@@ -32,6 +32,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .wf/*.sqlite
 .wf/*.sqlite-*
 .wf/*.sqlite.tmp
+.wf/*.key
 examples/*/.wf/
 .tmp/
 

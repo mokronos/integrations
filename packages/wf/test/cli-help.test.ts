@@ -43,10 +43,19 @@ describe("wf help", () => {
     expect(helpFlag.stdout).toBe(helpCommand.stdout)
   })
 
-  test("shows integrations command help", () => {
-    const result = runCli(["help", "integrations"])
-    expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("wf integrations search")
+  test("generates nested integrations help from the command hierarchy", () => {
+    const parent = runCli(["integrations"])
+    const helpCommand = runCli(["help", "integrations"])
+    const helpFlag = runCli(["integrations", "--help"])
+    const subcommandHelp = runCli(["integrations", "search", "--help"])
+
+    expect(parent.exitCode).toBe(0)
+    expect(parent.stdout).toContain("SUBCOMMANDS")
+    expect(parent.stdout).toContain("search")
+    expect(helpCommand.stdout).toBe(parent.stdout)
+    expect(helpFlag.stdout).toBe(parent.stdout)
+    expect(subcommandHelp.stdout).toContain("ARGUMENTS")
+    expect(subcommandHelp.stdout).toContain("term string")
   })
 
   test("rejects help for an unknown command", () => {

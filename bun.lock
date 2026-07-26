@@ -62,6 +62,12 @@
         "@mokronos/wfkit": "workspace:*",
       },
     },
+    "examples/connected-case": {
+      "name": "@wf/example-connected-case",
+      "dependencies": {
+        "@mokronos/wfkit": "workspace:*",
+      },
+    },
     "examples/email": {
       "name": "@wf-examples/email",
       "version": "0.0.0",
@@ -93,16 +99,13 @@
     "packages/wf": {
       "name": "@mokronos/wfkit",
       "version": "0.2.0",
-      "bin": {
-        "wf": "dist/cli/main.js",
-        "wf-integrations": "dist/cli/integrations.js",
-      },
       "dependencies": {
         "@effect/platform-bun": "4.0.0-beta.93",
         "@effect/platform-node": "4.0.0-beta.93",
         "@effect/platform-node-shared": "4.0.0-beta.93",
         "@effect/sql-sqlite-bun": "4.0.0-beta.93",
         "effect": "4.0.0-beta.93",
+        "yaml": "^2.9.0",
       },
     },
     "packages/wf-cli": {
@@ -773,6 +776,8 @@
     "@wf-examples/quickstart": ["@wf-examples/quickstart@workspace:examples/quickstart"],
 
     "@wf-examples/x-engagement": ["@wf-examples/x-engagement@workspace:examples/x-engagement"],
+
+    "@wf/example-connected-case": ["@wf/example-connected-case@workspace:examples/connected-case"],
 
     "accepts": ["accepts@2.0.0", "", { "dependencies": { "mime-types": "^3.0.0", "negotiator": "^1.0.0" } }, "sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng=="],
 

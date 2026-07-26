@@ -65,6 +65,7 @@ describe("integration node", () => {
     let initialized = false
     const baseUrl = startServer(async (request) => {
       expect(request.headers.get("authorization")).toBe("Bearer oauth-token")
+      if (request.method === "DELETE") return new Response(null, { status: 204 })
       const payload = Schema.decodeUnknownSync(RequestBody)(await request.json())
       if (payload.method === "initialize") {
         return Response.json({
@@ -78,6 +79,7 @@ describe("integration node", () => {
         }, { headers: { "mcp-session-id": "test-session" } })
       }
       expect(request.headers.get("mcp-session-id")).toBe("test-session")
+      expect(request.headers.get("mcp-protocol-version")).toBe("2025-03-26")
       if (payload.method === "notifications/initialized") {
         initialized = true
         return new Response(null, { status: 202 })

@@ -1,6 +1,12 @@
 import { Schema } from "effect"
 import { envSecretResolver } from "../core.ts"
-import { AuthRef, listMcpTools, resolveAuthorizationHeaders } from "../integration.ts"
+import {
+  IntegrationAuth,
+  IntegrationSource,
+  listMcpTools,
+  resolveAuthorizationHeaders
+} from "../integration.ts"
+import { discoverOpenApi } from "../openapi.ts"
 
 export const IntegrationKind = Schema.Union([Schema.Literal("mcp"), Schema.Literal("openapi"), Schema.Literal("graphql"), Schema.Literal("cli")])
 export type IntegrationKind = typeof IntegrationKind.Type
@@ -16,25 +22,20 @@ export type IntegrationSearchResult = typeof IntegrationSearchResult.Type
 export const DiscoverIntegrationsResult = Schema.Struct({ results: Schema.Array(IntegrationSearchResult) })
 export type DiscoverIntegrationsResult = typeof DiscoverIntegrationsResult.Type
 
-const SurfaceMechanics = Schema.Struct({ source: Schema.optional(Schema.Union([Schema.Literal("http"), Schema.Literal("well-known")])), in: Schema.optional(Schema.String), headerName: Schema.optional(Schema.String), scheme: Schema.optional(Schema.String) })
+const SurfaceMechanics = Schema.Struct({ source: Schema.optional(Schema.String), in: Schema.optional(Schema.String), headerName: Schema.optional(Schema.String), scheme: Schema.optional(Schema.String) })
 const SurfaceAuthUse = Schema.Struct({ id: Schema.String, mechanics: Schema.optional(SurfaceMechanics) })
 export const IntegrationSurfaceAuth = Schema.Struct({ status: Schema.optional(Schema.Union([Schema.Literal("required"), Schema.Literal("none"), Schema.Literal("unknown")])), entries: Schema.optional(Schema.Array(Schema.Struct({ use: Schema.optional(Schema.Array(SurfaceAuthUse)) }))) })
-export const IntegrationSurfaceCredential = Schema.Struct({ type: Schema.optional(Schema.String), label: Schema.optional(Schema.String), generateUrl: Schema.optional(Schema.String), setup: Schema.optional(Schema.String) })
-export const IntegrationSurface = Schema.Struct({ type: Schema.String, url: Schema.optional(Schema.String), spec: Schema.optional(Schema.String), slug: Schema.optional(Schema.String), name: Schema.optional(Schema.String), docs: Schema.optional(Schema.String), transports: Schema.optional(Schema.Array(Schema.String)), packages: Schema.optional(Schema.Array(Schema.Struct({ registryType: Schema.optional(Schema.String), identifier: Schema.optional(Schema.String) }))), command: Schema.optional(Schema.String), auth: Schema.optional(IntegrationSurfaceAuth) })
+export const IntegrationSurfaceCredential = Schema.Struct({ type: Schema.optional(Schema.String), label: Schema.optional(Schema.String), generateUrl: Schema.optional(Schema.String), setup: Schema.optional(Schema.String), acquisition: Schema.optional(Schema.String) })
+export const IntegrationSurfaceRequiredHeader = Schema.Struct({ name: Schema.String, source: Schema.optional(Schema.Json), description: Schema.optional(Schema.String) })
+export const IntegrationSurface = Schema.Struct({ type: Schema.String, url: Schema.optional(Schema.String), spec: Schema.optional(Schema.String), slug: Schema.optional(Schema.String), name: Schema.optional(Schema.String), docs: Schema.optional(Schema.String), transports: Schema.optional(Schema.Array(Schema.String)), packages: Schema.optional(Schema.Array(Schema.Struct({ registryType: Schema.optional(Schema.String), identifier: Schema.optional(Schema.String) }))), command: Schema.optional(Schema.String), auth: Schema.optional(IntegrationSurfaceAuth), requiredHeaders: Schema.optional(Schema.Array(IntegrationSurfaceRequiredHeader)) })
 export const IntegrationSurfaceDocument = Schema.Struct({ version: Schema.Number, domain: Schema.String, summary: Schema.optional(Schema.String), description: Schema.optional(Schema.String), discoveredAt: Schema.optional(Schema.String), credentials: Schema.optional(Schema.Record(Schema.String, IntegrationSurfaceCredential)), surfaces: Schema.optional(Schema.Array(IntegrationSurface)) })
 export type IntegrationSurfaceDocument = typeof IntegrationSurfaceDocument.Type
 
-const IntegrationNodeAuth = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("bearer"), credential: AuthRef }),
-  Schema.Struct({ kind: Schema.Literal("api-key"), credential: AuthRef, header: Schema.optional(Schema.String) }),
-  Schema.Struct({ kind: Schema.Literal("header"), credential: AuthRef, header: Schema.String, prefix: Schema.optional(Schema.String) })
-])
 export const IntegrationNodeConfig = Schema.Struct({
   domain: Schema.optional(Schema.String),
-  source: Schema.Union([
-    Schema.Struct({ kind: Schema.Literal("mcp"), url: Schema.String }),
-    Schema.Struct({ kind: Schema.Literal("openapi"), url: Schema.String, method: Schema.Union([Schema.Literal("GET"), Schema.Literal("POST"), Schema.Literal("PUT"), Schema.Literal("PATCH"), Schema.Literal("DELETE")]), path: Schema.optional(Schema.String) })
-  ]), operation: Schema.String, auth: Schema.optional(IntegrationNodeAuth)
+  source: IntegrationSource,
+  operation: Schema.String,
+  auth: Schema.optional(IntegrationAuth)
 })
 export type IntegrationNodeConfig = typeof IntegrationNodeConfig.Type
 export const IntegrationValidationFinding = Schema.Struct({ severity: Schema.Union([Schema.Literal("error"), Schema.Literal("warning"), Schema.Literal("info")]), check: Schema.String, message: Schema.String })
@@ -83,7 +84,7 @@ export const getIntegrationSurface = async (domain: string, options: { readonly 
 const normalizedUrl = (url: string): string => url.replace(/\/+$/, "")
 const finding = (severity: IntegrationValidationFinding["severity"], check: string, message: string): IntegrationValidationFinding => ({ severity, check, message })
 const firstMechanics = (surface: typeof IntegrationSurface.Type): typeof SurfaceMechanics.Type | undefined => surface.auth?.entries?.[0]?.use?.[0]?.mechanics
-const authPlausible = (auth: typeof IntegrationNodeAuth.Type, mechanics: typeof SurfaceMechanics.Type): boolean =>
+const authPlausible = (auth: NonNullable<IntegrationNodeConfig["auth"]>, mechanics: typeof SurfaceMechanics.Type): boolean =>
   mechanics.headerName === undefined || (auth.kind === "bearer" && mechanics.scheme === "Bearer") ||
   (auth.kind === "header" && auth.header.toLowerCase() === mechanics.headerName.toLowerCase() && (mechanics.scheme === undefined || auth.prefix === mechanics.scheme + " ")) ||
   (auth.kind === "api-key" && (auth.header ?? "x-api-key").toLowerCase() === mechanics.headerName.toLowerCase())
@@ -109,6 +110,27 @@ const shallowInputFindings = async (inputSchema: Schema.Schema.Type<typeof Schem
     return actual === property.type ? [] : [finding("warning", "live", `sample input property ${key} is ${actual}; expected ${property.type}`)]
   })
   return [...requiredFindings, ...typeFindings]
+}
+
+const openApiInputFindings = async (
+  operation: Awaited<ReturnType<typeof discoverOpenApi>>["operations"][number],
+  source: Extract<IntegrationNodeConfig["source"], { readonly kind: "openapi" }>,
+  sampleInput: Schema.Schema.Type<typeof Schema.Json>
+): Promise<ReadonlyArray<IntegrationValidationFinding>> => {
+  let input: typeof JsonObject.Type
+  try { input = await Schema.decodeUnknownPromise(JsonObject)(sampleInput) } catch { return [] }
+  const bindings = source.parameters ?? []
+  const findings: Array<IntegrationValidationFinding> = []
+  for (const parameter of operation.parameters.filter((entry) => entry.required && entry.location !== "reference")) {
+    const binding = bindings.find((entry) => entry.name === parameter.name && entry.in === parameter.location)
+    const inputName = binding?.input ?? binding?.name ?? parameter.name
+    if (input[inputName] === undefined) findings.push(finding("error", "live", `sample input is missing required ${parameter.location} parameter ${parameter.name} (${inputName})`))
+  }
+  if (operation.requestBody?.required === true) {
+    const bodyName = source.body
+    if (bodyName !== undefined && input[bodyName] === undefined) findings.push(finding("error", "live", `sample input is missing required request body ${bodyName}`))
+  }
+  return findings
 }
 
 export const validateIntegrationNode = async (config: Schema.Schema.Type<typeof Schema.Json>, options: {
@@ -147,9 +169,9 @@ export const validateIntegrationNode = async (config: Schema.Schema.Type<typeof 
   if (options.live === true && node.source.kind === "mcp") {
     let headers: Record<string, string> = {}
     let credentialsUnavailable = false
-    try { headers = await resolveAuthorizationHeaders(node.auth, async (name) => await (options.resolveSecret ?? envSecretResolver().resolve)(name)) } catch (error) {
+    try { headers = await resolveAuthorizationHeaders(node.auth, async (name, context) => await (options.resolveSecret ?? envSecretResolver().resolve)(name, context), node.source.url) } catch (error) {
       credentialsUnavailable = true
-      findings.push(finding("warning", "live", `live check needs credentials: ${String(error)}`))
+      findings.push(finding("error", "live", `live check needs credentials: ${String(error)}`))
     }
     try {
       const tools = await listMcpTools(node.source.url, headers)
@@ -161,9 +183,46 @@ export const validateIntegrationNode = async (config: Schema.Schema.Type<typeof 
       }
     } catch (error) {
       const status = error instanceof Error && "status" in error && typeof error.status === "number" ? error.status : undefined
-      if ((status === 401 || status === 403) && (node.auth === undefined || credentialsUnavailable)) findings.push(finding("warning", "live", "live check needs credentials"))
+      if ((status === 401 || status === 403) && (node.auth === undefined || credentialsUnavailable)) findings.push(finding("error", "live", "live check needs credentials"))
       else if (status === undefined) findings.push(finding("error", "live", `MCP server unreachable: ${String(error)}`))
       else findings.push(finding("error", "live", String(error)))
+    }
+  }
+  if (options.live === true && node.source.kind === "openapi") {
+    const registeredSpec = surfaceDocument?.surfaces?.find((surface) =>
+      surface.type === "http" && surface.url !== undefined && normalizedUrl(surface.url) === normalizedUrl(node.source.url)
+    )?.spec
+    const spec = node.source.spec ?? registeredSpec
+    if (spec === undefined) {
+      findings.push(finding("warning", "live", "OpenAPI operation cannot be inspected because no spec URL is configured"))
+    } else {
+      try {
+        const discovery = await discoverOpenApi(spec)
+        const operation = discovery.operations.find((entry) => entry.operationId === node.operation)
+        if (operation === undefined) {
+          findings.push(finding("error", "live", `operation ${node.operation} not found; available operations: ${discovery.operations.map((entry) => entry.operationId).join(", ")}`))
+        } else {
+          findings.push(finding("info", "live", `operation ${node.operation} is available in ${discovery.title ?? spec}`))
+          if (normalizedUrl(operation.server) !== normalizedUrl(node.source.url)) {
+            findings.push(finding(
+              node.auth === undefined ? "warning" : "error",
+              "live",
+              `operation ${node.operation} is declared for server ${operation.server}, not ${node.source.url}`
+            ))
+          }
+          if (operation.method !== node.source.method) findings.push(finding("error", "live", `operation ${node.operation} uses ${operation.method}, not ${node.source.method}`))
+          if (node.source.path !== undefined && operation.path !== node.source.path) findings.push(finding("error", "live", `operation ${node.operation} uses path ${operation.path}, not ${node.source.path}`))
+          if (operation.requestBody !== undefined && !operation.requestBody.contentTypes.includes("application/json")) {
+            findings.push(finding("error", "live", `operation ${node.operation} does not declare an application/json request body`))
+          }
+          if (node.source.contentType !== undefined && operation.requestBody !== undefined && !operation.requestBody.contentTypes.includes(node.source.contentType)) {
+            findings.push(finding("error", "live", `operation ${node.operation} does not accept ${node.source.contentType}`))
+          }
+          if (options.sampleInput !== undefined) findings.push(...await openApiInputFindings(operation, node.source, options.sampleInput))
+        }
+      } catch (error) {
+        findings.push(finding("error", "live", `OpenAPI discovery failed: ${String(error)}`))
+      }
     }
   }
   return { ok: !findings.some((entry) => entry.severity === "error"), findings }

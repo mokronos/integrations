@@ -18,7 +18,7 @@ export interface TerminalFailure<E> {
 
 export interface StepContext<E> {
   fail(error: E): TerminalFailure<E>
-  resolveSecret(name: string): Promise<string>
+  resolveSecret(name: string, context?: SecretResolutionContext): Promise<string>
   readonly attempt: number
   readonly executionId: string
 }
@@ -88,8 +88,13 @@ export const SecretRef = Schema.declare<string>(
 
 export type SecretRef = typeof SecretRef.Type
 
+export const SecretResolutionContext = Schema.Struct({
+  resource: Schema.optional(Schema.String)
+})
+export type SecretResolutionContext = typeof SecretResolutionContext.Type
+
 export interface SecretResolver {
-  resolve(name: string): string | Promise<string>
+  resolve(name: string, context?: SecretResolutionContext): string | Promise<string>
 }
 
 export const secret = (name: string): SecretRef => SecretRef.make(`${SecretRefPrefix}${name}`)
@@ -380,9 +385,9 @@ const makeStepContext = <E>(executionId: string, attempt: number, resolver?: Sec
   attempt,
   executionId,
   fail: (error) => ({ [TerminalFailureTypeId]: TerminalFailureTypeId, error }),
-  resolveSecret: (name) => {
+  resolveSecret: (name, context) => {
     if (resolver === undefined) throw new Error(`No secret resolver configured for ${name}`)
-    return Promise.resolve(resolver.resolve(name))
+    return Promise.resolve(resolver.resolve(name, context))
   }
 })
 

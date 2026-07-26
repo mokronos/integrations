@@ -7,15 +7,16 @@ const variantsDirectory = path.join(npmDirectory, "variants")
 const dryRun = process.argv.includes("--dry-run")
 
 const publish = async (directory: string, tag: string): Promise<void> => {
-  const arguments_ = [
-    "publish",
-    "--access",
-    "public",
-    "--tag",
-    tag,
-    ...(process.env["GITHUB_ACTIONS"] === "true" ? ["--provenance"] : []),
-    ...(dryRun ? ["--dry-run"] : [])
-  ]
+  const arguments_ = dryRun
+    ? ["pack", "--dry-run"]
+    : [
+        "publish",
+        "--access",
+        "public",
+        "--tag",
+        tag,
+        ...(process.env["GITHUB_ACTIONS"] === "true" ? ["--provenance"] : [])
+      ]
   const child = Bun.spawn(["npm", ...arguments_], {
     cwd: directory,
     stdin: "inherit",

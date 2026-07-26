@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { createTestRuntime } from "@mokronos/wfkit"
+import { Schema } from "effect"
 import { configureXEngagementAdapters, resetXEngagementAdapters } from "./adapters"
 import { XEngagementWorkflow } from "./workflow"
 
@@ -7,6 +8,10 @@ const secretValues = {
   zen: "test-zen-secret",
   x: "test-x-secret"
 }
+
+const ZenRequest = Schema.Struct({
+  messages: Schema.Array(Schema.Struct({ role: Schema.String, content: Schema.String }))
+})
 
 const startRuntime = () => {
   const rt = createTestRuntime()
@@ -18,15 +23,13 @@ const startRuntime = () => {
 const serveZen = (handler: (messages: ReadonlyArray<{ role: string; content: string }>) => string) => {
   const requests: Array<ReadonlyArray<{ role: string; content: string }>> = []
   const fetchStub = async (_input: string | URL | Request, init?: RequestInit) => {
-    const body = JSON.parse(String(init?.body)) as {
-      readonly messages: ReadonlyArray<{ role: string; content: string }>
-    }
-      requests.push(body.messages)
-      return Response.json({
-        choices: [{ message: { content: handler(body.messages) } }]
-      })
+    const body = Schema.decodeUnknownSync(ZenRequest)(JSON.parse(String(init?.body)))
+    requests.push(body.messages)
+    return Response.json({
+      choices: [{ message: { content: handler(body.messages) } }]
+    })
   }
-  configureXEngagementAdapters({ zenBaseUrl: "http://zen.test/v1", fetch: fetchStub })
+  configureXEngagementAdapters({ zenBaseUrl: "http://zen.test/v1", enableRealX: false, fetch: fetchStub })
   return { requests }
 }
 

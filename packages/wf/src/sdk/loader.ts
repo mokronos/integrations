@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { DefinedWorkflowTypeId, type DefinedWorkflow } from "../core.ts"
 import * as authoring from "../authoring.ts"
 import type { WorkflowArtifact } from "./artifact.ts"
@@ -82,6 +83,19 @@ const rewriteWfImports = (source: string): string => {
     .replaceAll(`import('@mokronos/wfkit')`, `Promise.resolve(${authoringExpression})`)
 }
 
+const workflowWithArtifactHash = (
+  workflow: DefinedWorkflow,
+  artifact: WorkflowArtifact,
+  exportName: string
+): DefinedWorkflow => ({
+  ...workflow,
+  sourceHash: createHash("sha256")
+    .update(artifact.source)
+    .update("\0")
+    .update(exportName)
+    .digest("hex")
+})
+
 export const loadWorkflowArtifact = async (
   artifact: WorkflowArtifact
 ): Promise<LoadedWorkflow> => {
@@ -90,7 +104,11 @@ export const loadWorkflowArtifact = async (
   if (artifact.exportName !== undefined) {
     const exported = module[artifact.exportName]
     if (isDefinedWorkflow(exported)) {
-      return { artifact, exportName: artifact.exportName, workflow: exported }
+      return {
+        artifact,
+        exportName: artifact.exportName,
+        workflow: workflowWithArtifactHash(exported, artifact, artifact.exportName)
+      }
     }
     throw new Error(
       `Workflow ${artifact.id} expected export ${artifact.exportName}, but it was not a wf workflow`
@@ -98,7 +116,11 @@ export const loadWorkflowArtifact = async (
   }
 
   if (isDefinedWorkflow(module.default)) {
-    return { artifact, exportName: "default", workflow: module.default }
+    return {
+      artifact,
+      exportName: "default",
+      workflow: workflowWithArtifactHash(module.default, artifact, "default")
+    }
   }
 
   const candidates: Array<readonly [string, DefinedWorkflow]> = []
@@ -110,7 +132,11 @@ export const loadWorkflowArtifact = async (
 
   if (candidates.length === 1) {
     const [exportName, workflow] = candidates[0]!
-    return { artifact, exportName, workflow }
+    return {
+      artifact,
+      exportName,
+      workflow: workflowWithArtifactHash(workflow, artifact, exportName)
+    }
   }
 
   if (candidates.length > 1) {

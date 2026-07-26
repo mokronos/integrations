@@ -1,8 +1,52 @@
 // The workflow authoring surface. An authored workflow imports ONLY from here
 // (plus pure helper functions it defines) — never `effect` or `@effect/*`.
-export { createInMemoryDeterminismState, defineStep, defineWorkflow, envSecretResolver, isSecretRef, NonDeterminismError, secret } from "./core.ts"
-export { auth, AuthRef, integration, IntegrationError } from "./integration.ts"
-export type { IntegrationAuth, IntegrationSource } from "./integration.ts"
+export { createInMemoryDeterminismState, defineStep, defineWorkflow, envSecretResolver, isSecretRef, NonDeterminismError, secret, SecretResolutionContext } from "./core.ts"
+export {
+  auth,
+  AuthRef,
+  discoverMcpServer,
+  integration,
+  IntegrationAuth,
+  IntegrationError,
+  IntegrationParameterBinding,
+  IntegrationSource,
+  listMcpTools,
+  McpServerDiscovery,
+  McpTool
+} from "./integration.ts"
+export {
+  ConnectionAuthorizationError,
+  ConnectionId,
+  ConnectionStatus,
+  connectionManagerPaths,
+  createConnectionManager,
+  createFileTokenProtector,
+  discoverMcpOAuth,
+  McpOAuthDiscovery,
+  OAuthAuthorizationServerMetadata,
+  OAuthClientConfiguration,
+  OAuthConnection,
+  OAuthProtectedResourceMetadata
+} from "./connections.ts"
+export type {
+  BeginMcpOAuthOptions,
+  ConnectionManager,
+  ConnectionManagerOptions,
+  OAuthAuthorizationAttempt,
+  TokenProtector
+} from "./connections.ts"
+export {
+  discoverOpenApi,
+  OpenApiDiscovery,
+  OpenApiHttpMethod,
+  OpenApiOperation,
+  OpenApiParameter,
+  OpenApiParameterLocation,
+  OpenApiRequestBody,
+  OpenApiResponse,
+  OpenApiSecurityRequirement,
+  OpenApiSecurityScheme
+} from "./openapi.ts"
 export type {
   DefinedWorkflow,
   InMemoryDeterminismState,
@@ -111,6 +155,7 @@ export {
   IntegrationSurfaceAuthSchema,
   IntegrationSurfaceCredentialSchema,
   IntegrationSurfaceDocumentSchema,
+  IntegrationSurfaceRequiredHeaderSchema,
   type IntegrationSurfaceDocument,
   IntegrationValidationFindingSchema,
   type IntegrationValidationFinding,

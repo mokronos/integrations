@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 import { readFile } from "node:fs/promises"
 import path from "node:path"
-import { Schema } from "effect"
 import {
+  connectionManagerPaths,
+  createConnectionManager,
   createWorkflowClient,
   createWorkflowRuntime,
   createSqliteWorkflowRepository,
@@ -11,7 +12,7 @@ import {
   sampleValueForJsonSchema,
   toJsonText
 } from "../index.ts"
-import { discover, getIntegrationSurface, validateIntegrationNode } from "../sdk/integrations.ts"
+import { runIntegrationsCli } from "./integrations.ts"
 import type {
   PendingSignal,
   WorkflowArtifact,
@@ -35,7 +36,7 @@ Commands:
   runs      List persisted runs
   history   Show the event history for a run
   signal    Resume a run waiting for a signal
-  integrations  Discover and validate integration surfaces (integrations.sh)
+  integrations  Discover, authorize, inspect, and validate integrations
   help      Show help for a command
 
 Run "wf help <command>" for command-specific usage and examples.
@@ -111,11 +112,16 @@ Example:
   wf help create
 `
     case "integrations":
-      return `Discover and validate integration surfaces from integrations.sh.
+      return `Discover, authorize, inspect, and validate integrations.
 
 Usage:
   wf integrations search <term> [--kind mcp|openapi|graphql|cli] [--limit <n>] [--json]
   wf integrations show <domain> [--json]
+  wf integrations connect <domain-or-mcp-url> [--connection <id>] [--scopes <scopes>] [--no-open]
+  wf integrations connections [--json]
+  wf integrations disconnect <connection-id>
+  wf integrations inspect-mcp <domain-or-url> [--connection <id>] [--json]
+  wf integrations inspect-openapi <domain-or-spec-url> [--operation <id>] [--json]
   wf integrations validate [<json>] [--file <path>] [--live] [--input <json>] [--json]
 `
     case undefined:
@@ -302,96 +308,6 @@ const readFlagValue = (
     throw new Error(`${flag} requires a value`)
   }
   return value
-}
-
-const integrationJson = async (text: string): Promise<Schema.Schema.Type<typeof Schema.Json>> => {
-  try {
-    return await Schema.decodeUnknownPromise(Schema.Json)(JSON.parse(text))
-  } catch (error) {
-    throw new Error(`Invalid JSON input: ${formatError(error)}`)
-  }
-}
-
-const printIntegrationSurface = (surface: Awaited<ReturnType<typeof getIntegrationSurface>>) => {
-  console.log(surface.summary ?? surface.description ?? "No summary.")
-  for (const entry of surface.surfaces ?? []) {
-    console.log(`\n${entry.name ?? entry.slug ?? entry.type} (${entry.type})${entry.url === undefined ? "" : `\n${entry.url}`}`)
-    if (entry.spec !== undefined) console.log(`spec: ${entry.spec}`)
-    if (entry.docs !== undefined) console.log(`docs: ${entry.docs}`)
-    if (entry.transports !== undefined) console.log(`transports: ${entry.transports.join(", ")}`)
-    if (entry.auth !== undefined) {
-      const uses = entry.auth.entries?.flatMap((authEntry) => authEntry.use ?? []) ?? []
-      console.log(`auth: ${entry.auth.status ?? "unknown"}${uses.length === 0 ? "" : ` (${uses.map((use) => `${use.id}${use.mechanics?.headerName === undefined ? "" : `: ${use.mechanics.headerName}${use.mechanics.scheme === undefined ? "" : ` ${use.mechanics.scheme}`}`}`).join(", ")})`}`)
-    }
-    if ((entry.type === "mcp" || entry.type === "http") && entry.url !== undefined) {
-      const mechanics = entry.auth?.entries?.[0]?.use?.[0]?.mechanics
-      const credential = entry.auth?.entries?.[0]?.use?.[0]?.id
-      console.log("integration({")
-      console.log(`  source: { kind: \"${entry.type === "mcp" ? "mcp" : "openapi"}\", url: \"${entry.url}\" },`)
-      console.log('  operation: "<tool name — list with a live validate or the server docs>",')
-      if (entry.auth?.status === "required" && credential !== undefined) console.log(`  auth: { kind: "header", credential: auth("${credential.replace(/^auth:/, "")}"), header: "${mechanics?.headerName ?? "Authorization"}" },`)
-      console.log("  input: t.struct({ ... }), output: t.struct({ ... })")
-      console.log("})")
-    }
-  }
-  if (surface.credentials !== undefined) {
-    console.log("\nCredentials:")
-    for (const [id, credential] of Object.entries(surface.credentials)) console.log(`${id}\t${credential.type ?? "unknown"}\t${credential.label ?? ""}\t${credential.generateUrl ?? ""}\t${credential.setup?.split("\n")[0] ?? ""}`)
-  }
-}
-
-const runIntegrationsCommand = async (args: ReadonlyArray<string>): Promise<void> => {
-  const [subcommand, ...rest] = args
-  if (subcommand === "search") {
-    const [term, ...flags] = rest
-    if (term === undefined) throw new Error("wf integrations search requires a term")
-    let kind: "mcp" | "openapi" | "graphql" | "cli" | undefined
-    let limit: number | undefined
-    let json = false
-    for (let index = 0; index < flags.length; index += 1) {
-      const flag = flags[index]
-      if (flag === "--json") json = true
-      else if (flag === "--kind") { const value = readFlagValue(flags, ++index, flag); if (value !== "mcp" && value !== "openapi" && value !== "graphql" && value !== "cli") throw new Error("--kind must be mcp, openapi, graphql, or cli"); kind = value }
-      else if (flag === "--limit") { const value = Number(readFlagValue(flags, ++index, flag)); if (!Number.isInteger(value) || value < 1) throw new Error("--limit must be a positive integer"); limit = value }
-      else throw new Error(`Unknown wf integrations search option: ${flag}`)
-    }
-    const result = await discover(term, { ...(kind === undefined ? {} : { kind }), ...(limit === undefined ? {} : { limit }) })
-    if (json) console.log(JSON.stringify(result, null, 2))
-    else { for (const entry of result.results) console.log(`${entry.domain}\t${entry.kinds.join(",")}\t${entry.description}`); console.log("run: wf integrations show <domain>") }
-    return
-  }
-  if (subcommand === "show") {
-    const [domain, ...flags] = rest
-    if (domain === undefined) throw new Error("wf integrations show requires a domain")
-    if (flags.length > 1 || (flags.length === 1 && flags[0] !== "--json")) throw new Error("wf integrations show accepts only --json")
-    const surface = await getIntegrationSurface(domain)
-    if (flags[0] === "--json") console.log(JSON.stringify(surface, null, 2)); else printIntegrationSurface(surface)
-    return
-  }
-  if (subcommand === "validate") {
-    let configText: string | undefined
-    let file: string | undefined
-    let inputText: string | undefined
-    let live = false
-    let json = false
-    for (let index = 0; index < rest.length; index += 1) {
-      const flag = rest[index]!
-      if (flag === "--file") file = readFlagValue(rest, ++index, flag)
-      else if (flag === "--input") inputText = readFlagValue(rest, ++index, flag)
-      else if (flag === "--live") live = true
-      else if (flag === "--json") json = true
-      else if (flag.startsWith("--")) throw new Error(`Unknown wf integrations validate option: ${flag}`)
-      else if (configText === undefined) configText = flag
-      else throw new Error("wf integrations validate accepts only one JSON config")
-    }
-    if ((configText === undefined) === (file === undefined)) throw new Error("wf integrations validate requires exactly one of JSON config or --file")
-    const config = await integrationJson(file === undefined ? configText! : await readFile(file, "utf8"))
-    const report = await validateIntegrationNode(config, { live, ...(inputText === undefined ? {} : { sampleInput: await integrationJson(inputText) }) })
-    if (json) console.log(JSON.stringify(report, null, 2)); else for (const entry of report.findings) console.log(`${entry.severity}\t${entry.check}\t${entry.message}`)
-    if (!report.ok) throw new Error("integration validation failed")
-    return
-  }
-  throw new Error(`Unknown wf integrations command: ${subcommand ?? ""}`)
 }
 
 const assertWorkflowId = (id: string) => {
@@ -818,10 +734,11 @@ const awaitSyncAndPersistRun = async (options: {
 const engineDatabasePath = (storageDir: string) => path.join(storageDir, "engine.sqlite")
 
 const createEngineBackedClient = (storageDir: string) => {
+  const connections = createConnectionManager(connectionManagerPaths(storageDir))
   const runtime = createWorkflowRuntime({
     backend: "sqlite",
     databasePath: engineDatabasePath(storageDir),
-    secrets: envSecretResolver()
+    secrets: connections.secretResolver(envSecretResolver())
   })
   const client = createWorkflowClient(runtime)
   return { runtime, client }
@@ -833,9 +750,20 @@ export const runWfkitCli = async (options: {
   readonly storageDir?: string
 }): Promise<void> => {
   const [command, ...args] = options.arguments
+  const rootDir = options.rootDir
+  const storageDir = options.storageDir ?? path.join(rootDir, ".wf")
+  const registryBaseUrl = process.env["WF_INTEGRATIONS_BASE_URL"]
 
   if (command === undefined || command === "-h" || command === "--help") {
     console.log(help)
+    return
+  }
+
+  if (command === "integrations") {
+    await runIntegrationsCli(args, {
+      storageDir,
+      ...(registryBaseUrl === undefined ? {} : { registryBaseUrl })
+    })
     return
   }
 
@@ -843,6 +771,13 @@ export const runWfkitCli = async (options: {
     const [requestedCommand, ...extraArgs] = args
     if (extraArgs.length > 0) {
       throw new Error(`wf help accepts at most one command\n\n${commandHelp("help")}`)
+    }
+    if (requestedCommand === "integrations") {
+      await runIntegrationsCli(["--help"], {
+        storageDir,
+        ...(registryBaseUrl === undefined ? {} : { registryBaseUrl })
+      })
+      return
     }
     const requestedHelp = commandHelp(requestedCommand)
     if (requestedHelp === undefined) {
@@ -861,13 +796,6 @@ export const runWfkitCli = async (options: {
     return
   }
 
-  if (command === "integrations") {
-    await runIntegrationsCommand(args)
-    return
-  }
-
-  const rootDir = options.rootDir
-  const storageDir = options.storageDir ?? path.join(rootDir, ".wf")
   const repository = createSqliteWorkflowRepository({
     rootDir,
     databasePath: path.join(storageDir, "wf.sqlite")

@@ -8,7 +8,8 @@ export {
   envSecretResolver,
   isSecretRef,
   NonDeterminismError,
-  secret
+  secret,
+  SecretResolutionContext
 } from "./core.ts"
 export { auth, AuthRef, integration, IntegrationError } from "./integration.ts"
 export type { IntegrationAuth, IntegrationSource } from "./integration.ts"

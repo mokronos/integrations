@@ -53,6 +53,7 @@ export {
   IntegrationSurfaceAuth as IntegrationSurfaceAuthSchema,
   IntegrationSurfaceCredential as IntegrationSurfaceCredentialSchema,
   IntegrationSurfaceDocument as IntegrationSurfaceDocumentSchema,
+  IntegrationSurfaceRequiredHeader as IntegrationSurfaceRequiredHeaderSchema,
   type IntegrationSurfaceDocument,
   IntegrationValidationFinding as IntegrationValidationFindingSchema,
   type IntegrationValidationFinding,

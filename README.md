@@ -164,6 +164,28 @@ wf help create
 wf run --help
 ```
 
+### `integrations`
+
+Agents can search registry surfaces, inspect MCP/OpenAPI operation schemas,
+authorize an MCP account in the browser, and validate a generated integration
+before creating the workflow:
+
+```bash
+wf integrations search linear --kind mcp --json
+wf integrations show linear.app --json
+wf integrations connect linear.app --scopes read
+wf integrations inspect-mcp linear.app --connection linear_oauth_app --json
+wf integrations inspect-openapi <domain-or-spec-url> --json
+wf integrations validate <integration-json> --live --input <sample-json> --json
+```
+
+`connect` uses protected-resource and authorization-server metadata, dynamic
+client registration when advertised, authorization code + PKCE, and a one-use
+loopback callback. The browser is the only user interaction. Tokens are encrypted
+under `~/.wf/` and workflows persist only `auth("<connection-id>")`; environment
+variables remain a fallback for manually provisioned API keys and bearer tokens.
+OAuth connections are audience-bound and cannot be reused with another endpoint.
+
 CLI state lives in `~/.wf/wf.sqlite`; durable engine state lives in
 `~/.wf/engine.sqlite`.
 
@@ -359,6 +381,8 @@ bun test
 - `.wf/wf.sqlite` — CLI catalog: workflow source, run rows, event rows.
 - `.wf/engine.sqlite` — durable engine state: completed activity results,
   timers, and suspended signal waits.
+- `.wf/connections.sqlite` — encrypted OAuth credentials and non-secret connection metadata.
+- `.wf/connections.key` — user-only local encryption key; keep it separate from database backups.
 
 ## Development
 

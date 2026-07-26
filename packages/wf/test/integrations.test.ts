@@ -22,8 +22,9 @@ const serverFixture = () => {
       : Response.json({ results: [{ domain: "linear.app", name: "Linear", description: "Issues", kinds: ["mcp", "graphql"], url: "https://linear.app" }] })
     if (url.pathname === "/api/linear.app/surface") return new Response(linearSurface.replace("http://placeholder", `http://127.0.0.1:${server.port}`), { headers: { "content-type": "application/json" } })
     if (url.pathname === "/mcp") {
+      if (request.method === "DELETE") return new Response(null, { status: 204 })
       const payload = await Schema.decodeUnknownPromise(Schema.Struct({ method: Schema.String }))(await request.json())
-      if (payload.method === "initialize") return Response.json({ jsonrpc: "2.0", id: 0, result: {} }, { headers: { "mcp-session-id": "test" } })
+      if (payload.method === "initialize") return Response.json({ jsonrpc: "2.0", id: 0, result: { protocolVersion: "2025-06-18" } }, { headers: { "mcp-session-id": "test" } })
       if (payload.method === "notifications/initialized") return new Response(null, { status: 202 })
       if (payload.method === "tools/list") return Response.json({
         jsonrpc: "2.0", id: 1,
