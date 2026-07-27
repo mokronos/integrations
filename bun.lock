@@ -94,6 +94,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@mokronos/wfkit": "workspace:*",
+        "effect": "^4.0.0-beta.93",
       },
     },
     "packages/wf": {
@@ -110,7 +111,7 @@
     },
     "packages/wf-cli": {
       "name": "@mokronos/wf",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "bin": {
         "wf": "bin/wf.cjs",
       },
