@@ -44,6 +44,8 @@ or schemas:
 
 ```sh
 wf integrations discover <mcp-endpoint-or-openapi-url>
+# Short alias:
+wf i discover <mcp-endpoint-or-openapi-url>
 ```
 
 `discover` delegates URL detection, MCP/OpenAPI registration, auth discovery,

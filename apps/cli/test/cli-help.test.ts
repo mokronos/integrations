@@ -47,7 +47,10 @@ describe("wf help", () => {
     const parent = runCli(["integrations"])
     const helpCommand = runCli(["help", "integrations"])
     const helpFlag = runCli(["integrations", "--help"])
+    const aliasHelpCommand = runCli(["help", "i"])
+    const aliasHelpFlag = runCli(["i", "--help"])
     const subcommandHelp = runCli(["integrations", "discover", "--help"])
+    const aliasSubcommandHelp = runCli(["i", "discover", "--help"])
 
     expect(parent.exitCode).toBe(0)
     expect(parent.stdout).toContain("SUBCOMMANDS")
@@ -55,9 +58,12 @@ describe("wf help", () => {
     expect(parent.stdout).toContain("invoke")
     expect(helpCommand.stdout).toBe(parent.stdout)
     expect(helpFlag.stdout).toBe(parent.stdout)
+    expect(aliasHelpCommand.stdout).toBe(parent.stdout)
+    expect(aliasHelpFlag.stdout).toBe(parent.stdout)
     expect(subcommandHelp.stdout).toContain("ARGUMENTS")
     expect(subcommandHelp.stdout).toContain("url string")
-  })
+    expect(aliasSubcommandHelp.stdout).toBe(subcommandHelp.stdout)
+  }, 15_000)
 
   test("rejects help for an unknown command", () => {
     const result = runCli(["help", "missing"])

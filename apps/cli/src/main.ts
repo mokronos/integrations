@@ -28,7 +28,7 @@ Workflow commands:
   runs                    List persisted runs
   history                 Show the event history for a run
   signal                  Resume a run waiting for a signal
-  integrations            Discover, authorize, inspect, and validate integrations
+  integrations (i)        Discover, authorize, inspect, and validate integrations
 
 Service and dashboard commands:
   install                 Register and start the per-user local dashboard service
@@ -296,7 +296,7 @@ export const main = async (): Promise<void> => {
       console.log(ownHelp)
       return
     }
-    if (requestedCommand === "integrations") {
+    if (requestedCommand === "integrations" || requestedCommand === "i") {
       await runGlobalWfkitCli(["integrations", "--help"])
       return
     }

@@ -327,7 +327,7 @@ wf <command>
 | `wf signal <run-id> <name> [json-payload] [--actor <actor>]` | Resume a run waiting for a signal |
 | `wf runs` | List persisted runs |
 | `wf history <run-id>` | Show the persisted event history for a run |
-| `wf integrations …` | Discover, authorize, inspect, and validate integrations |
+| `wf integrations …` / `wf i …` | Discover, authorize, inspect, and validate integrations |
 | `wf install` / `wf web` | Install and open the local dashboard service |
 | `wf help [command]` | Top-level or command-specific help |
 
@@ -336,6 +336,8 @@ catalog; later edits to the file do not change the stored artifact until you
 re-create it with `--force`.
 
 ### Integration commands
+
+All integration commands also accept the shorter `wf i` alias.
 
 ```bash
 wf integrations discover <url> [--connection <name>] [--json]

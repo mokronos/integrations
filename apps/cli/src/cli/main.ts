@@ -40,7 +40,7 @@ Commands:
   runs      List persisted runs
   history   Show the event history for a run
   signal    Resume a run waiting for a signal
-  integrations  Discover, authorize, inspect, and validate integrations
+  integrations (i)  Discover, authorize, inspect, and validate integrations
   help      Show help for a command
 
 Run "wf help <command>" for command-specific usage and examples.
@@ -136,6 +136,7 @@ Example:
   wf help create
 `
     case "integrations":
+    case "i":
       return `Discover, authorize, inspect, and validate integrations.
 
 Usage:
@@ -149,6 +150,9 @@ Usage:
   wf integrations validate <tool-address> [--json]
   wf integrations validate <json> [--live] [--json]
   wf integrations validate --file <path> [--live] [--json]
+
+Alias:
+  wf i <same subcommands and options as wf integrations>
 
 The default connection is named "default". Use --json only when you need
 complete schemas or machine-readable output.
@@ -938,7 +942,8 @@ export const runWfkitCli = async (options: {
   readonly rootDir: string
   readonly storageDir?: string
 }): Promise<void> => {
-  const [command, ...args] = options.arguments
+  const [rawCommand, ...args] = options.arguments
+  const command = rawCommand === "i" ? "integrations" : rawCommand
   const rootDir = options.rootDir
   const storageDir = options.storageDir ?? path.join(rootDir, ".wf")
   setExecutorStorageDirectory(storageDir)
@@ -958,7 +963,7 @@ export const runWfkitCli = async (options: {
     if (extraArgs.length > 0) {
       throw new Error(`wf help accepts at most one command\n\n${commandHelp("help")}`)
     }
-    if (requestedCommand === "integrations") {
+    if (requestedCommand === "integrations" || requestedCommand === "i") {
       await runIntegrationsCli(["--help"], { storageDir })
       return
     }
