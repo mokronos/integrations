@@ -142,11 +142,16 @@ Usage:
   wf integrations discover <url> [--connection <name>] [--json]
   wf integrations connect <integration-or-url> [--connection <name>] [--template <name>]
   wf integrations catalog [--json]
-  wf integrations tools [--integration <slug>] [--connection <name>] [--json]
+  wf integrations tools [<integration>] [--connection <name>] [--json]
   wf integrations connections [--json]
   wf integrations disconnect <integration> [--connection <name>]
   wf integrations invoke <tool-address> [<json>] [--file <path>]
-  wf integrations validate [<json>] [--file <path>] [--live] [--json]
+  wf integrations validate <tool-address> [--json]
+  wf integrations validate <json> [--live] [--json]
+  wf integrations validate --file <path> [--live] [--json]
+
+The default connection is named "default". Use --json only when you need
+complete schemas or machine-readable output.
 `
     case undefined:
       return help

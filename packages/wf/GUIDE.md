@@ -43,7 +43,7 @@ Start from the service URL instead of guessing protocol, auth, operation names,
 or schemas:
 
 ```sh
-wf integrations discover <mcp-endpoint-or-openapi-url> --json
+wf integrations discover <mcp-endpoint-or-openapi-url>
 ```
 
 `discover` delegates URL detection, MCP/OpenAPI registration, auth discovery,
@@ -52,22 +52,24 @@ integration slug. OAuth opens the browser and uses dynamic client registration
 when supported, PKCE, a loopback callback, and refresh:
 
 ```sh
-wf integrations connect <integration-slug> --connection default --scopes "scope:read scope:write"
-wf integrations connections --json
+wf integrations connect <integration-slug>
+wf integrations connections
 ```
 
 For an API key or bearer token, put the value in an environment variable and
 name that variable; never place the value on the command line:
 
 ```sh
-wf integrations connect <integration-slug> --connection default --credential-env SERVICE_TOKEN
+wf integrations connect <integration-slug> --credential-env SERVICE_TOKEN
 ```
 
-Then list the complete input/output schemas and copy the selected Executor
-address into the workflow:
+Then inspect the available tools and copy the selected Executor address into the
+workflow. The default output is concise; add `--json` when complete input/output
+schemas are needed:
 
 ```sh
-wf integrations tools --integration <integration-slug> --connection default --json
+wf integrations tools <integration-slug>
+wf integrations tools <integration-slug> --json
 ```
 
 For a safe read-only smoke test, invoke the selected address directly before

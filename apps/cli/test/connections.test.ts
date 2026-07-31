@@ -158,6 +158,7 @@ describe("Executor connections", () => {
         }
         if (url.pathname === "/authorize") {
           expect(url.searchParams.get("client_id")).toBe("wf-test-client")
+          expect(url.searchParams.get("scope")).toBe("profile")
           expect(url.searchParams.get("code_challenge_method")).toBe("S256")
           codeChallenge = url.searchParams.get("code_challenge") ?? ""
           const callback = new URL(url.searchParams.get("redirect_uri") ?? "")

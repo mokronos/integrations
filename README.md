@@ -155,7 +155,7 @@ discovery, and invocation; the workflow stores only a tool address.
 ### 1. Discover the integration
 
 ```bash
-wf integrations discover https://mcp.linear.app/mcp --json
+wf integrations discover https://mcp.linear.app/mcp
 ```
 
 This performs the complete discovery chain:
@@ -169,7 +169,7 @@ integration slug to connect.
 ### 2. Authorize it in the browser
 
 ```bash
-wf integrations connect <integration-slug> --connection default
+wf integrations connect <integration-slug>
 ```
 
 For OAuth, Executor discovers authorization metadata, dynamically registers a
@@ -188,11 +188,12 @@ wf integrations connections
 ### 3. Inspect the operations you can call
 
 ```bash
-wf integrations tools --integration <integration-slug> --connection default --json
+wf integrations tools <integration-slug>
 ```
 
-This lists Executor tool addresses with their input and output JSON Schemas.
-Pick an address and mirror its schema in the workflow's `input` and `output`.
+This lists tool names, addresses, descriptions, and concise input schemas. Add
+`--json` to get complete input and output JSON Schemas. Pick an address and
+mirror its schema in the workflow's `input` and `output`.
 Generic MCP envelopes are normalized before they reach workflows: structured
 content is returned directly, JSON text is parsed, and plain text remains a
 string.
@@ -341,17 +342,20 @@ wf integrations discover <url> [--connection <name>] [--json]
 wf integrations catalog [--json]
 wf integrations connect <integration-or-url> [--connection <name>] [--template <slug>] [--credential-env <name>] [--scopes <scopes>] [--client-id <id>] [--no-open]
 wf integrations connections [--json]
-wf integrations tools [--integration <slug>] [--connection <name>] [--json]
+wf integrations tools [<integration>] [--connection <name>] [--json]
 wf integrations disconnect <integration> [--connection <name>]
 wf integrations invoke <tool-address> [<json>] [--file <path>]
-wf integrations validate [<json>] [--file <path>] [--live] [--json]
+wf integrations validate <tool-address> [--json]
+wf integrations validate <json> [--live] [--json]
+wf integrations validate --file <path> [--live] [--json]
 ```
 
 `discover` uses Executor to identify MCP or OpenAPI, register the integration,
-discover auth, and list tool schemas. After `connect`, `tools` returns canonical
-addresses and input/output schemas. `validate --live` confirms an authored
-Executor address still exists in the local catalog. `invoke` executes one tool
-directly and prints its normalized JSON result.
+discover auth, and list the number of available tools. After `connect`, `tools`
+returns concise canonical addresses and input shapes; add `--json` for complete
+schemas. The default connection is `default`. `validate <tool-address>` checks
+an authored address against the live catalog. `invoke` executes one tool directly
+and prints its normalized JSON result.
 
 ### Storage
 

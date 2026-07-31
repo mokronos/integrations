@@ -64,15 +64,10 @@ const decodeJson = (
 
 const formatTool = (tool: ExecutorTool): string => {
   const lines = [
-    `\n${tool.address}`,
+    `\n${tool.name}`,
+    tool.address,
     inline(tool.description, 240),
-    `input: ${inline(tool.inputTypeScript ?? JSON.stringify(tool.inputSchema ?? {}))}`,
-    `output: ${inline(tool.outputTypeScript ?? JSON.stringify(tool.outputSchema ?? {}))}`,
-    "integration({",
-    `  source: { kind: "executor", address: ${JSON.stringify(tool.address)} },`,
-    "  input: t.struct({ /* derive from input schema */ }),",
-    "  output: t.struct({ /* derive from output schema */ })",
-    "})"
+    `input: ${inline(tool.inputTypeScript ?? JSON.stringify(tool.inputSchema ?? {}), 360)}`
   ]
   return lines.join("\n")
 }
@@ -93,7 +88,7 @@ const connectedSummary = (
 ): string => [
   `Connected ${connection.address}`,
   `tools: ${tools.length}`,
-  `next: wf integrations tools --integration ${connection.integration} --connection ${connection.name} --json`
+  `next: wf integrations tools ${connection.integration}`
 ].join("\n")
 
 const formatDiscovery = (discovery: Awaited<ReturnType<typeof discoverIntegration>>): string => {
@@ -112,7 +107,9 @@ const formatDiscovery = (discovery: Awaited<ReturnType<typeof discoverIntegratio
     lines.push(`next: wf integrations connect ${discovery.integration.slug}`)
   }
   lines.push(`tools: ${discovery.tools.length}`)
-  for (const tool of discovery.tools) lines.push(formatTool(tool))
+  if (discovery.tools.length > 0) {
+    lines.push(`next: wf integrations tools ${discovery.integration.slug}`)
+  }
   return lines.join("\n")
 }
 
@@ -169,7 +166,7 @@ const makeDiscover = () => Command.make(
       )
     )
 ).pipe(
-  Command.withDescription("Detect, register, inspect auth, and list tool schemas from one URL")
+  Command.withDescription("Detect, register, and summarize an integration from one URL")
 )
 
 const makeCatalog = () => Command.make(
@@ -192,8 +189,11 @@ const makeCatalog = () => Command.make(
 const makeTools = () => Command.make(
   "tools",
   {
-    integration: Flag.string("integration").pipe(Flag.optional),
-    connection: Flag.string("connection").pipe(Flag.optional),
+    integration: Argument.string("integration").pipe(Argument.optional),
+    connection: Flag.string("connection").pipe(
+      Flag.withDefault("default"),
+      Flag.withDescription("Connection name (default: default)")
+    ),
     json: Flag.boolean("json")
   },
   ({ integration, connection, json }) => Effect.tryPromise({
@@ -202,10 +202,7 @@ const makeTools = () => Command.make(
         onNone: () => ({}),
         onSome: (value) => ({ integration: value })
       }),
-      ...Option.match(connection, {
-        onNone: () => ({}),
-        onSome: (value) => ({ connection: value })
-      })
+      connection: connection
     }),
     catch: (error) => cliError(`Could not list tools: ${String(error)}`)
   }).pipe(
@@ -215,7 +212,7 @@ const makeTools = () => Command.make(
         : tools.map(formatTool).join("\n") || "No tools available."
     ))
   )
-).pipe(Command.withDescription("List Executor tool names and input/output schemas"))
+).pipe(Command.withDescription("List an integration's tools; use --json for complete schemas"))
 
 const makeConnect = (options: IntegrationsCliOptions) => Command.make(
   "connect",
@@ -300,7 +297,7 @@ const makeConnect = (options: IntegrationsCliOptions) => Command.make(
       `Connection failed: ${error instanceof Error ? errorMessage(error) : String(error)}`
     )
   }).pipe(Effect.flatMap(writeStdoutLine))
-).pipe(Command.withDescription("Authorize an Executor integration and discover its tool schemas"))
+).pipe(Command.withDescription("Authorize an Executor integration and report its tool count"))
 
 const makeConnections = () => Command.make(
   "connections",
@@ -368,7 +365,7 @@ const makeInvoke = () => Command.make(
 const makeValidate = () => Command.make(
   "validate",
   {
-    config: Argument.string("json").pipe(Argument.optional),
+    config: Argument.string("json-or-tool-address").pipe(Argument.optional),
     file: Flag.string("file").pipe(Flag.optional),
     live: Flag.boolean("live"),
     json: Flag.boolean("json")
@@ -379,10 +376,13 @@ const makeValidate = () => Command.make(
     if ((configText === undefined) === (filePath === undefined)) {
       return yield* cliError("Provide exactly one of a JSON config or --file")
     }
+    const directAddress = configText?.startsWith("tools.") === true
     let source: string
     if (filePath === undefined) {
       if (configText === undefined) return yield* cliError("Provide a JSON config")
-      source = configText
+      source = directAddress
+        ? JSON.stringify({ source: { kind: "executor", address: configText } })
+        : configText
     } else {
       source = yield* Effect.tryPromise({
         try: () => Bun.file(filePath).text(),
@@ -391,7 +391,7 @@ const makeValidate = () => Command.make(
     }
     const node = yield* decodeJson(source)
     const report = yield* Effect.tryPromise({
-      try: () => validateIntegrationNode(node, { live }),
+      try: () => validateIntegrationNode(node, { live: live || directAddress }),
       catch: (error) => cliError(`Integration validation failed: ${String(error)}`)
     })
     yield* writeStdoutLine(
@@ -403,7 +403,7 @@ const makeValidate = () => Command.make(
     )
     if (!report.ok) return yield* cliError("Integration validation failed")
   })
-).pipe(Command.withDescription("Validate an Executor tool address"))
+).pipe(Command.withDescription("Validate an Executor tool address or integration config"))
 
 const integrationsCommand = (options: IntegrationsCliOptions) =>
   Command.make("integrations").pipe(
@@ -425,12 +425,30 @@ export const runIntegrationsCli = (
   options: IntegrationsCliOptions = {}
 ): Promise<void> => {
   if (options.storageDir !== undefined) setExecutorStorageDirectory(options.storageDir)
+  const normalizedArguments = normalizeArguments(arguments_)
   return Effect.runPromise(
-    Command.runWith(integrationsCommand(options), { version: "0.3.0" })(arguments_).pipe(
+    Command.runWith(integrationsCommand(options), { version: "0.3.0" })(normalizedArguments).pipe(
       Effect.catchTag("ShowHelp", (error) => error.errors.length === 0
         ? Effect.void
         : Effect.sync(() => { process.exitCode = 1 })),
       Effect.provide(BunServices.layer)
     )
   ).finally(() => closeExecutor(options.storageDir))
+}
+
+const normalizeArguments = (arguments_: ReadonlyArray<string>): ReadonlyArray<string> => {
+  if (arguments_[0] !== "tools") return arguments_
+
+  const integrationFlag = arguments_.indexOf("--integration")
+  const flaggedIntegration = integrationFlag < 0 ? undefined : arguments_[integrationFlag + 1]
+  if (flaggedIntegration !== undefined) {
+    return [
+      "tools",
+      flaggedIntegration,
+      ...arguments_.slice(1, integrationFlag),
+      ...arguments_.slice(integrationFlag + 2)
+    ]
+  }
+
+  return arguments_
 }

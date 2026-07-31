@@ -132,6 +132,12 @@ describe("agent integration acceptance flow", () => {
     }
     const specUrl = `http://127.0.0.1:${server.port}/openapi.json`
 
+    const summary = await runCli(["integrations", "discover", specUrl], environment)
+    expect(summary.exitCode).toBe(0)
+    expect(summary.stdout).toContain("tools: 0")
+    expect(summary.stdout).toContain(`next: wf integrations connect agent_acceptance`)
+    expect(summary.stdout).not.toContain("input:")
+
     const discovered = await runCli(["integrations", "discover", specUrl, "--json"], environment)
     expect(discovered.exitCode).toBe(0)
     expect(discovered.stdout).toContain('"kind": "openapi"')
@@ -162,6 +168,25 @@ describe("agent integration acceptance flow", () => {
     if (createTicket === undefined) throw new Error("Executor did not discover tickets.create")
     expect(createTicket.inputSchema).toBeDefined()
     expect(createTicket.outputSchema).toBeDefined()
+
+    const concise = await runCli([
+      "integrations",
+      "tools",
+      "agent_acceptance"
+    ], environment)
+    expect(concise.exitCode).toBe(0)
+    expect(concise.stdout).toContain("tickets.create")
+    expect(concise.stdout).toContain("input:")
+    expect(concise.stdout).not.toContain("output:")
+
+    const validated = await runCli([
+      "integrations",
+      "validate",
+      createTicket.address
+    ], environment)
+    expect(validated.exitCode).toBe(0)
+    expect(validated.stdout).toContain("catalog\t")
+    expect(validated.stdout).toContain("tickets.create is available")
 
     const invoked = await runCli([
       "integrations",
