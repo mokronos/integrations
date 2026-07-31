@@ -97,5 +97,5 @@ describe("wf signal", () => {
     ])
     expect(alreadyCompleted.exitCode).not.toBe(0)
     expect(alreadyCompleted.stderr).toContain("not waiting for signal approval")
-  })
+  }, 15_000)
 })

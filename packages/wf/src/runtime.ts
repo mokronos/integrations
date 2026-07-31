@@ -187,7 +187,7 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
     },
 
     execute({ workflow, payload, executionId, onEvent }) {
-      const workflowName = String(workflow.workflow._tag ?? workflow.engineName)
+      const workflowName = String(workflow.workflow.name ?? workflow.engineName)
       if (onEvent !== undefined) {
         setExecutionEventSink(executionId, onEvent)
       }
@@ -199,7 +199,7 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
         yield* emitWorkflowEvent({ type: "workflow.started", workflowName, payload })
         const result = yield* engine.execute(workflow.workflow, {
           executionId,
-          payload: payload as any
+          payload: { value: payload }
         }).pipe(
           Effect.tap((result: unknown) =>
             emitWorkflowEvent({ type: "workflow.completed", workflowName, result })
@@ -229,7 +229,7 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
         const engine = yield* WorkflowEngine.WorkflowEngine
         const deferred = DurableDeferred.make(deferredName, { success: Schema.Unknown })
         yield* engine.deferredDone(deferred, {
-          workflowName: workflow.workflow._tag,
+          workflowName: workflow.workflow.name,
           executionId,
           deferredName,
           exit: Exit.succeed(payload)
@@ -277,10 +277,10 @@ export const makeWorkflowEffect = (
       options.engineDatabasePath === undefined ? {} : { databasePath: options.engineDatabasePath }
     ))
   )
-  const workflowName = String(wf.workflow._tag ?? wf.engineName ?? "Workflow")
+  const workflowName = String(wf.workflow.name ?? wf.engineName ?? "Workflow")
   const execution = Effect.gen(function* () {
     yield* emitWorkflowEvent({ type: "workflow.started", workflowName, payload })
-    const result = yield* wf.workflow.execute(payload).pipe(
+    const result = yield* wf.workflow.execute({ value: payload }).pipe(
       Effect.tap((result: unknown) =>
         emitWorkflowEvent({ type: "workflow.completed", workflowName, result })
       ),

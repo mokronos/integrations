@@ -47,15 +47,15 @@ describe("wf help", () => {
     const parent = runCli(["integrations"])
     const helpCommand = runCli(["help", "integrations"])
     const helpFlag = runCli(["integrations", "--help"])
-    const subcommandHelp = runCli(["integrations", "search", "--help"])
+    const subcommandHelp = runCli(["integrations", "discover", "--help"])
 
     expect(parent.exitCode).toBe(0)
     expect(parent.stdout).toContain("SUBCOMMANDS")
-    expect(parent.stdout).toContain("search")
+    expect(parent.stdout).toContain("discover")
     expect(helpCommand.stdout).toBe(parent.stdout)
     expect(helpFlag.stdout).toBe(parent.stdout)
     expect(subcommandHelp.stdout).toContain("ARGUMENTS")
-    expect(subcommandHelp.stdout).toContain("term string")
+    expect(subcommandHelp.stdout).toContain("url string")
   })
 
   test("rejects help for an unknown command", () => {

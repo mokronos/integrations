@@ -1403,16 +1403,21 @@ export const defineWorkflow = <
     .update(config.run.toString())
     .digest("hex")
 
-  const workflow = Workflow.make(engineName, {
-    payload: config.input as any,
-    idempotencyKey: (payload: any) => JSON.stringify(payload),
+  const WorkflowPayload = Schema.Struct({ value: Schema.Unknown })
+  const workflow = Workflow.make({
+    name: engineName,
+    payload: WorkflowPayload,
+    idempotencyKey: (payload) => JSON.stringify(payload.value),
     success: config.output,
     error: Schema.Unknown
   })
 
   const layer = workflow.toLayer(
-    Effect.fn(function* (payload: Schema.Schema.Type<Input>, executionId: string) {
-      const input = decodeSync(config.input, payload)
+    Effect.fn(function* (
+      payload: { readonly value: Schema.Schema.Type<Input> },
+      executionId: string
+    ) {
+      const input = decodeSync(config.input, payload.value)
       const result = yield* config.run(input, makeCtx(workflow, ExecutionId.make(executionId), errors)) as any
       return decodeSync(config.output, result)
     }) as any
@@ -1514,12 +1519,14 @@ export const defineWorkflow = <
     errors,
     workflow,
     layer,
-    execute: (payload) =>
-      workflow.execute(payload as any) as Effect.Effect<
+    execute: (payload) => {
+      const enginePayload = Schema.decodeUnknownSync(WorkflowPayload)({ value: payload })
+      return workflow.execute(enginePayload) as Effect.Effect<
         Schema.Schema.Type<Output>,
         Schema.Schema.Type<Errors> | unknown,
         any
-      >,
+      >
+    },
     executeInMemory
   }
 }

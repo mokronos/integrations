@@ -8,11 +8,10 @@ Before running a workflow, tell the user about every action they may need to tak
 
 Never invent credentials, silently substitute a different service, or leave the user with a workflow that appears to hang. If `wf` prints a pending signal command, relay that command and the expected payload to the user verbatim.
 
-When standard MCP OAuth is available, prefer `wf integrations connect` over
-asking the user to create or copy a token. Before running it, tell the user which
-account will open in the browser, the scopes requested, and why the workflow
-needs them. Never request every advertised scope by default; derive the least
-privileged scopes from the operations in the workflow.
+When OAuth is available, prefer `wf integrations connect` over asking the user
+to create or copy a token. Before running it, tell the user which account will
+open in the browser, the scopes requested, and why the workflow needs them.
+Never request every advertised scope by default.
 
 The example below only reads a public file from GitHub. It does not need an account or token and does not change anything on GitHub. Before running it, tell the user that it will:
 
@@ -40,40 +39,41 @@ installing or changing the user's runtime setup.
 
 ## Discover and authorize integrations
 
-Start from the registry instead of guessing endpoint names or schemas:
+Start from the service URL instead of guessing protocol, auth, operation names,
+or schemas:
 
 ```sh
-wf integrations search <service-or-capability> --kind mcp --json
-wf integrations show <domain> --json
+wf integrations discover <mcp-endpoint-or-openapi-url> --json
 ```
 
-For an OAuth-protected MCP surface, explain the requested scopes and connect it.
-The command opens the user's browser and handles dynamic client registration,
-PKCE, the loopback callback, encrypted token storage, and refresh:
+`discover` delegates URL detection, MCP/OpenAPI registration, auth discovery,
+and tool-schema discovery to Executor. If auth is required, connect the returned
+integration slug. OAuth opens the browser and uses dynamic client registration
+when supported, PKCE, a loopback callback, and refresh:
 
 ```sh
-wf integrations connect <domain> --scopes "scope:read scope:write"
+wf integrations connect <integration-slug> --connection default --scopes "scope:read scope:write"
 wf integrations connections --json
 ```
 
-Then inspect complete tool schemas. Use the connection id printed by `connect`
-inside `auth(...)`; never put a returned token into workflow source or input.
+For an API key or bearer token, put the value in an environment variable and
+name that variable; never place the value on the command line:
 
 ```sh
-wf integrations inspect-mcp <domain> --connection <connection-id> --json
+wf integrations connect <integration-slug> --connection default --credential-env SERVICE_TOKEN
 ```
 
-For an HTTP surface with a registered OpenAPI document, inspect one or all
-operations before authoring the node:
+Then list the complete input/output schemas and copy the selected Executor
+address into the workflow:
 
 ```sh
-wf integrations inspect-openapi <domain-or-spec-url> --json
-wf integrations inspect-openapi <domain-or-spec-url> --operation <operation-id> --json
+wf integrations tools --integration <integration-slug> --connection default --json
 ```
 
-The OpenAPI executor supports JSON request/response operations with explicit
-path, query, header, and cookie bindings. Treat unsupported media types or
-unresolved references as a design question for the user rather than guessing.
+Author the node as
+`source: { kind: "executor", address: "tools.<integration>.org.<connection>.<tool>" }`.
+Never put a returned credential into workflow source or input. Treat unsupported
+protocol features or unresolved schemas as a design question for the user.
 
 ## Create a real integration workflow
 
@@ -165,6 +165,8 @@ wf history <run-id>
 
 ## Continue from here
 
-When adapting this example to an authenticated API, do not place secret values in workflow inputs or source code. Prefer `wf integrations connect` for standard MCP OAuth. Otherwise tell the user which secret is required, arrange an approved secret source, and use wfkit secret references so durable history stores the reference rather than the value.
+When adapting this example to an authenticated API, do not place secret values
+in workflow inputs or source code. Use `wf integrations connect`, then persist
+only the selected Executor tool address in the workflow.
 
 For human approval flows, explain the decision and payload to the user before starting. When the run suspends, copy the exact `wf signal ...` command printed by the CLI and wait for the user's response before sending it.

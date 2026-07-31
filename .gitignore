@@ -36,6 +36,9 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 examples/*/.wf/
 .tmp/
 
+# reference repos (pulled via `scripts/pull-references.ts`)
+.reference/
+
 # IntelliJ based IDEs
 .idea
 .vscode/

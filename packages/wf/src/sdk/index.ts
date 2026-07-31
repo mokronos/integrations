@@ -41,20 +41,13 @@ export type {
 } from "./graph.ts"
 export { parseJsonText, toJsonText } from "./json.ts"
 export {
-  discover,
-  getIntegrationSurface,
+  discoverIntegration,
+  IntegrationDiscovery as IntegrationDiscoverySchema,
+  type IntegrationDiscovery,
   IntegrationKind as IntegrationKindSchema,
   type IntegrationKind,
   IntegrationNodeConfig as IntegrationNodeConfigSchema,
   type IntegrationNodeConfig,
-  IntegrationSearchResult as IntegrationSearchResultSchema,
-  type IntegrationSearchResult,
-  IntegrationSurface as IntegrationSurfaceSchema,
-  IntegrationSurfaceAuth as IntegrationSurfaceAuthSchema,
-  IntegrationSurfaceCredential as IntegrationSurfaceCredentialSchema,
-  IntegrationSurfaceDocument as IntegrationSurfaceDocumentSchema,
-  IntegrationSurfaceRequiredHeader as IntegrationSurfaceRequiredHeaderSchema,
-  type IntegrationSurfaceDocument,
   IntegrationValidationFinding as IntegrationValidationFindingSchema,
   type IntegrationValidationFinding,
   IntegrationValidationReport as IntegrationValidationReportSchema,
@@ -62,8 +55,7 @@ export {
   validateIntegrationNode
 } from "./integrations.ts"
 export type {
-  DiscoverIntegrationsOptions,
-  DiscoverIntegrationsResult,
+  DiscoverIntegrationsOptions
 } from "./integrations.ts"
 export { Cancelled, MissingWorkflowVersionError, createWorkflowClient, createWorkflowSdk } from "./sdk.ts"
 export type {

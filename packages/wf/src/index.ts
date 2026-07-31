@@ -2,51 +2,33 @@
 // (plus pure helper functions it defines) — never `effect` or `@effect/*`.
 export { createInMemoryDeterminismState, defineStep, defineWorkflow, envSecretResolver, isSecretRef, NonDeterminismError, secret, SecretResolutionContext } from "./core.ts"
 export {
-  auth,
-  AuthRef,
-  discoverMcpServer,
   integration,
-  IntegrationAuth,
   IntegrationError,
-  IntegrationParameterBinding,
-  IntegrationSource,
-  listMcpTools,
-  McpServerDiscovery,
-  McpTool
+  IntegrationSource
 } from "./integration.ts"
 export {
-  ConnectionAuthorizationError,
-  ConnectionId,
-  ConnectionStatus,
-  connectionManagerPaths,
-  createConnectionManager,
-  createFileTokenProtector,
-  discoverMcpOAuth,
-  McpOAuthDiscovery,
-  OAuthAuthorizationServerMetadata,
-  OAuthClientConfiguration,
-  OAuthConnection,
-  OAuthProtectedResourceMetadata
-} from "./connections.ts"
-export type {
-  BeginMcpOAuthOptions,
-  ConnectionManager,
-  ConnectionManagerOptions,
-  OAuthAuthorizationAttempt,
-  TokenProtector
-} from "./connections.ts"
-export {
-  discoverOpenApi,
-  OpenApiDiscovery,
-  OpenApiHttpMethod,
-  OpenApiOperation,
-  OpenApiParameter,
-  OpenApiParameterLocation,
-  OpenApiRequestBody,
-  OpenApiResponse,
-  OpenApiSecurityRequirement,
-  OpenApiSecurityScheme
-} from "./openapi.ts"
+  ExecutorAuthMethod,
+  ExecutorConnection,
+  ExecutorDetection,
+  ExecutorIntegration,
+  ExecutorMcpProbe,
+  ExecutorOpenApiPreview,
+  ExecutorTool,
+  ExecutorToolAddress,
+  addExecutorMcp,
+  addExecutorOpenApi,
+  closeExecutor,
+  createExecutorConnection,
+  detectExecutorIntegration,
+  executorStorageDirectory,
+  listExecutorConnections,
+  listExecutorIntegrations,
+  listExecutorTools,
+  previewExecutorOpenApi,
+  probeExecutorMcp,
+  removeExecutorConnection,
+  setExecutorStorageDirectory
+} from "./executor.ts"
 export type {
   DefinedWorkflow,
   InMemoryDeterminismState,
@@ -128,8 +110,7 @@ export type {
   WorkflowGraphSchemas,
   WorkflowGraphNodeKind,
   WorkflowGraphOptions,
-  DiscoverIntegrationsOptions,
-  DiscoverIntegrationsResult
+  DiscoverIntegrationsOptions
 } from "./sdk/index.ts"
 export {
   Cancelled,
@@ -145,26 +126,19 @@ export {
   toJsonText,
   sampleValueForJsonSchema,
   sampleValueForSchema,
+  IntegrationDiscoverySchema,
+  type IntegrationDiscovery,
   IntegrationKindSchema,
   type IntegrationKind,
   IntegrationNodeConfigSchema,
   type IntegrationNodeConfig,
-  IntegrationSearchResultSchema,
-  type IntegrationSearchResult,
-  IntegrationSurfaceSchema,
-  IntegrationSurfaceAuthSchema,
-  IntegrationSurfaceCredentialSchema,
-  IntegrationSurfaceDocumentSchema,
-  IntegrationSurfaceRequiredHeaderSchema,
-  type IntegrationSurfaceDocument,
   IntegrationValidationFindingSchema,
   type IntegrationValidationFinding,
   IntegrationValidationReportSchema,
   type IntegrationValidationReport,
   workflowArtifactToGraph,
   workflowToGraph,
-  discover,
-  getIntegrationSurface,
+  discoverIntegration,
   validateIntegrationNode
 } from "./sdk/index.ts"
 export { createTestRuntime } from "./testing/index.ts"

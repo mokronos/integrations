@@ -5,6 +5,7 @@ describe("CLI help", () => {
   test("groups workflow commands before service and dashboard commands", () => {
     expect(topLevelHelp).toContain(`Workflow commands:
   create                  Create or import a workflow
+  validate                Validate a workflow without running it
   list                    List registered workflows
   run                     Start a workflow run
   runs                    List persisted runs

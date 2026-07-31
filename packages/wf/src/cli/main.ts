@@ -2,18 +2,18 @@
 import { readFile } from "node:fs/promises"
 import path from "node:path"
 import {
-  connectionManagerPaths,
-  createConnectionManager,
   createWorkflowClient,
   createWorkflowRuntime,
   createSqliteWorkflowRepository,
-  envSecretResolver,
   loadWorkflowArtifact,
   sampleValueForJsonSchema,
-  toJsonText
+  setExecutorStorageDirectory,
+  toJsonText,
+  workflowArtifactToGraph
 } from "../index.ts"
 import { runIntegrationsCli } from "./integrations.ts"
 import type {
+  JsonSchema,
   PendingSignal,
   WorkflowArtifact,
   WorkflowClient,
@@ -21,7 +21,9 @@ import type {
   WorkflowHistoryEvent,
   WorkflowRepository,
   WorkflowRunEventRecord,
-  WorkflowRunRecord
+  WorkflowRunRecord,
+  WorkflowGraphNodeKind,
+  WorkflowGraphNodeMetadata
 } from "../index.ts"
 
 const help = `wf - create, run, and inspect durable TypeScript workflows
@@ -31,6 +33,7 @@ Usage:
 
 Commands:
   create    Create or import a workflow
+  validate  Validate a workflow without running it
   list      List registered workflows
   run       Start a workflow run
   runs      List persisted runs
@@ -66,6 +69,26 @@ Examples:
 
 Usage:
   wf list
+`
+    case "validate":
+      return `Validate a workflow without starting a durable run.
+
+Validation loads the workflow and traces its body in memory with sample values
+and faked steps, so it causes no real side effects or durable run.
+
+Usage:
+  wf validate <workflow-id> [--input <json>] [--json]
+  wf validate --file <path> [--input <json>] [--json]
+
+Options:
+  --file <path>       Validate a TypeScript workflow file outside the catalog
+  --input <json>      Use this JSON value while tracing the workflow
+  --json              Print the complete validation graph as JSON
+
+Examples:
+  wf validate welcome-email
+  wf validate welcome-email --input '{"message":"hello"}'
+  wf validate --file workflows/email.ts --json
 `
     case "run":
       return `Start a registered workflow with optional JSON input.
@@ -115,14 +138,13 @@ Example:
       return `Discover, authorize, inspect, and validate integrations.
 
 Usage:
-  wf integrations search <term> [--kind mcp|openapi|graphql|cli] [--limit <n>] [--json]
-  wf integrations show <domain> [--json]
-  wf integrations connect <domain-or-mcp-url> [--connection <id>] [--scopes <scopes>] [--no-open]
+  wf integrations discover <url> [--connection <name>] [--json]
+  wf integrations connect <integration-or-url> [--connection <name>] [--template <name>]
+  wf integrations catalog [--json]
+  wf integrations tools [--integration <slug>] [--connection <name>] [--json]
   wf integrations connections [--json]
-  wf integrations disconnect <connection-id>
-  wf integrations inspect-mcp <domain-or-url> [--connection <id>] [--json]
-  wf integrations inspect-openapi <domain-or-spec-url> [--operation <id>] [--json]
-  wf integrations validate [<json>] [--file <path>] [--live] [--input <json>] [--json]
+  wf integrations disconnect <integration> [--connection <name>]
+  wf integrations validate [<json>] [--file <path>] [--live] [--json]
 `
     case undefined:
       return help
@@ -203,6 +225,75 @@ interface CreateWorkflowOptions {
   readonly source: string
   readonly version: string
   readonly force: boolean
+}
+
+// Exactly one of "catalog" (validate a registered id) or "file" (validate a
+// file that has not been imported yet) — modelled as a union so the command
+// body has no impossible "neither was provided" branch to re-check.
+type ValidateWorkflowTarget =
+  | { readonly kind: "catalog"; readonly id: string }
+  | { readonly kind: "file"; readonly file: string }
+
+interface ValidateWorkflowOptions {
+  readonly target: ValidateWorkflowTarget
+  readonly inputText?: string
+  readonly json: boolean
+}
+
+const workflowIdFromFile = (file: string): string => {
+  const basename = path.basename(file, path.extname(file))
+  const id = basename.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "")
+  return /^[a-z][a-z0-9-]*$/.test(id) ? id : "workflow"
+}
+
+const parseValidateWorkflowOptions = (args: ReadonlyArray<string>): ValidateWorkflowOptions => {
+  let id: string | undefined
+  let file: string | undefined
+  let inputText: string | undefined
+  let json = false
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]!
+    switch (arg) {
+      case "--file":
+        file = readFlagValue(args, ++index, "--file")
+        break
+      case "--input":
+        inputText = readFlagValue(args, ++index, "--input")
+        break
+      case "--json":
+        json = true
+        break
+      default:
+        if (arg.startsWith("--")) {
+          throw new Error(`Unknown wf validate option: ${arg}`)
+        }
+        if (id !== undefined) {
+          throw new Error("wf validate accepts only one workflow id")
+        }
+        id = arg
+        break
+    }
+  }
+
+  if (id !== undefined && file !== undefined) {
+    throw new Error("Use either a workflow id or --file, not both")
+  }
+
+  const target: ValidateWorkflowTarget | undefined = id !== undefined
+    ? { kind: "catalog", id }
+    : file !== undefined
+      ? { kind: "file", file }
+      : undefined
+  if (target === undefined) {
+    throw new Error("wf validate requires a workflow id or --file")
+  }
+
+  return {
+    target,
+    ...(inputText === undefined ? {} : { inputText }),
+    json
+  }
 }
 
 interface RawCreateWorkflowOptions {
@@ -480,6 +571,134 @@ const stringifyEventValue = (value: unknown): string => {
   }
 }
 
+// Derived from the graph schema rather than restated, so widening a metadata
+// field cannot silently drift from what this formatter accepts.
+type ValidationMetadataValue = WorkflowGraphNodeMetadata[keyof WorkflowGraphNodeMetadata]
+
+const validationDetail = (key: string, value: ValidationMetadataValue): ReadonlyArray<EventDetail> =>
+  value === undefined ? [] : [[key, stringifyEventValue(value)]]
+
+// Only the metadata that changes how a node behaves at runtime; the traced
+// sample `input` is omitted because it is invented, not authored.
+const validationMetadata = (
+  kind: WorkflowGraphNodeKind,
+  metadata: WorkflowGraphNodeMetadata
+): ReadonlyArray<EventDetail> => {
+  switch (kind) {
+    case "step":
+      return [
+        ...validationDetail("activityName", metadata.activityName),
+        ...validationDetail("retry", metadata.retry),
+        ...validationDetail("concurrency", metadata.concurrency),
+        ...validationDetail("compensates", metadata.compensates)
+      ]
+    case "sleep":
+      return validationDetail("duration", metadata.duration)
+    case "signal":
+      return validationDetail("timeout", metadata.timeout)
+    case "code":
+      return validationDetail("reason", metadata.reason)
+    case "all":
+      return validationDetail("branches", metadata.branches)
+    default:
+      return []
+  }
+}
+
+// A workflow without typed errors renders as JSON Schema `{"not":{}}` (never).
+// Printing that in the success block reads like a defect, so drop the line.
+const isNeverSchema = (schema: JsonSchema): boolean => toJsonText(schema) === `{"not":{}}`
+
+const printSchemaLine = (label: string, schema: JsonSchema | undefined) => {
+  if (schema === undefined || isNeverSchema(schema)) return
+  console.log(`${dim(`${label}:`)} ${toJsonText(schema)}`)
+}
+
+const printValidationResult = (result: Awaited<ReturnType<typeof workflowArtifactToGraph>>) => {
+  const graph = result.graph
+  if (graph === undefined) {
+    return
+  }
+
+  const exportName = result.exportName ?? result.artifact.exportName ?? "default"
+  console.log(`${green("Valid")} ${bold(`${result.artifact.id}@${result.artifact.version}`)}\t${bold(graph.workflowName)}#${exportName}`)
+  printSchemaLine("input", graph.schemas?.input)
+  printSchemaLine("output", graph.schemas?.output)
+  printSchemaLine("errors", graph.schemas?.errors)
+  console.log(bold("flow:"))
+
+  const nodes = graph.nodes.filter((node) => node.kind !== "start" && node.kind !== "end")
+  if (nodes.length === 0) {
+    console.log("  (no orchestration calls)")
+    return
+  }
+
+  for (const node of nodes) {
+    const metadata = validationMetadata(node.kind, node.metadata)
+      .map(([key, value]) => ` ${dim(`${key}=`)}${value}`)
+      .join("")
+    console.log(`  ${bold(node.kind)}\t${node.label}${metadata}${node.repeated ? " (repeated)" : ""}`)
+  }
+}
+
+const validationError = (result: Awaited<ReturnType<typeof workflowArtifactToGraph>>): Error => {
+  const traceDiagnostics = result.graph?.diagnostics ?? []
+  const diagnostics = [...result.diagnostics, ...traceDiagnostics]
+  return new Error(`Invalid ${result.artifact.id}@${result.artifact.version}${diagnostics.map((diagnostic) => `\n  - ${diagnostic}`).join("")}`)
+}
+
+const validationArtifact = async (
+  repository: WorkflowRepository,
+  target: ValidateWorkflowTarget
+): Promise<WorkflowArtifact> => {
+  if (target.kind === "file") {
+    return {
+      // The real workflow name comes from the resolved export; this placeholder
+      // only exists because an artifact needs one before the source is loaded.
+      id: workflowIdFromFile(target.file),
+      name: "Workflow",
+      version: "dev",
+      source: await readFile(target.file, "utf8"),
+      createdAt: new Date().toISOString()
+    }
+  }
+
+  const artifact = await repository.get(target.id)
+  if (artifact === undefined) {
+    throw new Error(`Unknown workflow id: ${target.id}`)
+  }
+  return artifact
+}
+
+const traceWorkflowArtifact = async (
+  artifact: WorkflowArtifact,
+  inputText: string | undefined
+): Promise<Awaited<ReturnType<typeof workflowArtifactToGraph>>> => {
+  const log = console.log
+  const info = console.info
+  const warn = console.warn
+  const error = console.error
+  const debug = console.debug
+  const suppress = (): void => {}
+  console.log = suppress
+  console.info = suppress
+  console.warn = suppress
+  console.error = suppress
+  console.debug = suppress
+  try {
+    return await workflowArtifactToGraph(
+      artifact,
+      inputText === undefined ? {} : { input: parseJsonInput(inputText) }
+    )
+  } finally {
+    console.log = log
+    console.info = info
+    console.warn = warn
+    console.error = error
+    console.debug = debug
+  }
+}
+
 // --- colored event output ---------------------------------------------------
 // Category tints the [tag], the verb carries the outcome (green/red/yellow),
 // detail keys are dimmed. Colors turn off for non-TTY stderr, NO_COLOR, or
@@ -734,11 +953,9 @@ const awaitSyncAndPersistRun = async (options: {
 const engineDatabasePath = (storageDir: string) => path.join(storageDir, "engine.sqlite")
 
 const createEngineBackedClient = (storageDir: string) => {
-  const connections = createConnectionManager(connectionManagerPaths(storageDir))
   const runtime = createWorkflowRuntime({
     backend: "sqlite",
-    databasePath: engineDatabasePath(storageDir),
-    secrets: connections.secretResolver(envSecretResolver())
+    databasePath: engineDatabasePath(storageDir)
   })
   const client = createWorkflowClient(runtime)
   return { runtime, client }
@@ -752,7 +969,7 @@ export const runWfkitCli = async (options: {
   const [command, ...args] = options.arguments
   const rootDir = options.rootDir
   const storageDir = options.storageDir ?? path.join(rootDir, ".wf")
-  const registryBaseUrl = process.env["WF_INTEGRATIONS_BASE_URL"]
+  setExecutorStorageDirectory(storageDir)
 
   if (command === undefined || command === "-h" || command === "--help") {
     console.log(help)
@@ -760,10 +977,7 @@ export const runWfkitCli = async (options: {
   }
 
   if (command === "integrations") {
-    await runIntegrationsCli(args, {
-      storageDir,
-      ...(registryBaseUrl === undefined ? {} : { registryBaseUrl })
-    })
+    await runIntegrationsCli(args, { storageDir })
     return
   }
 
@@ -773,10 +987,7 @@ export const runWfkitCli = async (options: {
       throw new Error(`wf help accepts at most one command\n\n${commandHelp("help")}`)
     }
     if (requestedCommand === "integrations") {
-      await runIntegrationsCli(["--help"], {
-        storageDir,
-        ...(registryBaseUrl === undefined ? {} : { registryBaseUrl })
-      })
+      await runIntegrationsCli(["--help"], { storageDir })
       return
     }
     const requestedHelp = commandHelp(requestedCommand)
@@ -839,6 +1050,27 @@ export const runWfkitCli = async (options: {
       }
       await repository.upsertWorkflow(workflow)
       printCreatedWorkflow(workflow)
+      return
+    }
+
+    case "validate": {
+      const validateOptions = parseValidateWorkflowOptions(args)
+      const artifact = await validationArtifact(repository, validateOptions.target)
+
+      const result = await traceWorkflowArtifact(artifact, validateOptions.inputText)
+      const invalid = result.diagnostics.length > 0 ||
+        result.graph === undefined ||
+        result.graph.diagnostics.length > 0
+
+      if (validateOptions.json) {
+        console.log(toJsonText(result))
+        if (invalid) process.exitCode = 1
+        return
+      }
+      if (invalid) {
+        throw validationError(result)
+      }
+      printValidationResult(result)
       return
     }
 
@@ -927,7 +1159,7 @@ export const runWfkitCli = async (options: {
 
 if (import.meta.main) {
   runWfkitCli({ arguments: process.argv.slice(2), rootDir: process.cwd() }).then(
-  () => process.exit(0),
+  () => process.exit(process.exitCode ?? 0),
   (error) => {
     console.error(formatError(error))
     process.exit(1)

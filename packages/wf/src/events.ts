@@ -26,12 +26,12 @@ export const removeExecutionEventSink = (executionId: string): void => {
 }
 
 export const emitWorkflowEvent = (event: WorkflowEvent): Effect.Effect<void> =>
-  Effect.flatMap(currentWorkflowEventSink, (fiberSink) => {
+  Effect.gen(function* () {
+    const fiberSink = yield* currentWorkflowEventSink
     const executionId = (event as { readonly executionId?: string }).executionId
     const sink = (executionId !== undefined ? executionEventSinks.get(executionId) : undefined) ?? fiberSink
     if (sink === undefined) {
-      return Effect.void
+      return
     }
-
-    return Effect.promise(() => Promise.resolve(sink(event)))
+    yield* Effect.promise(() => Promise.resolve(sink(event)))
   })

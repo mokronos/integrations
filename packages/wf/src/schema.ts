@@ -7,10 +7,10 @@ interface SchemaVocabulary {
   readonly void: typeof Schema.Void
   readonly date: typeof Schema.Date
   readonly struct: typeof Schema.Struct
-  readonly array: <S extends Schema.Constraint>(schema: S) => Schema.$Array<S>
+  readonly array: <S extends Schema.Top>(schema: S) => Schema.$Array<S>
   readonly literal: typeof Schema.Literal
   readonly taggedStruct: typeof Schema.TaggedStruct
-  readonly optional: <S extends Schema.Constraint>(schema: S) => Schema.optional<S>
+  readonly optional: <S extends Schema.Top>(schema: S) => Schema.optional<S>
   readonly union: typeof Schema.Union
   readonly unknown: typeof Schema.Unknown
 }

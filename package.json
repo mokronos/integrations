@@ -7,6 +7,10 @@
     "packages/*",
     "examples/*"
   ],
+  "overrides": {
+    "@effect/platform-node-shared": "4.0.0-beta.59",
+    "effect": "4.0.0-beta.59"
+  },
   "scripts": {
     "build": "bun run --cwd packages/wf build",
     "build:cli": "bun run --cwd packages/wf-cli build",
@@ -18,6 +22,7 @@
     "example:quickstart": "bun run examples/quickstart/main.ts",
     "example:order-saga": "cd examples/order-saga && bun run main.ts",
     "example:approval": "cd examples/approval && bun run main.ts demo",
+    "install:local": "bun run packages/wf-cli/install-local.ts",
     "prepare": "effect-language-service patch",
     "typecheck": "tsc --build --noEmit",
     "test": "bun test",

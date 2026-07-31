@@ -102,6 +102,7 @@ const writePlatformPackage = async (target: BuildTarget): Promise<void> => {
     "bun",
     "build",
     "--compile",
+    "--minify",
     "--target",
     target.bunTarget,
     "--outfile",

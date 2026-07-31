@@ -11,8 +11,8 @@ export {
   secret,
   SecretResolutionContext
 } from "./core.ts"
-export { auth, AuthRef, integration, IntegrationError } from "./integration.ts"
-export type { IntegrationAuth, IntegrationSource } from "./integration.ts"
+export { integration, IntegrationError } from "./integration.ts"
+export type { IntegrationSource } from "./integration.ts"
 export type {
   DefinedWorkflow,
   InMemoryDeterminismState,

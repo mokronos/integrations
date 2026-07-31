@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import path from "node:path"
 import { createSqliteWorkflowRepository, toJsonText, workflowArtifactToGraph } from "../../wf/src/index.ts"
 import type { WorkflowRepository } from "../../wf/src/index.ts"
 import { runWfkitCli } from "../../wf/src/cli/main.ts"
@@ -14,6 +15,7 @@ Usage:
 
 Workflow commands:
   create                  Create or import a workflow
+  validate                Validate a workflow without running it
   list                    List registered workflows
   run                     Start a workflow run
   runs                    List persisted runs
@@ -71,6 +73,7 @@ Usage:
 }
 
 const mimeTypeFor = (pathname: string): string => {
+  if (pathname.endsWith(".html")) return "text/html; charset=utf-8"
   if (pathname.endsWith(".css")) return "text/css; charset=utf-8"
   if (pathname.endsWith(".js")) return "text/javascript; charset=utf-8"
   if (pathname.endsWith(".svg")) return "image/svg+xml"
@@ -84,7 +87,29 @@ const json = (body: string, status = 200): Response => new Response(body, {
   headers: { "content-type": "application/json; charset=utf-8" }
 })
 
-const dashboardResponse = (pathname: string): Response => {
+// Compiled binaries embed the dashboard at build time. Running from source leaves
+// embedded-web-assets.gen.ts as an empty stub, so fall back to apps/web/dist on disk
+// and a `vite build` is enough to refresh the dashboard — no binary recompile.
+const dashboardIsEmbedded = Object.keys(assets).length > 0
+const dashboardSourceDirectory = path.resolve(import.meta.dir, "..", "..", "..", "apps", "web", "dist")
+
+const dashboardFileResponse = async (pathname: string): Promise<Response> => {
+  const location = path.resolve(dashboardSourceDirectory, pathname === "/" ? "index.html" : pathname.slice(1))
+  const contained = location === dashboardSourceDirectory ||
+    location.startsWith(`${dashboardSourceDirectory}${path.sep}`)
+  if (!contained) return new Response("Not found", { status: 404 })
+  const file = Bun.file(location)
+  if (!(await file.exists())) {
+    return new Response(
+      `Dashboard assets not found at ${dashboardSourceDirectory}. Run: bun run --cwd apps/web build`,
+      { status: 404 }
+    )
+  }
+  return new Response(file, { headers: { "content-type": mimeTypeFor(location) } })
+}
+
+const dashboardResponse = async (pathname: string): Promise<Response> => {
+  if (!dashboardIsEmbedded) return dashboardFileResponse(pathname)
   const asset = assets[pathname === "/" ? "/index.html" : pathname]
   if (asset === undefined) return new Response("Not found", { status: 404 })
   return new Response(Buffer.from(asset.base64, "base64"), {
@@ -175,7 +200,7 @@ const runServer = async (options: ServerOptions): Promise<void> => {
           return json(JSON.stringify({ error: message }), 500)
         }
       }
-      return dashboardResponse(pathname)
+      return await dashboardResponse(pathname)
     }
   })
   const url = `http://127.0.0.1:${server.port}`
@@ -191,7 +216,11 @@ const runServer = async (options: ServerOptions): Promise<void> => {
   })
 }
 
-const executablePath = (): string => process.execPath
+// A compiled binary re-executes itself, but running from source process.execPath is
+// bun, so the service also needs the entry point to run. dashboardIsEmbedded is the
+// same build-time signal that distinguishes the two.
+const serviceProgram = (): ReadonlyArray<string> =>
+  dashboardIsEmbedded ? [process.execPath] : [process.execPath, path.resolve(import.meta.dir, "main.ts")]
 
 const runGlobalWfkitCli = (arguments_: ReadonlyArray<string>): Promise<void> =>
   runWfkitCli({
@@ -247,7 +276,7 @@ export const main = async (): Promise<void> => {
   }
   if (command === "install") {
     if (arguments_.length > 0) throw new Error("wf install does not accept options")
-    await installService(executablePath())
+    await installService(serviceProgram())
     console.log("wf service installed and started")
     return
   }

@@ -7,7 +7,9 @@ export const serviceLabel = "dev.mokronos.wf"
 export const defaultPort = 4787
 
 export interface ServiceDescriptor {
-  readonly executable: string
+  // A program, not a single path: a compiled binary is one element, while a
+  // source install is ["<bun>", "<path to main.ts>"].
+  readonly program: ReadonlyArray<string>
   readonly home: string
   readonly port: number
 }
@@ -62,7 +64,7 @@ export const launchdPlist = (descriptor: ServiceDescriptor): string => `<?xml ve
 <plist version="1.0"><dict>
   <key>Label</key><string>${serviceLabel}</string>
   <key>ProgramArguments</key><array>
-    ${[descriptor.executable, "daemon", "--foreground", "--port", String(descriptor.port)].map((value) => `<string>${xmlEscape(value)}</string>`).join("\n    ")}
+    ${[...descriptor.program, "daemon", "--foreground", "--port", String(descriptor.port)].map((value) => `<string>${xmlEscape(value)}</string>`).join("\n    ")}
   </array>
   <key>EnvironmentVariables</key><dict><key>WF_HOME</key><string>${xmlEscape(descriptor.home)}</string></dict>
   <key>WorkingDirectory</key><string>${xmlEscape(descriptor.home)}</string>
@@ -78,15 +80,15 @@ const command = async (program: string, arguments_: ReadonlyArray<string>): Prom
   if (await process_.exited !== 0) throw new Error(`${program} ${arguments_.join(" ")} failed`)
 }
 
-export const installService = async (executable: string): Promise<void> => {
+export const installService = async (program: ReadonlyArray<string>): Promise<void> => {
   const home = wfHome()
   await mkdir(path.join(home, "logs"), { recursive: true })
-  const descriptor: ServiceDescriptor = { executable, home, port: defaultPort }
+  const descriptor: ServiceDescriptor = { program, home, port: defaultPort }
   if (process.platform === "linux") {
     const unitDirectory = path.join(homedir(), ".config", "systemd", "user")
     await mkdir(unitDirectory, { recursive: true })
     await writeFile(path.join(unitDirectory, `${serviceLabel}.service`), systemdUnit({
-      program: [executable, "daemon", "--foreground", "--port", String(defaultPort)],
+      program: [...program, "daemon", "--foreground", "--port", String(defaultPort)],
       environment: { WF_HOME: home }, workingDirectory: home,
       stdoutPath: serviceLogPath(home), stderrPath: serviceErrorLogPath(home)
     }), { mode: 0o600 })

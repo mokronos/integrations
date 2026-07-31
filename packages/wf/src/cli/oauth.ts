@@ -1,8 +1,13 @@
-import type {
-  ConnectionManager,
-  OAuthClientConfiguration,
-  OAuthConnection
-} from "../connections.ts"
+import { Schema } from "effect"
+import {
+  completeExecutorOAuth,
+  createExecutorOAuthClient,
+  ExecutorAuthMethod,
+  ExecutorConnection,
+  probeExecutorOAuth,
+  registerExecutorOAuthClient,
+  startExecutorOAuth
+} from "../executor.ts"
 
 export const openBrowser = (url: string): void => {
   const command = process.platform === "darwin"
@@ -13,16 +18,16 @@ export const openBrowser = (url: string): void => {
   Bun.spawn(command, { stdout: "ignore", stderr: "ignore" })
 }
 
-export interface AuthorizeMcpInBrowserOptions {
-  readonly manager: ConnectionManager
-  readonly connectionId: string
-  readonly resource: string
-  readonly scopes?: ReadonlyArray<string>
-  readonly client?: OAuthClientConfiguration
-  readonly open?: (url: string) => void | Promise<void>
-  readonly onAuthorizationUrl?: (url: string) => void
-  readonly timeoutMs?: number
-}
+const AuthorizeExecutorOptions = Schema.Struct({
+  integration: Schema.String,
+  connection: Schema.String,
+  authMethod: ExecutorAuthMethod,
+  scopes: Schema.optional(Schema.Array(Schema.String)),
+  clientId: Schema.optional(Schema.String),
+  clientSecret: Schema.optional(Schema.String),
+  timeoutMs: Schema.optional(Schema.Number)
+})
+type AuthorizeExecutorOptions = typeof AuthorizeExecutorOptions.Type
 
 const browserResponse = (options: {
   readonly title: string
@@ -39,11 +44,17 @@ const browserResponse = (options: {
   headers: { "content-type": "text/html; charset=utf-8" }
 })
 
-export const authorizeMcpInBrowser = async (
-  options: AuthorizeMcpInBrowserOptions
-): Promise<OAuthConnection> => {
-  const completion = Promise.withResolvers<OAuthConnection>()
-  let attempt: Awaited<ReturnType<ConnectionManager["beginMcpOAuth"]>> | undefined
+export const authorizeExecutorInBrowser = async (
+  input: AuthorizeExecutorOptions & {
+    readonly open?: (url: string) => void | Promise<void>
+    readonly onAuthorizationUrl?: (url: string) => void
+  }
+): Promise<ExecutorConnection> => {
+  const options = Schema.decodeUnknownSync(AuthorizeExecutorOptions)(input)
+  if (options.authMethod.kind !== "oauth" || options.authMethod.oauth === undefined) {
+    throw new Error(`Auth method ${options.authMethod.id} is not OAuth`)
+  }
+  const completion = Promise.withResolvers<ExecutorConnection>()
   let callbackStarted = false
   const server = Bun.serve({
     hostname: "127.0.0.1",
@@ -53,7 +64,7 @@ export const authorizeMcpInBrowser = async (
       if (request.method !== "GET" || url.pathname !== "/oauth/callback") {
         return new Response("Not found", { status: 404 })
       }
-      if (attempt === undefined || callbackStarted) {
+      if (callbackStarted) {
         return browserResponse({
           title: "Authorization unavailable",
           message: "This authorization callback is no longer active. Return to the terminal and try again.",
@@ -61,16 +72,30 @@ export const authorizeMcpInBrowser = async (
         })
       }
       callbackStarted = true
+      const state = url.searchParams.get("state")
+      const code = url.searchParams.get("code")
+      if (state === null || code === null) {
+        const error = new Error(url.searchParams.get("error_description") ?? "OAuth callback is missing state or code")
+        setTimeout(() => completion.reject(error), 0)
+        return browserResponse({
+          title: "Authorization failed",
+          message: "The provider did not return a usable authorization code.",
+          status: 400
+        })
+      }
       try {
-        const connection = await attempt.complete(url.toString())
+        const connection = await completeExecutorOAuth({
+          state,
+          code,
+          callbackDomain: url.searchParams.get("domain") ?? url.searchParams.get("site")
+        })
         setTimeout(() => completion.resolve(connection), 0)
         return browserResponse({
           title: "Account connected",
           message: "Authorization completed. You can close this window and return to wf."
         })
       } catch (error) {
-        const failure = error instanceof Error ? error : new Error(String(error))
-        setTimeout(() => completion.reject(failure), 0)
+        setTimeout(() => completion.reject(error), 0)
         return browserResponse({
           title: "Authorization failed",
           message: "The callback could not be verified. Return to the terminal for details and try again.",
@@ -84,18 +109,77 @@ export const authorizeMcpInBrowser = async (
     () => completion.reject(new Error(`OAuth authorization timed out after ${Math.ceil(timeoutMs / 1000)} seconds`)),
     timeoutMs
   )
-
   try {
     const redirectUri = `http://127.0.0.1:${server.port}/oauth/callback`
-    attempt = await options.manager.beginMcpOAuth({
-      connectionId: options.connectionId,
-      resource: options.resource,
-      redirectUri,
-      ...(options.scopes === undefined ? {} : { scopes: options.scopes }),
-      ...(options.client === undefined ? {} : { client: options.client })
+    const oauth = options.authMethod.oauth
+    const discovered = oauth.discoveryUrl === undefined
+      ? undefined
+      : await probeExecutorOAuth(oauth.discoveryUrl)
+    const authorizationUrl = oauth.authorizationUrl ?? discovered?.authorizationUrl
+    const tokenUrl = oauth.tokenUrl ?? discovered?.tokenUrl
+    const resource = oauth.resource ?? discovered?.resource
+    if (authorizationUrl === undefined || tokenUrl === undefined) {
+      throw new Error("Executor could not discover OAuth authorization and token endpoints")
+    }
+    const clientSlug = `${options.integration}-wf`
+    let client: string
+    if (options.clientId !== undefined) {
+      client = await createExecutorOAuthClient({
+        slug: clientSlug,
+        integration: options.integration,
+        authorizationUrl,
+        tokenUrl,
+        clientId: options.clientId,
+        ...(options.clientSecret === undefined ? {} : { clientSecret: options.clientSecret }),
+        ...(resource === undefined ? {} : { resource })
+      })
+    } else {
+      const registrationEndpoint = oauth.registrationEndpoint ?? discovered?.registrationEndpoint
+      if (registrationEndpoint === null || registrationEndpoint === undefined) {
+        throw new Error("OAuth server does not support dynamic registration; provide --client-id")
+      }
+      client = await registerExecutorOAuthClient({
+        slug: clientSlug,
+        integration: options.integration,
+        redirectUri,
+        registrationEndpoint,
+        authorizationUrl,
+        tokenUrl,
+        scopes: options.scopes ?? oauth.scopes ?? discovered?.scopesSupported ?? [],
+        ...(discovered?.issuer === undefined ? {} : { issuer: discovered.issuer }),
+        ...(resource === undefined ? {} : { resource }),
+        ...(discovered?.tokenEndpointAuthMethodsSupported === undefined
+          ? {}
+          : {
+              tokenEndpointAuthMethodsSupported:
+                discovered.tokenEndpointAuthMethodsSupported
+            })
+      })
+    }
+    const started = await startExecutorOAuth({
+      client,
+      integration: options.integration,
+      connection: options.connection,
+      template: options.authMethod.template,
+      redirectUri
     })
-    options.onAuthorizationUrl?.(attempt.authorizationUrl)
-    await (options.open ?? openBrowser)(attempt.authorizationUrl)
+    if (started.status === "connected") {
+      return {
+        owner: started.connection.owner,
+        name: String(started.connection.name),
+        integration: String(started.connection.integration),
+        template: String(started.connection.template),
+        address: String(started.connection.address),
+        ...(started.connection.identityLabel === undefined
+          ? {}
+          : { identityLabel: started.connection.identityLabel }),
+        ...(started.connection.expiresAt === undefined
+          ? {}
+          : { expiresAt: started.connection.expiresAt })
+      }
+    }
+    input.onAuthorizationUrl?.(started.authorizationUrl)
+    await (input.open ?? openBrowser)(started.authorizationUrl)
     return await completion.promise
   } finally {
     clearTimeout(timeout)

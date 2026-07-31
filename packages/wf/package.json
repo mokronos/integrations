@@ -56,11 +56,17 @@
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
-    "@effect/platform-bun": "4.0.0-beta.93",
-    "@effect/platform-node": "4.0.0-beta.93",
-    "@effect/platform-node-shared": "4.0.0-beta.93",
-    "@effect/sql-sqlite-bun": "4.0.0-beta.93",
-    "effect": "4.0.0-beta.93",
+    "@effect/platform-bun": "4.0.0-beta.59",
+    "@effect/platform-node": "4.0.0-beta.59",
+    "@effect/platform-node-shared": "4.0.0-beta.59",
+    "@effect/sql-sqlite-bun": "4.0.0-beta.59",
+    "@executor-js/fumadb": "1.5.7",
+    "@executor-js/plugin-mcp": "1.5.37",
+    "@executor-js/plugin-openapi": "1.5.37",
+    "@executor-js/sdk": "1.5.37",
+    "@libsql/client": "0.17.3",
+    "drizzle-orm": "0.45.2",
+    "effect": "4.0.0-beta.59",
     "yaml": "^2.9.0"
   }
 }

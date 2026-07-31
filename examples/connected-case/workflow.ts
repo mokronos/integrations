@@ -1,4 +1,4 @@
-import { auth, defineWorkflow, integration, t } from "@mokronos/wfkit"
+import { defineWorkflow, integration, t } from "@mokronos/wfkit"
 
 const requiredEnvironment = (name: string): string => {
   const value = process.env[name]
@@ -6,8 +6,10 @@ const requiredEnvironment = (name: string): string => {
   return value
 }
 
-const apiUrl = requiredEnvironment("WF_CONNECTED_CASE_API_URL")
-const mcpUrl = requiredEnvironment("WF_CONNECTED_CASE_MCP_URL")
+const getCustomerTool = requiredEnvironment("WF_CONNECTED_CASE_GET_CUSTOMER_TOOL")
+const getPolicyTool = requiredEnvironment("WF_CONNECTED_CASE_GET_POLICY_TOOL")
+const createCaseTool = requiredEnvironment("WF_CONNECTED_CASE_CREATE_CASE_TOOL")
+const approveCaseTool = requiredEnvironment("WF_CONNECTED_CASE_APPROVE_CASE_TOOL")
 
 const Customer = t.struct({ id: t.string, name: t.string, tier: t.string })
 const Policy = t.struct({ tier: t.string, requiresApproval: t.boolean })
@@ -16,19 +18,7 @@ const ApprovalAudit = t.struct({ auditId: t.string, caseId: t.string, approvedBy
 
 const lookupCustomer = integration({
   name: "LookupCustomer",
-  source: {
-    kind: "openapi",
-    url: apiUrl,
-    method: "GET",
-    path: "/customers/{customerId}",
-    spec: `${apiUrl}/openapi.json`,
-    parameters: [
-      { name: "customerId", in: "path" },
-      { name: "include", in: "query" }
-    ],
-    headers: { "x-workflow-client": "connected-case-v1" }
-  },
-  operation: "getCustomer",
+  source: { kind: "executor", address: getCustomerTool },
   input: t.struct({ customerId: t.string, include: t.string }),
   output: Customer,
   retry: { attempts: 3, backoff: "exponential" }
@@ -36,24 +26,14 @@ const lookupCustomer = integration({
 
 const lookupPolicy = integration({
   name: "LookupPolicy",
-  source: {
-    kind: "openapi",
-    url: apiUrl,
-    method: "GET",
-    path: "/policies/{tier}",
-    spec: `${apiUrl}/openapi.json`,
-    parameters: [{ name: "tier", in: "path" }]
-  },
-  operation: "getPolicy",
+  source: { kind: "executor", address: getPolicyTool },
   input: t.struct({ tier: t.string }),
   output: Policy
 })
 
 const createCase = integration({
   name: "CreateCase",
-  source: { kind: "mcp", url: mcpUrl },
-  operation: "create_case",
-  auth: { kind: "bearer", credential: auth("case_manager_oauth") },
+  source: { kind: "executor", address: createCaseTool },
   input: t.struct({ customerId: t.string, title: t.string }),
   output: CreatedCase,
   retry: { attempts: 3, backoff: "exponential" }
@@ -61,16 +41,7 @@ const createCase = integration({
 
 const approveCase = integration({
   name: "ApproveCase",
-  source: {
-    kind: "openapi",
-    url: apiUrl,
-    method: "POST",
-    path: "/cases/{caseId}/approve",
-    spec: `${apiUrl}/openapi.json`,
-    parameters: [{ name: "caseId", in: "path" }],
-    body: "body"
-  },
-  operation: "approveCase",
+  source: { kind: "executor", address: approveCaseTool },
   input: t.struct({
     caseId: t.string,
     body: t.struct({ approvedBy: t.string, summary: t.string })
