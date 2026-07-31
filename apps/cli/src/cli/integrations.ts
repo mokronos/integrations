@@ -13,12 +13,12 @@ import {
   setExecutorStorageDirectory,
   discoverIntegration,
   validateIntegrationNode
-} from "@mokronos/wfkit"
+} from "@mokronos/wfkit-executor"
 import type {
   ExecutorAuthMethod,
   ExecutorIntegration,
   ExecutorTool
-} from "@mokronos/wfkit"
+} from "@mokronos/wfkit-executor"
 import { authorizeExecutorInBrowser, openBrowser } from "./oauth.ts"
 
 class IntegrationCliError extends Data.TaggedError("IntegrationCliError")<{

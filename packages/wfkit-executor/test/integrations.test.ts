@@ -8,11 +8,11 @@ import {
   normalizeExecutorToolOutputSchema,
   normalizeExecutorToolResult,
   setExecutorStorageDirectory
-} from "../src/executor.ts"
+} from "../src/index.ts"
 import {
   discoverIntegration,
   validateIntegrationNode
-} from "../src/sdk/integrations.ts"
+} from "../src/index.ts"
 
 const servers: Array<ReturnType<typeof Bun.serve>> = []
 const directories: Array<string> = []

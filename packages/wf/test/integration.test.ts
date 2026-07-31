@@ -3,16 +3,18 @@ import os from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, test } from "bun:test"
 import {
+  defineWorkflow,
+  integration,
+  t
+} from "../src/index.ts"
+import {
   addExecutorOpenApi,
   closeExecutor,
   createExecutorConnection,
-  defineWorkflow,
-  integration,
   listExecutorIntegrations,
   listExecutorTools,
-  setExecutorStorageDirectory,
-  t
-} from "../src/index.ts"
+  setExecutorStorageDirectory
+} from "@mokronos/wfkit-executor"
 
 const servers: Array<ReturnType<typeof Bun.serve>> = []
 const directories: Array<string> = []

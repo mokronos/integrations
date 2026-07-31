@@ -20,6 +20,7 @@
       "devDependencies": {
         "@effect/platform-bun": "4.0.0-beta.59",
         "@mokronos/wfkit": "workspace:*",
+        "@mokronos/wfkit-executor": "workspace:*",
         "effect": "4.0.0-beta.59",
       },
     },
@@ -117,6 +118,17 @@
         "@effect/platform-node": "4.0.0-beta.59",
         "@effect/platform-node-shared": "4.0.0-beta.59",
         "@effect/sql-sqlite-bun": "4.0.0-beta.59",
+        "@libsql/client": "0.17.3",
+        "@mokronos/wfkit-executor": "workspace:*",
+        "drizzle-orm": "0.45.2",
+        "effect": "4.0.0-beta.59",
+        "yaml": "^2.9.0",
+      },
+    },
+    "packages/wfkit-executor": {
+      "name": "@mokronos/wfkit-executor",
+      "version": "0.2.0",
+      "dependencies": {
         "@executor-js/fumadb": "1.5.7",
         "@executor-js/plugin-mcp": "1.5.37",
         "@executor-js/plugin-openapi": "1.5.37",
@@ -124,7 +136,6 @@
         "@libsql/client": "0.17.3",
         "drizzle-orm": "0.45.2",
         "effect": "4.0.0-beta.59",
-        "yaml": "^2.9.0",
       },
     },
   },
@@ -420,6 +431,8 @@
     "@mokronos/wf": ["@mokronos/wf@workspace:apps/cli"],
 
     "@mokronos/wfkit": ["@mokronos/wfkit@workspace:packages/wf"],
+
+    "@mokronos/wfkit-executor": ["@mokronos/wfkit-executor@workspace:packages/wfkit-executor"],
 
     "@msgpackr-extract/msgpackr-extract-darwin-arm64": ["@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.4", "", { "os": "darwin", "cpu": "arm64" }, "sha512-LCkGo6JDfaBhgST7UpPWgNgLINpcpabaHfyz5OBx75nUYxBsaEPxjnyNjWpeb/xBup/682QnBfRBy2/LvPutZQ=="],
 

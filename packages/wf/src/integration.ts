@@ -34,7 +34,7 @@ export const integration = <I, O>(config: {
   execute: async (input) => {
     try {
       const jsonInput = Schema.decodeUnknownSync(Json)(input)
-      const { ExecutorToolAddress, executeExecutorTool } = await import("./executor.ts")
+      const { ExecutorToolAddress, executeExecutorTool } = await import("@mokronos/wfkit-executor")
       const result = await executeExecutorTool(
         ExecutorToolAddress.make(config.source.address),
         jsonInput

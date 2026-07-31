@@ -12,7 +12,7 @@ import {
   listExecutorIntegrations,
   listExecutorTools,
   setExecutorStorageDirectory
-} from "@mokronos/wfkit"
+} from "@mokronos/wfkit-executor"
 import {
   authorizationUrlWithScopes,
   authorizeExecutorInBrowser

@@ -6,35 +6,6 @@ export {
   IntegrationError,
   IntegrationSource
 } from "./integration.ts"
-export {
-  ExecutorAuthMethod,
-  ExecutorConnection,
-  ExecutorDetection,
-  ExecutorIntegration,
-  ExecutorMcpProbe,
-  ExecutorOpenApiPreview,
-  ExecutorTool,
-  ExecutorToolAddress,
-  addExecutorMcp,
-  addExecutorOpenApi,
-  closeExecutor,
-  completeExecutorOAuth,
-  createExecutorConnection,
-  createExecutorOAuthClient,
-  detectExecutorIntegration,
-  executorStorageDirectory,
-  executeExecutorTool,
-  listExecutorConnections,
-  listExecutorIntegrations,
-  listExecutorTools,
-  previewExecutorOpenApi,
-  probeExecutorMcp,
-  probeExecutorOAuth,
-  registerExecutorOAuthClient,
-  removeExecutorConnection,
-  setExecutorStorageDirectory,
-  startExecutorOAuth
-} from "./executor.ts"
 export type {
   DefinedWorkflow,
   InMemoryDeterminismState,
@@ -118,8 +89,7 @@ export type {
   WorkflowGraphNodeMetadata,
   WorkflowGraphSchemas,
   WorkflowGraphNodeKind,
-  WorkflowGraphOptions,
-  DiscoverIntegrationsOptions
+  WorkflowGraphOptions
 } from "./sdk/index.ts"
 export {
   Cancelled,
@@ -137,20 +107,8 @@ export {
   toJsonText,
   sampleValueForJsonSchema,
   sampleValueForSchema,
-  IntegrationDiscoverySchema,
-  type IntegrationDiscovery,
-  IntegrationKindSchema,
-  type IntegrationKind,
-  IntegrationNodeConfigSchema,
-  type IntegrationNodeConfig,
-  IntegrationValidationFindingSchema,
-  type IntegrationValidationFinding,
-  IntegrationValidationReportSchema,
-  type IntegrationValidationReport,
   workflowArtifactToGraph,
-  workflowToGraph,
-  discoverIntegration,
-  validateIntegrationNode
+  workflowToGraph
 } from "./sdk/index.ts"
 export { createTestRuntime } from "./testing/index.ts"
 export type { CompensationRecorder, TestRuntime, TestRuntimeOptions } from "./testing/index.ts"

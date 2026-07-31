@@ -41,7 +41,9 @@ Subpath exports: `@mokronos/wfkit/schemas` (shared Effect schemas) and `@mokrono
 
 `integration(...)` is one durable node backed by an Executor tool address.
 Executor owns MCP/OpenAPI protocol handling, auth connections, schema discovery,
-and invocation. The workflow stores only the address.
+and invocation. The workflow stores only the address. Discovery and connection
+management are provided by the separate `@mokronos/wfkit-executor` package and
+the `wf` CLI; authored workflows only need `@mokronos/wfkit`.
 
 ```ts
 import { defineWorkflow, integration, t } from "@mokronos/wfkit"

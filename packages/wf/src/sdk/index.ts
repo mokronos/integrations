@@ -41,23 +41,6 @@ export type {
   WorkflowGraphOptions
 } from "./graph.ts"
 export { parseJsonText, toJsonText } from "./json.ts"
-export {
-  discoverIntegration,
-  IntegrationDiscovery as IntegrationDiscoverySchema,
-  type IntegrationDiscovery,
-  IntegrationKind as IntegrationKindSchema,
-  type IntegrationKind,
-  IntegrationNodeConfig as IntegrationNodeConfigSchema,
-  type IntegrationNodeConfig,
-  IntegrationValidationFinding as IntegrationValidationFindingSchema,
-  type IntegrationValidationFinding,
-  IntegrationValidationReport as IntegrationValidationReportSchema,
-  type IntegrationValidationReport,
-  validateIntegrationNode
-} from "./integrations.ts"
-export type {
-  DiscoverIntegrationsOptions
-} from "./integrations.ts"
 export { Cancelled, MissingWorkflowVersionError, createWorkflowClient, createWorkflowSdk, lifecycleRunRecords } from "./sdk.ts"
 export type {
   WorkflowClient,

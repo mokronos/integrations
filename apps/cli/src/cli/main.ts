@@ -8,10 +8,10 @@ import {
   loadWorkflowArtifact,
   lifecycleRunRecords,
   sampleValueForJsonSchema,
-  setExecutorStorageDirectory,
   toJsonText,
   workflowArtifactToGraph
 } from "@mokronos/wfkit"
+import { setExecutorStorageDirectory } from "@mokronos/wfkit-executor"
 import { runIntegrationsCli } from "./integrations.ts"
 import type {
   JsonSchema,

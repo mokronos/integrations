@@ -16,7 +16,7 @@ import {
   listExecutorTools,
   previewExecutorOpenApi,
   probeExecutorMcp
-} from "../executor.ts"
+} from "./executor.ts"
 
 export const IntegrationKind = Schema.Literals(["mcp", "openapi"])
 export type IntegrationKind = typeof IntegrationKind.Type
