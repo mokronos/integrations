@@ -320,36 +320,35 @@ wf <command>
 
 | Command | Purpose |
 | --- | --- |
-| `wf create <id> [--file <path>] [--source <ts>] [--name <export>] [--version <v>] [--force]` | Create or import a workflow into the catalog |
-| `wf validate <id> \| --file <path> [--input <json>] [--json]` | Load and trace a workflow without running it |
+| `wf create` | Create or import a workflow into the catalog |
+| `wf validate` | Load and trace a workflow without running it |
 | `wf list` | List registered workflow artifacts |
-| `wf run <id> [json-input]` | Start a run and stream its events |
-| `wf signal <run-id> <name> [json-payload] [--actor <actor>]` | Resume a run waiting for a signal |
+| `wf run` | Start a run and stream its events |
 | `wf runs` | List persisted runs |
-| `wf history <run-id>` | Show the persisted event history for a run |
-| `wf integrations …` / `wf i …` | Discover, authorize, inspect, and validate integrations |
-| `wf install` / `wf web` | Install and open the local dashboard service |
-| `wf help [command]` | Top-level or command-specific help |
+| `wf history` / `wf events` | Show the persisted event history for a run |
+| `wf signal` | Resume a run waiting for a signal |
+| `wf integrations` / `wf i` | Discover, authorize, inspect, and validate integrations |
+| `wf install` | Install the local dashboard service |
+| `wf web` | Open the local dashboard |
+| `wf daemon` | Run the dashboard service in the foreground |
 
-`wf create` with `--file` reads the file once and stores its source in the
-catalog; later edits to the file do not change the stored artifact until you
-re-create it with `--force`.
+Run `wf --help` or `wf <command> --help` for arguments, flags, examples, and
+nested subcommands.
 
 ### Integration commands
 
 All integration commands also accept the shorter `wf i` alias.
 
-```bash
-wf integrations discover <url> [--connection <name>] [--json]
-wf integrations catalog [--json]
-wf integrations connect <integration-or-url> [--connection <name>] [--template <slug>] [--credential-env <name>] [--scopes <scopes>] [--client-id <id>] [--no-open]
-wf integrations connections [--json]
-wf integrations tools [<integration>] [--connection <name>] [--json]
-wf integrations disconnect <integration> [--connection <name>]
-wf integrations invoke <tool-address> [<json>] [--file <path>]
-wf integrations validate <tool-address> [--json]
-wf integrations validate <json> [--live] [--json]
-wf integrations validate --file <path> [--live] [--json]
+```text
+wf integrations
+├── discover
+├── catalog
+├── connect
+├── connections
+├── tools
+├── disconnect
+├── invoke
+└── validate
 ```
 
 `discover` uses Executor to identify MCP or OpenAPI, register the integration,

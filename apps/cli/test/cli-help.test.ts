@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import path from "node:path"
 
 const repoRoot = path.resolve(import.meta.dir, "../../..")
-const cliPath = path.join(repoRoot, "apps", "cli", "src", "cli", "main.ts")
+const cliPath = path.join(repoRoot, "apps", "cli", "src", "main.ts")
 const decoder = new TextDecoder()
 
 const runCli = (args: ReadonlyArray<string>) => {
@@ -24,30 +24,28 @@ const runCli = (args: ReadonlyArray<string>) => {
   }
 }
 
-describe("wf help", () => {
+describe("CLI help", () => {
   test("lists commands from the top level", () => {
-    const result = runCli(["help"])
+    const result = runCli(["--help"])
 
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("wf - create, run, and inspect")
-    expect(result.stdout).toContain("wf help <command>")
+    expect(result.stdout).toContain("Durable workflows and a local dashboard")
+    expect(result.stdout).toContain("integrations, i")
+    expect(result.stdout).toContain("install")
   })
 
-  test("shows command-specific help in both supported forms", () => {
-    const helpCommand = runCli(["help", "create"])
+  test("shows command-specific help from the command definition", () => {
     const helpFlag = runCli(["create", "--help"])
 
-    expect(helpCommand.exitCode).toBe(0)
-    expect(helpCommand.stdout).toContain("wf create <workflow-id>")
     expect(helpFlag.exitCode).toBe(0)
-    expect(helpFlag.stdout).toBe(helpCommand.stdout)
+    expect(helpFlag.stdout).toContain("workflow-id string")
+    expect(helpFlag.stdout).toContain("--file string")
+    expect(helpFlag.stdout).toContain("--force")
   })
 
   test("generates nested integrations help from the command hierarchy", () => {
     const parent = runCli(["integrations"])
-    const helpCommand = runCli(["help", "integrations"])
     const helpFlag = runCli(["integrations", "--help"])
-    const aliasHelpCommand = runCli(["help", "i"])
     const aliasHelpFlag = runCli(["i", "--help"])
     const subcommandHelp = runCli(["integrations", "discover", "--help"])
     const aliasSubcommandHelp = runCli(["i", "discover", "--help"])
@@ -56,9 +54,7 @@ describe("wf help", () => {
     expect(parent.stdout).toContain("SUBCOMMANDS")
     expect(parent.stdout).toContain("discover")
     expect(parent.stdout).toContain("invoke")
-    expect(helpCommand.stdout).toBe(parent.stdout)
     expect(helpFlag.stdout).toBe(parent.stdout)
-    expect(aliasHelpCommand.stdout).toBe(parent.stdout)
     expect(aliasHelpFlag.stdout).toBe(parent.stdout)
     expect(subcommandHelp.stdout).toContain("ARGUMENTS")
     expect(subcommandHelp.stdout).toContain("url string")
@@ -66,9 +62,9 @@ describe("wf help", () => {
   }, 15_000)
 
   test("rejects help for an unknown command", () => {
-    const result = runCli(["help", "missing"])
+    const result = runCli(["missing"])
 
     expect(result.exitCode).not.toBe(0)
-    expect(result.stderr).toContain("Unknown command: missing")
+    expect(result.stderr).toContain("Unknown subcommand \"missing\"")
   })
 })

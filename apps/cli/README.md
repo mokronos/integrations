@@ -11,6 +11,34 @@ wf web
 The npm package installs a standalone platform binary. Bun is not required on the user's machine.
 Workflow state is stored in `~/.wf` by default; set `WF_HOME` to override it.
 
+Command tree:
+
+```text
+wf
+├── create
+├── validate
+├── list
+├── run
+├── runs
+├── history (alias: events)
+├── signal
+├── integrations (alias: i)
+│   ├── discover
+│   ├── catalog
+│   ├── connect
+│   ├── connections
+│   ├── tools
+│   ├── disconnect
+│   ├── invoke
+│   └── validate
+├── install
+├── web
+└── daemon
+```
+
+Use `wf --help` or `wf <command> --help` for arguments, flags, examples, and
+nested subcommands.
+
 Integration discovery and execution use Executor for both MCP and OpenAPI:
 
 ```sh

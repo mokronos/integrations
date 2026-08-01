@@ -1,5 +1,8 @@
 #!/usr/bin/env bun
 import path from "node:path"
+import { BunServices } from "@effect/platform-bun"
+import { Command, Flag } from "effect/unstable/cli"
+import { Data, Effect } from "effect"
 import {
   createSqliteWorkflowRepository,
   createWorkflowClient,
@@ -8,76 +11,13 @@ import {
   toJsonText,
   workflowArtifactToGraph
 } from "@mokronos/wfkit"
+import { closeExecutor, setExecutorStorageDirectory } from "@mokronos/wfkit-executor"
 import type { WorkflowRepository } from "@mokronos/wfkit"
-import { runWfkitCli } from "./cli/main.ts"
+import { makeWorkflowCommands, type CliRuntimeOptions } from "./cli/main.ts"
 import assets from "./embedded-web-assets.gen.ts"
 import { repositoryPath, wfHome } from "./paths.ts"
 import { defaultPort, installService } from "./service.ts"
 import packageMetadata from "../package.json" with { type: "json" }
-
-export const topLevelHelp = `wf - durable workflows and a local dashboard
-
-Usage:
-  wf <command> [options]
-
-Workflow commands:
-  create                  Create or import a workflow
-  validate                Validate a workflow without running it
-  list                    List registered workflows
-  run                     Start a workflow run
-  runs                    List persisted runs
-  history                 Show the event history for a run
-  signal                  Resume a run waiting for a signal
-  integrations (i)        Discover, authorize, inspect, and validate integrations
-
-Service and dashboard commands:
-  install                 Register and start the per-user local dashboard service
-  web                     Open the installed dashboard in your browser
-  web --foreground        Run a temporary dashboard in this terminal
-  daemon --foreground     Run the dashboard service in the foreground
-
-wf install registers and starts a per-user local dashboard service. It keeps the
-dashboard available without a terminal, serves workflow and run history from ~/.wf
-at http://127.0.0.1:4787, and does not execute workflows.
-
-Set WF_HOME to use a different global data directory.
-`
-
-export const commandHelp = (command: string): string | undefined => {
-  switch (command) {
-    case "install":
-      return `Register and start the per-user local dashboard service.
-
-The service keeps the dashboard available without a terminal. It serves workflow
-and run history from ~/.wf at http://127.0.0.1:4787 and does not execute workflows.
-
-Usage:
-  wf install
-`
-    case "web":
-      return `Open the installed local dashboard, which serves workflow and run history.
-
-Use --foreground to run a temporary dashboard in this terminal instead of the
-per-user service. The dashboard does not execute workflows in either mode.
-
-Usage:
-  wf web
-  wf web --foreground [--port <port>] [--no-open]
-`
-    case "daemon":
-      return `Run the local dashboard service in this terminal.
-
-This serves workflow and run history from ~/.wf and does not execute workflows.
-Use wf install to register and start the per-user service that remains available
-without a terminal.
-
-Usage:
-  wf daemon --foreground [--port <port>]
-`
-    default:
-      return undefined
-  }
-}
 
 const mimeTypeFor = (pathname: string): string => {
   if (pathname.endsWith(".html")) return "text/html; charset=utf-8"
@@ -164,9 +104,7 @@ const api = async (
   }
 }
 
-const parsePort = (value: string | undefined): number => {
-  if (value === undefined || !/^\d+$/.test(value)) throw new Error("--port requires an integer between 1 and 65535")
-  const port = Number(value)
+const validatePort = (port: number): number => {
   if (port < 1 || port > 65535) throw new Error("--port requires an integer between 1 and 65535")
   return port
 }
@@ -175,30 +113,6 @@ interface ServerOptions {
   readonly foreground: boolean
   readonly open: boolean
   readonly port: number
-}
-
-export const parseServerOptions = (arguments_: ReadonlyArray<string>): ServerOptions => {
-  let foreground = false
-  let open = true
-  let port = defaultPort
-  for (let index = 0; index < arguments_.length; index += 1) {
-    const argument = arguments_[index]
-    if (argument === "--foreground") {
-      foreground = true
-      continue
-    }
-    if (argument === "--no-open") {
-      open = false
-      continue
-    }
-    if (argument === "--port") {
-      port = parsePort(arguments_[index + 1])
-      index += 1
-      continue
-    }
-    throw new Error(`Unknown dashboard option: ${argument}`)
-  }
-  return { foreground, open, port }
 }
 
 const openBrowser = (url: string): void => {
@@ -251,13 +165,6 @@ const runServer = async (options: ServerOptions): Promise<void> => {
 const serviceProgram = (): ReadonlyArray<string> =>
   dashboardIsEmbedded ? [process.execPath] : [process.execPath, path.resolve(import.meta.dir, "main.ts")]
 
-const runGlobalWfkitCli = (arguments_: ReadonlyArray<string>): Promise<void> =>
-  runWfkitCli({
-    arguments: arguments_,
-    rootDir: process.cwd(),
-    storageDir: wfHome()
-  })
-
 const openInstalledDashboard = async (options: ServerOptions): Promise<void> => {
   if (options.foreground) {
     await runServer(options)
@@ -275,53 +182,128 @@ const openInstalledDashboard = async (options: ServerOptions): Promise<void> => 
   if (options.open) openBrowser(url)
 }
 
+class ServiceCliError extends Data.TaggedError("ServiceCliError")<{
+  readonly message: string
+}> {}
+
+const serviceTask = <A>(task: () => Promise<A>): Effect.Effect<A, ServiceCliError> =>
+  Effect.tryPromise({
+    try: task,
+    catch: (error) => new ServiceCliError({
+      message: error instanceof Error ? error.message : toJsonText(error)
+    })
+  })
+
+const makeRootCommand = (runtime: CliRuntimeOptions) => {
+  const installCommand = Command.make(
+    "install",
+    {},
+    () => serviceTask(async () => {
+      await installService(serviceProgram())
+      console.log("wf service installed and started")
+    })
+  ).pipe(Command.withDescription("Register and start the per-user local dashboard service"))
+
+  const webCommand = Command.make(
+    "web",
+    {
+      foreground: Flag.boolean("foreground").pipe(
+        Flag.withDescription("Run a temporary dashboard in this terminal")
+      ),
+      port: Flag.integer("port").pipe(
+        Flag.withDefault(defaultPort),
+        Flag.withDescription("Dashboard port when running in the foreground")
+      ),
+      noOpen: Flag.boolean("no-open").pipe(
+        Flag.withDescription("Do not open the dashboard in a browser")
+      )
+    },
+    ({ foreground, port, noOpen }) => serviceTask(() => openInstalledDashboard({
+      foreground,
+      open: !noOpen,
+      port: validatePort(port)
+    }))
+  ).pipe(Command.withDescription("Open the installed local dashboard"))
+
+  const daemonCommand = Command.make(
+    "daemon",
+    {
+      foreground: Flag.boolean("foreground").pipe(
+        Flag.withDescription("Run the dashboard service in this terminal")
+      ),
+      port: Flag.integer("port").pipe(
+        Flag.withDefault(defaultPort),
+        Flag.withDescription("Dashboard port")
+      )
+    },
+    ({ foreground, port }) => serviceTask(async () => {
+      if (!foreground) throw new Error("Usage: wf daemon --foreground")
+      await runServer({ foreground: true, open: false, port: validatePort(port) })
+    })
+  ).pipe(Command.withDescription("Run the dashboard service in the foreground"))
+
+  return Command.make("wf").pipe(
+    Command.withDescription("Durable workflows and a local dashboard"),
+    Command.withSubcommands([
+      ...makeWorkflowCommands(runtime),
+      installCommand,
+      webCommand,
+      daemonCommand
+    ] as const)
+  )
+}
+
+const runCommandLine = async (
+  arguments_: ReadonlyArray<string>,
+  runtime: CliRuntimeOptions
+): Promise<void> => {
+  setExecutorStorageDirectory(runtime.storageDir)
+  try {
+    await Effect.runPromise(
+      Command.runWith(makeRootCommand(runtime), { version: packageMetadata.version })(
+        normalizeLegacyArguments(arguments_)
+      ).pipe(
+        Effect.catchTag("ShowHelp", (error) => error.errors.length === 0
+          ? Effect.void
+          : Effect.sync(() => { process.exitCode = 1 })),
+        Effect.provide(BunServices.layer)
+      )
+    )
+  } finally {
+    await closeExecutor(runtime.storageDir)
+  }
+}
+
+// Effect CLI reserves --version as a global action flag. Keep the historical
+// `wf create ... --version <value>` spelling by translating it only within the
+// create command before the framework parses the arguments.
+const normalizeLegacyArguments = (
+  arguments_: ReadonlyArray<string>
+): ReadonlyArray<string> => {
+  if (arguments_[0] !== "create") return arguments_
+  const normalized: Array<string> = []
+  for (let index = 0; index < arguments_.length; index += 1) {
+    const argument = arguments_[index]
+    if (argument === undefined) continue
+    if (argument === "--version") {
+      normalized.push("--workflow-version")
+      const value = arguments_[index + 1]
+      if (value !== undefined) {
+        normalized.push(value)
+        index += 1
+      }
+      continue
+    }
+    normalized.push(argument)
+  }
+  return normalized
+}
+
 export const main = async (): Promise<void> => {
-  const [command, ...arguments_] = process.argv.slice(2)
-  if (command === undefined || command === "--help" || command === "-h") {
-    console.log(topLevelHelp)
-    return
-  }
-  if (command === "--version" || command === "-v") {
-    console.log(packageMetadata.version)
-    return
-  }
-  if (command === "help") {
-    if (arguments_.length === 0) {
-      console.log(topLevelHelp)
-      return
-    }
-    const [requestedCommand] = arguments_
-    const ownHelp = requestedCommand === undefined ? undefined : commandHelp(requestedCommand)
-    if (ownHelp !== undefined) {
-      console.log(ownHelp)
-      return
-    }
-    if (requestedCommand === "integrations" || requestedCommand === "i") {
-      await runGlobalWfkitCli(["integrations", "--help"])
-      return
-    }
-    await runGlobalWfkitCli([command, ...arguments_])
-    return
-  }
-  if (command === "install") {
-    if (arguments_.length > 0) throw new Error("wf install does not accept options")
-    await installService(serviceProgram())
-    console.log("wf service installed and started")
-    return
-  }
-  if (command === "web") {
-    await openInstalledDashboard(parseServerOptions(arguments_))
-    return
-  }
-  if (command === "daemon") {
-    if (arguments_[0] !== "--foreground") {
-      throw new Error("Usage: wf daemon --foreground")
-    }
-    const options = parseServerOptions(arguments_.slice(1))
-    await runServer({ ...options, foreground: true, open: false })
-    return
-  }
-  await runGlobalWfkitCli([command, ...arguments_])
+  await runCommandLine(process.argv.slice(2), {
+    rootDir: process.cwd(),
+    storageDir: wfHome()
+  })
 }
 
 if (import.meta.main) {

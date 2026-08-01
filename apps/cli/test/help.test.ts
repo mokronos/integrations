@@ -1,28 +1,33 @@
 import { describe, expect, test } from "bun:test"
-import { commandHelp, topLevelHelp } from "../src/main.ts"
+import path from "node:path"
+
+const repoRoot = path.resolve(import.meta.dir, "../../..")
+const cliPath = path.join(repoRoot, "apps", "cli", "src", "main.ts")
+const decoder = new TextDecoder()
+
+const runCli = (args: ReadonlyArray<string>) => {
+  const subprocess = Bun.spawnSync({
+    cmd: [process.execPath, "run", cliPath, ...args],
+    cwd: repoRoot,
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, NO_COLOR: "1" }
+  })
+  return {
+    exitCode: subprocess.exitCode,
+    stdout: decoder.decode(subprocess.stdout),
+    stderr: decoder.decode(subprocess.stderr)
+  }
+}
 
 describe("CLI help", () => {
-  test("groups workflow commands before service and dashboard commands", () => {
-    expect(topLevelHelp).toContain(`Workflow commands:
-  create                  Create or import a workflow
-  validate                Validate a workflow without running it
-  list                    List registered workflows
-  run                     Start a workflow run
-  runs                    List persisted runs
-  history                 Show the event history for a run
-  signal                  Resume a run waiting for a signal`)
-    expect(topLevelHelp).toContain(`Service and dashboard commands:
-  install                 Register and start the per-user local dashboard service
-  web                     Open the installed dashboard in your browser
-  web --foreground        Run a temporary dashboard in this terminal
-  daemon --foreground     Run the dashboard service in the foreground`)
-    expect(topLevelHelp.indexOf("Workflow commands:")).toBeLessThan(topLevelHelp.indexOf("Service and dashboard commands:"))
-  })
+  test("generates dashboard command help from flags and descriptions", () => {
+    const result = runCli(["web", "--help"])
 
-  test("explains that the dashboard service does not execute workflows", () => {
-    expect(topLevelHelp).toContain("does not execute workflows")
-    expect(commandHelp("install")).toContain("does not execute workflows")
-    expect(commandHelp("web")).toContain("does not execute workflows")
-    expect(commandHelp("daemon")).toContain("does not execute workflows")
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Open the installed local dashboard")
+    expect(result.stdout).toContain("--foreground")
+    expect(result.stdout).toContain("--port integer")
+    expect(result.stdout).toContain("--no-open")
   })
 })

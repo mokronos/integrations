@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 import { readFile } from "node:fs/promises"
 import path from "node:path"
+import { Data, Effect, Option } from "effect"
+import { Argument, Command, Flag } from "effect/unstable/cli"
 import {
   createWorkflowClient,
   createWorkflowRuntime,
@@ -11,8 +13,7 @@ import {
   toJsonText,
   workflowArtifactToGraph
 } from "@mokronos/wfkit"
-import { setExecutorStorageDirectory } from "@mokronos/wfkit-executor"
-import { runIntegrationsCli } from "./integrations.ts"
+import { makeIntegrationsCommand } from "./integrations.ts"
 import type {
   JsonSchema,
   PendingSignal,
@@ -26,143 +27,6 @@ import type {
   WorkflowGraphNodeKind,
   WorkflowGraphNodeMetadata
 } from "@mokronos/wfkit"
-
-const help = `wf - create, run, and inspect durable TypeScript workflows
-
-Usage:
-  wf <command> [options]
-
-Commands:
-  create    Create or import a workflow
-  validate  Validate a workflow without running it
-  list      List registered workflows
-  run       Start a workflow run
-  runs      List persisted runs
-  history   Show the event history for a run
-  signal    Resume a run waiting for a signal
-  integrations (i)  Discover, authorize, inspect, and validate integrations
-  help      Show help for a command
-
-Run "wf help <command>" for command-specific usage and examples.
-`
-
-const commandHelp = (command: string | undefined): string | undefined => {
-  switch (command) {
-    case "create":
-      return `Create or import a workflow into the local catalog.
-
-Usage:
-  wf create <workflow-id> [--name <workflow-name>] [--source <typescript>] [--file <path>] [--version <version>] [--force]
-
-Options:
-  --name <name>       Select a workflow export explicitly
-  --source <source>   Import inline TypeScript source
-  --file <path>       Import TypeScript from a file
-  --version <value>   Set the workflow version (default: dev)
-  --force             Replace an existing workflow id
-
-Examples:
-  wf create welcome-email
-  wf create email --file workflows/email.ts --version 1
-`
-    case "list":
-      return `List workflows registered in the local catalog.
-
-Usage:
-  wf list
-`
-    case "validate":
-      return `Validate a workflow without starting a durable run.
-
-Validation loads the workflow and traces its body in memory with sample values
-and faked steps, so it causes no real side effects or durable run.
-
-Usage:
-  wf validate <workflow-id> [--input <json>] [--json]
-  wf validate --file <path> [--input <json>] [--json]
-
-Options:
-  --file <path>       Validate a TypeScript workflow file outside the catalog
-  --input <json>      Use this JSON value while tracing the workflow
-  --json              Print the complete validation graph as JSON
-
-Examples:
-  wf validate welcome-email
-  wf validate welcome-email --input '{"message":"hello"}'
-  wf validate --file workflows/email.ts --json
-`
-    case "run":
-      return `Start a registered workflow with optional JSON input.
-
-Usage:
-  wf run <workflow-id> [json-input]
-
-Examples:
-  wf run welcome-email
-  wf run welcome-email '{"message":"hello"}'
-`
-    case "runs":
-      return `List workflow runs persisted in the local catalog.
-
-Usage:
-  wf runs
-`
-    case "history":
-    case "events":
-      return `Show the persisted event history for a workflow run.
-
-Usage:
-  wf history <run-id>
-`
-    case "signal":
-      return `Deliver a signal to a suspended workflow run.
-
-Usage:
-  wf signal <run-id> <signal-name> [json-payload] [--actor <actor>]
-
-Options:
-  --actor <actor>     Record who delivered the signal
-
-Example:
-  wf signal <run-id> approval '{"approved":true}' --actor ops
-`
-    case "help":
-      return `Show top-level or command-specific help.
-
-Usage:
-  wf help [command]
-
-Example:
-  wf help create
-`
-    case "integrations":
-    case "i":
-      return `Discover, authorize, inspect, and validate integrations.
-
-Usage:
-  wf integrations discover <url> [--connection <name>] [--json]
-  wf integrations connect <integration-or-url> [--connection <name>] [--template <name>]
-  wf integrations catalog [--json]
-  wf integrations tools [<integration>] [--connection <name>] [--json]
-  wf integrations connections [--json]
-  wf integrations disconnect <integration> [--connection <name>]
-  wf integrations invoke <tool-address> [<json>] [--file <path>]
-  wf integrations validate <tool-address> [--json]
-  wf integrations validate <json> [--live] [--json]
-  wf integrations validate --file <path> [--live] [--json]
-
-Alias:
-  wf i <same subcommands and options as wf integrations>
-
-The default connection is named "default". Use --json only when you need
-complete schemas or machine-readable output.
-`
-    case undefined:
-      return help
-    default:
-      return undefined
-  }
-}
 
 const formatError = (error: unknown): string => {
   if (error instanceof Error) {
@@ -185,50 +49,6 @@ const parseJsonInput = (input: string | undefined): unknown => {
   }
 }
 
-interface SignalCommandOptions {
-  readonly runId: string
-  readonly signalName: string
-  readonly payload: unknown
-  readonly actor?: string
-}
-
-const parseSignalCommandOptions = (args: ReadonlyArray<string>): SignalCommandOptions => {
-  const [runId, signalName, ...rest] = args
-  if (runId === undefined || signalName === undefined) {
-    throw new Error("wf signal requires a run id and signal name")
-  }
-
-  let payloadText: string | undefined
-  let actor: string | undefined
-
-  for (let index = 0; index < rest.length; index++) {
-    const arg = rest[index]!
-
-    switch (arg) {
-      case "--actor":
-        actor = readFlagValue(rest, ++index, "--actor")
-        break
-
-      default:
-        if (arg.startsWith("--")) {
-          throw new Error(`Unknown wf signal option: ${arg}`)
-        }
-        if (payloadText !== undefined) {
-          throw new Error("wf signal accepts only one JSON payload")
-        }
-        payloadText = arg
-        break
-    }
-  }
-
-  return {
-    runId,
-    signalName,
-    payload: parseJsonInput(payloadText),
-    ...(actor === undefined ? {} : { actor })
-  }
-}
-
 interface CreateWorkflowOptions {
   readonly id: string
   readonly name: string
@@ -245,172 +65,12 @@ type ValidateWorkflowTarget =
   | { readonly kind: "catalog"; readonly id: string }
   | { readonly kind: "file"; readonly file: string }
 
-interface ValidateWorkflowOptions {
-  readonly target: ValidateWorkflowTarget
-  readonly inputText?: string
-  readonly json: boolean
-}
-
 const workflowIdFromFile = (file: string): string => {
   const basename = path.basename(file, path.extname(file))
   const id = basename.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "")
   return /^[a-z][a-z0-9-]*$/.test(id) ? id : "workflow"
 }
 
-const parseValidateWorkflowOptions = (args: ReadonlyArray<string>): ValidateWorkflowOptions => {
-  let id: string | undefined
-  let file: string | undefined
-  let inputText: string | undefined
-  let json = false
-
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index]!
-    switch (arg) {
-      case "--file":
-        file = readFlagValue(args, ++index, "--file")
-        break
-      case "--input":
-        inputText = readFlagValue(args, ++index, "--input")
-        break
-      case "--json":
-        json = true
-        break
-      default:
-        if (arg.startsWith("--")) {
-          throw new Error(`Unknown wf validate option: ${arg}`)
-        }
-        if (id !== undefined) {
-          throw new Error("wf validate accepts only one workflow id")
-        }
-        id = arg
-        break
-    }
-  }
-
-  if (id !== undefined && file !== undefined) {
-    throw new Error("Use either a workflow id or --file, not both")
-  }
-
-  const target: ValidateWorkflowTarget | undefined = id !== undefined
-    ? { kind: "catalog", id }
-    : file !== undefined
-      ? { kind: "file", file }
-      : undefined
-  if (target === undefined) {
-    throw new Error("wf validate requires a workflow id or --file")
-  }
-
-  return {
-    target,
-    ...(inputText === undefined ? {} : { inputText }),
-    json
-  }
-}
-
-interface RawCreateWorkflowOptions {
-  readonly id: string
-  readonly name: string
-  readonly nameProvided: boolean
-  readonly source?: string
-  readonly sourceFile?: string
-  readonly version: string
-  readonly force: boolean
-}
-
-const parseCreateWorkflowOptions = (
-  id: string | undefined,
-  args: ReadonlyArray<string>
-): RawCreateWorkflowOptions => {
-  if (id === undefined) {
-    throw new Error("wf create requires a workflow id")
-  }
-
-  assertWorkflowId(id)
-
-  let name = `${toPascalCase(id)}Workflow`
-  let nameProvided = false
-  let source: string | undefined
-  let sourceFile: string | undefined
-  let version = "dev"
-  let force = false
-
-  for (let index = 0; index < args.length; index++) {
-    const arg = args[index]
-
-    switch (arg) {
-      case "--name":
-        name = readFlagValue(args, ++index, "--name")
-        assertWorkflowName(name)
-        nameProvided = true
-        break
-
-      case "--source":
-        source = readFlagValue(args, ++index, "--source")
-        break
-
-      case "--file":
-        sourceFile = readFlagValue(args, ++index, "--file")
-        break
-
-      case "--version":
-        version = readFlagValue(args, ++index, "--version")
-        break
-
-      case "--force":
-        force = true
-        break
-
-      default:
-        throw new Error(`Unknown wf create option: ${arg}`)
-    }
-  }
-
-  if (source !== undefined && sourceFile !== undefined) {
-    throw new Error("Use either --source or --file, not both")
-  }
-
-  return {
-    id,
-    name,
-    nameProvided,
-    ...(source === undefined ? {} : { source }),
-    ...(sourceFile === undefined ? {} : { sourceFile }),
-    version,
-    force
-  }
-}
-
-const parseCreateWorkflowOptionsWithSource = async (
-  id: string | undefined,
-  args: ReadonlyArray<string>
-): Promise<CreateWorkflowOptions> => {
-  const options = parseCreateWorkflowOptions(id, args)
-  const source = options.source ??
-    (options.sourceFile === undefined
-      ? workflowTemplate({ ...options, source: "" })
-      : await readFile(options.sourceFile, "utf8"))
-
-  return {
-    id: options.id,
-    name: options.name,
-    nameProvided: options.nameProvided,
-    source,
-    version: options.version,
-    force: options.force
-  }
-}
-
-const readFlagValue = (
-  args: ReadonlyArray<string>,
-  index: number,
-  flag: string
-): string => {
-  const value = args[index]
-  if (value === undefined || value.startsWith("--")) {
-    throw new Error(`${flag} requires a value`)
-  }
-  return value
-}
 
 const assertWorkflowId = (id: string) => {
   if (!/^[a-z][a-z0-9-]*$/.test(id)) {
@@ -937,226 +597,289 @@ const createEngineBackedClient = (storageDir: string) => {
   return { runtime, client }
 }
 
-export const runWfkitCli = async (options: {
-  readonly arguments: ReadonlyArray<string>
+export interface CliRuntimeOptions {
   readonly rootDir: string
-  readonly storageDir?: string
-}): Promise<void> => {
-  const [rawCommand, ...args] = options.arguments
-  const command = rawCommand === "i" ? "integrations" : rawCommand
-  const rootDir = options.rootDir
-  const storageDir = options.storageDir ?? path.join(rootDir, ".wf")
-  setExecutorStorageDirectory(storageDir)
+  readonly storageDir: string
+}
 
-  if (command === undefined || command === "-h" || command === "--help") {
-    console.log(help)
-    return
-  }
+class WorkflowCliError extends Data.TaggedError("WorkflowCliError")<{
+  readonly message: string
+}> {}
 
-  if (command === "integrations") {
-    await runIntegrationsCli(args, { storageDir })
-    return
-  }
+const cliError = (error: unknown): WorkflowCliError =>
+  new WorkflowCliError({ message: formatError(error) })
 
-  if (command === "help") {
-    const [requestedCommand, ...extraArgs] = args
-    if (extraArgs.length > 0) {
-      throw new Error(`wf help accepts at most one command\n\n${commandHelp("help")}`)
+const runCliTask = <A>(task: () => Promise<A>): Effect.Effect<A, WorkflowCliError> =>
+  Effect.tryPromise({ try: task, catch: cliError })
+
+const repositoryFor = (runtime: CliRuntimeOptions) => createSqliteWorkflowRepository({
+  rootDir: runtime.rootDir,
+  databasePath: path.join(runtime.storageDir, "wf.sqlite")
+})
+
+const createCommand = (runtime: CliRuntimeOptions) => Command.make(
+  "create",
+  {
+    id: Argument.string("workflow-id").pipe(
+      Argument.withDescription("Lowercase workflow id")
+    ),
+    name: Flag.string("name").pipe(
+      Flag.optional,
+      Flag.withDescription("Select a workflow export explicitly")
+    ),
+    source: Flag.string("source").pipe(
+      Flag.optional,
+      Flag.withDescription("Import inline TypeScript source")
+    ),
+    file: Flag.string("file").pipe(
+      Flag.optional,
+      Flag.withDescription("Import TypeScript from a file")
+    ),
+    workflowVersion: Flag.string("workflow-version").pipe(
+      Flag.withDefault("dev"),
+      Flag.withDescription("Workflow version")
+    ),
+    force: Flag.boolean("force").pipe(
+      Flag.withDescription("Replace an existing workflow id")
+    )
+  },
+  ({ id, name, source, file, workflowVersion, force }) => runCliTask(async () => {
+    assertWorkflowId(id)
+    const nameValue = Option.getOrUndefined(name)
+    const sourceValue = Option.getOrUndefined(source)
+    const fileValue = Option.getOrUndefined(file)
+    if (sourceValue !== undefined && fileValue !== undefined) {
+      throw new Error("Use either --source or --file, not both")
     }
-    if (requestedCommand === "integrations" || requestedCommand === "i") {
-      await runIntegrationsCli(["--help"], { storageDir })
-      return
+    const nameProvided = nameValue !== undefined
+    const workflowName = nameValue ?? `${toPascalCase(id)}Workflow`
+    if (nameProvided) assertWorkflowName(workflowName)
+    const templateOptions: CreateWorkflowOptions = {
+      id,
+      name: workflowName,
+      nameProvided,
+      source: "",
+      version: workflowVersion,
+      force
     }
-    const requestedHelp = commandHelp(requestedCommand)
-    if (requestedHelp === undefined) {
-      throw new Error(`Unknown command: ${requestedCommand}\n\n${help}`)
+    const sourceText = sourceValue ??
+      (fileValue === undefined
+        ? workflowTemplate(templateOptions)
+        : await readFile(fileValue, "utf8"))
+    const options: CreateWorkflowOptions = { ...templateOptions, source: sourceText }
+    const repository = repositoryFor(runtime)
+    const existingWorkflow = await repository.get(options.id)
+    if (existingWorkflow !== undefined && !options.force) {
+      throw new Error(`Workflow id already exists: ${options.id}. Use --force to update it.`)
     }
-    console.log(requestedHelp)
-    return
-  }
 
-  if (args[0] === "-h" || args[0] === "--help") {
-    const requestedHelp = commandHelp(command)
-    if (requestedHelp === undefined) {
-      throw new Error(`Unknown command: ${command}\n\n${help}`)
+    // Resolve the actual workflow export from the source instead of assuming
+    // the id-derived name. Imported files often export a differently named
+    // workflow; --name pins the export when a file has several.
+    const loaded = await loadWorkflowArtifact({
+      id: options.id,
+      name: options.name,
+      version: options.version,
+      source: options.source,
+      ...(options.nameProvided ? { exportName: options.name } : {})
+    })
+    const workflow: WorkflowArtifact = {
+      id: options.id,
+      name: options.nameProvided ? options.name : loaded.workflow.name,
+      version: options.version,
+      source: options.source,
+      exportName: loaded.exportName,
+      createdAt: new Date().toISOString()
     }
-    console.log(requestedHelp)
-    return
-  }
-
-  const repository = createSqliteWorkflowRepository({
-    rootDir,
-    databasePath: path.join(storageDir, "wf.sqlite")
+    if (existingWorkflow !== undefined) await repository.deleteWorkflow(options.id)
+    await repository.upsertWorkflow(workflow)
+    printCreatedWorkflow(workflow)
   })
+).pipe(
+  Command.withDescription("Create or import a workflow into the local catalog"),
+  Command.withExamples([
+    { command: "wf create welcome-email" },
+    { command: "wf create email --file workflows/email.ts --workflow-version 1" }
+  ])
+)
 
-  switch (command) {
-    case "create": {
-      const [id, ...createArgs] = args
-      const options = await parseCreateWorkflowOptionsWithSource(id, createArgs)
-      const existingWorkflow = await repository.get(options.id)
+const validateCommand = (runtime: CliRuntimeOptions) => Command.make(
+  "validate",
+  {
+    id: Argument.string("workflow-id").pipe(
+      Argument.optional,
+      Argument.withDescription("Registered workflow id")
+    ),
+    file: Flag.string("file").pipe(
+      Flag.optional,
+      Flag.withDescription("Validate a TypeScript workflow file outside the catalog")
+    ),
+    input: Flag.string("input").pipe(
+      Flag.optional,
+      Flag.withDescription("Use this JSON value while tracing the workflow")
+    ),
+    json: Flag.boolean("json").pipe(
+      Flag.withDescription("Print the complete validation graph as JSON")
+    )
+  },
+  ({ id, file, input, json }) => runCliTask(async () => {
+    const idValue = Option.getOrUndefined(id)
+    const fileValue = Option.getOrUndefined(file)
+    if (idValue !== undefined && fileValue !== undefined) {
+      throw new Error("Use either a workflow id or --file, not both")
+    }
+    const target: ValidateWorkflowTarget = idValue !== undefined
+      ? { kind: "catalog", id: idValue }
+      : fileValue !== undefined
+        ? { kind: "file", file: fileValue }
+        : (() => { throw new Error("wf validate requires a workflow id or --file") })()
+    const inputText = Option.getOrUndefined(input)
+    const artifact = await validationArtifact(repositoryFor(runtime), target)
+    const result = await traceWorkflowArtifact(artifact, inputText)
+    const invalid = result.diagnostics.length > 0 ||
+      result.graph === undefined ||
+      result.graph.diagnostics.length > 0
+    if (json) {
+      console.log(toJsonText(result))
+      if (invalid) process.exitCode = 1
+      return
+    }
+    if (invalid) throw validationError(result)
+    printValidationResult(result)
+  })
+).pipe(
+  Command.withDescription("Validate a workflow without starting a durable run"),
+  Command.withExamples([
+    { command: "wf validate welcome-email" },
+    { command: "wf validate --file workflows/email.ts --json" }
+  ])
+)
 
-      if (existingWorkflow !== undefined && !options.force) {
-        throw new Error(`Workflow id already exists: ${options.id}. Use --force to update it.`)
-      }
+const listCommand = (runtime: CliRuntimeOptions) => Command.make(
+  "list",
+  {},
+  () => runCliTask(async () => printWorkflows(await repositoryFor(runtime).list()))
+).pipe(Command.withDescription("List registered workflow artifacts"))
 
-      // Resolve the actual workflow export from the source instead of
-      // assuming the id-derived name — imported files usually export a
-      // differently named workflow. --name still pins the export explicitly
-      // (needed when a file exports several workflows). This also validates
-      // the source at create time instead of on first run.
-      const loaded = await loadWorkflowArtifact({
-        id: options.id,
-        name: options.name,
-        version: options.version,
-        source: options.source,
-        ...(options.nameProvided ? { exportName: options.name } : {})
+const runsCommand = (runtime: CliRuntimeOptions) => Command.make(
+  "runs",
+  {},
+  () => runCliTask(async () => {
+    const repository = repositoryFor(runtime)
+    const { client } = createEngineBackedClient(runtime.storageDir)
+    try {
+      printRuns(await lifecycleRunRecords(client, await repository.list()))
+    } finally {
+      await client.dispose()
+    }
+  })
+).pipe(Command.withDescription("List persisted workflow runs"))
+
+const historyCommand = (runtime: CliRuntimeOptions) => Command.make(
+  "history",
+  { runId: Argument.string("run-id") },
+  ({ runId }) => runCliTask(async () => {
+    const { client } = createEngineBackedClient(runtime.storageDir)
+    try {
+      printRunEvents(await client.history(runId))
+    } finally {
+      await client.dispose()
+    }
+  })
+).pipe(
+  Command.withAlias("events"),
+  Command.withDescription("Show the persisted event history for a workflow run")
+)
+
+const runCommand = (runtime: CliRuntimeOptions) => Command.make(
+  "run",
+  {
+    id: Argument.string("workflow-id"),
+    input: Argument.string("json-input").pipe(Argument.optional)
+  },
+  ({ id, input }) => runCliTask(async () => {
+    const repository = repositoryFor(runtime)
+    const artifact = await repository.get(id)
+    if (artifact === undefined) throw new Error(`Unknown workflow id: ${id}`)
+    const loaded = await loadWorkflowArtifact(artifact)
+    const { client } = createEngineBackedClient(runtime.storageDir)
+    try {
+      const handle = await client.start(loaded.workflow, parseJsonInput(Option.getOrUndefined(input)), {
+        artifactId: artifact.id
       })
-
-      const workflow: WorkflowArtifact = {
-        id: options.id,
-        name: options.nameProvided ? options.name : loaded.workflow.name,
-        version: options.version,
-        source: options.source,
-        exportName: loaded.exportName,
-        createdAt: new Date().toISOString()
-      }
-      if (existingWorkflow !== undefined) {
-        // The catalog is keyed by (name, version); replacing an id whose
-        // detected name changed must not leave the old row behind.
-        await repository.deleteWorkflow(options.id)
-      }
-      await repository.upsertWorkflow(workflow)
-      printCreatedWorkflow(workflow)
-      return
+      console.error(`${eventTag("run")} id ${bold(handle.executionId)}`)
+      await awaitAndPrintRun({ client, runId: handle.executionId, historyLength: 1 })
+    } finally {
+      await client.dispose()
     }
+  })
+).pipe(
+  Command.withDescription("Start a registered workflow run"),
+  Command.withExamples([
+    { command: "wf run welcome-email" },
+    { command: "wf run welcome-email '{\"message\":\"hello\"}'" }
+  ])
+)
 
-    case "validate": {
-      const validateOptions = parseValidateWorkflowOptions(args)
-      const artifact = await validationArtifact(repository, validateOptions.target)
-
-      const result = await traceWorkflowArtifact(artifact, validateOptions.inputText)
-      const invalid = result.diagnostics.length > 0 ||
-        result.graph === undefined ||
-        result.graph.diagnostics.length > 0
-
-      if (validateOptions.json) {
-        console.log(toJsonText(result))
-        if (invalid) process.exitCode = 1
-        return
-      }
-      if (invalid) {
-        throw validationError(result)
-      }
-      printValidationResult(result)
-      return
-    }
-
-    case "list": {
-      printWorkflows(await repository.list())
-      return
-    }
-
-    case "runs": {
-      const { client } = createEngineBackedClient(storageDir)
-      try {
-        printRuns(await lifecycleRunRecords(client, await repository.list()))
-      } finally {
-        await client.dispose()
-      }
-      return
-    }
-
-    case "history":
-    case "events": {
-      const [runId] = args
-      if (runId === undefined) {
-        throw new Error("wf history requires an execution id")
-      }
-
-      const { client } = createEngineBackedClient(storageDir)
-      try {
-        printRunEvents(await client.history(runId))
-      } finally {
-        await client.dispose()
-      }
-      return
-    }
-
-    case "run": {
-      const [id, rawInput] = args
-      if (id === undefined) {
-        throw new Error("wf run requires a workflow id")
-      }
-
-      const artifact = await repository.get(id)
+const signalCommand = (runtime: CliRuntimeOptions) => Command.make(
+  "signal",
+  {
+    runId: Argument.string("run-id"),
+    signalName: Argument.string("signal-name"),
+    payload: Argument.string("json-payload").pipe(Argument.optional),
+    actor: Flag.string("actor").pipe(
+      Flag.optional,
+      Flag.withDescription("Record who delivered the signal")
+    )
+  },
+  ({ runId, signalName, payload, actor }) => runCliTask(async () => {
+    const repository = repositoryFor(runtime)
+    const { runtime: engine, client } = createEngineBackedClient(runtime.storageDir)
+    try {
+      const execution = await client.execution(runId)
+      const artifact = execution.artifactId === undefined
+        ? (await repository.list()).find(
+          (candidate) =>
+            candidate.name === execution.workflowName &&
+            candidate.version === String(execution.version)
+        )
+        : await repository.get(execution.artifactId)
       if (artifact === undefined) {
-        throw new Error(`Unknown workflow id: ${id}`)
+        throw new Error(`Workflow artifact was deleted for run ${runId}: ${execution.workflowName}`)
       }
       const loaded = await loadWorkflowArtifact(artifact)
-      const input = parseJsonInput(rawInput)
-      const { client } = createEngineBackedClient(storageDir)
+      engine.register([loaded.workflow])
+      const historyLength = (await client.history(runId)).length
       try {
-        const handle = await client.start(loaded.workflow, input, { artifactId: artifact.id })
-        console.error(`${eventTag("run")} id ${bold(handle.executionId)}`)
-        await awaitAndPrintRun({ client, runId: handle.executionId, historyLength: 1 })
-      } finally {
-        await client.dispose()
+        await client.signal(
+          runId,
+          signalName,
+          parseJsonInput(Option.getOrUndefined(payload)),
+          Option.match(actor, {
+            onNone: () => ({}),
+            onSome: (value) => ({ actor: value })
+          })
+        )
+        await awaitAndPrintRun({ client, runId, historyLength })
+      } catch (error) {
+        const pendingSignals = await client.pendingSignals(runId).catch(() => [])
+        if (pendingSignals.length === 0) throw error
+        const lines = pendingSignals.map((pending) => describePendingSignal(runId, pending))
+        throw new Error(`${formatError(error)}\n${lines.join("\n")}`)
       }
-      return
+    } finally {
+      await client.dispose()
     }
+  })
+).pipe(Command.withDescription("Resume a run waiting for a signal"))
 
-    case "signal": {
-      const options = parseSignalCommandOptions(args)
-      const { runtime, client } = createEngineBackedClient(storageDir)
-      try {
-        const execution = await client.execution(options.runId)
-        const artifact = execution.artifactId === undefined
-          ? (await repository.list()).find(
-            (candidate) =>
-              candidate.name === execution.workflowName &&
-              candidate.version === String(execution.version)
-          )
-          : await repository.get(execution.artifactId)
-        if (artifact === undefined) {
-          throw new Error(`Workflow artifact was deleted for run ${options.runId}: ${execution.workflowName}`)
-        }
-
-        const loaded = await loadWorkflowArtifact(artifact)
-        runtime.register([loaded.workflow])
-        const historyLength = (await client.history(options.runId)).length
-        try {
-          await client.signal(
-            options.runId,
-            options.signalName,
-            options.payload,
-            options.actor === undefined ? {} : { actor: options.actor }
-          )
-          await awaitAndPrintRun({ client, runId: options.runId, historyLength })
-        } catch (error) {
-          const pendingSignals = await client.pendingSignals(options.runId).catch(() => [])
-          if (pendingSignals.length === 0) {
-            throw error
-          }
-          const lines = pendingSignals.map((signal) => describePendingSignal(options.runId, signal))
-          throw new Error(`${formatError(error)}\n${lines.join("\n")}`)
-        }
-      } finally {
-        await client.dispose()
-      }
-      return
-    }
-
-    default:
-      throw new Error(`Unknown command: ${command}\n\n${help}`)
-  }
-}
-
-if (import.meta.main) {
-  runWfkitCli({ arguments: process.argv.slice(2), rootDir: process.cwd() }).then(
-    () => {},
-    (error) => {
-      console.error(formatError(error))
-      process.exitCode = 1
-    }
-  )
-}
+export const makeWorkflowCommands = (runtime: CliRuntimeOptions) => [
+  createCommand(runtime),
+  validateCommand(runtime),
+  listCommand(runtime),
+  runCommand(runtime),
+  runsCommand(runtime),
+  historyCommand(runtime),
+  signalCommand(runtime),
+  makeIntegrationsCommand({ storageDir: runtime.storageDir })
+] as const

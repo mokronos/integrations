@@ -1,8 +1,6 @@
-import { BunServices } from "@effect/platform-bun"
 import { Data, Effect, Option, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import {
-  closeExecutor,
   createExecutorConnection,
   executeExecutorTool,
   ExecutorToolAddress,
@@ -10,7 +8,6 @@ import {
   listExecutorIntegrations,
   listExecutorTools,
   removeExecutorConnection,
-  setExecutorStorageDirectory,
   discoverIntegration,
   validateIntegrationNode
 } from "@mokronos/wfkit-executor"
@@ -190,28 +187,36 @@ const makeTools = () => Command.make(
   "tools",
   {
     integration: Argument.string("integration").pipe(Argument.optional),
+    integrationFlag: Flag.string("integration").pipe(
+      Flag.optional,
+      Flag.withDescription("Deprecated: use the positional integration argument")
+    ),
     connection: Flag.string("connection").pipe(
       Flag.withDefault("default"),
       Flag.withDescription("Connection name (default: default)")
     ),
     json: Flag.boolean("json")
   },
-  ({ integration, connection, json }) => Effect.tryPromise({
-    try: () => listExecutorTools({
-      ...Option.match(integration, {
-        onNone: () => ({}),
-        onSome: (value) => ({ integration: value })
+  ({ integration, integrationFlag, connection, json }) => Effect.gen(function*() {
+    const positional = Option.getOrUndefined(integration)
+    const flagged = Option.getOrUndefined(integrationFlag)
+    if (positional !== undefined && flagged !== undefined) {
+      return yield* cliError("Provide the integration either positionally or with --integration, not both")
+    }
+    const selected = positional ?? flagged
+    const tools = yield* Effect.tryPromise({
+      try: () => listExecutorTools({
+        ...(selected === undefined ? {} : { integration: selected }),
+        connection
       }),
-      connection: connection
-    }),
-    catch: (error) => cliError(`Could not list tools: ${String(error)}`)
-  }).pipe(
-    Effect.flatMap((tools) => writeStdoutLine(
+      catch: (error) => cliError(`Could not list tools: ${String(error)}`)
+    })
+    yield* writeStdoutLine(
       json
         ? JSON.stringify({ tools: tools.map(toolForJson) }, null, 2)
         : tools.map(formatTool).join("\n") || "No tools available."
-    ))
-  )
+    )
+  })
 ).pipe(Command.withDescription("List an integration's tools; use --json for complete schemas"))
 
 const makeConnect = (options: IntegrationsCliOptions) => Command.make(
@@ -405,9 +410,10 @@ const makeValidate = () => Command.make(
   })
 ).pipe(Command.withDescription("Validate an Executor tool address or integration config"))
 
-const integrationsCommand = (options: IntegrationsCliOptions) =>
+export const makeIntegrationsCommand = (options: IntegrationsCliOptions = {}) =>
   Command.make("integrations").pipe(
     Command.withDescription("Discover, authorize, inspect, and invoke through Executor"),
+    Command.withAlias("i"),
     Command.withSubcommands([
       makeDiscover(),
       makeCatalog(),
@@ -419,36 +425,3 @@ const integrationsCommand = (options: IntegrationsCliOptions) =>
       makeValidate()
     ])
   )
-
-export const runIntegrationsCli = (
-  arguments_: ReadonlyArray<string>,
-  options: IntegrationsCliOptions = {}
-): Promise<void> => {
-  if (options.storageDir !== undefined) setExecutorStorageDirectory(options.storageDir)
-  const normalizedArguments = normalizeArguments(arguments_)
-  return Effect.runPromise(
-    Command.runWith(integrationsCommand(options), { version: "0.3.0" })(normalizedArguments).pipe(
-      Effect.catchTag("ShowHelp", (error) => error.errors.length === 0
-        ? Effect.void
-        : Effect.sync(() => { process.exitCode = 1 })),
-      Effect.provide(BunServices.layer)
-    )
-  ).finally(() => closeExecutor(options.storageDir))
-}
-
-const normalizeArguments = (arguments_: ReadonlyArray<string>): ReadonlyArray<string> => {
-  if (arguments_[0] !== "tools") return arguments_
-
-  const integrationFlag = arguments_.indexOf("--integration")
-  const flaggedIntegration = integrationFlag < 0 ? undefined : arguments_[integrationFlag + 1]
-  if (flaggedIntegration !== undefined) {
-    return [
-      "tools",
-      flaggedIntegration,
-      ...arguments_.slice(1, integrationFlag),
-      ...arguments_.slice(integrationFlag + 2)
-    ]
-  }
-
-  return arguments_
-}

@@ -3,7 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import path from "node:path"
 
 const repoRoot = path.resolve(import.meta.dir, "../../..")
-const cliPath = path.join(repoRoot, "apps", "cli", "src", "cli", "main.ts")
+const cliPath = path.join(repoRoot, "apps", "cli", "src", "main.ts")
 const tempRoot = path.join(repoRoot, ".tmp", "cli-validate-tests")
 const decoder = new TextDecoder()
 
@@ -31,6 +31,7 @@ const runCli = (cwd: string, args: ReadonlyArray<string>) => {
     stderr: "pipe",
     env: {
       ...process.env,
+      WF_HOME: cwd,
       NO_COLOR: "1"
     }
   })

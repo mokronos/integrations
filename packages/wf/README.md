@@ -104,18 +104,31 @@ wf web
 
 Use `wf` for the full lifecycle:
 
-```sh
-wf create <workflow-id> [--name <workflow-name>] [--source <typescript>] [--file <path>] [--version <version>] [--force]
-wf list
-wf run <workflow-id> [json-input]
-wf runs
-wf history <execution-id>
-wf signal <run-id> <signal-name> [json-payload] [--actor <actor>]
-wf integrations --help
+```text
+wf
+├── create
+├── validate
+├── list
+├── run
+├── runs
+├── history (alias: events)
+├── signal
+├── integrations (alias: i)
+│   ├── discover
+│   ├── catalog
+│   ├── connect
+│   ├── connections
+│   ├── tools
+│   ├── disconnect
+│   ├── invoke
+│   └── validate
+├── install
+├── web
+└── daemon
 ```
 
-Use `wf help <command>` or `wf <command> --help` for command-specific options
-and examples.
+Use `wf --help` or `wf <command> --help` for arguments, flags, examples, and
+nested subcommands.
 
 Global CLI state lives in `~/.wf/wf.sqlite`; durable engine state lives in
 `~/.wf/engine.sqlite`; Executor's catalog lives in `~/.wf/executor.sqlite`; and

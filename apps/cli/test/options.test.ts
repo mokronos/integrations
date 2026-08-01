@@ -1,17 +1,39 @@
 import { describe, expect, test } from "bun:test"
-import { parseServerOptions } from "../src/main.ts"
+import path from "node:path"
+
+const repoRoot = path.resolve(import.meta.dir, "../../..")
+const cliPath = path.join(repoRoot, "apps", "cli", "src", "main.ts")
+const decoder = new TextDecoder()
+
+const runCli = (args: ReadonlyArray<string>) => {
+  const subprocess = Bun.spawnSync({
+    cmd: [process.execPath, "run", cliPath, ...args],
+    cwd: repoRoot,
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, NO_COLOR: "1" }
+  })
+  return {
+    exitCode: subprocess.exitCode,
+    stdout: decoder.decode(subprocess.stdout),
+    stderr: decoder.decode(subprocess.stderr)
+  }
+}
 
 describe("dashboard options", () => {
-  test("opens the installed service by default", () => {
-    expect(parseServerOptions([])).toEqual({ foreground: false, open: true, port: 4787 })
+  test("parses dashboard options through Effect CLI", () => {
+    const result = runCli(["web", "--help"])
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("--foreground")
+    expect(result.stdout).toContain("--port integer")
+    expect(result.stdout).toContain("--no-open")
   })
 
-  test("parses a temporary foreground server", () => {
-    expect(parseServerOptions(["--foreground", "--port", "9000", "--no-open"]))
-      .toEqual({ foreground: true, open: false, port: 9000 })
-  })
+  test("rejects invalid ports in the command handler", () => {
+    const result = runCli(["web", "--foreground", "--port", "70000", "--no-open"])
 
-  test("rejects invalid ports", () => {
-    expect(() => parseServerOptions(["--port", "70000"])).toThrow("between 1 and 65535")
+    expect(result.exitCode).not.toBe(0)
+    expect(result.stderr).toContain("between 1 and 65535")
   })
 })
