@@ -50,7 +50,7 @@ const compileWorkflowSource = async (artifact: WorkflowArtifact): Promise<string
       loader: "ts",
       target: "bun"
     })
-    return `${transpiler.transformSync(source)}\n//# sourceURL=wf:${artifact.id}@${artifact.version}\n`
+    return `${transpiler.transformSync(source)}\n//# sourceURL=wf:${artifact.id}\n`
   }
 
   const ts = await import("typescript")
@@ -60,7 +60,7 @@ const compileWorkflowSource = async (artifact: WorkflowArtifact): Promise<string
       target: ts.ScriptTarget.ESNext,
       verbatimModuleSyntax: true
     }
-  }).outputText}\n//# sourceURL=wf:${artifact.id}@${artifact.version}\n`
+  }).outputText}\n//# sourceURL=wf:${artifact.id}\n`
 }
 
 const rewriteWfImports = (source: string): string => {

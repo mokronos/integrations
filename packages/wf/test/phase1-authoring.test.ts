@@ -32,7 +32,6 @@ describe("Phase 1 authoring model", () => {
 
     const OrderWorkflow = defineWorkflow({
       name: "processOrder",
-      version: 1,
       input: Schema.Struct({
         orderId: Schema.String,
         totalAmount: Schema.Number,
@@ -79,7 +78,6 @@ describe("Phase 1 authoring model", () => {
 
     const workflow = defineWorkflow({
       name: "counterWorkflow",
-      version: 1,
       input: Schema.Void,
       output: Schema.Array(Schema.Number),
       run: function* (_, ctx) {
@@ -121,7 +119,6 @@ describe("Phase 1 authoring model", () => {
     const events: unknown[] = []
     const workflow = defineWorkflow({
       name: "sleepCounterWorkflow",
-      version: 1,
       input: Schema.Void,
       output: Schema.Void,
       run: function* (_, ctx) {
@@ -167,7 +164,6 @@ describe("Phase 1 authoring model", () => {
 
     const transientWorkflow = defineWorkflow({
       name: "transientWorkflow",
-      version: 1,
       input: Schema.Void,
       output: Schema.Void,
       run: function* (_, ctx) {
@@ -193,7 +189,6 @@ describe("Phase 1 authoring model", () => {
 
     const terminalWorkflow = defineWorkflow({
       name: "terminalWorkflow",
-      version: 1,
       input: Schema.Void,
       output: Schema.Void,
       run: function* (_, ctx) {
@@ -240,7 +235,6 @@ describe("Phase 1 authoring model", () => {
 
     const workflow = defineWorkflow({
       name: "compensationWorkflow",
-      version: 1,
       input: Schema.Void,
       output: Schema.Void,
       errors: Rejected,

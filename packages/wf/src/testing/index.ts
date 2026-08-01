@@ -231,7 +231,6 @@ export const createTestRuntime = (options: TestRuntimeOptions = {}): TestRuntime
       type: "execution.started",
       executionId: ExecutionId.make(id),
       workflowName: workflow.name,
-      version: workflow.version,
       payload,
       ...(opts.actor === undefined ? {} : { actor: opts.actor })
     })
@@ -255,18 +254,18 @@ export const createTestRuntime = (options: TestRuntimeOptions = {}): TestRuntime
     },
 
     async start(workflow, payload, opts = {}) {
-      const workflowKey = `${workflow.name}@v${workflow.version}`
+      const workflowKey = workflow.name
       if (opts.idempotencyKey !== undefined) {
         const existingId = idempotencyKeys.get(`${workflowKey}:${opts.idempotencyKey}`)
         if (existingId !== undefined) {
-          return { executionId: existingId, version: workflow.version }
+          return { executionId: existingId }
         }
       }
       const record = createExecution(workflow, payload, opts.actor === undefined ? {} : { actor: opts.actor })
       if (opts.idempotencyKey !== undefined) {
         idempotencyKeys.set(`${workflowKey}:${opts.idempotencyKey}`, record.executionId)
       }
-      return { executionId: record.executionId, version: workflow.version }
+      return { executionId: record.executionId }
     },
 
     async replay(id, workflow, payload) {
@@ -275,7 +274,7 @@ export const createTestRuntime = (options: TestRuntimeOptions = {}): TestRuntime
         id,
         determinism: previous.determinism
       })
-      return { executionId: record.executionId, version: workflow.version }
+      return { executionId: record.executionId }
     },
 
     sendSignal(executionId, name, payload) {

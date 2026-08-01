@@ -54,7 +54,6 @@ const printMessage = defineStep({
 
 export const ValidateDemoWorkflow = defineWorkflow({
   name: "ValidateDemoWorkflow",
-  version: 1,
   input: t.struct({ message: t.string }),
   output: t.void,
   run: function* (input, ctx) {
@@ -71,7 +70,7 @@ describe("wf validate", () => {
 
     const result = runCli(cwd, ["validate", "validate-demo"])
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("Valid validate-demo@dev")
+    expect(result.stdout).toContain("Valid validate-demo")
     expect(result.stdout).toContain("ValidateDemoWorkflow")
     expect(result.stdout).toContain("input:")
     expect(result.stdout).toContain("flow:")
@@ -85,7 +84,7 @@ describe("wf validate", () => {
 
     const result = runCli(cwd, ["validate", "--file", file])
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("Valid unregistered-workflow@dev")
+    expect(result.stdout).toContain("Valid unregistered-workflow")
     expect(result.stdout).toContain("ValidateDemoWorkflow")
   })
 
@@ -98,12 +97,12 @@ describe("wf validate", () => {
 
     const thrown = runCli(cwd, ["validate", "--file", throwsAtModuleScope])
     expect(thrown.exitCode).toBe(1)
-    expect(thrown.stderr).toContain("Invalid throws@dev")
+    expect(thrown.stderr).toContain("Invalid throws")
     expect(thrown.stderr).toContain("module exploded")
 
     const missing = runCli(cwd, ["validate", "--file", noWorkflowExport])
     expect(missing.exitCode).toBe(1)
-    expect(missing.stderr).toContain("Invalid no-workflow@dev")
+    expect(missing.stderr).toContain("Invalid no-workflow")
     expect(missing.stderr).toContain("did not export a wf workflow")
   })
 
@@ -149,7 +148,6 @@ describe("wf validate", () => {
 
 export const BranchingWorkflow = defineWorkflow({
   name: "BranchingWorkflow",
-  version: 1,
   input: t.struct({ wait: t.boolean }),
   output: t.void,
   run: function* (input, ctx) {

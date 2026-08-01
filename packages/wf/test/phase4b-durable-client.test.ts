@@ -55,7 +55,6 @@ describe("Phase 4b durable workflow client", () => {
   test("sqlite backend uses fresh execution IDs and explicit idempotency", async () => {
     const workflow = defineWorkflow({
       name: "sqliteIdentity",
-      version: 1,
       input: Schema.Struct({ value: Schema.String }),
       output: Schema.String,
       run: function* (input) {
@@ -82,7 +81,6 @@ describe("Phase 4b durable workflow client", () => {
   test("sqlite backend lifecycle: start, durable sleep, suspend on signal, deliver, result", async () => {
     const workflow = defineWorkflow({
       name: "sqliteLifecycle",
-      version: 1,
       input: Schema.Struct({}),
       output: Schema.String,
       run: function* (_, ctx) {
@@ -131,7 +129,6 @@ describe("Phase 4b durable workflow client", () => {
     })
     const workflow = defineWorkflow({
       name: "sqliteSingleFlightWorkflow",
-      version: 1,
       input: Schema.Struct({ value: Schema.String }),
       output: Schema.String,
       run: function* (input, ctx) {
@@ -169,7 +166,6 @@ describe("Phase 4b durable workflow client", () => {
     })
     const workflow = defineWorkflow({
       name: "sqliteAllWorkflow",
-      version: 1,
       input: Schema.Struct({ orderId: Schema.String }),
       output: Schema.Struct({
         paymentId: Schema.String,
@@ -204,7 +200,6 @@ describe("Phase 4b durable workflow client", () => {
   test("sqlite backend pendingSignals excludes timeout-consumed waits", async () => {
     const workflow = defineWorkflow({
       name: "sqlitePendingSignalTimeout",
-      version: 1,
       input: Schema.Struct({}),
       output: Schema.String,
       run: function* (_, ctx) {
@@ -230,7 +225,6 @@ describe("Phase 4b durable workflow client", () => {
   test("sqlite backend can resume a suspended signal wait from a new runtime over the same file", async () => {
     const workflow = defineWorkflow({
       name: "sqliteRestart",
-      version: 1,
       input: Schema.Struct({}),
       output: Schema.String,
       run: function* (_, ctx) {
@@ -261,7 +255,6 @@ describe("Phase 4b durable workflow client", () => {
   test("sqlite backend rejects invalid signal payloads at delivery without poisoning the run", async () => {
     const workflow = defineWorkflow({
       name: "sqliteInvalidSignal",
-      version: 1,
       input: Schema.Struct({}),
       output: Schema.String,
       run: function* (_, ctx) {
@@ -293,7 +286,6 @@ describe("Phase 4b durable workflow client", () => {
   test("sqlite backend fires durable signal timeouts promptly (poll interval regression)", async () => {
     const workflow = defineWorkflow({
       name: "sqliteTimeoutLatency",
-      version: 1,
       input: Schema.Struct({}),
       output: Schema.String,
       run: function* (_, ctx) {
@@ -327,7 +319,6 @@ describe("Phase 4b durable workflow client", () => {
     })
     const workflow = defineWorkflow({
       name: "sqliteReplayHistory",
-      version: 1,
       input: Schema.Struct({}),
       output: Schema.String,
       run: function* (_, ctx) {
@@ -385,7 +376,6 @@ describe("Phase 4b durable workflow client", () => {
     })
     const workflow = defineWorkflow({
       name: "sqliteExponentialRetryWorkflow",
-      version: 1,
       input: Schema.Struct({ id: Schema.String }),
       output: Schema.Struct({ id: Schema.String, attempts: Schema.Number }),
       run: function* (input, ctx) {

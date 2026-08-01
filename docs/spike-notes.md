@@ -47,10 +47,9 @@ Source checked: installed `@effect/workflow@0.18.2` and `@effect/cluster@0.59.0`
 - The implemented client can cancel an execution parked on the Phase 3 in-process signal wait. `compensate: true` rejects the wait with `Cancelled` and lets the core compensation stack unwind; `compensate: false` marks the cancellation as hard and skips unwind.
 - The current in-memory client does not interrupt a currently-running step body. This matches the earlier substrate finding that `WorkflowEngine.interrupt` is suspension-oriented; true mid-activity interruption needs the later durable engine client/runtime integration policy.
 
-## Phase 4b/5 durable runtime notes
+## Phase 4b durable runtime notes
 
-- Durable signal delivery on the SQLite backend routes through `WorkflowEngine.deferredDone` with the pinned workflow definition, execution ID, and the deferred name emitted by `signal.waiting`. This works across a second runtime created over the same SQLite file, but the runtime surface still has no explicit shutdown primitive for a clean in-process restart test.
-- Version pinning requires the authored engine workflow name to include the version (`name@vN`). That is already true in `defineWorkflow`; the durable client stores both logical name and pinned numeric version on every execution row and resolves resumes through that exact pair.
+- Durable signal delivery on the SQLite backend routes through `WorkflowEngine.deferredDone` with the registered workflow definition, execution ID, and the deferred name emitted by `signal.waiting`. This works across a second runtime created over the same SQLite file, but the runtime surface still has no explicit shutdown primitive for a clean in-process restart test.
 - Durable `cancel({ compensate: true })` is still not closed: `WorkflowEngine.interrupt` can wake a suspended workflow, but the current SQLite client does not inject a typed `Cancelled` failure into the workflow scope, so it cannot reliably drive the wrapper's LIFO compensation stack. Closing this likely needs a wrapper-level durable cancellation marker checked at every suspension boundary, not just a direct engine interrupt call.
 
 ## Phase 8: durable cancellation — CLOSED (plus substrate findings)

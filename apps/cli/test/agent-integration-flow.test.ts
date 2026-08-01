@@ -207,7 +207,6 @@ const createTicket = integration({
 })
 export const AgentAcceptance = defineWorkflow({
   name: "AgentAcceptance",
-  version: 1,
   input: t.struct({ title: t.string }),
   output: Output,
   run: function* (input, ctx) {
@@ -218,9 +217,7 @@ export const AgentAcceptance = defineWorkflow({
       "create",
       "agent-acceptance",
       "--source",
-      source,
-      "--version",
-      "1"
+      source
     ], environment)
     expect(created.exitCode).toBe(0)
 

@@ -22,7 +22,6 @@ const printMessage = defineStep({
 
 export const HelloWorkflow = defineWorkflow({
   name: "HelloWorkflow",
-  version: 1,
   input: t.struct({ message: t.string }),
   output: t.void,
   run: function* (input, ctx) {
@@ -61,7 +60,6 @@ const createIssue = integration({
 
 export const CreateIssue = defineWorkflow({
   name: "CreateIssue",
-  version: 1,
   input: t.struct({ teamId: t.string, title: t.string }),
   output: CreatedIssue,
   run: function* (input, ctx) {

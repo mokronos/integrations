@@ -23,7 +23,6 @@ const sendEmail = defineStep({
 
 export const EmailWorkflow = defineWorkflow({
   name: "EmailWorkflow",
-  version: 2,
   input: t.struct({ id: t.string, to: t.string }),
   output: t.void,
   errors: SendEmailError,

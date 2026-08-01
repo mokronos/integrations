@@ -44,7 +44,7 @@ export interface WorkflowRunStore {
 
 export interface WorkflowRepository extends WorkflowStore, WorkflowRunStore {
   upsertWorkflow(workflow: WorkflowArtifact): Promise<void>
-  /** Remove every catalog row for a workflow id (all names/versions). */
+  /** Remove the catalog row for a workflow id. */
   deleteWorkflow(id: string): Promise<void>
 }
 
@@ -83,7 +83,7 @@ const readManifest = async (rootDir: string, manifestPath: string): Promise<Norm
 
 const requiredString = (
   value: WorkflowManifestEntry,
-  key: "id" | "name" | "version",
+  key: "id" | "name",
   label: string
 ): string => {
   const field = value[key]
@@ -117,7 +117,6 @@ const normalizeArtifact = (rootDir: string, value: unknown, label: string): Work
   return Schema.decodeUnknownSync(WorkflowArtifactSchema)({
     id: requiredString(artifact, "id", label),
     name: requiredString(artifact, "name", label),
-    version: requiredString(artifact, "version", label),
     source: source ?? readLegacySource(rootDir, entrypoint, label),
     ...(exportName === undefined ? {} : { exportName }),
     ...(createdAt === undefined ? {} : { createdAt })

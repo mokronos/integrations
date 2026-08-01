@@ -26,7 +26,6 @@ describe("Phase 2 determinism", () => {
 
     const crashWorkflow = defineWorkflow({
       name: "deterministicValues",
-      version: 1,
       input: Schema.Void,
       output: Schema.Void,
       run: function* (_, ctx) {
@@ -45,7 +44,6 @@ describe("Phase 2 determinism", () => {
 
     const resumeWorkflow = defineWorkflow({
       name: "deterministicValues",
-      version: 1,
       input: Schema.Void,
       output: Schema.Struct({
         nowMs: Schema.Number,
@@ -92,7 +90,6 @@ describe("Phase 2 determinism", () => {
 
     const original = defineWorkflow({
       name: "divergentWorkflow",
-      version: 1,
       input: Schema.Void,
       output: Schema.Void,
       run: function* (_, ctx) {
@@ -106,7 +103,6 @@ describe("Phase 2 determinism", () => {
     writes.length = 0
     const divergent = defineWorkflow({
       name: "divergentWorkflow",
-      version: 1,
       input: Schema.Void,
       output: Schema.Void,
       run: function* (_, ctx) {
@@ -139,7 +135,6 @@ describe("Phase 2 determinism", () => {
 
     const original = defineWorkflow({
       name: "codeDivergentWorkflow",
-      version: 1,
       input: Schema.Void,
       output: Schema.String,
       run: function* (_, ctx) {
@@ -155,7 +150,6 @@ describe("Phase 2 determinism", () => {
 
     const divergent = defineWorkflow({
       name: "codeDivergentWorkflow",
-      version: 1,
       input: Schema.Void,
       output: Schema.Void,
       run: function* (_, ctx) {
@@ -179,7 +173,6 @@ describe("Phase 2 determinism", () => {
 
     const workflow = defineWorkflow({
       name: "codeReuseWorkflow",
-      version: 1,
       input: Schema.Void,
       output: Schema.Number,
       run: function* (_, ctx) {

@@ -55,7 +55,7 @@ export {
 export type { JsonSchema as JsonSchemaDocument, ExecutionId as ExecutionIdValue } from "./schemas.ts"
 export { deliverSignal, SignalDeliveryError } from "./signal.ts"
 export { t } from "./schema.ts"
-export { createWorkflowRuntime, engineLayer, executeWorkflow, makeEngineLayer, makeWorkflowEffect, run, WorkflowVersionConflictError } from "./runtime.ts"
+export { createWorkflowRuntime, engineLayer, executeWorkflow, makeEngineLayer, makeWorkflowEffect, run, WorkflowConflictError } from "./runtime.ts"
 export type { ExecuteWorkflowOptions, WorkflowRuntime, WorkflowRuntimeOptions } from "./runtime.ts"
 export type {
   FileWorkflowStoreOptions,
@@ -93,7 +93,6 @@ export type {
 } from "./sdk/index.ts"
 export {
   Cancelled,
-  MissingWorkflowVersionError,
   createFileWorkflowStore,
   createMemoryWorkflowStore,
   createWorkflowClient,

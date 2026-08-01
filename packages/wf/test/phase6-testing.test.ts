@@ -49,7 +49,6 @@ describe("Phase 6 test runtime", () => {
     })
     const OrderWorkflow = defineWorkflow({
       name: "testOrder",
-      version: 1,
       input: Schema.Struct({ totalAmount: Schema.Number, sku: Schema.String }),
       output: Schema.Struct({ transactionId: Schema.String }),
       errors: Rejected,
@@ -84,7 +83,6 @@ describe("Phase 6 test runtime", () => {
   test("manual advanceTime controls sleeps and signal timeouts", async () => {
     const workflow = defineWorkflow({
       name: "manualClock",
-      version: 1,
       input: Schema.Struct({}),
       output: Schema.String,
       run: function* (_, ctx) {
@@ -122,7 +120,6 @@ describe("Phase 6 test runtime", () => {
     })
     const workflow = defineWorkflow({
       name: "retryHelper",
-      version: 1,
       input: Schema.Struct({}),
       output: Schema.Number,
       run: function* (_, ctx) {
@@ -149,7 +146,6 @@ describe("Phase 6 test runtime", () => {
     })
     const workflow = defineWorkflow({
       name: "testRuntimeCancel",
-      version: 1,
       input: Schema.String,
       output: Schema.String,
       run: function* (input, ctx) {
@@ -203,7 +199,6 @@ describe("Phase 6 test runtime", () => {
     })
     const original = defineWorkflow({
       name: "testRuntimeDivergence",
-      version: 1,
       input: Schema.Struct({}),
       output: Schema.String,
       run: function* (_, ctx) {
@@ -213,7 +208,6 @@ describe("Phase 6 test runtime", () => {
     })
     const divergent = defineWorkflow({
       name: "testRuntimeDivergence",
-      version: 1,
       input: Schema.Struct({}),
       output: Schema.String,
       run: function* (_, ctx) {
@@ -247,7 +241,6 @@ describe("Phase 6 test runtime", () => {
     })
     const crash = defineWorkflow({
       name: "testRuntimeDeterminismRestart",
-      version: 1,
       input: Schema.Struct({}),
       output: Schema.Struct({}),
       run: function* (_, ctx) {
@@ -261,7 +254,6 @@ describe("Phase 6 test runtime", () => {
     })
     const resume = defineWorkflow({
       name: "testRuntimeDeterminismRestart",
-      version: 1,
       input: Schema.Struct({}),
       output: Schema.Struct({ nowMs: Schema.Number, random: Schema.Number }),
       run: function* (_, ctx) {

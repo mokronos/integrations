@@ -122,7 +122,6 @@ export const postReply = defineStep({
 
 export const XEngagementWorkflow = defineWorkflow({
   name: "XEngagementWorkflow",
-  version: 1,
   input: t.struct({
     maxCandidates: t.optional(t.number),
     maxRevisions: t.optional(t.number),

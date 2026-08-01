@@ -46,7 +46,6 @@ test("top-level CLI drains large stdout before exiting", async () => {
   const source = `import { defineWorkflow, t } from "@mokronos/wfkit"
 export const LargeOutput = defineWorkflow({
   name: "LargeOutput",
-  version: 1,
   input: t.struct({ size: t.number }),
   output: t.struct({ text: t.string }),
   run: function* (input) {
@@ -57,9 +56,7 @@ export const LargeOutput = defineWorkflow({
     "create",
     "large-output",
     "--source",
-    source,
-    "--version",
-    "1"
+    source
   ], environment)
   expect(created.exitCode).toBe(0)
 

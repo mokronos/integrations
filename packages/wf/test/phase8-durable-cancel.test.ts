@@ -37,7 +37,6 @@ const makeFixtures = () => {
 
   const workflow = defineWorkflow({
     name: "cancellableOrder",
-    version: 1,
     input: Schema.Struct({ item: Schema.String }),
     output: Schema.String,
     run: function* (input, ctx) {
@@ -110,7 +109,6 @@ describe("Phase 8 durable cancellation", () => {
   test("timed signal wait still receives its signal (durable race regression)", async () => {
     const workflow = defineWorkflow({
       name: "timedWait",
-      version: 1,
       input: Schema.Struct({}),
       output: Schema.String,
       run: function* (_, ctx) {

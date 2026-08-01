@@ -8,7 +8,7 @@ const Rejected = Schema.TaggedStruct("Rejected", { reason: Schema.String })
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
-describe("Phase 3 signals v2", () => {
+describe("Phase 3 signals", () => {
   test("HITL approval completes; timeout branches through ctx.fail and compensates", async () => {
     const compensations: unknown[] = []
 
@@ -24,7 +24,6 @@ describe("Phase 3 signals v2", () => {
 
     const workflow = defineWorkflow({
       name: "approvalWorkflow",
-      version: 1,
       input: Schema.Struct({ orderId: Schema.String }),
       output: Schema.Struct({ paymentId: Schema.String }),
       errors: Rejected,
@@ -63,7 +62,6 @@ describe("Phase 3 signals v2", () => {
   test("signal delivered before waitForSignal is buffered and consumed", async () => {
     const workflow = defineWorkflow({
       name: "preSignalWorkflow",
-      version: 1,
       input: Schema.Void,
       output: Schema.Boolean,
       run: function* (_, ctx) {
@@ -94,7 +92,6 @@ describe("Phase 3 signals v2", () => {
 
     const workflow = defineWorkflow({
       name: "reminderWorkflow",
-      version: 1,
       input: Schema.Void,
       output: Schema.Number,
       run: function* (_, ctx) {
@@ -137,7 +134,6 @@ describe("Phase 3 signals v2", () => {
   test("invalid signal payload is rejected at delivery and does not resume workflow", async () => {
     const workflow = defineWorkflow({
       name: "validationWorkflow",
-      version: 1,
       input: Schema.Void,
       output: Schema.Boolean,
       run: function* (_, ctx) {

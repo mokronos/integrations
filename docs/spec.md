@@ -1,6 +1,6 @@
-# Workflow SDK — API Specification (v1)
+# Workflow SDK — API Specification
 
-A thin, opinionated SDK over `@effect/workflow`. Goal: hide syntax boilerplate **and** semantic footguns (duplicate step names, retryable-vs-terminal errors, nondeterminism, versioning), while keeping the full engine reachable through an escape hatch.
+A thin, opinionated SDK over `@effect/workflow`. Goal: hide syntax boilerplate **and** semantic footguns (duplicate step names, retryable-vs-terminal errors, and nondeterminism), while keeping the full engine reachable through an escape hatch.
 
 ---
 
@@ -10,7 +10,7 @@ A thin, opinionated SDK over `@effect/workflow`. Goal: hide syntax boilerplate *
 2. **Typed, serializable errors everywhere.** Declared errors are terminal business failures (trigger compensation); undeclared thrown errors are transient (retried).
 3. **Honest types.** `ctx.run(...)` returns an `Effect` — we alias it as `WorkflowValue<O>` for docs, but we don't pretend it isn't Effect. The escape hatch stays trivial.
 4. **No accidental deduplication.** Every `start()` is a fresh execution unless an idempotency key is passed explicitly.
-5. **Testing is v1.** A saga you can't test is a saga you don't have.
+5. **Testing is core.** A saga you can't test is a saga you don't have.
 
 ---
 
@@ -50,8 +50,7 @@ const chargePayment = defineStep({
   // Optional. Keyed semaphore: at most `limit` concurrent executions of this
   // step per key (step name when `key` is omitted). "10,000 orders arrived,
   // don't call Stripe 10,000 times concurrently" is a day-one requirement.
-  // The API shape is the commitment; the v1 implementation is per-node
-  // (in-process), not distributed.
+  // The current implementation is per-node (in-process), not distributed.
   concurrency: { key: (input) => input.customerId, limit: 2 },
 })
 ```
@@ -78,10 +77,6 @@ interface StepContext<E> {
 ```ts
 const OrderWorkflow = defineWorkflow({
   name: "processOrder",
-
-  // REQUIRED. Bump whenever the `run` body changes in a way that alters
-  // the sequence/shape of ctx calls. Old executions replay old versions.
-  version: 1,
 
   input:  OrderPayload,
   output: Schema.Struct({ orderId: Schema.String, paymentId: Schema.String }),
@@ -138,7 +133,7 @@ interface WorkflowContext<WErrors> {
    */
   run<I, O, E>(step: Step<I, O, E>, input: I): WorkflowValue<O, E>
 
-  /** Run steps concurrently. See "Deferred" — v1 ships sequential only. */
+  /** Run steps concurrently. */
   all<T extends readonly WorkflowValue<any, any>[]>(calls: [...T]): WorkflowValue<ResultsOf<T>>
 
   /** Durable sleep — survives process restarts. Name required if called
@@ -195,7 +190,6 @@ const handle = await client.start(OrderWorkflow, payload, {
 })
 
 handle.executionId  // string
-handle.version      // workflow version this execution is pinned to
 
 // start/signal/cancel accept an optional actor, recorded on the
 // corresponding history events — audit is core, not an afterthought:
@@ -246,22 +240,13 @@ const pending = await client.pendingSignals(handle.executionId)
 
 ---
 
-## 5. Versioning & replay safety
+## 5. Replay safety
 
-- `version` on `defineWorkflow` is **required** (no silent default).
-- Executions are pinned to the version they started on. Deploying `version: 2` means: new starts run v2, in-flight executions keep replaying v1 — so **old versions must remain registered** until their executions drain (`client.list` tells you when).
 - **Replay-divergence detector:** during replay, if the sequence of `ctx` calls (step name + invocation counter + kind) diverges from recorded history, the execution fails loudly with a `NonDeterminismError` naming the divergent step — instead of silently corrupting state.
-
-```ts
-registerWorkflows([
-  OrderWorkflow,          // version: 2 (current)
-  OrderWorkflow_v1,       // kept until drained
-])
-```
 
 ---
 
-## 6. Testing (v1, not deferred)
+## 6. Testing
 
 ```ts
 const rt = createTestRuntime()   // in-memory engine, no Postgres, no cluster
@@ -301,11 +286,11 @@ const engine = createWorkflowRuntime({
   secrets: envSecretResolver(),  // secret name -> env var, e.g. stripe-key -> STRIPE_KEY
   sqliteBusyTimeoutMs: 5000,     // default; concurrent SQLite writers wait
 })
-engine.register([OrderWorkflow, OrderWorkflow_v1, RefundWorkflow])
+engine.register([OrderWorkflow, RefundWorkflow])
 ```
 
 SQLite is intended to have one live workflow owner process per database file in
-v1. A second process may open the same file to deliver a signal and resume after
+A second process may open the same file to deliver a signal and resume after
 the starter has suspended or exited; `sqliteBusyTimeoutMs` reduces lock races but
 does not provide distributed ownership.
 
@@ -326,19 +311,19 @@ so this is a core serialization rule, not a platform feature.
 
 ---
 
-## 8. v1 scope
+## 8. Scope
 
-| In v1 | Deferred |
+| In scope | Deferred |
 |---|---|
 | `defineStep` (execute + compensate + typed errors + retry) | `ctx.all` fan-out (compensation ordering across branches needs design) |
-| `defineWorkflow` + required `version` | Custom backoff beyond `attempts`/`"exponential"` |
+| `defineWorkflow` | Custom backoff beyond `attempts`/`"exponential"` |
 | `ctx.run` with invocation counters | Child workflows |
 | `ctx.sleep`, `ctx.now`, `ctx.random`, `ctx.fail` | `DurableQueue`, `interruptRetryPolicy` (reachable via `ctx.effect`) |
 | `ctx.waitForSignal` + `client.signal` (buffered, typed, timeout-as-value) | Continue-as-new / history truncation |
-| `ctx.effect` escape hatch | `patched()`-style intra-version migration |
+| `ctx.effect` escape hatch | Workflow migration primitives |
 | Client: `start` / `result` / `status` / `list` / `history` / `cancel` | UI / no-code layer |
 | Actor metadata on `start` / `signal` / `cancel` | Task-inbox service (`ctx.humanTask` sugar) |
-| `SecretRef` payloads (reference persisted, value resolved in `execute`) | Distributed concurrency limits (v1 is per-node) |
+| `SecretRef` payloads (reference persisted, value resolved in `execute`) | Distributed concurrency limits (current implementation is per-node) |
 | Per-step `concurrency` keys/limits | Trigger bindings (webhook / cron / polling dispatchers) |
 | Test runtime (mocking, time-skip, signal injection, compensation recorder) | |
 | Replay-divergence detector | |

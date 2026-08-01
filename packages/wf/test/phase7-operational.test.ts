@@ -38,7 +38,6 @@ describe("Phase 7 concurrency limits", () => {
 
     const workflow = defineWorkflow({
       name: "concurrencyLimit",
-      version: 1,
       input: Schema.Struct({ id: Schema.Number }),
       output: Schema.Number,
       run: function* (input, ctx) {
@@ -87,7 +86,6 @@ describe("Phase 7 concurrency limits", () => {
 
     const workflow = defineWorkflow({
       name: "concurrencyKeyed",
-      version: 1,
       input: Schema.Struct({ key: Schema.String, id: Schema.Number }),
       output: Schema.Number,
       run: function* (input, ctx) {
@@ -176,7 +174,6 @@ describe("Phase 7 secret references", () => {
 
     const workflow = defineWorkflow({
       name: "secretFlow",
-      version: 1,
       input: Schema.Struct({ payload: Schema.String }),
       output: Schema.Boolean,
       run: function* (input, ctx) {
@@ -297,7 +294,6 @@ describe("Phase 7 secret references", () => {
     })
     const workflow = defineWorkflow({
       name: "secretAfterSignal",
-      version: 1,
       input: Schema.Struct({}),
       output: Schema.Boolean,
       run: function* (_input, ctx) {

@@ -13,7 +13,6 @@ const emit = defineStep({
 
 export const LoaderHashWorkflow = defineWorkflow({
   name: "LoaderHashWorkflow",
-  version: 1,
   input: t.void,
   output: t.string,
   run: function* (_input, ctx) {
@@ -27,7 +26,6 @@ describe("workflow artifact loader", () => {
     const firstArtifact = {
       id: "loader-hash-a",
       name: "LoaderHashWorkflow",
-      version: "1",
       source: source("first")
     }
     const secondArtifact = {

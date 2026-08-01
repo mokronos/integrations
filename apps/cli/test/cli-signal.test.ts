@@ -47,7 +47,6 @@ const signalWorkflowSource = `import { defineWorkflow, t } from "@mokronos/wfkit
 
 export const SigDemoWorkflow = defineWorkflow({
   name: "SigDemoWorkflow",
-  version: 1,
   input: t.struct({}),
   output: t.string,
   run: function* (_, ctx) {
@@ -88,7 +87,7 @@ describe("wf signal", () => {
 
     const runs = runCli(cwd, ["runs"])
     expect(runs.exitCode).toBe(0)
-    expect(runs.stdout).toContain(`${runId}\tcompleted\tsig-demo@dev`)
+    expect(runs.stdout).toContain(`${runId}\tcompleted\tsig-demo`)
 
     const alreadyCompleted = runCli(cwd, [
       "signal",

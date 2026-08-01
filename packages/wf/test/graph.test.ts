@@ -18,7 +18,6 @@ const publish = defineStep({
 
 const DemoWorkflow = defineWorkflow({
   name: "DemoWorkflow",
-  version: 1,
   input: t.struct({ id: t.string }),
   output: t.void,
   run: function* (input, ctx) {
@@ -31,7 +30,6 @@ const DemoWorkflow = defineWorkflow({
 
 const CodeWorkflow = defineWorkflow({
   name: "CodeWorkflow",
-  version: 1,
   input: t.struct({ email: t.string }),
   output: t.struct({ subject: t.string }),
   run: function* (input, ctx) {
@@ -66,7 +64,6 @@ const notify = defineStep({
 
 const ParallelWorkflow = defineWorkflow({
   name: "ParallelWorkflow",
-  version: 1,
   input: t.struct({ id: t.string }),
   output: t.void,
   run: function* (input, ctx) {

@@ -99,7 +99,6 @@ const dispatchShipment = defineStep({
 
 export const OrderWorkflow = defineWorkflow({
   name: "OrderWorkflow",
-  version: 1,
   input: t.struct({
     apiUrl: t.string,
     orderId: t.string,

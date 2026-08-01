@@ -58,7 +58,6 @@ const postToLedger = defineStep({
 
 export const ExpenseApprovalWorkflow = defineWorkflow({
   name: "ExpenseApprovalWorkflow",
-  version: 1,
   input: t.struct({
     requestId: t.string,
     requester: t.string,

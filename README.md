@@ -3,8 +3,8 @@
 An agent-first workflow platform. The agent is not the runtime — it is the
 workflow *designer*. It discovers connectors, inspects their schemas and auth
 requirements, composes them into durable workflows, validates them, runs them,
-and inspects the resulting events. What you keep is a repeatable, versioned
-workflow artifact, not an expensive LLM execution trace.
+and inspects the resulting events. What you keep is a repeatable workflow
+artifact, not an expensive LLM execution trace.
 
 The `wf` CLI is the primary surface. Everything below is a command you can run.
 
@@ -43,7 +43,7 @@ wf create hello
 ```
 
 ```
-Created hello	dev	HelloWorkflow#HelloWorkflow	520 bytes
+Created hello	HelloWorkflow#HelloWorkflow	520 bytes
 ```
 
 What it stored is the workflow shown under [Authoring reference](#authoring-reference):
@@ -62,7 +62,7 @@ wf validate hello
 ```
 
 ```
-Valid hello@dev	HelloWorkflow#HelloWorkflow
+Valid hello	HelloWorkflow#HelloWorkflow
 input: {"type":"object","properties":{"message":{"type":"string"}},"required":["message"],"additionalProperties":false}
 output: {"type":"null"}
 flow:
@@ -75,7 +75,7 @@ just authored. A broken workflow exits non-zero and prints why — here, a field
 the workflow reads but never declared in its input schema:
 
 ```
-Invalid broken@dev
+Invalid broken
   - undefined is not an object (evaluating 'input.items.reduce')
 ```
 
@@ -95,10 +95,10 @@ wf run hello '{"message":"hello from wf"}'
 ```
 [run] id cd0624a8-793a-44ce-9af6-b8cf75a5cbee
 hello from wf
-[workflow] started HelloWorkflow@v1 input={"message":"hello from wf"}
+[workflow] started HelloWorkflow input={"message":"hello from wf"}
 [step] started PrintMessage#1 attempt=1
 [step] completed PrintMessage#1 attempt=1 result=undefined
-[workflow] completed HelloWorkflow@v1 result=undefined
+[workflow] completed HelloWorkflow result=undefined
 Workflow completed.
 ```
 
@@ -114,7 +114,7 @@ wf runs
 ```
 
 ```
-cd0624a8-793a-44ce-9af6-b8cf75a5cbee	completed	hello@dev	2026-07-27T22:29:53.201Z	2026-07-27T22:29:53.429Z
+cd0624a8-793a-44ce-9af6-b8cf75a5cbee	completed	hello	2026-07-27T22:29:53.201Z	2026-07-27T22:29:53.429Z
 ```
 
 ```bash
@@ -122,11 +122,11 @@ wf history cd0624a8-793a-44ce-9af6-b8cf75a5cbee
 ```
 
 ```
-1	…428Z	execution.started	{"type":"execution.started","executionId":"cd0624a8-…","workflowName":"HelloWorkflow","version":1,"payload":{"message":"hello from wf"}}
-2	…428Z	workflow.started	{"type":"workflow.started","workflowName":"HelloWorkflow@v1","payload":{"message":"hello from wf"}}
+1	…428Z	execution.started	{"type":"execution.started","executionId":"cd0624a8-…","workflowName":"HelloWorkflow","payload":{"message":"hello from wf"}}
+2	…428Z	workflow.started	{"type":"workflow.started","workflowName":"HelloWorkflow","payload":{"message":"hello from wf"}}
 3	…428Z	step.started	{"type":"step.started","executionId":"cd0624a8-…","stepName":"PrintMessage","invocation":1,"activityName":"PrintMessage#1","attempt":1,"input":{"message":"hello from wf"}}
 4	…429Z	step.completed	{"type":"step.completed","executionId":"cd0624a8-…","stepName":"PrintMessage","invocation":1,"activityName":"PrintMessage#1","attempt":1}
-5	…429Z	workflow.completed	{"type":"workflow.completed","workflowName":"HelloWorkflow@v1"}
+5	…429Z	workflow.completed	{"type":"workflow.completed","workflowName":"HelloWorkflow"}
 ```
 
 (Timestamps and ids abridged.) Each row is the durable record the engine
@@ -230,7 +230,6 @@ const NotApproved = t.taggedStruct("NotApproved", { reason: t.string })
 
 export const LinearIssueWorkflow = defineWorkflow({
   name: "LinearIssueWorkflow",
-  version: 1,
   input: t.struct({ team: t.string, title: t.string, detail: t.string }),
   output: t.struct({ identifier: t.string, url: t.string }),
   errors: NotApproved,
@@ -269,7 +268,7 @@ wf validate linear-issue
 ```
 
 ```
-Valid linear-issue@dev	LinearIssueWorkflow#LinearIssueWorkflow
+Valid linear-issue	LinearIssueWorkflow#LinearIssueWorkflow
 input: {"type":"object","properties":{"team":{"type":"string"},"title":{"type":"string"},"detail":{"type":"string"}},…}
 output: {"type":"object","properties":{"identifier":{"type":"string"},"url":{"type":"string"}},…}
 errors: {"type":"object","properties":{"_tag":{"type":"string","enum":["NotApproved"]},"reason":{"type":"string"}},…}
@@ -292,7 +291,7 @@ The run suspends at the approval and tells you exactly how to resume it:
 
 ```
 [run] id 04dc7f53-ae35-44d0-98aa-df86832cbe51
-[workflow] started LinearIssueWorkflow@v1 input={"team":"ENG","title":"Durable workflows","detail":"Try wf"}
+[workflow] started LinearIssueWorkflow input={"team":"ENG","title":"Durable workflows","detail":"Try wf"}
 [code] started build-description#1 reason="Give the reviewer the full issue body before it is filed"
 [code] completed build-description#1 reason="Give the reviewer the full issue body before it is filed" result="Try wf\n\nFiled by wf."
 [signal] waiting fileIssue#1
@@ -395,7 +394,6 @@ const printMessage = defineStep({
 
 export const HelloWorkflow = defineWorkflow({
   name: "HelloWorkflow",
-  version: 1,
   input: t.struct({ message: t.string }),
   output: t.void,
   run: function* (input, ctx) {

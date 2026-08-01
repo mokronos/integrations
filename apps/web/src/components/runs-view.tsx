@@ -109,7 +109,7 @@ export function RunsView({
                   >
                     <span className="run-main">
                       <code>{shortId(run.id)}</code>
-                      <strong>{run.workflowId}@{run.workflowVersion}</strong>
+                      <strong>{run.workflowId}</strong>
                     </span>
                     <StatusBadge status={run.status} />
                     <span>{compactDate(run.startedAt)}</span>
@@ -169,7 +169,7 @@ function RunSummary({ run }: { readonly run: WorkflowRunRecord | undefined }) {
       <CardContent className="run-summary-grid">
         <div>
           <span>Workflow</span>
-          <strong>{run.workflowId}@{run.workflowVersion}</strong>
+          <strong>{run.workflowId}</strong>
         </div>
         <div>
           <span>Started</span>

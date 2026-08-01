@@ -54,7 +54,6 @@ interface CreateWorkflowOptions {
   readonly name: string
   readonly nameProvided: boolean
   readonly source: string
-  readonly version: string
   readonly force: boolean
 }
 
@@ -104,7 +103,6 @@ const printMessage = defineStep({
 
 export const ${options.name} = defineWorkflow({
   name: "${options.name}",
-  version: 1,
   input: t.struct({
     message: t.string
   }),
@@ -126,14 +124,14 @@ const printWorkflows = (workflows: ReadonlyArray<WorkflowArtifact>) => {
   for (const workflow of workflows) {
     const exported = workflow.exportName === undefined ? "" : `#${workflow.exportName}`
     console.log(
-      `${workflow.id}\t${workflow.version}\t${workflow.name}${exported}\t${workflow.source.length} bytes`
+      `${workflow.id}\t${workflow.name}${exported}\t${workflow.source.length} bytes`
     )
   }
 }
 
 const printCreatedWorkflow = (workflow: WorkflowArtifact) => {
   const exported = workflow.exportName === undefined ? "" : `#${workflow.exportName}`
-  console.log(`Created ${workflow.id}\t${workflow.version}\t${workflow.name}${exported}\t${workflow.source.length} bytes`)
+  console.log(`Created ${workflow.id}\t${workflow.name}${exported}\t${workflow.source.length} bytes`)
 }
 
 const printRuns = (runs: ReadonlyArray<WorkflowRunRecord>) => {
@@ -145,7 +143,7 @@ const printRuns = (runs: ReadonlyArray<WorkflowRunRecord>) => {
   for (const run of runs) {
     const finishedAt = run.finishedAt ?? "-"
     console.log(
-      `${run.id}\t${run.status}\t${run.workflowId}@${run.workflowVersion}\t${run.startedAt}\t${finishedAt}`
+      `${run.id}\t${run.status}\t${run.workflowId}\t${run.startedAt}\t${finishedAt}`
     )
   }
 }
@@ -308,7 +306,7 @@ const printValidationResult = (result: Awaited<ReturnType<typeof workflowArtifac
   }
 
   const exportName = result.exportName ?? result.artifact.exportName ?? "default"
-  console.log(`${green("Valid")} ${bold(`${result.artifact.id}@${result.artifact.version}`)}\t${bold(graph.workflowName)}#${exportName}`)
+  console.log(`${green("Valid")} ${bold(result.artifact.id)}\t${bold(graph.workflowName)}#${exportName}`)
   printSchemaLine("input", graph.schemas?.input)
   printSchemaLine("output", graph.schemas?.output)
   printSchemaLine("errors", graph.schemas?.errors)
@@ -331,7 +329,7 @@ const printValidationResult = (result: Awaited<ReturnType<typeof workflowArtifac
 const validationError = (result: Awaited<ReturnType<typeof workflowArtifactToGraph>>): Error => {
   const traceDiagnostics = result.graph?.diagnostics ?? []
   const diagnostics = [...result.diagnostics, ...traceDiagnostics]
-  return new Error(`Invalid ${result.artifact.id}@${result.artifact.version}${diagnostics.map((diagnostic) => `\n  - ${diagnostic}`).join("")}`)
+  return new Error(`Invalid ${result.artifact.id}${diagnostics.map((diagnostic) => `\n  - ${diagnostic}`).join("")}`)
 }
 
 const validationArtifact = async (
@@ -344,7 +342,6 @@ const validationArtifact = async (
       // only exists because an artifact needs one before the source is loaded.
       id: workflowIdFromFile(target.file),
       name: "Workflow",
-      version: "dev",
       source: await readFile(target.file, "utf8"),
       createdAt: new Date().toISOString()
     }
@@ -635,15 +632,11 @@ const createCommand = (runtime: CliRuntimeOptions) => Command.make(
       Flag.optional,
       Flag.withDescription("Import TypeScript from a file")
     ),
-    workflowVersion: Flag.string("workflow-version").pipe(
-      Flag.withDefault("dev"),
-      Flag.withDescription("Workflow version")
-    ),
     force: Flag.boolean("force").pipe(
       Flag.withDescription("Replace an existing workflow id")
     )
   },
-  ({ id, name, source, file, workflowVersion, force }) => runCliTask(async () => {
+  ({ id, name, source, file, force }) => runCliTask(async () => {
     assertWorkflowId(id)
     const nameValue = Option.getOrUndefined(name)
     const sourceValue = Option.getOrUndefined(source)
@@ -659,7 +652,6 @@ const createCommand = (runtime: CliRuntimeOptions) => Command.make(
       name: workflowName,
       nameProvided,
       source: "",
-      version: workflowVersion,
       force
     }
     const sourceText = sourceValue ??
@@ -679,14 +671,12 @@ const createCommand = (runtime: CliRuntimeOptions) => Command.make(
     const loaded = await loadWorkflowArtifact({
       id: options.id,
       name: options.name,
-      version: options.version,
       source: options.source,
       ...(options.nameProvided ? { exportName: options.name } : {})
     })
     const workflow: WorkflowArtifact = {
       id: options.id,
       name: options.nameProvided ? options.name : loaded.workflow.name,
-      version: options.version,
       source: options.source,
       exportName: loaded.exportName,
       createdAt: new Date().toISOString()
@@ -699,7 +689,7 @@ const createCommand = (runtime: CliRuntimeOptions) => Command.make(
   Command.withDescription("Create or import a workflow into the local catalog"),
   Command.withExamples([
     { command: "wf create welcome-email" },
-    { command: "wf create email --file workflows/email.ts --workflow-version 1" }
+    { command: "wf create email --file workflows/email.ts" }
   ])
 )
 
@@ -840,8 +830,7 @@ const signalCommand = (runtime: CliRuntimeOptions) => Command.make(
       const artifact = execution.artifactId === undefined
         ? (await repository.list()).find(
           (candidate) =>
-            candidate.name === execution.workflowName &&
-            candidate.version === String(execution.version)
+            candidate.name === execution.workflowName
         )
         : await repository.get(execution.artifactId)
       if (artifact === undefined) {

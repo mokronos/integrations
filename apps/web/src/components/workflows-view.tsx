@@ -93,7 +93,7 @@ export function WorkflowsView({
                 const key = workflowKey(item)
                 return (
                   <SelectItem key={key} value={key}>
-                    {item.artifact.name} v{item.artifact.version}
+                    {item.artifact.name}
                   </SelectItem>
                 )
               })}
@@ -207,8 +207,6 @@ function WorkflowDetails({
                 <MetadataList
                   value={{
                     name: selected.artifact.name,
-                    version: selected.artifact.version,
-                    engineName: selected.graph?.engineName,
                     sourceHash: selected.graph?.sourceHash === undefined
                       ? undefined
                       : shortId(selected.graph.sourceHash),

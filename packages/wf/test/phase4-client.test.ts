@@ -23,7 +23,6 @@ describe("Phase 4 workflow client", () => {
   test("pendingSignals reports waits and removes delivered waits", async () => {
     const workflow = defineWorkflow({
       name: "pendingSignalsMemory",
-      version: 1,
       input: Schema.Void,
       output: Schema.String,
       run: function* (_, ctx) {
@@ -62,7 +61,6 @@ describe("Phase 4 workflow client", () => {
   test("pendingSignals disambiguates sequential waits with the same name", async () => {
     const workflow = defineWorkflow({
       name: "pendingSignalsSequentialMemory",
-      version: 1,
       input: Schema.Void,
       output: Schema.String,
       run: function* (_, ctx) {
@@ -104,7 +102,6 @@ describe("Phase 4 workflow client", () => {
   test("fresh starts get distinct execution IDs; idempotencyKey deduplicates", async () => {
     const workflow = defineWorkflow({
       name: "freshStarts",
-      version: 1,
       input: Schema.Struct({ value: Schema.String }),
       output: Schema.String,
       run: function* (input) {
@@ -136,7 +133,6 @@ describe("Phase 4 workflow client", () => {
 
     const workflow = defineWorkflow({
       name: "cancelWorkflow",
-      version: 1,
       input: Schema.String,
       output: Schema.String,
       run: function* (input, ctx) {
@@ -188,7 +184,6 @@ describe("Phase 4 workflow client", () => {
   test("status transitions include suspended during sleep and completed after result", async () => {
     const workflow = defineWorkflow({
       name: "statusWorkflow",
-      version: 1,
       input: Schema.Void,
       output: Schema.String,
       run: function* (_, ctx) {
@@ -221,10 +216,9 @@ describe("Phase 4 workflow client", () => {
     )
   })
 
-  test("lifecycle run projection matches name-only executions by version", async () => {
+  test("lifecycle run projection matches name-only executions", async () => {
     const workflow = defineWorkflow({
-      name: "versionedProjection",
-      version: 2,
+      name: "workflowProjection",
       input: Schema.Void,
       output: Schema.String,
       run: function* () {
@@ -237,24 +231,16 @@ describe("Phase 4 workflow client", () => {
 
     const runs = await lifecycleRunRecords(client, [
       {
-        id: "versioned-projection-v1",
+        id: "workflow-projection",
         name: workflow.name,
-        version: "1",
-        source: "v1"
-      },
-      {
-        id: "versioned-projection-v2",
-        name: workflow.name,
-        version: "2",
-        source: "v2"
+        source: "workflow source"
       }
     ])
 
     expect(runs).toContainEqual(
       expect.objectContaining({
         id: handle.executionId,
-        workflowId: "versioned-projection-v2",
-        workflowVersion: "2"
+        workflowId: "workflow-projection"
       })
     )
   })

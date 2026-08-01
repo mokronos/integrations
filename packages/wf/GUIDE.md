@@ -141,7 +141,6 @@ const fetchPublicGitHubFile = defineStep({
 
 export const GitHubFilePreviewWorkflow = defineWorkflow({
   name: "GitHubFilePreviewWorkflow",
-  version: 1,
   input: t.struct({
     owner: t.string,
     repository: t.string,
@@ -162,7 +161,7 @@ export const GitHubFilePreviewWorkflow = defineWorkflow({
 Register and run it:
 
 ```sh
-wf create github-file-preview --file workflows/github-file-preview.ts --version 1
+wf create github-file-preview --file workflows/github-file-preview.ts
 wf list
 wf run github-file-preview '{"owner":"Effect-TS","repository":"effect","path":"README.md"}'
 wf runs

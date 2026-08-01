@@ -26,7 +26,6 @@ describe("ctx.all", () => {
     const determinism = createInMemoryDeterminismState()
     const workflow = defineWorkflow({
       name: "allTupleWorkflow",
-      version: 1,
       input: Schema.Struct({ id: Schema.String }),
       output: Schema.Tuple([Schema.String, Schema.String]),
       run: function* (input, ctx) {
@@ -64,7 +63,6 @@ describe("ctx.all", () => {
 
     const original = defineWorkflow({
       name: "allReplayWorkflow",
-      version: 1,
       input: Schema.Void,
       output: Schema.Tuple([Schema.Number, Schema.Number]),
       run: function* (_, ctx) {
@@ -82,7 +80,6 @@ describe("ctx.all", () => {
 
     const divergent = defineWorkflow({
       name: "allReplayWorkflow",
-      version: 1,
       input: Schema.Void,
       output: Schema.Tuple([Schema.Number]),
       run: function* (_, ctx) {
@@ -121,7 +118,6 @@ describe("ctx.all", () => {
     })
     const workflow = defineWorkflow({
       name: "allFailureWorkflow",
-      version: 1,
       input: Schema.String,
       output: Schema.Void,
       run: function* (input, ctx) {

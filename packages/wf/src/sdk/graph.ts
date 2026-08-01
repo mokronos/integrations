@@ -397,8 +397,6 @@ const graphFromTrace = (options: {
 
   return {
     workflowName: options.workflow.name,
-    version: options.workflow.version,
-    engineName: options.workflow.engineName,
     sourceHash: options.workflow.sourceHash,
     ...(schemas === undefined ? {} : { schemas }),
     nodes,
@@ -424,7 +422,7 @@ export const workflowToGraph = async <I, O, E>(
 
   try {
     await workflow.executeInMemory(input, {
-      executionId: `graph-${workflow.name}-${workflow.version}`,
+      executionId: `graph-${workflow.name}`,
       determinism,
       signalTransport: createSignalTransport(),
       onEvent: (event) => {

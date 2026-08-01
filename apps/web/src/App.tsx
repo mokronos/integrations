@@ -30,7 +30,7 @@ export default function App() {
       return workflows
     }
     return workflows.filter((item) =>
-      `${item.artifact.id} ${item.artifact.name} ${item.artifact.version} ${item.exportName ?? ""}`
+      `${item.artifact.id} ${item.artifact.name} ${item.exportName ?? ""}`
         .toLowerCase()
         .includes(needle)
     )

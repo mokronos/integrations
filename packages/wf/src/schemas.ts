@@ -265,7 +265,6 @@ export const HistoryExecutionStarted = Schema.Struct({
   type: Schema.Literal("execution.started"),
   executionId: ExecutionId,
   workflowName: Schema.String,
-  version: Schema.Number,
   payload: OptionalUnknown,
   actor: OptionalString
 })
@@ -314,7 +313,6 @@ export type WorkflowHistoryRecord = typeof WorkflowHistoryRecord.Type
 export const WorkflowArtifact = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
-  version: Schema.String,
   source: Schema.String,
   exportName: OptionalString,
   createdAt: OptionalString
@@ -324,7 +322,6 @@ export type WorkflowArtifact = typeof WorkflowArtifact.Type
 export const WorkflowManifestEntry = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
-  version: Schema.String,
   source: OptionalString,
   entrypoint: OptionalString,
   exportName: OptionalString,
@@ -340,7 +337,6 @@ export type WorkflowManifest = typeof WorkflowManifest.Type
 export const WorkflowRunRecord = Schema.Struct({
   id: ExecutionId,
   workflowId: Schema.String,
-  workflowVersion: Schema.String,
   status: WorkflowRunStatus,
   input: Schema.Unknown,
   result: OptionalUnknown,
@@ -436,8 +432,6 @@ export const WorkflowGraphCall = Schema.Struct({
 
 export const WorkflowGraph = Schema.Struct({
   workflowName: Schema.String,
-  version: Schema.Number,
-  engineName: OptionalString,
   sourceHash: OptionalString,
   schemas: Schema.optionalKey(WorkflowGraphSchemas),
   nodes: Schema.Array(WorkflowGraphNode),

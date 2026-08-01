@@ -54,7 +54,6 @@ const CaseRejected = t.taggedStruct("CaseRejected", { reason: t.string })
 
 export const ConnectedCaseWorkflow = defineWorkflow({
   name: "ConnectedCaseWorkflow",
-  version: 1,
   input: t.struct({
     customerId: t.string,
     customerTier: t.string,

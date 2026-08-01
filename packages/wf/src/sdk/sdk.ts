@@ -28,7 +28,6 @@ export type WorkflowExecutionStatus = WorkflowRunStatus
 
 export interface WorkflowExecutionHandle {
   readonly executionId: string
-  readonly version: number
 }
 
 export type WorkflowResult =
@@ -47,7 +46,6 @@ export interface WorkflowExecutionRecord {
   readonly executionId: string
   readonly artifactId?: string
   readonly workflowName: string
-  readonly version: number
   readonly status: WorkflowExecutionStatus
   readonly payload: unknown
   readonly startedAt: string
@@ -67,7 +65,6 @@ export interface WorkflowListResult {
   readonly executions: ReadonlyArray<{
     readonly executionId: string
     readonly workflowName: string
-    readonly version: number
     readonly status: WorkflowExecutionStatus
     readonly startedAt: string
     readonly finishedAt?: string
@@ -79,7 +76,7 @@ export interface WorkflowClient {
   start<I, O, E>(
     workflow: DefinedWorkflow<I, O, E>,
     payload: I,
-    opts?: { readonly idempotencyKey?: string; readonly actor?: string; readonly version?: number; readonly artifactId?: string }
+    opts?: { readonly idempotencyKey?: string; readonly actor?: string; readonly artifactId?: string }
   ): Promise<WorkflowExecutionHandle>
   signal(
     executionId: string,
@@ -95,7 +92,6 @@ export interface WorkflowClient {
     workflow: DefinedWorkflow<I, O, E>,
     opts?: {
       readonly status?: WorkflowExecutionStatus
-      readonly version?: number
       readonly limit?: number
       readonly cursor?: string
     }
@@ -119,15 +115,12 @@ export const lifecycleRunRecords = async (
   (await client.executions()).map((execution) => {
     const artifact = execution.artifactId === undefined
       ? artifacts.find(
-        (candidate) =>
-          candidate.name === execution.workflowName &&
-          candidate.version === String(execution.version)
+        (candidate) => candidate.name === execution.workflowName
       )
       : artifacts.find((candidate) => candidate.id === execution.artifactId)
     return {
       id: ExecutionId.make(execution.executionId),
       workflowId: artifact?.id ?? execution.workflowName,
-      workflowVersion: artifact?.version ?? String(execution.version),
       status: execution.status,
       input: execution.payload,
       startedAt: execution.startedAt,
@@ -136,21 +129,6 @@ export const lifecycleRunRecords = async (
   })
 
 export { Cancelled } from "../core.ts"
-
-export class MissingWorkflowVersionError extends Error {
-  readonly _tag = "MissingWorkflowVersionError"
-  readonly workflowName: string
-  readonly version: number
-
-  constructor(options: { readonly workflowName: string; readonly version: number }) {
-    super(
-      `Workflow ${options.workflowName}@v${options.version} is not registered in this runtime; re-register that exact version before resuming this execution`
-    )
-    this.name = "MissingWorkflowVersionError"
-    this.workflowName = options.workflowName
-    this.version = options.version
-  }
-}
 
 interface ExecutionRecord {
   readonly executionId: string
@@ -275,11 +253,11 @@ const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowClient =
 
   return {
     async start(workflow, payload, opts = {}) {
-      const workflowKey = `${workflow.name}@v${workflow.version}`
+      const workflowKey = workflow.name
       if (opts.idempotencyKey !== undefined) {
         const existingId = idempotencyKeys.get(`${workflowKey}:${opts.idempotencyKey}`)
         if (existingId !== undefined) {
-          return { executionId: existingId, version: workflow.version }
+          return { executionId: existingId }
         }
       }
 
@@ -308,7 +286,6 @@ const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowClient =
         type: "execution.started",
         executionId: ExecutionId.make(id),
         workflowName: workflow.name,
-        version: workflow.version,
         payload,
         ...optionalActor(opts.actor)
       })
@@ -347,7 +324,7 @@ const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowClient =
           }
         )
 
-      return { executionId: id, version: workflow.version }
+      return { executionId: id }
     },
 
     async signal(id, name, payload, opts = {}) {
@@ -376,7 +353,6 @@ const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowClient =
         executionId: execution.executionId,
         ...(execution.artifactId === undefined ? {} : { artifactId: execution.artifactId }),
         workflowName: execution.workflow.name,
-        version: execution.workflow.version,
         status: execution.status,
         payload: execution.payload,
         startedAt: execution.startedAt,
@@ -391,7 +367,6 @@ const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowClient =
           executionId: execution.executionId,
           ...(execution.artifactId === undefined ? {} : { artifactId: execution.artifactId }),
           workflowName: execution.workflow.name,
-          version: execution.workflow.version,
           status: execution.status,
           payload: execution.payload,
           startedAt: execution.startedAt,
@@ -402,7 +377,6 @@ const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowClient =
     async list(workflow, opts = {}) {
       const all = Array.from(executions.values())
         .filter((execution) => execution.workflow.name === workflow.name)
-        .filter((execution) => opts.version === undefined || execution.workflow.version === opts.version)
         .filter((execution) => opts.status === undefined || execution.status === opts.status)
         .sort((left, right) => left.startedAt.localeCompare(right.startedAt))
       const start = opts.cursor === undefined ? 0 : Number.parseInt(opts.cursor, 10)
@@ -413,7 +387,6 @@ const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowClient =
         executions: page.map((execution) => ({
           executionId: execution.executionId,
           workflowName: execution.workflow.name,
-          version: execution.workflow.version,
           status: execution.status,
           startedAt: execution.startedAt,
           ...optionalFinishedAt(execution.finishedAt)
@@ -468,7 +441,6 @@ interface DurableExecutionRow {
   readonly id: string
   readonly artifact_id: string | null
   readonly workflow_name: string
-  readonly workflow_version: number
   readonly status: WorkflowExecutionStatus
   readonly payload_json: string
   readonly idempotency_key: string | null
@@ -481,7 +453,6 @@ interface DurableExecutionRow {
 
 interface DurableWorkflowCatalogRow {
   readonly workflow_name: string
-  readonly workflow_version: number
   readonly source_hash: string
   readonly registered_at: string
 }
@@ -496,9 +467,8 @@ const migrateClientDb = (db: Database) => {
   db.exec(`
     CREATE TABLE IF NOT EXISTS wf_client_executions (
        id TEXT PRIMARY KEY,
-       artifact_id TEXT,
+      artifact_id TEXT,
       workflow_name TEXT NOT NULL,
-      workflow_version INTEGER NOT NULL,
       status TEXT NOT NULL,
       payload_json TEXT NOT NULL,
       idempotency_key TEXT,
@@ -510,15 +480,14 @@ const migrateClientDb = (db: Database) => {
     );
 
     CREATE UNIQUE INDEX IF NOT EXISTS wf_client_executions_idempotency_idx
-      ON wf_client_executions(workflow_name, workflow_version, idempotency_key)
+      ON wf_client_executions(workflow_name, idempotency_key)
       WHERE idempotency_key IS NOT NULL;
 
     CREATE TABLE IF NOT EXISTS wf_client_workflows (
       workflow_name TEXT NOT NULL,
-      workflow_version INTEGER NOT NULL,
       source_hash TEXT NOT NULL,
       registered_at TEXT NOT NULL,
-      PRIMARY KEY (workflow_name, workflow_version)
+      PRIMARY KEY (workflow_name)
     );
 
     CREATE TABLE IF NOT EXISTS wf_client_history (
@@ -559,26 +528,25 @@ const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowClient =
   let closing = false
 
   const registerCatalog = (workflow: DefinedWorkflow) => {
-    const existing = db.query<DurableWorkflowCatalogRow, [string, number]>(`
-      SELECT workflow_name, workflow_version, source_hash, registered_at
+    const existing = db.query<DurableWorkflowCatalogRow, [string]>(`
+      SELECT workflow_name, source_hash, registered_at
       FROM wf_client_workflows
       WHERE workflow_name = ?
-        AND workflow_version = ?
-    `).get(workflow.name, workflow.version)
+    `).get(workflow.name)
 
     if (existing !== null) {
       if (existing.source_hash !== workflow.sourceHash) {
         throw new Error(
-          `Workflow ${workflow.name}@v${workflow.version} is already cataloged with different source; register a new version instead`
+          `Workflow ${workflow.name} is already cataloged with different source`
         )
       }
       return
     }
 
-    db.query<unknown, [string, number, string, string]>(`
-      INSERT INTO wf_client_workflows (workflow_name, workflow_version, source_hash, registered_at)
-      VALUES (?, ?, ?, ?)
-    `).run(workflow.name, workflow.version, workflow.sourceHash, nowIso())
+    db.query<unknown, [string, string, string]>(`
+      INSERT INTO wf_client_workflows (workflow_name, source_hash, registered_at)
+      VALUES (?, ?, ?)
+    `).run(workflow.name, workflow.sourceHash, nowIso())
   }
 
   const registerCatalogFromRuntime = (name: string) => {
@@ -639,7 +607,6 @@ const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowClient =
     executionId: row.id,
     ...(row.artifact_id === null ? {} : { artifactId: row.artifact_id }),
     workflowName: row.workflow_name,
-    version: row.workflow_version,
     status: row.status,
     payload: decodeStoredValue(row.payload_json),
     startedAt: row.started_at,
@@ -647,33 +614,18 @@ const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowClient =
   })
 
   const workflowFor = (row: DurableExecutionRow): DefinedWorkflow => {
-    const workflow = runtime.getWorkflow(row.workflow_name, row.workflow_version)
+    const workflow = runtime.getWorkflow(row.workflow_name)
     if (workflow === undefined) {
-      throw new MissingWorkflowVersionError({
-        workflowName: row.workflow_name,
-        version: row.workflow_version
-      })
+      throw new Error(`Workflow ${row.workflow_name} is not registered in this runtime`)
     }
     return workflow
   }
 
-  const workflowForStart = (workflow: DefinedWorkflow, version?: number): DefinedWorkflow => {
+  const workflowForStart = (workflow: DefinedWorkflow): DefinedWorkflow => {
     runtime.register([workflow])
     registerCatalogFromRuntime(workflow.name)
-
-    const selected = version === undefined
-      ? runtime.getLatestWorkflow(workflow.name)
-      : runtime.getWorkflow(workflow.name, version)
-
-    if (selected === undefined) {
-      throw new MissingWorkflowVersionError({
-        workflowName: workflow.name,
-        version: version ?? workflow.version
-      })
-    }
-
-    registerCatalog(selected)
-    return selected
+    registerCatalog(workflow)
+    return workflow
   }
 
   const makeEventSink = (executionId: string) => async (event: WorkflowEvent) => {
@@ -760,39 +712,36 @@ const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowClient =
 
   return {
     async start(workflow, payload, opts = {}) {
-      const selectedWorkflow = workflowForStart(workflow, opts.version)
+      const selectedWorkflow = workflowForStart(workflow)
       if (opts.idempotencyKey !== undefined) {
-        const existing = db.query<{ id: string }, [string, number, string]>(`
+        const existing = db.query<{ id: string }, [string, string]>(`
           SELECT id
           FROM wf_client_executions
           WHERE workflow_name = ?
-            AND workflow_version = ?
             AND idempotency_key = ?
-        `).get(selectedWorkflow.name, selectedWorkflow.version, opts.idempotencyKey)
+        `).get(selectedWorkflow.name, opts.idempotencyKey)
         if (existing !== null) {
-          return { executionId: existing.id, version: selectedWorkflow.version }
+          return { executionId: existing.id }
         }
       }
 
       const id = executionId()
-      db.query<unknown, [string, string | null, string, number, string, string | null, string | null, string]>(`
+      db.query<unknown, [string, string | null, string, string, string | null, string | null, string]>(`
         INSERT INTO wf_client_executions (
           id,
           artifact_id,
           workflow_name,
-          workflow_version,
           status,
           payload_json,
           idempotency_key,
           actor,
           started_at
         )
-        VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?)
+        VALUES (?, ?, ?, 'running', ?, ?, ?, ?)
       `).run(
         id,
         opts.artifactId ?? null,
         selectedWorkflow.name,
-        selectedWorkflow.version,
         encodeStoredValue(payload),
         opts.idempotencyKey ?? null,
         opts.actor ?? null,
@@ -802,13 +751,12 @@ const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowClient =
         type: "execution.started",
         executionId: ExecutionId.make(id),
         workflowName: selectedWorkflow.name,
-        version: selectedWorkflow.version,
         payload,
         ...optionalActor(opts.actor)
       })
 
       void runToTerminal(getRow(id))
-      return { executionId: id, version: selectedWorkflow.version }
+      return { executionId: id }
     },
 
     async signal(executionId, name, payload, opts = {}) {
@@ -880,7 +828,6 @@ const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowClient =
         WHERE workflow_name = ?
         ORDER BY started_at
       `).all(workflow.name)
-        .filter((row) => opts.version === undefined || row.workflow_version === opts.version)
         .filter((row) => opts.status === undefined || row.status === opts.status)
       const start = opts.cursor === undefined ? 0 : Number.parseInt(opts.cursor, 10)
       const limit = opts.limit ?? rows.length
@@ -890,7 +837,6 @@ const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowClient =
         executions: page.map((row) => ({
           executionId: row.id,
           workflowName: row.workflow_name,
-          version: row.workflow_version,
           status: row.status,
           startedAt: row.started_at,
           ...optionalFinishedAt(row.finished_at ?? undefined)
@@ -1014,7 +960,7 @@ export const createWorkflowSdk = (options: WorkflowSdkOptions = {}): WorkflowSdk
         throw new Error(`Unknown workflow id: ${id}`)
       }
 
-      const runId = `${artifact.id}:${artifact.version}:${executionId()}`
+      const runId = `${artifact.id}:${executionId()}`
       await runStore?.startRun({ id: runId, workflow: artifact, input })
 
       const loaded = await loadWorkflowArtifact(artifact)

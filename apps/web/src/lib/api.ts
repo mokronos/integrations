@@ -75,7 +75,7 @@ const getRunEventsJson = async (url: string): Promise<RunEventsResponse> => {
 }
 
 export const workflowKey = (item: WorkflowArtifactGraph): string =>
-  `${item.artifact.id}@${item.artifact.version}`
+  item.artifact.id
 
 export const fetchWorkflows = (): Promise<WorkflowsResponse> =>
   getWorkflowsJson("/api/workflows")

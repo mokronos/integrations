@@ -122,7 +122,6 @@ describe("Executor integration node", () => {
     })
     const workflow = defineWorkflow({
       name: "ExecutorIntegrationTest",
-      version: 1,
       input: t.struct({ title: t.string }),
       output: CreateIssueOutput,
       run: function* (input, ctx) {

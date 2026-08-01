@@ -239,7 +239,6 @@ export interface WorkflowContext<WErrors> {
 
 export interface DefineWorkflowConfig<I, O, WErrors = never> {
   readonly name: string
-  readonly version: number
   readonly input: AnySchema<I>
   readonly output: AnySchema<O>
   readonly errors?: AnySchema<WErrors>
@@ -251,8 +250,6 @@ export const DefinedWorkflowTypeId = Symbol.for("wf/DefinedWorkflow")
 export interface DefinedWorkflow<I = any, O = any, WErrors = any> {
   readonly [DefinedWorkflowTypeId]: typeof DefinedWorkflowTypeId
   readonly name: string
-  readonly version: number
-  readonly engineName: string
   readonly sourceHash: string
   readonly input: AnySchema<I>
   readonly output: AnySchema<O>
@@ -1394,7 +1391,6 @@ export const defineWorkflow = <
   const Errors extends AnySchema = typeof Schema.Never
 >(config: {
   readonly name: string
-  readonly version: number
   readonly input: Input
   readonly output: Output
   readonly errors?: Errors
@@ -1404,18 +1400,15 @@ export const defineWorkflow = <
   ) => Generator<any, Schema.Schema.Type<Output>, any>
 }): DefinedWorkflow<Schema.Schema.Type<Input>, Schema.Schema.Type<Output>, Schema.Schema.Type<Errors>> => {
   const errors = config.errors ?? Schema.Never
-  const engineName = `${config.name}@v${config.version}`
   const sourceHash = createHash("sha256")
     .update(config.name)
-    .update("\0")
-    .update(String(config.version))
     .update("\0")
     .update(config.run.toString())
     .digest("hex")
 
   const WorkflowPayload = Schema.Struct({ value: Schema.Unknown })
   const workflow = Workflow.make({
-    name: engineName,
+    name: config.name,
     payload: WorkflowPayload,
     idempotencyKey: (payload) => JSON.stringify(payload.value),
     success: config.output,
@@ -1522,8 +1515,6 @@ export const defineWorkflow = <
   return {
     [DefinedWorkflowTypeId]: DefinedWorkflowTypeId,
     name: config.name,
-    version: config.version,
-    engineName,
     sourceHash,
     input: config.input,
     output: config.output,

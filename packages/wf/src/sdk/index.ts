@@ -41,7 +41,7 @@ export type {
   WorkflowGraphOptions
 } from "./graph.ts"
 export { parseJsonText, toJsonText } from "./json.ts"
-export { Cancelled, MissingWorkflowVersionError, createWorkflowClient, createWorkflowSdk, lifecycleRunRecords } from "./sdk.ts"
+export { Cancelled, createWorkflowClient, createWorkflowSdk, lifecycleRunRecords } from "./sdk.ts"
 export type {
   WorkflowClient,
   WorkflowExecutionHandle,

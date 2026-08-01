@@ -19,7 +19,6 @@ import { parseJsonText, toJsonText } from "./json.ts"
 interface WorkflowRow {
   readonly id: string
   readonly name: string
-  readonly version: string
   readonly source: string | null
   readonly entrypoint?: string | null
   readonly export_name: string | null
@@ -29,7 +28,6 @@ interface WorkflowRow {
 interface WorkflowRunRow {
   readonly id: string
   readonly workflow_id: string
-  readonly workflow_version: string
   readonly status: WorkflowRunStatus
   readonly input_json: string
   readonly result_json: string | null
@@ -74,7 +72,6 @@ const optionalStringField = <K extends string>(
 const toArtifact = (rootDir: string, row: WorkflowRow): WorkflowArtifact => ({
   id: row.id,
   name: row.name,
-  version: row.version,
   source: row.source !== null && row.source.length > 0
     ? row.source
     : legacySourceFromEntrypoint(rootDir, row.entrypoint),
@@ -97,7 +94,6 @@ const legacySourceFromEntrypoint = (rootDir: string, entrypoint: string | null |
 const toRunRecord = (row: WorkflowRunRow): WorkflowRunRecord => Schema.decodeUnknownSync(WorkflowRunRecordSchema)({
   id: row.id,
   workflowId: row.workflow_id,
-  workflowVersion: row.workflow_version,
   status: row.status,
   input: JSON.parse(row.input_json),
   result: parseJsonText(row.result_json),
@@ -164,18 +160,16 @@ const migrate = (db: SqliteDatabase) => {
     CREATE TABLE IF NOT EXISTS workflows (
       id TEXT NOT NULL,
       name TEXT NOT NULL,
-      version TEXT NOT NULL,
       source TEXT NOT NULL DEFAULT '',
       entrypoint TEXT NOT NULL DEFAULT '',
       export_name TEXT,
       created_at TEXT NOT NULL,
-      PRIMARY KEY (name, version)
+      PRIMARY KEY (name)
     );
 
     CREATE TABLE IF NOT EXISTS workflow_runs (
       id TEXT PRIMARY KEY,
       workflow_id TEXT NOT NULL,
-      workflow_version TEXT NOT NULL,
        status TEXT NOT NULL CHECK (status IN ('running', 'suspended', 'compensating', 'completed', 'failed')),
       input_json TEXT NOT NULL,
       result_json TEXT,
@@ -210,7 +204,6 @@ const migrate = (db: SqliteDatabase) => {
     db.prepare("ALTER TABLE workflows ADD COLUMN source TEXT NOT NULL DEFAULT ''").run()
   }
 
-  db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS workflows_name_version_idx ON workflows(name, version)").run()
 }
 
 export const createSqliteWorkflowRepository = (
@@ -229,31 +222,27 @@ export const createSqliteWorkflowRepository = (
     async upsertWorkflow(workflow) {
       const db = await dbPromise
       const existing = db.prepare<WorkflowRow>(`
-        SELECT id, name, version, source, entrypoint, export_name, created_at
+        SELECT id, name, source, entrypoint, export_name, created_at
         FROM workflows
         WHERE name = ?
-          AND version = ?
-      `).get(workflow.name, workflow.version)
+      `).get(workflow.name)
 
       if (existing !== null) {
         const existingSource = existing.source !== null && existing.source.length > 0
           ? existing.source
           : legacySourceFromEntrypoint(rootDir, existing.entrypoint)
         if (existingSource !== workflow.source) {
-          throw new Error(
-            `Workflow ${workflow.name}@v${workflow.version} is already cataloged with different source; register a new version instead`
-          )
+          throw new Error(`Workflow ${workflow.name} is already cataloged with different source`)
         }
         return
       }
 
       db.prepare<unknown>(`
-        INSERT INTO workflows (id, name, version, source, entrypoint, export_name, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO workflows (id, name, source, entrypoint, export_name, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
       `).run(
         workflow.id,
         workflow.name,
-        workflow.version,
         workflow.source,
         "",
         workflow.exportName ?? null,
@@ -269,7 +258,7 @@ export const createSqliteWorkflowRepository = (
     async list() {
       const db = await dbPromise
       const rows = db.prepare<WorkflowRow>(`
-        SELECT id, name, version, source, entrypoint, export_name, created_at
+        SELECT id, name, source, entrypoint, export_name, created_at
         FROM workflows
         ORDER BY id
       `).all()
@@ -279,7 +268,7 @@ export const createSqliteWorkflowRepository = (
     async get(id) {
       const db = await dbPromise
       const row = db.prepare<WorkflowRow>(`
-        SELECT id, name, version, source, entrypoint, export_name, created_at
+        SELECT id, name, source, entrypoint, export_name, created_at
         FROM workflows
         WHERE id = ?
       `).get(id)
@@ -303,12 +292,11 @@ export const createSqliteWorkflowRepository = (
         INSERT INTO workflow_runs (
           id,
           workflow_id,
-          workflow_version,
           status,
           input_json,
           started_at
         )
-        VALUES (?, ?, ?, 'running', ?, ?)
+        VALUES (?, ?, 'running', ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           status = 'running',
           input_json = excluded.input_json,
@@ -316,7 +304,7 @@ export const createSqliteWorkflowRepository = (
           error_json = NULL,
           started_at = excluded.started_at,
           finished_at = NULL
-      `).run(id, workflow.id, workflow.version, toJsonText(input), startedAt)
+      `).run(id, workflow.id, toJsonText(input), startedAt)
 
       const row = db.prepare<WorkflowRunRow>(`
         SELECT *

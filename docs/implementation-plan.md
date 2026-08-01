@@ -1,6 +1,6 @@
 # Core Wrapper Implementation Plan
 
-Target: implement the `docs/spec.md` v1 API as a wrapper over `@effect/workflow`, plus the
+Target: implement the `docs/spec.md` API as a wrapper over `@effect/workflow`, plus the
 handful of operational primitives that competitor research showed cannot be layered on later
 (cancel, signal buffering, actor metadata, secret references, concurrency limits). Everything
 else — triggers/webhooks/cron dispatchers, connectors, UI, RBAC/SSO, task-inbox service,
@@ -9,7 +9,7 @@ visualizations — is platform and explicitly **out of scope**.
 ## Summary of decisions
 
 1. **Authoring model**: `defineStep` (input/output/errors schemas, plain-async `execute`,
-   colocated `compensate`, retry policy) + `defineWorkflow` (required `version`, generator
+   colocated `compensate`, retry policy) + `defineWorkflow` (generator
    `run`) + `ctx.run(step, input)` with automatic per-step invocation counters. This replaces
    the current `ctx.activity(name, fn, opts)` model in `packages/wf/src/core.ts`.
 2. **Error taxonomy**: thrown/undeclared = transient = retried per policy; `step.fail(...)` /
@@ -17,26 +17,23 @@ visualizations — is platform and explicitly **out of scope**.
 3. **Execution identity**: every `client.start()` is a fresh execution (random ID); dedup only
    via explicit `idempotencyKey`. This replaces the current deterministic hash-of-input run IDs
    in `packages/wf/src/sdk/sdk.ts`.
-4. **Versioning**: `version` required; executions pinned to their start version; multiple
-   versions of one workflow stay registered until drained. Catalog persistence must key on
-   `(name, version)`, not `id` (current `sqlite.ts` upserts a single row per id).
-5. **Determinism**: `ctx.now()` / `ctx.random()` recorded and replayed; replay-divergence
+4. **Determinism**: `ctx.now()` / `ctx.random()` recorded and replayed; replay-divergence
    detector fails loudly with `NonDeterminismError` instead of silently corrupting state.
-6. **Signals**: typed payload via schema, timeout as a typed *outcome* (business branch, not
+5. **Signals**: typed payload via schema, timeout as a typed *outcome* (business branch, not
    exception), and **buffering** — a signal delivered before the workflow reaches
    `waitForSignal` must not be lost.
-7. **Promoted from "platform" into core** (they change engine semantics or persistence
+6. **Promoted from "platform" into core** (they change engine semantics or persistence
    formats, so they go in now): `client.cancel()` with compensate-or-kill semantics; actor
    metadata on start/signal/cancel recorded in history; secret *references* (never values) in
    step payloads; per-step concurrency/rate keys.
-8. **HITL** needs no new primitive: it is `ctx.run(notifyStep)` + durable
+7. **HITL** needs no new primitive: it is `ctx.run(notifyStep)` + durable
    `ctx.waitForSignal(..., { timeout })`. Buffering + signal auth/audit (actor metadata) make
    it production-grade. Task-inbox service/UI is platform, later.
 
 ## Deferred (do not build)
 
-`ctx.all` fan-out, child workflows, continue-as-new / history truncation, `patched()`-style
-intra-version migration, custom backoff beyond `attempts`/`"exponential"`, trigger dispatchers
+`ctx.all` fan-out, child workflows, continue-as-new / history truncation, workflow migration,
+custom backoff beyond `attempts`/`"exponential"`, trigger dispatchers
 (webhook/cron/polling — they compose on top of `client.start` + `idempotencyKey`), task-inbox
 records, any UI. `DurableQueue` etc. remain reachable via the `ctx.effect` escape hatch.
 
@@ -48,7 +45,7 @@ records, any UI. `DurableQueue` etc. remain reachable via the `ctx.effect` escap
 - `packages/wf/src/errors.ts` — `defineError` (subsumed by step/workflow `errors` schemas;
   keep as sugar or fold in).
 - `packages/wf/src/signal.ts` — `defineSignal` (replaced by named+typed signals on ctx).
-- `packages/wf/src/sdk/*` + `apps/cli` — catalog/run SDK (rework identity + versioning).
+- `packages/wf/src/sdk/*` + `apps/cli` — catalog/run SDK.
 - `packages/wf/test/mock-fixtures.test.ts` — replace/extend with per-phase tests below.
 
 ---
@@ -74,8 +71,7 @@ The foundation; everything else depends on it. Rewrite `core.ts` around the spec
   - Decodes input / encodes output through the step's schemas before persistence.
   - Attaches `compensate` via `Workflow.withCompensation` at the call site, wrapping it so it
     receives `(result, input, reason)`.
-- New `defineWorkflow({ name, version, input, output, errors, run })` (spec §2). `version` is
-  required — no default. Internally the engine workflow name is `` `${name}@v${version}` ``.
+- New `defineWorkflow({ name, input, output, errors, run })` (spec §2).
 - `ctx.fail(error)` — typed against workflow `errors`, terminal, triggers LIFO unwind of every
   completed step's compensation.
 - `ctx.sleep(duration, name?)` — keep `DurableClock.sleep`; apply the same invocation-counter
@@ -110,10 +106,10 @@ Acceptance:
 Acceptance:
 - Test: workflow using `ctx.now`/`ctx.random` produces identical values across a
   crash-and-resume (kill the engine mid-run between steps, restart, resume).
-- Test: simulate divergence (register a v1 execution's history, replay against a body with a
+- Test: simulate divergence (register an execution's history, replay against a body with a
   reordered/renamed step) → `NonDeterminismError` naming the step; no state written.
 
-## Phase 3 — Signals v2: typed payloads, timeout-as-value, buffering
+## Phase 3 — Signals: typed payloads, timeout-as-value, buffering
 
 Replace `signal.ts`'s bare `defineSignal`/`DurableDeferred` usage.
 
@@ -144,7 +140,7 @@ Rework `packages/wf/src/sdk/sdk.ts` into `createWorkflowClient()` (spec §4).
 
 - `start(workflow, payload, opts?)` — **fresh random execution ID by default**; explicit
   `opts.idempotencyKey` opts into at-most-once (same key → same execution). Returns a handle
-  `{ executionId, version }`. Remove the hash-of-input run IDs.
+  `{ executionId }`. Remove the hash-of-input run IDs.
 - `signal(executionId, name, payload, opts?)` — validates against the wait's schema, buffers
   per Phase 3.
 - `result(executionId)` — blocks until terminal; returns
@@ -172,24 +168,7 @@ Acceptance:
   `false` it doesn't; both appear in `history` with actor.
 - Test: `status` transitions observed across a full run incl. `suspended` during sleep.
 
-## Phase 5 — Versioning & persistence
-
-- Catalog schema change in `packages/wf/src/sdk/sqlite.ts`: workflows keyed by
-  `(name, version)`; registering the same version twice with different source is an error (or
-  content-hash check); no upsert-over-old-version.
-- `registerWorkflows([...])` / `engine.register([...])` accepts multiple versions of the same
-  name; new `start`s always bind the highest registered version (or an explicit
-  `version` opt); each execution row stores its pinned version and replays only against it.
-- Starting/resuming an execution whose pinned version is no longer registered fails loudly
-  with a clear error (tells the operator to re-register, not silently run the wrong body).
-- `client.list` supports filtering by version so an operator can tell when v1 has drained.
-
-Acceptance:
-- Test: start under v1, deploy v1+v2, in-flight v1 execution resumes and completes on v1 while
-  new starts run v2.
-- Test: resume with v1 unregistered → loud, named error.
-
-## Phase 6 — Test runtime (spec §6 — v1, not deferred)
+## Phase 5 — Test runtime
 
 `createTestRuntime()` in a new `packages/wf/src/testing/` module.
 
@@ -213,7 +192,7 @@ Last because both are additive to the Phase 1 step model.
 
 - **Concurrency/rate limits per step**: `defineStep({ ..., concurrency?: { key?: (input) =>
   string, limit: number } })` — engine-side keyed semaphore so N executions calling the same
-  step don't stampede a rate-limited API. v1 scope: in-process semaphore in the engine layer
+  step don't stampede a rate-limited API. Initial scope: in-process semaphore in the engine layer
   (documented as per-node, not distributed); the API shape is the commitment, the distributed
   implementation can come later.
 - **Secret references**: a `SecretRef` schema/marker (`secret("stripe-key")`) usable in step

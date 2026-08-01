@@ -261,7 +261,7 @@ const runCommandLine = async (
   try {
     await Effect.runPromise(
       Command.runWith(makeRootCommand(runtime), { version: packageMetadata.version })(
-        normalizeLegacyArguments(arguments_)
+        arguments_
       ).pipe(
         Effect.catchTag("ShowHelp", (error) => error.errors.length === 0
           ? Effect.void
@@ -272,31 +272,6 @@ const runCommandLine = async (
   } finally {
     await closeExecutor(runtime.storageDir)
   }
-}
-
-// Effect CLI reserves --version as a global action flag. Keep the historical
-// `wf create ... --version <value>` spelling by translating it only within the
-// create command before the framework parses the arguments.
-const normalizeLegacyArguments = (
-  arguments_: ReadonlyArray<string>
-): ReadonlyArray<string> => {
-  if (arguments_[0] !== "create") return arguments_
-  const normalized: Array<string> = []
-  for (let index = 0; index < arguments_.length; index += 1) {
-    const argument = arguments_[index]
-    if (argument === undefined) continue
-    if (argument === "--version") {
-      normalized.push("--workflow-version")
-      const value = arguments_[index + 1]
-      if (value !== undefined) {
-        normalized.push(value)
-        index += 1
-      }
-      continue
-    }
-    normalized.push(argument)
-  }
-  return normalized
 }
 
 export const main = async (): Promise<void> => {

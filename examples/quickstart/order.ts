@@ -40,7 +40,6 @@ const shipOrder = defineStep({
 
 export const OrderWorkflow = defineWorkflow({
   name: "OrderWorkflow",
-  version: 1,
   input: t.struct({ orderId: t.string, amount: t.number }),
   output: t.struct({ paymentId: t.string }),
   errors: t.union([PaymentDeclined, OrderRejected]),

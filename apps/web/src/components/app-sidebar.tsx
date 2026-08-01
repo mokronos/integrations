@@ -1,7 +1,6 @@
 import { ChevronLeft, ChevronRight, History, Layers3, Search, Workflow } from "lucide-react"
 import type { ReactElement } from "react"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -175,9 +174,6 @@ export function AppSidebar({
                   >
                     <span className="list-item-top">
                       <span>{item.artifact.name}</span>
-                      <Badge variant={item.graph === undefined ? "destructive" : "secondary"}>
-                        v{item.artifact.version}
-                      </Badge>
                     </span>
                     <span className="list-item-sub">
                       {item.artifact.id}

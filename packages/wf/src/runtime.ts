@@ -39,8 +39,7 @@ export interface WorkflowRuntime {
   readonly databasePath?: string
   readonly secrets?: SecretResolver
   register(workflows: ReadonlyArray<any>): void
-  getWorkflow(name: string, version: number): DefinedWorkflow | undefined
-  getLatestWorkflow(name: string): DefinedWorkflow | undefined
+  getWorkflow(name: string): DefinedWorkflow | undefined
   listWorkflows(name?: string): ReadonlyArray<DefinedWorkflow>
   execute(options: {
     readonly workflow: DefinedWorkflow
@@ -69,14 +68,12 @@ export interface WorkflowRuntime {
   dispose(): Promise<void>
 }
 
-export class WorkflowVersionConflictError extends Error {
-  readonly _tag = "WorkflowVersionConflictError"
+export class WorkflowConflictError extends Error {
+  readonly _tag = "WorkflowConflictError"
 
-  constructor(options: { readonly name: string; readonly version: number }) {
-    super(
-      `Workflow ${options.name}@v${options.version} is already registered with different source; register a new version instead`
-    )
-    this.name = "WorkflowVersionConflictError"
+  constructor(options: { readonly name: string }) {
+    super(`Workflow ${options.name} is already registered with different source`)
+    this.name = "WorkflowConflictError"
   }
 }
 
@@ -164,36 +161,26 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
 
     register(registered) {
       for (const workflow of registered) {
-        const key = `${workflow.name}@${workflow.version}`
-        const existing = workflows.get(key)
+        const existing = workflows.get(workflow.name)
         if (existing !== undefined && existing.sourceHash !== workflow.sourceHash) {
-          throw new WorkflowVersionConflictError({
-            name: workflow.name,
-            version: workflow.version
-          })
+          throw new WorkflowConflictError({ name: workflow.name })
         }
-        workflows.set(key, workflow)
+        workflows.set(workflow.name, workflow)
       }
     },
 
-    getWorkflow(name, version) {
-      return workflows.get(`${name}@${version}`)
-    },
-
-    getLatestWorkflow(name) {
-      return Array.from(workflows.values())
-        .filter((workflow) => workflow.name === name)
-        .sort((left, right) => right.version - left.version)[0]
+    getWorkflow(name) {
+      return workflows.get(name)
     },
 
     listWorkflows(name) {
       return Array.from(workflows.values())
         .filter((workflow) => name === undefined || workflow.name === name)
-        .sort((left, right) => left.name.localeCompare(right.name) || left.version - right.version)
+        .sort((left, right) => left.name.localeCompare(right.name))
     },
 
     execute({ workflow, payload, executionId, onEvent }) {
-      const workflowName = String(workflow.workflow.name ?? workflow.engineName)
+      const workflowName = String(workflow.workflow.name ?? workflow.name)
       if (onEvent !== undefined) {
         setExecutionEventSink(executionId, onEvent)
       }
@@ -295,7 +282,7 @@ export const makeWorkflowEffect = (
       options.engineDatabasePath === undefined ? {} : { databasePath: options.engineDatabasePath }
     ))
   )
-  const workflowName = String(wf.workflow.name ?? wf.engineName ?? "Workflow")
+  const workflowName = String(wf.workflow.name ?? wf.name ?? "Workflow")
   const execution = Effect.gen(function* () {
     yield* emitWorkflowEvent({ type: "workflow.started", workflowName, payload })
     const result = yield* wf.workflow.execute({ value: payload }).pipe(
