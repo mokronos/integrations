@@ -132,6 +132,14 @@ describe("agent integration acceptance flow", () => {
     }
     const specUrl = `http://127.0.0.1:${server.port}/openapi.json`
 
+    const missing = await runCli([
+      "integrations",
+      "tools",
+      "not_in_catalog"
+    ], environment)
+    expect(missing.exitCode).toBe(1)
+    expect(missing.stderr).toContain("Integration not found in catalog: not_in_catalog")
+
     const summary = await runCli(["integrations", "discover", specUrl], environment)
     expect(summary.exitCode).toBe(0)
     expect(summary.stdout).toContain('"tools": []')
@@ -141,6 +149,14 @@ describe("agent integration acceptance flow", () => {
     expect(textSummary.stdout).toContain("tools: 0")
     expect(textSummary.stdout).toContain(`next: wf i connect agent_acceptance`)
     expect(textSummary.stdout).not.toContain("input:")
+
+    const disconnected = await runCli([
+      "integrations",
+      "tools",
+      "agent_acceptance"
+    ], environment)
+    expect(disconnected.exitCode).toBe(1)
+    expect(disconnected.stderr).toContain("Integration is not connected: agent_acceptance/default")
 
     const connected = await runCli([
       "integrations",

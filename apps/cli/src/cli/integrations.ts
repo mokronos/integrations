@@ -181,6 +181,23 @@ const selectAuthMethod = (
   return selected
 }
 
+const assertToolsTarget = async (
+  integration: string,
+  connection: string
+): Promise<void> => {
+  const integrations = await listExecutorIntegrations()
+  if (!integrations.some((candidate) => candidate.slug === integration)) {
+    throw new Error(`Integration not found in catalog: ${integration}`)
+  }
+
+  const connections = await listExecutorConnections()
+  if (!connections.some((candidate) =>
+    candidate.integration === integration && candidate.name === connection
+  )) {
+    throw new Error(`Integration is not connected: ${integration}/${connection}`)
+  }
+}
+
 const makeDiscover = () => Command.make(
   "discover",
   {
@@ -286,6 +303,12 @@ const makeTools = () => Command.make(
       return yield* cliError("Provide the integration either positionally or with --integration, not both")
     }
     const selected = positional ?? flagged
+    if (selected !== undefined) {
+      yield* Effect.tryPromise({
+        try: () => assertToolsTarget(selected, connection),
+        catch: (error) => cliError(error instanceof Error ? error.message : String(error))
+      })
+    }
     const tools = yield* Effect.tryPromise({
       try: () => listExecutorTools({
         ...(selected === undefined ? {} : { integration: selected }),
