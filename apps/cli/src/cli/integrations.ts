@@ -238,8 +238,8 @@ const makeSearch = () => Command.make(
       Flag.withDescription("Limit results to one integration kind")
     ),
     limit: Flag.integer("limit").pipe(
-      Flag.withDefault(20),
-      Flag.withDescription("Maximum results (1-100)")
+      Flag.withDefault(5),
+      Flag.withDescription("Maximum results (default: 5, range: 1-100)")
     ),
     text: Flag.boolean("text").pipe(
       Flag.withDescription("Print a human-readable result")
