@@ -24,6 +24,7 @@ wf
 ├── signal
 ├── integrations (alias: i)
 │   ├── discover
+│   ├── search
 │   ├── catalog
 │   ├── connect
 │   ├── connections
@@ -42,18 +43,23 @@ nested subcommands.
 Integration discovery and execution use Executor for both MCP and OpenAPI:
 
 ```sh
-wf integrations discover https://mcp.example.com/mcp
-wf integrations connect <integration-slug>
-wf integrations tools <integration-slug>
-wf integrations invoke <tool-address> '{"query":"status"}'
+wf i discover https://mcp.example.com/mcp
+wf i search linear
+wf i connect <integration-slug>
+wf i tools <integration-slug>
+wf i invoke <tool-address> '{"query":"status"}'
 ```
 
-The default connection is named `default`. Use `--json` on `discover` or `tools`
-when an agent needs complete schemas or machine-readable output. `discover`
-performs URL detection, auth discovery, registration, and tool discovery. For
-OAuth, `connect` opens a browser and returns through a loopback callback.
+The default connection is named `default`. Integration commands return JSON by
+default; use `--text` for human-readable output. `discover` performs URL
+detection, auth discovery, registration, and tool discovery. For OAuth, `connect`
+opens a browser and returns through a loopback callback.
 Credentials are AES-GCM encrypted with a separate user-only key; workflows
 persist only the Executor tool address.
+
+`search` queries the public integrations.sh catalog and returns JSON enriched
+with exact MCP, API, and GraphQL surface URLs. Use `--text` for a
+human-readable result.
 
 `wf install` currently registers a per-user service on Linux and macOS. Windows
 service registration is not implemented yet.

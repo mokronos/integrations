@@ -134,14 +134,13 @@ describe("agent integration acceptance flow", () => {
 
     const summary = await runCli(["integrations", "discover", specUrl], environment)
     expect(summary.exitCode).toBe(0)
-    expect(summary.stdout).toContain("tools: 0")
-    expect(summary.stdout).toContain(`next: wf integrations connect agent_acceptance`)
-    expect(summary.stdout).not.toContain("input:")
+    expect(summary.stdout).toContain('"tools": []')
 
-    const discovered = await runCli(["integrations", "discover", specUrl, "--json"], environment)
-    expect(discovered.exitCode).toBe(0)
-    expect(discovered.stdout).toContain('"kind": "openapi"')
-    expect(discovered.stdout).toContain('"requiresAuthentication": true')
+    const textSummary = await runCli(["integrations", "discover", specUrl, "--text"], environment)
+    expect(textSummary.exitCode).toBe(0)
+    expect(textSummary.stdout).toContain("tools: 0")
+    expect(textSummary.stdout).toContain(`next: wf i connect agent_acceptance`)
+    expect(textSummary.stdout).not.toContain("input:")
 
     const connected = await runCli([
       "integrations",
@@ -151,16 +150,15 @@ describe("agent integration acceptance flow", () => {
       "WF_AGENT_TOKEN"
     ], environment)
     expect(connected.exitCode).toBe(0)
-    expect(connected.stdout).toContain("Connected tools.agent_acceptance.org.default")
-    expect(connected.stdout).toContain("tools: 1")
+    expect(connected.stdout).toContain('"address": "tools.agent_acceptance.org.default')
+    expect(connected.stdout).toContain('"tools": [')
     expect(connected.stdout).not.toContain("acceptance-secret")
 
     const listed = await runCli([
       "integrations",
       "tools",
       "--integration",
-      "agent_acceptance",
-      "--json"
+      "agent_acceptance"
     ], environment)
     expect(listed.exitCode).toBe(0)
     const tools = Schema.decodeUnknownSync(ToolsOutput)(JSON.parse(listed.stdout))
@@ -172,7 +170,8 @@ describe("agent integration acceptance flow", () => {
     const concise = await runCli([
       "integrations",
       "tools",
-      "agent_acceptance"
+      "agent_acceptance",
+      "--text"
     ], environment)
     expect(concise.exitCode).toBe(0)
     expect(concise.stdout).toContain("tickets.create")
@@ -182,7 +181,8 @@ describe("agent integration acceptance flow", () => {
     const validated = await runCli([
       "integrations",
       "validate",
-      createTicket.address
+      createTicket.address,
+      "--text"
     ], environment)
     expect(validated.exitCode).toBe(0)
     expect(validated.stdout).toContain("catalog\t")

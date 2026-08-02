@@ -5,12 +5,14 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { Schema } from "effect"
 import {
   closeExecutor,
+  listExecutorIntegrations,
   normalizeExecutorToolOutputSchema,
   normalizeExecutorToolResult,
   setExecutorStorageDirectory
 } from "../src/index.ts"
 import {
   discoverIntegration,
+  searchIntegrations,
   validateIntegrationNode
 } from "../src/index.ts"
 
@@ -29,6 +31,17 @@ const json = (text: string): Schema.Schema.Type<typeof Schema.Json> =>
   Schema.decodeUnknownSync(Schema.Json)(JSON.parse(text))
 
 describe("Executor discovery SDK", () => {
+  test("does not expose Executor's synthetic built-in integration in the catalog", async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "wf-executor-catalog-"))
+    directories.push(directory)
+    setExecutorStorageDirectory(directory)
+
+    const integrations = await listExecutorIntegrations()
+
+    expect(integrations.some((integration) => integration.kind === "built-in")).toBe(false)
+    expect(integrations.some((integration) => integration.slug === "executor")).toBe(false)
+  })
+
   test("normalizes MCP envelopes into workflow-facing JSON", () => {
     expect(normalizeExecutorToolResult({
       structuredContent: { id: "DOC-1", title: "Typed result" },
@@ -64,6 +77,62 @@ describe("Executor discovery SDK", () => {
         isError: { const: false }
       }
     })).toEqual({})
+  })
+
+  test("searches the registry and returns exact surface URLs", async () => {
+    const server = Bun.serve({
+      port: 0,
+      fetch(request): Response {
+        const url = new URL(request.url)
+        if (url.pathname === "/api/search") {
+          expect(url.searchParams.get("q")).toBe("linear")
+          expect(url.searchParams.get("limit")).toBe("5")
+          return Response.json({
+            results: [{
+              domain: "linear.app",
+              name: "linear.app",
+              description: "Project and issue tracking",
+              kinds: ["mcp", "openapi"],
+              url: "https://integrations.sh/linear.app/"
+            }]
+          })
+        }
+        if (url.pathname === "/api/linear.app/surface") {
+          return Response.json({
+            version: 3,
+            domain: "linear.app",
+            surfaces: [
+              {
+                type: "mcp",
+                slug: "linear",
+                name: "Linear MCP server",
+                url: "https://mcp.linear.app/mcp",
+                transports: ["streamable-http"]
+              },
+              {
+                type: "http",
+                slug: "linear-api",
+                name: "Linear API",
+                spec: "https://linear.app/openapi.json"
+              }
+            ]
+          })
+        }
+        return new Response("not found", { status: 404 })
+      }
+    })
+    servers.push(server)
+
+    const result = await searchIntegrations(
+      { q: "linear", limit: 5 },
+      { registryUrl: `http://127.0.0.1:${server.port}` }
+    )
+    expect(result.query).toBe("linear")
+    expect(result.results).toHaveLength(1)
+    expect(result.results[0]?.surfaces.map((surface) => surface.discoveryUrl)).toEqual([
+      "https://mcp.linear.app/mcp",
+      "https://linear.app/openapi.json"
+    ])
   })
 
   test("runs URL detection, auth discovery, and input/output schema discovery", async () => {

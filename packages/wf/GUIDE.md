@@ -8,7 +8,7 @@ Before running a workflow, tell the user about every action they may need to tak
 
 Never invent credentials, silently substitute a different service, or leave the user with a workflow that appears to hang. If `wf` prints a pending signal command, relay that command and the expected payload to the user verbatim.
 
-When OAuth is available, prefer `wf integrations connect` over asking the user
+When OAuth is available, prefer `wf i connect` over asking the user
 to create or copy a token. Before running it, tell the user which account will
 open in the browser, the scopes requested, and why the workflow needs them.
 Never request every advertised scope by default.
@@ -43,8 +43,6 @@ Start from the service URL instead of guessing protocol, auth, operation names,
 or schemas:
 
 ```sh
-wf integrations discover <mcp-endpoint-or-openapi-url>
-# Short alias:
 wf i discover <mcp-endpoint-or-openapi-url>
 ```
 
@@ -54,31 +52,31 @@ integration slug. OAuth opens the browser and uses dynamic client registration
 when supported, PKCE, a loopback callback, and refresh:
 
 ```sh
-wf integrations connect <integration-slug>
-wf integrations connections
+wf i connect <integration-slug>
+wf i connections
 ```
 
 For an API key or bearer token, put the value in an environment variable and
 name that variable; never place the value on the command line:
 
 ```sh
-wf integrations connect <integration-slug> --credential-env SERVICE_TOKEN
+wf i connect <integration-slug> --credential-env SERVICE_TOKEN
 ```
 
 Then inspect the available tools and copy the selected Executor address into the
-workflow. The default output is concise; add `--json` when complete input/output
-schemas are needed:
+workflow. Integration commands return JSON by default; use `--text` for a
+concise human-readable output:
 
 ```sh
-wf integrations tools <integration-slug>
-wf integrations tools <integration-slug> --json
+wf i tools <integration-slug>
+wf i tools <integration-slug> --text
 ```
 
 For a safe read-only smoke test, invoke the selected address directly before
 authoring:
 
 ```sh
-wf integrations invoke <tool-address> '{"query":"status"}'
+wf i invoke <tool-address> '{"query":"status"}'
 ```
 
 Author the node as
@@ -176,7 +174,7 @@ wf history <run-id>
 ## Continue from here
 
 When adapting this example to an authenticated API, do not place secret values
-in workflow inputs or source code. Use `wf integrations connect`, then persist
+in workflow inputs or source code. Use `wf i connect`, then persist
 only the selected Executor tool address in the workflow.
 
 For human approval flows, explain the decision and payload to the user before starting. When the run suspends, copy the exact `wf signal ...` command printed by the CLI and wait for the user's response before sending it.

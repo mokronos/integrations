@@ -53,12 +53,18 @@ describe("CLI help", () => {
     expect(parent.exitCode).toBe(0)
     expect(parent.stdout).toContain("SUBCOMMANDS")
     expect(parent.stdout).toContain("discover")
+    expect(parent.stdout).toContain("search")
     expect(parent.stdout).toContain("invoke")
     expect(helpFlag.stdout).toBe(parent.stdout)
     expect(aliasHelpFlag.stdout).toBe(parent.stdout)
     expect(subcommandHelp.stdout).toContain("ARGUMENTS")
     expect(subcommandHelp.stdout).toContain("url string")
     expect(aliasSubcommandHelp.stdout).toBe(subcommandHelp.stdout)
+
+    const searchHelp = runCli(["i", "search", "--help"])
+    expect(searchHelp.exitCode).toBe(0)
+    expect(searchHelp.stdout).toContain("query string")
+    expect(searchHelp.stdout).toContain("--text")
   }, 15_000)
 
   test("rejects help for an unknown command", () => {

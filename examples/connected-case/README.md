@@ -13,9 +13,9 @@ The workflow source takes Executor tool addresses from
 workflow:
 
 ```bash
-wf integrations discover <mcp-or-openapi-url> --json
-wf integrations connect <integration-slug> --connection default
-wf integrations tools --integration <integration-slug> --connection default --json
+wf i discover <mcp-or-openapi-url>
+wf i connect <integration-slug> --connection default
+wf i tools --integration <integration-slug> --connection default
 ```
 
 The CLI delegates protocol detection, auth templates, OAuth, connection metadata,

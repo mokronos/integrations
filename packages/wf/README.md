@@ -72,15 +72,15 @@ Start with one URL. The discovery command runs detection, auth discovery,
 registration, and tool-schema discovery:
 
 ```sh
-wf integrations discover https://mcp.example.com/mcp
-wf integrations connect <integration-slug>
-wf integrations tools <integration-slug>
-wf integrations invoke <tool-address> '{"query":"status"}'
-wf integrations connections
+wf i discover https://mcp.example.com/mcp
+wf i connect <integration-slug>
+wf i tools <integration-slug>
+wf i invoke <tool-address> '{"query":"status"}'
+wf i connections
 ```
 
-The default connection is `default`. Add `--json` to discovery or tool listing
-when an agent needs complete schemas or machine-readable output.
+The default connection is `default`. Integration commands return JSON by default;
+use `--text` for human-readable output.
 
 For API keys or bearer tokens, pass the name of an environment variable with
 `--credential-env`; the value is never printed. OAuth uses Executor's discovery,

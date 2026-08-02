@@ -480,7 +480,7 @@ export const addExecutorOpenApi = async (options: {
 
 export const listExecutorIntegrations = async (): Promise<ReadonlyArray<ExecutorIntegration>> =>
   await runExecutor((executor) => executor.integrations.list()).then((integrations) =>
-    integrations.map((integration) => ({
+    integrations.filter((integration) => integration.kind !== "built-in").map((integration) => ({
       slug: String(integration.slug),
       name: integration.name,
       description: integration.description,

@@ -9,12 +9,14 @@ import {
   listExecutorTools,
   removeExecutorConnection,
   discoverIntegration,
+  searchIntegrations,
   validateIntegrationNode
 } from "@mokronos/wfkit-executor"
 import type {
   ExecutorAuthMethod,
   ExecutorIntegration,
-  ExecutorTool
+  ExecutorTool,
+  IntegrationSearchSurface
 } from "@mokronos/wfkit-executor"
 import { authorizeExecutorInBrowser, openBrowser } from "./oauth.ts"
 
@@ -81,12 +83,20 @@ const toolForJson = (tool: ExecutorTool) => ({
 
 const connectedSummary = (
   connection: Awaited<ReturnType<typeof createExecutorConnection>>,
-  tools: ReadonlyArray<ExecutorTool>
+  toolCount: number
 ): string => [
   `Connected ${connection.address}`,
-  `tools: ${tools.length}`,
-  `next: wf integrations tools ${connection.integration}`
+  `tools: ${toolCount}`,
+  `next: wf i tools ${connection.integration}`
 ].join("\n")
+
+const connectedResult = (
+  connection: Awaited<ReturnType<typeof createExecutorConnection>>,
+  tools: ReadonlyArray<ExecutorTool>
+) => ({
+  connection,
+  tools: tools.map(toolForJson)
+})
 
 const formatDiscovery = (discovery: Awaited<ReturnType<typeof discoverIntegration>>): string => {
   const lines = [
@@ -101,11 +111,45 @@ const formatDiscovery = (discovery: Awaited<ReturnType<typeof discoverIntegratio
     ).join(", ")}`)
   }
   if (discovery.requiresAuthentication && discovery.tools.length === 0) {
-    lines.push(`next: wf integrations connect ${discovery.integration.slug}`)
+    lines.push(`next: wf i connect ${discovery.integration.slug}`)
   }
   lines.push(`tools: ${discovery.tools.length}`)
   if (discovery.tools.length > 0) {
-    lines.push(`next: wf integrations tools ${discovery.integration.slug}`)
+    lines.push(`next: wf i tools ${discovery.integration.slug}`)
+  }
+  return lines.join("\n")
+}
+
+const searchSurfaceKind = (surface: IntegrationSearchSurface): string => {
+  switch (surface.type) {
+    case "http":
+    case "openapi":
+      return "openapi"
+    default:
+      return surface.type
+  }
+}
+
+const formatSearch = (search: Awaited<ReturnType<typeof searchIntegrations>>): string => {
+  if (search.results.length === 0) return `No integrations found for "${search.query}".`
+
+  const lines = [`query: ${search.query}`]
+  for (const result of search.results) {
+    lines.push(`\n${result.domain}\t${inline(result.name, 120)}`)
+    if (result.description.length > 0) lines.push(inline(result.description, 240))
+    lines.push(`catalog: ${result.url}`)
+    if (result.surfaces.length === 0) {
+      lines.push("surfaces: none")
+      continue
+    }
+    for (const surface of result.surfaces) {
+      lines.push(`  ${searchSurfaceKind(surface)}\t${surface.name}`)
+      if (surface.url !== undefined) lines.push(`  url: ${surface.url}`)
+      if (surface.spec !== undefined) lines.push(`  spec: ${surface.spec}`)
+      if (surface.discoveryUrl !== undefined) {
+        lines.push(`  discover: wf i discover ${surface.discoveryUrl}`)
+      }
+    }
   }
   return lines.join("\n")
 }
@@ -147,11 +191,11 @@ const makeDiscover = () => Command.make(
       Flag.withDefault("default"),
       Flag.withDescription("Connection name for unauthenticated tools")
     ),
-    json: Flag.boolean("json").pipe(
-      Flag.withDescription("Print detection, auth, and schemas as JSON")
+    text: Flag.boolean("text").pipe(
+      Flag.withDescription("Print a human-readable result")
     )
   },
-  ({ url, connection, json }) =>
+  ({ url, connection, text }) =>
     Effect.tryPromise({
       try: () => discoverIntegration(url, { connection }),
       catch: (error) => cliError(
@@ -159,26 +203,62 @@ const makeDiscover = () => Command.make(
       )
     }).pipe(
       Effect.flatMap((result) =>
-        writeStdoutLine(json ? JSON.stringify(result, null, 2) : formatDiscovery(result))
+        writeStdoutLine(text ? formatDiscovery(result) : JSON.stringify(result, null, 2))
       )
     )
 ).pipe(
-  Command.withDescription("Detect, register, and summarize an integration from one URL")
+  Command.withDescription("Detect and register an integration")
 )
+
+const makeSearch = () => Command.make(
+  "search",
+  {
+    query: Argument.string("query").pipe(
+      Argument.withDescription("Service name, domain, or integration keyword")
+    ),
+    kind: Flag.choice("kind", ["mcp", "openapi", "graphql", "cli"]).pipe(
+      Flag.optional,
+      Flag.withDescription("Limit results to one integration kind")
+    ),
+    limit: Flag.integer("limit").pipe(
+      Flag.withDefault(20),
+      Flag.withDescription("Maximum results (1-100)")
+    ),
+    text: Flag.boolean("text").pipe(
+      Flag.withDescription("Print a human-readable result")
+    )
+  },
+  ({ query, kind, limit, text }) => Effect.tryPromise({
+    try: () => searchIntegrations({
+      q: query,
+      ...(Option.isNone(kind) ? {} : { kind: kind.value }),
+      limit
+    }),
+    catch: (error) => cliError(
+      `Integration search failed: ${error instanceof Error ? errorMessage(error) : String(error)}`
+    )
+  }).pipe(
+    Effect.flatMap((result) => writeStdoutLine(text ? formatSearch(result) : JSON.stringify(result, null, 2)))
+  )
+).pipe(Command.withDescription("Search integrations.sh for exact integration URLs"))
 
 const makeCatalog = () => Command.make(
   "catalog",
-  { json: Flag.boolean("json") },
-  ({ json }) => Effect.tryPromise({
+  {
+    text: Flag.boolean("text").pipe(
+      Flag.withDescription("Print a human-readable result")
+    )
+  },
+  ({ text }) => Effect.tryPromise({
     try: () => listExecutorIntegrations(),
     catch: (error) => cliError(`Could not list integrations: ${String(error)}`)
   }).pipe(
     Effect.flatMap((integrations) => writeStdoutLine(
-      json
-        ? JSON.stringify({ integrations }, null, 2)
-        : integrations.map((integration) =>
+      text
+        ? integrations.map((integration) =>
             `${integration.slug}\t${integration.kind}\t${integration.name}\t${integration.authMethods.map((method) => method.kind).join(",")}`
           ).join("\n") || "No integrations discovered."
+        : JSON.stringify({ integrations }, null, 2)
     ))
   )
 ).pipe(Command.withDescription("List Executor's persisted integration catalog"))
@@ -195,9 +275,11 @@ const makeTools = () => Command.make(
       Flag.withDefault("default"),
       Flag.withDescription("Connection name (default: default)")
     ),
-    json: Flag.boolean("json")
+    text: Flag.boolean("text").pipe(
+      Flag.withDescription("Print a human-readable result")
+    )
   },
-  ({ integration, integrationFlag, connection, json }) => Effect.gen(function*() {
+  ({ integration, integrationFlag, connection, text }) => Effect.gen(function*() {
     const positional = Option.getOrUndefined(integration)
     const flagged = Option.getOrUndefined(integrationFlag)
     if (positional !== undefined && flagged !== undefined) {
@@ -212,12 +294,12 @@ const makeTools = () => Command.make(
       catch: (error) => cliError(`Could not list tools: ${String(error)}`)
     })
     yield* writeStdoutLine(
-      json
-        ? JSON.stringify({ tools: tools.map(toolForJson) }, null, 2)
-        : tools.map(formatTool).join("\n") || "No tools available."
+      text
+        ? tools.map(formatTool).join("\n") || "No tools available."
+        : JSON.stringify({ tools: tools.map(toolForJson) }, null, 2)
     )
   })
-).pipe(Command.withDescription("List an integration's tools; use --json for complete schemas"))
+).pipe(Command.withDescription("List an integration's tools"))
 
 const makeConnect = (options: IntegrationsCliOptions) => Command.make(
   "connect",
@@ -233,7 +315,10 @@ const makeConnect = (options: IntegrationsCliOptions) => Command.make(
     clientId: Flag.string("client-id").pipe(Flag.optional),
     clientSecretEnv: Flag.string("client-secret-env").pipe(Flag.optional),
     noOpen: Flag.boolean("no-open"),
-    timeout: Flag.integer("timeout").pipe(Flag.withDefault(300))
+    timeout: Flag.integer("timeout").pipe(Flag.withDefault(300)),
+    text: Flag.boolean("text").pipe(
+      Flag.withDescription("Print a human-readable result")
+    )
   },
   ({
     target,
@@ -244,7 +329,8 @@ const makeConnect = (options: IntegrationsCliOptions) => Command.make(
     clientId,
     clientSecretEnv,
     noOpen,
-    timeout
+    timeout,
+    text
   }) => Effect.tryPromise({
     try: async () => {
       const integration = await resolveIntegration(target)
@@ -272,13 +358,13 @@ const makeConnect = (options: IntegrationsCliOptions) => Command.make(
           }),
           ...(clientSecret === undefined ? {} : { clientSecret }),
           open: noOpen ? () => undefined : (options.openBrowser ?? openBrowser),
-          onAuthorizationUrl: (url) => console.log(`Authorize in your browser:\n${url}`)
+          onAuthorizationUrl: (url) => console.error(`Authorize in your browser:\n${url}`)
         })
         const tools = await listExecutorTools({
           integration: integration.slug,
           connection: connected.name
         })
-        return connectedSummary(connected, tools)
+        return connectedResult(connected, tools)
       }
       const envName = Option.getOrUndefined(credentialEnv)
       if (envName === undefined) {
@@ -296,27 +382,35 @@ const makeConnect = (options: IntegrationsCliOptions) => Command.make(
         integration: integration.slug,
         connection: connected.name
       })
-      return connectedSummary(connected, tools)
+      return connectedResult(connected, tools)
     },
     catch: (error) => cliError(
       `Connection failed: ${error instanceof Error ? errorMessage(error) : String(error)}`
     )
-  }).pipe(Effect.flatMap(writeStdoutLine))
-).pipe(Command.withDescription("Authorize an Executor integration and report its tool count"))
+  }).pipe(Effect.flatMap((result) => writeStdoutLine(
+    text
+      ? connectedSummary(result.connection, result.tools.length)
+      : JSON.stringify(result, null, 2)
+  )))
+).pipe(Command.withDescription("Authorize an Executor integration"))
 
 const makeConnections = () => Command.make(
   "connections",
-  { json: Flag.boolean("json") },
-  ({ json }) => Effect.tryPromise({
+  {
+    text: Flag.boolean("text").pipe(
+      Flag.withDescription("Print a human-readable result")
+    )
+  },
+  ({ text }) => Effect.tryPromise({
     try: () => listExecutorConnections(),
     catch: (error) => cliError(`Could not list connections: ${String(error)}`)
   }).pipe(
     Effect.flatMap((connections) => writeStdoutLine(
-      json
-        ? JSON.stringify({ connections }, null, 2)
-        : connections.map((connection) =>
+      text
+        ? connections.map((connection) =>
             `${connection.integration}\t${connection.name}\t${connection.template}\t${connection.address}`
           ).join("\n") || "No connected integrations."
+        : JSON.stringify({ connections }, null, 2)
     ))
   )
 ).pipe(Command.withDescription("List Executor connections without exposing credentials"))
@@ -325,13 +419,20 @@ const makeDisconnect = () => Command.make(
   "disconnect",
   {
     integration: Argument.string("integration"),
-    connection: Flag.string("connection").pipe(Flag.withDefault("default"))
+    connection: Flag.string("connection").pipe(Flag.withDefault("default")),
+    text: Flag.boolean("text").pipe(
+      Flag.withDescription("Print a human-readable result")
+    )
   },
-  ({ integration, connection }) => Effect.tryPromise({
+  ({ integration, connection, text }) => Effect.tryPromise({
     try: () => removeExecutorConnection({ integration, name: connection }),
     catch: (error) => cliError(`Disconnect failed: ${String(error)}`)
-  }).pipe(Effect.flatMap(() => writeStdoutLine(`Disconnected ${integration}/${connection}`)))
-).pipe(Command.withDescription("Delete an Executor connection and its stored credential"))
+  }).pipe(Effect.flatMap(() => writeStdoutLine(
+    text
+      ? `Disconnected ${integration}/${connection}`
+      : JSON.stringify({ disconnected: true, integration, connection }, null, 2)
+  )))
+).pipe(Command.withDescription("Delete an Executor connection"))
 
 const makeInvoke = () => Command.make(
   "invoke",
@@ -373,9 +474,11 @@ const makeValidate = () => Command.make(
     config: Argument.string("json-or-tool-address").pipe(Argument.optional),
     file: Flag.string("file").pipe(Flag.optional),
     live: Flag.boolean("live"),
-    json: Flag.boolean("json")
+    text: Flag.boolean("text").pipe(
+      Flag.withDescription("Print a human-readable result")
+    )
   },
-  ({ config, file, live, json }) => Effect.gen(function*() {
+  ({ config, file, live, text }) => Effect.gen(function*() {
     const configText = Option.getOrUndefined(config)
     const filePath = Option.getOrUndefined(file)
     if ((configText === undefined) === (filePath === undefined)) {
@@ -400,11 +503,11 @@ const makeValidate = () => Command.make(
       catch: (error) => cliError(`Integration validation failed: ${String(error)}`)
     })
     yield* writeStdoutLine(
-      json
-        ? JSON.stringify(report, null, 2)
-        : report.findings.map((entry) =>
+      text
+        ? report.findings.map((entry) =>
             `${entry.severity}\t${entry.check}\t${entry.message}`
           ).join("\n")
+        : JSON.stringify(report, null, 2)
     )
     if (!report.ok) return yield* cliError("Integration validation failed")
   })
@@ -416,6 +519,7 @@ export const makeIntegrationsCommand = (options: IntegrationsCliOptions = {}) =>
     Command.withAlias("i"),
     Command.withSubcommands([
       makeDiscover(),
+      makeSearch(),
       makeCatalog(),
       makeTools(),
       makeConnect(options),

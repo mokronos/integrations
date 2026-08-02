@@ -169,7 +169,7 @@ integration slug to connect.
 ### 2. Authorize it in the browser
 
 ```bash
-wf integrations connect <integration-slug>
+wf i connect <integration-slug>
 ```
 
 For OAuth, Executor discovers authorization metadata, dynamically registers a
@@ -182,17 +182,17 @@ discovered defaults in the authorization request.
 Confirm it landed, and see every connection you hold:
 
 ```bash
-wf integrations connections
+wf i connections
 ```
 
 ### 3. Inspect the operations you can call
 
 ```bash
-wf integrations tools <integration-slug>
+wf i tools <integration-slug>
 ```
 
-This lists tool names, addresses, descriptions, and concise input schemas. Add
-`--json` to get complete input and output JSON Schemas. Pick an address and
+This returns JSON with tool names, addresses, descriptions, and complete input
+and output JSON Schemas. Use `--text` for concise human-readable output. Pick an address and
 mirror its schema in the workflow's `input` and `output`.
 Generic MCP envelopes are normalized before they reach workflows: structured
 content is returned directly, JSON text is parsed, and plain text remains a
@@ -201,7 +201,7 @@ string.
 Safely inspect a read-only tool before authoring:
 
 ```bash
-wf integrations invoke <tool-address> '{"query":"workflow integrations"}'
+wf i invoke <tool-address> '{"query":"workflow integrations"}'
 ```
 
 > Linear does not publish a stable list of MCP tool names, so the address and
@@ -339,7 +339,8 @@ nested subcommands.
 All integration commands also accept the shorter `wf i` alias.
 
 ```text
-wf integrations
+wf i
+├── search
 ├── discover
 ├── catalog
 ├── connect
@@ -350,10 +351,11 @@ wf integrations
 └── validate
 ```
 
-`discover` uses Executor to identify MCP or OpenAPI, register the integration,
-discover auth, and list the number of available tools. After `connect`, `tools`
-returns concise canonical addresses and input shapes; add `--json` for complete
-schemas. The default connection is `default`. `validate <tool-address>` checks
+`search` returns JSON by default with exact catalog and surface URLs; use `--text`
+for a readable result. `discover` uses Executor to identify MCP or OpenAPI,
+register the integration, discover auth, and list the number of available tools.
+After `connect`, `tools` returns JSON by default with complete schemas; use
+`--text` for concise canonical addresses and input shapes. The default connection is `default`. `validate <tool-address>` checks
 an authored address against the live catalog. `invoke` executes one tool directly
 and prints its normalized JSON result.
 

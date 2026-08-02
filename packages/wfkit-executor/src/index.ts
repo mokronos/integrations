@@ -35,6 +35,12 @@ export type {
   IntegrationDiscovery,
   IntegrationKind,
   IntegrationNodeConfig,
+  IntegrationSearchKind,
+  IntegrationSearchMatch,
+  IntegrationSearchQuery,
+  IntegrationSearchResponse,
+  IntegrationSearchSurface,
+  SearchIntegrationsOptions,
   IntegrationValidationFinding,
   IntegrationValidationReport
 } from "./integrations.ts"
@@ -43,7 +49,13 @@ export {
   IntegrationDiscovery as IntegrationDiscoverySchema,
   IntegrationKind as IntegrationKindSchema,
   IntegrationNodeConfig as IntegrationNodeConfigSchema,
+  IntegrationSearchKind as IntegrationSearchKindSchema,
+  IntegrationSearchMatch as IntegrationSearchMatchSchema,
+  IntegrationSearchQuery as IntegrationSearchQuerySchema,
+  IntegrationSearchResponse as IntegrationSearchResponseSchema,
+  IntegrationSearchSurface as IntegrationSearchSurfaceSchema,
   IntegrationValidationFinding as IntegrationValidationFindingSchema,
   IntegrationValidationReport as IntegrationValidationReportSchema,
+  searchIntegrations,
   validateIntegrationNode
 } from "./integrations.ts"
