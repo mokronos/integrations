@@ -27,6 +27,7 @@ export type {
   StepContext,
   TerminalFailure,
   WorkflowContext,
+  WorkflowGenerator,
   WorkflowValue
 } from "./core.ts"
 export type { WorkflowEvent, WorkflowEventSink } from "./events.ts"

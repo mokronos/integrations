@@ -148,6 +148,11 @@ export const defineStep = <
 }
 
 export type WorkflowValue<A, E = never> = Effect.Effect<A, E, DynamicService>
+export type WorkflowGenerator<O> = Generator<
+  WorkflowValue<DynamicService, DynamicService>,
+  O,
+  DynamicService
+>
 
 type WorkflowValueSuccess<EffectValue> =
   EffectValue extends WorkflowValue<infer A, DynamicService> ? A : never
@@ -194,7 +199,7 @@ export interface DefineWorkflowConfig<I, O, WErrors = never> {
   readonly input: AnySchema<I>
   readonly output: AnySchema<O>
   readonly errors?: AnySchema<WErrors>
-  readonly run: (input: I, ctx: WorkflowContext<WErrors>) => Generator<any, O, any>
+  readonly run: (input: I, ctx: WorkflowContext<WErrors>) => WorkflowGenerator<O>
 }
 
 export const DefinedWorkflowTypeId = Symbol.for("wf/DefinedWorkflow")
@@ -1293,7 +1298,7 @@ export const defineWorkflow = <
   readonly run: (
     input: Schema.Schema.Type<Input>,
     ctx: WorkflowContext<Schema.Schema.Type<Errors>>
-  ) => Generator<any, Schema.Schema.Type<Output>, any>
+  ) => WorkflowGenerator<Schema.Schema.Type<Output>>
 }): DefinedWorkflow<Schema.Schema.Type<Input>, Schema.Schema.Type<Output>, Schema.Schema.Type<Errors>> => {
   const errors = config.errors ?? Schema.Never
   const sourceHash = createHash("sha256")
