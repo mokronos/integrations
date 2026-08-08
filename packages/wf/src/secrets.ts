@@ -39,3 +39,32 @@ export const isSecretRef = (value: unknown): value is SecretRef =>
 
 export const secretRefName = (value: SecretRef): string =>
   value.slice(SecretRefPrefix.length)
+
+/** Resolve branded secret placeholders recursively at the execution boundary. */
+export const resolveSecretReferences = async (
+  value: unknown,
+  resolver: SecretResolver | undefined
+): Promise<unknown> => {
+  if (isSecretRef(value)) {
+    if (resolver === undefined) {
+      throw new Error(`No secret resolver configured for ${secretRefName(value)}`)
+    }
+    return resolver.resolve(secretRefName(value))
+  }
+
+  if (Array.isArray(value)) {
+    return Promise.all(value.map((item) => resolveSecretReferences(item, resolver)))
+  }
+
+  if (value instanceof Date || typeof value !== "object" || value === null) {
+    return value
+  }
+
+  const entries = await Promise.all(
+    Object.entries(value).map(async ([key, entry]) => [
+      key,
+      await resolveSecretReferences(entry, resolver)
+    ] as const)
+  )
+  return Object.fromEntries(entries)
+}

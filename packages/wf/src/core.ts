@@ -18,8 +18,7 @@ import type { SignalTransport } from "./signal.ts"
 import { defaultConcurrencyLimiter } from "./concurrency.ts"
 import type { ConcurrencyLimiter, StepConcurrencyPolicy } from "./concurrency.ts"
 import {
-  isSecretRef,
-  secretRefName
+  resolveSecretReferences
 } from "./secrets.ts"
 import type {
   SecretResolutionContext,
@@ -379,28 +378,6 @@ const decodeSync = <A>(schema: AnySchema<A>, value: unknown): A =>
 const encodeSync = <A>(schema: AnySchema<A>, value: A): unknown =>
   Schema.encodeSync(schema)(value)
 
-const resolveSecretRefs = async <A>(value: A, resolver: SecretResolver | undefined): Promise<A> => {
-  if (isSecretRef(value)) {
-    if (resolver === undefined) {
-      throw new Error(`No secret resolver configured for ${secretRefName(value)}`)
-    }
-    return await resolver.resolve(secretRefName(value)) as A
-  }
-
-  if (Array.isArray(value)) {
-    return await Promise.all(value.map((item) => resolveSecretRefs(item, resolver))) as A
-  }
-
-  if (value instanceof Date || typeof value !== "object" || value === null) {
-    return value
-  }
-
-  const entries = await Promise.all(
-    Object.entries(value).map(async ([key, entry]) => [key, await resolveSecretRefs(entry, resolver)] as const)
-  )
-  return Object.fromEntries(entries) as A
-}
-
 // Durable race with a persisted winner. This deliberately does NOT use
 // DurableDeferred.raceAll: its replay path runs `Effect.flatten(exit)` over
 // the stored winner, which dies with "Not a valid effect" for plain (non-
@@ -520,7 +497,10 @@ const makeCtx = <WErrors>(
             const release = await (resources.concurrency ?? defaultConcurrencyLimiter)
               .acquire(step.name, step.concurrency, input)
             try {
-              const executeInput = await resolveSecretRefs(input, resolver)
+              const executeInput = decodeSync(
+                step.input,
+                await resolveSecretReferences(input, resolver)
+              )
               const value = await step.execute(
                 executeInput,
                 makeStepContext(executionId, attempt, resolver, integrations)
@@ -957,7 +937,10 @@ const makeInMemoryCtx = <WErrors>(
               const release = await (options.concurrency ?? defaultConcurrencyLimiter)
                 .acquire(step.name, step.concurrency, input)
               try {
-                const executeInput = await resolveSecretRefs(input, options.secrets)
+                const executeInput = decodeSync(
+                  step.input,
+                  await resolveSecretReferences(input, options.secrets)
+                )
                 const value = await (
                   options.stepExecutor?.({ step, input: executeInput, invocation, activityName, context: stepContext }) ??
                   executeStep?.(executeInput, stepContext as any) ??
