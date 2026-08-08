@@ -10,11 +10,12 @@ const normalizeJson = (value: unknown): unknown => {
     return value
   }
 
-  const input = value as Record<string, unknown>
   const output: Record<string, unknown> = {}
 
-  for (const key of Object.keys(input).sort()) {
-    output[key] = normalizeJson(input[key])
+  for (const [key, entry] of Object.entries(value).sort(([left], [right]) =>
+    left.localeCompare(right)
+  )) {
+    output[key] = normalizeJson(entry)
   }
 
   return output
