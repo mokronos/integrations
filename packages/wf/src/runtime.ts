@@ -147,11 +147,13 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
     return workflowLayers.reduce((layer, workflowLayer) => Layer.provideMerge(workflowLayer, layer), base)
   }
 
-  // ONE engine per runtime. Building a fresh cluster node per call (execute,
-  // signal, ...) puts several SingleRunner nodes on the same store, and they
-  // fight over shard ownership — message processing becomes arbitrarily late.
-  // Rebuilt only when the registered workflow set changes.
-  let managed: { readonly signature: string; readonly runtime: ManagedRuntime.ManagedRuntime<any, unknown> } | undefined
+  // Reuse one engine for each immutable workflow registry snapshot. Old
+  // snapshots stay alive until runtime disposal so registering a workflow
+  // cannot tear resources out from under an active execution.
+  const managedBySignature = new Map<
+    string,
+    ManagedRuntime.ManagedRuntime<any, unknown>
+  >()
   let disposed = false
 
   const getManagedRuntime = () => {
@@ -159,13 +161,11 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
       throw new Error("Workflow runtime has been disposed")
     }
     const signature = Array.from(workflows.keys()).sort().join(",")
-    if (managed === undefined || managed.signature !== signature) {
-      if (managed !== undefined) {
-        void managed.runtime.dispose()
-      }
-      managed = { signature, runtime: ManagedRuntime.make(env()) }
-    }
-    return managed.runtime
+    const existing = managedBySignature.get(signature)
+    if (existing !== undefined) return existing
+    const created = ManagedRuntime.make(env())
+    managedBySignature.set(signature, created)
+    return created
   }
 
   const runEffect = <A>(effect: Effect.Effect<A, unknown, any>, onEvent?: WorkflowEventSink) =>
@@ -281,11 +281,9 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
         removeExecutionResources(executionId)
       }
       registeredExecutionIds.clear()
-      const active = managed
-      managed = undefined
-      if (active !== undefined) {
-        await active.runtime.dispose()
-      }
+      const active = Array.from(managedBySignature.values())
+      managedBySignature.clear()
+      await Promise.all(active.map((runtime) => runtime.dispose()))
     }
   }
 }
