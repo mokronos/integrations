@@ -389,7 +389,7 @@ const makeCtx = <WErrors>(
       // A plain failure exit: withCompensation finalizers run for compensate:
       // true. compensate: false never reaches here (the client interrupts the
       // engine directly), but failing is still the safe fallback.
-      return yield* Effect.fail(new Cancelled({ compensate: outcome.compensate }))
+      return yield* new Cancelled({ compensate: outcome.compensate })
     })
 
   return {
