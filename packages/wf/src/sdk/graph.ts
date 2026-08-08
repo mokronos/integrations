@@ -3,7 +3,7 @@ import type {
   InMemoryDeterminismState,
   OrchestrationCall,
   SecretResolver,
-  Step
+  StepRetryPolicy
 } from "../core.ts"
 import { Schema } from "effect"
 import { createInMemoryDeterminismState } from "../core.ts"
@@ -83,7 +83,19 @@ const workflowSchemas = (workflow: DefinedWorkflow): WorkflowGraphSchemas | unde
   })
 }
 
-const stepSchemas = (step: Step<any, any, any>): WorkflowGraphNodeSchemas | undefined => {
+interface InspectableStep {
+  readonly input: Schema.Top
+  readonly output: Schema.Top
+  readonly errors: Schema.Top
+  readonly retry?: StepRetryPolicy
+  readonly concurrency?: {
+    readonly limit: number
+    readonly key?: object
+  }
+  readonly compensate?: object
+}
+
+const stepSchemas = (step: InspectableStep): WorkflowGraphNodeSchemas | undefined => {
   const input = jsonSchemaFor(step.input)
   const output = jsonSchemaFor(step.output)
   const errors = jsonSchemaFor(step.errors)
@@ -94,7 +106,7 @@ const stepSchemas = (step: Step<any, any, any>): WorkflowGraphNodeSchemas | unde
   })
 }
 
-const describeStep = (step: Step<any, any, any>): WorkflowGraphNodeMetadata => ({
+const describeStep = (step: InspectableStep): WorkflowGraphNodeMetadata => ({
   ...(step.retry === undefined ? {} : { retry: step.retry }),
   ...(step.concurrency === undefined
     ? {}
