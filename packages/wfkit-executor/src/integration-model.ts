@@ -12,6 +12,16 @@ import {
 export const IntegrationKind = Schema.Literals(["mcp", "openapi"])
 export type IntegrationKind = typeof IntegrationKind.Type
 
+/** A read-only description of an endpoint. Inspection never installs catalog
+ * state, creates credentials, or opens a connection. */
+export const IntegrationInspection = Schema.Struct({
+  url: Schema.String,
+  detection: ExecutorDetection,
+  probe: Schema.optional(ExecutorMcpProbe),
+  preview: Schema.optional(ExecutorOpenApiPreview)
+})
+export type IntegrationInspection = typeof IntegrationInspection.Type
+
 export const IntegrationDiscovery = Schema.Struct({
   url: Schema.String,
   detection: ExecutorDetection,

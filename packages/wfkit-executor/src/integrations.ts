@@ -1,30 +1,21 @@
 import { Schema } from "effect"
 import {
-  addExecutorMcp,
-  addExecutorOpenApi,
-  detectExecutorIntegration,
-  ensureExecutorConnection,
   listExecutorConnections,
   listExecutorIntegrations,
-  listExecutorTools,
-  previewExecutorOpenApi,
-  probeExecutorMcp
+  listExecutorTools
 } from "./executor.ts"
 import {
-  ExecutorDetection,
-  ExecutorIntegration,
   ExecutorTool,
   IntegrationOverview
 } from "./schemas.ts"
 import {
-  IntegrationDiscovery,
   IntegrationNodeConfig,
-  type DiscoverIntegrationsOptions,
   type IntegrationValidationFinding,
   type IntegrationValidationReport
 } from "./integration-model.ts"
 export {
   IntegrationDiscovery,
+  IntegrationInspection,
   IntegrationKind,
   IntegrationNodeConfig,
   IntegrationValidationFinding,
@@ -33,110 +24,7 @@ export {
 export type {
   DiscoverIntegrationsOptions
 } from "./integration-model.ts"
-
-const confidenceRank = (confidence: ExecutorDetection["confidence"]): number => {
-  switch (confidence) {
-    case "high": return 3
-    case "medium": return 2
-    case "low": return 1
-  }
-}
-
-const bestDetection = (detections: ReadonlyArray<ExecutorDetection>): ExecutorDetection | undefined =>
-  [...detections].sort((left, right) => confidenceRank(right.confidence) - confidenceRank(left.confidence))[0]
-
-const existingIntegration = async (slug: string): Promise<ExecutorIntegration | undefined> =>
-  (await listExecutorIntegrations()).find((integration) => integration.slug === slug)
-
-const detectWithFallback = async (url: string): Promise<ExecutorDetection> => {
-  const detected = bestDetection(await detectExecutorIntegration(url))
-  if (detected !== undefined) return detected
-  try {
-    const probe = await probeExecutorMcp(url)
-    return {
-      kind: "mcp",
-      confidence: "high",
-      endpoint: url,
-      name: probe.name,
-      slug: probe.slug
-    }
-  } catch {
-    const preview = await previewExecutorOpenApi(url)
-    const name = preview.title ?? new URL(url).hostname
-    return {
-      kind: "openapi",
-      confidence: "high",
-      endpoint: url,
-      name,
-      slug: name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "")
-    }
-  }
-}
-
-export const discoverIntegration = async (
-  url: string,
-  options: DiscoverIntegrationsOptions = {}
-): Promise<IntegrationDiscovery> => {
-  const parsed = new URL(url)
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error(`Unsupported integration URL protocol: ${parsed.protocol}`)
-  }
-  const connectionName = options.connection ?? "default"
-  const detection = await detectWithFallback(parsed.toString())
-  if (detection.kind === "mcp") {
-    const probe = await probeExecutorMcp(detection.endpoint)
-    let registered = await existingIntegration(detection.slug)
-    if (registered === undefined) {
-      await addExecutorMcp({
-        endpoint: detection.endpoint,
-        name: probe.name,
-        slug: detection.slug,
-        auth: probe.requiresOAuth ? "oauth2" : probe.requiresAuthentication ? "bearer" : "none"
-      })
-      registered = await existingIntegration(detection.slug)
-    }
-    if (registered === undefined) throw new Error(`Executor did not persist MCP integration ${detection.slug}`)
-    await ensureExecutorConnection(registered, connectionName)
-    return {
-      url: parsed.toString(),
-      detection,
-      probe,
-      integration: registered,
-      requiresAuthentication:
-        registered.authMethods.length > 0 &&
-        !registered.authMethods.some((method) => method.kind === "none"),
-      authMethods: registered.authMethods,
-      tools: await listExecutorTools({ integration: registered.slug, connection: connectionName })
-    }
-  }
-  if (detection.kind !== "openapi") {
-    throw new Error(`Executor detected unsupported integration kind: ${detection.kind}`)
-  }
-  const preview = await previewExecutorOpenApi(detection.endpoint)
-  let registered = await existingIntegration(detection.slug)
-  if (registered === undefined) {
-    await addExecutorOpenApi({
-      spec: detection.endpoint,
-      slug: detection.slug,
-      name: detection.name,
-      ...(preview.servers[0]?.url === undefined ? {} : { baseUrl: preview.servers[0].url })
-    })
-    registered = await existingIntegration(detection.slug)
-  }
-  if (registered === undefined) throw new Error(`Executor did not persist OpenAPI integration ${detection.slug}`)
-  await ensureExecutorConnection(registered, connectionName)
-  return {
-    url: parsed.toString(),
-    detection,
-    preview,
-    integration: registered,
-    requiresAuthentication:
-      registered.authMethods.length > 0 &&
-      !registered.authMethods.some((method) => method.kind === "none"),
-    authMethods: registered.authMethods,
-    tools: await listExecutorTools({ integration: registered.slug, connection: connectionName })
-  }
-}
+export { discoverIntegration, inspectIntegration, installIntegration } from "./discovery.ts"
 
 const toolsForConnection = async (
   integration: string,

@@ -40,6 +40,7 @@ export {
 export type {
   DiscoverIntegrationsOptions,
   IntegrationDiscovery,
+  IntegrationInspection,
   IntegrationKind,
   IntegrationNodeConfig,
   IntegrationValidationFinding,
@@ -47,7 +48,10 @@ export type {
 } from "./integrations.ts"
 export {
   discoverIntegration,
+  inspectIntegration,
+  installIntegration,
   IntegrationDiscovery as IntegrationDiscoverySchema,
+  IntegrationInspection as IntegrationInspectionSchema,
   IntegrationKind as IntegrationKindSchema,
   IntegrationNodeConfig as IntegrationNodeConfigSchema,
   IntegrationValidationFinding as IntegrationValidationFindingSchema,
