@@ -17,7 +17,7 @@ import type {
   WorkflowExecutionRecord,
   WorkflowExecutionStatus,
   WorkflowResult
-} from "./sdk.ts"
+} from "./client-model.ts"
 
 interface ExecutionRecord {
   readonly executionId: string

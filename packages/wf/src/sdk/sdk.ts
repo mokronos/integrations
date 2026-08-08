@@ -10,7 +10,7 @@ import {
   WorkflowHistoryEvent as WorkflowHistoryEventSchema,
   WorkflowRunStatus as WorkflowRunStatusSchema
 } from "../schemas.ts"
-import type { JsonSchema, WorkflowHistoryEvent, WorkflowHistoryRecord, WorkflowRunStatus } from "../schemas.ts"
+import type { WorkflowHistoryEvent, WorkflowHistoryRecord } from "../schemas.ts"
 import { statusAfterEvent } from "../run-lifecycle.ts"
 import { createWorkflowRuntime } from "../runtime.ts"
 import type { WorkflowRuntime } from "../runtime.ts"
@@ -28,100 +28,13 @@ import {
 } from "./client-lifecycle.ts"
 import { createMemoryWorkflowClient } from "./memory-client.ts"
 import { migrateClientDatabase } from "./client-database.ts"
-
-export type WorkflowExecutionStatus = WorkflowRunStatus
-
-export interface WorkflowExecutionHandle {
-  readonly executionId: string
-}
-
-export type WorkflowResult =
-  | { readonly type: "completed"; readonly value: unknown }
-  | { readonly type: "failed"; readonly error: unknown }
-
-export type WorkflowObservation =
-  | { readonly type: "terminal"; readonly result: WorkflowResult }
-  | { readonly type: "signal-suspended"; readonly pendingSignals: ReadonlyArray<PendingSignal> }
-
-export type { WorkflowHistoryEvent }
-
-export type { WorkflowHistoryRecord }
-
-export interface WorkflowExecutionRecord {
-  readonly executionId: string
-  readonly artifactId?: string
-  readonly workflowName: string
-  readonly status: WorkflowExecutionStatus
-  readonly payload: unknown
-  readonly startedAt: string
-  readonly finishedAt?: string
-  /**
-   * The snapshot of the workflow source this execution started against. Resuming
-   * it replays that source, not whatever the catalog file says now.
-   */
-  readonly sourceHash?: string
-}
-
-export interface PendingSignal {
-  readonly name: string
-  readonly invocation: number
-  readonly activityName: string
-  readonly timeout?: unknown
-  /** JSON Schema of the payload the wait expects. */
-  readonly payloadSchema?: JsonSchema
-}
-
-export interface WorkflowListResult {
-  readonly executions: ReadonlyArray<{
-    readonly executionId: string
-    readonly workflowName: string
-    readonly status: WorkflowExecutionStatus
-    readonly startedAt: string
-    readonly finishedAt?: string
-  }>
-  readonly cursor?: string
-}
-
-export interface WorkflowClient {
-  start<I, O, E>(
-    workflow: DefinedWorkflow<I, O, E>,
-    payload: I,
-    opts?: {
-      readonly idempotencyKey?: string
-      readonly actor?: string
-      readonly artifactId?: string
-      /** Snapshot to pin this execution to, so later edits cannot change its replay. */
-      readonly sourceHash?: string
-    }
-  ): Promise<WorkflowExecutionHandle>
-  signal(
-    executionId: string,
-    name: string,
-    payload: unknown,
-    opts?: { readonly actor?: string }
-  ): Promise<void>
-  result(executionId: string): Promise<WorkflowResult>
-  status(executionId: string): Promise<WorkflowExecutionStatus>
-  execution(executionId: string): Promise<WorkflowExecutionRecord>
-  executions(): Promise<ReadonlyArray<WorkflowExecutionRecord>>
-  list<I, O, E>(
-    workflow: DefinedWorkflow<I, O, E>,
-    opts?: {
-      readonly status?: WorkflowExecutionStatus
-      readonly limit?: number
-      readonly cursor?: string
-    }
-  ): Promise<WorkflowListResult>
-  history(executionId: string): Promise<ReadonlyArray<WorkflowHistoryRecord>>
-  pendingSignals(executionId: string): Promise<ReadonlyArray<PendingSignal>>
-  cancel(
-    executionId: string,
-    opts?: { readonly compensate?: boolean; readonly actor?: string }
-  ): Promise<void>
-  /** Waits for a terminal result or signal suspension without exposing polling. */
-  observe(executionId: string, options?: { readonly signal?: AbortSignal }): Promise<WorkflowObservation>
-  dispose(): Promise<void>
-}
+import type {
+  WorkflowClient,
+  WorkflowExecutionRecord,
+  WorkflowExecutionStatus,
+  WorkflowResult
+} from "./client-model.ts"
+export type * from "./client-model.ts"
 
 /** Catalog artifacts annotate executions; lifecycle state itself stays engine-owned. */
 export const lifecycleRunRecords = async (

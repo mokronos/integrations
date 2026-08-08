@@ -4,7 +4,7 @@ import type {
   PendingSignal,
   WorkflowClient,
   WorkflowObservation
-} from "./sdk.ts"
+} from "./client-model.ts"
 
 export const nowIso = (): string => new Date().toISOString()
 
