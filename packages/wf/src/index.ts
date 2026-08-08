@@ -1,32 +1,6 @@
-// The workflow authoring surface. An authored workflow imports ONLY from here
-// (plus pure helper functions it defines) — never `effect` or `@effect/*`.
-export { CodeExecutionError, createInMemoryDeterminismState, defineStep, defineWorkflow, envSecretResolver, isSecretRef, NonDeterminismError, secret, SecretResolutionContext, StepExecutionError, StepRetryPolicy } from "./core.ts"
-export {
-  integration,
-  IntegrationError,
-  IntegrationSource
-} from "./integration.ts"
-export type { IntegrationInvoker } from "./integration.ts"
-export type {
-  DefinedWorkflow,
-  DefinedStep,
-  InMemoryDeterminismState,
-  OrchestrationCall,
-  OrchestrationKind,
-  SecretRef,
-  SecretResolver,
-  SignalOutcome,
-  Step,
-  StepConcurrency,
-  StepContext,
-  SynchronousSchema,
-  TerminalFailure,
-  WorkflowContext,
-  WorkflowGenerator,
-  WorkflowDefinition,
-  WorkflowValue
-} from "./core.ts"
-export type { WorkflowEvent, WorkflowEventSink } from "./events.ts"
+// The main package includes the exact same authoring surface as the lightweight
+// loader entrypoint, then adds runtime and SDK operations below.
+export * from "./authoring.ts"
 export {
   ExecutionId,
   JsonSchema,
@@ -54,8 +28,6 @@ export {
   isWorkflowEvent
 } from "./schemas.ts"
 export type { JsonSchema as JsonSchemaDocument, ExecutionId as ExecutionIdValue } from "./schemas.ts"
-export { SignalDeliveryError } from "./signal.ts"
-export { t } from "./schema.ts"
 export { createWorkflowRuntime, executeWorkflow, makeEngineLayer, makeWorkflowEffect, run, WorkflowConflictError } from "./runtime.ts"
 export type { ExecuteWorkflowOptions, WorkflowRuntime, WorkflowRuntimeOptions } from "./runtime.ts"
 export type {
