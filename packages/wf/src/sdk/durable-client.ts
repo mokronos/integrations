@@ -13,6 +13,7 @@ import {
   optionalActor,
   optionalCursor,
   optionalFinishedAt,
+  paginate,
   pendingSignalsFromHistory
 } from "./client-lifecycle.ts"
 import { decodePersistedJsonSchema } from "./json-schema-validation.ts"
@@ -204,19 +205,16 @@ export const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowC
     async list(workflow, opts = {}) {
       const rows = store.forWorkflow(workflow.name)
         .filter((row) => opts.status === undefined || row.status === opts.status)
-      const start = opts.cursor === undefined ? 0 : Number.parseInt(opts.cursor, 10)
-      const limit = opts.limit ?? rows.length
-      const page = rows.slice(start, start + limit)
-      const next = start + limit < rows.length ? String(start + limit) : undefined
+      const page = paginate(rows, opts)
       return {
-        executions: page.map((row) => ({
+        executions: page.items.map((row) => ({
           executionId: row.id,
           workflowName: row.workflow_name,
           status: row.status,
           startedAt: row.started_at,
           ...optionalFinishedAt(row.finished_at ?? undefined)
         })),
-        ...optionalCursor(next)
+        ...optionalCursor(page.cursor)
       }
     },
 

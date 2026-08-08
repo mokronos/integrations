@@ -1,3 +1,4 @@
+import { Schema } from "effect"
 import { isTerminalRunStatus } from "../run-lifecycle.ts"
 import type { WorkflowHistoryRecord } from "../schemas.ts"
 import type {
@@ -19,6 +20,27 @@ export const optionalFinishedAt = (
 export const optionalCursor = (
   cursor: string | undefined
 ): { readonly cursor?: string } => cursor === undefined ? {} : { cursor }
+
+const PageOffset = Schema.NumberFromString.pipe(
+  Schema.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
+)
+
+const PageLimit = Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0)))
+
+export const paginate = <T>(
+  values: ReadonlyArray<T>,
+  options: { readonly cursor?: string; readonly limit?: number }
+): { readonly items: ReadonlyArray<T>; readonly cursor?: string } => {
+  const start = options.cursor === undefined
+    ? 0
+    : Schema.decodeUnknownSync(PageOffset)(options.cursor)
+  const limit = options.limit === undefined
+    ? values.length
+    : Schema.decodeUnknownSync(PageLimit)(options.limit)
+  const items = values.slice(start, start + limit)
+  const cursor = start + limit < values.length ? String(start + limit) : undefined
+  return { items, ...optionalCursor(cursor) }
+}
 
 const signalKey = (event: { readonly name: string; readonly invocation: number }): string =>
   `${event.name}:${event.invocation}`

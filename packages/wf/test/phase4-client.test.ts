@@ -135,6 +135,19 @@ describe("Phase 4 workflow client", () => {
     expect(keyedSecond).toEqual(keyedFirst)
   })
 
+  test("list rejects malformed pagination", async () => {
+    const workflow = defineWorkflow({
+      name: "validatedPagination",
+      input: Schema.Void,
+      output: Schema.Void,
+      run: function* () {}
+    })
+    const client = createWorkflowClient()
+
+    await expect(client.list(workflow, { cursor: "not-an-offset" })).rejects.toThrow()
+    await expect(client.list(workflow, { limit: 0 })).rejects.toThrow()
+  })
+
   test("cancel during signal wait records actor and compensation behavior", async () => {
     const compensated: string[] = []
     const reserve = defineStep({

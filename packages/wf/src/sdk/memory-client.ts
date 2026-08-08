@@ -10,6 +10,7 @@ import {
   optionalActor,
   optionalCursor,
   optionalFinishedAt,
+  paginate,
   pendingSignalsFromHistory
 } from "./client-lifecycle.ts"
 import type {
@@ -170,19 +171,16 @@ export const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowC
         .filter((execution) => execution.workflowName === workflow.name)
         .filter((execution) => opts.status === undefined || execution.status === opts.status)
         .sort((left, right) => left.startedAt.localeCompare(right.startedAt))
-      const start = opts.cursor === undefined ? 0 : Number.parseInt(opts.cursor, 10)
-      const limit = opts.limit ?? all.length
-      const page = all.slice(start, start + limit)
-      const next = start + limit < all.length ? String(start + limit) : undefined
+      const page = paginate(all, opts)
       return {
-        executions: page.map((execution) => ({
+        executions: page.items.map((execution) => ({
           executionId: execution.executionId,
           workflowName: execution.workflowName,
           status: execution.status,
           startedAt: execution.startedAt,
           ...optionalFinishedAt(execution.finishedAt)
         })),
-        ...optionalCursor(next)
+        ...optionalCursor(page.cursor)
       }
     },
 
