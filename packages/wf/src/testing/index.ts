@@ -76,6 +76,8 @@ interface ExecutionRecord {
   readonly startedAt: string
   finishedAt?: string
   readonly history: WorkflowHistoryRecord[]
+  readonly abort: AbortController
+  cancellation?: Cancelled
   readonly resultPromise: Promise<WorkflowResult>
   readonly resolveResult: (result: WorkflowResult) => void
 }
@@ -193,6 +195,7 @@ export const createTestRuntime = (options: TestRuntimeOptions = {}): TestRuntime
   ) => {
     void workflow.executeInMemory(payload, {
       executionId: record.executionId,
+      signal: record.abort.signal,
       determinism: record.determinism,
       signalTransport: signals,
       stepExecutor: executeStepOverride,
@@ -212,7 +215,7 @@ export const createTestRuntime = (options: TestRuntimeOptions = {}): TestRuntime
       (error) => {
         record.status = "failed"
         record.finishedAt = nowIso()
-        record.result = { type: "failed", error }
+        record.result = { type: "failed", error: record.cancellation ?? error }
         record.resolveResult(record.result)
       }
     )
@@ -234,6 +237,7 @@ export const createTestRuntime = (options: TestRuntimeOptions = {}): TestRuntime
       status: "running",
       startedAt: nowIso(),
       history: [],
+      abort: new AbortController(),
       resultPromise,
       resolveResult
     }
@@ -318,6 +322,8 @@ export const createTestRuntime = (options: TestRuntimeOptions = {}): TestRuntime
         throw new Error(`Cannot cancel ${record.status} execution ${executionId}`)
       }
       const compensate = opts.compensate ?? true
+      const cancellation = new Cancelled({ compensate })
+      record.cancellation = cancellation
       appendHistory(record, {
         type: "execution.cancelled",
         executionId: ExecutionId.make(executionId),
@@ -327,7 +333,8 @@ export const createTestRuntime = (options: TestRuntimeOptions = {}): TestRuntime
       if (compensate) {
         record.status = "compensating"
       }
-      signals.cancel(executionId, new Cancelled({ compensate }))
+      signals.cancel(executionId, cancellation)
+      if (!compensate) record.abort.abort(cancellation)
     },
 
     setSecret(name, value) {

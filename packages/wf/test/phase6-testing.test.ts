@@ -177,6 +177,31 @@ describe("Phase 6 test runtime", () => {
     expect(recorder.calls).toEqual([])
   })
 
+  test("hard cancellation interrupts a running test step", async () => {
+    const neverCompletes = defineStep({
+      name: "neverCompletesInTest",
+      input: Schema.Void,
+      output: Schema.Void,
+      execute: () => new Promise<never>(() => {})
+    })
+    const workflow = defineWorkflow({
+      name: "hardCancelRunningTestStep",
+      input: Schema.Void,
+      output: Schema.Void,
+      run: function* (_, ctx) {
+        yield* ctx.run(neverCompletes, undefined)
+      }
+    })
+    const rt = createTestRuntime()
+    const handle = await rt.start(workflow, undefined)
+
+    await rt.cancel(handle.executionId, { compensate: false })
+    await expect(rt.result(handle.executionId)).resolves.toMatchObject({
+      type: "failed",
+      error: { _tag: "Cancelled", compensate: false }
+    })
+  })
+
   test("divergence detector is exercisable through test runtime replay", async () => {
     const writes: string[] = []
     const first = defineStep({
