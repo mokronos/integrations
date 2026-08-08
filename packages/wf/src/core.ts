@@ -260,6 +260,11 @@ const typedStepFailure = (stepName: string, error: unknown): unknown =>
 const unwrapAsyncFailure = (error: unknown): unknown =>
   error instanceof AsyncFailure ? error.error : error
 
+const preserveNonDeterminismError = (error: unknown): NonDeterminismError => {
+  if (error instanceof NonDeterminismError) return error
+  throw error
+}
+
 const makeStepContext = <E>(
   _errors: SynchronousSchema<E>,
   executionId: string,
@@ -1222,7 +1227,7 @@ const makeInMemoryCtx = <WErrors>(
       const call: OrchestrationCall = { kind: "all", name, counter: invocation, branches }
       const record = Effect.tryPromise({
         try: () => recordCall(call),
-        catch: (error): NonDeterminismError => error as NonDeterminismError
+        catch: preserveNonDeterminismError
       })
       const emitEvent = (event: WorkflowEvent) => Effect.promise(() => emit(event))
       const persistBlock = (branchCalls: OrchestrationCall[][]) =>
