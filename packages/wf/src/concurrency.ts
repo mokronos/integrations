@@ -18,20 +18,23 @@ interface SemaphoreState {
 
 /** Creates an isolated set of step semaphores. */
 export const createConcurrencyLimiter = (): ConcurrencyLimiter => {
-  const semaphores = new Map<string, SemaphoreState>()
+  const policies = new WeakMap<object, Map<string, Map<string, SemaphoreState>>>()
 
   return {
     async acquire(stepName, policy, input) {
-      const limit = policy?.limit
-      if (limit === undefined) return () => undefined
+      if (policy === undefined) return () => undefined
+      const limit = policy.limit
       if (!Number.isInteger(limit) || limit < 1) {
         throw new Error(`Invalid concurrency limit for step ${stepName}: ${limit}`)
       }
 
-      const key = policy?.key?.(input) ?? stepName
-      const semaphoreKey = `${stepName}\0${key}`
-      const state = semaphores.get(semaphoreKey) ?? { active: 0, queue: [] }
-      semaphores.set(semaphoreKey, state)
+      const key = policy.key?.(input) ?? stepName
+      const steps = policies.get(policy) ?? new Map<string, Map<string, SemaphoreState>>()
+      policies.set(policy, steps)
+      const partitions = steps.get(stepName) ?? new Map<string, SemaphoreState>()
+      steps.set(stepName, partitions)
+      const state = partitions.get(key) ?? { active: 0, queue: [] }
+      partitions.set(key, state)
       if (state.active >= limit) {
         await new Promise<void>((resolve) => state.queue.push(resolve))
       }
@@ -44,7 +47,9 @@ export const createConcurrencyLimiter = (): ConcurrencyLimiter => {
         state.active--
         state.queue.shift()?.()
         if (state.active === 0 && state.queue.length === 0) {
-          semaphores.delete(semaphoreKey)
+          partitions.delete(key)
+          if (partitions.size === 0) steps.delete(stepName)
+          if (steps.size === 0) policies.delete(policy)
         }
       }
     }

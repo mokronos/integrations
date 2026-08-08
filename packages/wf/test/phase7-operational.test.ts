@@ -114,6 +114,42 @@ describe("Phase 7 concurrency limits", () => {
     // Distinct keys are independent: both partitions ran at the same time.
     expect(maxTotal).toBe(2)
   })
+
+  test("same-named step definitions keep independent concurrency limits", async () => {
+    let live = 0
+    let maxLive = 0
+    const makeStep = () => defineStep({
+      name: "sharedName",
+      input: Schema.Void,
+      output: Schema.Void,
+      concurrency: { limit: 1 },
+      execute: async () => {
+        live++
+        maxLive = Math.max(maxLive, live)
+        await sleep(20)
+        live--
+      }
+    })
+    const makeWorkflow = (name: string, step: ReturnType<typeof makeStep>) => defineWorkflow({
+      name,
+      input: Schema.Void,
+      output: Schema.Void,
+      run: function* (_, ctx) {
+        yield* ctx.run(step, undefined)
+      }
+    })
+    const runtime = createWorkflowRuntime({ backend: "memory" })
+    const client = createWorkflowClient(runtime)
+    const first = makeWorkflow("firstSharedName", makeStep())
+    const second = makeWorkflow("secondSharedName", makeStep())
+    const [firstRun, secondRun] = await Promise.all([
+      client.start(first, undefined),
+      client.start(second, undefined)
+    ])
+
+    await Promise.all([client.result(firstRun.executionId), client.result(secondRun.executionId)])
+    expect(maxLive).toBe(2)
+  })
 })
 
 describe("Phase 7 secret references", () => {
