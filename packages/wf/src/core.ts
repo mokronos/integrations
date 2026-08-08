@@ -34,7 +34,7 @@ export {
 } from "./secrets.ts"
 export type { SecretResolver } from "./secrets.ts"
 
-type AnySchema<A = any> = Schema.Codec<A, any, any, any>
+type AnySchema<A = any> = Schema.Codec<A, any, never, never>
 
 const TerminalFailureTypeId: unique symbol = Symbol.for("wf/TerminalFailure")
 
@@ -374,10 +374,10 @@ const nextInvocation = (counters: Map<string, number>, name: string): number => 
 }
 
 const decodeSync = <A>(schema: AnySchema<A>, value: unknown): A =>
-  Schema.decodeUnknownSync(schema as any)(value) as A
+  Schema.decodeUnknownSync(schema)(value)
 
 const encodeSync = <A>(schema: AnySchema<A>, value: A): unknown =>
-  Schema.encodeSync(schema as any)(value)
+  Schema.encodeSync(schema)(value)
 
 const resolveSecretRefs = async <A>(value: A, resolver: SecretResolver | undefined): Promise<A> => {
   if (isSecretRef(value)) {

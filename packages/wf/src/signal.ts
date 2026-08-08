@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 
-type AnySchema<A = any> = Schema.Codec<A, any, any, any>
+type AnySchema<A = any> = Schema.Codec<A, any, never, never>
 
 export class SignalDeliveryError extends Error {
   readonly _tag = "SignalDeliveryError"
@@ -41,7 +41,7 @@ const keyOf = (executionId: string, name: string): string => `${executionId}\0${
 
 export const decodeSignal = <T>(schema: AnySchema<T>, value: unknown): T => {
   try {
-    return Schema.decodeUnknownSync(schema as any)(value) as T
+    return Schema.decodeUnknownSync(schema)(value)
   } catch (cause) {
     throw new SignalDeliveryError("Signal payload failed schema validation", { cause })
   }
