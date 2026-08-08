@@ -63,18 +63,21 @@ export const jsonSchemaOf = (schema: unknown): JsonSchema | undefined => {
 
 const WorkflowStartedEvent = Schema.Struct({
   type: Schema.Literal("workflow.started"),
+  executionId: Schema.optional(ExecutionId),
   workflowName: Schema.String,
   payload: OptionalUnknown
 })
 
 const WorkflowCompletedEvent = Schema.Struct({
   type: Schema.Literal("workflow.completed"),
+  executionId: Schema.optional(ExecutionId),
   workflowName: Schema.String,
   result: OptionalUnknown
 })
 
 const WorkflowFailedEvent = Schema.Struct({
   type: Schema.Literal("workflow.failed"),
+  executionId: Schema.optional(ExecutionId),
   workflowName: Schema.String,
   error: OptionalUnknown
 })

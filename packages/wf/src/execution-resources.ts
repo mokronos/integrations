@@ -15,28 +15,35 @@ export interface ExecutionResources {
   readonly signals?: SignalTransport
 }
 
-export const currentExecutionResources = Context.Reference<ExecutionResources>(
-  "@mokronos/wfkit/ExecutionResources",
-  { defaultValue: () => ({}) }
-)
-
-const resourcesByExecution = new Map<string, ExecutionResources>()
-
-export const registerExecutionResources = (
-  executionId: string,
-  resources: ExecutionResources
-): void => {
-  resourcesByExecution.set(executionId, resources)
+export interface ExecutionResourceRegistryService {
+  readonly register: (executionId: string, resources: ExecutionResources) => void
+  readonly remove: (executionId: string) => void
+  readonly get: (executionId: string) => ExecutionResources
+  readonly clear: () => void
 }
 
-export const removeExecutionResources = (executionId: string): void => {
-  resourcesByExecution.delete(executionId)
-}
+export class ExecutionResourceRegistry extends Context.Service<
+  ExecutionResourceRegistry,
+  ExecutionResourceRegistryService
+>()("@mokronos/wfkit/ExecutionResourceRegistry") {}
 
-export const getExecutionResources = (
-  executionId: string,
-  fallback: ExecutionResources = {}
-): ExecutionResources => ({
-  ...fallback,
-  ...resourcesByExecution.get(executionId)
-})
+export const makeExecutionResourceRegistry = (
+  defaults: ExecutionResources = {}
+): ExecutionResourceRegistryService => {
+  const resourcesByExecution = new Map<string, ExecutionResources>()
+  return {
+    register: (executionId, resources) => {
+      resourcesByExecution.set(executionId, resources)
+    },
+    remove: (executionId) => {
+      resourcesByExecution.delete(executionId)
+    },
+    get: (executionId) => ({
+      ...defaults,
+      ...resourcesByExecution.get(executionId)
+    }),
+    clear: () => {
+      resourcesByExecution.clear()
+    }
+  }
+}

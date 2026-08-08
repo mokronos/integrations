@@ -5,8 +5,8 @@ import type * as Duration from "effect/Duration"
 import { emitWorkflowEvent } from "./events.ts"
 import type { IntegrationInvoker } from "./integration.ts"
 import {
-  currentExecutionResources,
-  getExecutionResources
+  ExecutionResourceRegistry,
+  makeExecutionResourceRegistry
 } from "./execution-resources.ts"
 import type { WorkflowEvent } from "./schemas.ts"
 import { ExecutionId, jsonSchemaOf } from "./schemas.ts"
@@ -488,8 +488,8 @@ const makeCtx = <WErrors>(
           input
         })
 
-        const contextResources = yield* currentExecutionResources
-        const resources = getExecutionResources(executionId, contextResources)
+        const registry = yield* ExecutionResourceRegistry
+        const resources = registry.get(executionId)
         const resolver = resources.secrets
         const integrations = resources.integrations
         const result = yield* Effect.tryPromise({
@@ -709,8 +709,8 @@ const makeCtx = <WErrors>(
         yield* recordCall(call)
         // Delivery-side validation needs the schema of the wait the run is
         // parked at; replay re-registers it in a fresh process.
-        const contextResources = yield* currentExecutionResources
-        const resources = getExecutionResources(executionId, contextResources)
+        const registry = yield* ExecutionResourceRegistry
+        const resources = registry.get(executionId)
         const signals = resources.signals ?? defaultSignalTransport
         signals.registerSchema(executionId, name, schema)
         yield* emitWorkflowEvent({
@@ -1424,14 +1424,17 @@ export const defineWorkflow = <
       )
     )
 
+    const resources = makeExecutionResourceRegistry({
+      ...(options.onEvent === undefined ? {} : { events: options.onEvent }),
+      ...(options.secrets === undefined ? {} : { secrets: options.secrets }),
+      ...(options.integrations === undefined ? {} : { integrations: options.integrations }),
+      ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
+      ...(options.signalTransport === undefined ? {} : { signals: options.signalTransport })
+    })
+
     const exit = await Effect.runPromiseExit(
       effect.pipe(
-        Effect.provideService(currentExecutionResources, {
-          ...(options.onEvent === undefined ? {} : { events: options.onEvent }),
-          ...(options.secrets === undefined ? {} : { secrets: options.secrets }),
-          ...(options.integrations === undefined ? {} : { integrations: options.integrations }),
-          ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency })
-        })
+        Effect.provideService(ExecutionResourceRegistry, resources)
       ) as Effect.Effect<Schema.Schema.Type<Output>, unknown, never>
     )
     if (Exit.isSuccess(exit)) {

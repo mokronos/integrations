@@ -13,15 +13,15 @@ import {
 } from "./events.ts"
 import type { WorkflowEventSink } from "./events.ts"
 import {
-  currentExecutionResources,
-  registerExecutionResources,
-  removeExecutionResources
+  ExecutionResourceRegistry,
+  makeExecutionResourceRegistry
 } from "./execution-resources.ts"
 import type { IntegrationInvoker } from "./integration.ts"
 import { createConcurrencyLimiter } from "./concurrency.ts"
 import type { ConcurrencyLimiter } from "./concurrency.ts"
 import { createSignalTransport } from "./signal.ts"
 import type { SignalTransport } from "./signal.ts"
+import { ExecutionId } from "./schemas.ts"
 
 type DynamicService = Schema.Schema.Type<Schema.Top>
 
@@ -128,12 +128,18 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
   const signals = createSignalTransport()
   const registeredExecutionIds = new Set<string>()
   const databasePath = options.databasePath
+  const resourceRegistry = makeExecutionResourceRegistry({
+    ...(options.secrets === undefined ? {} : { secrets: options.secrets }),
+    ...(options.integrations === undefined ? {} : { integrations: options.integrations }),
+    concurrency,
+    signals
+  })
 
   const registerResources = (
     executionId: string,
     onEvent?: WorkflowEventSink
   ): void => {
-    registerExecutionResources(executionId, {
+    resourceRegistry.register(executionId, {
       ...(onEvent === undefined ? {} : { events: onEvent }),
       ...(options.secrets === undefined ? {} : { secrets: options.secrets }),
       ...(options.integrations === undefined ? {} : { integrations: options.integrations }),
@@ -144,7 +150,7 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
   }
 
   const removeResources = (executionId: string): void => {
-    removeExecutionResources(executionId)
+    resourceRegistry.remove(executionId)
     registeredExecutionIds.delete(executionId)
   }
 
@@ -158,7 +164,14 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
             ...(options.timerPollIntervalMs === undefined ? {} : { timerPollIntervalMs: options.timerPollIntervalMs })
           })
         : WorkflowEngine.layerMemory
-    return workflowLayers.reduce((layer, workflowLayer) => Layer.provideMerge(workflowLayer, layer), base)
+    const runtimeDependencies = Layer.merge(
+      base,
+      Layer.succeed(ExecutionResourceRegistry, resourceRegistry)
+    )
+    return workflowLayers.reduce(
+      (layer, workflowLayer) => Layer.provideMerge(workflowLayer, layer),
+      runtimeDependencies
+    )
   }
 
   // Reuse one engine for each immutable workflow registry snapshot. Old
@@ -183,20 +196,9 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
   }
 
   const runEffect = <A>(
-    effect: Effect.Effect<A, DynamicService, DynamicService>,
-    onEvent?: WorkflowEventSink
+    effect: Effect.Effect<A, DynamicService, DynamicService>
   ) =>
-    getManagedRuntime().runPromise(
-      effect.pipe(
-        Effect.provideService(currentExecutionResources, {
-          ...(onEvent === undefined ? {} : { events: onEvent }),
-          ...(options.secrets === undefined ? {} : { secrets: options.secrets }),
-          ...(options.integrations === undefined ? {} : { integrations: options.integrations }),
-          concurrency,
-          signals
-        })
-      ) as Effect.Effect<A, DynamicService, never>
-    )
+    getManagedRuntime().runPromise(effect as Effect.Effect<A, DynamicService, never>)
 
   return {
     backend: options.backend,
@@ -231,21 +233,21 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
       registerResources(executionId, onEvent)
       const effect = Effect.gen(function* () {
         const engine = yield* WorkflowEngine.WorkflowEngine
-        yield* emitWorkflowEvent({ type: "workflow.started", workflowName, payload })
+        yield* emitWorkflowEvent({ type: "workflow.started", executionId: ExecutionId.make(executionId), workflowName, payload })
         const result = yield* engine.execute(workflow.workflow, {
           executionId,
           payload: { value: payload }
         }).pipe(
           Effect.tap((result: unknown) =>
-            emitWorkflowEvent({ type: "workflow.completed", workflowName, result })
+            emitWorkflowEvent({ type: "workflow.completed", executionId: ExecutionId.make(executionId), workflowName, result })
           ),
           Effect.tapError((error: unknown) =>
-            emitWorkflowEvent({ type: "workflow.failed", workflowName, error })
+            emitWorkflowEvent({ type: "workflow.failed", executionId: ExecutionId.make(executionId), workflowName, error })
           )
         )
         return result
       })
-      return runEffect(effect, onEvent).finally(() => {
+      return runEffect(effect).finally(() => {
         removeResources(executionId)
       })
     },
@@ -275,7 +277,7 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
       // The resumed replay may run inside THIS call's engine environment, so
       // it needs the same event sink as the original execute to record
       // history (compensations, cancellation, signal receipt).
-      return runEffect(effect, onEvent)
+      return runEffect(effect)
     },
 
     interrupt({ workflow, executionId }) {
@@ -301,9 +303,10 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
       }
       disposed = true
       for (const executionId of registeredExecutionIds) {
-        removeExecutionResources(executionId)
+        resourceRegistry.remove(executionId)
       }
       registeredExecutionIds.clear()
+      resourceRegistry.clear()
       const active = Array.from(managedBySignature.values())
       managedBySignature.clear()
       await Promise.all(active.map((runtime) => runtime.dispose()))
@@ -316,10 +319,14 @@ export const makeWorkflowEffect = (
   payload: unknown,
   options: ExecuteWorkflowOptions = {}
 ) => {
+  const resources = makeExecutionResourceRegistry(
+    options.onEvent === undefined ? {} : { events: options.onEvent }
+  )
   const env = wf.layer.pipe(
     Layer.provideMerge(makeEngineLayer(
       options.engineDatabasePath === undefined ? {} : { databasePath: options.engineDatabasePath }
-    ))
+    )),
+    Layer.provideMerge(Layer.succeed(ExecutionResourceRegistry, resources))
   )
   const workflowName = String(wf.workflow.name ?? wf.name ?? "Workflow")
   const execution = Effect.gen(function* () {
@@ -336,10 +343,7 @@ export const makeWorkflowEffect = (
   })
 
   return execution.pipe(
-    Effect.provide(env),
-    Effect.provideService(currentExecutionResources, {
-      ...(options.onEvent === undefined ? {} : { events: options.onEvent })
-    })
+    Effect.provide(env)
   )
 }
 
