@@ -397,7 +397,9 @@ const makeCtx = <WErrors>(
   let journalPosition = 0
   let parallelDepth = 0
 
-  const recordCall = (actual: OrchestrationCall): Effect.Effect<void, NonDeterminismError, any> => {
+  const recordCall = (
+    actual: OrchestrationCall
+  ): Effect.Effect<void, NonDeterminismError, DynamicService> => {
     const position = ++journalPosition
     const activityName = parallelDepth > 0
       ? `determinism:${actual.kind}:${actual.name}#${actual.counter}`
@@ -529,7 +531,7 @@ const makeCtx = <WErrors>(
         )
       )
 
-      let activity: Effect.Effect<unknown, unknown, any> = Activity.make({
+      let activity: DynamicEffect = Activity.make({
         name: activityName,
         success: step.output,
         error: Schema.Unknown,
@@ -1451,7 +1453,7 @@ export const defineWorkflow = <
       return workflow.execute(enginePayload) as Effect.Effect<
         Schema.Schema.Type<Output>,
         Schema.Schema.Type<Errors> | unknown,
-        any
+        DynamicService
       >
     },
     executeInMemory
