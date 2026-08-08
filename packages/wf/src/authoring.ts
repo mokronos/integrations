@@ -9,7 +9,8 @@ export {
   isSecretRef,
   NonDeterminismError,
   secret,
-  SecretResolutionContext
+  SecretResolutionContext,
+  StepRetryPolicy
 } from "./core.ts"
 export { integration, IntegrationError } from "./integration.ts"
 export type { IntegrationInvoker, IntegrationSource } from "./integration.ts"
@@ -24,7 +25,6 @@ export type {
   Step,
   StepConcurrency,
   StepContext,
-  StepRetryPolicy,
   TerminalFailure,
   WorkflowContext,
   WorkflowValue

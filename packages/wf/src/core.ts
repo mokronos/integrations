@@ -78,10 +78,11 @@ export interface StepContext<E> {
   readonly executionId: string
 }
 
-export interface StepRetryPolicy {
-  readonly attempts: number
-  readonly backoff: "exponential" | "none"
-}
+export const StepRetryPolicy = Schema.Struct({
+  attempts: Schema.Int.check(Schema.isGreaterThan(0)),
+  backoff: Schema.Literals(["exponential", "none"])
+})
+export type StepRetryPolicy = typeof StepRetryPolicy.Type
 
 export type StepConcurrency<I> = StepConcurrencyPolicy<I>
 
