@@ -52,6 +52,7 @@ export const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowC
   const executions = new Map<string, ExecutionRecord>()
   const idempotencyKeys = new Map<string, string>()
   const signals = runtime?.signals ?? createSignalTransport()
+  const deliveredSignalClaims = new Set<string>()
   let disposed = false
 
   const ensureActive = (): void => {
@@ -159,7 +160,17 @@ export const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowC
       if (waiting === undefined) {
         throw new Error(`Execution ${id} is not waiting for signal ${name}`)
       }
-      await signals.deliver(id, name, payload)
+      const claim = `${id}\0${waiting.activityName}`
+      if (deliveredSignalClaims.has(claim)) {
+        throw new Error(`Signal ${name} has already been delivered to execution ${id}`)
+      }
+      deliveredSignalClaims.add(claim)
+      try {
+        await signals.deliver(id, name, payload)
+      } catch (error) {
+        deliveredSignalClaims.delete(claim)
+        throw error
+      }
       appendHistory(execution, {
         type: "signal.delivered",
         executionId: ExecutionId.make(id),
@@ -238,6 +249,7 @@ export const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowC
       await runtime?.dispose()
       executions.clear()
       idempotencyKeys.clear()
+      deliveredSignalClaims.clear()
     }
   }
 }

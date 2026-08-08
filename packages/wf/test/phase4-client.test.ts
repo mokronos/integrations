@@ -133,6 +133,32 @@ describe("Phase 4 workflow client", () => {
     expect(await client.pendingSignals(handle.executionId)).toEqual([])
   })
 
+  test("concurrent signal delivery cannot buffer a duplicate for the next wait", async () => {
+    const workflow = defineWorkflow({
+      name: "singleSignalClaim",
+      input: Schema.Void,
+      output: Schema.String,
+      run: function* (_, ctx) {
+        const signal = yield* ctx.waitForSignal("approval", Schema.Struct({ ok: Schema.Boolean }))
+        return signal.type
+      }
+    })
+    const client = createWorkflowClient()
+    const handle = await client.start(workflow, undefined)
+    expect(await waitForStatus(client, handle.executionId, "suspended")).toBe("suspended")
+
+    const deliveries = await Promise.allSettled([
+      client.signal(handle.executionId, "approval", { ok: true }),
+      client.signal(handle.executionId, "approval", { ok: true })
+    ])
+    expect(deliveries.filter((delivery) => delivery.status === "fulfilled")).toHaveLength(1)
+    expect(deliveries.filter((delivery) => delivery.status === "rejected")).toHaveLength(1)
+    await expect(client.result(handle.executionId)).resolves.toEqual({
+      type: "completed",
+      value: "signal"
+    })
+  })
+
   test("fresh starts get distinct execution IDs; idempotencyKey deduplicates", async () => {
     const workflow = defineWorkflow({
       name: "freshStarts",
