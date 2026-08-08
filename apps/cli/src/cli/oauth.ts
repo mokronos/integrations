@@ -88,6 +88,7 @@ export const authorizeExecutorInBrowser = async (
   }
   const completion = Promise.withResolvers<ExecutorConnection>()
   let callbackStarted = false
+  let expectedState: string | undefined
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -103,10 +104,17 @@ export const authorizeExecutorInBrowser = async (
           status: 409
         })
       }
-      callbackStarted = true
       const state = url.searchParams.get("state")
       const code = url.searchParams.get("code")
-      if (state === null || code === null) {
+      if (state === null || expectedState === undefined || state !== expectedState) {
+        return browserResponse({
+          title: "Authorization failed",
+          message: "The callback state could not be verified. Return to the terminal and try again.",
+          status: 400
+        })
+      }
+      callbackStarted = true
+      if (code === null) {
         const error = new Error(url.searchParams.get("error_description") ?? "OAuth callback is missing state or code")
         setTimeout(() => completion.reject(error), 0)
         return browserResponse({
@@ -213,6 +221,7 @@ export const authorizeExecutorInBrowser = async (
           : { expiresAt: started.connection.expiresAt })
       }
     }
+    expectedState = started.state
     const authorizationUrlToOpen = requestedScopes === undefined
       ? started.authorizationUrl
       : authorizationUrlWithScopes(started.authorizationUrl, requestedScopes)
