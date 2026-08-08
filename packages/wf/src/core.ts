@@ -854,7 +854,7 @@ const makeCtx = <WErrors>(
     },
 
     effect(effect) {
-      return effect as Effect.Effect<any, any, any>
+      return effect
     }
   }
 }
@@ -1293,7 +1293,7 @@ const makeInMemoryCtx = <WErrors>(
     },
 
     effect(effect) {
-      return effect as Effect.Effect<any, any, any>
+      return effect
     }
   }
 }
@@ -1338,13 +1338,16 @@ export const defineWorkflow = <
 
   const layer = workflow.toLayer(
     Effect.fn(function* (
-      payload: { readonly value: Schema.Schema.Type<Input> },
+      payload: { readonly value: unknown },
       executionId: string
     ) {
       const input = decodeSync(config.input, payload.value)
-      const result = yield* config.run(input, makeCtx(workflow, ExecutionId.make(executionId), errors)) as any
+      const result = yield* config.run(
+        input,
+        makeCtx(workflow, ExecutionId.make(executionId), errors)
+      )
       return decodeSync(config.output, result)
-    }) as any
+    })
   )
 
   const executeInMemory = async (
@@ -1370,7 +1373,7 @@ export const defineWorkflow = <
     })
 
     const effect = Effect.gen(function* () {
-      return yield* config.run(input, ctx) as any
+      return yield* config.run(input, ctx)
     }).pipe(
       Effect.map((result) => decodeSync(config.output, result)),
       Effect.catch((error) =>
