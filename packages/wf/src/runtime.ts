@@ -216,7 +216,7 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
         const result = yield* workflow.workflow.execute(
           engine,
           executionId,
-          { value: payload }
+          payload
         ).pipe(
           Effect.tap((result: unknown) =>
             emitWorkflowEvent({ type: "workflow.completed", executionId: ExecutionId.make(executionId), workflowName, result })

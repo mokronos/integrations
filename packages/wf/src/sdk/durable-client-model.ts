@@ -6,7 +6,11 @@ import {
 import { optionalFinishedAt } from "./client-lifecycle.ts"
 import type { WorkflowExecutionRecord } from "./client-model.ts"
 
-const StoredValueJson = Schema.fromJsonString(Schema.Struct({ value: Schema.Unknown }))
+// JSON omits properties with an `undefined` value. An optional envelope field
+// preserves that value for `Schema.Void` workflow inputs and outputs.
+const StoredValueJson = Schema.fromJsonString(
+  Schema.Struct({ value: Schema.optionalKey(Schema.Unknown) })
+)
 
 export const encodeStoredValue = (value: unknown): string =>
   Schema.encodeSync(StoredValueJson)({ value })

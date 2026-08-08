@@ -92,7 +92,19 @@ interface WorkflowCompensator {
     ) => Effect.Effect<void, never, DynamicService>
   ) => (effect: DynamicEffect) => DynamicEffect
 }
-const WorkflowPayloadSchema = Schema.Struct({ value: Schema.Unknown })
+// Durable RPC messages are JSON encoded, so represent `undefined` explicitly
+// instead of placing it in an object property that serialization would omit.
+const WorkflowPayloadSchema = Schema.Struct({
+  type: Schema.Literals(["value", "void"]),
+  value: Schema.Unknown
+})
+type WorkflowPayload = typeof WorkflowPayloadSchema.Type
+
+const encodeWorkflowPayload = (value: DynamicService): WorkflowPayload =>
+  value === undefined ? { type: "void", value: null } : { type: "value", value }
+
+const decodeWorkflowPayload = (payload: WorkflowPayload): DynamicService =>
+  payload.type === "void" ? undefined : payload.value
 
 export const DefinedWorkflowTypeId = Symbol.for("wf/DefinedWorkflow")
 
@@ -101,10 +113,10 @@ export interface WorkflowEngineHandle {
   readonly execute: (
     engine: WorkflowEngine.WorkflowEngine["Service"],
     executionId: string,
-    payload: { readonly value: DynamicService }
+    payload: DynamicService
   ) => Effect.Effect<DynamicService, DynamicService>
   readonly executeStandalone: (
-    payload: { readonly value: DynamicService }
+    payload: DynamicService
   ) => Effect.Effect<
     DynamicService,
     DynamicService,
@@ -1325,17 +1337,17 @@ export const defineWorkflow = <
   const workflow = Workflow.make({
     name: config.name,
     payload: WorkflowPayloadSchema,
-    idempotencyKey: (payload) => JSON.stringify(payload.value),
+    idempotencyKey: (payload) => JSON.stringify(payload),
     success: config.output,
     error: Schema.Unknown
   })
 
   const layer = workflow.toLayer(
     Effect.fn(function* (
-      payload: { readonly value: unknown },
+      payload: WorkflowPayload,
       executionId: string
     ) {
-      const input = decodeSync(config.input, payload.value)
+      const input = decodeSync(config.input, decodeWorkflowPayload(payload))
       const result = yield* config.run(
         input,
         makeCtx<Errors["Type"]>(
@@ -1351,8 +1363,8 @@ export const defineWorkflow = <
   const workflowHandle: WorkflowEngineHandle = {
     name: workflow.name,
     execute: (engine, executionId, payload) =>
-      engine.execute(workflow, { executionId, payload }),
-    executeStandalone: (payload) => workflow.execute(payload),
+      engine.execute(workflow, { executionId, payload: encodeWorkflowPayload(payload) }),
+    executeStandalone: (payload) => workflow.execute(encodeWorkflowPayload(payload)),
     resume: (engine, executionId) => engine.resume(workflow, executionId),
     interrupt: (engine, executionId) => engine.interrupt(workflow, executionId)
   }
@@ -1470,8 +1482,7 @@ export const defineWorkflow = <
       WorkflowEngine.WorkflowEngine | ExecutionResourceRegistry
     >,
     execute: (payload) => {
-      const enginePayload = Schema.decodeUnknownSync(WorkflowPayloadSchema)({ value: payload })
-      return workflowHandle.executeStandalone(enginePayload) as Effect.Effect<
+      return workflowHandle.executeStandalone(payload) as Effect.Effect<
         Output["Type"],
         Errors["Type"] | unknown,
         WorkflowEngine.WorkflowEngine

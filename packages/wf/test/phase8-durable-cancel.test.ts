@@ -114,7 +114,7 @@ describe("Phase 8 durable cancellation", () => {
   test("timed signal wait still receives its signal (durable race regression)", async () => {
     const workflow = defineWorkflow({
       name: "timedWait",
-      input: Schema.Struct({}),
+      input: Schema.Void,
       output: Schema.String,
       run: function* (_, ctx) {
         const approval = yield* ctx.waitForSignal(
@@ -132,7 +132,7 @@ describe("Phase 8 durable cancellation", () => {
     runtime.register([workflow])
     const client = createWorkflowClient(runtime)
 
-    const handle = await client.start(workflow, {})
+    const handle = await client.start(workflow, undefined)
     expect(await waitForStatus(client, handle.executionId, "suspended")).toBe("suspended")
     await client.signal(handle.executionId, "approval", { approved: true })
     await expect(client.result(handle.executionId)).resolves.toEqual({
