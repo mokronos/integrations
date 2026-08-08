@@ -216,7 +216,7 @@ const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowClient =
       FROM wf_client_history
       WHERE execution_id = ?
     `).get(executionId)?.sequence ?? 1
-    db.query<unknown, [string, number, string, string, string | null]>(`
+    db.query<Record<string, never>, [string, number, string, string, string | null]>(`
       INSERT INTO wf_client_history (execution_id, sequence, event_json, created_at, dedupe_key)
       VALUES (?, ?, ?, ?, ?)
     `).run(executionId, sequence, toJsonText(event), nowIso(), dedupeKey)
@@ -224,7 +224,7 @@ const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowClient =
   }
 
   const updateStatus = (executionId: string, status: WorkflowExecutionStatus) => {
-    db.query<unknown, [WorkflowExecutionStatus, string]>(`
+    db.query<Record<string, never>, [WorkflowExecutionStatus, string]>(`
       UPDATE wf_client_executions
       SET status = ?
       WHERE id = ?
@@ -315,7 +315,7 @@ const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowClient =
           executionId: row.id,
           onEvent: makeEventSink(row.id)
         })
-        db.query<unknown, [string, string, string]>(`
+        db.query<Record<string, never>, [string, string, string]>(`
           UPDATE wf_client_executions
           SET status = 'completed',
             result_json = ?,
@@ -329,7 +329,7 @@ const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowClient =
         if (closing) {
           return { type: "failed", error }
         }
-        db.query<unknown, [string, string, string]>(`
+        db.query<Record<string, never>, [string, string, string]>(`
           UPDATE wf_client_executions
           SET status = 'failed',
             error_json = ?,
@@ -366,7 +366,7 @@ const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowClient =
 
       const id = executionId()
       db.query<
-        unknown,
+        Record<string, never>,
         [string, string | null, string, string, string | null, string | null, string | null, string]
       >(`
         INSERT INTO wf_client_executions (
@@ -519,7 +519,7 @@ const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowClient =
           payload: { compensate: true, ...(opts.actor === undefined ? {} : { actor: opts.actor }) },
           onEvent: makeEventSink(executionId)
         })
-        db.query<unknown, [string, string, string]>(`
+        db.query<Record<string, never>, [string, string, string]>(`
           UPDATE wf_client_executions
           SET status = 'failed',
             error_json = ?,
