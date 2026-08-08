@@ -4,12 +4,14 @@
 export {
   addExecutorMcp,
   addExecutorOpenApi,
+  createExecutorCatalog,
   detectExecutorIntegration,
   findExecutorIntegration,
   listExecutorIntegrations,
   previewExecutorOpenApi,
   probeExecutorMcp
 } from "./catalog.ts"
+export type { ExecutorCatalog } from "./catalog.ts"
 export {
   completeExecutorOAuth,
   createExecutorConnection,
@@ -28,7 +30,7 @@ export {
   getExecutor,
   setExecutorStorageDirectory
 } from "./host.ts"
-export type { ExecutorHost } from "./host.ts"
+export type { ExecutorHost, ExecutorRunner } from "./host.ts"
 export {
   executeExecutorTool,
   listExecutorTools,

@@ -75,10 +75,13 @@ const makeExecutor = async (directory: string): Promise<WfExecutor> => {
   }))
 }
 
-export interface ExecutorHost {
+export interface ExecutorRunner {
+  run<A, E>(operation: (executor: WfExecutor) => Effect.Effect<A, E>): Promise<A>
+}
+
+export interface ExecutorHost extends ExecutorRunner {
   readonly directory: string
   executor(): Promise<WfExecutor>
-  run<A, E>(operation: (executor: WfExecutor) => Effect.Effect<A, E>): Promise<A>
   close(): Promise<void>
 }
 
