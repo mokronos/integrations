@@ -26,6 +26,7 @@ describe("executor services", () => {
     expect(services.connections.create).toBeFunction()
     expect(services.discovery.inspect).toBeFunction()
     expect(services.provisioning.install).toBeFunction()
+    expect(services.validateIntegrationNode).toBeFunction()
     expect(services.integrationInvoker.invoke).toBeFunction()
 
     await host.close()

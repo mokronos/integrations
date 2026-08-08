@@ -5,6 +5,11 @@ import {
   type IntegrationValidationReport
 } from "./integration-model.ts"
 import { listExecutorTools } from "./tools.ts"
+import type { ExecutorTools } from "./tools.ts"
+
+export interface IntegrationValidationDependencies {
+  readonly tools: Pick<ExecutorTools, "list">
+}
 
 const finding = (
   severity: IntegrationValidationFinding["severity"],
@@ -12,10 +17,12 @@ const finding = (
   message: string
 ): IntegrationValidationFinding => ({ severity, check, message })
 
-export const validateIntegrationNode = async (
-  config: typeof Schema.Json.Type,
-  options: { readonly live?: boolean } = {}
-): Promise<IntegrationValidationReport> => {
+export const createIntegrationValidation = (
+  dependencies: IntegrationValidationDependencies
+) => async (
+    config: typeof Schema.Json.Type,
+    options: { readonly live?: boolean } = {}
+  ): Promise<IntegrationValidationReport> => {
   let node: typeof IntegrationNodeConfig.Type
   try {
     node = await Schema.decodeUnknownPromise(IntegrationNodeConfig)(config)
@@ -29,7 +36,7 @@ export const validateIntegrationNode = async (
     finding("info", "structural", "Executor tool address is valid")
   ]
   if (options.live === true) {
-    const tool = (await listExecutorTools()).find((candidate) =>
+    const tool = (await dependencies.tools.list()).find((candidate) =>
       candidate.address === node.source.address
     )
     if (tool === undefined) {
@@ -43,3 +50,7 @@ export const validateIntegrationNode = async (
     findings
   }
 }
+
+export const validateIntegrationNode = createIntegrationValidation({
+  tools: { list: listExecutorTools }
+})

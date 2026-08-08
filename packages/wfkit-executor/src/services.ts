@@ -6,6 +6,7 @@ import { createExecutorIntegrationInvoker } from "./invoker.ts"
 import { createIntegrationOverview } from "./overview.ts"
 import { createIntegrationProvisioning } from "./provisioning.ts"
 import { createExecutorTools } from "./tools.ts"
+import { createIntegrationValidation } from "./validation.ts"
 
 /** All Executor-backed capabilities sharing one explicitly owned host. */
 export const createExecutorServices = (runner: ExecutorRunner) => {
@@ -21,6 +22,7 @@ export const createExecutorServices = (runner: ExecutorRunner) => {
     tools,
     discovery,
     provisioning: createIntegrationProvisioning({ discovery, catalog, connections, tools }),
+    validateIntegrationNode: createIntegrationValidation({ tools }),
     listIntegrationOverviews: createIntegrationOverview({ catalog, connections, tools }),
     integrationInvoker: createExecutorIntegrationInvoker(tools)
   }
