@@ -10,6 +10,7 @@ import type { WorkflowRuntime } from "../runtime.ts"
 import { decodeSignal } from "../signal.ts"
 import { parseJsonText } from "./json.ts"
 import {
+  createSignalDeliveryClaims,
   observeExecution,
   optionalActor,
   optionalCursor,
@@ -37,7 +38,7 @@ export const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowC
   }
   const store = createDurableClientStore(databasePath)
   const runPromises = new Map<string, Promise<WorkflowResult>>()
-  const deliveredSignalClaims = new Set<string>()
+  const signalClaims = createSignalDeliveryClaims()
   let closing = false
 
   const workflowFor = (row: DurableExecutionRow): DefinedWorkflow => {
@@ -175,10 +176,6 @@ export const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowC
       if (waiting === undefined) {
         throw new Error(`Execution ${executionId} is not waiting for signal ${name}`)
       }
-      const claim = `${executionId}\0${waiting.activityName}`
-      if (deliveredSignalClaims.has(claim)) {
-        throw new Error(`Signal ${name} has already been delivered to execution ${executionId}`)
-      }
       // Validate before completing the durable deferred: a bad value persisted
       // there would otherwise fail the run during replay. The history schema is
       // durable, unlike the runtime's process-local schema registry.
@@ -188,7 +185,7 @@ export const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowC
       } else if (waiting.payloadSchema !== undefined) {
         decodePersistedJsonSchema(waiting.payloadSchema, payload)
       }
-      deliveredSignalClaims.add(claim)
+      signalClaims.claim(executionId, waiting)
       // Ensure this runtime has loaded the suspended execution before waking
       // it so replay uses this runtime's secrets and integration adapters.
       try {
@@ -201,7 +198,7 @@ export const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowC
           onEvent: makeEventSink(executionId)
         })
       } catch (error) {
-        deliveredSignalClaims.delete(claim)
+        signalClaims.release(executionId, waiting)
         throw error
       }
       store.appendHistory(executionId, {
@@ -308,7 +305,7 @@ export const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowC
       closing = true
       await runtime.dispose()
       await Promise.allSettled(runPromises.values())
-      deliveredSignalClaims.clear()
+      signalClaims.clear()
       store.close()
     }
   }

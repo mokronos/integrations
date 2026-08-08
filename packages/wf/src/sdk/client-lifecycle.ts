@@ -42,6 +42,29 @@ export const paginate = <T>(
   return { items, ...optionalCursor(cursor) }
 }
 
+export const createSignalDeliveryClaims = () => {
+  const claims = new Set<string>()
+  const keyOf = (executionId: string, signal: Pick<PendingSignal, "activityName">) =>
+    `${executionId}\0${signal.activityName}`
+  return {
+    claim(executionId: string, signal: Pick<PendingSignal, "name" | "activityName">): void {
+      const key = keyOf(executionId, signal)
+      if (claims.has(key)) {
+        throw new Error(
+          `Signal ${signal.name} has already been delivered to execution ${executionId}`
+        )
+      }
+      claims.add(key)
+    },
+    release(executionId: string, signal: Pick<PendingSignal, "activityName">): void {
+      claims.delete(keyOf(executionId, signal))
+    },
+    clear(): void {
+      claims.clear()
+    }
+  }
+}
+
 const signalKey = (event: { readonly name: string; readonly invocation: number }): string =>
   `${event.name}:${event.invocation}`
 

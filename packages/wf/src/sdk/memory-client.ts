@@ -5,6 +5,7 @@ import type { WorkflowHistoryEvent, WorkflowHistoryRecord } from "../schemas.ts"
 import type { WorkflowRuntime } from "../runtime.ts"
 import { createSignalTransport } from "../signal.ts"
 import {
+  createSignalDeliveryClaims,
   nowIso,
   observeExecution,
   optionalActor,
@@ -52,7 +53,7 @@ export const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowC
   const executions = new Map<string, ExecutionRecord>()
   const idempotencyKeys = new Map<string, string>()
   const signals = runtime?.signals ?? createSignalTransport()
-  const deliveredSignalClaims = new Set<string>()
+  const signalClaims = createSignalDeliveryClaims()
   let disposed = false
 
   const ensureActive = (): void => {
@@ -160,15 +161,11 @@ export const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowC
       if (waiting === undefined) {
         throw new Error(`Execution ${id} is not waiting for signal ${name}`)
       }
-      const claim = `${id}\0${waiting.activityName}`
-      if (deliveredSignalClaims.has(claim)) {
-        throw new Error(`Signal ${name} has already been delivered to execution ${id}`)
-      }
-      deliveredSignalClaims.add(claim)
+      signalClaims.claim(id, waiting)
       try {
         await signals.deliver(id, name, payload)
       } catch (error) {
-        deliveredSignalClaims.delete(claim)
+        signalClaims.release(id, waiting)
         throw error
       }
       appendHistory(execution, {
@@ -249,7 +246,7 @@ export const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowC
       await runtime?.dispose()
       executions.clear()
       idempotencyKeys.clear()
-      deliveredSignalClaims.clear()
+      signalClaims.clear()
     }
   }
 }
