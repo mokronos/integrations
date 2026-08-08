@@ -37,15 +37,21 @@ export const createConcurrencyLimiter = (): ConcurrencyLimiter => {
       partitions.set(key, state)
       if (state.active >= limit) {
         await new Promise<void>((resolve) => state.queue.push(resolve))
+      } else {
+        state.active++
       }
-
-      state.active++
       let released = false
       return () => {
         if (released) return
         released = true
+        const next = state.queue.shift()
+        if (next !== undefined) {
+          // Transfer this permit directly. Keeping `active` unchanged prevents
+          // a new caller from slipping in before the queued continuation runs.
+          next()
+          return
+        }
         state.active--
-        state.queue.shift()?.()
         if (state.active === 0 && state.queue.length === 0) {
           partitions.delete(key)
           if (partitions.size === 0) steps.delete(stepName)
