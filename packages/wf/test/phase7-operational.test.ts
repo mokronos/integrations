@@ -348,4 +348,23 @@ describe("Phase 7 secret references", () => {
 
     expect(() => runtime.register([])).toThrow("Workflow runtime has been disposed")
   })
+
+  test("runtime registration detects schema-only workflow conflicts", () => {
+    const first = defineWorkflow({
+      name: "schemaConflict",
+      input: Schema.Void,
+      output: Schema.Void,
+      run: function* () {}
+    })
+    const second = defineWorkflow({
+      name: "schemaConflict",
+      input: Schema.String,
+      output: Schema.Void,
+      run: function* () {}
+    })
+    const runtime = createWorkflowRuntime({ backend: "memory" })
+    runtime.register([first])
+
+    expect(() => runtime.register([second])).toThrow("already registered with different source")
+  })
 })

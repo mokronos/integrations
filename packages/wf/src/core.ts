@@ -1315,6 +1315,9 @@ const isDeclaredTerminal = <E>(schema: SynchronousSchema<E>, error: unknown): bo
   }
 }
 
+const schemaFingerprint = (schema: Schema.Top): string =>
+  JSON.stringify(jsonSchemaOf(schema) ?? { ast: schema.ast._tag })
+
 export const defineWorkflow = <
   const Input extends SynchronousSchema<DynamicService>,
   const Output extends SynchronousSchema<DynamicService>,
@@ -1338,6 +1341,12 @@ export const defineWorkflow = <
     .update(config.name)
     .update("\0")
     .update(config.run.toString())
+    .update("\0")
+    .update(schemaFingerprint(config.input))
+    .update("\0")
+    .update(schemaFingerprint(config.output))
+    .update("\0")
+    .update(schemaFingerprint(errors))
     .digest("hex")
 
   const workflow = Workflow.make({
