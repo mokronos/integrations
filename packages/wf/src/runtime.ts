@@ -1,10 +1,5 @@
-import { mkdirSync } from "node:fs"
-import path from "node:path"
 import { NodeRuntime } from "@effect/platform-node"
-import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { Effect, Exit, Layer, ManagedRuntime, Schema } from "effect"
-import { ClusterWorkflowEngine, SingleRunner } from "effect/unstable/cluster"
-import { SqlClient } from "effect/unstable/sql"
 import { DurableDeferred, WorkflowEngine } from "effect/unstable/workflow"
 import type { DefinedWorkflow } from "./core.ts"
 import type { SecretResolver } from "./secrets.ts"
@@ -22,6 +17,9 @@ import type { ConcurrencyLimiter } from "./concurrency.ts"
 import { createSignalTransport } from "./signal.ts"
 import type { SignalTransport } from "./signal.ts"
 import { ExecutionId } from "./schemas.ts"
+import { makeEngineLayer } from "./engine-layer.ts"
+
+export { makeEngineLayer } from "./engine-layer.ts"
 
 type DynamicService = Schema.Schema.Type<Schema.Top>
 
@@ -89,37 +87,6 @@ export class WorkflowConflictError extends Schema.TaggedErrorClass<WorkflowConfl
   override get message(): string {
     return `Workflow ${this.workflowName} is already registered with different source`
   }
-}
-
-const defaultEngineDatabasePath = () => path.join(process.cwd(), ".wf", "engine.sqlite")
-
-// All durable-execution plumbing lives here so authored workflows never touch
-// the cluster engine, the runner, or the backing store.
-export const makeEngineLayer = (options: {
-  readonly databasePath?: string
-  readonly sqliteBusyTimeoutMs?: number
-  readonly timerPollIntervalMs?: number
-} = {}) => {
-  const databasePath = path.resolve(options.databasePath ?? defaultEngineDatabasePath())
-  const sqliteBusyTimeoutMs = Math.max(0, Math.trunc(options.sqliteBusyTimeoutMs ?? 5000))
-  // The cluster default is 10 seconds, which delays every durable timer
-  // (signal timeout, long sleep) by up to that long on a single-node engine.
-  const timerPollIntervalMs = Math.max(10, Math.trunc(options.timerPollIntervalMs ?? 250))
-  const sqliteLayer = Layer.unwrap(Effect.sync(() => {
-    mkdirSync(path.dirname(databasePath), { recursive: true })
-    return SqliteClient.layer({ filename: databasePath })
-  }))
-  const configuredSqliteLayer = Layer.effectDiscard(Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    yield* sql.unsafe(`PRAGMA busy_timeout = ${sqliteBusyTimeoutMs}`)
-  })).pipe(Layer.provideMerge(sqliteLayer))
-
-  return ClusterWorkflowEngine.layer.pipe(
-    Layer.provideMerge(SingleRunner.layer({
-      shardingConfig: { entityMessagePollInterval: timerPollIntervalMs }
-    })),
-    Layer.provide(configuredSqliteLayer)
-  )
 }
 
 export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): WorkflowRuntime => {
