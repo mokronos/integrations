@@ -2,8 +2,8 @@ import { Schema } from "effect"
 import {
   addExecutorMcp,
   addExecutorOpenApi,
-  createExecutorConnection,
   detectExecutorIntegration,
+  ensureExecutorConnection,
   listExecutorConnections,
   listExecutorIntegrations,
   listExecutorTools,
@@ -47,24 +47,6 @@ const bestDetection = (detections: ReadonlyArray<ExecutorDetection>): ExecutorDe
 
 const existingIntegration = async (slug: string): Promise<ExecutorIntegration | undefined> =>
   (await listExecutorIntegrations()).find((integration) => integration.slug === slug)
-
-const ensureConnection = async (
-  integration: ExecutorIntegration,
-  connectionName: string
-): Promise<void> => {
-  const existing = (await listExecutorConnections()).some((connection) =>
-    connection.integration === integration.slug && connection.name === connectionName
-  )
-  if (existing) return
-  const noAuth = integration.authMethods.find((method) => method.kind === "none")
-  if (noAuth === undefined && integration.authMethods.length > 0) return
-  await createExecutorConnection({
-    integration: integration.slug,
-    name: connectionName,
-    template: noAuth?.template ?? "none",
-    value: ""
-  })
-}
 
 const detectWithFallback = async (url: string): Promise<ExecutorDetection> => {
   const detected = bestDetection(await detectExecutorIntegration(url))
@@ -114,7 +96,7 @@ export const discoverIntegration = async (
       registered = await existingIntegration(detection.slug)
     }
     if (registered === undefined) throw new Error(`Executor did not persist MCP integration ${detection.slug}`)
-    await ensureConnection(registered, connectionName)
+    await ensureExecutorConnection(registered, connectionName)
     return {
       url: parsed.toString(),
       detection,
@@ -142,7 +124,7 @@ export const discoverIntegration = async (
     registered = await existingIntegration(detection.slug)
   }
   if (registered === undefined) throw new Error(`Executor did not persist OpenAPI integration ${detection.slug}`)
-  await ensureConnection(registered, connectionName)
+  await ensureExecutorConnection(registered, connectionName)
   return {
     url: parsed.toString(),
     detection,

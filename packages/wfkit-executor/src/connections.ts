@@ -6,7 +6,7 @@ import {
   OAuthState
 } from "@executor-js/sdk/core"
 import { runExecutor } from "./host.ts"
-import type { ExecutorConnection } from "./schemas.ts"
+import type { ExecutorConnection, ExecutorIntegration } from "./schemas.ts"
 
 /** Creates a persisted credential-backed connection for an installed
  * integration. */
@@ -54,6 +54,26 @@ export const removeExecutorConnection = async (options: {
     integration: IntegrationSlug.make(options.integration),
     name: ConnectionName.make(options.name)
   }))
+
+/** Applies the default unauthenticated-connection policy. Authenticated
+ * integrations are intentionally left untouched for an explicit auth flow. */
+export const ensureExecutorConnection = async (
+  integration: ExecutorIntegration,
+  connectionName: string
+): Promise<void> => {
+  const existing = (await listExecutorConnections()).some((connection) =>
+    connection.integration === integration.slug && connection.name === connectionName
+  )
+  if (existing) return
+  const noAuth = integration.authMethods.find((method) => method.kind === "none")
+  if (noAuth === undefined && integration.authMethods.length > 0) return
+  await createExecutorConnection({
+    integration: integration.slug,
+    name: connectionName,
+    template: noAuth?.template ?? "none",
+    value: ""
+  })
+}
 
 /** Reads OAuth server metadata without changing connection state. */
 export const probeExecutorOAuth = async (url: string) =>

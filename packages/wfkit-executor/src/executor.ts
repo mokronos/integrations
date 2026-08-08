@@ -14,6 +14,7 @@ export {
   completeExecutorOAuth,
   createExecutorConnection,
   createExecutorOAuthClient,
+  ensureExecutorConnection,
   listExecutorConnections,
   probeExecutorOAuth,
   registerExecutorOAuthClient,

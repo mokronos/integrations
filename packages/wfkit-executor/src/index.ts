@@ -21,6 +21,7 @@ export {
   createExecutorOAuthClient,
   detectExecutorIntegration,
   executorStorageDirectory,
+  ensureExecutorConnection,
   executeExecutorTool,
   getExecutor,
   listExecutorConnections,
