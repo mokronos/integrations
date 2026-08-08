@@ -36,8 +36,10 @@ describe("Phase 4 workflow client", () => {
     })
     const client = createWorkflowClient()
 
-    await client.dispose()
-    await expect(client.dispose()).resolves.toBeUndefined()
+    await expect(Promise.all([client.dispose(), client.dispose()])).resolves.toEqual([
+      undefined,
+      undefined
+    ])
     await expect(client.start(workflow, undefined)).rejects.toThrow(
       "Workflow client has been disposed"
     )

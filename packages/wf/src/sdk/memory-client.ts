@@ -55,6 +55,7 @@ export const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowC
   const signals = runtime?.signals ?? createSignalTransport()
   const signalClaims = createSignalDeliveryClaims()
   let disposed = false
+  let disposePromise: Promise<void> | undefined
 
   const ensureActive = (): void => {
     if (disposed) {
@@ -234,19 +235,22 @@ export const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowC
     }, id, options.signal),
 
     async dispose() {
-      if (disposed) return
+      if (disposePromise !== undefined) return disposePromise
       disposed = true
-      for (const execution of executions.values()) {
-        if (!isTerminalRunStatus(execution.status)) {
-          const error = new Error("Workflow client has been disposed")
-          signals.cleanup(execution.executionId, error)
-          execution.abort.abort(error)
+      disposePromise = (async () => {
+        for (const execution of executions.values()) {
+          if (!isTerminalRunStatus(execution.status)) {
+            const error = new Error("Workflow client has been disposed")
+            signals.cleanup(execution.executionId, error)
+            execution.abort.abort(error)
+          }
         }
-      }
-      await runtime?.dispose()
-      executions.clear()
-      idempotencyKeys.clear()
-      signalClaims.clear()
+        await runtime?.dispose()
+        executions.clear()
+        idempotencyKeys.clear()
+        signalClaims.clear()
+      })()
+      await disposePromise
     }
   }
 }
