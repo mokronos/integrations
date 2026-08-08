@@ -12,26 +12,53 @@ import {
 export const IntegrationKind = Schema.Literals(["mcp", "openapi"])
 export type IntegrationKind = typeof IntegrationKind.Type
 
+const McpDetection = Schema.Struct({
+  ...ExecutorDetection.fields,
+  kind: Schema.Literal("mcp")
+})
+
+const OpenApiDetection = Schema.Struct({
+  ...ExecutorDetection.fields,
+  kind: Schema.Literal("openapi")
+})
+
 /** A read-only description of an endpoint. Inspection never installs catalog
  * state, creates credentials, or opens a connection. */
-export const IntegrationInspection = Schema.Struct({
-  url: Schema.String,
-  detection: ExecutorDetection,
-  probe: Schema.optional(ExecutorMcpProbe),
-  preview: Schema.optional(ExecutorOpenApiPreview)
-})
+export const IntegrationInspection = Schema.Union([
+  Schema.Struct({
+    url: Schema.String,
+    detection: McpDetection,
+    probe: ExecutorMcpProbe
+  }),
+  Schema.Struct({
+    url: Schema.String,
+    detection: OpenApiDetection,
+    preview: ExecutorOpenApiPreview
+  })
+])
 export type IntegrationInspection = typeof IntegrationInspection.Type
 
-export const IntegrationDiscovery = Schema.Struct({
-  url: Schema.String,
-  detection: ExecutorDetection,
-  probe: Schema.optional(ExecutorMcpProbe),
-  preview: Schema.optional(ExecutorOpenApiPreview),
+const DiscoveryFields = {
   integration: ExecutorIntegration,
   requiresAuthentication: Schema.Boolean,
   authMethods: Schema.Array(ExecutorAuthMethod),
   tools: Schema.Array(ExecutorTool)
-})
+}
+
+export const IntegrationDiscovery = Schema.Union([
+  Schema.Struct({
+    url: Schema.String,
+    detection: McpDetection,
+    probe: ExecutorMcpProbe,
+    ...DiscoveryFields
+  }),
+  Schema.Struct({
+    url: Schema.String,
+    detection: OpenApiDetection,
+    preview: ExecutorOpenApiPreview,
+    ...DiscoveryFields
+  })
+])
 export type IntegrationDiscovery = typeof IntegrationDiscovery.Type
 
 export interface DiscoverIntegrationsOptions {

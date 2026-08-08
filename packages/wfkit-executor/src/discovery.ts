@@ -77,14 +77,14 @@ const inspectWith = async (
   if (detection.kind === "mcp") {
     return {
       url: normalizedUrl,
-      detection,
+      detection: { ...detection, kind: "mcp" },
       probe: await dependencies.catalog.probeMcp(detection.endpoint)
     }
   }
   if (detection.kind === "openapi") {
     return {
       url: normalizedUrl,
-      detection,
+      detection: { ...detection, kind: "openapi" },
       preview: await dependencies.catalog.previewOpenApi(detection.endpoint)
     }
   }

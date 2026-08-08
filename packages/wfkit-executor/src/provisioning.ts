@@ -41,26 +41,22 @@ const installWith = async (
   const existing = await dependencies.catalog.find(inspection.detection.slug)
   if (existing !== undefined) return existing
 
-  if (inspection.detection.kind === "mcp") {
+  if ("probe" in inspection) {
     const probe = inspection.probe
-    if (probe === undefined) throw new Error("MCP installation requires an MCP probe")
     await dependencies.catalog.addMcp({
       endpoint: inspection.detection.endpoint,
       name: probe.name,
       slug: inspection.detection.slug,
       auth: probe.requiresOAuth ? "oauth2" : probe.requiresAuthentication ? "bearer" : "none"
     })
-  } else if (inspection.detection.kind === "openapi") {
+  } else {
     const preview = inspection.preview
-    if (preview === undefined) throw new Error("OpenAPI installation requires an OpenAPI preview")
     await dependencies.catalog.addOpenApi({
       spec: inspection.detection.endpoint,
       slug: inspection.detection.slug,
       name: inspection.detection.name,
       ...(preview.servers[0]?.url === undefined ? {} : { baseUrl: preview.servers[0].url })
     })
-  } else {
-    throw new Error(`Cannot install unsupported integration kind: ${inspection.detection.kind}`)
   }
 
   const installed = await dependencies.catalog.find(inspection.detection.slug)
