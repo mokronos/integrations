@@ -18,6 +18,22 @@ import type { SignalTransport } from "./signal.ts"
 import { defaultConcurrencyLimiter } from "./concurrency.ts"
 import type { ConcurrencyLimiter, StepConcurrencyPolicy } from "./concurrency.ts"
 import {
+  createInMemoryDeterminismState,
+  NonDeterminismError,
+  OrchestrationCall,
+  orchestrationCallsEqual,
+  orchestrationValueKey,
+  verifyOrchestrationCall
+} from "./determinism.ts"
+import type { InMemoryDeterminismState } from "./determinism.ts"
+export {
+  createInMemoryDeterminismState,
+  NonDeterminismError,
+  OrchestrationCall,
+  OrchestrationKind
+} from "./determinism.ts"
+export type { InMemoryDeterminismState } from "./determinism.ts"
+import {
   resolveSecretReferences
 } from "./secrets.ts"
 import type {
@@ -109,15 +125,6 @@ export const defineStep = <
 
 export type WorkflowValue<A, E = never> = Effect.Effect<A, E, any>
 
-export type OrchestrationKind = "step" | "sleep" | "signal" | "now" | "random" | "code" | "all"
-
-export interface OrchestrationCall {
-  readonly kind: OrchestrationKind
-  readonly name: string
-  readonly counter: number
-  readonly branches?: number
-}
-
 type WorkflowValueSuccess<EffectValue> =
   EffectValue extends WorkflowValue<infer A, any> ? A : never
 
@@ -156,21 +163,6 @@ const CancellationRequestSchema = Schema.Struct({
   compensate: Schema.Boolean,
   actor: Schema.optional(Schema.String)
 })
-
-export class NonDeterminismError extends Error {
-  readonly _tag = "NonDeterminismError"
-  readonly expected: OrchestrationCall
-  readonly actual: OrchestrationCall
-
-  constructor(options: { readonly expected: OrchestrationCall; readonly actual: OrchestrationCall }) {
-    super(
-      `Non-deterministic workflow replay: expected ${formatCall(options.expected)} but saw ${formatCall(options.actual)}`
-    )
-    this.name = "NonDeterminismError"
-    this.expected = options.expected
-    this.actual = options.actual
-  }
-}
 
 export interface WorkflowContext<WErrors> {
   readonly executionId: string
@@ -252,15 +244,6 @@ export interface InMemoryExecutionOptions {
   readonly concurrency?: ConcurrencyLimiter
 }
 
-export interface InMemoryDeterminismState {
-  readonly calls: OrchestrationCall[]
-  readonly blocks: Array<{
-    readonly call: OrchestrationCall
-    readonly branches: ReadonlyArray<ReadonlyArray<OrchestrationCall>>
-  }>
-  readonly values: Map<string, unknown>
-}
-
 interface CompensationEntry {
   readonly stepName: string
   readonly invocation: number
@@ -283,44 +266,6 @@ class AsyncFailure extends Error {
     this.error = error
   }
 }
-
-const OrchestrationCallSchema: AnySchema = Schema.Struct({
-  kind: Schema.Union([
-    Schema.Literal("step"),
-    Schema.Literal("sleep"),
-    Schema.Literal("signal"),
-    Schema.Literal("now"),
-    Schema.Literal("random"),
-    Schema.Literal("code"),
-    Schema.Literal("all")
-  ]),
-  name: Schema.String,
-  counter: Schema.Number,
-  branches: Schema.optional(Schema.Number)
-})
-
-export const createInMemoryDeterminismState = (): InMemoryDeterminismState => ({
-  calls: [],
-  blocks: [],
-  values: new Map()
-})
-
-const formatCall = (call: OrchestrationCall): string =>
-  `${call.kind}:${call.name}#${call.counter}${call.branches === undefined ? "" : ` branches=${call.branches}`}`
-
-const callsEqual = (left: OrchestrationCall, right: OrchestrationCall): boolean =>
-  left.kind === right.kind &&
-  left.name === right.name &&
-  left.counter === right.counter &&
-  left.branches === right.branches
-
-const verifyCall = (expected: OrchestrationCall, actual: OrchestrationCall) => {
-  if (!callsEqual(expected, actual)) {
-    throw new NonDeterminismError({ expected, actual })
-  }
-}
-
-const valueKey = (call: OrchestrationCall): string => formatCall(call)
 
 const skipsCompensation = (error: unknown): boolean =>
   typeof error === "object" &&
@@ -427,11 +372,11 @@ const makeCtx = <WErrors>(
       : `determinism#${position}`
     return Activity.make({
       name: activityName,
-      success: OrchestrationCallSchema,
+      success: OrchestrationCall,
       execute: Effect.succeed(actual)
     }).pipe(
       Effect.flatMap((expected) =>
-        callsEqual(expected, actual)
+        orchestrationCallsEqual(expected, actual)
           ? Effect.void
           : Effect.fail(new NonDeterminismError({ expected, actual }))
       )
@@ -897,7 +842,7 @@ const makeInMemoryCtx = <WErrors>(
     if (expected === undefined) {
       determinism.calls.push(actual)
     } else {
-      verifyCall(expected, actual)
+      verifyOrchestrationCall(expected, actual)
     }
     branchCollectors[branchCollectors.length - 1]?.push(actual)
   }
@@ -1130,7 +1075,7 @@ const makeInMemoryCtx = <WErrors>(
       const call: OrchestrationCall = { kind: "now", name: "now", counter: invocation }
       return Effect.promise(async () => {
         await recordCall(call)
-        const key = valueKey(call)
+        const key = orchestrationValueKey(call)
         const existing = determinism.values.get(key)
         if (existing instanceof Date) {
           return existing
@@ -1146,7 +1091,7 @@ const makeInMemoryCtx = <WErrors>(
       const call: OrchestrationCall = { kind: "random", name: "random", counter: invocation }
       return Effect.promise(async () => {
         await recordCall(call)
-        const key = valueKey(call)
+        const key = orchestrationValueKey(call)
         const existing = determinism.values.get(key)
         if (typeof existing === "number") {
           return existing
@@ -1173,7 +1118,7 @@ const makeInMemoryCtx = <WErrors>(
             ...(options.reason === undefined ? {} : { reason: options.reason })
           })
 
-          const key = valueKey(call)
+          const key = orchestrationValueKey(call)
           if (determinism.values.has(key)) {
             const result = determinism.values.get(key)
             await emit({
