@@ -88,6 +88,7 @@ export const createExecutorHost = (directory: string): ExecutorHost => {
   const resolvedDirectory = path.resolve(directory)
   let pending: Promise<WfExecutor> | undefined
   let closed = false
+  let closePromise: Promise<void> | undefined
 
   const executor = (): Promise<WfExecutor> => {
     if (closed) {
@@ -107,13 +108,14 @@ export const createExecutorHost = (directory: string): ExecutorHost => {
     executor,
     run: async (operation) => await Effect.runPromise(operation(await executor())),
     close: async () => {
-      if (closed) return
+      if (closePromise !== undefined) return closePromise
       closed = true
       const active = pending
       pending = undefined
-      if (active !== undefined) {
-        await Effect.runPromise((await active).close())
-      }
+      closePromise = active === undefined
+        ? Promise.resolve()
+        : active.then((executor) => Effect.runPromise(executor.close()))
+      await closePromise
     }
   }
 }

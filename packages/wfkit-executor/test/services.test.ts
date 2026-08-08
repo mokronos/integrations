@@ -29,11 +29,13 @@ describe("executor services", () => {
     expect(services.validateIntegrationNode).toBeFunction()
     expect(services.integrationInvoker.invoke).toBeFunction()
 
-    await host.close()
+    await expect(Promise.all([host.close(), host.close()])).resolves.toEqual([
+      undefined,
+      undefined
+    ])
     await expect(host.executor()).rejects.toMatchObject({
       _tag: "ExecutorHostClosedError",
       directory
     })
-    await expect(host.close()).resolves.toBeUndefined()
   })
 })
