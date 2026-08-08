@@ -21,6 +21,8 @@ import type { IntegrationInvoker } from "./integration.ts"
 import { createConcurrencyLimiter } from "./concurrency.ts"
 import type { ConcurrencyLimiter } from "./concurrency.ts"
 
+type DynamicService = Schema.Schema.Type<Schema.Top>
+
 export interface ExecuteWorkflowOptions {
   readonly onEvent?: WorkflowEventSink
   readonly engineDatabasePath?: string
@@ -159,7 +161,7 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
   // cannot tear resources out from under an active execution.
   const managedBySignature = new Map<
     string,
-    ManagedRuntime.ManagedRuntime<any, unknown>
+    ManagedRuntime.ManagedRuntime<DynamicService, DynamicService>
   >()
   let disposed = false
 
@@ -175,7 +177,10 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
     return created
   }
 
-  const runEffect = <A>(effect: Effect.Effect<A, unknown, any>, onEvent?: WorkflowEventSink) =>
+  const runEffect = <A>(
+    effect: Effect.Effect<A, DynamicService, DynamicService>,
+    onEvent?: WorkflowEventSink
+  ) =>
     getManagedRuntime().runPromise(
       effect.pipe(
         Effect.provideService(currentExecutionResources, {
@@ -184,7 +189,7 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
           ...(options.integrations === undefined ? {} : { integrations: options.integrations }),
           concurrency
         })
-      ) as Effect.Effect<A, unknown, never>
+      ) as Effect.Effect<A, DynamicService, never>
     )
 
   return {
