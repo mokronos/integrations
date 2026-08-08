@@ -74,13 +74,17 @@ registration, and tool-schema discovery:
 ```sh
 wf i discover https://mcp.example.com/mcp
 wf i connect <integration-slug>
-wf i tools <integration-slug>
+wf i tools <integration-slug> --search release
+wf i schema <tool-name>
 wf i invoke <tool-address> '{"query":"status"}'
 wf i connections
 ```
 
 The default connection is `default`. Integration commands return JSON by default;
-use `--text` for human-readable output.
+use `--text` for human-readable output. `tools` lists names and descriptions
+grouped by integration, narrowed by `--search`; `schema` returns one tool's
+address and full input and output schemas, from a bare tool name, an integration
+slug plus a tool name, or a tool address.
 
 For API keys or bearer tokens, pass the name of an environment variable with
 `--credential-env`; the value is never printed. OAuth uses Executor's discovery,

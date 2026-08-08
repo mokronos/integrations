@@ -46,7 +46,8 @@ Integration discovery and execution use Executor for both MCP and OpenAPI:
 wf i discover https://mcp.example.com/mcp
 wf i search linear
 wf i connect <integration-slug>
-wf i tools <integration-slug>
+wf i tools <integration-slug> --search release
+wf i schema <tool-name>
 wf i invoke <tool-address> '{"query":"status"}'
 ```
 
@@ -54,6 +55,10 @@ The default connection is named `default`. Integration commands return JSON by
 default; use `--text` for human-readable output. `discover` performs URL
 detection, auth discovery, registration, and tool discovery. For OAuth, `connect`
 opens a browser and returns through a loopback callback.
+Inspection is progressive: `tools` lists names and descriptions grouped by
+integration (narrow it with `--search`), and `schema` returns one named tool's
+address and full input and output schemas. `schema` takes a bare tool name while
+it is unique, an integration slug plus a tool name, or a tool address.
 Credentials are AES-GCM encrypted with a separate user-only key; workflows
 persist only the Executor tool address.
 

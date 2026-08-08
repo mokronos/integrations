@@ -15,7 +15,8 @@ workflow:
 ```bash
 wf i discover <mcp-or-openapi-url>
 wf i connect <integration-slug> --connection default
-wf i tools --integration <integration-slug> --connection default
+wf i tools <integration-slug> --connection default
+wf i schema <integration-slug> <tool-name>
 ```
 
 The CLI delegates protocol detection, auth templates, OAuth, connection metadata,

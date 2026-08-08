@@ -42,9 +42,15 @@ export {
 export type { ExecutorHost, ExecutorRunner } from "./host.ts"
 export {
   createExecutorTools,
+  describeExecutorTool,
   executeExecutorTool,
   listExecutorTools,
+  listExecutorToolSummaries,
   normalizeExecutorToolOutputSchema,
   normalizeExecutorToolResult
 } from "./tools.ts"
-export type { ExecutorTools } from "./tools.ts"
+export type {
+  ExecutorToolFilter,
+  ExecutorTools,
+  ExecutorToolTarget
+} from "./tools.ts"

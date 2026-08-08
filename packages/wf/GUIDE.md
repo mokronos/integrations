@@ -63,14 +63,21 @@ name that variable; never place the value on the command line:
 wf i connect <integration-slug> --credential-env SERVICE_TOKEN
 ```
 
-Then inspect the available tools and copy the selected Executor address into the
-workflow. Integration commands return JSON by default; use `--text` for a
-concise human-readable output:
+Then inspect the available tools. Browse names and descriptions first, and pull
+the schemas for the one tool you settle on. Integration commands return JSON by
+default; use `--text` for a concise human-readable output:
 
 ```sh
 wf i tools <integration-slug>
 wf i tools <integration-slug> --text
+wf i tools --search <text>
+wf i schema <tool-name>
 ```
+
+`schema` returns the Executor address to copy into the workflow, together with
+the input and output schemas to mirror in `input` and `output`. It accepts a
+bare tool name while that name is unique across the connected integrations, an
+integration slug plus a tool name, or a full tool address.
 
 For a safe read-only smoke test, invoke the selected address directly before
 authoring:

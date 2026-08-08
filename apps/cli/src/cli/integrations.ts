@@ -2,11 +2,12 @@ import { Data, Effect, Option, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import {
   createExecutorConnection,
+  describeExecutorTool,
   executeExecutorTool,
   ExecutorToolAddress,
   listExecutorConnections,
   listExecutorIntegrations,
-  listExecutorTools,
+  listExecutorToolSummaries,
   removeExecutorConnection,
   discoverIntegration,
   searchIntegrations,
@@ -16,6 +17,7 @@ import type {
   ExecutorAuthMethod,
   ExecutorIntegration,
   ExecutorTool,
+  ExecutorToolSummary,
   IntegrationSearchSurface
 } from "@mokronos/wfkit-executor"
 import { authorizeExecutorInBrowser, openBrowser } from "./oauth.ts"
@@ -61,25 +63,70 @@ const decodeJson = (
     catch: () => cliError("Invalid JSON")
   })
 
-const formatTool = (tool: ExecutorTool): string => {
+/** Listings stay browsable: one flattened line per tool, with the full text
+ *  reachable through `wf i schema`. */
+const listingDescriptionLimit = 240
+
+const summaryForJson = (tool: ExecutorToolSummary) => ({
+  name: tool.name,
+  description: inline(tool.description, listingDescriptionLimit)
+})
+
+interface ToolGroup {
+  readonly integration: string
+  readonly connection: string
+  readonly tools: Array<ExecutorToolSummary>
+}
+
+const groupTools = (tools: ReadonlyArray<ExecutorToolSummary>): ReadonlyArray<ToolGroup> => {
+  const groups = new Map<string, ToolGroup>()
+  for (const tool of tools) {
+    const key = `${tool.integration}/${tool.connection}`
+    const group = groups.get(key)
+    if (group === undefined) {
+      groups.set(key, {
+        integration: tool.integration,
+        connection: tool.connection,
+        tools: [tool]
+      })
+    } else {
+      group.tools.push(tool)
+    }
+  }
+  return [...groups.values()]
+}
+
+const formatToolGroups = (groups: ReadonlyArray<ToolGroup>): string => {
+  const lines: Array<string> = []
+  for (const group of groups) {
+    const count = group.tools.length
+    lines.push(`\n${group.integration}/${group.connection}\t${count} tool${count === 1 ? "" : "s"}`)
+    for (const tool of group.tools) {
+      lines.push(`${tool.name}\t${inline(tool.description, listingDescriptionLimit)}`)
+    }
+    // The slug an agent needs next, spelled out per group: a 53-tool listing
+    // scrolls its header away long before the reader reaches the bottom.
+    lines.push(`next: wf i schema ${group.integration} <tool>`)
+  }
+  return lines.join("\n").trimStart()
+}
+
+const formatToolDetail = (tool: ExecutorTool): string => {
   const lines = [
-    `\n${tool.name}`,
+    tool.name,
     tool.address,
-    inline(tool.description, 240),
-    `input: ${inline(tool.inputTypeScript ?? JSON.stringify(tool.inputSchema ?? {}), 360)}`
+    `${tool.integration}/${tool.connection}`,
+    "",
+    tool.description,
+    "",
+    `input:\n${tool.inputTypeScript ?? JSON.stringify(tool.inputSchema ?? {}, null, 2)}`,
+    "",
+    `output:\n${tool.outputTypeScript ?? JSON.stringify(tool.outputSchema ?? {}, null, 2)}`,
+    "",
+    `next: wf i invoke ${tool.address} '<json>'`
   ]
   return lines.join("\n")
 }
-
-const toolForJson = (tool: ExecutorTool) => ({
-  address: tool.address,
-  name: tool.name,
-  description: tool.description,
-  integration: tool.integration,
-  connection: tool.connection,
-  ...(tool.inputSchema === undefined ? {} : { inputSchema: tool.inputSchema }),
-  ...(tool.outputSchema === undefined ? {} : { outputSchema: tool.outputSchema })
-})
 
 const connectedSummary = (
   connection: Awaited<ReturnType<typeof createExecutorConnection>>,
@@ -92,10 +139,10 @@ const connectedSummary = (
 
 const connectedResult = (
   connection: Awaited<ReturnType<typeof createExecutorConnection>>,
-  tools: ReadonlyArray<ExecutorTool>
+  tools: ReadonlyArray<ExecutorToolSummary>
 ) => ({
   connection,
-  tools: tools.map(toolForJson)
+  tools: tools.map(summaryForJson)
 })
 
 const formatDiscovery = (discovery: Awaited<ReturnType<typeof discoverIntegration>>): string => {
@@ -198,6 +245,50 @@ const assertToolsTarget = async (
   }
 }
 
+/** Accepts whatever an agent has in hand: a tool address, an integration plus a
+ *  tool name, or just the tool name it read off a listing. */
+const resolveToolAddress = async (
+  target: string,
+  tool: string | undefined,
+  connection: string
+): Promise<ExecutorToolAddress> => {
+  if (tool === undefined && target.startsWith("tools.")) {
+    return await Schema.decodeUnknownPromise(ExecutorToolAddress)(target)
+  }
+
+  if (tool !== undefined) {
+    await assertToolsTarget(target, connection)
+    const summaries = await listExecutorToolSummaries({ integration: target, connection })
+    const match = summaries.find((summary) => summary.name === tool)
+    if (match === undefined) {
+      throw new Error(
+        `Tool not found: ${target}/${tool}. Run wf i tools ${target} to list its tools.`
+      )
+    }
+    return match.address
+  }
+
+  const matches = (await listExecutorToolSummaries({ connection }))
+    .filter((summary) => summary.name === target)
+  const [only] = matches
+  if (only !== undefined && matches.length === 1) return only.address
+  if (only !== undefined) {
+    throw new Error(
+      `Several integrations expose ${target}. Pick one: ${matches.map((match) =>
+        `wf i schema ${match.integration} ${target}`
+      ).join(", ")}`
+    )
+  }
+
+  const integrations = await listExecutorIntegrations()
+  if (integrations.some((integration) => integration.slug === target)) {
+    throw new Error(
+      `${target} is an integration, not a tool. Run wf i tools ${target}, then wf i schema ${target} <tool>.`
+    )
+  }
+  throw new Error(`Tool not found: ${target}. Run wf i tools to browse tool names.`)
+}
+
 const makeDiscover = () => Command.make(
   "discover",
   {
@@ -288,6 +379,10 @@ const makeTools = () => Command.make(
       Flag.optional,
       Flag.withDescription("Deprecated: use the positional integration argument")
     ),
+    search: Flag.string("search").pipe(
+      Flag.optional,
+      Flag.withDescription("Only list tools whose name or description contains this text")
+    ),
     connection: Flag.string("connection").pipe(
       Flag.withDefault("default"),
       Flag.withDescription("Connection name (default: default)")
@@ -296,7 +391,7 @@ const makeTools = () => Command.make(
       Flag.withDescription("Print a human-readable result")
     )
   },
-  ({ integration, integrationFlag, connection, text }) => Effect.gen(function*() {
+  ({ integration, integrationFlag, search, connection, text }) => Effect.gen(function*() {
     const positional = Option.getOrUndefined(integration)
     const flagged = Option.getOrUndefined(integrationFlag)
     if (positional !== undefined && flagged !== undefined) {
@@ -310,19 +405,69 @@ const makeTools = () => Command.make(
       })
     }
     const tools = yield* Effect.tryPromise({
-      try: () => listExecutorTools({
+      try: () => listExecutorToolSummaries({
         ...(selected === undefined ? {} : { integration: selected }),
         connection
       }),
       catch: (error) => cliError(`Could not list tools: ${String(error)}`)
     })
+    const term = Option.getOrUndefined(search)?.toLowerCase()
+    const matching = term === undefined
+      ? tools
+      : tools.filter((tool) =>
+        tool.name.toLowerCase().includes(term) || tool.description.toLowerCase().includes(term)
+      )
+    const groups = groupTools(matching)
     yield* writeStdoutLine(
       text
-        ? tools.map(formatTool).join("\n") || "No tools available."
-        : JSON.stringify({ tools: tools.map(toolForJson) }, null, 2)
+        ? groups.length === 0
+          ? term === undefined ? "No tools available." : `No tools match "${term}".`
+          : formatToolGroups(groups)
+        : JSON.stringify({
+          integrations: groups.map((group) => ({
+            integration: group.integration,
+            connection: group.connection,
+            tools: group.tools.map(summaryForJson)
+          }))
+        }, null, 2)
     )
   })
-).pipe(Command.withDescription("List an integration's tools"))
+).pipe(Command.withDescription("List tool names and descriptions per integration"))
+
+const makeSchema = () => Command.make(
+  "schema",
+  {
+    target: Argument.string("target").pipe(
+      Argument.withDescription("Tool name, integration slug, or tool address")
+    ),
+    tool: Argument.string("tool").pipe(
+      Argument.optional,
+      Argument.withDescription("Tool name, when the first argument is an integration")
+    ),
+    connection: Flag.string("connection").pipe(
+      Flag.withDefault("default"),
+      Flag.withDescription("Connection name (default: default)")
+    ),
+    text: Flag.boolean("text").pipe(
+      Flag.withDescription("Print a human-readable result")
+    )
+  },
+  ({ target, tool, connection, text }) => Effect.gen(function*() {
+    const address = yield* Effect.tryPromise({
+      try: () => resolveToolAddress(target, Option.getOrUndefined(tool), connection),
+      catch: (error) => cliError(error instanceof Error ? errorMessage(error) : String(error))
+    })
+    const detail = yield* Effect.tryPromise({
+      try: () => describeExecutorTool(address),
+      catch: (error) => cliError(
+        `Could not read tool schema: ${error instanceof Error ? errorMessage(error) : String(error)}`
+      )
+    })
+    yield* writeStdoutLine(
+      text ? formatToolDetail(detail) : JSON.stringify(detail, null, 2)
+    )
+  })
+).pipe(Command.withDescription("Show one tool's description and input/output schemas"))
 
 const makeConnect = (options: IntegrationsCliOptions) => Command.make(
   "connect",
@@ -383,7 +528,7 @@ const makeConnect = (options: IntegrationsCliOptions) => Command.make(
           open: noOpen ? () => undefined : (options.openBrowser ?? openBrowser),
           onAuthorizationUrl: (url) => console.error(`Authorize in your browser:\n${url}`)
         })
-        const tools = await listExecutorTools({
+        const tools = await listExecutorToolSummaries({
           integration: integration.slug,
           connection: connected.name
         })
@@ -401,7 +546,7 @@ const makeConnect = (options: IntegrationsCliOptions) => Command.make(
         template: method.template,
         value: credential
       })
-      const tools = await listExecutorTools({
+      const tools = await listExecutorToolSummaries({
         integration: integration.slug,
         connection: connected.name
       })
@@ -545,6 +690,7 @@ export const makeIntegrationsCommand = (options: IntegrationsCliOptions = {}) =>
       makeSearch(),
       makeList(),
       makeTools(),
+      makeSchema(),
       makeConnect(options),
       makeConnections(),
       makeDisconnect(),

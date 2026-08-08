@@ -200,9 +200,22 @@ wf i connections
 wf i tools <integration-slug>
 ```
 
-This returns JSON with tool names, addresses, descriptions, and complete input
-and output JSON Schemas. Use `--text` for concise human-readable output. Pick an address and
-mirror its schema in the workflow's `input` and `output`.
+This returns the tool names and descriptions of each integration, grouped by
+integration and connection — enough to pick one without reading a hundred JSON
+Schemas. Use `--text` for concise human-readable output, and `--search <text>`
+to keep only the tools whose name or description mentions it.
+
+Then ask for the one you picked:
+
+```bash
+wf i schema <tool-name>
+```
+
+That returns the tool's address, its full description, and complete input and
+output schemas. Mirror the schemas in the workflow's `input` and `output`, and
+use the address to author the node. A bare tool name is enough while it is
+unique across your integrations; otherwise pass
+`wf i schema <integration-slug> <tool-name>`, or a full tool address.
 Generic MCP envelopes are normalized before they reach workflows: structured
 content is returned directly, JSON text is parsed, and plain text remains a
 string.

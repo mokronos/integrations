@@ -11,6 +11,7 @@ export {
   ExecutorOAuthStart,
   ExecutorTool,
   ExecutorToolAddress,
+  ExecutorToolSummary,
   IntegrationOverview,
   IntegrationsResponse
 } from "./schemas.ts"
@@ -27,6 +28,7 @@ export {
   createExecutorConnections,
   createExecutorOAuthClient,
   createExecutorTools,
+  describeExecutorTool,
   detectExecutorIntegration,
   executorStorageDirectory,
   ensureExecutorConnection,
@@ -35,6 +37,7 @@ export {
   listExecutorConnections,
   listExecutorIntegrations,
   listExecutorTools,
+  listExecutorToolSummaries,
   normalizeExecutorToolOutputSchema,
   normalizeExecutorToolResult,
   previewExecutorOpenApi,
@@ -51,7 +54,9 @@ export type {
   ExecutorConnections,
   ExecutorHost,
   ExecutorRunner,
-  ExecutorTools
+  ExecutorToolFilter,
+  ExecutorTools,
+  ExecutorToolTarget
 } from "./executor.ts"
 export type {
   DiscoverIntegrationsOptions,

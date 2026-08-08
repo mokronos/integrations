@@ -80,12 +80,20 @@ export const ExecutorOAuthStart = Schema.Union([
 ])
 export type ExecutorOAuthStart = typeof ExecutorOAuthStart.Type
 
-export const ExecutorTool = Schema.Struct({
+/** A tool's identity and purpose without its schemas. Listing this level of
+ *  detail keeps browsing an integration cheap; `ExecutorTool` is the follow-up
+ *  for one chosen tool. */
+export const ExecutorToolSummary = Schema.Struct({
   address: ExecutorToolAddress,
   name: Schema.String,
   description: Schema.String,
   integration: Schema.String,
-  connection: Schema.String,
+  connection: Schema.String
+})
+export type ExecutorToolSummary = typeof ExecutorToolSummary.Type
+
+export const ExecutorTool = Schema.Struct({
+  ...ExecutorToolSummary.fields,
   inputSchema: Schema.optional(Schema.Json),
   outputSchema: Schema.optional(Schema.Json),
   inputTypeScript: Schema.optional(Schema.String),

@@ -4,7 +4,8 @@ import { runExecutor } from "./default-host.ts"
 import type { ExecutorRunner } from "./host.ts"
 import {
   ExecutorToolAddress,
-  ExecutorTool
+  ExecutorTool,
+  ExecutorToolSummary
 } from "./schemas.ts"
 
 const ExecutorToolResult = Schema.Union([
@@ -79,65 +80,131 @@ const optionalJson = <A>(value: A | undefined) =>
     ? undefined
     : Option.getOrUndefined(Schema.decodeUnknownOption(Schema.Json)(value))
 
+export interface ExecutorToolFilter {
+  readonly integration?: string
+  readonly connection?: string
+}
+
+/** Either a tool's address, or the integration plus tool name an agent reads
+ *  off a listing. */
+export interface ExecutorToolTarget {
+  readonly integration: string
+  readonly name: string
+  readonly connection?: string
+}
+
 export interface ExecutorTools {
-  readonly list: (filter?: {
-    readonly integration?: string
-    readonly connection?: string
-  }) => Promise<ReadonlyArray<ExecutorTool>>
+  readonly list: (filter?: ExecutorToolFilter) => Promise<ReadonlyArray<ExecutorTool>>
+  readonly summaries: (filter?: ExecutorToolFilter) => Promise<ReadonlyArray<ExecutorToolSummary>>
+  readonly describe: (
+    target: ExecutorToolAddress | ExecutorToolTarget
+  ) => Promise<ExecutorTool>
   readonly execute: (address: ExecutorToolAddress, input: Json) => Promise<Json>
 }
 
 /** Tool operations bound to an explicit host/runner. */
-export const createExecutorTools = (runner: ExecutorRunner): ExecutorTools => ({
-  list: async (filter: {
-    readonly integration?: string
-    readonly connection?: string
-  } = {}) => {
+export const createExecutorTools = (runner: ExecutorRunner): ExecutorTools => {
+  const summaries = async (filter: ExecutorToolFilter = {}) => {
     const tools = await runner.run((executor) => executor.tools.list({
       ...(filter.integration === undefined ? {} : { integration: IntegrationSlug.make(filter.integration) }),
       ...(filter.connection === undefined ? {} : { connection: ConnectionName.make(filter.connection) })
     }))
     const callableTools = tools.filter((tool) => String(tool.address).startsWith("tools."))
-    const discovered = await Promise.all(callableTools.map(async (tool) => {
-      const schema = await runner.run((executor) => executor.tools.schema(tool.address))
-      const inputSchema = optionalJson(schema?.inputSchema)
-      const outputSchema = optionalJson(schema?.outputSchema)
-      const normalizedOutputSchema = outputSchema === undefined
-        ? undefined
-        : normalizeExecutorToolOutputSchema(outputSchema)
-      const hasMcpEnvelopeOutput = normalizedOutputSchema === compactMcpOutputSchema
-      return {
-        address: ExecutorToolAddress.make(String(tool.address)),
+    return Schema.decodeUnknownSync(Schema.Array(ExecutorToolSummary))(
+      callableTools.map((tool) => ({
+        address: String(tool.address),
         name: String(tool.name),
         description: tool.description,
         integration: String(tool.integration),
-        connection: String(tool.connection),
-        ...(inputSchema === undefined ? {} : { inputSchema }),
-        ...(normalizedOutputSchema === undefined ? {} : { outputSchema: normalizedOutputSchema }),
-        ...(schema?.inputTypeScript === undefined ? {} : { inputTypeScript: schema.inputTypeScript }),
-        ...(hasMcpEnvelopeOutput
-          ? { outputTypeScript: "Json" }
-          : schema?.outputTypeScript === undefined
-            ? {}
-            : { outputTypeScript: schema.outputTypeScript })
-      }
-    }))
-    return Schema.decodeUnknownSync(Schema.Array(ExecutorTool))(discovered)
-  },
-  execute: async (address, input) => {
-    const result = await runner.run((executor) => executor.execute(ToolAddress.make(address), input))
-    const decoded = await Schema.decodeUnknownPromise(ExecutorToolResult)(result)
-    if (!decoded.ok) {
-      throw new Error(`${decoded.error.code}: ${decoded.error.message}`)
-    }
-    return normalizeExecutorToolResult(decoded.data)
+        connection: String(tool.connection)
+      }))
+    )
   }
-})
+
+  const describeSummary = async (summary: ExecutorToolSummary): Promise<ExecutorTool> => {
+    const schema = await runner.run((executor) =>
+      executor.tools.schema(ToolAddress.make(summary.address))
+    )
+    const inputSchema = optionalJson(schema?.inputSchema)
+    const outputSchema = optionalJson(schema?.outputSchema)
+    const normalizedOutputSchema = outputSchema === undefined
+      ? undefined
+      : normalizeExecutorToolOutputSchema(outputSchema)
+    const hasMcpEnvelopeOutput = normalizedOutputSchema === compactMcpOutputSchema
+    return Schema.decodeUnknownSync(ExecutorTool)({
+      ...summary,
+      ...(inputSchema === undefined ? {} : { inputSchema }),
+      ...(normalizedOutputSchema === undefined ? {} : { outputSchema: normalizedOutputSchema }),
+      ...(schema?.inputTypeScript === undefined ? {} : { inputTypeScript: schema.inputTypeScript }),
+      ...(hasMcpEnvelopeOutput
+        ? { outputTypeScript: "Json" }
+        : schema?.outputTypeScript === undefined
+          ? {}
+          : { outputTypeScript: schema.outputTypeScript })
+    })
+  }
+
+  // `tools.<integration>.<owner>.<connection>.<name>`, per ExecutorToolAddress.
+  // Narrowing the listing this way keeps a lookup by address as cheap as one by
+  // integration and name.
+  const addressFilter = (address: ExecutorToolAddress): ExecutorToolFilter => {
+    const [, integration, , connection] = address.split(".")
+    return {
+      ...(integration === undefined ? {} : { integration }),
+      ...(connection === undefined ? {} : { connection })
+    }
+  }
+
+  return {
+    summaries,
+    list: async (filter: ExecutorToolFilter = {}) =>
+      await Promise.all((await summaries(filter)).map(describeSummary)),
+    describe: async (target) => {
+      const isAddress = typeof target === "string"
+      const candidates = await summaries(
+        isAddress
+          ? addressFilter(target)
+          : {
+            integration: target.integration,
+            connection: target.connection ?? "default"
+          }
+      )
+      const match = isAddress
+        ? candidates.find((candidate) => candidate.address === target)
+        : candidates.find((candidate) => candidate.name === target.name)
+      if (match === undefined) {
+        throw new Error(
+          isAddress
+            ? `Tool not found: ${target}`
+            : `Tool not found: ${target.integration}/${target.name}`
+        )
+      }
+      return await describeSummary(match)
+    },
+    execute: async (address, input) => {
+      const result = await runner.run((executor) => executor.execute(ToolAddress.make(address), input))
+      const decoded = await Schema.decodeUnknownPromise(ExecutorToolResult)(result)
+      if (!decoded.ok) {
+        throw new Error(`${decoded.error.code}: ${decoded.error.message}`)
+      }
+      return normalizeExecutorToolResult(decoded.data)
+    }
+  }
+}
 
 const defaultTools = createExecutorTools({ run: runExecutor })
 
 /** Lists callable tools exposed by installed integrations and their active
- * connections. */
+ * connections, with each tool's full input and output schema. */
 export const listExecutorTools = defaultTools.list
+
+/** Lists the same tools as `listExecutorTools`, but only their names,
+ * addresses, and descriptions. Skips the per-tool schema lookup, so browsing a
+ * large integration stays cheap. */
+export const listExecutorToolSummaries = defaultTools.summaries
+
+/** Resolves one tool's full detail from its address or from an integration plus
+ * tool name. */
+export const describeExecutorTool = defaultTools.describe
 
 export const executeExecutorTool = defaultTools.execute

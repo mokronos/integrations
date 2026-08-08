@@ -43,12 +43,24 @@ const runCli = async (
 }
 
 const ToolsOutput = Schema.Struct({
-  tools: Schema.Array(Schema.Struct({
-    address: Schema.String,
-    name: Schema.String,
-    inputSchema: Schema.optional(Schema.Json),
-    outputSchema: Schema.optional(Schema.Json)
+  integrations: Schema.Array(Schema.Struct({
+    integration: Schema.String,
+    connection: Schema.String,
+    tools: Schema.Array(Schema.Struct({
+      name: Schema.String,
+      description: Schema.String
+    }))
   }))
+})
+
+const ToolSchemaOutput = Schema.Struct({
+  address: Schema.String,
+  name: Schema.String,
+  description: Schema.String,
+  integration: Schema.String,
+  connection: Schema.String,
+  inputSchema: Schema.optional(Schema.Json),
+  outputSchema: Schema.optional(Schema.Json)
 })
 
 describe("agent integration acceptance flow", () => {
@@ -165,10 +177,12 @@ describe("agent integration acceptance flow", () => {
       "WF_AGENT_TOKEN"
     ], environment)
     expect(connected.exitCode).toBe(0)
-    expect(connected.stdout).toContain('"address": "tools.agent_acceptance.org.default')
+    expect(connected.stdout).toContain('"name": "tickets.create"')
     expect(connected.stdout).toContain('"tools": [')
     expect(connected.stdout).not.toContain("acceptance-secret")
 
+    // The listing stays at name-and-description detail, so browsing a large
+    // integration does not drag every schema along with it.
     const listed = await runCli([
       "integrations",
       "tools",
@@ -177,10 +191,12 @@ describe("agent integration acceptance flow", () => {
     ], environment)
     expect(listed.exitCode).toBe(0)
     const tools = Schema.decodeUnknownSync(ToolsOutput)(JSON.parse(listed.stdout))
-    const createTicket = tools.tools.find((tool) => tool.name === "tickets.create")
-    if (createTicket === undefined) throw new Error("Executor did not discover tickets.create")
-    expect(createTicket.inputSchema).toBeDefined()
-    expect(createTicket.outputSchema).toBeDefined()
+    const group = tools.integrations.find((entry) => entry.integration === "agent_acceptance")
+    if (group === undefined) throw new Error("Executor did not group the discovered tools")
+    expect(group.connection).toBe("default")
+    expect(group.tools.map((tool) => tool.name)).toContain("tickets.create")
+    expect(listed.stdout).not.toContain("inputSchema")
+    expect(listed.stdout).not.toContain("tools.agent_acceptance.org.default")
 
     const concise = await runCli([
       "integrations",
@@ -189,9 +205,89 @@ describe("agent integration acceptance flow", () => {
       "--text"
     ], environment)
     expect(concise.exitCode).toBe(0)
+    expect(concise.stdout).toContain("agent_acceptance/default")
     expect(concise.stdout).toContain("tickets.create")
-    expect(concise.stdout).toContain("input:")
-    expect(concise.stdout).not.toContain("output:")
+    expect(concise.stdout).toContain("next: wf i schema agent_acceptance <tool>")
+    expect(concise.stdout).not.toContain("input:")
+
+    const filtered = await runCli([
+      "integrations",
+      "tools",
+      "--search",
+      "ticket",
+      "--text"
+    ], environment)
+    expect(filtered.exitCode).toBe(0)
+    expect(filtered.stdout).toContain("tickets.create")
+
+    const unmatched = await runCli([
+      "integrations",
+      "tools",
+      "--search",
+      "invoices",
+      "--text"
+    ], environment)
+    expect(unmatched.exitCode).toBe(0)
+    expect(unmatched.stdout).toContain('No tools match "invoices".')
+
+    // One named tool, and only then its address and schemas.
+    const detailed = await runCli([
+      "integrations",
+      "schema",
+      "agent_acceptance",
+      "tickets.create"
+    ], environment)
+    expect(detailed.exitCode).toBe(0)
+    const createTicket = Schema.decodeUnknownSync(ToolSchemaOutput)(JSON.parse(detailed.stdout))
+    expect(createTicket.address).toStartWith("tools.agent_acceptance.org.default")
+    expect(createTicket.inputSchema).toBeDefined()
+    expect(createTicket.outputSchema).toBeDefined()
+
+    const byAddress = await runCli([
+      "integrations",
+      "schema",
+      createTicket.address,
+      "--text"
+    ], environment)
+    expect(byAddress.exitCode).toBe(0)
+    expect(byAddress.stdout).toContain("input:")
+    expect(byAddress.stdout).toContain("output:")
+    expect(byAddress.stdout).toContain(`next: wf i invoke ${createTicket.address}`)
+
+    // A bare tool name is what an agent reads off the listing, so it resolves
+    // on its own while it is unambiguous.
+    const byName = await runCli([
+      "integrations",
+      "schema",
+      "tickets.create"
+    ], environment)
+    expect(byName.exitCode).toBe(0)
+    expect(JSON.parse(byName.stdout)).toMatchObject({ address: createTicket.address })
+
+    const slugOnly = await runCli([
+      "integrations",
+      "schema",
+      "agent_acceptance"
+    ], environment)
+    expect(slugOnly.exitCode).toBe(1)
+    expect(slugOnly.stderr).toContain("agent_acceptance is an integration, not a tool")
+
+    const unknownTool = await runCli([
+      "integrations",
+      "schema",
+      "agent_acceptance",
+      "tickets.delete"
+    ], environment)
+    expect(unknownTool.exitCode).toBe(1)
+    expect(unknownTool.stderr).toContain("Tool not found: agent_acceptance/tickets.delete")
+
+    const unknownName = await runCli([
+      "integrations",
+      "schema",
+      "tickets.delete"
+    ], environment)
+    expect(unknownName.exitCode).toBe(1)
+    expect(unknownName.stderr).toContain("Tool not found: tickets.delete")
 
     const validated = await runCli([
       "integrations",
