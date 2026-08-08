@@ -4,6 +4,7 @@ import {
   createExecutorOAuthClient,
   ExecutorAuthMethod,
   ExecutorConnection,
+  type ExecutorAuth,
   probeExecutorOAuth,
   registerExecutorOAuthClient,
   startExecutorOAuth
@@ -28,6 +29,19 @@ const AuthorizeExecutorOptions = Schema.Struct({
   timeoutMs: Schema.optional(Schema.Number)
 })
 type AuthorizeExecutorOptions = typeof AuthorizeExecutorOptions.Type
+
+type ExecutorOAuthOperations = Pick<
+  ExecutorAuth,
+  "probe" | "registerClient" | "createClient" | "start" | "complete"
+>
+
+const defaultExecutorAuth: ExecutorOAuthOperations = {
+  probe: probeExecutorOAuth,
+  registerClient: registerExecutorOAuthClient,
+  createClient: createExecutorOAuthClient,
+  start: startExecutorOAuth,
+  complete: completeExecutorOAuth
+}
 
 const normalizedScopes = (scopes: ReadonlyArray<string>): ReadonlyArray<string> =>
   [...new Set(scopes.map((scope) => scope.trim()).filter((scope) => scope.length > 0))]
@@ -65,7 +79,8 @@ export const authorizeExecutorInBrowser = async (
   input: AuthorizeExecutorOptions & {
     readonly open?: (url: string) => void | Promise<void>
     readonly onAuthorizationUrl?: (url: string) => void
-  }
+  },
+  auth: ExecutorOAuthOperations = defaultExecutorAuth
 ): Promise<ExecutorConnection> => {
   const options = Schema.decodeUnknownSync(AuthorizeExecutorOptions)(input)
   if (options.authMethod.kind !== "oauth" || options.authMethod.oauth === undefined) {
@@ -101,7 +116,7 @@ export const authorizeExecutorInBrowser = async (
         })
       }
       try {
-        const connection = await completeExecutorOAuth({
+        const connection = await auth.complete({
           state,
           code,
           callbackDomain: url.searchParams.get("domain") ?? url.searchParams.get("site")
@@ -134,7 +149,7 @@ export const authorizeExecutorInBrowser = async (
       : normalizedScopes(options.scopes)
     const discovered = oauth.discoveryUrl === undefined
       ? undefined
-      : await probeExecutorOAuth(oauth.discoveryUrl)
+      : await auth.probe(oauth.discoveryUrl)
     const authorizationUrl = oauth.authorizationUrl ?? discovered?.authorizationUrl
     const tokenUrl = oauth.tokenUrl ?? discovered?.tokenUrl
     const resource = oauth.resource ?? discovered?.resource
@@ -144,7 +159,7 @@ export const authorizeExecutorInBrowser = async (
     const clientSlug = `${options.integration}-wf`
     let client: string
     if (options.clientId !== undefined) {
-      client = await createExecutorOAuthClient({
+      client = await auth.createClient({
         slug: clientSlug,
         integration: options.integration,
         authorizationUrl,
@@ -158,7 +173,7 @@ export const authorizeExecutorInBrowser = async (
       if (registrationEndpoint === null || registrationEndpoint === undefined) {
         throw new Error("OAuth server does not support dynamic registration; provide --client-id")
       }
-      client = await registerExecutorOAuthClient({
+      client = await auth.registerClient({
         slug: clientSlug,
         integration: options.integration,
         redirectUri,
@@ -176,7 +191,7 @@ export const authorizeExecutorInBrowser = async (
             })
       })
     }
-    const started = await startExecutorOAuth({
+    const started = await auth.start({
       client,
       integration: options.integration,
       connection: options.connection,
