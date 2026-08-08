@@ -328,7 +328,7 @@ const raceDurable = (
       Option.isNone
     )
     if (Option.isSome(exit)) {
-      return yield* exit.value as Exit.Exit<DynamicService, DynamicService>
+      return yield* exit.value
     }
     return yield* DurableDeferred.into(Effect.raceAll(effects), deferred)
   })
