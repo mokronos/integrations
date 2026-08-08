@@ -58,6 +58,15 @@ export type { SecretResolver } from "./secrets.ts"
 
 type AnySchema<A = any> = Schema.Codec<A, any, never, never>
 type DynamicService = Schema.Schema.Type<Schema.Top>
+type DynamicEffect = Effect.Effect<DynamicService, DynamicService, DynamicService>
+interface WorkflowCompensator {
+  readonly withCompensation: (
+    compensation: (
+      value: DynamicService,
+      cause: Cause.Cause<DynamicService>
+    ) => Effect.Effect<void, never, DynamicService>
+  ) => (effect: DynamicEffect) => DynamicEffect
+}
 const WorkflowPayloadSchema = Schema.Struct({ value: Schema.Unknown })
 
 const TerminalFailureTypeId: unique symbol = Symbol.for("wf/TerminalFailure")
@@ -380,7 +389,7 @@ const retryDelayMillis = (retry: StepRetryPolicy | undefined, attempt: number): 
     : 0
 
 const makeCtx = <WErrors>(
-  wf: any,
+  wf: WorkflowCompensator,
   executionId: ExecutionId,
   workflowErrors: AnySchema<WErrors>
 ): WorkflowContext<WErrors> => {
