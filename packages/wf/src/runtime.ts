@@ -47,7 +47,7 @@ export interface WorkflowRuntime {
   readonly secrets?: SecretResolver
   readonly integrations?: IntegrationInvoker
   readonly concurrency: ConcurrencyLimiter
-  register(workflows: ReadonlyArray<any>): void
+  register(workflows: ReadonlyArray<DefinedWorkflow>): void
   getWorkflow(name: string): DefinedWorkflow | undefined
   listWorkflows(name?: string): ReadonlyArray<DefinedWorkflow>
   execute(options: {
