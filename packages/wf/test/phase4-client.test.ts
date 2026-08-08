@@ -210,6 +210,31 @@ describe("Phase 4 workflow client", () => {
     )
   })
 
+  test("hard cancellation interrupts an in-flight step", async () => {
+    const neverCompletes = defineStep({
+      name: "neverCompletes",
+      input: Schema.Void,
+      output: Schema.Void,
+      execute: () => new Promise<never>(() => {})
+    })
+    const workflow = defineWorkflow({
+      name: "hardCancelRunningStep",
+      input: Schema.Void,
+      output: Schema.Void,
+      run: function* (_, ctx) {
+        yield* ctx.run(neverCompletes, undefined)
+      }
+    })
+    const client = createWorkflowClient()
+    const handle = await client.start(workflow, undefined)
+
+    await client.cancel(handle.executionId, { compensate: false })
+    await expect(client.result(handle.executionId)).resolves.toMatchObject({
+      type: "failed",
+      error: { _tag: "Cancelled", compensate: false }
+    })
+  })
+
   test("status transitions include suspended during sleep and completed after result", async () => {
     const workflow = defineWorkflow({
       name: "statusWorkflow",

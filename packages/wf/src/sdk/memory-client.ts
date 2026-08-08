@@ -31,6 +31,8 @@ interface ExecutionRecord {
   readonly startedAt: string
   finishedAt?: string
   readonly history: WorkflowHistoryRecord[]
+  readonly abort: AbortController
+  cancellation?: Cancelled
   readonly resultPromise: Promise<WorkflowResult>
   readonly resolveResult: (result: WorkflowResult) => void
 }
@@ -95,6 +97,7 @@ export const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowC
         status: "running",
         startedAt: nowIso(),
         history: [],
+        abort: new AbortController(),
         resultPromise,
         resolveResult
       }
@@ -113,6 +116,7 @@ export const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowC
 
       void workflow.executeInMemory(payload, {
         executionId: id,
+        signal: execution.abort.signal,
         determinism: createInMemoryDeterminismState(),
         signalTransport: signals,
         ...(runtime?.secrets === undefined ? {} : { secrets: runtime.secrets }),
@@ -139,7 +143,7 @@ export const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowC
         (error) => {
           execution.status = "failed"
           execution.finishedAt = nowIso()
-          execution.result = { type: "failed", error }
+          execution.result = { type: "failed", error: execution.cancellation ?? error }
           execution.resolveResult(execution.result)
           signals.cleanup(id, error)
         }
@@ -193,6 +197,8 @@ export const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowC
         throw new Error(`Cannot cancel ${execution.status} execution ${id}`)
       }
       const compensate = opts.compensate ?? true
+      const cancellation = new Cancelled({ compensate })
+      execution.cancellation = cancellation
       appendHistory(execution, {
         type: "execution.cancelled",
         executionId: ExecutionId.make(id),
@@ -200,7 +206,8 @@ export const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowC
         ...optionalActor(opts.actor)
       })
       if (compensate) execution.status = "compensating"
-      signals.cancel(id, new Cancelled({ compensate }))
+      signals.cancel(id, cancellation)
+      if (!compensate) execution.abort.abort(cancellation)
       const result = await execution.resultPromise
       if (result.type === "failed") execution.status = "failed"
     },
@@ -217,7 +224,9 @@ export const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowC
       disposed = true
       for (const execution of executions.values()) {
         if (!isTerminalRunStatus(execution.status)) {
-          signals.cleanup(execution.executionId, new Error("Workflow client has been disposed"))
+          const error = new Error("Workflow client has been disposed")
+          signals.cleanup(execution.executionId, error)
+          execution.abort.abort(error)
         }
       }
       executions.clear()

@@ -172,6 +172,7 @@ export type DefinedWorkflow<
 
 export interface InMemoryExecutionOptions {
   readonly executionId?: string
+  readonly signal?: AbortSignal
   readonly determinism?: InMemoryDeterminismState
   readonly onEvent?: (event: WorkflowEvent) => void | Promise<void>
   readonly stepExecutor?: (options: {
@@ -1464,7 +1465,8 @@ export const defineWorkflow = <
     const exit = await Effect.runPromiseExit(
       effect.pipe(
         Effect.provideService(ExecutionResourceRegistry, resources)
-      ) as Effect.Effect<Output["Type"], unknown, never>
+      ) as Effect.Effect<Output["Type"], unknown, never>,
+      options.signal === undefined ? {} : { signal: options.signal }
     )
     if (Exit.isSuccess(exit)) {
       return exit.value
