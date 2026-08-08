@@ -11,6 +11,16 @@ const Boom = Schema.TaggedStruct("Boom", {
 })
 
 describe("Phase 1 authoring model", () => {
+  test("rejects invalid retry policies at the authoring boundary", () => {
+    expect(() => defineStep({
+      name: "invalidRetry",
+      input: Schema.Void,
+      output: Schema.Void,
+      retry: { attempts: 0, backoff: "none" },
+      execute: async () => undefined
+    })).toThrow()
+  })
+
   test("ported OrderWorkflow shape typechecks with inferred ctx.run results and ctx.fail", async () => {
     const chargePayment = defineStep({
       name: "chargePayment",

@@ -128,10 +128,16 @@ export const defineStep = <
   ) => unknown | Promise<unknown>
   readonly retry?: StepRetryPolicy
   readonly concurrency?: StepConcurrency<Schema.Schema.Type<Input>>
-}): Step<Schema.Schema.Type<Input>, Schema.Schema.Type<Output>, Schema.Schema.Type<Errors>> => ({
-  ...config,
-  errors: config.errors ?? Schema.Never
-})
+}): Step<Schema.Schema.Type<Input>, Schema.Schema.Type<Output>, Schema.Schema.Type<Errors>> => {
+  const retry = config.retry === undefined
+    ? undefined
+    : Schema.decodeUnknownSync(StepRetryPolicy)(config.retry)
+  return {
+    ...config,
+    errors: config.errors ?? Schema.Never,
+    ...(retry === undefined ? {} : { retry })
+  }
+}
 
 export type WorkflowValue<A, E = never> = Effect.Effect<A, E, any>
 
