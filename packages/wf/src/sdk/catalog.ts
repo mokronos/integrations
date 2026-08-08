@@ -26,6 +26,9 @@ export interface WorkflowCatalogOptions {
 
 const workflowExtension = ".ts"
 
+const isFileSystemError = (error: unknown, code: string): boolean =>
+  error instanceof Error && "code" in error && error.code === code
+
 const decodeWorkflowId = Schema.decodeUnknownSync(WorkflowId)
 
 export const parseWorkflowId = (value: string): WorkflowId => {
@@ -69,7 +72,7 @@ const readArtifact = async (
   try {
     source = await readFile(file, "utf8")
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+    if (isFileSystemError(error, "ENOENT")) {
       return undefined
     }
     throw error
@@ -99,7 +102,7 @@ export const createDirectoryWorkflowCatalog = (
       try {
         entries = await readdir(directory, { withFileTypes: true })
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        if (isFileSystemError(error, "ENOENT")) {
           return []
         }
         throw error

@@ -18,6 +18,9 @@ export type WorkflowSourceHash = typeof WorkflowSourceHash.Type
 
 const decodeHash = Schema.decodeUnknownSync(WorkflowSourceHash)
 
+const isFileSystemError = (error: unknown, code: string): boolean =>
+  error instanceof Error && "code" in error && error.code === code
+
 export const hashWorkflowSource = (source: string): WorkflowSourceHash =>
   decodeHash(createHash("sha256").update(source).digest("hex"))
 
@@ -86,7 +89,7 @@ export const createWorkflowSourceStore = (
       try {
         return await readFile(fileFor(hash), "utf8")
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        if (isFileSystemError(error, "ENOENT")) {
           return undefined
         }
         throw error
