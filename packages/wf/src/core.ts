@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import { Activity, DurableClock, DurableDeferred, Workflow, WorkflowEngine } from "effect/unstable/workflow"
-import { Cause, Effect, Exit, Option, Schedule, Schema } from "effect"
+import { Cause, Effect, Exit, Option, Schema } from "effect"
 import type * as Duration from "effect/Duration"
 import { emitWorkflowEvent } from "./events.ts"
 import type { IntegrationInvoker } from "./integration.ts"
@@ -328,16 +328,13 @@ const raceDurable = (
     return yield* DurableDeferred.into(Effect.raceAll(effects) as any, deferred as any)
   })
 
-const retrySchedule = (retry: StepRetryPolicy | undefined) => {
-  const attempts = Math.max(1, retry?.attempts ?? 1)
-  const recurs = Schedule.recurs(attempts - 1)
-  return retry?.backoff === "exponential"
-    ? Schedule.exponential("10 millis").pipe(Schedule.both(recurs))
-    : recurs
-}
-
 const transientAttempts = (retry: StepRetryPolicy | undefined): number =>
   Math.max(1, retry?.attempts ?? 1)
+
+const retryDelayMillis = (retry: StepRetryPolicy | undefined, attempt: number): number =>
+  retry?.backoff === "exponential" && attempt > 1
+    ? 10 * 2 ** (attempt - 2)
+    : 0
 
 const makeCtx = <WErrors>(
   wf: any,
@@ -406,6 +403,10 @@ const makeCtx = <WErrors>(
 
       const execute = Effect.gen(function* () {
         const attempt = yield* Activity.CurrentAttempt
+        const retryDelay = retryDelayMillis(step.retry, attempt)
+        if (retryDelay > 0) {
+          yield* Effect.sleep(`${retryDelay} millis`)
+        }
         yield* emitWorkflowEvent({
           type: "step.started",
           executionId,
@@ -485,10 +486,10 @@ const makeCtx = <WErrors>(
 
       activity = activity.pipe(
         Activity.retry({
-          schedule: retrySchedule(step.retry),
+          times: transientAttempts(step.retry) - 1,
           while: (error: unknown) =>
             isActivityFailure(error) && error._wfFailureType === "transient"
-        } as any),
+        }),
         Effect.mapError(unwrapActivityFailure)
       )
 
