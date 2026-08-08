@@ -73,6 +73,31 @@ export const createDurableClientStore = (databasePath: string) => {
     }
   }
 
+  const appendHistoryRecord = (
+    executionId: string,
+    event: WorkflowHistoryEvent
+  ): boolean => {
+    const dedupeKey = replayDedupeKey(event) ?? null
+    if (dedupeKey !== null) {
+      const existing = database.query<{ id: number }, [string, string]>(`
+        SELECT id
+        FROM wf_client_history
+        WHERE execution_id = ? AND dedupe_key = ?
+      `).get(executionId, dedupeKey)
+      if (existing !== null) return false
+    }
+    const sequence = database.query<{ sequence: number }, [string]>(`
+      SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence
+      FROM wf_client_history
+      WHERE execution_id = ?
+    `).get(executionId)?.sequence ?? 1
+    database.query<Record<string, never>, [string, number, string, string, string | null]>(`
+      INSERT INTO wf_client_history (execution_id, sequence, event_json, created_at, dedupe_key)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(executionId, sequence, toJsonText(event), nowIso(), dedupeKey)
+    return true
+  }
+
   return {
     get,
 
@@ -127,27 +152,29 @@ export const createDurableClientStore = (databasePath: string) => {
     },
 
     appendHistory: (executionId: string, event: WorkflowHistoryEvent): boolean =>
-      withImmediateTransaction(() => {
-        const dedupeKey = replayDedupeKey(event) ?? null
-        if (dedupeKey !== null) {
-          const existing = database.query<{ id: number }, [string, string]>(`
-            SELECT id
-            FROM wf_client_history
-            WHERE execution_id = ? AND dedupe_key = ?
-          `).get(executionId, dedupeKey)
-          if (existing !== null) return false
-        }
-        const sequence = database.query<{ sequence: number }, [string]>(`
-          SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence
-          FROM wf_client_history
-          WHERE execution_id = ?
-        `).get(executionId)?.sequence ?? 1
-        database.query<Record<string, never>, [string, number, string, string, string | null]>(`
-          INSERT INTO wf_client_history (execution_id, sequence, event_json, created_at, dedupe_key)
-          VALUES (?, ?, ?, ?, ?)
-        `).run(executionId, sequence, toJsonText(event), nowIso(), dedupeKey)
-        return true
-      }),
+      withImmediateTransaction(() => appendHistoryRecord(executionId, event)),
+
+    claimCancellation: (
+      executionId: string,
+      event: WorkflowHistoryEvent,
+      error: Schema.Schema.Type<typeof Schema.Unknown>,
+      compensate: boolean
+    ): boolean => withImmediateTransaction(() => {
+      const result = compensate
+        ? database.query<Record<string, never>, [string]>(`
+            UPDATE wf_client_executions
+            SET status = 'compensating'
+            WHERE id = ? AND status IN ('running', 'suspended')
+          `).run(executionId)
+        : database.query<Record<string, never>, [string, string, string]>(`
+            UPDATE wf_client_executions
+            SET status = 'failed', error_json = ?, finished_at = ?
+            WHERE id = ? AND status IN ('running', 'suspended')
+          `).run(toJsonText(error), nowIso(), executionId)
+      if (result.changes !== 1) return false
+      appendHistoryRecord(executionId, event)
+      return true
+    }),
 
     updateStatus: (executionId: string, status: DurableExecutionRow["status"]): boolean => {
       const result = database.query<Record<string, never>, [DurableExecutionRow["status"], string]>(`

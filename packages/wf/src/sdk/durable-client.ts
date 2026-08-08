@@ -4,6 +4,7 @@ import type { WorkflowEvent } from "../events.ts"
 import {
   ExecutionId
 } from "../schemas.ts"
+import type { WorkflowHistoryEvent } from "../schemas.ts"
 import { isCancellableRunStatus, statusAfterEvent } from "../run-lifecycle.ts"
 import type { WorkflowRuntime } from "../runtime.ts"
 import { decodeSignal } from "../signal.ts"
@@ -250,19 +251,22 @@ export const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowC
       const workflow = workflowFor(row)
       const compensate = opts.compensate ?? true
       const cancellation = new Cancelled({ compensate })
-      const claimed = compensate
-        ? store.updateStatus(executionId, "compensating")
-        : store.fail(executionId, cancellation)
-      if (!claimed) {
-        const status = store.get(executionId).status
-        throw new Error(`Cannot cancel ${status} execution ${executionId}`)
-      }
-      store.appendHistory(executionId, {
+      const cancellationEvent: WorkflowHistoryEvent = {
         type: "execution.cancelled",
         executionId: ExecutionId.make(executionId),
         compensate,
         ...optionalActor(opts.actor)
-      })
+      }
+      const claimed = store.claimCancellation(
+        executionId,
+        cancellationEvent,
+        cancellation,
+        compensate
+      )
+      if (!claimed) {
+        const status = store.get(executionId).status
+        throw new Error(`Cannot cancel ${status} execution ${executionId}`)
+      }
       if (compensate) {
         // Complete the reserved cancellation deferred: the execution wakes at
         // its current suspension point, fails with Cancelled, and unwinds the
