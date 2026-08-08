@@ -16,8 +16,7 @@ export class SignalDeliveryError extends Schema.TaggedErrorClass<SignalDeliveryE
 ) {}
 
 interface SignalWaiter {
-  readonly schema: SynchronousSchema
-  readonly resolve: (value: unknown) => void
+  readonly deliver: (value: unknown) => void
   readonly reject: (error: unknown) => void
 }
 
@@ -97,9 +96,8 @@ export const createSignalTransport = (): SignalTransport => {
       const key = keyOf(executionId, name)
       const waiter = waiters.get(key)?.[0]
       if (waiter !== undefined) {
-        const decoded = decodeSignal(waiter.schema, payload)
+        waiter.deliver(payload)
         removeWaiter(key, waiter)
-        waiter.resolve(decoded)
         return
       }
 
@@ -119,7 +117,10 @@ export const createSignalTransport = (): SignalTransport => {
       if (buffered.present) return Promise.resolve(buffered.value)
       const key = keyOf(executionId, name)
       return new Promise((resolve, reject) => {
-        const waiter: SignalWaiter = { schema, resolve: resolve as (value: unknown) => void, reject }
+        const waiter: SignalWaiter = {
+          deliver: (value) => resolve(decodeSignal(schema, value)),
+          reject
+        }
         const abort = () => {
           removeWaiter(key, waiter)
           reject(options.signal?.reason ?? new Error("Signal wait cancelled"))
