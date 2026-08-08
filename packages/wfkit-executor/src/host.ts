@@ -228,6 +228,11 @@ export const getExecutor = (): Promise<WfExecutor> => {
   if (existing !== undefined) return existing
   const created = makeExecutor(directory)
   executors.set(directory, created)
+  void created.catch(() => {
+    if (executors.get(directory) === created) {
+      executors.delete(directory)
+    }
+  })
   return created
 }
 
