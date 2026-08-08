@@ -25,6 +25,7 @@ import {
   pendingSignalsFromHistory
 } from "./client-lifecycle.ts"
 import { migrateClientDatabase } from "./client-database.ts"
+import { decodePersistedJsonSchema } from "./json-schema-validation.ts"
 import type {
   WorkflowClient,
   WorkflowExecutionRecord,
@@ -294,22 +295,18 @@ export const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowC
       if (waiting === undefined) {
         throw new Error(`Execution ${executionId} is not waiting for signal ${name}`)
       }
-      // Validate the payload against the schema of the wait the run is parked
-      // at BEFORE completing the durable deferred — a bad value persisted into
-      // the deferred would otherwise fail the run at replay. In a fresh
-      // process the schema registry is empty until the run replays, so nudge
-      // a resume and wait for the workflow to park again.
-      let schema = runtime.signals.getSchema(executionId, name)
-      if (schema === undefined) {
-        await runtime.resume({ workflow, executionId })
-        for (let attempt = 0; attempt < 50 && schema === undefined; attempt++) {
-          await new Promise((resolve) => setTimeout(resolve, 50))
-          schema = runtime.signals.getSchema(executionId, name)
-        }
-      }
+      // Validate before completing the durable deferred: a bad value persisted
+      // there would otherwise fail the run during replay. The history schema is
+      // durable, unlike the runtime's process-local schema registry.
+      const schema = runtime.signals.getSchema(executionId, name)
       if (schema !== undefined) {
         decodeSignal(schema, payload)
+      } else if (waiting.payloadSchema !== undefined) {
+        decodePersistedJsonSchema(waiting.payloadSchema, payload)
       }
+      // Ensure this runtime has loaded the suspended execution before waking
+      // it so replay uses this runtime's secrets and integration adapters.
+      await runtime.resume({ workflow, executionId })
       await runtime.deliverSignal({
         workflow,
         executionId,

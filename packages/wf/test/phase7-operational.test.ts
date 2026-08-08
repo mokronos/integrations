@@ -324,6 +324,7 @@ describe("Phase 7 secret references", () => {
       }
       await sleep(10)
     }
+    await startClient.dispose()
 
     const signaler = createWorkflowRuntime({
       backend: "sqlite",
