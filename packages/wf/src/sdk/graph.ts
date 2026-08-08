@@ -5,7 +5,7 @@ import type {
   StepRetryPolicy
 } from "../core.ts"
 import type { SecretResolver } from "../secrets.ts"
-import { Schema } from "effect"
+import { Schema, SchemaAST } from "effect"
 import { createInMemoryDeterminismState } from "../core.ts"
 import { createSignalTransport } from "../signal.ts"
 import type { WorkflowEvent } from "../events.ts"
@@ -23,18 +23,6 @@ import {
 } from "../schemas.ts"
 import type { WorkflowArtifact } from "./artifact.ts"
 import { validateWorkflowArtifact } from "./loader.ts"
-
-interface SchemaAst {
-  readonly _tag?: string
-  readonly propertySignatures?: ReadonlyArray<{
-    readonly name: PropertyKey
-    readonly type?: SchemaAst
-  }>
-  readonly elements?: ReadonlyArray<SchemaAst>
-  readonly rest?: ReadonlyArray<SchemaAst>
-  readonly types?: ReadonlyArray<SchemaAst>
-  readonly literal?: unknown
-}
 
 export type {
   WorkflowArtifactGraph,
@@ -119,8 +107,8 @@ const describeStep = (step: InspectableStep): WorkflowGraphNodeMetadata => ({
   compensates: step.compensate !== undefined
 })
 
-const schemaAst = (schema: unknown): SchemaAst | undefined =>
-  Schema.isSchema(schema) ? schema.ast as SchemaAst : undefined
+const schemaAst = (schema: unknown): SchemaAST.AST | undefined =>
+  Schema.isSchema(schema) ? schema.ast : undefined
 
 export const sampleValueForSchema = (schema: unknown): unknown =>
   sampleValueFromAst(schemaAst(schema), new Set())
@@ -170,7 +158,10 @@ export const sampleValueForJsonSchema = (schema: JsonSchema, depth = 0): unknown
 // `seen` holds the current recursion path only: schema AST nodes are shared
 // (t.string is a singleton), so a persistent visited-set would misread the
 // second reference to a node as a cycle.
-const sampleValueFromAst = (ast: SchemaAst | undefined, seen: Set<SchemaAst>): unknown => {
+const sampleValueFromAst = (
+  ast: SchemaAST.AST | undefined,
+  seen: Set<SchemaAST.AST>
+): unknown => {
   if (ast === undefined || seen.has(ast)) {
     return {}
   }
@@ -182,7 +173,10 @@ const sampleValueFromAst = (ast: SchemaAst | undefined, seen: Set<SchemaAst>): u
   }
 }
 
-const sampleValueFromAstUnguarded = (ast: SchemaAst, seen: Set<SchemaAst>): unknown => {
+const sampleValueFromAstUnguarded = (
+  ast: SchemaAST.AST,
+  seen: Set<SchemaAST.AST>
+): unknown => {
   switch (ast._tag) {
     case "String":
       return "sample"
@@ -195,8 +189,6 @@ const sampleValueFromAstUnguarded = (ast: SchemaAst, seen: Set<SchemaAst>): unkn
       return undefined
     case "Null":
       return null
-    case "Date":
-      return new Date(0)
     case "Literal":
       return ast.literal
     case "Arrays": {
