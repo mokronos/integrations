@@ -1,5 +1,5 @@
 import { Context } from "effect"
-import type { SecretResolver } from "./core.ts"
+import type { SecretResolver } from "./secrets.ts"
 import type { WorkflowEventSink } from "./events.ts"
 import type { IntegrationInvoker } from "./integration.ts"
 

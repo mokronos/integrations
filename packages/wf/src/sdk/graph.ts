@@ -2,9 +2,9 @@ import type {
   DefinedWorkflow,
   InMemoryDeterminismState,
   OrchestrationCall,
-  SecretResolver,
   StepRetryPolicy
 } from "../core.ts"
+import type { SecretResolver } from "../secrets.ts"
 import { Schema } from "effect"
 import { createInMemoryDeterminismState } from "../core.ts"
 import { createSignalTransport } from "../signal.ts"

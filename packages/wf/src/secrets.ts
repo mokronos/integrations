@@ -1,0 +1,41 @@
+import { Schema } from "effect"
+
+const SecretRefPrefix = "secret:"
+
+export const SecretRef = Schema.declare<string>(
+  (value): value is string => typeof value === "string" && value.startsWith(SecretRefPrefix)
+).pipe(Schema.brand("SecretRef"))
+export type SecretRef = typeof SecretRef.Type
+
+export const SecretResolutionContext = Schema.Struct({
+  resource: Schema.optional(Schema.String)
+})
+export type SecretResolutionContext = typeof SecretResolutionContext.Type
+
+export interface SecretResolver {
+  resolve(name: string, context?: SecretResolutionContext): string | Promise<string>
+}
+
+export const secret = (name: string): SecretRef => SecretRef.make(`${SecretRefPrefix}${name}`)
+
+const defaultSecretEnvName = (name: string): string =>
+  name.replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").toUpperCase()
+
+export const envSecretResolver = (options: {
+  readonly mapping?: Record<string, string>
+  readonly fallback?: string
+} = {}): SecretResolver => ({
+  resolve: (name) => {
+    const envName = options.mapping?.[name] ?? defaultSecretEnvName(name)
+    const value = process.env[envName]
+    if (value !== undefined) return value
+    if (options.fallback !== undefined) return options.fallback
+    throw new Error(`Secret "${name}" not found: set env var ${envName}`)
+  }
+})
+
+export const isSecretRef = (value: unknown): value is SecretRef =>
+  Schema.is(SecretRef)(value)
+
+export const secretRefName = (value: SecretRef): string =>
+  value.slice(SecretRefPrefix.length)

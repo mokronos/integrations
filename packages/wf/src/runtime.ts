@@ -6,7 +6,8 @@ import { Effect, Exit, Layer, ManagedRuntime, Schema } from "effect"
 import { ClusterWorkflowEngine, SingleRunner } from "effect/unstable/cluster"
 import { SqlClient } from "effect/unstable/sql"
 import { DurableDeferred, WorkflowEngine } from "effect/unstable/workflow"
-import type { DefinedWorkflow, SecretResolver } from "./core.ts"
+import type { DefinedWorkflow } from "./core.ts"
+import type { SecretResolver } from "./secrets.ts"
 import {
   emitWorkflowEvent
 } from "./events.ts"

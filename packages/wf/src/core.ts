@@ -16,6 +16,22 @@ import {
   SignalDeliveryError
 } from "./signal.ts"
 import type { SignalTransport } from "./signal.ts"
+import {
+  isSecretRef,
+  secretRefName
+} from "./secrets.ts"
+import type {
+  SecretResolutionContext,
+  SecretResolver
+} from "./secrets.ts"
+export {
+  envSecretResolver,
+  isSecretRef,
+  secret,
+  SecretRef,
+  SecretResolutionContext
+} from "./secrets.ts"
+export type { SecretResolver } from "./secrets.ts"
 
 type AnySchema<A = any> = Schema.Codec<A, any, any, any>
 
@@ -93,50 +109,6 @@ export const defineStep = <
   ...config,
   errors: config.errors ?? Schema.Never
 })
-
-const SecretRefPrefix = "secret:"
-
-export const SecretRef = Schema.declare<string>(
-  (value): value is string => typeof value === "string" && value.startsWith(SecretRefPrefix)
-).pipe(Schema.brand("SecretRef"))
-
-export type SecretRef = typeof SecretRef.Type
-
-export const SecretResolutionContext = Schema.Struct({
-  resource: Schema.optional(Schema.String)
-})
-export type SecretResolutionContext = typeof SecretResolutionContext.Type
-
-export interface SecretResolver {
-  resolve(name: string, context?: SecretResolutionContext): string | Promise<string>
-}
-
-export const secret = (name: string): SecretRef => SecretRef.make(`${SecretRefPrefix}${name}`)
-
-const defaultSecretEnvName = (name: string): string =>
-  name.replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").toUpperCase()
-
-export const envSecretResolver = (options: {
-  readonly mapping?: Record<string, string>
-  readonly fallback?: string
-} = {}): SecretResolver => ({
-  resolve: (name) => {
-    const envName = options.mapping?.[name] ?? defaultSecretEnvName(name)
-    const value = process.env[envName]
-    if (value !== undefined) {
-      return value
-    }
-    if (options.fallback !== undefined) {
-      return options.fallback
-    }
-    throw new Error(`Secret "${name}" not found: set env var ${envName}`)
-  }
-})
-
-export const isSecretRef = (value: unknown): value is SecretRef =>
-  Schema.is(SecretRef)(value)
-
-const secretName = (value: SecretRef): string => value.slice(SecretRefPrefix.length)
 
 export type WorkflowValue<A, E = never> = Effect.Effect<A, E, any>
 
@@ -411,9 +383,9 @@ const encodeSync = <A>(schema: AnySchema<A>, value: A): unknown =>
 const resolveSecretRefs = async <A>(value: A, resolver: SecretResolver | undefined): Promise<A> => {
   if (isSecretRef(value)) {
     if (resolver === undefined) {
-      throw new Error(`No secret resolver configured for ${secretName(value)}`)
+      throw new Error(`No secret resolver configured for ${secretRefName(value)}`)
     }
-    return await resolver.resolve(secretName(value)) as A
+    return await resolver.resolve(secretRefName(value)) as A
   }
 
   if (Array.isArray(value)) {
