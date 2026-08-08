@@ -147,8 +147,11 @@ interface ExecutionRecord {
 
 const executionId = () => crypto.randomUUID()
 const nowIso = () => new Date().toISOString()
-const encodeStoredValue = (value: unknown): string => JSON.stringify({ value })
-const decodeStoredValue = (json: string): unknown => (JSON.parse(json) as { value: unknown }).value
+const StoredValueJson = Schema.fromJsonString(Schema.Struct({ value: Schema.Unknown }))
+const encodeStoredValue = (value: unknown): string =>
+  Schema.encodeSync(StoredValueJson)({ value })
+const decodeStoredValue = (json: string): unknown =>
+  Schema.decodeUnknownSync(StoredValueJson)(json).value
 const optionalActor = (actor: string | undefined): { readonly actor?: string } =>
   actor === undefined ? {} : { actor }
 const optionalFinishedAt = (finishedAt: string | undefined): { readonly finishedAt?: string } =>
