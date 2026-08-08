@@ -67,8 +67,7 @@ export interface TerminalFailure<E> {
   readonly error: E
 }
 
-export interface StepContext<E> {
-  fail(error: E): TerminalFailure<E>
+export interface StepExecutionContext {
   resolveSecret(name: string, context?: SecretResolutionContext): Promise<string>
   invokeIntegration(
     address: string,
@@ -77,6 +76,15 @@ export interface StepContext<E> {
   readonly attempt: number
   readonly executionId: string
 }
+
+export interface StepContext<E> extends StepExecutionContext {
+  fail(error: E): TerminalFailure<E>
+}
+
+export const terminalFailure = <E>(error: E): TerminalFailure<E> => ({
+  [TerminalFailureTypeId]: TerminalFailureTypeId,
+  error
+})
 
 export const StepRetryPolicy = Schema.Struct({
   attempts: Schema.Int.check(Schema.isGreaterThan(0)),
@@ -208,14 +216,13 @@ export interface InMemoryExecutionOptions {
   readonly executionId?: string
   readonly determinism?: InMemoryDeterminismState
   readonly onEvent?: (event: WorkflowEvent) => void | Promise<void>
-  readonly stepExecutors?: ReadonlyMap<Step<any, any, any>, Step<any, any, any>["execute"]>
   readonly stepExecutor?: (options: {
-    readonly step: Step<any, any, any>
+    readonly step: InspectableStep
     readonly input: unknown
     readonly invocation: number
     readonly activityName: string
-    readonly context: StepContext<any>
-  }) => unknown | Promise<unknown>
+    readonly context: StepExecutionContext
+  }) => StepExecutionOverride | Promise<StepExecutionOverride>
   readonly sleep?: (options: {
     readonly executionId: string
     readonly name: string
@@ -237,6 +244,20 @@ export interface InMemoryExecutionOptions {
   readonly integrations?: IntegrationInvoker
   readonly concurrency?: ConcurrencyLimiter
 }
+
+export interface InspectableStep {
+  readonly name: string
+  readonly input: Schema.Top
+  readonly output: Schema.Top
+  readonly errors: Schema.Top
+  readonly retry?: StepRetryPolicy
+  readonly concurrency?: { readonly limit: number; readonly key?: object }
+  readonly compensate?: object
+}
+
+export type StepExecutionOverride =
+  | { readonly handled: false }
+  | { readonly handled: true; readonly value: unknown }
 
 interface CompensationEntry {
   readonly stepName: string
@@ -288,7 +309,7 @@ const makeStepContext = <E>(
 ): StepContext<E> => ({
   attempt,
   executionId,
-  fail: (error) => ({ [TerminalFailureTypeId]: TerminalFailureTypeId, error }),
+  fail: terminalFailure,
   resolveSecret: (name, context) => {
     if (resolver === undefined) throw new Error(`No secret resolver configured for ${name}`)
     return Promise.resolve(resolver.resolve(name, context))
@@ -820,7 +841,7 @@ const makeInMemoryCtx = <WErrors>(
   emit: (event: WorkflowEvent) => Promise<void>,
   options: Pick<
     InMemoryExecutionOptions,
-    "stepExecutors" | "stepExecutor" | "sleep" | "signalTimeout" | "signalValue" | "signalTransport" | "secrets" | "integrations" | "concurrency"
+    "stepExecutor" | "sleep" | "signalTimeout" | "signalValue" | "signalTransport" | "secrets" | "integrations" | "concurrency"
   > = {}
 ): WorkflowContext<WErrors> => {
   const counters = new Map<string, number>()
@@ -872,7 +893,6 @@ const makeInMemoryCtx = <WErrors>(
                 options.secrets,
                 options.integrations
               )
-              const executeStep = options.stepExecutors?.get(step)
               const release = await (options.concurrency ?? defaultConcurrencyLimiter)
                 .acquire(step.name, step.concurrency, input)
               try {
@@ -880,17 +900,18 @@ const makeInMemoryCtx = <WErrors>(
                   step.input,
                   await resolveSecretReferences(input, options.secrets)
                 )
-                const value = options.stepExecutor !== undefined
-                  ? await options.stepExecutor({
+                const override = options.stepExecutor === undefined
+                  ? { handled: false } as const
+                  : await options.stepExecutor({
                       step,
                       input: executeInput,
                       invocation,
                       activityName,
                       context: stepContext
                     })
-                  : executeStep !== undefined
-                    ? await executeStep(executeInput, stepContext as any)
-                    : await step.execute(executeInput, stepContext)
+                const value = override.handled
+                  ? override.value
+                  : await step.execute(executeInput, stepContext)
                 if (isTerminalFailure(value)) {
                   const terminal = decodeSync(step.errors, value.error)
                   throw terminal
@@ -1312,7 +1333,6 @@ export const defineWorkflow = <
       await options.onEvent?.(event)
     }
     const ctx = makeInMemoryCtx(executionId, errors, compensations, determinism, emit, {
-      ...(options.stepExecutors === undefined ? {} : { stepExecutors: options.stepExecutors }),
       ...(options.stepExecutor === undefined ? {} : { stepExecutor: options.stepExecutor }),
       ...(options.sleep === undefined ? {} : { sleep: options.sleep }),
       ...(options.signalTimeout === undefined ? {} : { signalTimeout: options.signalTimeout }),

@@ -1,12 +1,14 @@
 import type * as Duration from "effect/Duration"
+import { Schema } from "effect"
 import type {
   DefinedWorkflow,
   InMemoryDeterminismState,
   Step,
   StepContext,
+  StepExecutionContext,
   TerminalFailure
 } from "../core.ts"
-import { createInMemoryDeterminismState } from "../core.ts"
+import { createInMemoryDeterminismState, terminalFailure } from "../core.ts"
 import type {
   WorkflowExecutionHandle,
   WorkflowExecutionStatus,
@@ -73,6 +75,10 @@ interface VirtualTimer {
   readonly resolve: () => void
 }
 
+interface RegisteredStepMock {
+  readonly execute: (input: unknown, context: StepExecutionContext) => Promise<unknown>
+}
+
 const nowIso = () => new Date().toISOString()
 const executionId = () => crypto.randomUUID()
 
@@ -102,8 +108,8 @@ export const createTestRuntime = (options: TestRuntimeOptions = {}): TestRuntime
   const timeSkipping = options.timeSkipping ?? true
   const executions = new Map<string, ExecutionRecord>()
   const idempotencyKeys = new Map<string, string>()
-  const stepMocks = new Map<Step<any, any, any>, Step<any, any, any>["execute"]>()
-  const failOnce = new Set<Step<any, any, any>>()
+  const stepMocks = new Map<object, RegisteredStepMock>()
+  const failOnce = new Set<object>()
   const recorders: CompensationRecorder[] = []
   const timers: VirtualTimer[] = []
   const secrets = new Map<string, string>()
@@ -155,22 +161,19 @@ export const createTestRuntime = (options: TestRuntimeOptions = {}): TestRuntime
     })
   }
 
-  const buildStepExecutors = () => {
-    const executors = new Map<Step<any, any, any>, Step<any, any, any>["execute"]>()
-    const steps = new Set([...stepMocks.keys(), ...failOnce])
-    for (const step of steps) {
-      executors.set(step, async (input: unknown, context: StepContext<unknown>) => {
-        if (failOnce.has(step)) {
-          failOnce.delete(step)
-          throw new Error(`Injected failure for step ${step.name}`)
-        }
-        const mock = stepMocks.get(step)
-        return mock === undefined
-          ? step.execute(input, context as never)
-          : mock(input, context as never)
-      })
+  const executeStepOverride = async (options: {
+    readonly step: { readonly name: string }
+    readonly input: unknown
+    readonly context: StepExecutionContext
+  }) => {
+    if (failOnce.has(options.step)) {
+      failOnce.delete(options.step)
+      throw new Error(`Injected failure for step ${options.step.name}`)
     }
-    return executors
+    const mock = stepMocks.get(options.step)
+    return mock === undefined
+      ? { handled: false } as const
+      : { handled: true, value: await mock.execute(options.input, options.context) } as const
   }
 
   const launch = (
@@ -182,7 +185,7 @@ export const createTestRuntime = (options: TestRuntimeOptions = {}): TestRuntime
       executionId: record.executionId,
       determinism: record.determinism,
       signalTransport: signals,
-      stepExecutors: buildStepExecutors(),
+      stepExecutor: executeStepOverride,
       sleep: ({ duration }) => makeDelay(duration),
       signalTimeout: ({ duration }) => makeDelay(duration),
       secrets: secretResolver,
@@ -240,11 +243,19 @@ export const createTestRuntime = (options: TestRuntimeOptions = {}): TestRuntime
 
   return {
     mockStep(step, impl) {
-      stepMocks.set(step, impl as Step<any, any, any>["execute"])
+      stepMocks.set(step, {
+        execute: async (input, context) => await impl(
+          Schema.decodeUnknownSync(step.input)(input),
+          {
+            ...context,
+            fail: terminalFailure
+          }
+        )
+      })
     },
 
     failStepOnce(step) {
-      failOnce.add(step as Step<any, any, any>)
+      failOnce.add(step)
     },
 
     recordCompensations() {

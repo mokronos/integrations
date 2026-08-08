@@ -1,11 +1,10 @@
 import type {
   DefinedWorkflow,
   InMemoryDeterminismState,
-  OrchestrationCall,
-  StepRetryPolicy
+  InspectableStep,
+  OrchestrationCall
 } from "../core.ts"
 import type { SecretResolver } from "../secrets.ts"
-import { Schema } from "effect"
 import { createInMemoryDeterminismState } from "../core.ts"
 import { createSignalTransport } from "../signal.ts"
 import type { WorkflowEvent } from "../events.ts"
@@ -70,18 +69,6 @@ const workflowSchemas = (workflow: DefinedWorkflow): WorkflowGraphSchemas | unde
     ...(output === undefined ? {} : { output }),
     ...(errors === undefined ? {} : { errors })
   })
-}
-
-interface InspectableStep {
-  readonly input: Schema.Top
-  readonly output: Schema.Top
-  readonly errors: Schema.Top
-  readonly retry?: StepRetryPolicy
-  readonly concurrency?: {
-    readonly limit: number
-    readonly key?: object
-  }
-  readonly compensate?: object
 }
 
 const stepSchemas = (step: InspectableStep): WorkflowGraphNodeSchemas | undefined => {
@@ -331,7 +318,7 @@ export const workflowToGraph = async <I, O, E>(
         if (stepNodeSchemas !== undefined) {
           schemas.set(id, stepNodeSchemas)
         }
-        return sampleValueForSchema(step.output)
+        return { handled: true, value: sampleValueForSchema(step.output) }
       },
       sleep: async () => undefined,
       signalTimeout: async () => undefined,
