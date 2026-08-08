@@ -14,7 +14,7 @@ import {
   type ProviderItemId,
   StorageError
 } from "@executor-js/sdk/core"
-import { Effect, Schema } from "effect"
+import { Effect, Schema, Semaphore } from "effect"
 
 const CredentialFile = Schema.Record(Schema.String, Schema.String)
 const credentialAdditionalData = Buffer.from("@mokronos/wfkit/executor-credentials/v1")
@@ -107,6 +107,7 @@ const writeCredentials = (
 
 export const fileCredentialProvider = (directory: string): CredentialProvider => {
   const filePath = path.join(directory, "executor-auth.json")
+  const writes = Semaphore.makeUnsafe(1)
   return {
     key: ProviderKey.make("wf-file"),
     writable: true,
@@ -125,7 +126,7 @@ export const fileCredentialProvider = (directory: string): CredentialProvider =>
         })
       ),
     set: (id: ProviderItemId, value: string) =>
-      Effect.try({
+      writes.withPermit(Effect.try({
         try: () => sealCredential(directory, value),
         catch: (cause) => new StorageError({
           message: `Failed to seal Executor credential ${String(id)}`,
@@ -139,15 +140,15 @@ export const fileCredentialProvider = (directory: string): CredentialProvider =>
             )
           )
         )
-      ),
+      )),
     delete: (id: ProviderItemId) =>
-      readCredentials(filePath).pipe(
+      writes.withPermit(readCredentials(filePath).pipe(
         Effect.flatMap((credentials) => {
           const next = Object.fromEntries(
             Object.entries(credentials).filter(([key]) => key !== String(id))
           )
           return writeCredentials(filePath, next)
         })
-      )
+      ))
   }
 }
