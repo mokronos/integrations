@@ -98,6 +98,11 @@ describe("Phase 8 durable cancellation", () => {
     await client.cancel(handle.executionId, { compensate: false, actor: "ops" })
 
     expect(await client.status(handle.executionId)).toBe("failed")
+    expect(await client.result(handle.executionId)).toEqual({
+      type: "failed",
+      error: expect.objectContaining({ _tag: "Cancelled", compensate: false })
+    })
+    expect((await client.execution(handle.executionId)).finishedAt).toBeDefined()
     expect(compensated).toEqual([])
 
     const history = await client.history(handle.executionId)

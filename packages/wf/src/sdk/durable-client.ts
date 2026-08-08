@@ -253,8 +253,8 @@ export const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowC
         store.fail(executionId, new Cancelled({ compensate: true }))
       } else {
         // Hard kill: engine-level interrupt, no unwind.
-        store.updateStatus(executionId, "failed")
         await runtime.interrupt({ workflow, executionId })
+        store.fail(executionId, new Cancelled({ compensate: false }))
       }
     },
 
