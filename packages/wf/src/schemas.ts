@@ -52,10 +52,9 @@ export const decodeJsonSchema = (value: unknown): JsonSchema =>
 
 /** Best-effort JSON Schema for an Effect schema; undefined when the schema
  *  has no JSON representation. */
-export const jsonSchemaOf = (schema: unknown): JsonSchema | undefined => {
+export const jsonSchemaOf = (schema: Schema.Top): JsonSchema | undefined => {
   try {
-    const document = Schema.toJsonSchemaDocument(schema as never) as { readonly schema?: unknown }
-    return document.schema === undefined ? undefined : decodeJsonSchema(document.schema)
+    return decodeJsonSchema(Schema.toJsonSchemaDocument(schema).schema)
   } catch {
     return undefined
   }
