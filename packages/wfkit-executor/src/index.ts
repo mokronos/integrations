@@ -16,6 +16,7 @@ export {
   addExecutorMcp,
   addExecutorOpenApi,
   closeExecutor,
+  createExecutorAuth,
   createExecutorCatalog,
   createExecutorHost,
   completeExecutorOAuth,
@@ -42,6 +43,7 @@ export {
   startExecutorOAuth
 } from "./executor.ts"
 export type {
+  ExecutorAuth,
   ExecutorCatalog,
   ExecutorConnections,
   ExecutorHost,

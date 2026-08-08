@@ -10,10 +10,12 @@ import { createExecutorTools } from "./tools.ts"
 export const createExecutorServices = (runner: ExecutorRunner) => {
   const catalog = createExecutorCatalog(runner)
   const connections = createExecutorConnections(runner)
+  const auth = createExecutorAuth(runner)
   const tools = createExecutorTools(runner)
   return {
     catalog,
     connections,
+    auth,
     tools,
     discovery: createIntegrationDiscovery({ catalog, connections, tools }),
     listIntegrationOverviews: createIntegrationOverview({ catalog, connections, tools }),
@@ -22,3 +24,4 @@ export const createExecutorServices = (runner: ExecutorRunner) => {
 }
 
 export type ExecutorServices = ReturnType<typeof createExecutorServices>
+import { createExecutorAuth } from "./auth.ts"

@@ -14,15 +14,19 @@ export {
 export type { ExecutorCatalog } from "./catalog.ts"
 export {
   completeExecutorOAuth,
-  createExecutorConnections,
-  createExecutorConnection,
+  createExecutorAuth,
   createExecutorOAuthClient,
-  ensureExecutorConnection,
-  listExecutorConnections,
   probeExecutorOAuth,
   registerExecutorOAuthClient,
-  removeExecutorConnection,
   startExecutorOAuth
+} from "./auth.ts"
+export type { ExecutorAuth } from "./auth.ts"
+export {
+  createExecutorConnections,
+  createExecutorConnection,
+  ensureExecutorConnection,
+  listExecutorConnections,
+  removeExecutorConnection
 } from "./connections.ts"
 export type { ExecutorConnections } from "./connections.ts"
 export {

@@ -22,6 +22,8 @@ describe("executor services", () => {
     const services = createExecutorServices(host)
 
     expect(await services.catalog.list()).toEqual([])
+    expect(services.auth.start).toBeFunction()
+    expect(services.connections.create).toBeFunction()
     expect(services.integrationInvoker.invoke).toBeFunction()
 
     await host.close()
