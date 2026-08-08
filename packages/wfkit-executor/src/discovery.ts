@@ -1,43 +1,25 @@
 import {
-  addExecutorMcp,
-  addExecutorOpenApi,
   detectExecutorIntegration,
-  findExecutorIntegration,
   previewExecutorOpenApi,
   probeExecutorMcp
 } from "./catalog.ts"
-import { ensureExecutorConnection } from "./connections.ts"
 import type { ExecutorCatalog } from "./catalog.ts"
-import type { ExecutorConnections } from "./connections.ts"
-import type {
-  DiscoverIntegrationsOptions,
-  IntegrationDiscovery,
-  IntegrationInspection
-} from "./integration-model.ts"
-import type { ExecutorDetection, ExecutorIntegration } from "./schemas.ts"
-import { listExecutorTools } from "./tools.ts"
-import type { ExecutorTools } from "./tools.ts"
+import type { IntegrationInspection } from "./integration-model.ts"
+import type { ExecutorDetection } from "./schemas.ts"
 
 export interface IntegrationDiscoveryDependencies {
   readonly catalog: Pick<
     ExecutorCatalog,
-    "detectIntegration" | "probeMcp" | "previewOpenApi" | "addMcp" | "addOpenApi" | "find"
+    "detectIntegration" | "probeMcp" | "previewOpenApi"
   >
-  readonly connections: Pick<ExecutorConnections, "ensure">
-  readonly tools: Pick<ExecutorTools, "list">
 }
 
 const defaultDependencies: IntegrationDiscoveryDependencies = {
   catalog: {
     detectIntegration: detectExecutorIntegration,
     probeMcp: probeExecutorMcp,
-    previewOpenApi: previewExecutorOpenApi,
-    addMcp: addExecutorMcp,
-    addOpenApi: addExecutorOpenApi,
-    find: findExecutorIntegration
-  },
-  connections: { ensure: ensureExecutorConnection },
-  tools: { list: listExecutorTools }
+    previewOpenApi: previewExecutorOpenApi
+  }
 }
 
 const confidenceRank = (confidence: ExecutorDetection["confidence"]): number => {
@@ -109,82 +91,13 @@ const inspectWith = async (
   throw new Error(`Executor detected unsupported integration kind: ${detection.kind}`)
 }
 
-/** Installs a previously inspected endpoint in the persisted catalog. */
-const installWith = async (
-  inspection: IntegrationInspection,
-  dependencies: IntegrationDiscoveryDependencies
-): Promise<ExecutorIntegration> => {
-  const existing = await dependencies.catalog.find(inspection.detection.slug)
-  if (existing !== undefined) return existing
-
-  if (inspection.detection.kind === "mcp") {
-    const probe = inspection.probe
-    if (probe === undefined) throw new Error("MCP installation requires an MCP probe")
-    await dependencies.catalog.addMcp({
-      endpoint: inspection.detection.endpoint,
-      name: probe.name,
-      slug: inspection.detection.slug,
-      auth: probe.requiresOAuth ? "oauth2" : probe.requiresAuthentication ? "bearer" : "none"
-    })
-  } else if (inspection.detection.kind === "openapi") {
-    const preview = inspection.preview
-    if (preview === undefined) throw new Error("OpenAPI installation requires an OpenAPI preview")
-    await dependencies.catalog.addOpenApi({
-      spec: inspection.detection.endpoint,
-      slug: inspection.detection.slug,
-      name: inspection.detection.name,
-      ...(preview.servers[0]?.url === undefined ? {} : { baseUrl: preview.servers[0].url })
-    })
-  } else {
-    throw new Error(`Cannot install unsupported integration kind: ${inspection.detection.kind}`)
-  }
-
-  const installed = await dependencies.catalog.find(inspection.detection.slug)
-  if (installed === undefined) {
-    throw new Error(`Executor did not persist integration ${inspection.detection.slug}`)
-  }
-  return installed
-}
-
-/** Compatibility composition for callers that want inspection, installation,
- * default connection policy, and tool listing in one operation. */
-const discoverWith = async (
-  url: string,
-  options: DiscoverIntegrationsOptions,
-  dependencies: IntegrationDiscoveryDependencies
-): Promise<IntegrationDiscovery> => {
-  const inspection = await inspectWith(url, dependencies)
-  const integration = await installWith(inspection, dependencies)
-  const connectionName = options.connection ?? "default"
-  await dependencies.connections.ensure(integration, connectionName)
-  return {
-    ...inspection,
-    integration,
-    requiresAuthentication:
-      integration.authMethods.length > 0 &&
-      !integration.authMethods.some((method) => method.kind === "none"),
-    authMethods: integration.authMethods,
-    tools: await dependencies.tools.list({ integration: integration.slug, connection: connectionName })
-  }
-}
-
 export const createIntegrationDiscovery = (
   dependencies: IntegrationDiscoveryDependencies
 ) => ({
-  inspect: (url: string) => inspectWith(url, dependencies),
-  install: (inspection: IntegrationInspection) => installWith(inspection, dependencies),
-  discover: (url: string, options: DiscoverIntegrationsOptions = {}) =>
-    discoverWith(url, options, dependencies)
+  inspect: (url: string) => inspectWith(url, dependencies)
 })
 
 const defaultDiscovery = createIntegrationDiscovery(defaultDependencies)
 
 /** Detects and probes an endpoint without changing persisted Executor state. */
 export const inspectIntegration = defaultDiscovery.inspect
-
-/** Installs a previously inspected endpoint in the persisted catalog. */
-export const installIntegration = defaultDiscovery.install
-
-/** Compatibility composition for inspection, installation, connection policy,
- * and tool listing. */
-export const discoverIntegration = defaultDiscovery.discover

@@ -2,11 +2,15 @@
  * policy, projections, and validation are implemented independently. */
 export {
   createIntegrationDiscovery,
-  discoverIntegration,
-  inspectIntegration,
-  installIntegration
+  inspectIntegration
 } from "./discovery.ts"
 export type { IntegrationDiscoveryDependencies } from "./discovery.ts"
+export {
+  createIntegrationProvisioning,
+  discoverIntegration,
+  installIntegration
+} from "./provisioning.ts"
+export type { IntegrationProvisioningDependencies } from "./provisioning.ts"
 export {
   IntegrationDiscovery,
   IntegrationInspection,

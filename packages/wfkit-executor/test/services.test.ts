@@ -24,6 +24,8 @@ describe("executor services", () => {
     expect(await services.catalog.list()).toEqual([])
     expect(services.auth.start).toBeFunction()
     expect(services.connections.create).toBeFunction()
+    expect(services.discovery.inspect).toBeFunction()
+    expect(services.provisioning.install).toBeFunction()
     expect(services.integrationInvoker.invoke).toBeFunction()
 
     await host.close()

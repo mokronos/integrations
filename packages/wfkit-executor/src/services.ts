@@ -4,6 +4,7 @@ import { createIntegrationDiscovery } from "./discovery.ts"
 import type { ExecutorRunner } from "./host.ts"
 import { createExecutorIntegrationInvoker } from "./invoker.ts"
 import { createIntegrationOverview } from "./overview.ts"
+import { createIntegrationProvisioning } from "./provisioning.ts"
 import { createExecutorTools } from "./tools.ts"
 
 /** All Executor-backed capabilities sharing one explicitly owned host. */
@@ -12,12 +13,14 @@ export const createExecutorServices = (runner: ExecutorRunner) => {
   const connections = createExecutorConnections(runner)
   const auth = createExecutorAuth(runner)
   const tools = createExecutorTools(runner)
+  const discovery = createIntegrationDiscovery({ catalog })
   return {
     catalog,
     connections,
     auth,
     tools,
-    discovery: createIntegrationDiscovery({ catalog, connections, tools }),
+    discovery,
+    provisioning: createIntegrationProvisioning({ discovery, catalog, connections, tools }),
     listIntegrationOverviews: createIntegrationOverview({ catalog, connections, tools }),
     integrationInvoker: createExecutorIntegrationInvoker(tools)
   }

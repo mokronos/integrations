@@ -54,6 +54,7 @@ export type {
   DiscoverIntegrationsOptions,
   IntegrationDiscoveryDependencies,
   IntegrationOverviewDependencies,
+  IntegrationProvisioningDependencies,
   IntegrationDiscovery,
   IntegrationInspection,
   IntegrationKind,
@@ -64,6 +65,7 @@ export type {
 export {
   createIntegrationDiscovery,
   createIntegrationOverview,
+  createIntegrationProvisioning,
   discoverIntegration,
   inspectIntegration,
   installIntegration,
