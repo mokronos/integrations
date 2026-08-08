@@ -350,19 +350,25 @@ const encodeSync = <A>(schema: AnySchema<A>, value: A): unknown =>
 // does — a single `yield*` of the persisted exit.
 const raceDurable = (
   name: string,
-  effects: ReadonlyArray<Effect.Effect<any, any, any>>
-): Effect.Effect<any, any, any> =>
+  effects: readonly [
+    Effect.Effect<DynamicService, DynamicService, DynamicService>,
+    ...Array<Effect.Effect<DynamicService, DynamicService, DynamicService>>
+  ]
+): Effect.Effect<DynamicService, DynamicService, DynamicService> =>
   Effect.gen(function* () {
-    const deferred = DurableDeferred.make(name, { success: Schema.Unknown })
+    const deferred = DurableDeferred.make(name, {
+      success: Schema.Unknown,
+      error: Schema.Unknown
+    })
     const engine = yield* WorkflowEngine.WorkflowEngine
     const exit = yield* Workflow.wrapActivityResult(
       engine.deferredResult(deferred),
       Option.isNone
     )
     if (Option.isSome(exit)) {
-      return yield* exit.value as Exit.Exit<any, any>
+      return yield* exit.value as Exit.Exit<DynamicService, DynamicService>
     }
-    return yield* DurableDeferred.into(Effect.raceAll(effects) as any, deferred as any)
+    return yield* DurableDeferred.into(Effect.raceAll(effects), deferred)
   })
 
 const transientAttempts = (retry: StepRetryPolicy | undefined): number =>
