@@ -4,7 +4,7 @@ import { runExecutor } from "./default-host.ts"
 import type { ExecutorRunner } from "./host.ts"
 import {
   ExecutorToolAddress,
-  type ExecutorTool
+  ExecutorTool
 } from "./schemas.ts"
 
 const ExecutorToolResult = Schema.Union([
@@ -98,7 +98,7 @@ export const createExecutorTools = (runner: ExecutorRunner): ExecutorTools => ({
       ...(filter.connection === undefined ? {} : { connection: ConnectionName.make(filter.connection) })
     }))
     const callableTools = tools.filter((tool) => String(tool.address).startsWith("tools."))
-    return await Promise.all(callableTools.map(async (tool) => {
+    const discovered = await Promise.all(callableTools.map(async (tool) => {
       const schema = await runner.run((executor) => executor.tools.schema(tool.address))
       const inputSchema = optionalJson(schema?.inputSchema)
       const outputSchema = optionalJson(schema?.outputSchema)
@@ -122,6 +122,7 @@ export const createExecutorTools = (runner: ExecutorRunner): ExecutorTools => ({
             : { outputTypeScript: schema.outputTypeScript })
       }
     }))
+    return Schema.decodeUnknownSync(Schema.Array(ExecutorTool))(discovered)
   },
   execute: async (address, input) => {
     const result = await runner.run((executor) => executor.execute(ToolAddress.make(address), input))

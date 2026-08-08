@@ -1,8 +1,8 @@
 import { IntegrationSlug } from "@executor-js/sdk/core"
-import { Option } from "effect"
+import { Option, Schema } from "effect"
 import { runExecutor } from "./default-host.ts"
 import type { ExecutorRunner } from "./host.ts"
-import type {
+import {
   ExecutorDetection,
   ExecutorIntegration,
   ExecutorMcpProbe,
@@ -33,7 +33,8 @@ export interface ExecutorCatalog {
 export const createExecutorCatalog = (runner: ExecutorRunner): ExecutorCatalog => {
   const list = async (): Promise<ReadonlyArray<ExecutorIntegration>> =>
     await runner.run((executor) => executor.integrations.list()).then((integrations) =>
-      integrations.filter((integration) => integration.kind !== "built-in").map((integration) => ({
+      Schema.decodeUnknownSync(Schema.Array(ExecutorIntegration))(
+        integrations.filter((integration) => integration.kind !== "built-in").map((integration) => ({
         slug: String(integration.slug),
         name: integration.name,
         description: integration.description,
@@ -58,17 +59,20 @@ export const createExecutorCatalog = (runner: ExecutorRunner): ExecutorCatalog =
           })
         })),
         ...(integration.displayUrl === undefined ? {} : { displayUrl: integration.displayUrl })
-      }))
+        }))
+      )
     )
 
   const catalog: ExecutorCatalog = {
-    detectIntegration: async (url) =>
-      await runner.run((executor) => executor.integrations.detect(url)),
-    probeMcp: async (url) =>
-      await runner.run((executor) => executor.mcp.probeEndpoint(url)),
+    detectIntegration: async (url) => Schema.decodeUnknownSync(Schema.Array(ExecutorDetection))(
+      await runner.run((executor) => executor.integrations.detect(url))
+    ),
+    probeMcp: async (url) => Schema.decodeUnknownSync(ExecutorMcpProbe)(
+      await runner.run((executor) => executor.mcp.probeEndpoint(url))
+    ),
     previewOpenApi: async (spec) => {
       const preview = await runner.run((executor) => executor.openapi.previewSpec(spec))
-      return {
+      return Schema.decodeUnknownSync(ExecutorOpenApiPreview)({
         title: Option.getOrNull(preview.title),
         version: Option.getOrNull(preview.version),
         operationCount: preview.operationCount,
@@ -79,7 +83,7 @@ export const createExecutorCatalog = (runner: ExecutorRunner): ExecutorCatalog =
           scheme: Option.getOrNull(scheme.scheme),
           headerName: Option.getOrNull(scheme.headerName)
         }))
-      }
+      })
     },
     addMcp: async (options) =>
       await runner.run((executor) => executor.mcp.addServer({
