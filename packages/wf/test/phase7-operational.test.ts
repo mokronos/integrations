@@ -414,7 +414,10 @@ describe("Phase 7 secret references", () => {
 
   test("a disposed runtime rejects further registration", async () => {
     const runtime = createWorkflowRuntime({ backend: "memory" })
-    await runtime.dispose()
+    await expect(Promise.all([runtime.dispose(), runtime.dispose()])).resolves.toEqual([
+      undefined,
+      undefined
+    ])
 
     expect(() => runtime.register([])).toThrow("Workflow runtime has been disposed")
   })

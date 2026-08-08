@@ -152,6 +152,7 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
     >
   >()
   let disposed = false
+  let disposePromise: Promise<void> | undefined
 
   const ensureActive = (): void => {
     if (disposed) {
@@ -278,18 +279,19 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
     },
 
     async dispose() {
-      if (disposed) {
-        return
-      }
+      if (disposePromise !== undefined) return disposePromise
       disposed = true
-      for (const executionId of registeredExecutionIds) {
-        resourceRegistry.remove(executionId)
-      }
-      registeredExecutionIds.clear()
-      resourceRegistry.clear()
-      const active = Array.from(managedBySignature.values())
-      managedBySignature.clear()
-      await Promise.all(active.map((runtime) => runtime.dispose()))
+      disposePromise = (async () => {
+        for (const executionId of registeredExecutionIds) {
+          resourceRegistry.remove(executionId)
+        }
+        registeredExecutionIds.clear()
+        resourceRegistry.clear()
+        const active = Array.from(managedBySignature.values())
+        managedBySignature.clear()
+        await Promise.all(active.map((runtime) => runtime.dispose()))
+      })()
+      await disposePromise
     }
   }
 }
