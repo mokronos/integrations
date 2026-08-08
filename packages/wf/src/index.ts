@@ -22,7 +22,6 @@ export type {
   WorkflowContext,
   WorkflowValue
 } from "./core.ts"
-export { defineError } from "./errors.ts"
 export type { WorkflowEvent, WorkflowEventSink } from "./events.ts"
 export {
   ExecutionId,
