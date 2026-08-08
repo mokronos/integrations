@@ -57,6 +57,8 @@ export {
 export type { SecretResolver } from "./secrets.ts"
 
 type AnySchema<A = any> = Schema.Codec<A, any, never, never>
+type DynamicService = Schema.Schema.Type<Schema.Top>
+const WorkflowPayloadSchema = Schema.Struct({ value: Schema.Unknown })
 
 const TerminalFailureTypeId: unique symbol = Symbol.for("wf/TerminalFailure")
 
@@ -191,7 +193,7 @@ export interface DefinedWorkflow<I = any, O = any, WErrors = any> {
   readonly errors: AnySchema<WErrors>
   readonly workflow: any
   readonly layer: any
-  readonly execute: (payload: I) => Effect.Effect<O, WErrors | unknown, any>
+  readonly execute: (payload: I) => Effect.Effect<O, WErrors | unknown, DynamicService>
   readonly executeInMemory: (payload: I, options?: InMemoryExecutionOptions) => Promise<O>
 }
 
@@ -1265,10 +1267,9 @@ export const defineWorkflow = <
     .update(config.run.toString())
     .digest("hex")
 
-  const WorkflowPayload = Schema.Struct({ value: Schema.Unknown })
   const workflow = Workflow.make({
     name: config.name,
-    payload: WorkflowPayload,
+    payload: WorkflowPayloadSchema,
     idempotencyKey: (payload) => JSON.stringify(payload.value),
     success: config.output,
     error: Schema.Unknown
@@ -1388,7 +1389,7 @@ export const defineWorkflow = <
     workflow,
     layer,
     execute: (payload) => {
-      const enginePayload = Schema.decodeUnknownSync(WorkflowPayload)({ value: payload })
+      const enginePayload = Schema.decodeUnknownSync(WorkflowPayloadSchema)({ value: payload })
       return workflow.execute(enginePayload) as Effect.Effect<
         Schema.Schema.Type<Output>,
         Schema.Schema.Type<Errors> | unknown,
