@@ -18,6 +18,13 @@ import type { SignalTransport } from "./signal.ts"
 import { defaultConcurrencyLimiter } from "./concurrency.ts"
 import type { ConcurrencyLimiter, StepConcurrencyPolicy } from "./concurrency.ts"
 import {
+  Cancelled,
+  CancellationRequest,
+  cancellationDeferredName,
+  skipsCompensation
+} from "./cancellation.ts"
+export { Cancelled, cancellationDeferredName } from "./cancellation.ts"
+import {
   createInMemoryDeterminismState,
   NonDeterminismError,
   OrchestrationCall,
@@ -142,28 +149,6 @@ export type SignalOutcome<T> =
   | { readonly type: "signal"; readonly value: T }
   | { readonly type: "timeout" }
 
-export class Cancelled extends Error {
-  readonly _tag = "Cancelled"
-  readonly _wfSkipCompensation?: true
-
-  constructor(options: { readonly compensate: boolean }) {
-    super("Workflow execution cancelled")
-    this.name = "Cancelled"
-    if (!options.compensate) {
-      this._wfSkipCompensation = true
-    }
-  }
-}
-
-/** Reserved per-execution deferred the durable client completes to request
- *  cancellation. Every suspension point races against it. */
-export const cancellationDeferredName = "wf:cancel"
-
-const CancellationRequestSchema = Schema.Struct({
-  compensate: Schema.Boolean,
-  actor: Schema.optional(Schema.String)
-})
-
 export interface WorkflowContext<WErrors> {
   readonly executionId: string
   run<I, O, E>(step: Step<I, O, E>, input: I): WorkflowValue<O, E | NonDeterminismError>
@@ -266,11 +251,6 @@ class AsyncFailure extends Error {
     this.error = error
   }
 }
-
-const skipsCompensation = (error: unknown): boolean =>
-  typeof error === "object" &&
-  error !== null &&
-  (error as { readonly _wfSkipCompensation?: unknown })._wfSkipCompensation === true
 
 const isTerminalFailure = <E>(value: unknown): value is TerminalFailure<E> =>
   typeof value === "object" &&
@@ -384,7 +364,7 @@ const makeCtx = <WErrors>(
   }
 
   const cancellationDeferred = DurableDeferred.make(cancellationDeferredName, {
-    success: CancellationRequestSchema
+    success: CancellationRequest
   })
 
   // A suspension point races its own durable operation against the reserved
