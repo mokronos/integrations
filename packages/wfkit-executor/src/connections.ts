@@ -50,19 +50,20 @@ export const ensureExecutorConnection = async (
   integration: ExecutorIntegration,
   connectionName: string,
   runner: ExecutorRunner = defaultExecutorRunner
-): Promise<void> => {
+): Promise<boolean> => {
   const existing = (await listExecutorConnections(runner)).some((connection) =>
     connection.integration === integration.slug && connection.name === connectionName
   )
-  if (existing) return
+  if (existing) return true
   const noAuth = integration.authMethods.find((method) => method.kind === "none")
-  if (noAuth === undefined && integration.authMethods.length > 0) return
+  if (noAuth === undefined && integration.authMethods.length > 0) return false
   await createExecutorConnection({
     integration: integration.slug,
     name: connectionName,
     template: noAuth?.template ?? "none",
     value: ""
   }, runner)
+  return true
 }
 
 /** Persisted connection operations bound to an explicit host/runner. */

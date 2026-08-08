@@ -78,7 +78,7 @@ const provisionWith = async (
   const inspection = await dependencies.discovery.inspect(url)
   const integration = await installWith(inspection, dependencies)
   const connectionName = options.connection ?? "default"
-  await dependencies.connections.ensure(integration, connectionName)
+  const connected = await dependencies.connections.ensure(integration, connectionName)
   return {
     ...inspection,
     integration,
@@ -86,7 +86,9 @@ const provisionWith = async (
       integration.authMethods.length > 0 &&
       !integration.authMethods.some((method) => method.kind === "none"),
     authMethods: integration.authMethods,
-    tools: await dependencies.tools.list({ integration: integration.slug, connection: connectionName })
+    tools: connected
+      ? await dependencies.tools.list({ integration: integration.slug, connection: connectionName })
+      : []
   }
 }
 

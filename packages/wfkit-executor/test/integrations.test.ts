@@ -4,7 +4,6 @@ import path from "node:path"
 import { afterEach, describe, expect, test } from "bun:test"
 import { Schema } from "effect"
 import {
-  addExecutorOpenApi,
   closeExecutor,
   decodeIntegrationsResponse,
   listExecutorIntegrations,
@@ -275,10 +274,11 @@ describe("Executor discovery SDK", () => {
     servers.push(server)
 
     await discoverIntegration(`http://127.0.0.1:${server.port}/open.json`)
-    await addExecutorOpenApi({
-      spec: `http://127.0.0.1:${server.port}/secured.json`,
-      slug: "secured_docs"
-    })
+    const securedDiscovery = await discoverIntegration(
+      `http://127.0.0.1:${server.port}/secured.json`
+    )
+    expect(securedDiscovery.requiresAuthentication).toBe(true)
+    expect(securedDiscovery.tools).toEqual([])
 
     const overviews = await listIntegrationOverviews()
     const open = overviews.find((overview) => overview.slug === "open_docs")
