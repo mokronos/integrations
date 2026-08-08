@@ -1,4 +1,4 @@
-import { Context, Schema } from "effect"
+import { Schema } from "effect"
 import type { Step, StepRetryPolicy } from "./core.ts"
 
 export const IntegrationSource = Schema.Struct({
@@ -23,28 +23,6 @@ type JsonValue = typeof Json.Type
 
 export interface IntegrationInvoker {
   readonly invoke: (address: string, input: JsonValue) => Promise<JsonValue>
-}
-
-export const currentIntegrationInvoker = Context.Reference<IntegrationInvoker | undefined>(
-  "@mokronos/wfkit/IntegrationInvoker",
-  { defaultValue: () => undefined }
-)
-
-const executionIntegrationInvokers = new Map<string, IntegrationInvoker>()
-
-export const setExecutionIntegrationInvoker = (
-  executionId: string,
-  invoker: IntegrationInvoker
-): void => {
-  executionIntegrationInvokers.set(executionId, invoker)
-}
-
-export const getExecutionIntegrationInvoker = (
-  executionId: string
-): IntegrationInvoker | undefined => executionIntegrationInvokers.get(executionId)
-
-export const removeExecutionIntegrationInvoker = (executionId: string): void => {
-  executionIntegrationInvokers.delete(executionId)
 }
 
 export const integration = <I, O>(config: {

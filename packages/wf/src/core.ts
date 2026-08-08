@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto"
 import { Activity, DurableClock, DurableDeferred, Workflow, WorkflowEngine } from "effect/unstable/workflow"
-import { Cause, Context, Effect, Exit, Option, Schedule, Schema } from "effect"
+import { Cause, Effect, Exit, Option, Schedule, Schema } from "effect"
 import type * as Duration from "effect/Duration"
-import { currentWorkflowEventSink, emitWorkflowEvent } from "./events.ts"
-import {
-  currentIntegrationInvoker,
-  getExecutionIntegrationInvoker
-} from "./integration.ts"
+import { emitWorkflowEvent } from "./events.ts"
 import type { IntegrationInvoker } from "./integration.ts"
+import {
+  currentExecutionResources,
+  getExecutionResources
+} from "./execution-resources.ts"
 import type { WorkflowEvent } from "./schemas.ts"
 import { ExecutionId, jsonSchemaOf } from "./schemas.ts"
 import {
@@ -137,26 +137,6 @@ export const isSecretRef = (value: unknown): value is SecretRef =>
   Schema.is(SecretRef)(value)
 
 const secretName = (value: SecretRef): string => value.slice(SecretRefPrefix.length)
-
-export const currentSecretResolver = Context.Reference<SecretResolver | undefined>(
-  "wf/currentSecretResolver",
-  { defaultValue: () => undefined }
-)
-
-// Durable executions run on engine entity fibers that don't inherit the
-// caller's context reference, so the runtime also registers resolvers per execution.
-const executionSecretResolvers = new Map<string, SecretResolver>()
-
-export const setExecutionSecretResolver = (executionId: string, resolver: SecretResolver): void => {
-  executionSecretResolvers.set(executionId, resolver)
-}
-
-export const removeExecutionSecretResolver = (executionId: string): void => {
-  executionSecretResolvers.delete(executionId)
-}
-
-export const getExecutionSecretResolver = (executionId: string): SecretResolver | undefined =>
-  executionSecretResolvers.get(executionId)
 
 export type WorkflowValue<A, E = never> = Effect.Effect<A, E, any>
 
@@ -605,10 +585,10 @@ const makeCtx = <WErrors>(
           input
         })
 
-        const contextResolver = yield* currentSecretResolver
-        const resolver = getExecutionSecretResolver(executionId) ?? contextResolver
-        const contextIntegrationInvoker = yield* currentIntegrationInvoker
-        const integrations = getExecutionIntegrationInvoker(executionId) ?? contextIntegrationInvoker
+        const contextResources = yield* currentExecutionResources
+        const resources = getExecutionResources(executionId, contextResources)
+        const resolver = resources.secrets
+        const integrations = resources.integrations
         const result = yield* Effect.tryPromise({
           try: async () => {
             const release = await acquireConcurrency(step, input)
@@ -1531,10 +1511,11 @@ export const defineWorkflow = <
 
     const exit = await Effect.runPromiseExit(
       effect.pipe(
-        Effect.provideService(
-          currentWorkflowEventSink,
-          options.onEvent as any
-        )
+        Effect.provideService(currentExecutionResources, {
+          ...(options.onEvent === undefined ? {} : { events: options.onEvent }),
+          ...(options.secrets === undefined ? {} : { secrets: options.secrets }),
+          ...(options.integrations === undefined ? {} : { integrations: options.integrations })
+        })
       ) as Effect.Effect<Schema.Schema.Type<Output>, unknown, never>
     )
     if (Exit.isSuccess(exit)) {

@@ -6,20 +6,16 @@ import { Effect, Exit, Layer, ManagedRuntime, Schema } from "effect"
 import { ClusterWorkflowEngine, SingleRunner } from "effect/unstable/cluster"
 import { SqlClient } from "effect/unstable/sql"
 import { DurableDeferred, WorkflowEngine } from "effect/unstable/workflow"
-import { currentSecretResolver, removeExecutionSecretResolver, setExecutionSecretResolver } from "./core.ts"
 import type { DefinedWorkflow, SecretResolver } from "./core.ts"
 import {
-  currentWorkflowEventSink,
-  emitWorkflowEvent,
-  removeExecutionEventSink,
-  setExecutionEventSink
+  emitWorkflowEvent
 } from "./events.ts"
 import type { WorkflowEventSink } from "./events.ts"
 import {
-  currentIntegrationInvoker,
-  removeExecutionIntegrationInvoker,
-  setExecutionIntegrationInvoker
-} from "./integration.ts"
+  currentExecutionResources,
+  registerExecutionResources,
+  removeExecutionResources
+} from "./execution-resources.ts"
 import type { IntegrationInvoker } from "./integration.ts"
 
 export interface ExecuteWorkflowOptions {
@@ -157,9 +153,11 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
   const runEffect = <A>(effect: Effect.Effect<A, unknown, any>, onEvent?: WorkflowEventSink) =>
     getManagedRuntime().runPromise(
       effect.pipe(
-        Effect.provideService(currentWorkflowEventSink, onEvent),
-        Effect.provideService(currentSecretResolver, options.secrets),
-        Effect.provideService(currentIntegrationInvoker, options.integrations)
+        Effect.provideService(currentExecutionResources, {
+          ...(onEvent === undefined ? {} : { events: onEvent }),
+          ...(options.secrets === undefined ? {} : { secrets: options.secrets }),
+          ...(options.integrations === undefined ? {} : { integrations: options.integrations })
+        })
       ) as Effect.Effect<A, unknown, never>
     )
 
@@ -190,15 +188,11 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
 
     execute({ workflow, payload, executionId, onEvent }) {
       const workflowName = String(workflow.workflow.name ?? workflow.name)
-      if (onEvent !== undefined) {
-        setExecutionEventSink(executionId, onEvent)
-      }
-      if (options.secrets !== undefined) {
-        setExecutionSecretResolver(executionId, options.secrets)
-      }
-      if (options.integrations !== undefined) {
-        setExecutionIntegrationInvoker(executionId, options.integrations)
-      }
+      registerExecutionResources(executionId, {
+        ...(onEvent === undefined ? {} : { events: onEvent }),
+        ...(options.secrets === undefined ? {} : { secrets: options.secrets }),
+        ...(options.integrations === undefined ? {} : { integrations: options.integrations })
+      })
       const effect = Effect.gen(function* () {
         const engine = yield* WorkflowEngine.WorkflowEngine
         yield* emitWorkflowEvent({ type: "workflow.started", workflowName, payload })
@@ -216,24 +210,18 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
         return result
       })
       return runEffect(effect, onEvent).finally(() => {
-        removeExecutionEventSink(executionId)
-        removeExecutionSecretResolver(executionId)
-        removeExecutionIntegrationInvoker(executionId)
+        removeExecutionResources(executionId)
       })
     },
 
     deliverSignal({ workflow, executionId, deferredName, payload, onEvent }) {
-      if (onEvent !== undefined) {
-        setExecutionEventSink(executionId, onEvent)
-      }
-      // The resumed replay may execute steps in THIS process (see the resume
-      // note below), so it needs the secret resolver just like execute().
-      if (options.secrets !== undefined) {
-        setExecutionSecretResolver(executionId, options.secrets)
-      }
-      if (options.integrations !== undefined) {
-        setExecutionIntegrationInvoker(executionId, options.integrations)
-      }
+      // The resumed replay may execute steps in THIS process, so all execution
+      // resources are registered together before the wake-up.
+      registerExecutionResources(executionId, {
+        ...(onEvent === undefined ? {} : { events: onEvent }),
+        ...(options.secrets === undefined ? {} : { secrets: options.secrets }),
+        ...(options.integrations === undefined ? {} : { integrations: options.integrations })
+      })
       const effect = Effect.gen(function* () {
         const engine = yield* WorkflowEngine.WorkflowEngine
         const deferred = DurableDeferred.make(deferredName, { success: Schema.Unknown })
@@ -314,7 +302,9 @@ export const makeWorkflowEffect = (
 
   return execution.pipe(
     Effect.provide(env),
-    Effect.provideService(currentWorkflowEventSink, options.onEvent)
+    Effect.provideService(currentExecutionResources, {
+      ...(options.onEvent === undefined ? {} : { events: options.onEvent })
+    })
   )
 }
 

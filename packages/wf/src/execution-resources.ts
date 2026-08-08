@@ -1,0 +1,38 @@
+import { Context } from "effect"
+import type { SecretResolver } from "./core.ts"
+import type { WorkflowEventSink } from "./events.ts"
+import type { IntegrationInvoker } from "./integration.ts"
+
+/** Replaceable dependencies owned by one workflow execution. Keeping them in
+ * one record gives the runtime one registration and cleanup lifecycle. */
+export interface ExecutionResources {
+  readonly events?: WorkflowEventSink
+  readonly secrets?: SecretResolver
+  readonly integrations?: IntegrationInvoker
+}
+
+export const currentExecutionResources = Context.Reference<ExecutionResources>(
+  "@mokronos/wfkit/ExecutionResources",
+  { defaultValue: () => ({}) }
+)
+
+const resourcesByExecution = new Map<string, ExecutionResources>()
+
+export const registerExecutionResources = (
+  executionId: string,
+  resources: ExecutionResources
+): void => {
+  resourcesByExecution.set(executionId, resources)
+}
+
+export const removeExecutionResources = (executionId: string): void => {
+  resourcesByExecution.delete(executionId)
+}
+
+export const getExecutionResources = (
+  executionId: string,
+  fallback: ExecutionResources = {}
+): ExecutionResources => ({
+  ...fallback,
+  ...resourcesByExecution.get(executionId)
+})
