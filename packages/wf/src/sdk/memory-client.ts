@@ -153,6 +153,12 @@ export const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowC
 
     async signal(id, name, payload, opts = {}) {
       const execution = requireExecution(id)
+      const waiting = pendingSignalsFromHistory(execution.history)
+        .filter((signal) => signal.name === name)
+        .at(-1)
+      if (waiting === undefined) {
+        throw new Error(`Execution ${id} is not waiting for signal ${name}`)
+      }
       await signals.deliver(id, name, payload)
       appendHistory(execution, {
         type: "signal.delivered",

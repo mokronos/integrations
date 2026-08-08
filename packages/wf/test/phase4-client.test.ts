@@ -87,6 +87,9 @@ describe("Phase 4 workflow client", () => {
       value: "approved"
     })
     expect(await client.pendingSignals(handle.executionId)).toEqual([])
+    await expect(client.signal(handle.executionId, "approval", { approved: true })).rejects.toThrow(
+      "is not waiting for signal approval"
+    )
   })
 
   test("pendingSignals disambiguates sequential waits with the same name", async () => {
