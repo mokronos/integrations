@@ -193,7 +193,7 @@ export interface WorkflowContext<WErrors> {
     options?: { readonly name?: string; readonly concurrency?: number | "unbounded" }
   ): WorkflowValue<WorkflowAllSuccess<Effects>, WorkflowAllError<Effects> | NonDeterminismError>
   fail(error: WErrors): WorkflowValue<never, WErrors>
-  effect<A, E, R>(effect: Effect.Effect<A, E, R>): WorkflowValue<A, E>
+  effect<A, E>(effect: Effect.Effect<A, E, never>): WorkflowValue<A, E>
 }
 
 export interface DefineWorkflowConfig<I, O, WErrors = never> {
