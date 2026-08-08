@@ -880,11 +880,17 @@ const makeInMemoryCtx = <WErrors>(
                   step.input,
                   await resolveSecretReferences(input, options.secrets)
                 )
-                const value = await (
-                  options.stepExecutor?.({ step, input: executeInput, invocation, activityName, context: stepContext }) ??
-                  executeStep?.(executeInput, stepContext as any) ??
-                  step.execute(executeInput, stepContext)
-                )
+                const value = options.stepExecutor !== undefined
+                  ? await options.stepExecutor({
+                      step,
+                      input: executeInput,
+                      invocation,
+                      activityName,
+                      context: stepContext
+                    })
+                  : executeStep !== undefined
+                    ? await executeStep(executeInput, stepContext as any)
+                    : await step.execute(executeInput, stepContext)
                 if (isTerminalFailure(value)) {
                   const terminal = decodeSync(step.errors, value.error)
                   throw terminal

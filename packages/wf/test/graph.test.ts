@@ -79,6 +79,30 @@ const ParallelWorkflow = defineWorkflow({
 })
 
 describe("workflowToGraph", () => {
+  test("does not run real void steps when the tracer returns undefined", async () => {
+    let executions = 0
+    const sideEffect = defineStep({
+      name: "voidSideEffect",
+      input: t.void,
+      output: t.void,
+      execute: async () => {
+        executions++
+      }
+    })
+    const workflow = defineWorkflow({
+      name: "voidGraphWorkflow",
+      input: t.void,
+      output: t.void,
+      run: function* (_input, ctx) {
+        yield* ctx.run(sideEffect, undefined)
+      }
+    })
+
+    await workflowToGraph(workflow)
+
+    expect(executions).toBe(0)
+  })
+
   test("traces workflow primitives without running real steps", async () => {
     const graph = await workflowToGraph(DemoWorkflow, { input: { id: "demo" } })
 
