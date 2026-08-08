@@ -102,18 +102,22 @@ export interface WorkflowEngineHandle {
     engine: WorkflowEngine.WorkflowEngine["Service"],
     executionId: string,
     payload: { readonly value: DynamicService }
-  ) => DynamicEffect
+  ) => Effect.Effect<DynamicService, DynamicService>
   readonly executeStandalone: (
     payload: { readonly value: DynamicService }
-  ) => DynamicEffect
+  ) => Effect.Effect<
+    DynamicService,
+    DynamicService,
+    WorkflowEngine.WorkflowEngine
+  >
   readonly resume: (
     engine: WorkflowEngine.WorkflowEngine["Service"],
     executionId: string
-  ) => Effect.Effect<void, never, DynamicService>
+  ) => Effect.Effect<void>
   readonly interrupt: (
     engine: WorkflowEngine.WorkflowEngine["Service"],
     executionId: string
-  ) => Effect.Effect<void, never, DynamicService>
+  ) => Effect.Effect<void>
 }
 
 export interface WorkflowDefinition<
@@ -136,7 +140,7 @@ export interface WorkflowDefinition<
   execute(payload: Input["Type"]): Effect.Effect<
     Output["Type"],
     Errors["Type"] | unknown,
-    DynamicService
+    WorkflowEngine.WorkflowEngine
   >
   executeInMemory(
     payload: Input["Type"],
@@ -1347,12 +1351,10 @@ export const defineWorkflow = <
   const workflowHandle: WorkflowEngineHandle = {
     name: workflow.name,
     execute: (engine, executionId, payload) =>
-      engine.execute(workflow, { executionId, payload }) as DynamicEffect,
-    executeStandalone: (payload) => workflow.execute(payload) as DynamicEffect,
-    resume: (engine, executionId) =>
-      engine.resume(workflow, executionId) as Effect.Effect<void, never, DynamicService>,
-    interrupt: (engine, executionId) =>
-      engine.interrupt(workflow, executionId) as Effect.Effect<void, never, DynamicService>
+      engine.execute(workflow, { executionId, payload }),
+    executeStandalone: (payload) => workflow.execute(payload),
+    resume: (engine, executionId) => engine.resume(workflow, executionId),
+    interrupt: (engine, executionId) => engine.interrupt(workflow, executionId)
   }
 
   const executeInMemory = async (
@@ -1472,7 +1474,7 @@ export const defineWorkflow = <
       return workflowHandle.executeStandalone(enginePayload) as Effect.Effect<
         Output["Type"],
         Errors["Type"] | unknown,
-        DynamicService
+        WorkflowEngine.WorkflowEngine
       >
     },
     executeInMemory

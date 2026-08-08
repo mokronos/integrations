@@ -166,9 +166,13 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
   }
 
   const runEffect = <A>(
-    effect: Effect.Effect<A, DynamicService, DynamicService>
+    effect: Effect.Effect<
+      A,
+      DynamicService,
+      WorkflowEngine.WorkflowEngine | ExecutionResourceRegistry
+    >
   ) =>
-    getManagedRuntime().runPromise(effect as Effect.Effect<A, DynamicService, never>)
+    getManagedRuntime().runPromise(effect)
 
   return {
     backend: options.backend,
@@ -322,14 +326,11 @@ export const executeWorkflow = (
   wf: DefinedWorkflow,
   payload: unknown,
   options: ExecuteWorkflowOptions = {}
-) =>
-  Effect.runPromise(
-    makeWorkflowEffect(wf, payload, options) as Effect.Effect<unknown, unknown, never>
-  )
+) => Effect.runPromise(makeWorkflowEffect(wf, payload, options))
 
 // Execute a workflow to completion as a standalone program.
 export const run = (wf: DefinedWorkflow, payload: unknown) => {
-  return (makeWorkflowEffect(wf, payload) as Effect.Effect<unknown, unknown, never>).pipe(
+  return makeWorkflowEffect(wf, payload).pipe(
     NodeRuntime.runMain
   )
 }
