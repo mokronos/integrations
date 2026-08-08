@@ -1,6 +1,6 @@
 import { IntegrationSlug } from "@executor-js/sdk/core"
 import { Option } from "effect"
-import { runExecutor } from "./host.ts"
+import { runExecutor } from "./default-host.ts"
 import type { ExecutorRunner } from "./host.ts"
 import type {
   ExecutorDetection,

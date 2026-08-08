@@ -5,7 +5,7 @@ import {
   OAuthClientSlug,
   OAuthState
 } from "@executor-js/sdk/core"
-import { runExecutor } from "./host.ts"
+import { runExecutor } from "./default-host.ts"
 import type { ExecutorRunner } from "./host.ts"
 import type { ExecutorConnection } from "./schemas.ts"
 

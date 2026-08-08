@@ -1,6 +1,6 @@
 import { ConnectionName, IntegrationSlug, ToolAddress } from "@executor-js/sdk/core"
 import { Option, Schema } from "effect"
-import { runExecutor } from "./host.ts"
+import { runExecutor } from "./default-host.ts"
 import type { ExecutorRunner } from "./host.ts"
 import {
   ExecutorToolAddress,

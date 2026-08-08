@@ -31,10 +31,12 @@ export {
 export type { ExecutorConnections } from "./connections.ts"
 export {
   closeExecutor,
-  createExecutorHost,
   executorStorageDirectory,
   getExecutor,
   setExecutorStorageDirectory
+} from "./default-host.ts"
+export {
+  createExecutorHost,
 } from "./host.ts"
 export type { ExecutorHost, ExecutorRunner } from "./host.ts"
 export {

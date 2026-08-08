@@ -24,18 +24,6 @@ const plugins = [
 
 export type WfExecutor = Executor<typeof plugins>
 
-const defaultStorageDirectory = (): string =>
-  process.env["WF_STORAGE_DIR"] ?? path.join(process.cwd(), ".wf")
-
-let configuredStorageDirectory: string | undefined
-const hosts = new Map<string, ExecutorHost>()
-export const setExecutorStorageDirectory = (directory: string): void => {
-  configuredStorageDirectory = path.resolve(directory)
-}
-
-export const executorStorageDirectory = (): string =>
-  configuredStorageDirectory ?? path.resolve(defaultStorageDirectory())
-
 const makeExecutor = async (directory: string): Promise<WfExecutor> => {
   mkdirSync(directory, { recursive: true, mode: 0o700 })
   return await Effect.runPromise(createExecutor({
@@ -114,27 +102,3 @@ export const createExecutorHost = (directory: string): ExecutorHost => {
     }
   }
 }
-
-const defaultHost = (): ExecutorHost => {
-  const directory = executorStorageDirectory()
-  const existing = hosts.get(directory)
-  if (existing !== undefined) return existing
-  const created = createExecutorHost(directory)
-  hosts.set(directory, created)
-  return created
-}
-
-export const getExecutor = (): Promise<WfExecutor> => defaultHost().executor()
-
-export const closeExecutor = async (directory?: string): Promise<void> => {
-  const resolved = path.resolve(directory ?? executorStorageDirectory())
-  const host = hosts.get(resolved)
-  if (host === undefined) return
-  hosts.delete(resolved)
-  await host.close()
-}
-
-export const runExecutor = async <A, E>(
-  operation: (executor: WfExecutor) => Effect.Effect<A, E>
-): Promise<A> =>
-  await defaultHost().run(operation)
