@@ -847,7 +847,7 @@ const makeInMemoryCtx = <WErrors>(
   emit: (event: WorkflowEvent) => Promise<void>,
   options: Pick<
     InMemoryExecutionOptions,
-    "stepExecutor" | "sleep" | "signalTimeout" | "signalValue" | "signalTransport" | "secrets" | "integrations" | "concurrency"
+    "signal" | "stepExecutor" | "sleep" | "signalTimeout" | "signalValue" | "signalTransport" | "secrets" | "integrations" | "concurrency"
   > = {}
 ): WorkflowContext<WErrors> => {
   const counters = new Map<string, number>()
@@ -904,7 +904,7 @@ const makeInMemoryCtx = <WErrors>(
                 options.integrations
               )
               const release = await (options.concurrency ?? defaultConcurrencyLimiter)
-                .acquire(step.name, step.concurrency, input)
+                .acquire(step.name, step.concurrency, input, options.signal)
               try {
                 const executeInput = decodeSync(
                   step.input,
@@ -1403,6 +1403,7 @@ export const defineWorkflow = <
       emit,
       {
         ...(options.stepExecutor === undefined ? {} : { stepExecutor: options.stepExecutor }),
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
         ...(options.sleep === undefined ? {} : { sleep: options.sleep }),
         ...(options.signalTimeout === undefined ? {} : { signalTimeout: options.signalTimeout }),
         ...(options.signalValue === undefined ? {} : { signalValue: options.signalValue }),

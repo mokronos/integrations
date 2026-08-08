@@ -150,6 +150,40 @@ describe("Phase 7 concurrency limits", () => {
     await Promise.all([client.result(firstRun.executionId), client.result(secondRun.executionId)])
     expect(maxLive).toBe(2)
   })
+
+  test("hard cancellation removes a queued concurrency waiter", async () => {
+    const gate = Promise.withResolvers<void>()
+    const started: number[] = []
+    const step = defineStep({
+      name: "cancelQueued",
+      input: Schema.Struct({ id: Schema.Number }),
+      output: Schema.Void,
+      concurrency: { limit: 1 },
+      execute: async (input) => {
+        started.push(input.id)
+        if (input.id === 1) await gate.promise
+      }
+    })
+    const workflow = defineWorkflow({
+      name: "cancelQueuedWorkflow",
+      input: Schema.Struct({ id: Schema.Number }),
+      output: Schema.Void,
+      run: function* (input, ctx) {
+        yield* ctx.run(step, input)
+      }
+    })
+    const client = createWorkflowClient(createWorkflowRuntime({ backend: "memory" }))
+    const first = await client.start(workflow, { id: 1 })
+    while (started.length === 0) await sleep(1)
+    const queued = await client.start(workflow, { id: 2 })
+
+    await client.cancel(queued.executionId, { compensate: false })
+    gate.resolve()
+    await client.result(first.executionId)
+    await sleep(10)
+
+    expect(started).toEqual([1])
+  })
 })
 
 describe("Phase 7 secret references", () => {

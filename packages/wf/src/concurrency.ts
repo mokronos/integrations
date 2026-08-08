@@ -7,7 +7,8 @@ export interface ConcurrencyLimiter {
   acquire<I>(
     stepName: string,
     policy: StepConcurrencyPolicy<I> | undefined,
-    input: I
+    input: I,
+    signal?: AbortSignal
   ): Promise<() => void>
 }
 
@@ -21,7 +22,7 @@ export const createConcurrencyLimiter = (): ConcurrencyLimiter => {
   const policies = new WeakMap<object, Map<string, Map<string, SemaphoreState>>>()
 
   return {
-    async acquire(stepName, policy, input) {
+    async acquire(stepName, policy, input, signal) {
       if (policy === undefined) return () => undefined
       const limit = policy.limit
       if (!Number.isInteger(limit) || limit < 1) {
@@ -36,7 +37,23 @@ export const createConcurrencyLimiter = (): ConcurrencyLimiter => {
       const state = partitions.get(key) ?? { active: 0, queue: [] }
       partitions.set(key, state)
       if (state.active >= limit) {
-        await new Promise<void>((resolve) => state.queue.push(resolve))
+        await new Promise<void>((resolve, reject) => {
+          const grant = () => {
+            signal?.removeEventListener("abort", abort)
+            resolve()
+          }
+          const abort = () => {
+            const index = state.queue.indexOf(grant)
+            if (index !== -1) state.queue.splice(index, 1)
+            reject(signal?.reason ?? new Error("Concurrency wait cancelled"))
+          }
+          if (signal?.aborted === true) {
+            abort()
+            return
+          }
+          state.queue.push(grant)
+          signal?.addEventListener("abort", abort, { once: true })
+        })
       } else {
         state.active++
       }
