@@ -1,3 +1,4 @@
+import { createExecutorAuth } from "./auth.ts"
 import { createExecutorCatalog } from "./catalog.ts"
 import { createExecutorConnections } from "./connections.ts"
 import { createIntegrationDiscovery } from "./discovery.ts"
@@ -29,4 +30,3 @@ export const createExecutorServices = (runner: ExecutorRunner) => {
 }
 
 export type ExecutorServices = ReturnType<typeof createExecutorServices>
-import { createExecutorAuth } from "./auth.ts"
