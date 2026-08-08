@@ -14,7 +14,7 @@ import {
 } from "@executor-js/sdk/core"
 import { createExecutorFumaDb } from "@executor-js/sdk/host-internal"
 import { drizzle } from "drizzle-orm/libsql"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { fileCredentialProvider } from "./credential-provider.ts"
 
 const plugins = [
@@ -73,13 +73,26 @@ export interface ExecutorHost extends ExecutorRunner {
   close(): Promise<void>
 }
 
+export class ExecutorHostClosedError extends Schema.TaggedErrorClass<ExecutorHostClosedError>()(
+  "ExecutorHostClosedError",
+  { directory: Schema.String }
+) {
+  override get message(): string {
+    return `Executor host for ${this.directory} has been closed`
+  }
+}
+
 /** Owns one Executor instance and its storage resources for an explicit
  * directory. Construction is lazy; close releases the database handle. */
 export const createExecutorHost = (directory: string): ExecutorHost => {
   const resolvedDirectory = path.resolve(directory)
   let pending: Promise<WfExecutor> | undefined
+  let closed = false
 
   const executor = (): Promise<WfExecutor> => {
+    if (closed) {
+      return Promise.reject(new ExecutorHostClosedError({ directory: resolvedDirectory }))
+    }
     if (pending !== undefined) return pending
     const created = makeExecutor(resolvedDirectory)
     pending = created
@@ -94,6 +107,8 @@ export const createExecutorHost = (directory: string): ExecutorHost => {
     executor,
     run: async (operation) => await Effect.runPromise(operation(await executor())),
     close: async () => {
+      if (closed) return
+      closed = true
       const active = pending
       pending = undefined
       if (active !== undefined) {

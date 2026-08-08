@@ -19,6 +19,7 @@ export {
   createExecutorAuth,
   createExecutorCatalog,
   createExecutorHost,
+  ExecutorHostClosedError,
   completeExecutorOAuth,
   createExecutorConnection,
   createExecutorConnections,
