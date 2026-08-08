@@ -255,14 +255,14 @@ class AsyncFailure extends Error {
 const isTerminalFailure = <E>(value: unknown): value is TerminalFailure<E> =>
   typeof value === "object" &&
   value !== null &&
-  (value as { readonly [TerminalFailureTypeId]?: unknown })[TerminalFailureTypeId] ===
-    TerminalFailureTypeId
+  TerminalFailureTypeId in value &&
+  value[TerminalFailureTypeId] === TerminalFailureTypeId
 
 const isActivityFailure = (value: unknown): value is ActivityFailure =>
   typeof value === "object" &&
   value !== null &&
-  ((value as { readonly _wfFailureType?: unknown })._wfFailureType === "terminal" ||
-    (value as { readonly _wfFailureType?: unknown })._wfFailureType === "transient")
+  "_wfFailureType" in value &&
+  (value._wfFailureType === "terminal" || value._wfFailureType === "transient")
 
 const unwrapActivityFailure = (error: unknown): unknown =>
   isActivityFailure(error) ? error.error : error
@@ -271,6 +271,7 @@ const unwrapAsyncFailure = (error: unknown): unknown =>
   error instanceof AsyncFailure ? error.error : error
 
 const makeStepContext = <E>(
+  _errors: AnySchema<E>,
   executionId: string,
   attempt: number,
   resolver?: SecretResolver,
@@ -428,7 +429,7 @@ const makeCtx = <WErrors>(
               )
               const value = await step.execute(
                 executeInput,
-                makeStepContext(executionId, attempt, resolver, integrations)
+                makeStepContext(step.errors, executionId, attempt, resolver, integrations)
               )
               if (isTerminalFailure(value)) {
                 throw value
@@ -490,6 +491,7 @@ const makeCtx = <WErrors>(
       )
 
       if (step.compensate !== undefined) {
+        const compensate = step.compensate
         activity = activity.pipe(
           wf.withCompensation((value: unknown, cause: Cause.Cause<unknown>) =>
             Effect.gen(function* () {
@@ -503,8 +505,9 @@ const makeCtx = <WErrors>(
                 input,
                 reason: cause
               })
+              const result = decodeSync(step.output, value)
               yield* Effect.tryPromise({
-                try: () => Promise.resolve(step.compensate!(value as any, input, cause)),
+                try: () => Promise.resolve(compensate(result, input, cause)),
                 catch: (error) => new AsyncFailure(error)
               }).pipe(
                 Effect.tapError((error) =>
@@ -656,7 +659,7 @@ const makeCtx = <WErrors>(
         const signalBranch = DurableDeferred.await(deferred).pipe(
           Effect.map((value) => ({
             type: "signal" as const,
-            encoded: encodeSync(schema, value as any)
+            encoded: encodeSync(schema, value)
           }))
         )
         const timeoutBranch = opts?.timeout === undefined
@@ -853,6 +856,7 @@ const makeInMemoryCtx = <WErrors>(
 
             try {
               const stepContext = makeStepContext(
+                step.errors,
                 executionId,
                 attempt,
                 options.secrets,
@@ -869,7 +873,7 @@ const makeInMemoryCtx = <WErrors>(
                 const value = await (
                   options.stepExecutor?.({ step, input: executeInput, invocation, activityName, context: stepContext }) ??
                   executeStep?.(executeInput, stepContext as any) ??
-                  step.execute(executeInput, stepContext as any)
+                  step.execute(executeInput, stepContext)
                 )
                 if (isTerminalFailure(value)) {
                   const terminal = decodeSync(step.errors, value.error)
@@ -889,12 +893,17 @@ const makeInMemoryCtx = <WErrors>(
                 })
 
                 if (step.compensate !== undefined) {
+                  const compensate = step.compensate
                   compensations.push({
                     stepName: step.name,
                     invocation,
                     result,
                     input,
-                    compensate: step.compensate as CompensationEntry["compensate"]
+                    compensate: (result, compensationInput, reason) => compensate(
+                      decodeSync(step.output, result),
+                      decodeSync(step.input, compensationInput),
+                      reason
+                    )
                   })
                 }
 
