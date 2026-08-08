@@ -31,9 +31,11 @@ const confidenceRank = (confidence: ExecutorDetection["confidence"]): number => 
 }
 
 const bestDetection = (detections: ReadonlyArray<ExecutorDetection>): ExecutorDetection | undefined =>
-  [...detections].sort((left, right) =>
-    confidenceRank(right.confidence) - confidenceRank(left.confidence)
-  )[0]
+  detections
+    .filter((detection) => detection.kind === "mcp" || detection.kind === "openapi")
+    .toSorted((left, right) =>
+      confidenceRank(right.confidence) - confidenceRank(left.confidence)
+    )[0]
 
 const detectWithFallback = async (
   url: string,

@@ -12,6 +12,7 @@ import {
   setExecutorStorageDirectory
 } from "../src/index.ts"
 import {
+  createIntegrationDiscovery,
   discoverIntegration,
   listIntegrationOverviews,
   searchIntegrations,
@@ -33,6 +34,37 @@ const json = (text: string): Schema.Schema.Type<typeof Schema.Json> =>
   Schema.decodeUnknownSync(Schema.Json)(JSON.parse(text))
 
 describe("Executor discovery SDK", () => {
+  test("ignores unsupported detections when a supported surface exists", async () => {
+    const discovery = createIntegrationDiscovery({
+      catalog: {
+        detectIntegration: async () => [
+          { kind: "graphql", confidence: "high", endpoint: "https://example.test/graphql", name: "Graph", slug: "graph" },
+          { kind: "mcp", confidence: "low", endpoint: "https://example.test/mcp", name: "MCP", slug: "mcp" }
+        ],
+        probeMcp: async () => ({
+          connected: true,
+          requiresAuthentication: false,
+          requiresOAuth: false,
+          supportsDynamicRegistration: false,
+          name: "MCP",
+          slug: "mcp",
+          toolCount: 1,
+          serverName: null,
+          instructions: null
+        }),
+        previewOpenApi: async () => ({
+          title: null,
+          version: null,
+          operationCount: 0,
+          servers: [],
+          securitySchemes: []
+        })
+      }
+    })
+
+    expect((await discovery.inspect("https://example.test")).detection.kind).toBe("mcp")
+  })
+
   test("does not switch process-default storage while a host is active", async () => {
     const first = await mkdtemp(path.join(os.tmpdir(), "wf-executor-active-"))
     const second = await mkdtemp(path.join(os.tmpdir(), "wf-executor-other-"))
