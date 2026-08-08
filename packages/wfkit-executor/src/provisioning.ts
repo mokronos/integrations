@@ -1,3 +1,4 @@
+import { Schema } from "effect"
 import {
   addExecutorMcp,
   addExecutorOpenApi,
@@ -7,10 +8,10 @@ import type { ExecutorCatalog } from "./catalog.ts"
 import { ensureExecutorConnection } from "./connections.ts"
 import type { ExecutorConnections } from "./connections.ts"
 import { createIntegrationDiscovery, inspectIntegration } from "./discovery.ts"
-import type {
-  DiscoverIntegrationsOptions,
-  IntegrationDiscovery,
-  IntegrationInspection
+import {
+  IntegrationInspection,
+  type DiscoverIntegrationsOptions,
+  type IntegrationDiscovery
 } from "./integration-model.ts"
 import type { ExecutorIntegration } from "./schemas.ts"
 import { listExecutorTools } from "./tools.ts"
@@ -38,30 +39,31 @@ const installWith = async (
   inspection: IntegrationInspection,
   dependencies: IntegrationProvisioningDependencies
 ): Promise<ExecutorIntegration> => {
-  const existing = await dependencies.catalog.find(inspection.detection.slug)
+  const decoded = Schema.decodeUnknownSync(IntegrationInspection)(inspection)
+  const existing = await dependencies.catalog.find(decoded.detection.slug)
   if (existing !== undefined) return existing
 
-  if ("probe" in inspection) {
-    const probe = inspection.probe
+  if ("probe" in decoded) {
+    const probe = decoded.probe
     await dependencies.catalog.addMcp({
-      endpoint: inspection.detection.endpoint,
+      endpoint: decoded.detection.endpoint,
       name: probe.name,
-      slug: inspection.detection.slug,
+      slug: decoded.detection.slug,
       auth: probe.requiresOAuth ? "oauth2" : probe.requiresAuthentication ? "bearer" : "none"
     })
   } else {
-    const preview = inspection.preview
+    const preview = decoded.preview
     await dependencies.catalog.addOpenApi({
-      spec: inspection.detection.endpoint,
-      slug: inspection.detection.slug,
-      name: inspection.detection.name,
+      spec: decoded.detection.endpoint,
+      slug: decoded.detection.slug,
+      name: decoded.detection.name,
       ...(preview.servers[0]?.url === undefined ? {} : { baseUrl: preview.servers[0].url })
     })
   }
 
-  const installed = await dependencies.catalog.find(inspection.detection.slug)
+  const installed = await dependencies.catalog.find(decoded.detection.slug)
   if (installed === undefined) {
-    throw new Error(`Executor did not persist integration ${inspection.detection.slug}`)
+    throw new Error(`Executor did not persist integration ${decoded.detection.slug}`)
   }
   return installed
 }
