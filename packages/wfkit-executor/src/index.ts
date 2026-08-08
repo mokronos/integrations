@@ -7,6 +7,8 @@ export {
   ExecutorIntegration,
   ExecutorMcpProbe,
   ExecutorOpenApiPreview,
+  ExecutorOAuthProbe,
+  ExecutorOAuthStart,
   ExecutorTool,
   ExecutorToolAddress,
   IntegrationOverview,

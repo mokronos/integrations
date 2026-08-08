@@ -55,6 +55,31 @@ export const ExecutorConnection = Schema.Struct({
 })
 export type ExecutorConnection = typeof ExecutorConnection.Type
 
+export const ExecutorOAuthProbe = Schema.Struct({
+  issuer: Schema.optional(Schema.NullOr(Schema.String)),
+  authorizationUrl: Schema.String,
+  tokenUrl: Schema.String,
+  resource: Schema.optional(Schema.NullOr(Schema.String)),
+  scopesSupported: Schema.optional(Schema.Array(Schema.String)),
+  registrationEndpoint: Schema.optional(Schema.NullOr(Schema.String)),
+  tokenEndpointAuthMethodsSupported: Schema.optional(Schema.Array(Schema.String)),
+  clientIdMetadataDocumentSupported: Schema.optional(Schema.Boolean)
+})
+export type ExecutorOAuthProbe = typeof ExecutorOAuthProbe.Type
+
+export const ExecutorOAuthStart = Schema.Union([
+  Schema.Struct({
+    status: Schema.Literal("connected"),
+    connection: ExecutorConnection
+  }),
+  Schema.Struct({
+    status: Schema.Literal("redirect"),
+    authorizationUrl: Schema.String,
+    state: Schema.String
+  })
+])
+export type ExecutorOAuthStart = typeof ExecutorOAuthStart.Type
+
 export const ExecutorTool = Schema.Struct({
   address: ExecutorToolAddress,
   name: Schema.String,

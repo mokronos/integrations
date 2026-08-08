@@ -7,7 +7,11 @@ import {
 } from "@executor-js/sdk/core"
 import { runExecutor } from "./default-host.ts"
 import type { ExecutorRunner } from "./host.ts"
-import { ExecutorConnection } from "./schemas.ts"
+import {
+  ExecutorConnection,
+  ExecutorOAuthProbe,
+  ExecutorOAuthStart
+} from "./schemas.ts"
 import { Schema } from "effect"
 
 const defaultExecutorRunner: ExecutorRunner = { run: runExecutor }
@@ -16,7 +20,9 @@ const defaultExecutorRunner: ExecutorRunner = { run: runExecutor }
 export const probeExecutorOAuth = async (
   url: string,
   runner: ExecutorRunner = defaultExecutorRunner
-) => await runner.run((executor) => executor.oauth.probe({ url }))
+): Promise<ExecutorOAuthProbe> =>
+  await runner.run((executor) => executor.oauth.probe({ url }))
+    .then(Schema.decodeUnknownSync(ExecutorOAuthProbe))
 
 export const registerExecutorOAuthClient = async (options: {
   readonly slug: string
@@ -76,7 +82,7 @@ export const startExecutorOAuth = async (options: {
   readonly connection: string
   readonly template: string
   readonly redirectUri: string
-}, runner: ExecutorRunner = defaultExecutorRunner) =>
+}, runner: ExecutorRunner = defaultExecutorRunner): Promise<ExecutorOAuthStart> =>
   await runner.run((executor) => executor.oauth.start({
     owner: "org",
     clientOwner: "org",
@@ -85,7 +91,7 @@ export const startExecutorOAuth = async (options: {
     name: ConnectionName.make(options.connection),
     template: AuthTemplateSlug.make(options.template),
     redirectUri: options.redirectUri
-  }))
+  })).then(Schema.decodeUnknownSync(ExecutorOAuthStart))
 
 export const completeExecutorOAuth = async (options: {
   readonly state: string
