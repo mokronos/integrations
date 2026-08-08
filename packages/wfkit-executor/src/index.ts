@@ -51,6 +51,7 @@ export type {
 export type {
   DiscoverIntegrationsOptions,
   IntegrationDiscoveryDependencies,
+  IntegrationOverviewDependencies,
   IntegrationDiscovery,
   IntegrationInspection,
   IntegrationKind,
@@ -60,6 +61,7 @@ export type {
 } from "./integrations.ts"
 export {
   createIntegrationDiscovery,
+  createIntegrationOverview,
   discoverIntegration,
   inspectIntegration,
   installIntegration,

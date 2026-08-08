@@ -16,5 +16,6 @@ export {
   IntegrationValidationReport
 } from "./integration-model.ts"
 export type { DiscoverIntegrationsOptions } from "./integration-model.ts"
-export { listIntegrationOverviews } from "./overview.ts"
+export { createIntegrationOverview, listIntegrationOverviews } from "./overview.ts"
+export type { IntegrationOverviewDependencies } from "./overview.ts"
 export { validateIntegrationNode } from "./validation.ts"

@@ -3,6 +3,7 @@ import { createExecutorConnections } from "./connections.ts"
 import { createIntegrationDiscovery } from "./discovery.ts"
 import type { ExecutorRunner } from "./host.ts"
 import { createExecutorIntegrationInvoker } from "./invoker.ts"
+import { createIntegrationOverview } from "./overview.ts"
 import { createExecutorTools } from "./tools.ts"
 
 /** All Executor-backed capabilities sharing one explicitly owned host. */
@@ -15,6 +16,7 @@ export const createExecutorServices = (runner: ExecutorRunner) => {
     connections,
     tools,
     discovery: createIntegrationDiscovery({ catalog, connections, tools }),
+    listIntegrationOverviews: createIntegrationOverview({ catalog, connections, tools }),
     integrationInvoker: createExecutorIntegrationInvoker(tools)
   }
 }
