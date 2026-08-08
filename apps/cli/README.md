@@ -25,7 +25,7 @@ wf
 ├── integrations (alias: i)
 │   ├── discover
 │   ├── search
-│   ├── catalog
+│   ├── list
 │   ├── connect
 │   ├── connections
 │   ├── tools

@@ -259,8 +259,8 @@ const makeSearch = () => Command.make(
   )
 ).pipe(Command.withDescription("Search integrations.sh for exact integration URLs"))
 
-const makeCatalog = () => Command.make(
-  "catalog",
+const makeList = () => Command.make(
+  "list",
   {
     text: Flag.boolean("text").pipe(
       Flag.withDescription("Print a human-readable result")
@@ -543,7 +543,7 @@ export const makeIntegrationsCommand = (options: IntegrationsCliOptions = {}) =>
     Command.withSubcommands([
       makeDiscover(),
       makeSearch(),
-      makeCatalog(),
+      makeList(),
       makeTools(),
       makeConnect(options),
       makeConnections(),

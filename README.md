@@ -351,7 +351,7 @@ All integration commands also accept the shorter `wf i` alias.
 wf i
 ├── search
 ├── discover
-├── catalog
+├── list
 ├── connect
 ├── connections
 ├── tools

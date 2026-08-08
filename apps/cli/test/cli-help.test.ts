@@ -59,6 +59,7 @@ describe("CLI help", () => {
     expect(parent.stdout).toContain("SUBCOMMANDS")
     expect(parent.stdout).toContain("discover")
     expect(parent.stdout).toContain("search")
+    expect(parent.stdout).toContain("list")
     expect(parent.stdout).toContain("invoke")
     expect(helpFlag.stdout).toBe(parent.stdout)
     expect(aliasHelpFlag.stdout).toBe(parent.stdout)

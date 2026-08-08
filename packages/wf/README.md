@@ -113,7 +113,7 @@ wf
 ├── signal
 ├── integrations (alias: i)
 │   ├── discover
-│   ├── catalog
+│   ├── list
 │   ├── connect
 │   ├── connections
 │   ├── tools
