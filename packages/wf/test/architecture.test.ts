@@ -92,6 +92,35 @@ describe("package architecture", () => {
     )).toBe(true)
   })
 
+  test("production TypeScript has no explicit any escape hatches", async () => {
+    const sourceRoots = [
+      join(packageDirectory, "src"),
+      join(packageDirectory, "..", "wfkit-executor", "src")
+    ]
+    const files = (await Promise.all(sourceRoots.map(typescriptFiles))).flat()
+    const explicitAny = /\b(?:as|extends)\s+any\b|[:=]\s*any\b|[<,]\s*any\s*[,>]/
+    const offenders: string[] = []
+    for (const file of files) {
+      const lines = (await readFile(file, "utf8")).split("\n")
+      for (const [index, line] of lines.entries()) {
+        if (explicitAny.test(line)) {
+          offenders.push(`${file}:${index + 1}`)
+        }
+      }
+    }
+    expect(offenders).toEqual([])
+  })
+
+  test("integration discovery remains read-only", async () => {
+    const discovery = await readFile(
+      join(packageDirectory, "..", "wfkit-executor", "src", "discovery.ts"),
+      "utf8"
+    )
+    expect(discovery).not.toMatch(
+      /from "\.\/(?:auth|connections|provisioning|tools)\.ts"/
+    )
+  })
+
   test("importing the runtime has no filesystem side effects", async () => {
     const directory = await mkdtemp(join(tmpdir(), "wf-import-"))
     temporaryDirectories.push(directory)
