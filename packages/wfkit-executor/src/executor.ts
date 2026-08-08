@@ -23,10 +23,12 @@ export {
 } from "./connections.ts"
 export {
   closeExecutor,
+  createExecutorHost,
   executorStorageDirectory,
   getExecutor,
   setExecutorStorageDirectory
 } from "./host.ts"
+export type { ExecutorHost } from "./host.ts"
 export {
   executeExecutorTool,
   listExecutorTools,

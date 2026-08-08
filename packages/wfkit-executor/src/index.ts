@@ -16,6 +16,7 @@ export {
   addExecutorMcp,
   addExecutorOpenApi,
   closeExecutor,
+  createExecutorHost,
   completeExecutorOAuth,
   createExecutorConnection,
   createExecutorOAuthClient,
@@ -37,6 +38,7 @@ export {
   setExecutorStorageDirectory,
   startExecutorOAuth
 } from "./executor.ts"
+export type { ExecutorHost } from "./executor.ts"
 export type {
   DiscoverIntegrationsOptions,
   IntegrationDiscovery,

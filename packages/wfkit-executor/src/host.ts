@@ -39,7 +39,7 @@ const defaultStorageDirectory = (): string =>
   process.env["WF_STORAGE_DIR"] ?? path.join(process.cwd(), ".wf")
 
 let configuredStorageDirectory: string | undefined
-const executors = new Map<string, Promise<WfExecutor>>()
+const hosts = new Map<string, ExecutorHost>()
 const CredentialFile = Schema.Record(Schema.String, Schema.String)
 const credentialAdditionalData = Buffer.from("@mokronos/wfkit/executor-credentials/v1")
 
@@ -222,29 +222,63 @@ const makeExecutor = async (directory: string): Promise<WfExecutor> => {
   }))
 }
 
-export const getExecutor = (): Promise<WfExecutor> => {
-  const directory = executorStorageDirectory()
-  const existing = executors.get(directory)
-  if (existing !== undefined) return existing
-  const created = makeExecutor(directory)
-  executors.set(directory, created)
-  void created.catch(() => {
-    if (executors.get(directory) === created) {
-      executors.delete(directory)
+export interface ExecutorHost {
+  readonly directory: string
+  executor(): Promise<WfExecutor>
+  run<A, E>(operation: (executor: WfExecutor) => Effect.Effect<A, E>): Promise<A>
+  close(): Promise<void>
+}
+
+/** Owns one Executor instance and its storage resources for an explicit
+ * directory. Construction is lazy; close releases the database handle. */
+export const createExecutorHost = (directory: string): ExecutorHost => {
+  const resolvedDirectory = path.resolve(directory)
+  let pending: Promise<WfExecutor> | undefined
+
+  const executor = (): Promise<WfExecutor> => {
+    if (pending !== undefined) return pending
+    const created = makeExecutor(resolvedDirectory)
+    pending = created
+    void created.catch(() => {
+      if (pending === created) pending = undefined
+    })
+    return created
+  }
+
+  return {
+    directory: resolvedDirectory,
+    executor,
+    run: async (operation) => await Effect.runPromise(operation(await executor())),
+    close: async () => {
+      const active = pending
+      pending = undefined
+      if (active !== undefined) {
+        await Effect.runPromise((await active).close())
+      }
     }
-  })
+  }
+}
+
+const defaultHost = (): ExecutorHost => {
+  const directory = executorStorageDirectory()
+  const existing = hosts.get(directory)
+  if (existing !== undefined) return existing
+  const created = createExecutorHost(directory)
+  hosts.set(directory, created)
   return created
 }
 
+export const getExecutor = (): Promise<WfExecutor> => defaultHost().executor()
+
 export const closeExecutor = async (directory?: string): Promise<void> => {
   const resolved = path.resolve(directory ?? executorStorageDirectory())
-  const executor = executors.get(resolved)
-  if (executor === undefined) return
-  executors.delete(resolved)
-  await Effect.runPromise((await executor).close())
+  const host = hosts.get(resolved)
+  if (host === undefined) return
+  hosts.delete(resolved)
+  await host.close()
 }
 
 export const runExecutor = async <A, E>(
   operation: (executor: WfExecutor) => Effect.Effect<A, E>
 ): Promise<A> =>
-  await Effect.runPromise(operation(await getExecutor()))
+  await defaultHost().run(operation)
