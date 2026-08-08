@@ -1,26 +1,3 @@
-export const stableStringify = (value: unknown): string =>
-  JSON.stringify(normalizeJson(value))
-
-const normalizeJson = (value: unknown): unknown => {
-  if (Array.isArray(value)) {
-    return value.map(normalizeJson)
-  }
-
-  if (typeof value !== "object" || value === null) {
-    return value
-  }
-
-  const output: Record<string, unknown> = {}
-
-  for (const [key, entry] of Object.entries(value).sort(([left], [right]) =>
-    left.localeCompare(right)
-  )) {
-    output[key] = normalizeJson(entry)
-  }
-
-  return output
-}
-
 // Error has no enumerable own properties, so plain JSON.stringify turns a
 // thrown Error into "{}" and history loses the failure message. Keep name,
 // message, and any own enumerable fields (e.g. _tag on tagged errors).
