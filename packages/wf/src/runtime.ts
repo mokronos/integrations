@@ -15,6 +15,12 @@ import {
   setExecutionEventSink
 } from "./events.ts"
 import type { WorkflowEventSink } from "./events.ts"
+import {
+  currentIntegrationInvoker,
+  removeExecutionIntegrationInvoker,
+  setExecutionIntegrationInvoker
+} from "./integration.ts"
+import type { IntegrationInvoker } from "./integration.ts"
 
 export interface ExecuteWorkflowOptions {
   readonly onEvent?: WorkflowEventSink
@@ -27,6 +33,8 @@ export interface WorkflowRuntimeOptions {
   /** Resolves SecretRef inputs to their values at step execution time.
    *  Only the reference string is ever persisted. */
   readonly secrets?: SecretResolver
+  /** Concrete adapter used by provider-neutral integration steps. */
+  readonly integrations?: IntegrationInvoker
   readonly sqliteBusyTimeoutMs?: number
   /** How often the engine polls storage for due timers and undelivered
    *  messages. Durable timers (signal timeouts, long sleeps) can fire up to
@@ -150,7 +158,8 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
     getManagedRuntime().runPromise(
       effect.pipe(
         Effect.provideService(currentWorkflowEventSink, onEvent),
-        Effect.provideService(currentSecretResolver, options.secrets)
+        Effect.provideService(currentSecretResolver, options.secrets),
+        Effect.provideService(currentIntegrationInvoker, options.integrations)
       ) as Effect.Effect<A, unknown, never>
     )
 
@@ -187,6 +196,9 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
       if (options.secrets !== undefined) {
         setExecutionSecretResolver(executionId, options.secrets)
       }
+      if (options.integrations !== undefined) {
+        setExecutionIntegrationInvoker(executionId, options.integrations)
+      }
       const effect = Effect.gen(function* () {
         const engine = yield* WorkflowEngine.WorkflowEngine
         yield* emitWorkflowEvent({ type: "workflow.started", workflowName, payload })
@@ -206,6 +218,7 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
       return runEffect(effect, onEvent).finally(() => {
         removeExecutionEventSink(executionId)
         removeExecutionSecretResolver(executionId)
+        removeExecutionIntegrationInvoker(executionId)
       })
     },
 
@@ -217,6 +230,9 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
       // note below), so it needs the secret resolver just like execute().
       if (options.secrets !== undefined) {
         setExecutionSecretResolver(executionId, options.secrets)
+      }
+      if (options.integrations !== undefined) {
+        setExecutionIntegrationInvoker(executionId, options.integrations)
       }
       const effect = Effect.gen(function* () {
         const engine = yield* WorkflowEngine.WorkflowEngine

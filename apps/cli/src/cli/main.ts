@@ -16,6 +16,7 @@ import {
   toJsonText,
   workflowArtifactToGraph
 } from "@mokronos/wfkit"
+import { executorIntegrationInvoker } from "@mokronos/wfkit-executor"
 import { makeIntegrationsCommand } from "./integrations.ts"
 import { migrateLegacyCatalog } from "../migrate-catalog.ts"
 import { sourcesPath, workflowsPath } from "../paths.ts"
@@ -581,7 +582,8 @@ const engineDatabasePath = (storageDir: string) => path.join(storageDir, "engine
 const createEngineBackedClient = (storageDir: string) => {
   const runtime = createWorkflowRuntime({
     backend: "sqlite",
-    databasePath: engineDatabasePath(storageDir)
+    databasePath: engineDatabasePath(storageDir),
+    integrations: executorIntegrationInvoker
   })
   const client = createWorkflowClient(runtime)
   return { runtime, client }

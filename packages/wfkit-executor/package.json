@@ -48,6 +48,7 @@
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
+    "@mokronos/wfkit": "workspace:*",
     "@executor-js/fumadb": "1.5.7",
     "@executor-js/plugin-mcp": "1.5.37",
     "@executor-js/plugin-openapi": "1.5.37",

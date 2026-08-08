@@ -6,6 +6,7 @@ export {
   IntegrationError,
   IntegrationSource
 } from "./integration.ts"
+export type { IntegrationInvoker } from "./integration.ts"
 export type {
   DefinedWorkflow,
   InMemoryDeterminismState,

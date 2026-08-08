@@ -12,7 +12,7 @@ export {
   SecretResolutionContext
 } from "./core.ts"
 export { integration, IntegrationError } from "./integration.ts"
-export type { IntegrationSource } from "./integration.ts"
+export type { IntegrationInvoker, IntegrationSource } from "./integration.ts"
 export type {
   DefinedWorkflow,
   InMemoryDeterminismState,

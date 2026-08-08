@@ -11,6 +11,7 @@ import {
   addExecutorOpenApi,
   closeExecutor,
   createExecutorConnection,
+  executorIntegrationInvoker,
   listExecutorIntegrations,
   listExecutorTools,
   setExecutorStorageDirectory
@@ -129,7 +130,10 @@ describe("Executor integration node", () => {
       }
     })
 
-    await expect(workflow.executeInMemory({ title: "A durable issue" })).resolves.toEqual({
+    await expect(workflow.executeInMemory(
+      { title: "A durable issue" },
+      { integrations: executorIntegrationInvoker }
+    )).resolves.toEqual({
       id: "ISS-1",
       title: "A durable issue"
     })

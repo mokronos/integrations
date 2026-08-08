@@ -3,6 +3,11 @@ import { Activity, DurableClock, DurableDeferred, Workflow, WorkflowEngine } fro
 import { Cause, Context, Effect, Exit, Option, Schedule, Schema } from "effect"
 import type * as Duration from "effect/Duration"
 import { currentWorkflowEventSink, emitWorkflowEvent } from "./events.ts"
+import {
+  currentIntegrationInvoker,
+  getExecutionIntegrationInvoker
+} from "./integration.ts"
+import type { IntegrationInvoker } from "./integration.ts"
 import type { WorkflowEvent } from "./schemas.ts"
 import { ExecutionId, jsonSchemaOf } from "./schemas.ts"
 import {
@@ -24,6 +29,10 @@ export interface TerminalFailure<E> {
 export interface StepContext<E> {
   fail(error: E): TerminalFailure<E>
   resolveSecret(name: string, context?: SecretResolutionContext): Promise<string>
+  invokeIntegration(
+    address: string,
+    input: typeof Schema.Json.Type
+  ): Promise<typeof Schema.Json.Type>
   readonly attempt: number
   readonly executionId: string
 }
@@ -290,6 +299,7 @@ export interface InMemoryExecutionOptions {
   /** Execution-scoped signal adapter. Defaults to the legacy singleton. */
   readonly signalTransport?: SignalTransport
   readonly secrets?: SecretResolver
+  readonly integrations?: IntegrationInvoker
 }
 
 export interface InMemoryDeterminismState {
@@ -385,13 +395,24 @@ const unwrapActivityFailure = (error: unknown): unknown =>
 const unwrapAsyncFailure = (error: unknown): unknown =>
   error instanceof AsyncFailure ? error.error : error
 
-const makeStepContext = <E>(executionId: string, attempt: number, resolver?: SecretResolver): StepContext<E> => ({
+const makeStepContext = <E>(
+  executionId: string,
+  attempt: number,
+  resolver?: SecretResolver,
+  integrations?: IntegrationInvoker
+): StepContext<E> => ({
   attempt,
   executionId,
   fail: (error) => ({ [TerminalFailureTypeId]: TerminalFailureTypeId, error }),
   resolveSecret: (name, context) => {
     if (resolver === undefined) throw new Error(`No secret resolver configured for ${name}`)
     return Promise.resolve(resolver.resolve(name, context))
+  },
+  invokeIntegration: (address, input) => {
+    if (integrations === undefined) {
+      throw new Error(`No integration invoker configured for ${address}`)
+    }
+    return integrations.invoke(address, input)
   }
 })
 
@@ -586,12 +607,17 @@ const makeCtx = <WErrors>(
 
         const contextResolver = yield* currentSecretResolver
         const resolver = getExecutionSecretResolver(executionId) ?? contextResolver
+        const contextIntegrationInvoker = yield* currentIntegrationInvoker
+        const integrations = getExecutionIntegrationInvoker(executionId) ?? contextIntegrationInvoker
         const result = yield* Effect.tryPromise({
           try: async () => {
             const release = await acquireConcurrency(step, input)
             try {
               const executeInput = await resolveSecretRefs(input, resolver)
-              const value = await step.execute(executeInput, makeStepContext(executionId, attempt, resolver))
+              const value = await step.execute(
+                executeInput,
+                makeStepContext(executionId, attempt, resolver, integrations)
+              )
               if (isTerminalFailure(value)) {
                 throw value
               }
@@ -966,7 +992,7 @@ const makeInMemoryCtx = <WErrors>(
   emit: (event: WorkflowEvent) => Promise<void>,
   options: Pick<
     InMemoryExecutionOptions,
-    "stepExecutors" | "stepExecutor" | "sleep" | "signalTimeout" | "signalValue" | "signalTransport" | "secrets"
+    "stepExecutors" | "stepExecutor" | "sleep" | "signalTimeout" | "signalValue" | "signalTransport" | "secrets" | "integrations"
   > = {}
 ): WorkflowContext<WErrors> => {
   const counters = new Map<string, number>()
@@ -1011,7 +1037,12 @@ const makeInMemoryCtx = <WErrors>(
             })
 
             try {
-              const stepContext = makeStepContext(executionId, attempt, options.secrets)
+              const stepContext = makeStepContext(
+                executionId,
+                attempt,
+                options.secrets,
+                options.integrations
+              )
               const executeStep = options.stepExecutors?.get(step)
               const release = await acquireConcurrency(step, input)
               try {
@@ -1444,7 +1475,8 @@ export const defineWorkflow = <
       ...(options.signalTimeout === undefined ? {} : { signalTimeout: options.signalTimeout }),
       ...(options.signalValue === undefined ? {} : { signalValue: options.signalValue }),
       ...(options.signalTransport === undefined ? {} : { signalTransport: options.signalTransport }),
-      ...(options.secrets === undefined ? {} : { secrets: options.secrets })
+      ...(options.secrets === undefined ? {} : { secrets: options.secrets }),
+      ...(options.integrations === undefined ? {} : { integrations: options.integrations })
     })
 
     const effect = Effect.gen(function* () {

@@ -67,6 +67,7 @@ export type {
   IntegrationSearchSurface,
   SearchIntegrationsOptions
 } from "./registry.ts"
+export { executorIntegrationInvoker } from "./invoker.ts"
 export {
   IntegrationSearchKind as IntegrationSearchKindSchema,
   IntegrationSearchMatch as IntegrationSearchMatchSchema,

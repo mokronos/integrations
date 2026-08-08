@@ -1,4 +1,4 @@
-import { Schema } from "effect"
+import { Context, Schema } from "effect"
 import type { Step, StepRetryPolicy } from "./core.ts"
 
 export const IntegrationSource = Schema.Struct({
@@ -19,6 +19,34 @@ export class IntegrationError extends Schema.TaggedErrorClass<IntegrationError>(
 const IntegrationErrorSchema = IntegrationError
 const Json = Schema.Json
 
+type JsonValue = typeof Json.Type
+
+export interface IntegrationInvoker {
+  readonly invoke: (address: string, input: JsonValue) => Promise<JsonValue>
+}
+
+export const currentIntegrationInvoker = Context.Reference<IntegrationInvoker | undefined>(
+  "@mokronos/wfkit/IntegrationInvoker",
+  { defaultValue: () => undefined }
+)
+
+const executionIntegrationInvokers = new Map<string, IntegrationInvoker>()
+
+export const setExecutionIntegrationInvoker = (
+  executionId: string,
+  invoker: IntegrationInvoker
+): void => {
+  executionIntegrationInvokers.set(executionId, invoker)
+}
+
+export const getExecutionIntegrationInvoker = (
+  executionId: string
+): IntegrationInvoker | undefined => executionIntegrationInvokers.get(executionId)
+
+export const removeExecutionIntegrationInvoker = (executionId: string): void => {
+  executionIntegrationInvokers.delete(executionId)
+}
+
 export const integration = <I, O>(config: {
   readonly name?: string
   readonly source: IntegrationSource
@@ -31,14 +59,10 @@ export const integration = <I, O>(config: {
   output: config.output,
   errors: IntegrationErrorSchema,
   ...(config.retry === undefined ? {} : { retry: config.retry }),
-  execute: async (input) => {
+  execute: async (input, step) => {
     try {
       const jsonInput = Schema.decodeUnknownSync(Json)(input)
-      const { ExecutorToolAddress, executeExecutorTool } = await import("@mokronos/wfkit-executor")
-      const result = await executeExecutorTool(
-        ExecutorToolAddress.make(config.source.address),
-        jsonInput
-      )
+      const result = await step.invokeIntegration(config.source.address, jsonInput)
       return await Schema.decodeUnknownPromise(config.output)(result)
     } catch (cause) {
       throw new IntegrationError({
