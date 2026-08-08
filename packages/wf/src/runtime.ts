@@ -91,8 +91,10 @@ export const makeEngineLayer = (options: {
   // The cluster default is 10 seconds, which delays every durable timer
   // (signal timeout, long sleep) by up to that long on a single-node engine.
   const timerPollIntervalMs = Math.max(10, Math.trunc(options.timerPollIntervalMs ?? 250))
-  mkdirSync(path.dirname(databasePath), { recursive: true })
-  const sqliteLayer = SqliteClient.layer({ filename: databasePath })
+  const sqliteLayer = Layer.unwrap(Effect.sync(() => {
+    mkdirSync(path.dirname(databasePath), { recursive: true })
+    return SqliteClient.layer({ filename: databasePath })
+  }))
   const configuredSqliteLayer = Layer.effectDiscard(Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     yield* sql.unsafe(`PRAGMA busy_timeout = ${sqliteBusyTimeoutMs}`)
@@ -105,8 +107,6 @@ export const makeEngineLayer = (options: {
     Layer.provide(configuredSqliteLayer)
   )
 }
-
-export const engineLayer = makeEngineLayer()
 
 export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): WorkflowRuntime => {
   const workflows = new Map<string, DefinedWorkflow>()
