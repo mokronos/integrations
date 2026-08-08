@@ -11,7 +11,14 @@ const hosts = new Map<string, ExecutorHost>()
 const closingHosts = new Map<string, Promise<void>>()
 
 export const setExecutorStorageDirectory = (directory: string): void => {
-  configuredStorageDirectory = path.resolve(directory)
+  const resolved = path.resolve(directory)
+  const activeDirectory = Array.from(hosts.keys()).find((candidate) => candidate !== resolved)
+  if (activeDirectory !== undefined) {
+    throw new Error(
+      `Cannot change Executor storage to ${resolved} while host ${activeDirectory} is active`
+    )
+  }
+  configuredStorageDirectory = resolved
 }
 
 export const executorStorageDirectory = (): string =>

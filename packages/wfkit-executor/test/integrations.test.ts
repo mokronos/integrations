@@ -34,6 +34,18 @@ const json = (text: string): Schema.Schema.Type<typeof Schema.Json> =>
   Schema.decodeUnknownSync(Schema.Json)(JSON.parse(text))
 
 describe("Executor discovery SDK", () => {
+  test("does not switch process-default storage while a host is active", async () => {
+    const first = await mkdtemp(path.join(os.tmpdir(), "wf-executor-active-"))
+    const second = await mkdtemp(path.join(os.tmpdir(), "wf-executor-other-"))
+    directories.push(first, second)
+    setExecutorStorageDirectory(first)
+    await listExecutorIntegrations()
+
+    expect(() => setExecutorStorageDirectory(second)).toThrow(
+      "while host"
+    )
+  })
+
   test("does not expose Executor's synthetic built-in integration in the catalog", async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), "wf-executor-catalog-"))
     directories.push(directory)
