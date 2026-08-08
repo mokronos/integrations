@@ -1,6 +1,11 @@
 import { Schema } from "effect"
 
-type AnySchema<A = any> = Schema.Codec<A, any, never, never>
+type SynchronousSchema<A = Schema.Schema.Type<Schema.Top>> = Schema.Codec<
+  A,
+  Schema.Schema.Type<Schema.Top>,
+  never,
+  never
+>
 
 export class SignalDeliveryError extends Schema.TaggedErrorClass<SignalDeliveryError>()(
   "SignalDeliveryError",
@@ -11,7 +16,7 @@ export class SignalDeliveryError extends Schema.TaggedErrorClass<SignalDeliveryE
 ) {}
 
 interface SignalWaiter {
-  readonly schema: AnySchema
+  readonly schema: SynchronousSchema
   readonly resolve: (value: unknown) => void
   readonly reject: (error: unknown) => void
 }
@@ -21,14 +26,14 @@ export type BufferedSignal<T> =
   | { readonly present: true; readonly value: T }
 
 export interface SignalTransport {
-  getSchema(executionId: string, name: string): AnySchema | undefined
-  registerSchema<T>(executionId: string, name: string, schema: AnySchema<T>): void
+  getSchema(executionId: string, name: string): SynchronousSchema | undefined
+  registerSchema<T>(executionId: string, name: string, schema: SynchronousSchema<T>): void
   deliver(executionId: string, name: string, payload: unknown): Promise<void>
-  takeBuffered<T>(executionId: string, name: string, schema: AnySchema<T>): BufferedSignal<T>
+  takeBuffered<T>(executionId: string, name: string, schema: SynchronousSchema<T>): BufferedSignal<T>
   await<T>(
     executionId: string,
     name: string,
-    schema: AnySchema<T>,
+    schema: SynchronousSchema<T>,
     options?: { readonly signal?: AbortSignal }
   ): Promise<T>
   cancel(executionId: string, error: unknown): void
@@ -37,7 +42,7 @@ export interface SignalTransport {
 
 const keyOf = (executionId: string, name: string): string => `${executionId}\0${name}`
 
-export const decodeSignal = <T>(schema: AnySchema<T>, value: unknown): T => {
+export const decodeSignal = <T>(schema: SynchronousSchema<T>, value: unknown): T => {
   try {
     return Schema.decodeUnknownSync(schema)(value)
   } catch (cause) {
@@ -49,7 +54,7 @@ export const decodeSignal = <T>(schema: AnySchema<T>, value: unknown): T => {
 }
 
 export const createSignalTransport = (): SignalTransport => {
-  const schemas = new Map<string, AnySchema>()
+  const schemas = new Map<string, SynchronousSchema>()
   const buffers = new Map<string, unknown[]>()
   const waiters = new Map<string, SignalWaiter[]>()
 
@@ -61,7 +66,7 @@ export const createSignalTransport = (): SignalTransport => {
     if (queued.length === 0) waiters.delete(key)
   }
 
-  const takeBuffered = <T>(executionId: string, name: string, schema: AnySchema<T>): BufferedSignal<T> => {
+  const takeBuffered = <T>(executionId: string, name: string, schema: SynchronousSchema<T>): BufferedSignal<T> => {
     schemas.set(keyOf(executionId, name), schema)
     const key = keyOf(executionId, name)
     const queue = buffers.get(key)
@@ -150,18 +155,18 @@ export const defaultSignalTransport = createSignalTransport()
 
 // Backwards-compatible process-local helpers. Production callers should pass
 // an execution-owned transport through their adapter instead.
-export const getSignalSchema = (executionId: string, name: string): AnySchema | undefined =>
+export const getSignalSchema = (executionId: string, name: string): SynchronousSchema | undefined =>
   defaultSignalTransport.getSchema(executionId, name)
-export const registerSignalSchema = <T>(executionId: string, name: string, schema: AnySchema<T>) =>
+export const registerSignalSchema = <T>(executionId: string, name: string, schema: SynchronousSchema<T>) =>
   defaultSignalTransport.registerSchema(executionId, name, schema)
 export const deliverSignal = (executionId: string, name: string, payload: unknown): Promise<void> =>
   defaultSignalTransport.deliver(executionId, name, payload)
-export const takeBufferedSignal = <T>(executionId: string, name: string, schema: AnySchema<T>): BufferedSignal<T> =>
+export const takeBufferedSignal = <T>(executionId: string, name: string, schema: SynchronousSchema<T>): BufferedSignal<T> =>
   defaultSignalTransport.takeBuffered(executionId, name, schema)
 export const awaitSignal = <T>(
   executionId: string,
   name: string,
-  schema: AnySchema<T>,
+  schema: SynchronousSchema<T>,
   options?: { readonly signal?: AbortSignal }
 ): Promise<T> => defaultSignalTransport.await(executionId, name, schema, options)
 export const cancelSignalWaits = (executionId: string, error: unknown) =>
