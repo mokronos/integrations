@@ -149,12 +149,13 @@ export const createDurableClientStore = (databasePath: string) => {
         return true
       }),
 
-    updateStatus: (executionId: string, status: DurableExecutionRow["status"]): void => {
-      database.query<Record<string, never>, [DurableExecutionRow["status"], string]>(`
+    updateStatus: (executionId: string, status: DurableExecutionRow["status"]): boolean => {
+      const result = database.query<Record<string, never>, [DurableExecutionRow["status"], string]>(`
         UPDATE wf_client_executions
         SET status = ?
         WHERE id = ? AND status NOT IN ('completed', 'failed', 'compensating')
       `).run(status, executionId)
+      return result.changes === 1
     },
 
     complete: (executionId: string, value: Schema.Schema.Type<typeof Schema.Unknown>): boolean => {

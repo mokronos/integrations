@@ -22,3 +22,6 @@ export const statusAfterEvent = (event: WorkflowEvent): WorkflowRunStatus | unde
 
 export const isTerminalRunStatus = (status: WorkflowRunStatus): boolean =>
   status === "completed" || status === "failed"
+
+export const isCancellableRunStatus = (status: WorkflowRunStatus): boolean =>
+  status === "running" || status === "suspended"

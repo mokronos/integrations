@@ -4,7 +4,7 @@ import type { WorkflowEvent } from "../events.ts"
 import {
   ExecutionId
 } from "../schemas.ts"
-import { isTerminalRunStatus, statusAfterEvent } from "../run-lifecycle.ts"
+import { isCancellableRunStatus, statusAfterEvent } from "../run-lifecycle.ts"
 import type { WorkflowRuntime } from "../runtime.ts"
 import { decodeSignal } from "../signal.ts"
 import { parseJsonText } from "./json.ts"
@@ -244,11 +244,19 @@ export const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowC
 
     async cancel(executionId, opts = {}) {
       const row = store.get(executionId)
-      if (isTerminalRunStatus(row.status)) {
+      if (!isCancellableRunStatus(row.status)) {
         throw new Error(`Cannot cancel ${row.status} execution ${executionId}`)
       }
       const workflow = workflowFor(row)
       const compensate = opts.compensate ?? true
+      const cancellation = new Cancelled({ compensate })
+      const claimed = compensate
+        ? store.updateStatus(executionId, "compensating")
+        : store.fail(executionId, cancellation)
+      if (!claimed) {
+        const status = store.get(executionId).status
+        throw new Error(`Cannot cancel ${status} execution ${executionId}`)
+      }
       store.appendHistory(executionId, {
         type: "execution.cancelled",
         executionId: ExecutionId.make(executionId),
@@ -259,7 +267,6 @@ export const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowC
         // Complete the reserved cancellation deferred: the execution wakes at
         // its current suspension point, fails with Cancelled, and unwinds the
         // compensation stack before being recorded as failed.
-        store.updateStatus(executionId, "compensating")
         await runtime.deliverSignal({
           workflow,
           executionId,
@@ -267,10 +274,9 @@ export const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowC
           payload: { compensate: true, ...(opts.actor === undefined ? {} : { actor: opts.actor }) },
           onEvent: makeEventSink(executionId)
         })
-        store.fail(executionId, new Cancelled({ compensate: true }))
+        store.fail(executionId, cancellation)
       } else {
         // Hard kill: engine-level interrupt, no unwind.
-        store.fail(executionId, new Cancelled({ compensate: false }))
         await runtime.interrupt({ workflow, executionId })
       }
     },

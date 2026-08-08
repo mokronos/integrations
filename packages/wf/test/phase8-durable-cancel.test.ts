@@ -111,6 +111,27 @@ describe("Phase 8 durable cancellation", () => {
     expect(types).not.toContain("compensation.started")
   })
 
+  test("concurrent cancellation records only the request that claims the execution", async () => {
+    const { workflow } = makeFixtures()
+    const runtime = createWorkflowRuntime({ backend: "sqlite", databasePath: dbPath() })
+    runtime.register([workflow])
+    const client = createWorkflowClient(runtime)
+    const handle = await client.start(workflow, { item: "widget" })
+    expect(await waitForStatus(client, handle.executionId, "suspended")).toBe("suspended")
+
+    const claimed = client.cancel(handle.executionId, { actor: "first" })
+    await expect(client.cancel(handle.executionId, { actor: "second" })).rejects.toThrow(
+      "Cannot cancel compensating"
+    )
+    await claimed
+
+    const cancellations = (await client.history(handle.executionId)).filter(
+      (record) => record.event.type === "execution.cancelled"
+    )
+    expect(cancellations).toHaveLength(1)
+    expect(cancellations[0]?.event).toMatchObject({ actor: "first" })
+  })
+
   test("timed signal wait still receives its signal (durable race regression)", async () => {
     const workflow = defineWorkflow({
       name: "timedWait",

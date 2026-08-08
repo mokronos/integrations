@@ -1,5 +1,5 @@
 import { Cancelled, createInMemoryDeterminismState } from "../core.ts"
-import { isTerminalRunStatus, statusAfterEvent } from "../run-lifecycle.ts"
+import { isCancellableRunStatus, isTerminalRunStatus, statusAfterEvent } from "../run-lifecycle.ts"
 import { ExecutionId } from "../schemas.ts"
 import type { WorkflowHistoryEvent, WorkflowHistoryRecord } from "../schemas.ts"
 import type { WorkflowRuntime } from "../runtime.ts"
@@ -193,7 +193,7 @@ export const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowC
 
     async cancel(id, opts = {}) {
       const execution = requireExecution(id)
-      if (isTerminalRunStatus(execution.status)) {
+      if (!isCancellableRunStatus(execution.status)) {
         throw new Error(`Cannot cancel ${execution.status} execution ${id}`)
       }
       const compensate = opts.compensate ?? true
