@@ -8,6 +8,7 @@ const defaultStorageDirectory = (): string =>
 
 let configuredStorageDirectory: string | undefined
 const hosts = new Map<string, ExecutorHost>()
+const closingHosts = new Map<string, Promise<void>>()
 
 export const setExecutorStorageDirectory = (directory: string): void => {
   configuredStorageDirectory = path.resolve(directory)
@@ -29,10 +30,16 @@ export const getExecutor = (): Promise<WfExecutor> => defaultHost().executor()
 
 export const closeExecutor = async (directory?: string): Promise<void> => {
   const resolved = path.resolve(directory ?? executorStorageDirectory())
+  const closing = closingHosts.get(resolved)
+  if (closing !== undefined) return closing
   const host = hosts.get(resolved)
   if (host === undefined) return
-  hosts.delete(resolved)
-  await host.close()
+  const promise = host.close().finally(() => {
+    if (hosts.get(resolved) === host) hosts.delete(resolved)
+    closingHosts.delete(resolved)
+  })
+  closingHosts.set(resolved, promise)
+  await promise
 }
 
 export const runExecutor = async <A, E>(
