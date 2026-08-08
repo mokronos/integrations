@@ -52,6 +52,16 @@ const withTimeout = async <A>(promise: Promise<A>, ms: number): Promise<A> => {
 }
 
 describe("Phase 4b durable workflow client", () => {
+  test("durable client disposal is concurrent and idempotent", async () => {
+    const runtime = createWorkflowRuntime({ backend: "sqlite", databasePath: dbPath() })
+    const client = createWorkflowClient(runtime)
+
+    await expect(Promise.all([client.dispose(), client.dispose()])).resolves.toEqual([
+      undefined,
+      undefined
+    ])
+  })
+
   test("sqlite backend uses fresh execution IDs and explicit idempotency", async () => {
     const workflow = defineWorkflow({
       name: "sqliteIdentity",

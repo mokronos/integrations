@@ -41,6 +41,7 @@ export const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowC
   const runPromises = new Map<string, Promise<WorkflowResult>>()
   const signalClaims = createSignalDeliveryClaims()
   let closing = false
+  let disposePromise: Promise<void> | undefined
 
   const workflowFor = (row: DurableExecutionRow): DefinedWorkflow => {
     const workflow = runtime.getWorkflow(row.workflow_name)
@@ -307,11 +308,15 @@ export const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowC
     },
 
     async dispose() {
+      if (disposePromise !== undefined) return disposePromise
       closing = true
-      await runtime.dispose()
-      await Promise.allSettled(runPromises.values())
-      signalClaims.clear()
-      store.close()
+      disposePromise = (async () => {
+        await runtime.dispose()
+        await Promise.allSettled(runPromises.values())
+        signalClaims.clear()
+        store.close()
+      })()
+      await disposePromise
     }
   }
 }
