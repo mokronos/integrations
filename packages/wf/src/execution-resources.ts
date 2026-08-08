@@ -1,7 +1,7 @@
 import { Context } from "effect"
 import type { SecretResolver } from "./secrets.ts"
-import type { WorkflowEventSink } from "./events.ts"
-import type { IntegrationInvoker } from "./integration.ts"
+import type { WorkflowEventSink } from "./event-sink.ts"
+import type { IntegrationInvoker } from "./integration-invoker.ts"
 import type { ConcurrencyLimiter } from "./concurrency.ts"
 import type { SignalTransport } from "./signal.ts"
 

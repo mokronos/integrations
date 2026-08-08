@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname, extname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { Schema } from "effect"
 
@@ -15,6 +15,52 @@ const PackageManifest = Schema.Struct({
   optionalDependencies: Schema.optional(DependencyMap)
 })
 
+const typescriptFiles = async (directory: string): Promise<ReadonlyArray<string>> => {
+  const files: string[] = []
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const entryPath = join(directory, entry.name)
+    if (entry.isDirectory()) {
+      files.push(...await typescriptFiles(entryPath))
+    } else if (entryPath.endsWith(".ts")) {
+      files.push(resolve(entryPath))
+    }
+  }
+  return files
+}
+
+const assertNoImportCycles = async (roots: ReadonlyArray<string>): Promise<void> => {
+  const files = (await Promise.all(roots.map(typescriptFiles))).flat()
+  const knownFiles = new Set(files)
+  const dependencies = new Map<string, ReadonlyArray<string>>()
+  for (const file of files) {
+    const imports = Array.from((await readFile(file, "utf8")).matchAll(
+      /(?:from\s+|import\s*)"(\.[^"]+)"/g
+    )).flatMap((match) => {
+      const specifier = match[1]
+      if (specifier === undefined) return []
+      const dependency = resolve(dirname(file), specifier)
+      const resolved = extname(dependency) === "" ? `${dependency}.ts` : dependency
+      return knownFiles.has(resolved) ? [resolved] : []
+    })
+    dependencies.set(file, imports)
+  }
+
+  const visited = new Set<string>()
+  const stack: string[] = []
+  const visit = (file: string): void => {
+    const cycleStart = stack.indexOf(file)
+    if (cycleStart >= 0) {
+      throw new Error(`Import cycle: ${[...stack.slice(cycleStart), file].join(" -> ")}`)
+    }
+    if (visited.has(file)) return
+    stack.push(file)
+    for (const dependency of dependencies.get(file) ?? []) visit(dependency)
+    stack.pop()
+    visited.add(file)
+  }
+  for (const file of files) visit(file)
+}
+
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, {
     recursive: true,
@@ -23,6 +69,13 @@ afterEach(async () => {
 })
 
 describe("package architecture", () => {
+  test("local package imports are acyclic", async () => {
+    await assertNoImportCycles([
+      join(packageDirectory, "src"),
+      join(packageDirectory, "..", "wfkit-executor", "src")
+    ])
+  })
+
   test("the authoring package does not depend on the integration executor", async () => {
     const manifest = Schema.decodeUnknownSync(Schema.fromJsonString(PackageManifest))(
       await readFile(join(packageDirectory, "package.json"), "utf8")

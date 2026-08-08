@@ -3,7 +3,7 @@ import { Activity, DurableClock, DurableDeferred, Workflow, WorkflowEngine } fro
 import { Cause, Effect, Exit, Option, Schema } from "effect"
 import type * as Duration from "effect/Duration"
 import { emitWorkflowEvent } from "./events.ts"
-import type { IntegrationInvoker } from "./integration.ts"
+import type { IntegrationInvoker } from "./integration-invoker.ts"
 import {
   ExecutionResourceRegistry,
   makeExecutionResourceRegistry

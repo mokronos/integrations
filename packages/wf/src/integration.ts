@@ -1,5 +1,6 @@
 import { Schema } from "effect"
 import type { Step, StepRetryPolicy } from "./core.ts"
+export type { IntegrationInvoker } from "./integration-invoker.ts"
 
 export const IntegrationSource = Schema.Struct({
   kind: Schema.Literal("executor"),
@@ -18,12 +19,6 @@ export class IntegrationError extends Schema.TaggedErrorClass<IntegrationError>(
 
 const IntegrationErrorSchema = IntegrationError
 const Json = Schema.Json
-
-type JsonValue = typeof Json.Type
-
-export interface IntegrationInvoker {
-  readonly invoke: (address: string, input: JsonValue) => Promise<JsonValue>
-}
 
 export const integration = <I, O>(config: {
   readonly name?: string
