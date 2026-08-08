@@ -14,6 +14,7 @@ export {
 export type { ExecutorCatalog } from "./catalog.ts"
 export {
   completeExecutorOAuth,
+  createExecutorConnections,
   createExecutorConnection,
   createExecutorOAuthClient,
   ensureExecutorConnection,
@@ -23,6 +24,7 @@ export {
   removeExecutorConnection,
   startExecutorOAuth
 } from "./connections.ts"
+export type { ExecutorConnections } from "./connections.ts"
 export {
   closeExecutor,
   createExecutorHost,

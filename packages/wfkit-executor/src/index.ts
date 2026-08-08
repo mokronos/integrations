@@ -20,6 +20,7 @@ export {
   createExecutorHost,
   completeExecutorOAuth,
   createExecutorConnection,
+  createExecutorConnections,
   createExecutorOAuthClient,
   createExecutorTools,
   detectExecutorIntegration,
@@ -40,7 +41,13 @@ export {
   setExecutorStorageDirectory,
   startExecutorOAuth
 } from "./executor.ts"
-export type { ExecutorCatalog, ExecutorHost, ExecutorRunner, ExecutorTools } from "./executor.ts"
+export type {
+  ExecutorCatalog,
+  ExecutorConnections,
+  ExecutorHost,
+  ExecutorRunner,
+  ExecutorTools
+} from "./executor.ts"
 export type {
   DiscoverIntegrationsOptions,
   IntegrationDiscovery,

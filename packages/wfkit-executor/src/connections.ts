@@ -6,7 +6,10 @@ import {
   OAuthState
 } from "@executor-js/sdk/core"
 import { runExecutor } from "./host.ts"
+import type { ExecutorRunner } from "./host.ts"
 import type { ExecutorConnection, ExecutorIntegration } from "./schemas.ts"
+
+const defaultExecutorRunner: ExecutorRunner = { run: runExecutor }
 
 /** Creates a persisted credential-backed connection for an installed
  * integration. */
@@ -15,8 +18,8 @@ export const createExecutorConnection = async (options: {
   readonly name: string
   readonly template: string
   readonly value: string
-}): Promise<ExecutorConnection> =>
-  await runExecutor((executor) => executor.connections.create({
+}, runner: ExecutorRunner = defaultExecutorRunner): Promise<ExecutorConnection> =>
+  await runner.run((executor) => executor.connections.create({
     owner: "org",
     integration: IntegrationSlug.make(options.integration),
     name: ConnectionName.make(options.name),
@@ -32,8 +35,10 @@ export const createExecutorConnection = async (options: {
     ...(connection.expiresAt === undefined ? {} : { expiresAt: connection.expiresAt })
   }))
 
-export const listExecutorConnections = async (): Promise<ReadonlyArray<ExecutorConnection>> =>
-  await runExecutor((executor) => executor.connections.list()).then((connections) =>
+export const listExecutorConnections = async (
+  runner: ExecutorRunner = defaultExecutorRunner
+): Promise<ReadonlyArray<ExecutorConnection>> =>
+  await runner.run((executor) => executor.connections.list()).then((connections) =>
     connections.map((connection) => ({
       owner: connection.owner,
       name: String(connection.name),
@@ -48,8 +53,8 @@ export const listExecutorConnections = async (): Promise<ReadonlyArray<ExecutorC
 export const removeExecutorConnection = async (options: {
   readonly integration: string
   readonly name: string
-}): Promise<void> =>
-  await runExecutor((executor) => executor.connections.remove({
+}, runner: ExecutorRunner = defaultExecutorRunner): Promise<void> =>
+  await runner.run((executor) => executor.connections.remove({
     owner: "org",
     integration: IntegrationSlug.make(options.integration),
     name: ConnectionName.make(options.name)
@@ -59,9 +64,10 @@ export const removeExecutorConnection = async (options: {
  * integrations are intentionally left untouched for an explicit auth flow. */
 export const ensureExecutorConnection = async (
   integration: ExecutorIntegration,
-  connectionName: string
+  connectionName: string,
+  runner: ExecutorRunner = defaultExecutorRunner
 ): Promise<void> => {
-  const existing = (await listExecutorConnections()).some((connection) =>
+  const existing = (await listExecutorConnections(runner)).some((connection) =>
     connection.integration === integration.slug && connection.name === connectionName
   )
   if (existing) return
@@ -72,12 +78,14 @@ export const ensureExecutorConnection = async (
     name: connectionName,
     template: noAuth?.template ?? "none",
     value: ""
-  })
+  }, runner)
 }
 
 /** Reads OAuth server metadata without changing connection state. */
-export const probeExecutorOAuth = async (url: string) =>
-  await runExecutor((executor) => executor.oauth.probe({ url }))
+export const probeExecutorOAuth = async (
+  url: string,
+  runner: ExecutorRunner = defaultExecutorRunner
+) => await runner.run((executor) => executor.oauth.probe({ url }))
 
 export const registerExecutorOAuthClient = async (options: {
   readonly slug: string
@@ -90,8 +98,8 @@ export const registerExecutorOAuthClient = async (options: {
   readonly resource?: string | null
   readonly scopes: ReadonlyArray<string>
   readonly tokenEndpointAuthMethodsSupported?: ReadonlyArray<string>
-}): Promise<string> =>
-  await runExecutor((executor) => executor.oauth.registerDynamicClient({
+}, runner: ExecutorRunner = defaultExecutorRunner): Promise<string> =>
+  await runner.run((executor) => executor.oauth.registerDynamicClient({
     owner: "org",
     slug: OAuthClientSlug.make(options.slug),
     originIntegration: IntegrationSlug.make(options.integration),
@@ -115,8 +123,8 @@ export const createExecutorOAuthClient = async (options: {
   readonly clientId: string
   readonly clientSecret?: string
   readonly resource?: string | null
-}): Promise<string> =>
-  await runExecutor((executor) => executor.oauth.createClient({
+}, runner: ExecutorRunner = defaultExecutorRunner): Promise<string> =>
+  await runner.run((executor) => executor.oauth.createClient({
     owner: "org",
     slug: OAuthClientSlug.make(options.slug),
     origin: {
@@ -137,8 +145,8 @@ export const startExecutorOAuth = async (options: {
   readonly connection: string
   readonly template: string
   readonly redirectUri: string
-}) =>
-  await runExecutor((executor) => executor.oauth.start({
+}, runner: ExecutorRunner = defaultExecutorRunner) =>
+  await runner.run((executor) => executor.oauth.start({
     owner: "org",
     clientOwner: "org",
     client: OAuthClientSlug.make(options.client),
@@ -152,8 +160,8 @@ export const completeExecutorOAuth = async (options: {
   readonly state: string
   readonly code: string
   readonly callbackDomain?: string | null
-}): Promise<ExecutorConnection> =>
-  await runExecutor((executor) => executor.oauth.complete({
+}, runner: ExecutorRunner = defaultExecutorRunner): Promise<ExecutorConnection> =>
+  await runner.run((executor) => executor.oauth.complete({
     state: OAuthState.make(options.state),
     code: options.code,
     ...(options.callbackDomain === undefined ? {} : { callbackDomain: options.callbackDomain })
@@ -166,3 +174,25 @@ export const completeExecutorOAuth = async (options: {
     ...(connection.identityLabel === undefined ? {} : { identityLabel: connection.identityLabel }),
     ...(connection.expiresAt === undefined ? {} : { expiresAt: connection.expiresAt })
   }))
+
+/** Connection and OAuth operations bound to an explicit host/runner. */
+export const createExecutorConnections = (runner: ExecutorRunner) => ({
+  create: (options: Parameters<typeof createExecutorConnection>[0]) =>
+    createExecutorConnection(options, runner),
+  list: () => listExecutorConnections(runner),
+  remove: (options: Parameters<typeof removeExecutorConnection>[0]) =>
+    removeExecutorConnection(options, runner),
+  ensure: (integration: ExecutorIntegration, connectionName: string) =>
+    ensureExecutorConnection(integration, connectionName, runner),
+  probeOAuth: (url: string) => probeExecutorOAuth(url, runner),
+  registerOAuthClient: (options: Parameters<typeof registerExecutorOAuthClient>[0]) =>
+    registerExecutorOAuthClient(options, runner),
+  createOAuthClient: (options: Parameters<typeof createExecutorOAuthClient>[0]) =>
+    createExecutorOAuthClient(options, runner),
+  startOAuth: (options: Parameters<typeof startExecutorOAuth>[0]) =>
+    startExecutorOAuth(options, runner),
+  completeOAuth: (options: Parameters<typeof completeExecutorOAuth>[0]) =>
+    completeExecutorOAuth(options, runner)
+})
+
+export type ExecutorConnections = ReturnType<typeof createExecutorConnections>
