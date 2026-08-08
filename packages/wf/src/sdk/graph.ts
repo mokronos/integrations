@@ -5,13 +5,12 @@ import type {
   StepRetryPolicy
 } from "../core.ts"
 import type { SecretResolver } from "../secrets.ts"
-import { Schema, SchemaAST } from "effect"
+import { Schema } from "effect"
 import { createInMemoryDeterminismState } from "../core.ts"
 import { createSignalTransport } from "../signal.ts"
 import type { WorkflowEvent } from "../events.ts"
 import {
   jsonSchemaOf,
-  type JsonSchema,
   type WorkflowArtifactGraph,
   type WorkflowGraph,
   type WorkflowGraphEdge,
@@ -23,6 +22,8 @@ import {
 } from "../schemas.ts"
 import type { WorkflowArtifact } from "./artifact.ts"
 import { validateWorkflowArtifact } from "./loader.ts"
+import { sampleValueForSchema } from "./sample.ts"
+export { sampleValueForJsonSchema, sampleValueForSchema } from "./sample.ts"
 
 export type {
   WorkflowArtifactGraph,
@@ -106,115 +107,6 @@ const describeStep = (step: InspectableStep): WorkflowGraphNodeMetadata => ({
       }),
   compensates: step.compensate !== undefined
 })
-
-const schemaAst = (schema: unknown): SchemaAST.AST | undefined =>
-  Schema.isSchema(schema) ? schema.ast : undefined
-
-export const sampleValueForSchema = (schema: unknown): unknown =>
-  sampleValueFromAst(schemaAst(schema), new Set())
-
-/** Sample value for a JSON Schema document (e.g. PendingSignal.payloadSchema),
- *  mirroring the placeholders of sampleValueForSchema. */
-export const sampleValueForJsonSchema = (schema: JsonSchema, depth = 0): unknown => {
-  if (depth > 8) {
-    return {}
-  }
-  if (schema.const !== undefined) {
-    return schema.const
-  }
-  if (schema.enum !== undefined && schema.enum.length > 0) {
-    return schema.enum[0]
-  }
-  const alternative = schema.anyOf?.[0] ?? schema.oneOf?.[0]
-  if (alternative !== undefined) {
-    return sampleValueForJsonSchema(alternative, depth + 1)
-  }
-  const type = Array.isArray(schema.type) ? schema.type[0] : schema.type
-  switch (type) {
-    case "string":
-      return "sample"
-    case "number":
-    case "integer":
-      return 1
-    case "boolean":
-      return true
-    case "null":
-      return null
-    case "array":
-      return schema.items === undefined ? [] : [sampleValueForJsonSchema(schema.items, depth + 1)]
-    case "object": {
-      const properties = schema.properties ?? {}
-      const required = schema.required
-      const entries = Object.entries(properties)
-        .filter(([key]) => required === undefined || required.includes(key))
-        .map(([key, property]) => [key, sampleValueForJsonSchema(property, depth + 1)])
-      return Object.fromEntries(entries)
-    }
-    default:
-      return {}
-  }
-}
-
-// `seen` holds the current recursion path only: schema AST nodes are shared
-// (t.string is a singleton), so a persistent visited-set would misread the
-// second reference to a node as a cycle.
-const sampleValueFromAst = (
-  ast: SchemaAST.AST | undefined,
-  seen: Set<SchemaAST.AST>
-): unknown => {
-  if (ast === undefined || seen.has(ast)) {
-    return {}
-  }
-  seen.add(ast)
-  try {
-    return sampleValueFromAstUnguarded(ast, seen)
-  } finally {
-    seen.delete(ast)
-  }
-}
-
-const sampleValueFromAstUnguarded = (
-  ast: SchemaAST.AST,
-  seen: Set<SchemaAST.AST>
-): unknown => {
-  switch (ast._tag) {
-    case "String":
-      return "sample"
-    case "Number":
-      return 1
-    case "Boolean":
-      return true
-    case "Void":
-    case "Undefined":
-      return undefined
-    case "Null":
-      return null
-    case "Literal":
-      return ast.literal
-    case "Arrays": {
-      const element = ast.rest?.[0] ?? ast.elements?.[0]
-      return [sampleValueFromAst(element, seen)]
-    }
-    case "Union": {
-      const candidate = ast.types?.find((item) => item._tag !== "Undefined") ?? ast.types?.[0]
-      return sampleValueFromAst(candidate, seen)
-    }
-    case "Objects": {
-      const entries = ast.propertySignatures?.map((property) => [
-        property.name,
-        sampleValueFromAst(property.type, seen)
-      ]) ?? []
-      return Object.fromEntries(entries)
-    }
-    case "Unknown":
-    case "Any":
-      return {}
-    case "Never":
-      throw new Error("Cannot create a sample value for Schema.Never")
-    default:
-      return {}
-  }
-}
 
 const metadataFromEvents = (events: ReadonlyArray<WorkflowEvent>) => {
   const metadata = new Map<string, WorkflowGraphNodeMetadata>()
