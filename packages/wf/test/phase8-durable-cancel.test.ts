@@ -140,4 +140,29 @@ describe("Phase 8 durable cancellation", () => {
       value: "approved"
     })
   })
+
+  test("does not overwrite a completed execution with cancellation", async () => {
+    const workflow = defineWorkflow({
+      name: "alreadyCompleted",
+      input: Schema.Struct({}),
+      output: Schema.String,
+      run: function* () {
+        return "done"
+      }
+    })
+    const runtime = createWorkflowRuntime({ backend: "sqlite", databasePath: dbPath() })
+    runtime.register([workflow])
+    const client = createWorkflowClient(runtime)
+
+    const handle = await client.start(workflow, {})
+    await expect(client.result(handle.executionId)).resolves.toEqual({
+      type: "completed",
+      value: "done"
+    })
+    await expect(client.cancel(handle.executionId)).rejects.toThrow("Cannot cancel completed")
+    await expect(client.result(handle.executionId)).resolves.toEqual({
+      type: "completed",
+      value: "done"
+    })
+  })
 })

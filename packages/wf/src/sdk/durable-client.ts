@@ -4,7 +4,7 @@ import type { WorkflowEvent } from "../events.ts"
 import {
   ExecutionId
 } from "../schemas.ts"
-import { statusAfterEvent } from "../run-lifecycle.ts"
+import { isTerminalRunStatus, statusAfterEvent } from "../run-lifecycle.ts"
 import type { WorkflowRuntime } from "../runtime.ts"
 import { decodeSignal } from "../signal.ts"
 import { parseJsonText } from "./json.ts"
@@ -230,6 +230,9 @@ export const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowC
 
     async cancel(executionId, opts = {}) {
       const row = store.get(executionId)
+      if (isTerminalRunStatus(row.status)) {
+        throw new Error(`Cannot cancel ${row.status} execution ${executionId}`)
+      }
       const workflow = workflowFor(row)
       const compensate = opts.compensate ?? true
       store.appendHistory(executionId, {

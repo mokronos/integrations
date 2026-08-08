@@ -20,7 +20,7 @@ import type {
 import { Cancelled } from "../sdk/index.ts"
 import { createSignalTransport } from "../signal.ts"
 import { ExecutionId, isWorkflowEvent } from "../schemas.ts"
-import { statusAfterEvent } from "../run-lifecycle.ts"
+import { isTerminalRunStatus, statusAfterEvent } from "../run-lifecycle.ts"
 
 export interface TestRuntimeOptions {
   readonly timeSkipping?: boolean
@@ -314,6 +314,9 @@ export const createTestRuntime = (options: TestRuntimeOptions = {}): TestRuntime
 
     async cancel(executionId, opts = {}) {
       const record = requireExecution(executionId)
+      if (isTerminalRunStatus(record.status)) {
+        throw new Error(`Cannot cancel ${record.status} execution ${executionId}`)
+      }
       const compensate = opts.compensate ?? true
       appendHistory(record, {
         type: "execution.cancelled",
