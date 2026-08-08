@@ -153,10 +153,14 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
   >()
   let disposed = false
 
-  const getManagedRuntime = () => {
+  const ensureActive = (): void => {
     if (disposed) {
       throw new Error("Workflow runtime has been disposed")
     }
+  }
+
+  const getManagedRuntime = () => {
+    ensureActive()
     const signature = Array.from(workflows.keys()).sort().join(",")
     const existing = managedBySignature.get(signature)
     if (existing !== undefined) return existing
@@ -183,6 +187,7 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
     signals,
 
     register(registered) {
+      ensureActive()
       for (const workflow of registered) {
         const existing = workflows.get(workflow.name)
         if (existing !== undefined && existing.sourceHash !== workflow.sourceHash) {

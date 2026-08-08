@@ -341,4 +341,11 @@ describe("Phase 7 secret references", () => {
     })
     expect(seenByExecute).toEqual(["resolved-zen-key-value"])
   })
+
+  test("a disposed runtime rejects further registration", async () => {
+    const runtime = createWorkflowRuntime({ backend: "memory" })
+    await runtime.dispose()
+
+    expect(() => runtime.register([])).toThrow("Workflow runtime has been disposed")
+  })
 })
