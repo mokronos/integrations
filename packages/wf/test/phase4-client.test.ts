@@ -20,6 +20,22 @@ const waitForStatus = async (
 }
 
 describe("Phase 4 workflow client", () => {
+  test("a disposed memory client rejects new executions", async () => {
+    const workflow = defineWorkflow({
+      name: "disposedMemoryClient",
+      input: Schema.Void,
+      output: Schema.Void,
+      run: function* () {}
+    })
+    const client = createWorkflowClient()
+
+    await client.dispose()
+    await expect(client.dispose()).resolves.toBeUndefined()
+    await expect(client.start(workflow, undefined)).rejects.toThrow(
+      "Workflow client has been disposed"
+    )
+  })
+
   test("pendingSignals reports waits and removes delivered waits", async () => {
     const workflow = defineWorkflow({
       name: "pendingSignalsMemory",

@@ -49,6 +49,13 @@ export const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowC
   const executions = new Map<string, ExecutionRecord>()
   const idempotencyKeys = new Map<string, string>()
   const signals = runtime?.signals ?? createSignalTransport()
+  let disposed = false
+
+  const ensureActive = (): void => {
+    if (disposed) {
+      throw new Error("Workflow client has been disposed")
+    }
+  }
 
   const appendHistory = (record: ExecutionRecord, event: WorkflowHistoryEvent) => {
     record.history.push({
@@ -66,6 +73,7 @@ export const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowC
 
   return {
     async start(workflow, payload, opts = {}) {
+      ensureActive()
       const workflowKey = workflow.name
       if (opts.idempotencyKey !== undefined) {
         const existingId = idempotencyKeys.get(`${workflowKey}:${opts.idempotencyKey}`)
@@ -207,6 +215,13 @@ export const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowC
     }, id, options.signal),
 
     async dispose() {
+      if (disposed) return
+      disposed = true
+      for (const execution of executions.values()) {
+        if (!isTerminalRunStatus(execution.status)) {
+          signals.cleanup(execution.executionId, new Error("Workflow client has been disposed"))
+        }
+      }
       executions.clear()
       idempotencyKeys.clear()
     }
