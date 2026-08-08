@@ -79,7 +79,17 @@ export const migrateClientDatabase = (db: Database): void => {
   }
   db.exec("DROP TABLE IF EXISTS wf_client_workflows")
   db.exec(`
-    CREATE INDEX IF NOT EXISTS wf_client_history_dedupe_idx
+    DELETE FROM wf_client_history
+    WHERE dedupe_key IS NOT NULL
+      AND id NOT IN (
+        SELECT MIN(id)
+        FROM wf_client_history
+        WHERE dedupe_key IS NOT NULL
+        GROUP BY execution_id, dedupe_key
+      );
+
+    DROP INDEX IF EXISTS wf_client_history_dedupe_idx;
+    CREATE UNIQUE INDEX wf_client_history_dedupe_idx
       ON wf_client_history(execution_id, dedupe_key)
       WHERE dedupe_key IS NOT NULL
   `)

@@ -32,6 +32,7 @@ type NewExecution = typeof NewExecution.Type
 export const createDurableClientStore = (databasePath: string) => {
   mkdirSync(path.dirname(path.resolve(databasePath)), { recursive: true })
   const database = new Database(databasePath, { create: true, readwrite: true })
+  database.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;")
   migrateClientDatabase(database)
 
   const get = (executionId: string): DurableExecutionRow => {

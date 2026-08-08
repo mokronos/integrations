@@ -116,4 +116,62 @@ describe("durable client database migration", () => {
       await client.dispose()
     }
   }, 15_000)
+
+  test("collapses legacy replay duplicates before enforcing uniqueness", async () => {
+    const file = databasePath()
+    const database = new Database(file, { create: true, readwrite: true })
+    database.exec(`
+      CREATE TABLE wf_client_executions (
+        id TEXT PRIMARY KEY,
+        workflow_name TEXT NOT NULL,
+        status TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        idempotency_key TEXT,
+        actor TEXT,
+        result_json TEXT,
+        error_json TEXT,
+        started_at TEXT NOT NULL,
+        finished_at TEXT
+      );
+      CREATE TABLE wf_client_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        execution_id TEXT NOT NULL,
+        sequence INTEGER NOT NULL,
+        event_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        dedupe_key TEXT,
+        UNIQUE(execution_id, sequence)
+      );
+      CREATE INDEX wf_client_history_dedupe_idx
+        ON wf_client_history(execution_id, dedupe_key)
+        WHERE dedupe_key IS NOT NULL;
+      INSERT INTO wf_client_history
+        (execution_id, sequence, event_json, created_at, dedupe_key)
+      VALUES
+        ('run', 1, '{}', '2026-01-01T00:00:00.000Z', 'step:one'),
+        ('run', 2, '{}', '2026-01-01T00:00:01.000Z', 'step:one');
+    `)
+    database.close()
+
+    const client = createWorkflowClient(
+      createWorkflowRuntime({ backend: "sqlite", databasePath: file })
+    )
+    await client.dispose()
+
+    const migrated = new Database(file, { readonly: true })
+    try {
+      const rows = migrated.query<{ readonly count: number }, []>(
+        "SELECT COUNT(*) AS count FROM wf_client_history WHERE dedupe_key = 'step:one'"
+      ).get()
+      const index = migrated.query<{ readonly name: string; readonly unique: number }, []>(
+        "PRAGMA index_list('wf_client_history')"
+      ).all().find((entry) =>
+        entry.name === "wf_client_history_dedupe_idx" && entry.unique === 1
+      )
+      expect(rows?.count).toBe(1)
+      expect(index).toBeDefined()
+    } finally {
+      migrated.close()
+    }
+  })
 })
