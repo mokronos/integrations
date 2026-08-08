@@ -2,12 +2,13 @@ import type * as Duration from "effect/Duration"
 import { Schema } from "effect"
 import type {
   DefinedWorkflow,
+  DefinedStep,
   InMemoryDeterminismState,
-  Step,
   StepContext,
   StepExecutionContext,
   TerminalFailure
 } from "../core.ts"
+import type { SynchronousSchema } from "../core.ts"
 import { createInMemoryDeterminismState, terminalFailure } from "../core.ts"
 import type {
   WorkflowExecutionHandle,
@@ -30,11 +31,22 @@ export interface CompensationRecorder {
 }
 
 export interface TestRuntime {
-  mockStep<I, O, E>(
-    step: Step<I, O, E>,
-    impl: (input: I, step: StepContext<E>) => Promise<O | TerminalFailure<E>>
+  mockStep<
+    Input extends SynchronousSchema<Schema.Schema.Type<Schema.Top>>,
+    Output extends SynchronousSchema<Schema.Schema.Type<Schema.Top>>,
+    Errors extends SynchronousSchema<Schema.Schema.Type<Schema.Top>>
+  >(
+    step: DefinedStep<Input, Output, Errors>,
+    impl: (
+      input: Input["Type"],
+      step: StepContext<Errors["Type"]>
+    ) => Promise<Output["Type"] | TerminalFailure<Errors["Type"]>>
   ): void
-  failStepOnce<I, O, E>(step: Step<I, O, E>): void
+  failStepOnce<
+    Input extends SynchronousSchema<Schema.Schema.Type<Schema.Top>>,
+    Output extends SynchronousSchema<Schema.Schema.Type<Schema.Top>>,
+    Errors extends SynchronousSchema<Schema.Schema.Type<Schema.Top>>
+  >(step: DefinedStep<Input, Output, Errors>): void
   recordCompensations(): CompensationRecorder
   start<I, O, E>(
     workflow: DefinedWorkflow<I, O, E>,

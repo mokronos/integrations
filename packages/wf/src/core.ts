@@ -58,8 +58,8 @@ export {
 } from "./secrets.ts"
 export type { SecretResolver } from "./secrets.ts"
 
-type AnySchema<A = any> = Schema.Codec<A, any, never, never>
 type DynamicService = Schema.Schema.Type<Schema.Top>
+export type SynchronousSchema<A> = Schema.Codec<A, DynamicService, never, never>
 type DynamicEffect = Effect.Effect<DynamicService, DynamicService, DynamicService>
 interface WorkflowCompensator {
   readonly withCompensation: (
@@ -105,22 +105,41 @@ export type StepRetryPolicy = typeof StepRetryPolicy.Type
 
 export type StepConcurrency<I> = StepConcurrencyPolicy<I>
 
-export interface Step<I, O, E = never> {
+export interface DefinedStep<
+  Input extends SynchronousSchema<DynamicService>,
+  Output extends SynchronousSchema<DynamicService>,
+  Errors extends SynchronousSchema<DynamicService>
+> {
   readonly name: string
-  readonly input: AnySchema<I>
-  readonly output: AnySchema<O>
-  readonly errors: AnySchema<E>
-  readonly execute: (input: I, step: StepContext<E>) => Promise<O | TerminalFailure<E>>
-  readonly compensate?: (result: O, input: I, reason: unknown) => unknown | Promise<unknown>
+  readonly input: Input
+  readonly output: Output
+  readonly errors: Errors
+  readonly execute: (
+    input: Input["Type"],
+    step: StepContext<Errors["Type"]>
+  ) => Promise<
+    Output["Type"] | TerminalFailure<Errors["Type"]>
+  >
+  readonly compensate?: (
+    result: Output["Type"],
+    input: Input["Type"],
+    reason: unknown
+  ) => unknown | Promise<unknown>
   readonly retry?: StepRetryPolicy
-  readonly concurrency?: StepConcurrency<I>
+  readonly concurrency?: StepConcurrency<Input["Type"]>
 }
+
+export type Step<I, O, E = never> = DefinedStep<
+  SynchronousSchema<I>,
+  SynchronousSchema<O>,
+  SynchronousSchema<E>
+>
 
 export interface DefineStepConfig<I, O, E> {
   readonly name: string
-  readonly input: AnySchema<I>
-  readonly output: AnySchema<O>
-  readonly errors?: AnySchema<E>
+  readonly input: SynchronousSchema<I>
+  readonly output: SynchronousSchema<O>
+  readonly errors?: SynchronousSchema<E>
   readonly execute: (input: I, step: StepContext<E>) => Promise<O | TerminalFailure<E>>
   readonly compensate?: (result: O, input: I, reason: unknown) => unknown | Promise<unknown>
   readonly retry?: StepRetryPolicy
@@ -128,26 +147,30 @@ export interface DefineStepConfig<I, O, E> {
 }
 
 export const defineStep = <
-  const Input extends AnySchema,
-  const Output extends AnySchema,
-  const Errors extends AnySchema = typeof Schema.Never
+  const Input extends SynchronousSchema<DynamicService>,
+  const Output extends SynchronousSchema<DynamicService>,
+  const Errors extends SynchronousSchema<DynamicService> = typeof Schema.Never
 >(config: {
   readonly name: string
   readonly input: Input
   readonly output: Output
   readonly errors?: Errors
   readonly execute: (
-    input: Schema.Schema.Type<Input>,
-    step: StepContext<Schema.Schema.Type<Errors>>
-  ) => Promise<Schema.Schema.Type<Output> | TerminalFailure<Schema.Schema.Type<Errors>>>
+    input: Input["Type"],
+    step: StepContext<Errors["Type"]>
+  ) => Promise<Output["Type"] | TerminalFailure<Errors["Type"]>>
   readonly compensate?: (
-    result: Schema.Schema.Type<Output>,
-    input: Schema.Schema.Type<Input>,
+    result: Output["Type"],
+    input: Input["Type"],
     reason: unknown
   ) => unknown | Promise<unknown>
   readonly retry?: StepRetryPolicy
-  readonly concurrency?: StepConcurrency<Schema.Schema.Type<Input>>
-}): Step<Schema.Schema.Type<Input>, Schema.Schema.Type<Output>, Schema.Schema.Type<Errors>> => {
+  readonly concurrency?: StepConcurrency<Input["Type"]>
+}): DefinedStep<
+  Input,
+  Output,
+  Errors | typeof Schema.Never
+> => {
   const retry = config.retry === undefined
     ? undefined
     : Schema.decodeUnknownSync(StepRetryPolicy)(config.retry)
@@ -184,17 +207,24 @@ export type SignalOutcome<T> =
 
 export interface WorkflowContext<WErrors> {
   readonly executionId: string
-  run<I, O, E>(
-    step: Step<I, O, E>,
-    input: I
-  ): WorkflowValue<O, E | NonDeterminismError | StepExecutionError>
+  run<
+    Input extends SynchronousSchema<DynamicService>,
+    Output extends SynchronousSchema<DynamicService>,
+    Errors extends SynchronousSchema<DynamicService>
+  >(
+    step: DefinedStep<Input, Output, Errors>,
+    input: Input["Type"]
+  ): WorkflowValue<
+    Output["Type"],
+    Errors["Type"] | NonDeterminismError | StepExecutionError
+  >
   sleep(
     duration: Duration.Input,
     name?: string
   ): WorkflowValue<void, NonDeterminismError | Cancelled>
   waitForSignal<T>(
     name: string,
-    schema: AnySchema<T>,
+    schema: SynchronousSchema<T>,
     opts?: { readonly timeout?: Duration.Input }
   ): WorkflowValue<
     SignalOutcome<T>,
@@ -216,9 +246,9 @@ export interface WorkflowContext<WErrors> {
 
 export interface DefineWorkflowConfig<I, O, WErrors = never> {
   readonly name: string
-  readonly input: AnySchema<I>
-  readonly output: AnySchema<O>
-  readonly errors?: AnySchema<WErrors>
+  readonly input: SynchronousSchema<I>
+  readonly output: SynchronousSchema<O>
+  readonly errors?: SynchronousSchema<WErrors>
   readonly run: (input: I, ctx: WorkflowContext<WErrors>) => WorkflowGenerator<O>
 }
 
@@ -244,26 +274,43 @@ export interface WorkflowEngineHandle {
   ) => Effect.Effect<void, never, DynamicService>
 }
 
-export interface DefinedWorkflow<
-  I = DynamicService,
-  O = DynamicService,
-  WErrors = DynamicService
+export interface WorkflowDefinition<
+  Input extends SynchronousSchema<DynamicService>,
+  Output extends SynchronousSchema<DynamicService>,
+  Errors extends SynchronousSchema<DynamicService>
 > {
   readonly [DefinedWorkflowTypeId]: typeof DefinedWorkflowTypeId
   readonly name: string
   readonly sourceHash: string
-  readonly input: AnySchema<I>
-  readonly output: AnySchema<O>
-  readonly errors: AnySchema<WErrors>
+  readonly input: Input
+  readonly output: Output
+  readonly errors: Errors
   readonly workflow: WorkflowEngineHandle
   readonly layer: Layer.Layer<
     never,
     never,
     WorkflowEngine.WorkflowEngine | ExecutionResourceRegistry
   >
-  execute(payload: I): Effect.Effect<O, WErrors | unknown, DynamicService>
-  executeInMemory(payload: I, options?: InMemoryExecutionOptions): Promise<O>
+  execute(payload: Input["Type"]): Effect.Effect<
+    Output["Type"],
+    Errors["Type"] | unknown,
+    DynamicService
+  >
+  executeInMemory(
+    payload: Input["Type"],
+    options?: InMemoryExecutionOptions
+  ): Promise<Output["Type"]>
 }
+
+export type DefinedWorkflow<
+  I = DynamicService,
+  O = DynamicService,
+  WErrors = DynamicService
+> = WorkflowDefinition<
+  SynchronousSchema<I>,
+  SynchronousSchema<O>,
+  SynchronousSchema<WErrors>
+>
 
 export interface InMemoryExecutionOptions {
   readonly executionId?: string
@@ -289,7 +336,7 @@ export interface InMemoryExecutionOptions {
   readonly signalValue?: (options: {
     readonly executionId: string
     readonly name: string
-    readonly schema: AnySchema
+    readonly schema: SynchronousSchema<DynamicService>
   }) => unknown | Promise<unknown>
   /** Execution-scoped signal adapter. Defaults to the legacy singleton. */
   readonly signalTransport?: SignalTransport
@@ -362,7 +409,7 @@ const unwrapAsyncFailure = (error: unknown): unknown =>
   error instanceof AsyncFailure ? error.error : error
 
 const makeStepContext = <E>(
-  _errors: AnySchema<E>,
+  _errors: SynchronousSchema<E>,
   executionId: string,
   attempt: number,
   resolver?: SecretResolver,
@@ -389,10 +436,16 @@ const nextInvocation = (counters: Map<string, number>, name: string): number => 
   return invocation
 }
 
-const decodeSync = <A>(schema: AnySchema<A>, value: unknown): A =>
+const decodeSync = <S extends SynchronousSchema<DynamicService>>(
+  schema: S,
+  value: unknown
+): S["Type"] =>
   Schema.decodeUnknownSync(schema)(value)
 
-const encodeSync = <A>(schema: AnySchema<A>, value: A): unknown =>
+const encodeSync = <S extends SynchronousSchema<DynamicService>>(
+  schema: S,
+  value: S["Type"]
+): unknown =>
   Schema.encodeSync(schema)(value)
 
 // Durable race with a persisted winner. This deliberately does NOT use
@@ -434,7 +487,7 @@ const retryDelayMillis = (retry: StepRetryPolicy | undefined, attempt: number): 
 const makeCtx = <WErrors>(
   wf: WorkflowCompensator,
   executionId: ExecutionId,
-  workflowErrors: AnySchema<WErrors>
+  workflowErrors: SynchronousSchema<WErrors>
 ): WorkflowContext<WErrors> => {
   const counters = new Map<string, number>()
   let journalPosition = 0
@@ -492,7 +545,11 @@ const makeCtx = <WErrors>(
   return {
     executionId,
 
-    run<I, O, E>(step: Step<I, O, E>, rawInput: I) {
+    run<
+      Input extends SynchronousSchema<DynamicService>,
+      Output extends SynchronousSchema<DynamicService>,
+      Errors extends SynchronousSchema<DynamicService>
+    >(step: DefinedStep<Input, Output, Errors>, rawInput: Input["Type"]) {
       const invocation = nextInvocation(counters, step.name)
       const activityName = `${step.name}#${invocation}`
       const call: OrchestrationCall = { kind: "step", name: step.name, counter: invocation }
@@ -637,7 +694,10 @@ const makeCtx = <WErrors>(
       return Effect.gen(function* () {
         yield* recordCall(call)
         return yield* activity
-      }) as WorkflowValue<O, E | NonDeterminismError | StepExecutionError>
+      }) as WorkflowValue<
+        Output["Type"],
+        Errors["Type"] | NonDeterminismError | StepExecutionError
+      >
     },
 
     all<const Effects extends ReadonlyArray<WorkflowValue<DynamicService, DynamicService>>>(
@@ -735,7 +795,7 @@ const makeCtx = <WErrors>(
 
     waitForSignal<T>(
       name: string,
-      schema: AnySchema<T>,
+      schema: SynchronousSchema<T>,
       opts?: { readonly timeout?: Duration.Input }
     ) {
       const invocation = nextInvocation(counters, name)
@@ -922,7 +982,7 @@ const makeCtx = <WErrors>(
 
 const makeInMemoryCtx = <WErrors>(
   executionId: ExecutionId,
-  workflowErrors: AnySchema<WErrors>,
+  workflowErrors: SynchronousSchema<WErrors>,
   compensations: CompensationEntry[],
   determinism: InMemoryDeterminismState,
   emit: (event: WorkflowEvent) => Promise<void>,
@@ -951,7 +1011,11 @@ const makeInMemoryCtx = <WErrors>(
   return {
     executionId,
 
-    run<I, O, E>(step: Step<I, O, E>, rawInput: I) {
+    run<
+      Input extends SynchronousSchema<DynamicService>,
+      Output extends SynchronousSchema<DynamicService>,
+      Errors extends SynchronousSchema<DynamicService>
+    >(step: DefinedStep<Input, Output, Errors>, rawInput: Input["Type"]) {
       const invocation = nextInvocation(counters, step.name)
       const activityName = `${step.name}#${invocation}`
       const input = decodeSync(step.input, rawInput)
@@ -1059,8 +1123,8 @@ const makeInMemoryCtx = <WErrors>(
         },
         catch: (error) => new AsyncFailure(error)
       }).pipe(Effect.mapError(unwrapAsyncFailure)) as WorkflowValue<
-        O,
-        E | NonDeterminismError | StepExecutionError
+        Output["Type"],
+        Errors["Type"] | NonDeterminismError | StepExecutionError
       >
     },
 
@@ -1092,7 +1156,7 @@ const makeInMemoryCtx = <WErrors>(
 
     waitForSignal<T>(
       name: string,
-      schema: AnySchema<T>,
+      schema: SynchronousSchema<T>,
       opts?: { readonly timeout?: Duration.Input }
     ) {
       const invocation = nextInvocation(counters, name)
@@ -1382,7 +1446,7 @@ const makeInMemoryCtx = <WErrors>(
   }
 }
 
-const isDeclaredTerminal = <E>(schema: AnySchema<E>, error: unknown): boolean => {
+const isDeclaredTerminal = <E>(schema: SynchronousSchema<E>, error: unknown): boolean => {
   try {
     decodeSync(schema, error)
     return true
@@ -1392,20 +1456,24 @@ const isDeclaredTerminal = <E>(schema: AnySchema<E>, error: unknown): boolean =>
 }
 
 export const defineWorkflow = <
-  const Input extends AnySchema,
-  const Output extends AnySchema,
-  const Errors extends AnySchema = typeof Schema.Never
+  const Input extends SynchronousSchema<DynamicService>,
+  const Output extends SynchronousSchema<DynamicService>,
+  const Errors extends SynchronousSchema<DynamicService> = typeof Schema.Never
 >(config: {
   readonly name: string
   readonly input: Input
   readonly output: Output
   readonly errors?: Errors
   readonly run: (
-    input: Schema.Schema.Type<Input>,
-    ctx: WorkflowContext<Schema.Schema.Type<Errors>>
-  ) => WorkflowGenerator<Schema.Schema.Type<Output>>
-}): DefinedWorkflow<Schema.Schema.Type<Input>, Schema.Schema.Type<Output>, Schema.Schema.Type<Errors>> => {
-  const errors = config.errors ?? Schema.Never
+    input: Input["Type"],
+    ctx: WorkflowContext<Errors["Type"]>
+  ) => WorkflowGenerator<Output["Type"]>
+}): WorkflowDefinition<
+  Input,
+  Output,
+  Errors | typeof Schema.Never
+> => {
+  const errors: Errors | typeof Schema.Never = config.errors ?? Schema.Never
   const sourceHash = createHash("sha256")
     .update(config.name)
     .update("\0")
@@ -1428,7 +1496,11 @@ export const defineWorkflow = <
       const input = decodeSync(config.input, payload.value)
       const result = yield* config.run(
         input,
-        makeCtx(workflow, ExecutionId.make(executionId), errors)
+        makeCtx<Errors["Type"]>(
+          workflow,
+          ExecutionId.make(executionId),
+          errors
+        )
       )
       return decodeSync(config.output, result)
     })
@@ -1446,9 +1518,9 @@ export const defineWorkflow = <
   }
 
   const executeInMemory = async (
-    payload: Schema.Schema.Type<Input>,
+    payload: Input["Type"],
     options: InMemoryExecutionOptions = {}
-  ): Promise<Schema.Schema.Type<Output>> => {
+  ): Promise<Output["Type"]> => {
     const executionId = ExecutionId.make(options.executionId ?? `memory-${crypto.randomUUID()}`)
     const compensations: CompensationEntry[] = []
     const determinism = options.determinism ?? createInMemoryDeterminismState()
@@ -1456,16 +1528,23 @@ export const defineWorkflow = <
     const emit = async (event: WorkflowEvent) => {
       await options.onEvent?.(event)
     }
-    const ctx = makeInMemoryCtx(executionId, errors, compensations, determinism, emit, {
-      ...(options.stepExecutor === undefined ? {} : { stepExecutor: options.stepExecutor }),
-      ...(options.sleep === undefined ? {} : { sleep: options.sleep }),
-      ...(options.signalTimeout === undefined ? {} : { signalTimeout: options.signalTimeout }),
-      ...(options.signalValue === undefined ? {} : { signalValue: options.signalValue }),
-      ...(options.signalTransport === undefined ? {} : { signalTransport: options.signalTransport }),
-      ...(options.secrets === undefined ? {} : { secrets: options.secrets }),
-      ...(options.integrations === undefined ? {} : { integrations: options.integrations }),
-      ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency })
-    })
+    const ctx = makeInMemoryCtx<Errors["Type"]>(
+      executionId,
+      errors,
+      compensations,
+      determinism,
+      emit,
+      {
+        ...(options.stepExecutor === undefined ? {} : { stepExecutor: options.stepExecutor }),
+        ...(options.sleep === undefined ? {} : { sleep: options.sleep }),
+        ...(options.signalTimeout === undefined ? {} : { signalTimeout: options.signalTimeout }),
+        ...(options.signalValue === undefined ? {} : { signalValue: options.signalValue }),
+        ...(options.signalTransport === undefined ? {} : { signalTransport: options.signalTransport }),
+        ...(options.secrets === undefined ? {} : { secrets: options.secrets }),
+        ...(options.integrations === undefined ? {} : { integrations: options.integrations }),
+        ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency })
+      }
+    )
 
     const effect = Effect.gen(function* () {
       return yield* config.run(input, ctx)
@@ -1528,7 +1607,7 @@ export const defineWorkflow = <
     const exit = await Effect.runPromiseExit(
       effect.pipe(
         Effect.provideService(ExecutionResourceRegistry, resources)
-      ) as Effect.Effect<Schema.Schema.Type<Output>, unknown, never>
+      ) as Effect.Effect<Output["Type"], unknown, never>
     )
     if (Exit.isSuccess(exit)) {
       return exit.value
@@ -1553,8 +1632,8 @@ export const defineWorkflow = <
     execute: (payload) => {
       const enginePayload = Schema.decodeUnknownSync(WorkflowPayloadSchema)({ value: payload })
       return workflowHandle.executeStandalone(enginePayload) as Effect.Effect<
-        Schema.Schema.Type<Output>,
-        Schema.Schema.Type<Errors> | unknown,
+        Output["Type"],
+        Errors["Type"] | unknown,
         DynamicService
       >
     },

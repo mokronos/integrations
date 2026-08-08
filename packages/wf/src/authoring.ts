@@ -18,6 +18,7 @@ export { integration, IntegrationError } from "./integration.ts"
 export type { IntegrationInvoker, IntegrationSource } from "./integration.ts"
 export type {
   DefinedWorkflow,
+  DefinedStep,
   InMemoryDeterminismState,
   OrchestrationCall,
   OrchestrationKind,
@@ -27,9 +28,11 @@ export type {
   Step,
   StepConcurrency,
   StepContext,
+  SynchronousSchema,
   TerminalFailure,
   WorkflowContext,
   WorkflowGenerator,
+  WorkflowDefinition,
   WorkflowValue
 } from "./core.ts"
 export type { WorkflowEvent, WorkflowEventSink } from "./events.ts"
