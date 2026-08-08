@@ -1,0 +1,57 @@
+import { Schema } from "effect"
+import {
+  WorkflowHistoryEvent,
+  WorkflowRunStatus
+} from "../schemas.ts"
+import { optionalFinishedAt } from "./client-lifecycle.ts"
+import type { WorkflowExecutionRecord } from "./client-model.ts"
+
+const StoredValueJson = Schema.fromJsonString(Schema.Struct({ value: Schema.Unknown }))
+
+export const encodeStoredValue = (value: unknown): string =>
+  Schema.encodeSync(StoredValueJson)({ value })
+
+export const decodeStoredValue = (json: string): unknown =>
+  Schema.decodeUnknownSync(StoredValueJson)(json).value
+
+export const DurableExecutionRow = Schema.Struct({
+  id: Schema.String,
+  artifact_id: Schema.NullOr(Schema.String),
+  workflow_name: Schema.String,
+  status: WorkflowRunStatus,
+  payload_json: Schema.String,
+  idempotency_key: Schema.NullOr(Schema.String),
+  actor: Schema.NullOr(Schema.String),
+  source_hash: Schema.NullOr(Schema.String),
+  result_json: Schema.NullOr(Schema.String),
+  error_json: Schema.NullOr(Schema.String),
+  started_at: Schema.String,
+  finished_at: Schema.NullOr(Schema.String)
+})
+export type DurableExecutionRow = typeof DurableExecutionRow.Type
+
+export const DurableHistoryRow = Schema.Struct({
+  sequence: Schema.Number,
+  event_json: Schema.String,
+  created_at: Schema.String
+})
+export type DurableHistoryRow = typeof DurableHistoryRow.Type
+
+const StoredHistoryEventJson = Schema.fromJsonString(WorkflowHistoryEvent)
+
+export const decodeExecutionRow = Schema.decodeUnknownSync(DurableExecutionRow)
+export const decodeHistoryRow = Schema.decodeUnknownSync(DurableHistoryRow)
+export const decodeStoredHistoryEvent = Schema.decodeUnknownSync(StoredHistoryEventJson)
+
+export const durableExecutionRecord = (
+  row: DurableExecutionRow
+): WorkflowExecutionRecord => ({
+  executionId: row.id,
+  ...(row.artifact_id === null ? {} : { artifactId: row.artifact_id }),
+  workflowName: row.workflow_name,
+  status: row.status,
+  payload: decodeStoredValue(row.payload_json),
+  startedAt: row.started_at,
+  ...optionalFinishedAt(row.finished_at ?? undefined),
+  ...(row.source_hash === null ? {} : { sourceHash: row.source_hash })
+})

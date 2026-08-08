@@ -1,14 +1,11 @@
 import { Database } from "bun:sqlite"
 import { mkdirSync } from "node:fs"
 import path from "node:path"
-import { Schema } from "effect"
 import type { DefinedWorkflow } from "../core.ts"
 import { Cancelled, cancellationDeferredName } from "../core.ts"
 import type { WorkflowEvent } from "../events.ts"
 import {
-  ExecutionId,
-  WorkflowHistoryEvent as WorkflowHistoryEventSchema,
-  WorkflowRunStatus as WorkflowRunStatusSchema
+  ExecutionId
 } from "../schemas.ts"
 import type { WorkflowHistoryEvent, WorkflowHistoryRecord } from "../schemas.ts"
 import { statusAfterEvent } from "../run-lifecycle.ts"
@@ -26,47 +23,25 @@ import {
 } from "./client-lifecycle.ts"
 import { migrateClientDatabase } from "./client-database.ts"
 import { decodePersistedJsonSchema } from "./json-schema-validation.ts"
+import {
+  decodeExecutionRow,
+  decodeHistoryRow,
+  decodeStoredHistoryEvent,
+  decodeStoredValue,
+  durableExecutionRecord,
+  encodeStoredValue
+} from "./durable-client-model.ts"
+import type {
+  DurableExecutionRow,
+  DurableHistoryRow
+} from "./durable-client-model.ts"
 import type {
   WorkflowClient,
-  WorkflowExecutionRecord,
   WorkflowExecutionStatus,
   WorkflowResult
 } from "./client-model.ts"
 
 const executionId = () => crypto.randomUUID()
-const StoredValueJson = Schema.fromJsonString(Schema.Struct({ value: Schema.Unknown }))
-const encodeStoredValue = (value: unknown): string =>
-  Schema.encodeSync(StoredValueJson)({ value })
-const decodeStoredValue = (json: string): unknown =>
-  Schema.decodeUnknownSync(StoredValueJson)(json).value
-
-const DurableExecutionRow = Schema.Struct({
-  id: Schema.String,
-  artifact_id: Schema.NullOr(Schema.String),
-  workflow_name: Schema.String,
-  status: WorkflowRunStatusSchema,
-  payload_json: Schema.String,
-  idempotency_key: Schema.NullOr(Schema.String),
-  actor: Schema.NullOr(Schema.String),
-  source_hash: Schema.NullOr(Schema.String),
-  result_json: Schema.NullOr(Schema.String),
-  error_json: Schema.NullOr(Schema.String),
-  started_at: Schema.String,
-  finished_at: Schema.NullOr(Schema.String)
-})
-type DurableExecutionRow = typeof DurableExecutionRow.Type
-
-const DurableHistoryRow = Schema.Struct({
-  sequence: Schema.Number,
-  event_json: Schema.String,
-  created_at: Schema.String
-})
-type DurableHistoryRow = typeof DurableHistoryRow.Type
-
-const StoredHistoryEventJson = Schema.fromJsonString(WorkflowHistoryEventSchema)
-const decodeExecutionRow = Schema.decodeUnknownSync(DurableExecutionRow)
-const decodeHistoryRow = Schema.decodeUnknownSync(DurableHistoryRow)
-
 export const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowClient => {
   const databasePath = runtime.databasePath
   if (databasePath === undefined) {
@@ -126,17 +101,6 @@ export const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowC
     return decodeExecutionRow(row)
   }
 
-  const executionRecord = (row: DurableExecutionRow): WorkflowExecutionRecord => ({
-    executionId: row.id,
-    ...(row.artifact_id === null ? {} : { artifactId: row.artifact_id }),
-    workflowName: row.workflow_name,
-    status: row.status,
-    payload: decodeStoredValue(row.payload_json),
-    startedAt: row.started_at,
-    ...optionalFinishedAt(row.finished_at ?? undefined),
-    ...(row.source_hash === null ? {} : { sourceHash: row.source_hash })
-  })
-
   const workflowFor = (row: DurableExecutionRow): DefinedWorkflow => {
     const workflow = runtime.getWorkflow(row.workflow_name)
     if (workflow === undefined) {
@@ -172,7 +136,7 @@ export const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowC
     `).all(executionId).map((row) => decodeHistoryRow(row)).map((row) => ({
       sequence: row.sequence,
       createdAt: row.created_at,
-      event: Schema.decodeUnknownSync(StoredHistoryEventJson)(row.event_json)
+      event: decodeStoredHistoryEvent(row.event_json)
     }))
   }
 
@@ -333,7 +297,7 @@ export const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowC
     },
 
     async execution(executionId) {
-      return executionRecord(getRow(executionId))
+      return durableExecutionRecord(getRow(executionId))
     },
 
     async executions() {
@@ -341,7 +305,7 @@ export const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowC
         SELECT *
         FROM wf_client_executions
         ORDER BY started_at DESC
-      `).all().map((row) => decodeExecutionRow(row)).map(executionRecord)
+      `).all().map((row) => decodeExecutionRow(row)).map(durableExecutionRecord)
     },
 
     async list(workflow, opts = {}) {
