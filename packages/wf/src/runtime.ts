@@ -114,7 +114,25 @@ export const makeEngineLayer = (options: {
 
 export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): WorkflowRuntime => {
   const workflows = new Map<string, DefinedWorkflow>()
+  const registeredExecutionIds = new Set<string>()
   const databasePath = options.databasePath
+
+  const registerResources = (
+    executionId: string,
+    onEvent?: WorkflowEventSink
+  ): void => {
+    registerExecutionResources(executionId, {
+      ...(onEvent === undefined ? {} : { events: onEvent }),
+      ...(options.secrets === undefined ? {} : { secrets: options.secrets }),
+      ...(options.integrations === undefined ? {} : { integrations: options.integrations })
+    })
+    registeredExecutionIds.add(executionId)
+  }
+
+  const removeResources = (executionId: string): void => {
+    removeExecutionResources(executionId)
+    registeredExecutionIds.delete(executionId)
+  }
 
   const env = () => {
     const workflowLayers = Array.from(workflows.values()).map((workflow) => workflow.layer)
@@ -188,11 +206,7 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
 
     execute({ workflow, payload, executionId, onEvent }) {
       const workflowName = String(workflow.workflow.name ?? workflow.name)
-      registerExecutionResources(executionId, {
-        ...(onEvent === undefined ? {} : { events: onEvent }),
-        ...(options.secrets === undefined ? {} : { secrets: options.secrets }),
-        ...(options.integrations === undefined ? {} : { integrations: options.integrations })
-      })
+      registerResources(executionId, onEvent)
       const effect = Effect.gen(function* () {
         const engine = yield* WorkflowEngine.WorkflowEngine
         yield* emitWorkflowEvent({ type: "workflow.started", workflowName, payload })
@@ -210,18 +224,14 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
         return result
       })
       return runEffect(effect, onEvent).finally(() => {
-        removeExecutionResources(executionId)
+        removeResources(executionId)
       })
     },
 
     deliverSignal({ workflow, executionId, deferredName, payload, onEvent }) {
       // The resumed replay may execute steps in THIS process, so all execution
       // resources are registered together before the wake-up.
-      registerExecutionResources(executionId, {
-        ...(onEvent === undefined ? {} : { events: onEvent }),
-        ...(options.secrets === undefined ? {} : { secrets: options.secrets }),
-        ...(options.integrations === undefined ? {} : { integrations: options.integrations })
-      })
+      registerResources(executionId, onEvent)
       const effect = Effect.gen(function* () {
         const engine = yield* WorkflowEngine.WorkflowEngine
         const deferred = DurableDeferred.make(deferredName, { success: Schema.Unknown })
@@ -267,6 +277,10 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
         return
       }
       disposed = true
+      for (const executionId of registeredExecutionIds) {
+        removeExecutionResources(executionId)
+      }
+      registeredExecutionIds.clear()
       const active = managed
       managed = undefined
       if (active !== undefined) {
