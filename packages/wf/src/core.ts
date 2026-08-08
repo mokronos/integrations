@@ -188,12 +188,18 @@ export interface WorkflowContext<WErrors> {
     step: Step<I, O, E>,
     input: I
   ): WorkflowValue<O, E | NonDeterminismError | StepExecutionError>
-  sleep(duration: Duration.Input, name?: string): WorkflowValue<void, NonDeterminismError>
+  sleep(
+    duration: Duration.Input,
+    name?: string
+  ): WorkflowValue<void, NonDeterminismError | Cancelled>
   waitForSignal<T>(
     name: string,
     schema: AnySchema<T>,
     opts?: { readonly timeout?: Duration.Input }
-  ): WorkflowValue<SignalOutcome<T>, NonDeterminismError | SignalDeliveryError>
+  ): WorkflowValue<
+    SignalOutcome<T>,
+    NonDeterminismError | SignalDeliveryError | Cancelled
+  >
   now(): WorkflowValue<Date, NonDeterminismError>
   random(): WorkflowValue<number, NonDeterminismError>
   code<T>(name: string, options: {
@@ -610,7 +616,10 @@ const makeCtx = <WErrors>(
       }) as WorkflowValue<O, E | NonDeterminismError | StepExecutionError>
     },
 
-    all(effects, options) {
+    all<const Effects extends ReadonlyArray<WorkflowValue<DynamicService, DynamicService>>>(
+      effects: Effects,
+      options?: { readonly name?: string; readonly concurrency?: number | "unbounded" }
+    ) {
       const name = options?.name ?? "all"
       const invocation = nextInvocation(counters, name)
       const activityName = `${name}#${invocation}`
@@ -631,7 +640,7 @@ const makeCtx = <WErrors>(
         })
         const combined = Effect.all(effects, {
           concurrency: options?.concurrency ?? "unbounded"
-        }) as Effect.Effect<any, any, any>
+        }) as WorkflowValue<WorkflowAllSuccess<Effects>, WorkflowAllError<Effects>>
         return yield* combined.pipe(
             Effect.ensuring(Effect.sync(() => {
               parallelDepth--
@@ -653,8 +662,11 @@ const makeCtx = <WErrors>(
               branches,
               error
             }))
-          ) as Effect.Effect<any, any, any>
-      }) as Effect.Effect<any, any, any>
+          )
+      }) as WorkflowValue<
+        WorkflowAllSuccess<Effects>,
+        WorkflowAllError<Effects> | NonDeterminismError
+      >
     },
 
     sleep(duration, name) {
@@ -694,10 +706,14 @@ const makeCtx = <WErrors>(
           activityName: sleepName,
           duration
         })
-      }) as Effect.Effect<any, any, any>
+      }) as WorkflowValue<void, NonDeterminismError | Cancelled>
     },
 
-    waitForSignal(name, schema, opts) {
+    waitForSignal<T>(
+      name: string,
+      schema: AnySchema<T>,
+      opts?: { readonly timeout?: Duration.Input }
+    ) {
       const invocation = nextInvocation(counters, name)
       const waitName = `${name}#${invocation}`
       const call: OrchestrationCall = { kind: "signal", name, counter: invocation }
@@ -777,7 +793,10 @@ const makeCtx = <WErrors>(
           payload: value
         })
         return { type: "signal", value } as const
-      }) as Effect.Effect<any, any, any>
+      }) as WorkflowValue<
+        SignalOutcome<T>,
+        NonDeterminismError | SignalDeliveryError | Cancelled
+      >
     },
 
     now() {
@@ -1047,7 +1066,11 @@ const makeInMemoryCtx = <WErrors>(
       })
     },
 
-    waitForSignal(name, schema, opts) {
+    waitForSignal<T>(
+      name: string,
+      schema: AnySchema<T>,
+      opts?: { readonly timeout?: Duration.Input }
+    ) {
       const invocation = nextInvocation(counters, name)
       const activityName = `${name}#${invocation}`
       const payloadSchema = jsonSchemaOf(schema)
@@ -1144,7 +1167,10 @@ const makeInMemoryCtx = <WErrors>(
           return { type: "signal", value } as const
         },
         catch: (error) => new AsyncFailure(error)
-      }).pipe(Effect.mapError(unwrapAsyncFailure)) as Effect.Effect<any, any, any>
+      }).pipe(Effect.mapError(unwrapAsyncFailure)) as WorkflowValue<
+        SignalOutcome<T>,
+        NonDeterminismError | SignalDeliveryError | Cancelled
+      >
     },
 
     now() {
@@ -1243,7 +1269,10 @@ const makeInMemoryCtx = <WErrors>(
       }) as WorkflowValue<T, NonDeterminismError | CodeExecutionError>
     },
 
-    all(effects, options) {
+    all<const Effects extends ReadonlyArray<WorkflowValue<DynamicService, DynamicService>>>(
+      effects: Effects,
+      options?: { readonly name?: string; readonly concurrency?: number | "unbounded" }
+    ) {
       const name = options?.name ?? "all"
       const invocation = nextInvocation(counters, name)
       const activityName = `${name}#${invocation}`
@@ -1278,13 +1307,13 @@ const makeInMemoryCtx = <WErrors>(
               branchCalls.push(calls)
               branchCollectors.push(calls)
             }),
-            () => effect as Effect.Effect<any, any, any>,
+            () => effect,
             () => Effect.sync(() => {
               branchCollectors.pop()
             })
           )
         )
-        return yield* (Effect.all(wrapped, { concurrency: 1 }) as Effect.Effect<any, any, any>).pipe(
+        return yield* Effect.all(wrapped, { concurrency: 1 }).pipe(
           Effect.tap(() =>
             Effect.gen(function* () {
               yield* persistBlock(branchCalls)
@@ -1313,7 +1342,10 @@ const makeInMemoryCtx = <WErrors>(
             })
           )
         )
-      }) as Effect.Effect<any, any, any>
+      }) as WorkflowValue<
+        WorkflowAllSuccess<Effects>,
+        WorkflowAllError<Effects> | NonDeterminismError
+      >
     },
 
     fail(error) {
