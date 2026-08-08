@@ -48,7 +48,7 @@ const memoryExecutionRecord = (execution: ExecutionRecord): WorkflowExecutionRec
 export const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowClient => {
   const executions = new Map<string, ExecutionRecord>()
   const idempotencyKeys = new Map<string, string>()
-  const signals = createSignalTransport()
+  const signals = runtime?.signals ?? createSignalTransport()
 
   const appendHistory = (record: ExecutionRecord, event: WorkflowHistoryEvent) => {
     record.history.push({

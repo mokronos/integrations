@@ -3,6 +3,7 @@ import type { SecretResolver } from "./secrets.ts"
 import type { WorkflowEventSink } from "./events.ts"
 import type { IntegrationInvoker } from "./integration.ts"
 import type { ConcurrencyLimiter } from "./concurrency.ts"
+import type { SignalTransport } from "./signal.ts"
 
 /** Replaceable dependencies owned by one workflow execution. Keeping them in
  * one record gives the runtime one registration and cleanup lifecycle. */
@@ -11,6 +12,7 @@ export interface ExecutionResources {
   readonly secrets?: SecretResolver
   readonly integrations?: IntegrationInvoker
   readonly concurrency?: ConcurrencyLimiter
+  readonly signals?: SignalTransport
 }
 
 export const currentExecutionResources = Context.Reference<ExecutionResources>(

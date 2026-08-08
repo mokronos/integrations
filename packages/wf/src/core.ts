@@ -12,7 +12,6 @@ import type { WorkflowEvent } from "./schemas.ts"
 import { ExecutionId, jsonSchemaOf } from "./schemas.ts"
 import {
   defaultSignalTransport,
-  registerSignalSchema,
   SignalDeliveryError
 } from "./signal.ts"
 import type { SignalTransport } from "./signal.ts"
@@ -730,7 +729,10 @@ const makeCtx = <WErrors>(
         yield* recordCall(call)
         // Delivery-side validation needs the schema of the wait the run is
         // parked at; replay re-registers it in a fresh process.
-        registerSignalSchema(executionId, name, schema)
+        const contextResources = yield* currentExecutionResources
+        const resources = getExecutionResources(executionId, contextResources)
+        const signals = resources.signals ?? defaultSignalTransport
+        signals.registerSchema(executionId, name, schema)
         yield* emitWorkflowEvent({
           type: "signal.waiting",
           executionId,

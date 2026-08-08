@@ -20,6 +20,8 @@ import {
 import type { IntegrationInvoker } from "./integration.ts"
 import { createConcurrencyLimiter } from "./concurrency.ts"
 import type { ConcurrencyLimiter } from "./concurrency.ts"
+import { createSignalTransport } from "./signal.ts"
+import type { SignalTransport } from "./signal.ts"
 
 type DynamicService = Schema.Schema.Type<Schema.Top>
 
@@ -49,6 +51,7 @@ export interface WorkflowRuntime {
   readonly secrets?: SecretResolver
   readonly integrations?: IntegrationInvoker
   readonly concurrency: ConcurrencyLimiter
+  readonly signals: SignalTransport
   register(workflows: ReadonlyArray<DefinedWorkflow>): void
   getWorkflow(name: string): DefinedWorkflow | undefined
   listWorkflows(name?: string): ReadonlyArray<DefinedWorkflow>
@@ -122,6 +125,7 @@ export const makeEngineLayer = (options: {
 export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): WorkflowRuntime => {
   const workflows = new Map<string, DefinedWorkflow>()
   const concurrency = createConcurrencyLimiter()
+  const signals = createSignalTransport()
   const registeredExecutionIds = new Set<string>()
   const databasePath = options.databasePath
 
@@ -133,7 +137,8 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
       ...(onEvent === undefined ? {} : { events: onEvent }),
       ...(options.secrets === undefined ? {} : { secrets: options.secrets }),
       ...(options.integrations === undefined ? {} : { integrations: options.integrations }),
-      concurrency
+      concurrency,
+      signals
     })
     registeredExecutionIds.add(executionId)
   }
@@ -187,7 +192,8 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
           ...(onEvent === undefined ? {} : { events: onEvent }),
           ...(options.secrets === undefined ? {} : { secrets: options.secrets }),
           ...(options.integrations === undefined ? {} : { integrations: options.integrations }),
-          concurrency
+          concurrency,
+          signals
         })
       ) as Effect.Effect<A, DynamicService, never>
     )
@@ -198,6 +204,7 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
     ...(options.secrets === undefined ? {} : { secrets: options.secrets }),
     ...(options.integrations === undefined ? {} : { integrations: options.integrations }),
     concurrency,
+    signals,
 
     register(registered) {
       for (const workflow of registered) {
@@ -280,6 +287,7 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
     },
 
     resume({ workflow, executionId }) {
+      registerResources(executionId)
       const effect = Effect.gen(function* () {
         const engine = yield* WorkflowEngine.WorkflowEngine
         yield* engine.resume(workflow.workflow, executionId)

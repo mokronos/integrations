@@ -14,7 +14,7 @@ import type { JsonSchema, WorkflowHistoryEvent, WorkflowHistoryRecord, WorkflowR
 import { statusAfterEvent } from "../run-lifecycle.ts"
 import { createWorkflowRuntime } from "../runtime.ts"
 import type { WorkflowRuntime } from "../runtime.ts"
-import { decodeSignal, getSignalSchema } from "../signal.ts"
+import { decodeSignal } from "../signal.ts"
 import type { WorkflowArtifact, WorkflowRunRecord } from "./artifact.ts"
 import { parseJsonText, toJsonText } from "./json.ts"
 import { replayDedupeKey } from "../replay.ts"
@@ -417,12 +417,12 @@ const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowClient =
       // the deferred would otherwise fail the run at replay. In a fresh
       // process the schema registry is empty until the run replays, so nudge
       // a resume and wait for the workflow to park again.
-      let schema = getSignalSchema(executionId, name)
+      let schema = runtime.signals.getSchema(executionId, name)
       if (schema === undefined) {
         await runtime.resume({ workflow, executionId })
         for (let attempt = 0; attempt < 50 && schema === undefined; attempt++) {
           await new Promise((resolve) => setTimeout(resolve, 50))
-          schema = getSignalSchema(executionId, name)
+          schema = runtime.signals.getSchema(executionId, name)
         }
       }
       if (schema !== undefined) {
