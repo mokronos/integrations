@@ -67,8 +67,8 @@ describe("ctx.all", () => {
       output: Schema.Tuple([Schema.Number, Schema.Number]),
       run: function* (_, ctx) {
         return yield* ctx.all([
-          ctx.code("first-value", { run: () => ++firstInvocations }),
-          ctx.code("second-value", { run: () => ++secondInvocations })
+          ctx.code("first-value", { output: Schema.Number, run: () => ++firstInvocations }),
+          ctx.code("second-value", { output: Schema.Number, run: () => ++secondInvocations })
         ], { name: "parallel" })
       }
     })
@@ -84,7 +84,7 @@ describe("ctx.all", () => {
       output: Schema.Tuple([Schema.Number]),
       run: function* (_, ctx) {
         return yield* ctx.all([
-          ctx.code("first-value", { run: () => ++firstInvocations })
+          ctx.code("first-value", { output: Schema.Number, run: () => ++firstInvocations })
         ], { name: "parallel" })
       }
     })

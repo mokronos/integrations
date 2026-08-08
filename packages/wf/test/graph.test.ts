@@ -34,6 +34,7 @@ const CodeWorkflow = defineWorkflow({
   output: t.struct({ subject: t.string }),
   run: function* (input, ctx) {
     const subject = yield* ctx.code("build-subject", {
+      output: t.string,
       reason: "Derive a friendly subject from the recipient's email local part",
       run: () => `Welcome, ${input.email.split("@")[0]}!`
     })

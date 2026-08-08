@@ -141,6 +141,7 @@ describe("Phase 2 determinism", () => {
       run: function* (_, ctx) {
         return yield* ctx.code("build-value", {
           reason: "Build a replayed value",
+          output: Schema.String,
           run: () => "recorded"
         })
       }
@@ -179,6 +180,7 @@ describe("Phase 2 determinism", () => {
       run: function* (_, ctx) {
         return yield* ctx.code("stable-value", {
           reason: "Produce a value once and replay it later",
+          output: Schema.Number,
           run: () => ++invocations
         })
       }
@@ -187,6 +189,11 @@ describe("Phase 2 determinism", () => {
     await expect(workflow.executeInMemory(undefined, { executionId, determinism })).resolves.toBe(1)
     await expect(workflow.executeInMemory(undefined, { executionId, determinism })).resolves.toBe(1)
     expect(invocations).toBe(1)
+
+    determinism.values.set("code:stable-value#1", "not-a-number")
+    await expect(
+      workflow.executeInMemory(undefined, { executionId, determinism })
+    ).rejects.toThrow("Expected number")
   })
 
   test("ctx.code models callback failures in its error channel", async () => {
@@ -196,6 +203,7 @@ describe("Phase 2 determinism", () => {
       output: Schema.Void,
       run: function* (_, ctx) {
         yield* ctx.code("failing-code", {
+          output: Schema.Void,
           run: () => {
             throw new Error("callback failed")
           }

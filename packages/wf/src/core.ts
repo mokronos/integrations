@@ -232,10 +232,11 @@ export interface WorkflowContext<WErrors> {
   >
   now(): WorkflowValue<Date, NonDeterminismError>
   random(): WorkflowValue<number, NonDeterminismError>
-  code<T>(name: string, options: {
+  code<Output extends SynchronousSchema<DynamicService>>(name: string, options: {
     readonly reason?: string
-    readonly run: () => T | Promise<T>
-  }): WorkflowValue<T, NonDeterminismError | CodeExecutionError>
+    readonly output: Output
+    readonly run: () => Output["Type"] | Promise<Output["Type"]>
+  }): WorkflowValue<Output["Type"], NonDeterminismError | CodeExecutionError>
   all<const Effects extends ReadonlyArray<WorkflowValue<DynamicService, DynamicService>>>(
     effects: Effects,
     options?: { readonly name?: string; readonly concurrency?: number | "unbounded" }
@@ -913,9 +914,10 @@ const makeCtx = <WErrors>(
       })
     },
 
-    code<T>(name: string, options: {
+    code<Output extends SynchronousSchema<DynamicService>>(name: string, options: {
       readonly reason?: string
-      readonly run: () => T | Promise<T>
+      readonly output: Output
+      readonly run: () => Output["Type"] | Promise<Output["Type"]>
     }) {
       const invocation = nextInvocation(counters, name)
       const activityName = `${name}#${invocation}`
@@ -929,10 +931,10 @@ const makeCtx = <WErrors>(
           activityName,
           ...(options.reason === undefined ? {} : { reason: options.reason })
         })
-        const result = yield* Effect.tryPromise({
+        const result = decodeSync(options.output, yield* Effect.tryPromise({
           try: async () => options.run(),
           catch: (error) => new AsyncFailure(error)
-        })
+        }))
         yield* emitWorkflowEvent({
           type: "code.completed",
           executionId,
@@ -958,7 +960,7 @@ const makeCtx = <WErrors>(
       )
       const activity = Activity.make({
         name: activityName,
-        success: Schema.Unknown,
+        success: options.output,
         error: Schema.Unknown,
         execute
       }).pipe(Effect.mapError((error) =>
@@ -967,7 +969,7 @@ const makeCtx = <WErrors>(
       return Effect.gen(function* () {
         yield* recordCall(call)
         return yield* activity
-      }) as WorkflowValue<T, NonDeterminismError | CodeExecutionError>
+      }) as WorkflowValue<Output["Type"], NonDeterminismError | CodeExecutionError>
     },
 
     fail(error) {
@@ -1293,9 +1295,10 @@ const makeInMemoryCtx = <WErrors>(
       })
     },
 
-    code<T>(name: string, options: {
+    code<Output extends SynchronousSchema<DynamicService>>(name: string, options: {
       readonly reason?: string
-      readonly run: () => T | Promise<T>
+      readonly output: Output
+      readonly run: () => Output["Type"] | Promise<Output["Type"]>
     }) {
       const invocation = nextInvocation(counters, name)
       const activityName = `${name}#${invocation}`
@@ -1314,7 +1317,7 @@ const makeInMemoryCtx = <WErrors>(
 
           const key = orchestrationValueKey(call)
           if (determinism.values.has(key)) {
-            const result = determinism.values.get(key)
+            const result = decodeSync(options.output, determinism.values.get(key))
             await emit({
               type: "code.completed",
               executionId,
@@ -1324,11 +1327,11 @@ const makeInMemoryCtx = <WErrors>(
               ...(options.reason === undefined ? {} : { reason: options.reason }),
               result
             })
-            return result as Awaited<ReturnType<typeof options.run>>
+            return result
           }
 
           try {
-            const result = await options.run()
+            const result = decodeSync(options.output, await options.run())
             determinism.values.set(key, result)
             await emit({
               type: "code.completed",
@@ -1354,7 +1357,7 @@ const makeInMemoryCtx = <WErrors>(
           }
         },
         catch: (cause) => new CodeExecutionError({ name, cause })
-      }) as WorkflowValue<T, NonDeterminismError | CodeExecutionError>
+      }) as WorkflowValue<Output["Type"], NonDeterminismError | CodeExecutionError>
     },
 
     all<const Effects extends ReadonlyArray<WorkflowValue<DynamicService, DynamicService>>>(

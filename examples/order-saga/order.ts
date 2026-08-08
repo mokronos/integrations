@@ -117,6 +117,7 @@ export const OrderWorkflow = defineWorkflow({
   run: function* (input, ctx) {
     const totalCents = yield* ctx.code("compute-total", {
       reason: "Order total is quantity times unit price",
+      output: t.number,
       run: () => input.quantity * input.unitPriceCents
     })
 

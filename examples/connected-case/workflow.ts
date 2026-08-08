@@ -77,6 +77,7 @@ export const ConnectedCaseWorkflow = defineWorkflow({
     const preparedAt = yield* ctx.now()
     const summary = yield* ctx.code("build-review-summary", {
       reason: "Give the human reviewer one stable summary of all integration results",
+      output: t.string,
       run: () => `${created.caseId}: ${customer.name} (${customer.tier}), approval=${policy.requiresApproval}, prepared=${preparedAt.toISOString()}`
     })
 

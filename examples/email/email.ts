@@ -29,6 +29,7 @@ export const EmailWorkflow = defineWorkflow({
   run: function* (input, ctx) {
     const subject = yield* ctx.code("build-subject", {
       reason: "Derive a friendly subject from the recipient's email local part",
+      output: t.string,
       run: () => `Welcome, ${input.to.split("@")[0]}!`
     })
 
