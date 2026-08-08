@@ -312,6 +312,7 @@ const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowClient =
           determinism: createInMemoryDeterminismState(),
           signalTransport: signals,
           ...(runtime?.secrets === undefined ? {} : { secrets: runtime.secrets }),
+          ...(runtime?.integrations === undefined ? {} : { integrations: runtime.integrations }),
           onEvent: async (event) => {
             appendHistory(execution, event)
         const nextStatus = statusAfterEvent(event)

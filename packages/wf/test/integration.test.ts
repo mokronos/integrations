@@ -3,6 +3,8 @@ import os from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, test } from "bun:test"
 import {
+  createWorkflowClient,
+  createWorkflowRuntime,
   defineWorkflow,
   integration,
   t
@@ -29,6 +31,39 @@ afterEach(async () => {
 })
 
 describe("Executor integration node", () => {
+  test("memory client receives its integration adapter from the runtime", async () => {
+    const EchoOutput = t.struct({ echoed: t.string })
+    const echo = integration({
+      source: { kind: "executor", address: "tools.echo.org.default.echo" },
+      input: t.struct({ value: t.string }),
+      output: EchoOutput
+    })
+    const workflow = defineWorkflow({
+      name: "MemoryIntegrationAdapterTest",
+      input: t.struct({ value: t.string }),
+      output: EchoOutput,
+      run: function* (input, ctx) {
+        return yield* ctx.run(echo, input)
+      }
+    })
+    const runtime = createWorkflowRuntime({
+      backend: "memory",
+      integrations: {
+        invoke: async (_address, input) => ({ echoed: JSON.stringify(input) })
+      }
+    })
+    const client = createWorkflowClient(runtime)
+    try {
+      const handle = await client.start(workflow, { value: "hello" })
+      await expect(client.result(handle.executionId)).resolves.toEqual({
+        type: "completed",
+        value: { echoed: '{"value":"hello"}' }
+      })
+    } finally {
+      await client.dispose()
+    }
+  })
+
   test("invokes an authenticated OpenAPI tool through its persisted address", async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), "wf-executor-integration-"))
     directories.push(directory)

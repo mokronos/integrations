@@ -42,6 +42,7 @@ export interface WorkflowRuntime {
   readonly backend: "memory" | "sqlite"
   readonly databasePath?: string
   readonly secrets?: SecretResolver
+  readonly integrations?: IntegrationInvoker
   register(workflows: ReadonlyArray<any>): void
   getWorkflow(name: string): DefinedWorkflow | undefined
   listWorkflows(name?: string): ReadonlyArray<DefinedWorkflow>
@@ -183,6 +184,7 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
     backend: options.backend,
     ...(databasePath === undefined ? {} : { databasePath }),
     ...(options.secrets === undefined ? {} : { secrets: options.secrets }),
+    ...(options.integrations === undefined ? {} : { integrations: options.integrations }),
 
     register(registered) {
       for (const workflow of registered) {
