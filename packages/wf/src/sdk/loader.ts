@@ -5,12 +5,16 @@ import type { WorkflowArtifact } from "./artifact.ts"
 
 const authoringModuleSymbolName = "@mokronos/wfkit/authoring"
 const authoringModuleSymbol = Symbol.for(authoringModuleSymbolName)
-Object.defineProperty(globalThis, authoringModuleSymbol, {
-  value: authoring,
-  configurable: false,
-  enumerable: false,
-  writable: false
-})
+
+const installAuthoringModule = (): void => {
+  if (Object.hasOwn(globalThis, authoringModuleSymbol)) return
+  Object.defineProperty(globalThis, authoringModuleSymbol, {
+    value: authoring,
+    configurable: false,
+    enumerable: false,
+    writable: false
+  })
+}
 
 export interface LoadedWorkflow {
   readonly artifact: WorkflowArtifact
@@ -43,6 +47,7 @@ const importArtifactModule = async (
 }
 
 const compileWorkflowSource = async (artifact: WorkflowArtifact): Promise<string> => {
+  installAuthoringModule()
   const source = rewriteWfImports(artifact.source)
 
   if (typeof Bun !== "undefined" && Bun.Transpiler !== undefined) {
