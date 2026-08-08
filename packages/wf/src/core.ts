@@ -204,7 +204,11 @@ export interface DefineWorkflowConfig<I, O, WErrors = never> {
 
 export const DefinedWorkflowTypeId = Symbol.for("wf/DefinedWorkflow")
 
-export interface DefinedWorkflow<I = any, O = any, WErrors = any> {
+export interface DefinedWorkflow<
+  I = DynamicService,
+  O = DynamicService,
+  WErrors = DynamicService
+> {
   readonly [DefinedWorkflowTypeId]: typeof DefinedWorkflowTypeId
   readonly name: string
   readonly sourceHash: string
@@ -213,8 +217,8 @@ export interface DefinedWorkflow<I = any, O = any, WErrors = any> {
   readonly errors: AnySchema<WErrors>
   readonly workflow: any
   readonly layer: any
-  readonly execute: (payload: I) => Effect.Effect<O, WErrors | unknown, DynamicService>
-  readonly executeInMemory: (payload: I, options?: InMemoryExecutionOptions) => Promise<O>
+  execute(payload: I): Effect.Effect<O, WErrors | unknown, DynamicService>
+  executeInMemory(payload: I, options?: InMemoryExecutionOptions): Promise<O>
 }
 
 export interface InMemoryExecutionOptions {
