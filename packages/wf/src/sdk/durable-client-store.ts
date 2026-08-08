@@ -99,9 +99,9 @@ export const createDurableClientStore = (databasePath: string) => {
           AND idempotency_key = ?
       `).get(workflowName, idempotencyKey)?.id,
 
-    insert: (input: NewExecution): void => {
+    insert: (input: NewExecution): boolean => {
       const value = Schema.decodeUnknownSync(NewExecution)(input)
-      database.query<
+      const result = database.query<
         Record<string, never>,
         [string, string | null, string, string, string | null, string | null, string | null, string]
       >(`
@@ -110,6 +110,9 @@ export const createDurableClientStore = (databasePath: string) => {
           idempotency_key, actor, source_hash, started_at
         )
         VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?)
+        ON CONFLICT(workflow_name, idempotency_key)
+          WHERE idempotency_key IS NOT NULL
+          DO NOTHING
       `).run(
         value.id,
         value.artifactId ?? null,
@@ -120,6 +123,7 @@ export const createDurableClientStore = (databasePath: string) => {
         value.sourceHash ?? null,
         nowIso()
       )
+      return result.changes === 1
     },
 
     appendHistory: (executionId: string, event: WorkflowHistoryEvent): boolean =>

@@ -117,7 +117,7 @@ export const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowC
       }
 
       const id = executionId()
-      store.insert({
+      const inserted = store.insert({
         id,
         workflowName: selectedWorkflow.name,
         payload,
@@ -126,6 +126,15 @@ export const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowC
         ...(opts.actor === undefined ? {} : { actor: opts.actor }),
         ...(opts.sourceHash === undefined ? {} : { sourceHash: opts.sourceHash })
       })
+      if (!inserted) {
+        const winner = opts.idempotencyKey === undefined
+          ? undefined
+          : store.findIdempotent(selectedWorkflow.name, opts.idempotencyKey)
+        if (winner === undefined) {
+          throw new Error(`Failed to insert workflow execution ${id}`)
+        }
+        return { executionId: winner }
+      }
       store.appendHistory(id, {
         type: "execution.started",
         executionId: ExecutionId.make(id),
