@@ -2,15 +2,13 @@ import { Schema } from "effect"
 
 type AnySchema<A = any> = Schema.Codec<A, any, never, never>
 
-export class SignalDeliveryError extends Error {
-  readonly _tag = "SignalDeliveryError"
-
-  constructor(message: string, options?: { readonly cause?: unknown }) {
-    super(message)
-    this.name = "SignalDeliveryError"
-    this.cause = options?.cause
+export class SignalDeliveryError extends Schema.TaggedErrorClass<SignalDeliveryError>()(
+  "SignalDeliveryError",
+  {
+    message: Schema.String,
+    cause: Schema.optionalKey(Schema.Defect)
   }
-}
+) {}
 
 interface SignalWaiter {
   readonly schema: AnySchema
@@ -43,7 +41,10 @@ export const decodeSignal = <T>(schema: AnySchema<T>, value: unknown): T => {
   try {
     return Schema.decodeUnknownSync(schema)(value)
   } catch (cause) {
-    throw new SignalDeliveryError("Signal payload failed schema validation", { cause })
+    throw new SignalDeliveryError({
+      message: "Signal payload failed schema validation",
+      cause
+    })
   }
 }
 

@@ -82,12 +82,12 @@ export interface WorkflowRuntime {
   dispose(): Promise<void>
 }
 
-export class WorkflowConflictError extends Error {
-  readonly _tag = "WorkflowConflictError"
-
-  constructor(options: { readonly name: string }) {
-    super(`Workflow ${options.name} is already registered with different source`)
-    this.name = "WorkflowConflictError"
+export class WorkflowConflictError extends Schema.TaggedErrorClass<WorkflowConflictError>()(
+  "WorkflowConflictError",
+  { workflowName: Schema.String }
+) {
+  override get message(): string {
+    return `Workflow ${this.workflowName} is already registered with different source`
   }
 }
 
@@ -212,7 +212,7 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
       for (const workflow of registered) {
         const existing = workflows.get(workflow.name)
         if (existing !== undefined && existing.sourceHash !== workflow.sourceHash) {
-          throw new WorkflowConflictError({ name: workflow.name })
+          throw new WorkflowConflictError({ workflowName: workflow.name })
         }
         workflows.set(workflow.name, workflow)
       }
