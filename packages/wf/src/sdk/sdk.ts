@@ -5,7 +5,11 @@ import { Schema } from "effect"
 import type { DefinedWorkflow } from "../core.ts"
 import { Cancelled, cancellationDeferredName } from "../core.ts"
 import type { WorkflowEvent } from "../events.ts"
-import { ExecutionId, WorkflowHistoryEvent as WorkflowHistoryEventSchema } from "../schemas.ts"
+import {
+  ExecutionId,
+  WorkflowHistoryEvent as WorkflowHistoryEventSchema,
+  WorkflowRunStatus as WorkflowRunStatusSchema
+} from "../schemas.ts"
 import type { JsonSchema, WorkflowHistoryEvent, WorkflowHistoryRecord, WorkflowRunStatus } from "../schemas.ts"
 import { statusAfterEvent } from "../run-lifecycle.ts"
 import { createWorkflowRuntime } from "../runtime.ts"
@@ -153,26 +157,32 @@ export const createWorkflowClient = (
 ): WorkflowClient =>
   runtime.backend === "sqlite" ? createDurableWorkflowClient(runtime) : createMemoryWorkflowClient(runtime)
 
-interface DurableExecutionRow {
-  readonly id: string
-  readonly artifact_id: string | null
-  readonly workflow_name: string
-  readonly status: WorkflowExecutionStatus
-  readonly payload_json: string
-  readonly idempotency_key: string | null
-  readonly actor: string | null
-  readonly source_hash: string | null
-  readonly result_json: string | null
-  readonly error_json: string | null
-  readonly started_at: string
-  readonly finished_at: string | null
-}
+const DurableExecutionRow = Schema.Struct({
+  id: Schema.String,
+  artifact_id: Schema.NullOr(Schema.String),
+  workflow_name: Schema.String,
+  status: WorkflowRunStatusSchema,
+  payload_json: Schema.String,
+  idempotency_key: Schema.NullOr(Schema.String),
+  actor: Schema.NullOr(Schema.String),
+  source_hash: Schema.NullOr(Schema.String),
+  result_json: Schema.NullOr(Schema.String),
+  error_json: Schema.NullOr(Schema.String),
+  started_at: Schema.String,
+  finished_at: Schema.NullOr(Schema.String)
+})
+type DurableExecutionRow = typeof DurableExecutionRow.Type
 
-interface DurableHistoryRow {
-  readonly sequence: number
-  readonly event_json: string
-  readonly created_at: string
-}
+const DurableHistoryRow = Schema.Struct({
+  sequence: Schema.Number,
+  event_json: Schema.String,
+  created_at: Schema.String
+})
+type DurableHistoryRow = typeof DurableHistoryRow.Type
+
+const StoredHistoryEventJson = Schema.fromJsonString(WorkflowHistoryEventSchema)
+const decodeExecutionRow = Schema.decodeUnknownSync(DurableExecutionRow)
+const decodeHistoryRow = Schema.decodeUnknownSync(DurableHistoryRow)
 
 const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowClient => {
   const databasePath = runtime.databasePath
@@ -230,7 +240,7 @@ const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowClient =
     if (row === null) {
       throw new Error(`Unknown workflow execution: ${executionId}`)
     }
-    return row
+    return decodeExecutionRow(row)
   }
 
   const executionRecord = (row: DurableExecutionRow): WorkflowExecutionRecord => ({
@@ -276,10 +286,10 @@ const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowClient =
       FROM wf_client_history
       WHERE execution_id = ?
       ORDER BY sequence
-    `).all(executionId).map((row) => ({
+    `).all(executionId).map((row) => decodeHistoryRow(row)).map((row) => ({
       sequence: row.sequence,
       createdAt: row.created_at,
-      event: Schema.decodeUnknownSync(WorkflowHistoryEventSchema)(JSON.parse(row.event_json))
+      event: Schema.decodeUnknownSync(StoredHistoryEventJson)(row.event_json)
     }))
   }
 
@@ -452,7 +462,7 @@ const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowClient =
         SELECT *
         FROM wf_client_executions
         ORDER BY started_at DESC
-      `).all().map(executionRecord)
+      `).all().map((row) => decodeExecutionRow(row)).map(executionRecord)
     },
 
     async list(workflow, opts = {}) {
@@ -461,7 +471,7 @@ const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowClient =
         FROM wf_client_executions
         WHERE workflow_name = ?
         ORDER BY started_at
-      `).all(workflow.name)
+      `).all(workflow.name).map((row) => decodeExecutionRow(row))
         .filter((row) => opts.status === undefined || row.status === opts.status)
       const start = opts.cursor === undefined ? 0 : Number.parseInt(opts.cursor, 10)
       const limit = opts.limit ?? rows.length
