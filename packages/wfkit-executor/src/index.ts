@@ -50,6 +50,7 @@ export type {
 } from "./executor.ts"
 export type {
   DiscoverIntegrationsOptions,
+  IntegrationDiscoveryDependencies,
   IntegrationDiscovery,
   IntegrationInspection,
   IntegrationKind,
@@ -58,6 +59,7 @@ export type {
   IntegrationValidationReport
 } from "./integrations.ts"
 export {
+  createIntegrationDiscovery,
   discoverIntegration,
   inspectIntegration,
   installIntegration,
@@ -78,7 +80,12 @@ export type {
   IntegrationSearchSurface,
   SearchIntegrationsOptions
 } from "./registry.ts"
-export { executorIntegrationInvoker } from "./invoker.ts"
+export {
+  createExecutorIntegrationInvoker,
+  executorIntegrationInvoker
+} from "./invoker.ts"
+export { createExecutorServices } from "./services.ts"
+export type { ExecutorServices } from "./services.ts"
 export {
   IntegrationSearchKind as IntegrationSearchKindSchema,
   IntegrationSearchMatch as IntegrationSearchMatchSchema,

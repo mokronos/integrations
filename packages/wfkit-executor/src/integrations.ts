@@ -1,10 +1,12 @@
 /** Compatibility barrel for integration-facing APIs. Discovery, connection
  * policy, projections, and validation are implemented independently. */
 export {
+  createIntegrationDiscovery,
   discoverIntegration,
   inspectIntegration,
   installIntegration
 } from "./discovery.ts"
+export type { IntegrationDiscoveryDependencies } from "./discovery.ts"
 export {
   IntegrationDiscovery,
   IntegrationInspection,
