@@ -229,6 +229,7 @@ export const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowC
           execution.abort.abort(error)
         }
       }
+      await runtime?.dispose()
       executions.clear()
       idempotencyKeys.clear()
     }

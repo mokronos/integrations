@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import { Schema } from "effect"
-import { createWorkflowClient, defineStep, defineWorkflow, lifecycleRunRecords, parseWorkflowId } from "../src"
+import {
+  createWorkflowClient,
+  createWorkflowRuntime,
+  defineStep,
+  defineWorkflow,
+  lifecycleRunRecords,
+  parseWorkflowId
+} from "../src"
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -34,6 +41,14 @@ describe("Phase 4 workflow client", () => {
     await expect(client.start(workflow, undefined)).rejects.toThrow(
       "Workflow client has been disposed"
     )
+  })
+
+  test("memory client disposal releases its explicit runtime", async () => {
+    const runtime = createWorkflowRuntime({ backend: "memory" })
+    const client = createWorkflowClient(runtime)
+
+    await client.dispose()
+    expect(() => runtime.register([])).toThrow("Workflow runtime has been disposed")
   })
 
   test("pendingSignals reports waits and removes delivered waits", async () => {
