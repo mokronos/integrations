@@ -5,7 +5,9 @@ import {
 } from "@executor-js/sdk/core"
 import { runExecutor } from "./default-host.ts"
 import type { ExecutorRunner } from "./host.ts"
-import type { ExecutorConnection, ExecutorIntegration } from "./schemas.ts"
+import { ExecutorConnection } from "./schemas.ts"
+import type { ExecutorIntegration } from "./schemas.ts"
+import { Schema } from "effect"
 
 const defaultExecutorRunner: ExecutorRunner = { run: runExecutor }
 
@@ -23,29 +25,13 @@ export const createExecutorConnection = async (options: {
     name: ConnectionName.make(options.name),
     template: AuthTemplateSlug.make(options.template),
     value: options.value
-  })).then((connection) => ({
-    owner: connection.owner,
-    name: String(connection.name),
-    integration: String(connection.integration),
-    template: String(connection.template),
-    address: String(connection.address),
-    ...(connection.identityLabel === undefined ? {} : { identityLabel: connection.identityLabel }),
-    ...(connection.expiresAt === undefined ? {} : { expiresAt: connection.expiresAt })
-  }))
+  })).then(Schema.decodeUnknownSync(ExecutorConnection))
 
 export const listExecutorConnections = async (
   runner: ExecutorRunner = defaultExecutorRunner
 ): Promise<ReadonlyArray<ExecutorConnection>> =>
   await runner.run((executor) => executor.connections.list()).then((connections) =>
-    connections.map((connection) => ({
-      owner: connection.owner,
-      name: String(connection.name),
-      integration: String(connection.integration),
-      template: String(connection.template),
-      address: String(connection.address),
-      ...(connection.identityLabel === undefined ? {} : { identityLabel: connection.identityLabel }),
-      ...(connection.expiresAt === undefined ? {} : { expiresAt: connection.expiresAt })
-    }))
+    Schema.decodeUnknownSync(Schema.Array(ExecutorConnection))(connections)
   )
 
 export const removeExecutorConnection = async (options: {

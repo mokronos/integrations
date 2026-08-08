@@ -7,7 +7,8 @@ import {
 } from "@executor-js/sdk/core"
 import { runExecutor } from "./default-host.ts"
 import type { ExecutorRunner } from "./host.ts"
-import type { ExecutorConnection } from "./schemas.ts"
+import { ExecutorConnection } from "./schemas.ts"
+import { Schema } from "effect"
 
 const defaultExecutorRunner: ExecutorRunner = { run: runExecutor }
 
@@ -95,15 +96,7 @@ export const completeExecutorOAuth = async (options: {
     state: OAuthState.make(options.state),
     code: options.code,
     ...(options.callbackDomain === undefined ? {} : { callbackDomain: options.callbackDomain })
-  })).then((connection) => ({
-    owner: connection.owner,
-    name: String(connection.name),
-    integration: String(connection.integration),
-    template: String(connection.template),
-    address: String(connection.address),
-    ...(connection.identityLabel === undefined ? {} : { identityLabel: connection.identityLabel }),
-    ...(connection.expiresAt === undefined ? {} : { expiresAt: connection.expiresAt })
-  }))
+  })).then(Schema.decodeUnknownSync(ExecutorConnection))
 
 /** OAuth operations bound to an explicit host/runner. */
 export const createExecutorAuth = (runner: ExecutorRunner) => ({
