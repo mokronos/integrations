@@ -1,3 +1,4 @@
+import { Schema } from "effect"
 import type { DefinedWorkflow } from "../core.ts"
 import { Cancelled, cancellationDeferredName } from "../core.ts"
 import type { WorkflowEvent } from "../events.ts"
@@ -68,7 +69,11 @@ export const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowC
 
   const terminalResult = (row: DurableExecutionRow): WorkflowResult | undefined => {
     if (row.status === "completed") {
-      return { type: "completed", value: parseJsonText(row.result_json) }
+      const workflow = workflowFor(row)
+      return {
+        type: "completed",
+        value: Schema.decodeUnknownSync(workflow.output)(parseJsonText(row.result_json))
+      }
     }
     if (row.status === "failed") {
       return { type: "failed", error: parseJsonText(row.error_json) }
