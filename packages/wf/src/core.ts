@@ -147,19 +147,19 @@ export const defineStep = <
   }
 }
 
-export type WorkflowValue<A, E = never> = Effect.Effect<A, E, any>
+export type WorkflowValue<A, E = never> = Effect.Effect<A, E, DynamicService>
 
 type WorkflowValueSuccess<EffectValue> =
-  EffectValue extends WorkflowValue<infer A, any> ? A : never
+  EffectValue extends WorkflowValue<infer A, DynamicService> ? A : never
 
 type WorkflowValueError<EffectValue> =
-  EffectValue extends WorkflowValue<any, infer E> ? E : never
+  EffectValue extends WorkflowValue<DynamicService, infer E> ? E : never
 
-type WorkflowAllSuccess<Effects extends ReadonlyArray<WorkflowValue<any, any>>> = {
+type WorkflowAllSuccess<Effects extends ReadonlyArray<WorkflowValue<DynamicService, DynamicService>>> = {
   -readonly [K in keyof Effects]: WorkflowValueSuccess<Effects[K]>
 }
 
-type WorkflowAllError<Effects extends ReadonlyArray<WorkflowValue<any, any>>> =
+type WorkflowAllError<Effects extends ReadonlyArray<WorkflowValue<DynamicService, DynamicService>>> =
   WorkflowValueError<Effects[number]>
 
 export type SignalOutcome<T> =
@@ -181,7 +181,7 @@ export interface WorkflowContext<WErrors> {
     readonly reason?: string
     readonly run: () => T | Promise<T>
   }): WorkflowValue<T, NonDeterminismError>
-  all<const Effects extends ReadonlyArray<WorkflowValue<any, any>>>(
+  all<const Effects extends ReadonlyArray<WorkflowValue<DynamicService, DynamicService>>>(
     effects: Effects,
     options?: { readonly name?: string; readonly concurrency?: number | "unbounded" }
   ): WorkflowValue<WorkflowAllSuccess<Effects>, WorkflowAllError<Effects> | NonDeterminismError>
