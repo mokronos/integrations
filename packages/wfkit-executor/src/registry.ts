@@ -4,9 +4,13 @@ export const IntegrationSearchKind = Schema.Literals(["mcp", "openapi", "graphql
 export type IntegrationSearchKind = typeof IntegrationSearchKind.Type
 
 export const IntegrationSearchQuery = Schema.Struct({
-  q: Schema.String,
+  q: Schema.String.pipe(
+    Schema.refine((value): value is string => value.trim().length > 0)
+  ),
   kind: Schema.optional(IntegrationSearchKind),
-  limit: Schema.optional(Schema.Int)
+  limit: Schema.optional(Schema.Int.pipe(
+    Schema.refine((value): value is number => value >= 1 && value <= 100)
+  ))
 })
 export type IntegrationSearchQuery = typeof IntegrationSearchQuery.Type
 
@@ -97,17 +101,14 @@ export const searchIntegrations = async (
   query: IntegrationSearchQuery,
   options: SearchIntegrationsOptions = {}
 ): Promise<IntegrationSearchResponse> => {
-  const text = query.q.trim()
-  if (text.length === 0) throw new Error("Integration search query cannot be empty")
-  if (query.limit !== undefined && (query.limit < 1 || query.limit > 100)) {
-    throw new Error("Integration search limit must be between 1 and 100")
-  }
+  const decodedQuery = Schema.decodeUnknownSync(IntegrationSearchQuery)(query)
+  const text = decodedQuery.q.trim()
 
   const registryUrl = options.registryUrl ?? integrationsRegistryUrl
   const url = new URL("/api/search", registryUrl)
   url.searchParams.set("q", text)
-  if (query.kind !== undefined) url.searchParams.set("kind", query.kind)
-  if (query.limit !== undefined) url.searchParams.set("limit", String(query.limit))
+  if (decodedQuery.kind !== undefined) url.searchParams.set("kind", decodedQuery.kind)
+  if (decodedQuery.limit !== undefined) url.searchParams.set("limit", String(decodedQuery.limit))
 
   const response = await fetch(url)
   if (!response.ok) {
