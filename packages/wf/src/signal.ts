@@ -117,13 +117,21 @@ export const createSignalTransport = (): SignalTransport => {
       if (buffered.present) return Promise.resolve(buffered.value)
       const key = keyOf(executionId, name)
       return new Promise((resolve, reject) => {
+        const removeAbortListener = () => options.signal?.removeEventListener("abort", abort)
         const waiter: SignalWaiter = {
-          deliver: (value) => resolve(decodeSignal(schema, value)),
-          reject
+          deliver: (value) => {
+            const decoded = decodeSignal(schema, value)
+            removeAbortListener()
+            resolve(decoded)
+          },
+          reject: (error) => {
+            removeAbortListener()
+            reject(error)
+          }
         }
-        const abort = () => {
+        function abort() {
           removeWaiter(key, waiter)
-          reject(options.signal?.reason ?? new Error("Signal wait cancelled"))
+          waiter.reject(options.signal?.reason ?? new Error("Signal wait cancelled"))
         }
         if (options.signal?.aborted === true) {
           abort()
