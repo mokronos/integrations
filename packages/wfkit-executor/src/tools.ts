@@ -1,6 +1,7 @@
 import { ConnectionName, IntegrationSlug, ToolAddress } from "@executor-js/sdk/core"
-import { Effect, Option, Schema } from "effect"
-import { getExecutor, runExecutor } from "./host.ts"
+import { Option, Schema } from "effect"
+import { runExecutor } from "./host.ts"
+import type { ExecutorRunner } from "./host.ts"
 import {
   ExecutorToolAddress,
   type ExecutorTool
@@ -78,52 +79,64 @@ const optionalJson = <A>(value: A | undefined) =>
     ? undefined
     : Option.getOrUndefined(Schema.decodeUnknownOption(Schema.Json)(value))
 
-/** Lists callable tools exposed by installed integrations and their active
- * connections. */
-export const listExecutorTools = async (filter: {
-  readonly integration?: string
-  readonly connection?: string
-} = {}): Promise<ReadonlyArray<ExecutorTool>> => {
-  const executor = await getExecutor()
-  const tools = await Effect.runPromise(executor.tools.list({
-    ...(filter.integration === undefined ? {} : { integration: IntegrationSlug.make(filter.integration) }),
-    ...(filter.connection === undefined ? {} : { connection: ConnectionName.make(filter.connection) })
-  }))
-  const callableTools = tools.filter((tool) => String(tool.address).startsWith("tools."))
-  return await Promise.all(callableTools.map(async (tool) => {
-    const schema = await Effect.runPromise(executor.tools.schema(tool.address))
-    const inputSchema = optionalJson(schema?.inputSchema)
-    const outputSchema = optionalJson(schema?.outputSchema)
-    const normalizedOutputSchema = outputSchema === undefined
-      ? undefined
-      : normalizeExecutorToolOutputSchema(outputSchema)
-    const hasMcpEnvelopeOutput = normalizedOutputSchema === compactMcpOutputSchema
-    return {
-      address: ExecutorToolAddress.make(String(tool.address)),
-      name: String(tool.name),
-      description: tool.description,
-      integration: String(tool.integration),
-      connection: String(tool.connection),
-      ...(inputSchema === undefined ? {} : { inputSchema }),
-      ...(normalizedOutputSchema === undefined ? {} : { outputSchema: normalizedOutputSchema }),
-      ...(schema?.inputTypeScript === undefined ? {} : { inputTypeScript: schema.inputTypeScript }),
-      ...(hasMcpEnvelopeOutput
-        ? { outputTypeScript: "Json" }
-        : schema?.outputTypeScript === undefined
-          ? {}
-          : { outputTypeScript: schema.outputTypeScript })
-    }
-  }))
+export interface ExecutorTools {
+  readonly list: (filter?: {
+    readonly integration?: string
+    readonly connection?: string
+  }) => Promise<ReadonlyArray<ExecutorTool>>
+  readonly execute: (address: ExecutorToolAddress, input: Json) => Promise<Json>
 }
 
-export const executeExecutorTool = async (
-  address: ExecutorToolAddress,
-  input: Json
-): Promise<Json> => {
-  const result = await runExecutor((executor) => executor.execute(ToolAddress.make(address), input))
-  const decoded = await Schema.decodeUnknownPromise(ExecutorToolResult)(result)
-  if (!decoded.ok) {
-    throw new Error(`${decoded.error.code}: ${decoded.error.message}`)
+/** Tool operations bound to an explicit host/runner. */
+export const createExecutorTools = (runner: ExecutorRunner): ExecutorTools => ({
+  list: async (filter: {
+    readonly integration?: string
+    readonly connection?: string
+  } = {}) => {
+    const tools = await runner.run((executor) => executor.tools.list({
+      ...(filter.integration === undefined ? {} : { integration: IntegrationSlug.make(filter.integration) }),
+      ...(filter.connection === undefined ? {} : { connection: ConnectionName.make(filter.connection) })
+    }))
+    const callableTools = tools.filter((tool) => String(tool.address).startsWith("tools."))
+    return await Promise.all(callableTools.map(async (tool) => {
+      const schema = await runner.run((executor) => executor.tools.schema(tool.address))
+      const inputSchema = optionalJson(schema?.inputSchema)
+      const outputSchema = optionalJson(schema?.outputSchema)
+      const normalizedOutputSchema = outputSchema === undefined
+        ? undefined
+        : normalizeExecutorToolOutputSchema(outputSchema)
+      const hasMcpEnvelopeOutput = normalizedOutputSchema === compactMcpOutputSchema
+      return {
+        address: ExecutorToolAddress.make(String(tool.address)),
+        name: String(tool.name),
+        description: tool.description,
+        integration: String(tool.integration),
+        connection: String(tool.connection),
+        ...(inputSchema === undefined ? {} : { inputSchema }),
+        ...(normalizedOutputSchema === undefined ? {} : { outputSchema: normalizedOutputSchema }),
+        ...(schema?.inputTypeScript === undefined ? {} : { inputTypeScript: schema.inputTypeScript }),
+        ...(hasMcpEnvelopeOutput
+          ? { outputTypeScript: "Json" }
+          : schema?.outputTypeScript === undefined
+            ? {}
+            : { outputTypeScript: schema.outputTypeScript })
+      }
+    }))
+  },
+  execute: async (address, input) => {
+    const result = await runner.run((executor) => executor.execute(ToolAddress.make(address), input))
+    const decoded = await Schema.decodeUnknownPromise(ExecutorToolResult)(result)
+    if (!decoded.ok) {
+      throw new Error(`${decoded.error.code}: ${decoded.error.message}`)
+    }
+    return normalizeExecutorToolResult(decoded.data)
   }
-  return normalizeExecutorToolResult(decoded.data)
-}
+})
+
+const defaultTools = createExecutorTools({ run: runExecutor })
+
+/** Lists callable tools exposed by installed integrations and their active
+ * connections. */
+export const listExecutorTools = defaultTools.list
+
+export const executeExecutorTool = defaultTools.execute

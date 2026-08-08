@@ -32,8 +32,10 @@ export {
 } from "./host.ts"
 export type { ExecutorHost, ExecutorRunner } from "./host.ts"
 export {
+  createExecutorTools,
   executeExecutorTool,
   listExecutorTools,
   normalizeExecutorToolOutputSchema,
   normalizeExecutorToolResult
 } from "./tools.ts"
+export type { ExecutorTools } from "./tools.ts"
