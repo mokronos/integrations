@@ -146,7 +146,10 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
   // cannot tear resources out from under an active execution.
   const managedBySignature = new Map<
     string,
-    ManagedRuntime.ManagedRuntime<DynamicService, DynamicService>
+    ManagedRuntime.ManagedRuntime<
+      WorkflowEngine.WorkflowEngine | ExecutionResourceRegistry,
+      DynamicService
+    >
   >()
   let disposed = false
 
@@ -201,10 +204,11 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
       const effect = Effect.gen(function* () {
         const engine = yield* WorkflowEngine.WorkflowEngine
         yield* emitWorkflowEvent({ type: "workflow.started", executionId: ExecutionId.make(executionId), workflowName, payload })
-        const result = yield* engine.execute(workflow.workflow, {
+        const result = yield* workflow.workflow.execute(
+          engine,
           executionId,
-          payload: { value: payload }
-        }).pipe(
+          { value: payload }
+        ).pipe(
           Effect.tap((result: unknown) =>
             emitWorkflowEvent({ type: "workflow.completed", executionId: ExecutionId.make(executionId), workflowName, result })
           ),
@@ -238,7 +242,7 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
         // (resume is a no-op unless the run is recorded as suspended).
         for (let attempt = 0; attempt < 5; attempt++) {
           yield* Effect.sleep("100 millis")
-          yield* engine.resume(workflow.workflow, executionId)
+          yield* workflow.workflow.resume(engine, executionId)
         }
       })
       // The resumed replay may run inside THIS call's engine environment, so
@@ -250,7 +254,7 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
     interrupt({ workflow, executionId }) {
       const effect = Effect.gen(function* () {
         const engine = yield* WorkflowEngine.WorkflowEngine
-        yield* engine.interrupt(workflow.workflow, executionId)
+        yield* workflow.workflow.interrupt(engine, executionId)
       })
       return runEffect(effect)
     },
@@ -259,7 +263,7 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
       registerResources(executionId)
       const effect = Effect.gen(function* () {
         const engine = yield* WorkflowEngine.WorkflowEngine
-        yield* engine.resume(workflow.workflow, executionId)
+        yield* workflow.workflow.resume(engine, executionId)
       })
       return runEffect(effect)
     },
@@ -298,7 +302,7 @@ export const makeWorkflowEffect = (
   const workflowName = String(wf.workflow.name ?? wf.name ?? "Workflow")
   const execution = Effect.gen(function* () {
     yield* emitWorkflowEvent({ type: "workflow.started", workflowName, payload })
-    const result = yield* wf.workflow.execute({ value: payload }).pipe(
+    const result = yield* wf.workflow.executeStandalone({ value: payload }).pipe(
       Effect.tap((result: unknown) =>
         emitWorkflowEvent({ type: "workflow.completed", workflowName, result })
       ),

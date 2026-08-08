@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import { Activity, DurableClock, DurableDeferred, Workflow, WorkflowEngine } from "effect/unstable/workflow"
-import { Cause, Effect, Exit, Option, Schema } from "effect"
+import { Cause, Effect, Exit, Layer, Option, Schema } from "effect"
 import type * as Duration from "effect/Duration"
 import { emitWorkflowEvent } from "./events.ts"
 import type { IntegrationInvoker } from "./integration-invoker.ts"
@@ -224,6 +224,26 @@ export interface DefineWorkflowConfig<I, O, WErrors = never> {
 
 export const DefinedWorkflowTypeId = Symbol.for("wf/DefinedWorkflow")
 
+export interface WorkflowEngineHandle {
+  readonly name: string
+  readonly execute: (
+    engine: WorkflowEngine.WorkflowEngine["Service"],
+    executionId: string,
+    payload: { readonly value: DynamicService }
+  ) => DynamicEffect
+  readonly executeStandalone: (
+    payload: { readonly value: DynamicService }
+  ) => DynamicEffect
+  readonly resume: (
+    engine: WorkflowEngine.WorkflowEngine["Service"],
+    executionId: string
+  ) => Effect.Effect<void, never, DynamicService>
+  readonly interrupt: (
+    engine: WorkflowEngine.WorkflowEngine["Service"],
+    executionId: string
+  ) => Effect.Effect<void, never, DynamicService>
+}
+
 export interface DefinedWorkflow<
   I = DynamicService,
   O = DynamicService,
@@ -235,8 +255,12 @@ export interface DefinedWorkflow<
   readonly input: AnySchema<I>
   readonly output: AnySchema<O>
   readonly errors: AnySchema<WErrors>
-  readonly workflow: any
-  readonly layer: any
+  readonly workflow: WorkflowEngineHandle
+  readonly layer: Layer.Layer<
+    never,
+    never,
+    WorkflowEngine.WorkflowEngine | ExecutionResourceRegistry
+  >
   execute(payload: I): Effect.Effect<O, WErrors | unknown, DynamicService>
   executeInMemory(payload: I, options?: InMemoryExecutionOptions): Promise<O>
 }
@@ -1410,6 +1434,17 @@ export const defineWorkflow = <
     })
   )
 
+  const workflowHandle: WorkflowEngineHandle = {
+    name: workflow.name,
+    execute: (engine, executionId, payload) =>
+      engine.execute(workflow, { executionId, payload }) as DynamicEffect,
+    executeStandalone: (payload) => workflow.execute(payload) as DynamicEffect,
+    resume: (engine, executionId) =>
+      engine.resume(workflow, executionId) as Effect.Effect<void, never, DynamicService>,
+    interrupt: (engine, executionId) =>
+      engine.interrupt(workflow, executionId) as Effect.Effect<void, never, DynamicService>
+  }
+
   const executeInMemory = async (
     payload: Schema.Schema.Type<Input>,
     options: InMemoryExecutionOptions = {}
@@ -1509,11 +1544,15 @@ export const defineWorkflow = <
     input: config.input,
     output: config.output,
     errors,
-    workflow,
-    layer,
+    workflow: workflowHandle,
+    layer: layer as Layer.Layer<
+      never,
+      never,
+      WorkflowEngine.WorkflowEngine | ExecutionResourceRegistry
+    >,
     execute: (payload) => {
       const enginePayload = Schema.decodeUnknownSync(WorkflowPayloadSchema)({ value: payload })
-      return workflow.execute(enginePayload) as Effect.Effect<
+      return workflowHandle.executeStandalone(enginePayload) as Effect.Effect<
         Schema.Schema.Type<Output>,
         Schema.Schema.Type<Errors> | unknown,
         DynamicService
