@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { Effect, Schema } from "effect"
 import {
+  CodeExecutionError,
   createInMemoryDeterminismState,
   defineStep,
   defineWorkflow,
@@ -186,5 +187,24 @@ describe("Phase 2 determinism", () => {
     await expect(workflow.executeInMemory(undefined, { executionId, determinism })).resolves.toBe(1)
     await expect(workflow.executeInMemory(undefined, { executionId, determinism })).resolves.toBe(1)
     expect(invocations).toBe(1)
+  })
+
+  test("ctx.code models callback failures in its error channel", async () => {
+    const workflow = defineWorkflow({
+      name: "codeFailureWorkflow",
+      input: Schema.Void,
+      output: Schema.Void,
+      run: function* (_, ctx) {
+        yield* ctx.code("failing-code", {
+          run: () => {
+            throw new Error("callback failed")
+          }
+        })
+      }
+    })
+
+    const error = await workflow.executeInMemory(undefined).catch((cause) => cause)
+    expect(error).toBeInstanceOf(CodeExecutionError)
+    expect(error).toHaveProperty("message", "Code block failing-code failed: callback failed")
   })
 })

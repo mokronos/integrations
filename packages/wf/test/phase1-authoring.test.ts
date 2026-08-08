@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Schema } from "effect"
-import { defineStep, defineWorkflow } from "../src/core"
+import { defineStep, defineWorkflow, StepExecutionError } from "../src/core"
 
 const Rejected = Schema.TaggedStruct("Rejected", {
   reason: Schema.String
@@ -181,7 +181,9 @@ describe("Phase 1 authoring model", () => {
       }
     })
 
-    await expect(transientWorkflow.executeInMemory(undefined)).rejects.toThrow("temporary")
+    const transientError = await transientWorkflow.executeInMemory(undefined).catch((error) => error)
+    expect(transientError).toBeInstanceOf(StepExecutionError)
+    expect(transientError).toHaveProperty("message", "Step transient failed: temporary")
     expect(transientCalls).toBe(3)
 
     let terminalCalls = 0

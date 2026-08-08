@@ -33,6 +33,8 @@ import {
   verifyOrchestrationCall
 } from "./determinism.ts"
 import type { InMemoryDeterminismState } from "./determinism.ts"
+import { CodeExecutionError, StepExecutionError } from "./execution-errors.ts"
+export { CodeExecutionError, StepExecutionError } from "./execution-errors.ts"
 export {
   createInMemoryDeterminismState,
   NonDeterminismError,
@@ -182,7 +184,10 @@ export type SignalOutcome<T> =
 
 export interface WorkflowContext<WErrors> {
   readonly executionId: string
-  run<I, O, E>(step: Step<I, O, E>, input: I): WorkflowValue<O, E | NonDeterminismError>
+  run<I, O, E>(
+    step: Step<I, O, E>,
+    input: I
+  ): WorkflowValue<O, E | NonDeterminismError | StepExecutionError>
   sleep(duration: Duration.Input, name?: string): WorkflowValue<void, NonDeterminismError>
   waitForSignal<T>(
     name: string,
@@ -194,7 +199,7 @@ export interface WorkflowContext<WErrors> {
   code<T>(name: string, options: {
     readonly reason?: string
     readonly run: () => T | Promise<T>
-  }): WorkflowValue<T, NonDeterminismError>
+  }): WorkflowValue<T, NonDeterminismError | CodeExecutionError>
   all<const Effects extends ReadonlyArray<WorkflowValue<DynamicService, DynamicService>>>(
     effects: Effects,
     options?: { readonly name?: string; readonly concurrency?: number | "unbounded" }
@@ -314,6 +319,14 @@ const isActivityFailure = (value: unknown): value is ActivityFailure =>
 
 const unwrapActivityFailure = (error: unknown): unknown =>
   isActivityFailure(error) ? error.error : error
+
+const typedStepFailure = (stepName: string, error: unknown): unknown =>
+  isActivityFailure(error) && error._wfFailureType === "terminal"
+    ? error.error
+    : new StepExecutionError({
+        stepName,
+        cause: isActivityFailure(error) ? error.error : error
+      })
 
 const unwrapAsyncFailure = (error: unknown): unknown =>
   error instanceof AsyncFailure ? error.error : error
@@ -449,7 +462,7 @@ const makeCtx = <WErrors>(
   return {
     executionId,
 
-    run(step, rawInput) {
+    run<I, O, E>(step: Step<I, O, E>, rawInput: I) {
       const invocation = nextInvocation(counters, step.name)
       const activityName = `${step.name}#${invocation}`
       const call: OrchestrationCall = { kind: "step", name: step.name, counter: invocation }
@@ -544,7 +557,7 @@ const makeCtx = <WErrors>(
           while: (error: unknown) =>
             isActivityFailure(error) && error._wfFailureType === "transient"
         }),
-        Effect.mapError(unwrapActivityFailure)
+        Effect.mapError((error) => typedStepFailure(step.name, error))
       )
 
       if (step.compensate !== undefined) {
@@ -594,7 +607,7 @@ const makeCtx = <WErrors>(
       return Effect.gen(function* () {
         yield* recordCall(call)
         return yield* activity
-      }) as Effect.Effect<any, any, any>
+      }) as WorkflowValue<O, E | NonDeterminismError | StepExecutionError>
     },
 
     all(effects, options) {
@@ -797,7 +810,10 @@ const makeCtx = <WErrors>(
       })
     },
 
-    code(name, options) {
+    code<T>(name: string, options: {
+      readonly reason?: string
+      readonly run: () => T | Promise<T>
+    }) {
       const invocation = nextInvocation(counters, name)
       const activityName = `${name}#${invocation}`
       const call: OrchestrationCall = { kind: "code", name, counter: invocation }
@@ -842,11 +858,13 @@ const makeCtx = <WErrors>(
         success: Schema.Unknown,
         error: Schema.Unknown,
         execute
-      }).pipe(Effect.mapError(unwrapAsyncFailure))
+      }).pipe(Effect.mapError((error) =>
+        new CodeExecutionError({ name, cause: unwrapAsyncFailure(error) })
+      ))
       return Effect.gen(function* () {
         yield* recordCall(call)
         return yield* activity
-      }) as Effect.Effect<any, any, any>
+      }) as WorkflowValue<T, NonDeterminismError | CodeExecutionError>
     },
 
     fail(error) {
@@ -890,7 +908,7 @@ const makeInMemoryCtx = <WErrors>(
   return {
     executionId,
 
-    run(step, rawInput) {
+    run<I, O, E>(step: Step<I, O, E>, rawInput: I) {
       const invocation = nextInvocation(counters, step.name)
       const activityName = `${step.name}#${invocation}`
       const input = decodeSync(step.input, rawInput)
@@ -975,16 +993,20 @@ const makeInMemoryCtx = <WErrors>(
                 release()
               }
             } catch (error) {
-              if (attempt === attempts || isDeclaredTerminal(step.errors, error)) {
+              const terminal = isDeclaredTerminal(step.errors, error)
+              if (attempt === attempts || terminal) {
+                const failure = terminal
+                  ? error
+                  : new StepExecutionError({ stepName: step.name, cause: error })
                 await emit({
                   type: "step.failed",
                   executionId,
                   stepName: step.name,
                   invocation,
                   activityName,
-                  error
+                  error: failure
                 })
-                throw error
+                throw failure
               }
               lastTransient = error
             }
@@ -993,7 +1015,10 @@ const makeInMemoryCtx = <WErrors>(
           throw lastTransient
         },
         catch: (error) => new AsyncFailure(error)
-      }).pipe(Effect.mapError(unwrapAsyncFailure)) as Effect.Effect<any, any, any>
+      }).pipe(Effect.mapError(unwrapAsyncFailure)) as WorkflowValue<
+        O,
+        E | NonDeterminismError | StepExecutionError
+      >
     },
 
     sleep(duration, name) {
@@ -1154,7 +1179,10 @@ const makeInMemoryCtx = <WErrors>(
       })
     },
 
-    code(name, options) {
+    code<T>(name: string, options: {
+      readonly reason?: string
+      readonly run: () => T | Promise<T>
+    }) {
       const invocation = nextInvocation(counters, name)
       const activityName = `${name}#${invocation}`
       const call: OrchestrationCall = { kind: "code", name, counter: invocation }
@@ -1211,8 +1239,8 @@ const makeInMemoryCtx = <WErrors>(
             throw error
           }
         },
-        catch: (error) => new AsyncFailure(error)
-      }).pipe(Effect.mapError(unwrapAsyncFailure)) as Effect.Effect<any, any, any>
+        catch: (cause) => new CodeExecutionError({ name, cause })
+      }) as WorkflowValue<T, NonDeterminismError | CodeExecutionError>
     },
 
     all(effects, options) {

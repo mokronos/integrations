@@ -2,6 +2,7 @@
 // Keep this free of runtime/sdk imports so workflow modules can be inspected
 // in non-Bun tooling such as the web dashboard dev server.
 export {
+  CodeExecutionError,
   createInMemoryDeterminismState,
   defineStep,
   defineWorkflow,
@@ -10,6 +11,7 @@ export {
   NonDeterminismError,
   secret,
   SecretResolutionContext,
+  StepExecutionError,
   StepRetryPolicy
 } from "./core.ts"
 export { integration, IntegrationError } from "./integration.ts"
