@@ -422,7 +422,7 @@ export const workflowToGraph = async <I, O, E>(
   const schemas = new Map<string, WorkflowGraphNodeSchemas>()
   const signalCounts = new Map<string, number>()
   const diagnostics: string[] = []
-  const input = options.input ?? sampleValueForSchema(workflow.input) as I
+  const input = options.input ?? workflow.input.make(sampleValueForSchema(workflow.input))
 
   try {
     await workflow.executeInMemory(input, {
