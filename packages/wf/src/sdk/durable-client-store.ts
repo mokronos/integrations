@@ -151,24 +151,28 @@ export const createDurableClientStore = (databasePath: string) => {
 
     updateStatus: (executionId: string, status: DurableExecutionRow["status"]): void => {
       database.query<Record<string, never>, [DurableExecutionRow["status"], string]>(`
-        UPDATE wf_client_executions SET status = ? WHERE id = ?
+        UPDATE wf_client_executions
+        SET status = ?
+        WHERE id = ? AND status NOT IN ('completed', 'failed', 'compensating')
       `).run(status, executionId)
     },
 
-    complete: (executionId: string, value: Schema.Schema.Type<typeof Schema.Unknown>): void => {
-      database.query<Record<string, never>, [string, string, string]>(`
+    complete: (executionId: string, value: Schema.Schema.Type<typeof Schema.Unknown>): boolean => {
+      const result = database.query<Record<string, never>, [string, string, string]>(`
         UPDATE wf_client_executions
         SET status = 'completed', result_json = ?, finished_at = ?
-        WHERE id = ?
+        WHERE id = ? AND status NOT IN ('completed', 'failed', 'compensating')
       `).run(toJsonText(value), nowIso(), executionId)
+      return result.changes === 1
     },
 
-    fail: (executionId: string, error: Schema.Schema.Type<typeof Schema.Unknown>): void => {
-      database.query<Record<string, never>, [string, string, string]>(`
+    fail: (executionId: string, error: Schema.Schema.Type<typeof Schema.Unknown>): boolean => {
+      const result = database.query<Record<string, never>, [string, string, string]>(`
         UPDATE wf_client_executions
         SET status = 'failed', error_json = ?, finished_at = ?
-        WHERE id = ?
+        WHERE id = ? AND status NOT IN ('completed', 'failed')
       `).run(toJsonText(error), nowIso(), executionId)
+      return result.changes === 1
     },
 
     history,

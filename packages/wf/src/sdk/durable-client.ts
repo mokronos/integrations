@@ -63,13 +63,27 @@ export const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowC
     }
   }
 
-  const runToTerminal = async (row: DurableExecutionRow): Promise<WorkflowResult> => {
+  const terminalResult = (row: DurableExecutionRow): WorkflowResult | undefined => {
     if (row.status === "completed") {
       return { type: "completed", value: parseJsonText(row.result_json) }
     }
     if (row.status === "failed") {
       return { type: "failed", error: parseJsonText(row.error_json) }
     }
+    return undefined
+  }
+
+  const requireTerminalResult = (executionId: string): WorkflowResult => {
+    const result = terminalResult(store.get(executionId))
+    if (result === undefined) {
+      throw new Error(`Expected terminal workflow execution: ${executionId}`)
+    }
+    return result
+  }
+
+  const runToTerminal = async (row: DurableExecutionRow): Promise<WorkflowResult> => {
+    const persisted = terminalResult(row)
+    if (persisted !== undefined) return persisted
 
     const existing = runPromises.get(row.id)
     if (existing !== undefined) {
@@ -85,16 +99,18 @@ export const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowC
           executionId: row.id,
           onEvent: makeEventSink(row.id)
         })
-        store.complete(row.id, value)
-        return { type: "completed", value }
+        return store.complete(row.id, value)
+          ? { type: "completed", value }
+          : requireTerminalResult(row.id)
       } catch (error) {
         // Releasing a process-local engine while a workflow is durably parked
         // must not turn that resource shutdown into a persisted failure.
         if (closing) {
           return { type: "failed", error }
         }
-        store.fail(row.id, error)
-        return { type: "failed", error }
+        return store.fail(row.id, error)
+          ? { type: "failed", error }
+          : requireTerminalResult(row.id)
       }
     })()
     runPromises.set(row.id, promise)
@@ -254,8 +270,8 @@ export const createDurableWorkflowClient = (runtime: WorkflowRuntime): WorkflowC
         store.fail(executionId, new Cancelled({ compensate: true }))
       } else {
         // Hard kill: engine-level interrupt, no unwind.
-        await runtime.interrupt({ workflow, executionId })
         store.fail(executionId, new Cancelled({ compensate: false }))
+        await runtime.interrupt({ workflow, executionId })
       }
     },
 
