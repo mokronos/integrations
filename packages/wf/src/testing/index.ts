@@ -70,8 +70,6 @@ export interface TestRuntime {
 
 interface ExecutionRecord {
   readonly executionId: string
-  readonly workflow: DefinedWorkflow
-  readonly payload: unknown
   readonly determinism: InMemoryDeterminismState
   status: WorkflowExecutionStatus
   result?: WorkflowResult
@@ -188,12 +186,12 @@ export const createTestRuntime = (options: TestRuntimeOptions = {}): TestRuntime
       : { handled: true, value: await mock.execute(options.input, options.context) } as const
   }
 
-  const launch = (
-    workflow: DefinedWorkflow,
-    payload: unknown,
+  const launch = <I, O, E>(
+    workflow: DefinedWorkflow<I, O, E>,
+    payload: I,
     record: ExecutionRecord
   ) => {
-    void workflow.executeInMemory(payload as never, {
+    void workflow.executeInMemory(payload, {
       executionId: record.executionId,
       determinism: record.determinism,
       signalTransport: signals,
@@ -202,7 +200,7 @@ export const createTestRuntime = (options: TestRuntimeOptions = {}): TestRuntime
       signalTimeout: ({ duration }) => makeDelay(duration),
       secrets: secretResolver,
       onEvent: (event) => {
-        appendHistory(record, event as WorkflowHistoryEvent)
+        appendHistory(record, event)
       }
     }).then(
       (value) => {
@@ -220,9 +218,9 @@ export const createTestRuntime = (options: TestRuntimeOptions = {}): TestRuntime
     )
   }
 
-  const createExecution = (
-    workflow: DefinedWorkflow,
-    payload: unknown,
+  const createExecution = <I, O, E>(
+    workflow: DefinedWorkflow<I, O, E>,
+    payload: I,
     opts: { readonly id?: string; readonly determinism?: InMemoryDeterminismState; readonly actor?: string } = {}
   ): ExecutionRecord => {
     let resolveResult!: (result: WorkflowResult) => void
@@ -232,8 +230,6 @@ export const createTestRuntime = (options: TestRuntimeOptions = {}): TestRuntime
     const id = opts.id ?? executionId()
     const record: ExecutionRecord = {
       executionId: id,
-      workflow,
-      payload,
       determinism: opts.determinism ?? createInMemoryDeterminismState(),
       status: "running",
       startedAt: nowIso(),
@@ -339,7 +335,8 @@ export const createTestRuntime = (options: TestRuntimeOptions = {}): TestRuntime
       virtualNow += parseDurationMs(duration)
       timers.sort((left, right) => left.due - right.due)
       for (let index = 0; index < timers.length;) {
-        const timer = timers[index]!
+        const timer = timers[index]
+        if (timer === undefined) break
         if (timer.due > virtualNow) {
           index++
           continue
