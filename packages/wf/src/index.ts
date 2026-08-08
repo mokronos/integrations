@@ -51,7 +51,7 @@ export {
   isWorkflowEvent
 } from "./schemas.ts"
 export type { JsonSchema as JsonSchemaDocument, ExecutionId as ExecutionIdValue } from "./schemas.ts"
-export { deliverSignal, SignalDeliveryError } from "./signal.ts"
+export { SignalDeliveryError } from "./signal.ts"
 export { t } from "./schema.ts"
 export { createWorkflowRuntime, executeWorkflow, makeEngineLayer, makeWorkflowEffect, run, WorkflowConflictError } from "./runtime.ts"
 export type { ExecuteWorkflowOptions, WorkflowRuntime, WorkflowRuntimeOptions } from "./runtime.ts"

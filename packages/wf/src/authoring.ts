@@ -30,5 +30,5 @@ export type {
   WorkflowValue
 } from "./core.ts"
 export type { WorkflowEvent, WorkflowEventSink } from "./events.ts"
-export { deliverSignal, SignalDeliveryError } from "./signal.ts"
+export { SignalDeliveryError } from "./signal.ts"
 export { t } from "./schema.ts"
