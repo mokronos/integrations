@@ -124,25 +124,25 @@ export const createDurableClientStore = (databasePath: string) => {
 
     appendHistory: (executionId: string, event: WorkflowHistoryEvent): boolean =>
       withImmediateTransaction(() => {
-      const dedupeKey = replayDedupeKey(event) ?? null
-      if (dedupeKey !== null) {
-        const existing = database.query<{ id: number }, [string, string]>(`
-          SELECT id
+        const dedupeKey = replayDedupeKey(event) ?? null
+        if (dedupeKey !== null) {
+          const existing = database.query<{ id: number }, [string, string]>(`
+            SELECT id
+            FROM wf_client_history
+            WHERE execution_id = ? AND dedupe_key = ?
+          `).get(executionId, dedupeKey)
+          if (existing !== null) return false
+        }
+        const sequence = database.query<{ sequence: number }, [string]>(`
+          SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence
           FROM wf_client_history
-          WHERE execution_id = ? AND dedupe_key = ?
-        `).get(executionId, dedupeKey)
-        if (existing !== null) return false
-      }
-      const sequence = database.query<{ sequence: number }, [string]>(`
-        SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence
-        FROM wf_client_history
-        WHERE execution_id = ?
-      `).get(executionId)?.sequence ?? 1
-      database.query<Record<string, never>, [string, number, string, string, string | null]>(`
-        INSERT INTO wf_client_history (execution_id, sequence, event_json, created_at, dedupe_key)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(executionId, sequence, toJsonText(event), nowIso(), dedupeKey)
-      return true
+          WHERE execution_id = ?
+        `).get(executionId)?.sequence ?? 1
+        database.query<Record<string, never>, [string, number, string, string, string | null]>(`
+          INSERT INTO wf_client_history (execution_id, sequence, event_json, created_at, dedupe_key)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(executionId, sequence, toJsonText(event), nowIso(), dedupeKey)
+        return true
       }),
 
     updateStatus: (executionId: string, status: DurableExecutionRow["status"]): void => {
