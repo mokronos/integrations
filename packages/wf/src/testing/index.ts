@@ -1,4 +1,4 @@
-import type * as Duration from "effect/Duration"
+import * as Duration from "effect/Duration"
 import { Schema } from "effect"
 import type {
   DefinedWorkflow,
@@ -94,25 +94,6 @@ interface RegisteredStepMock {
 const nowIso = () => new Date().toISOString()
 const executionId = () => crypto.randomUUID()
 
-const parseDurationMs = (duration: Duration.Input): number => {
-  if (typeof duration === "number") {
-    return duration
-  }
-  const raw = String(duration).trim()
-  const match = /^(\d+(?:\.\d+)?)\s*([a-zA-Z]+)?$/.exec(raw)
-  if (match === null) {
-    return 0
-  }
-  const value = Number(match[1])
-  const unit = (match[2] ?? "millis").toLowerCase()
-  if (unit.startsWith("ms") || unit.startsWith("milli")) return value
-  if (unit.startsWith("sec")) return value * 1_000
-  if (unit.startsWith("min")) return value * 60_000
-  if (unit.startsWith("hour")) return value * 60 * 60_000
-  if (unit.startsWith("day")) return value * 24 * 60 * 60_000
-  return value
-}
-
 const statusFromEvent = (event: WorkflowHistoryEvent): WorkflowExecutionStatus | undefined =>
   isWorkflowEvent(event) ? statusAfterEvent(event) : undefined
 
@@ -167,7 +148,7 @@ export const createTestRuntime = (options: TestRuntimeOptions = {}): TestRuntime
     if (timeSkipping) {
       return new Promise((resolve) => setTimeout(resolve, 0))
     }
-    const due = virtualNow + parseDurationMs(duration)
+    const due = virtualNow + Duration.toMillis(Duration.fromInputUnsafe(duration))
     return new Promise((resolve) => {
       timers.push({ due, resolve })
     })
@@ -342,7 +323,7 @@ export const createTestRuntime = (options: TestRuntimeOptions = {}): TestRuntime
     },
 
     async advanceTime(duration) {
-      virtualNow += parseDurationMs(duration)
+      virtualNow += Duration.toMillis(Duration.fromInputUnsafe(duration))
       timers.sort((left, right) => left.due - right.due)
       for (let index = 0; index < timers.length;) {
         const timer = timers[index]
