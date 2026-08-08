@@ -18,6 +18,8 @@ import {
   removeExecutionResources
 } from "./execution-resources.ts"
 import type { IntegrationInvoker } from "./integration.ts"
+import { createConcurrencyLimiter } from "./concurrency.ts"
+import type { ConcurrencyLimiter } from "./concurrency.ts"
 
 export interface ExecuteWorkflowOptions {
   readonly onEvent?: WorkflowEventSink
@@ -44,6 +46,7 @@ export interface WorkflowRuntime {
   readonly databasePath?: string
   readonly secrets?: SecretResolver
   readonly integrations?: IntegrationInvoker
+  readonly concurrency: ConcurrencyLimiter
   register(workflows: ReadonlyArray<any>): void
   getWorkflow(name: string): DefinedWorkflow | undefined
   listWorkflows(name?: string): ReadonlyArray<DefinedWorkflow>
@@ -116,6 +119,7 @@ export const makeEngineLayer = (options: {
 
 export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): WorkflowRuntime => {
   const workflows = new Map<string, DefinedWorkflow>()
+  const concurrency = createConcurrencyLimiter()
   const registeredExecutionIds = new Set<string>()
   const databasePath = options.databasePath
 
@@ -126,7 +130,8 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
     registerExecutionResources(executionId, {
       ...(onEvent === undefined ? {} : { events: onEvent }),
       ...(options.secrets === undefined ? {} : { secrets: options.secrets }),
-      ...(options.integrations === undefined ? {} : { integrations: options.integrations })
+      ...(options.integrations === undefined ? {} : { integrations: options.integrations }),
+      concurrency
     })
     registeredExecutionIds.add(executionId)
   }
@@ -176,7 +181,8 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
         Effect.provideService(currentExecutionResources, {
           ...(onEvent === undefined ? {} : { events: onEvent }),
           ...(options.secrets === undefined ? {} : { secrets: options.secrets }),
-          ...(options.integrations === undefined ? {} : { integrations: options.integrations })
+          ...(options.integrations === undefined ? {} : { integrations: options.integrations }),
+          concurrency
         })
       ) as Effect.Effect<A, unknown, never>
     )
@@ -186,6 +192,7 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
     ...(databasePath === undefined ? {} : { databasePath }),
     ...(options.secrets === undefined ? {} : { secrets: options.secrets }),
     ...(options.integrations === undefined ? {} : { integrations: options.integrations }),
+    concurrency,
 
     register(registered) {
       for (const workflow of registered) {

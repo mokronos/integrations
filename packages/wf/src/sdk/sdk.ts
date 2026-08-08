@@ -313,6 +313,7 @@ const createMemoryWorkflowClient = (runtime?: WorkflowRuntime): WorkflowClient =
           signalTransport: signals,
           ...(runtime?.secrets === undefined ? {} : { secrets: runtime.secrets }),
           ...(runtime?.integrations === undefined ? {} : { integrations: runtime.integrations }),
+          ...(runtime?.concurrency === undefined ? {} : { concurrency: runtime.concurrency }),
           onEvent: async (event) => {
             appendHistory(execution, event)
         const nextStatus = statusAfterEvent(event)

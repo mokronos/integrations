@@ -16,6 +16,8 @@ import {
   SignalDeliveryError
 } from "./signal.ts"
 import type { SignalTransport } from "./signal.ts"
+import { defaultConcurrencyLimiter } from "./concurrency.ts"
+import type { ConcurrencyLimiter, StepConcurrencyPolicy } from "./concurrency.ts"
 import {
   isSecretRef,
   secretRefName
@@ -58,10 +60,7 @@ export interface StepRetryPolicy {
   readonly backoff: "exponential" | "none"
 }
 
-export interface StepConcurrency<I> {
-  readonly key?: (input: I) => string
-  readonly limit: number
-}
+export type StepConcurrency<I> = StepConcurrencyPolicy<I>
 
 export interface Step<I, O, E = never> {
   readonly name: string
@@ -252,6 +251,7 @@ export interface InMemoryExecutionOptions {
   readonly signalTransport?: SignalTransport
   readonly secrets?: SecretResolver
   readonly integrations?: IntegrationInvoker
+  readonly concurrency?: ConcurrencyLimiter
 }
 
 export interface InMemoryDeterminismState {
@@ -402,51 +402,6 @@ const resolveSecretRefs = async <A>(value: A, resolver: SecretResolver | undefin
   return Object.fromEntries(entries) as A
 }
 
-interface SemaphoreState {
-  active: number
-  readonly queue: Array<() => void>
-}
-
-const concurrencySemaphores = new Map<string, SemaphoreState>()
-
-const acquireConcurrency = async <I>(step: Step<I, any, any>, input: I): Promise<() => void> => {
-  const limit = step.concurrency?.limit
-  if (limit === undefined) {
-    return () => undefined
-  }
-  if (!Number.isInteger(limit) || limit < 1) {
-    throw new Error(`Invalid concurrency limit for step ${step.name}: ${limit}`)
-  }
-
-  const key = step.concurrency?.key?.(input) ?? step.name
-  const semaphoreKey = `${step.name}\0${key}`
-  const state = concurrencySemaphores.get(semaphoreKey) ?? { active: 0, queue: [] }
-  concurrencySemaphores.set(semaphoreKey, state)
-
-  if (state.active >= limit) {
-    await new Promise<void>((resolve) => {
-      state.queue.push(resolve)
-    })
-  }
-
-  state.active++
-  let released = false
-  return () => {
-    if (released) {
-      return
-    }
-    released = true
-    state.active--
-    const next = state.queue.shift()
-    if (next !== undefined) {
-      next()
-    }
-    if (state.active === 0 && state.queue.length === 0) {
-      concurrencySemaphores.delete(semaphoreKey)
-    }
-  }
-}
-
 // Durable race with a persisted winner. This deliberately does NOT use
 // DurableDeferred.raceAll: its replay path runs `Effect.flatten(exit)` over
 // the stored winner, which dies with "Not a valid effect" for plain (non-
@@ -563,7 +518,8 @@ const makeCtx = <WErrors>(
         const integrations = resources.integrations
         const result = yield* Effect.tryPromise({
           try: async () => {
-            const release = await acquireConcurrency(step, input)
+            const release = await (resources.concurrency ?? defaultConcurrencyLimiter)
+              .acquire(step.name, step.concurrency, input)
             try {
               const executeInput = await resolveSecretRefs(input, resolver)
               const value = await step.execute(
@@ -944,7 +900,7 @@ const makeInMemoryCtx = <WErrors>(
   emit: (event: WorkflowEvent) => Promise<void>,
   options: Pick<
     InMemoryExecutionOptions,
-    "stepExecutors" | "stepExecutor" | "sleep" | "signalTimeout" | "signalValue" | "signalTransport" | "secrets" | "integrations"
+    "stepExecutors" | "stepExecutor" | "sleep" | "signalTimeout" | "signalValue" | "signalTransport" | "secrets" | "integrations" | "concurrency"
   > = {}
 ): WorkflowContext<WErrors> => {
   const counters = new Map<string, number>()
@@ -996,7 +952,8 @@ const makeInMemoryCtx = <WErrors>(
                 options.integrations
               )
               const executeStep = options.stepExecutors?.get(step)
-              const release = await acquireConcurrency(step, input)
+              const release = await (options.concurrency ?? defaultConcurrencyLimiter)
+                .acquire(step.name, step.concurrency, input)
               try {
                 const executeInput = await resolveSecretRefs(input, options.secrets)
                 const value = await (
@@ -1428,7 +1385,8 @@ export const defineWorkflow = <
       ...(options.signalValue === undefined ? {} : { signalValue: options.signalValue }),
       ...(options.signalTransport === undefined ? {} : { signalTransport: options.signalTransport }),
       ...(options.secrets === undefined ? {} : { secrets: options.secrets }),
-      ...(options.integrations === undefined ? {} : { integrations: options.integrations })
+      ...(options.integrations === undefined ? {} : { integrations: options.integrations }),
+      ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency })
     })
 
     const effect = Effect.gen(function* () {
@@ -1486,7 +1444,8 @@ export const defineWorkflow = <
         Effect.provideService(currentExecutionResources, {
           ...(options.onEvent === undefined ? {} : { events: options.onEvent }),
           ...(options.secrets === undefined ? {} : { secrets: options.secrets }),
-          ...(options.integrations === undefined ? {} : { integrations: options.integrations })
+          ...(options.integrations === undefined ? {} : { integrations: options.integrations }),
+          ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency })
         })
       ) as Effect.Effect<Schema.Schema.Type<Output>, unknown, never>
     )
