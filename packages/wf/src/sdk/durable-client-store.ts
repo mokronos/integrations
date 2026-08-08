@@ -61,6 +61,18 @@ export const createDurableClientStore = (databasePath: string) => {
     }))
   }
 
+  const withImmediateTransaction = <A>(operation: () => A): A => {
+    database.exec("BEGIN IMMEDIATE")
+    try {
+      const result = operation()
+      database.exec("COMMIT")
+      return result
+    } catch (error) {
+      database.exec("ROLLBACK")
+      throw error
+    }
+  }
+
   return {
     get,
 
@@ -110,7 +122,8 @@ export const createDurableClientStore = (databasePath: string) => {
       )
     },
 
-    appendHistory: (executionId: string, event: WorkflowHistoryEvent): boolean => {
+    appendHistory: (executionId: string, event: WorkflowHistoryEvent): boolean =>
+      withImmediateTransaction(() => {
       const dedupeKey = replayDedupeKey(event) ?? null
       if (dedupeKey !== null) {
         const existing = database.query<{ id: number }, [string, string]>(`
@@ -130,7 +143,7 @@ export const createDurableClientStore = (databasePath: string) => {
         VALUES (?, ?, ?, ?, ?)
       `).run(executionId, sequence, toJsonText(event), nowIso(), dedupeKey)
       return true
-    },
+      }),
 
     updateStatus: (executionId: string, status: DurableExecutionRow["status"]): void => {
       database.query<Record<string, never>, [DurableExecutionRow["status"], string]>(`
