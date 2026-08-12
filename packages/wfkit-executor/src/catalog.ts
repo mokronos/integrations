@@ -23,6 +23,7 @@ export interface ExecutorCatalog {
     readonly spec: string
     readonly slug: string
     readonly name?: string
+    readonly description?: string
     readonly baseUrl?: string
   }) => Promise<string>
   readonly list: () => Promise<ReadonlyArray<ExecutorIntegration>>
@@ -34,32 +35,7 @@ export const createExecutorCatalog = (runner: ExecutorRunner): ExecutorCatalog =
   const list = async (): Promise<ReadonlyArray<ExecutorIntegration>> =>
     await runner.run((executor) => executor.integrations.list()).then((integrations) =>
       Schema.decodeUnknownSync(Schema.Array(ExecutorIntegration))(
-        integrations.filter((integration) => integration.kind !== "built-in").map((integration) => ({
-        slug: String(integration.slug),
-        name: integration.name,
-        description: integration.description,
-        kind: integration.kind,
-        authMethods: integration.authMethods.map((method) => ({
-          id: method.id,
-          label: method.label,
-          kind: method.kind,
-          template: method.template,
-          ...(method.oauth === undefined ? {} : {
-            oauth: {
-              ...(method.oauth.discoveryUrl === undefined ? {} : { discoveryUrl: method.oauth.discoveryUrl }),
-              ...(method.oauth.authorizationUrl === undefined ? {} : { authorizationUrl: method.oauth.authorizationUrl }),
-              ...(method.oauth.tokenUrl === undefined ? {} : { tokenUrl: method.oauth.tokenUrl }),
-              ...(method.oauth.resource === undefined ? {} : { resource: method.oauth.resource }),
-              ...(method.oauth.scopes === undefined ? {} : { scopes: method.oauth.scopes }),
-              ...(method.oauth.registrationEndpoint === undefined ? {} : { registrationEndpoint: method.oauth.registrationEndpoint }),
-              ...(method.oauth.supportsDynamicRegistration === undefined
-                ? {}
-                : { supportsDynamicRegistration: method.oauth.supportsDynamicRegistration })
-            }
-          })
-        })),
-        ...(integration.displayUrl === undefined ? {} : { displayUrl: integration.displayUrl })
-        }))
+        integrations.filter((integration) => integration.kind !== "built-in")
       )
     )
 
@@ -74,14 +50,31 @@ export const createExecutorCatalog = (runner: ExecutorRunner): ExecutorCatalog =
       const preview = await runner.run((executor) => executor.openapi.previewSpec(spec))
       return Schema.decodeUnknownSync(ExecutorOpenApiPreview)({
         title: Option.getOrNull(preview.title),
+        description: Option.getOrNull(preview.description),
         version: Option.getOrNull(preview.version),
         operationCount: preview.operationCount,
-        servers: preview.servers.map((server) => ({ url: server.url })),
+        operations: preview.operations.map((operation) => ({
+          operationId: operation.operationId,
+          method: operation.method,
+          path: operation.path,
+          summary: Option.getOrNull(operation.summary),
+          tags: operation.tags,
+          deprecated: operation.deprecated
+        })),
+        tags: preview.tags,
+        servers: preview.servers.map((server) => ({
+          url: server.url,
+          description: Option.getOrNull(server.description)
+        })),
         securitySchemes: preview.securitySchemes.map((scheme) => ({
           name: scheme.name,
           type: scheme.type,
           scheme: Option.getOrNull(scheme.scheme),
-          headerName: Option.getOrNull(scheme.headerName)
+          bearerFormat: Option.getOrNull(scheme.bearerFormat),
+          in: Option.getOrNull(scheme.in),
+          headerName: Option.getOrNull(scheme.headerName),
+          description: Option.getOrNull(scheme.description),
+          openIdConnectUrl: Option.getOrNull(scheme.openIdConnectUrl)
         }))
       })
     },
@@ -100,13 +93,17 @@ export const createExecutorCatalog = (runner: ExecutorRunner): ExecutorCatalog =
         spec: { kind: "url", url: options.spec },
         slug: options.slug,
         ...(options.name === undefined ? {} : { name: options.name }),
+        ...(options.description === undefined ? {} : { description: options.description }),
         ...(options.baseUrl === undefined ? {} : { baseUrl: options.baseUrl })
       })).then((result) => String(result.slug)),
     list,
-    find: async (slug) =>
-      (await list()).find((integration) =>
-        IntegrationSlug.make(integration.slug) === IntegrationSlug.make(slug)
+    find: async (slug) => {
+      const integration = await runner.run((executor) =>
+        executor.integrations.get(IntegrationSlug.make(slug))
       )
+      if (integration === null || integration.kind === "built-in") return undefined
+      return Schema.decodeUnknownSync(ExecutorIntegration)(integration)
+    }
   }
   return catalog
 }

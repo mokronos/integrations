@@ -5,6 +5,8 @@ import type {
   OrchestrationCall
 } from "../core.ts"
 import type { SecretResolver } from "../secrets.ts"
+import type { IntegrationSource } from "../integration-contract.ts"
+import { integrationSourceKey } from "../integration-contract.ts"
 import { createInMemoryDeterminismState } from "../core.ts"
 import { createSignalTransport } from "../signal.ts"
 import type { WorkflowEvent } from "../events.ts"
@@ -83,7 +85,9 @@ const stepSchemas = (step: InspectableStep): WorkflowGraphNodeSchemas | undefine
 }
 
 const describeStep = (step: InspectableStep): WorkflowGraphNodeMetadata => ({
-  ...(step.integration === undefined ? {} : { integration: step.integration }),
+  ...(step.kind !== "integration" || step.source === undefined
+    ? {}
+    : { integration: step.source }),
   ...(step.retry === undefined ? {} : { retry: step.retry }),
   ...(step.concurrency === undefined
     ? {}
@@ -95,17 +99,6 @@ const describeStep = (step: InspectableStep): WorkflowGraphNodeMetadata => ({
       }),
   compensates: step.compensate !== undefined
 })
-
-export const workflowGraphIntegrationAddresses = (
-  graph: WorkflowGraph
-): ReadonlyArray<string> => {
-  const addresses = new Set<string>()
-  for (const node of graph.nodes) {
-    const address = node.metadata.integration?.address
-    if (address !== undefined) addresses.add(address)
-  }
-  return [...addresses]
-}
 
 const metadataFromEvents = (events: ReadonlyArray<WorkflowEvent>) => {
   const metadata = new Map<string, WorkflowGraphNodeMetadata>()
@@ -358,6 +351,30 @@ export const workflowToGraph = async <I, O, E>(
     diagnostics,
     maxNodes: options.maxNodes ?? 100
   })
+}
+
+/**
+ * The distinct integrations a traced workflow needs, in first-use order.
+ *
+ * Deduplicated on the whole reference rather than the integration slug, so a
+ * workflow that reads from `user` and writes to `org` reports both tiers — they
+ * are two separate things to have connected.
+ *
+ * Only branches the trace actually walked are represented; a step behind an
+ * untaken conditional will not appear. Pass a representative `input` to
+ * `workflowToGraph` when a specific path matters.
+ */
+export const workflowGraphIntegrations = (
+  graph: WorkflowGraph
+): ReadonlyArray<IntegrationSource> => {
+  const found = new Map<string, IntegrationSource>()
+  for (const node of graph.nodes) {
+    const reference = node.metadata.integration
+    if (reference === undefined) continue
+    const key = integrationSourceKey(reference)
+    if (!found.has(key)) found.set(key, reference)
+  }
+  return [...found.values()]
 }
 
 export const workflowArtifactToGraph = async (

@@ -19,7 +19,7 @@ const isConnected = (integration: IntegrationOverview): boolean =>
 const connectionExpiry = (connection: ExecutorConnection): string =>
   connection.expiresAt === undefined || connection.expiresAt === null
     ? "no expiry"
-    : `expires ${compactDate(new Date(connection.expiresAt * 1000).toISOString())}`
+    : `expires ${compactDate(new Date(connection.expiresAt).toISOString())}`
 
 const toolLabel = (count: number): string => count === 1 ? "1 tool" : `${count} tools`
 

@@ -61,13 +61,16 @@ JSON by default; use `--text` for human-readable output and `--verbose` for full
 objects. `discover` performs URL
 detection, auth discovery, registration, and tool discovery. For OAuth, `connect`
 opens a browser and returns through a loopback callback.
+Multi-value API-key methods use comma-separated
+`--credential-values variable=ENV_NAME,...` mappings.
 Inspection is progressive: `tools` lists names and descriptions grouped by
 integration (narrow it with `--search`), and `schema` summarizes one named tool's
 address and input and output schemas. Add `--verbose` for the complete schemas.
 `schema` takes a bare tool name while
 it is unique, an integration slug plus a tool name, or a tool address.
 Credentials are AES-GCM encrypted with a separate user-only key; workflows
-persist only the Executor tool address.
+persist only the integration slug, tool name, and optional credential tier, never
+the resolved address or connection name.
 
 `search` queries the public integrations.sh catalog and returns the preferred
 discovery URL for each result. Use `--verbose` for every MCP, API, and GraphQL

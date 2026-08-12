@@ -15,17 +15,18 @@ import {
   sampleValueForJsonSchema,
   toJsonText,
   workflowArtifactToGraph,
-  workflowGraphIntegrationAddresses
+  workflowGraphIntegrations
 } from "@mokronos/wfkit"
 import {
-  executorIntegrationInvoker,
-  validateExecutorToolAddresses
+  describeIntegrationResolution,
+  type ExecutorServices
 } from "@mokronos/wfkit-executor"
-import type { IntegrationValidationReport } from "@mokronos/wfkit-executor"
 import { makeIntegrationsCommand } from "./integrations.ts"
 import { migrateLegacyCatalog } from "../migrate-catalog.ts"
 import { sourcesPath, workflowsPath } from "../paths.ts"
+import type { IntegrationResolution } from "@mokronos/wfkit-executor"
 import type {
+  IntegrationSource,
   JsonSchema,
   PendingSignal,
   WorkflowArtifact,
@@ -123,74 +124,41 @@ export const ${options.name} = defineWorkflow({
 // Listing prints the file path because that is the address an editor or agent
 // needs, and its modification time shows which files changed recently. It
 // deliberately does not load the sources, so listing never runs module code.
-const defaultPageSize = 10
-const defaultDiagnosticLimit = 5
-const defaultDiagnosticDetailLimit = 160
-
-const verboseFlag = () => Flag.boolean("verbose").pipe(
-  Flag.withAlias("v"),
-  Flag.withDescription("Show complete details")
-)
-
-const printMoreHint = (shown: number, total: number): void => {
-  if (shown < total) console.log(`Showing ${shown} of ${total}. Rerun with --verbose for all.`)
-}
-
-const printWorkflows = (
-  catalog: WorkflowCatalog,
-  workflows: ReadonlyArray<WorkflowArtifact>,
-  verbose: boolean
-) => {
+const printWorkflows = (catalog: WorkflowCatalog, workflows: ReadonlyArray<WorkflowArtifact>) => {
   if (workflows.length === 0) {
     console.log(`No workflows found in ${catalog.directory}`)
     return
   }
 
-  const visible = verbose ? workflows : workflows.slice(0, defaultPageSize)
-  for (const workflow of visible) {
-    console.log(
-      verbose
-        ? `${workflow.id}\tupdated ${workflow.updatedAt ?? "unknown"}\t${workflow.source.length} bytes\t${catalog.pathFor(workflow.id)}`
-        : `${workflow.id}\tupdated ${workflow.updatedAt ?? "unknown"}\t${catalog.pathFor(workflow.id)}`
-    )
+  for (const workflow of workflows) {
+    console.log(`${workflow.id}\tupdated ${workflow.updatedAt ?? "unknown"}\t${catalog.pathFor(workflow.id)}`)
   }
-  printMoreHint(visible.length, workflows.length)
 }
 
-const printRuns = (runs: ReadonlyArray<WorkflowRunRecord>, verbose: boolean) => {
+const printRuns = (runs: ReadonlyArray<WorkflowRunRecord>) => {
   if (runs.length === 0) {
     console.log("No workflow runs found.")
     return
   }
 
-  const visible = verbose ? runs : runs.slice(0, defaultPageSize)
-  for (const run of visible) {
+  for (const run of runs) {
     const finishedAt = run.finishedAt ?? "-"
     console.log(
-      verbose
-        ? `${run.id}\t${run.status}\t${run.workflowId}\t${run.startedAt}\t${finishedAt}`
-        : `${run.id}\t${run.status}\t${run.workflowId}`
+      `${run.id}\t${run.status}\t${run.workflowId}\t${run.startedAt}\t${finishedAt}`
     )
   }
-  printMoreHint(visible.length, runs.length)
 }
 
-const printRunEvents = (events: ReadonlyArray<WorkflowHistoryRecord>, verbose: boolean) => {
+const printRunEvents = (events: ReadonlyArray<WorkflowHistoryRecord>) => {
   if (events.length === 0) {
     console.log("No workflow run events found.")
     return
   }
 
-  const visible = verbose ? events : events.slice(-defaultPageSize)
-  for (const event of visible) {
+  for (const event of events) {
     console.log(
-      verbose
-        ? `${event.sequence}\t${event.createdAt}\t${event.event.type}\t${stringifyEventValue(event.event)}`
-        : `${event.sequence}\t${event.createdAt}\t${event.event.type}`
+      `${event.sequence}\t${event.createdAt}\t${event.event.type}\t${stringifyEventValue(event.event)}`
     )
-  }
-  if (visible.length < events.length) {
-    console.log(`Showing latest ${visible.length} of ${events.length}. Rerun with --verbose for full events.`)
   }
 }
 
@@ -202,64 +170,38 @@ const writeStdoutLine = (text: string): Promise<void> =>
     })
   })
 
-const resultDisplayLimit = 800
-
-const printRunResult = async (result: unknown, verbose: boolean): Promise<void> => {
+const printRunResult = async (result: unknown): Promise<void> => {
   if (result === undefined) {
     await writeStdoutLine("Workflow completed.")
     return
   }
 
-  const compact = JSON.stringify(result)
-  if (verbose) {
-    await writeStdoutLine(JSON.stringify(result, null, 2))
-    return
-  }
-  if (compact.length <= resultDisplayLimit) {
-    await writeStdoutLine(compact)
-    return
-  }
-  await writeStdoutLine(JSON.stringify({
-    truncated: true,
-    characters: compact.length,
-    preview: compact.slice(0, resultDisplayLimit),
-    next: "Rerun with --verbose for the complete result."
-  }))
+  await writeStdoutLine(JSON.stringify(result, null, 2))
 }
 
 const samplePayloadFor = (signal: PendingSignal): unknown =>
   signal.payloadSchema === undefined ? {} : sampleValueForJsonSchema(signal.payloadSchema)
 
-const describePendingSignal = (runId: string, signal: PendingSignal, verbose: boolean): string => {
-  const schemaLine = !verbose || signal.payloadSchema === undefined
+const describePendingSignal = (runId: string, signal: PendingSignal): string => {
+  const schemaLine = signal.payloadSchema === undefined
     ? ""
     : `\n  expected payload schema: ${toJsonText(signal.payloadSchema)}`
-  const sample = toJsonText(samplePayloadFor(signal))
-  const payload = verbose || sample.length <= eventDetailLimit ? sample : "<json-payload>"
-  return `Currently waiting for signal "${signal.name}".${schemaLine}\n  deliver with: wf signal ${runId} ${signal.name} '${payload}'`
+  return `Currently waiting for signal "${signal.name}".${schemaLine}\n  deliver with: wf signal ${runId} ${signal.name} '${toJsonText(samplePayloadFor(signal))}'`
 }
 
-const printPendingSignalHint = (
-  runId: string,
-  pendingSignals: ReadonlyArray<PendingSignal>,
-  verbose: boolean
-) => {
-  const visibleSignals = verbose ? pendingSignals : pendingSignals.slice(0, defaultDiagnosticLimit)
-  const names = visibleSignals
+const printPendingSignalHint = (runId: string, pendingSignals: ReadonlyArray<PendingSignal>) => {
+  const names = pendingSignals
     .map((signal) => signal.timeout === undefined
       ? signal.name
       : `${signal.name} timeout=${stringifyEventValue(signal.timeout)}`)
     .join(", ")
-  const remaining = pendingSignals.length - visibleSignals.length
-  console.error(`${eventTag("signal")} ${yellow("waiting")} for ${bold(names)}${remaining > 0 ? ` (+${remaining} more)` : ""}`)
+  console.error(`${eventTag("signal")} ${yellow("waiting")} for ${bold(names)}`)
   const signal = pendingSignals[0]
   if (signal !== undefined) {
-    if (verbose && signal.payloadSchema !== undefined) {
+    if (signal.payloadSchema !== undefined) {
       console.error(`${eventTag("signal")} ${bold(signal.name)} expects payload schema: ${dim(toJsonText(signal.payloadSchema))}`)
     }
-    const sample = toJsonText(samplePayloadFor(signal))
-    const payload = verbose || sample.length <= eventDetailLimit ? sample : "<json-payload>"
-    console.error(`${bold("Resume with:")} wf signal ${runId} ${signal.name} '${payload}'`)
+    console.error(`${bold("Resume with:")} wf signal ${runId} ${signal.name} '${toJsonText(samplePayloadFor(signal))}'`)
   }
 }
 
@@ -309,13 +251,11 @@ const stringifyEventValue = (value: unknown): string => {
 
 const eventDetailLimit = 320
 
-const summarizeValue = (value: unknown, limit: number): string => {
+const summarizeEventValue = (value: unknown): string => {
   const serialized = stringifyEventValue(value)
-  if (serialized.length <= limit) return serialized
-  return `${serialized.slice(0, limit)}… (+${serialized.length - limit} chars)`
+  if (serialized.length <= eventDetailLimit) return serialized
+  return `${serialized.slice(0, eventDetailLimit)}… (+${serialized.length - eventDetailLimit} chars)`
 }
-
-const summarizeEventValue = (value: unknown): string => summarizeValue(value, eventDetailLimit)
 
 // Derived from the graph schema rather than restated, so widening a metadata
 // field cannot silently drift from what this formatter accepts.
@@ -360,27 +300,20 @@ const printSchemaLine = (label: string, schema: JsonSchema | undefined) => {
   console.log(`${dim(`${label}:`)} ${toJsonText(schema)}`)
 }
 
-const printValidationResult = (
-  result: Awaited<ReturnType<typeof workflowArtifactToGraph>>,
-  verbose: boolean
-) => {
+const printValidationResult = (result: Awaited<ReturnType<typeof workflowArtifactToGraph>>) => {
   const graph = result.graph
   if (graph === undefined) {
     return
   }
 
   const exportName = result.exportName ?? "default"
-  const nodes = graph.nodes.filter((node) => node.kind !== "start" && node.kind !== "end")
-  console.log(`${green("Valid")} ${bold(result.artifact.id)}\t${bold(graph.workflowName)}#${exportName}\t${nodes.length} orchestration call${nodes.length === 1 ? "" : "s"}`)
-  if (!verbose) {
-    console.log("details: rerun with --verbose for schemas and traced flow")
-    return
-  }
+  console.log(`${green("Valid")} ${bold(result.artifact.id)}\t${bold(graph.workflowName)}#${exportName}`)
   printSchemaLine("input", graph.schemas?.input)
   printSchemaLine("output", graph.schemas?.output)
   printSchemaLine("errors", graph.schemas?.errors)
   console.log(bold("flow:"))
 
+  const nodes = graph.nodes.filter((node) => node.kind !== "start" && node.kind !== "end")
   if (nodes.length === 0) {
     console.log("  (no orchestration calls)")
     return
@@ -394,56 +327,44 @@ const printValidationResult = (
   }
 }
 
+/** One traced integration requirement paired with what it resolves to on this
+ *  machine right now. */
 interface IntegrationReadiness {
-  readonly address: string
-  readonly report: IntegrationValidationReport
+  readonly source: IntegrationSource
+  readonly resolution: IntegrationResolution
 }
 
+/** Checks every integration the trace reached against the local executor.
+ *
+ * This is the half of validation that is NOT a property of the workflow source:
+ * the same definition is ready on one machine and unconnected on another. A
+ * workflow arriving from a colleague validates structurally but reports here
+ * exactly which connections its new owner still has to make. */
 const checkGraphIntegrations = async (
+  executor: ExecutorServices,
   graph: NonNullable<Awaited<ReturnType<typeof workflowArtifactToGraph>>["graph"]>
 ): Promise<ReadonlyArray<IntegrationReadiness>> =>
-  await validateExecutorToolAddresses(workflowGraphIntegrationAddresses(graph))
+  await Promise.all(
+    workflowGraphIntegrations(graph).map(async (source) => ({
+      source,
+      resolution: await executor.resolveIntegration(source)
+    }))
+  )
 
-const printIntegrationReadiness = (
-  entries: ReadonlyArray<IntegrationReadiness>,
-  verbose: boolean
-) => {
+const printIntegrationReadiness = (entries: ReadonlyArray<IntegrationReadiness>) => {
   if (entries.length === 0) return
   console.log(bold("integrations:"))
-  const visible = verbose ? entries : entries.slice(0, defaultDiagnosticLimit)
-  for (const entry of visible) {
-    const catalog = entry.report.findings.find((finding) => finding.check === "catalog")
-    const status = entry.report.ok
-      ? green("ready")
-      : catalog?.message.startsWith("Could not inspect") === true
-        ? red("error")
-        : red("missing")
-    const detail = catalog === undefined
-      ? ""
-      : verbose || catalog.message.length <= defaultDiagnosticDetailLimit
-        ? catalog.message
-        : `${catalog.message.slice(0, defaultDiagnosticDetailLimit)}… (+${catalog.message.length - defaultDiagnosticDetailLimit} chars)`
-    console.log(
-      `  ${status}\t${entry.address}` +
-      (detail.length === 0 ? "" : ` ${dim(detail)}`)
-    )
+  for (const { source, resolution } of entries) {
+    const line = describeIntegrationResolution(source, resolution)
+    const ready = resolution.status === "resolved" || resolution.status === "legacy-address"
+    console.log(`  ${ready ? green("ready") : red(resolution.status)}\t${line}`)
   }
-  printMoreHint(visible.length, entries.length)
 }
 
-const validationError = (
-  result: Awaited<ReturnType<typeof workflowArtifactToGraph>>,
-  verbose: boolean
-): Error => {
+const validationError = (result: Awaited<ReturnType<typeof workflowArtifactToGraph>>): Error => {
   const traceDiagnostics = result.graph?.diagnostics ?? []
   const diagnostics = [...result.diagnostics, ...traceDiagnostics]
-  const visible = verbose ? diagnostics : diagnostics.slice(0, defaultDiagnosticLimit)
-  const more = visible.length < diagnostics.length
-    ? `\n  - ${diagnostics.length - visible.length} more; rerun with --verbose for all diagnostics`
-    : ""
-  return new Error(`Invalid ${result.artifact.id}${visible.map((diagnostic) =>
-    `\n  - ${verbose ? diagnostic : summarizeValue(diagnostic, defaultDiagnosticDetailLimit)}`
-  ).join("")}${more}`)
+  return new Error(`Invalid ${result.artifact.id}${diagnostics.map((diagnostic) => `\n  - ${diagnostic}`).join("")}`)
 }
 
 const fileValidationArtifact = async (
@@ -465,20 +386,26 @@ const catalogValidationArtifact = async (
   return artifact
 }
 
-const withConsoleOutput = async <A>(verbose: boolean, task: () => Promise<A>): Promise<A> => {
+const traceWorkflowArtifact = async (
+  artifact: WorkflowArtifact,
+  inputText: string | undefined
+): Promise<Awaited<ReturnType<typeof workflowArtifactToGraph>>> => {
   const log = console.log
   const info = console.info
   const warn = console.warn
   const error = console.error
   const debug = console.debug
-  const sink = verbose ? error : (): void => {}
-  console.log = sink
-  console.info = sink
-  console.warn = sink
-  console.error = sink
-  console.debug = sink
+  const suppress = (): void => {}
+  console.log = suppress
+  console.info = suppress
+  console.warn = suppress
+  console.error = suppress
+  console.debug = suppress
   try {
-    return await task()
+    return await workflowArtifactToGraph(
+      artifact,
+      inputText === undefined ? {} : { input: parseJsonInput(inputText) }
+    )
   } finally {
     console.log = log
     console.info = info
@@ -487,18 +414,6 @@ const withConsoleOutput = async <A>(verbose: boolean, task: () => Promise<A>): P
     console.debug = debug
   }
 }
-
-const traceWorkflowArtifact = async (
-  artifact: WorkflowArtifact,
-  inputText: string | undefined,
-  verbose: boolean
-): Promise<Awaited<ReturnType<typeof workflowArtifactToGraph>>> =>
-  withConsoleOutput(verbose, () =>
-    workflowArtifactToGraph(
-      artifact,
-      inputText === undefined ? {} : { input: parseJsonInput(inputText) }
-    )
-  )
 
 // --- colored event output ---------------------------------------------------
 // Category tints the [tag], the verb carries the outcome (green/red/yellow),
@@ -560,32 +475,27 @@ const printEventLine = (
   console.error(`${eventTag(category)} ${paintVerb(verb)} ${bold(subject)}${detailText}`)
 }
 
-const errorDetail = (error: unknown, verbose: boolean): EventDetail => [
-  "error",
-  red(verbose ? stringifyEventValue(error) : summarizeEventValue(error))
-]
+const errorDetail = (error: unknown): EventDetail => ["error", red(summarizeEventValue(error))]
 
-const reasonDetails = (reason: string | undefined, verbose: boolean): ReadonlyArray<EventDetail> =>
-  reason === undefined ? [] : [["reason", verbose ? stringifyEventValue(reason) : summarizeEventValue(reason)]]
+const reasonDetails = (reason: string | undefined): ReadonlyArray<EventDetail> =>
+  reason === undefined ? [] : [["reason", summarizeEventValue(reason)]]
 
-const printWorkflowEvent = (event: WorkflowEvent, verbose: boolean) => {
-  const detail = (value: unknown): string =>
-    verbose ? stringifyEventValue(value) : summarizeEventValue(value)
+const printWorkflowEvent = (event: WorkflowEvent) => {
   switch (event.type) {
     case "workflow.started":
       printEventLine("workflow", "started", event.workflowName, [
-        ["input", detail(event.payload)]
+        ["input", summarizeEventValue(event.payload)]
       ])
       return
 
     case "workflow.completed":
       printEventLine("workflow", "completed", event.workflowName, [
-        ["result", detail(event.result)]
+        ["result", summarizeEventValue(event.result)]
       ])
       return
 
     case "workflow.failed":
-      printEventLine("workflow", "failed", event.workflowName, [errorDetail(event.error, verbose)])
+      printEventLine("workflow", "failed", event.workflowName, [errorDetail(event.error)])
       return
 
     case "step.started":
@@ -595,17 +505,17 @@ const printWorkflowEvent = (event: WorkflowEvent, verbose: boolean) => {
     case "step.completed":
       printEventLine("step", "completed", event.activityName, [
         ["attempt", String(event.attempt)],
-        ["result", detail(event.result)]
+        ["result", summarizeEventValue(event.result)]
       ])
       return
 
     case "step.failed":
-      printEventLine("step", "failed", event.activityName, [errorDetail(event.error, verbose)])
+      printEventLine("step", "failed", event.activityName, [errorDetail(event.error)])
       return
 
     case "compensation.started":
       printEventLine("compensation", "started", event.activityName, [
-        ["reason", detail(event.reason)]
+        ["reason", summarizeEventValue(event.reason)]
       ])
       return
 
@@ -614,12 +524,12 @@ const printWorkflowEvent = (event: WorkflowEvent, verbose: boolean) => {
       return
 
     case "compensation.failed":
-      printEventLine("compensation", "failed", event.activityName, [errorDetail(event.error, verbose)])
+      printEventLine("compensation", "failed", event.activityName, [errorDetail(event.error)])
       return
 
     case "sleep.started":
       printEventLine("sleep", "started", event.activityName, [
-        ["duration", detail(event.duration)]
+        ["duration", summarizeEventValue(event.duration)]
       ])
       return
 
@@ -633,31 +543,31 @@ const printWorkflowEvent = (event: WorkflowEvent, verbose: boolean) => {
 
     case "signal.received":
       printEventLine("signal", "received", event.activityName, [
-        ["payload", detail(event.payload)]
+        ["payload", summarizeEventValue(event.payload)]
       ])
       return
 
     case "signal.timeout":
       printEventLine("signal", "timeout", event.activityName, [
-        ["timeout", detail(event.timeout)]
+        ["timeout", summarizeEventValue(event.timeout)]
       ])
       return
 
     case "code.started":
-      printEventLine("code", "started", event.activityName, reasonDetails(event.reason, verbose))
+      printEventLine("code", "started", event.activityName, reasonDetails(event.reason))
       return
 
     case "code.completed":
       printEventLine("code", "completed", event.activityName, [
-        ...reasonDetails(event.reason, verbose),
-        ["result", detail(event.result)]
+        ...reasonDetails(event.reason),
+        ["result", summarizeEventValue(event.result)]
       ])
       return
 
     case "code.failed":
       printEventLine("code", "failed", event.activityName, [
-        ...reasonDetails(event.reason, verbose),
-        errorDetail(event.error, verbose)
+        ...reasonDetails(event.reason),
+        errorDetail(event.error)
       ])
       return
 
@@ -672,7 +582,7 @@ const printWorkflowEvent = (event: WorkflowEvent, verbose: boolean) => {
     case "all.failed":
       printEventLine("all", "failed", event.activityName, [
         ["branches", String(event.branches)],
-        errorDetail(event.error, verbose)
+        errorDetail(event.error)
       ])
       return
   }
@@ -682,30 +592,23 @@ const awaitAndPrintRun = async (options: {
   readonly client: WorkflowClient
   readonly runId: string
   readonly historyLength: number
-  readonly verbose: boolean
 }) => {
-  const outcome = await withConsoleOutput(
-    options.verbose,
-    () => options.client.observe(options.runId)
-  )
+  const outcome = await options.client.observe(options.runId)
   const records = (await options.client.history(options.runId))
     .filter((record) => record.sequence > options.historyLength)
-  if (options.verbose) {
-    for (const record of records) {
-      if (isPrintableWorkflowEvent(record.event)) {
-        printWorkflowEvent(record.event, true)
-      }
+  for (const record of records) {
+    if (isPrintableWorkflowEvent(record.event)) {
+      printWorkflowEvent(record.event)
     }
   }
 
   if (outcome.type === "signal-suspended") {
-    printPendingSignalHint(options.runId, outcome.pendingSignals, options.verbose)
+    printPendingSignalHint(options.runId, outcome.pendingSignals)
     return
   }
 
   if (outcome.result.type === "completed") {
-    printEventLine("run", "completed", options.runId)
-    await printRunResult(outcome.result.value, options.verbose)
+    await printRunResult(outcome.result.value)
     return
   }
 
@@ -714,11 +617,11 @@ const awaitAndPrintRun = async (options: {
 
 const engineDatabasePath = (storageDir: string) => path.join(storageDir, "engine.sqlite")
 
-const createEngineBackedClient = (storageDir: string) => {
+const createEngineBackedClient = (runtimeOptions: CliRuntimeOptions) => {
   const runtime = createWorkflowRuntime({
     backend: "sqlite",
-    databasePath: engineDatabasePath(storageDir),
-    integrations: executorIntegrationInvoker
+    databasePath: engineDatabasePath(runtimeOptions.storageDir),
+    integrations: runtimeOptions.executor.integrationInvoker
   })
   const client = createWorkflowClient(runtime)
   return { runtime, client }
@@ -727,6 +630,7 @@ const createEngineBackedClient = (storageDir: string) => {
 export interface CliRuntimeOptions {
   readonly rootDir: string
   readonly storageDir: string
+  readonly executor: ExecutorServices
 }
 
 class WorkflowCliError extends Data.TaggedError("WorkflowCliError")<{
@@ -739,17 +643,17 @@ const cliError = (error: unknown): WorkflowCliError =>
 const runCliTask = <A>(task: () => Promise<A>): Effect.Effect<A, WorkflowCliError> =>
   Effect.tryPromise({ try: task, catch: cliError })
 
-const legacyMigrations = new Map<string, Promise<ReadonlyArray<string>>>()
+const legacyMigrations = new Map<string, Promise<void>>()
 
-const migrateOnce = async (storageDir: string, verbose: boolean): Promise<void> => {
-  const pending = legacyMigrations.get(storageDir) ?? migrateLegacyCatalog(storageDir)
-  legacyMigrations.set(storageDir, pending)
-  const ids = await pending
-  if (ids.length > 0) {
+const migrateOnce = (storageDir: string): Promise<void> => {
+  const pending = legacyMigrations.get(storageDir) ?? migrateLegacyCatalog(storageDir).then((ids) => {
+    if (ids.length === 0) return
     console.error(
-      `Moved ${ids.length} workflow(s) out of wf.sqlite into ${workflowsPath(storageDir)}${verbose ? `: ${ids.join(", ")}` : "."}`
+      `Moved ${ids.length} workflow(s) out of wf.sqlite into ${workflowsPath(storageDir)}: ${ids.join(", ")}`
     )
-  }
+  })
+  legacyMigrations.set(storageDir, pending)
+  return pending
 }
 
 /**
@@ -757,8 +661,8 @@ const migrateOnce = async (storageDir: string, verbose: boolean): Promise<void> 
  * Commands that never look at workflows — help, integrations — leave storage
  * untouched, which is what keeps `wf --help` a read-only act.
  */
-const openCatalog = async (runtime: CliRuntimeOptions, verbose: boolean): Promise<WorkflowCatalog> => {
-  await migrateOnce(runtime.storageDir, verbose)
+const openCatalog = async (runtime: CliRuntimeOptions): Promise<WorkflowCatalog> => {
+  await migrateOnce(runtime.storageDir)
   return createDirectoryWorkflowCatalog({ directory: workflowsPath(runtime.storageDir) })
 }
 
@@ -816,10 +720,9 @@ const createCommand = (runtime: CliRuntimeOptions) => Command.make(
     ),
     force: Flag.boolean("force").pipe(
       Flag.withDescription("Replace an existing workflow id")
-    ),
-    verbose: verboseFlag()
+    )
   },
-  ({ id, name, source, file, force, verbose }) => runCliTask(async () => {
+  ({ id, name, source, file, force }) => runCliTask(async () => {
     const workflowId = parseWorkflowId(id)
     const nameValue = Option.getOrUndefined(name)
     const sourceValue = Option.getOrUndefined(source)
@@ -838,7 +741,7 @@ const createCommand = (runtime: CliRuntimeOptions) => Command.make(
       (fileValue === undefined
         ? workflowTemplate(options)
         : await readFile(fileValue, "utf8"))
-    const catalog = await openCatalog(runtime, verbose)
+    const catalog = await openCatalog(runtime)
     const existingWorkflow = await catalog.get(workflowId)
     if (existingWorkflow !== undefined && !options.force) {
       throw new Error(
@@ -849,14 +752,11 @@ const createCommand = (runtime: CliRuntimeOptions) => Command.make(
     // Load before writing so a broken source never lands in the catalog. This
     // also reports the workflow's real name, which lives in the source rather
     // than beside it.
-    const loaded = await withConsoleOutput(
-      verbose,
-      () => loadWorkflowArtifact({ id: workflowId, source: sourceText })
-    )
+    const loaded = await loadWorkflowArtifact({ id: workflowId, source: sourceText })
     const written = await catalog.write(workflowId, sourceText)
-    console.log(verbose
-      ? `Created ${written.id}\t${loaded.workflow.name}#${loaded.exportName}\t${catalog.pathFor(workflowId)}`
-      : `Created ${written.id}\t${catalog.pathFor(workflowId)}`)
+    console.log(
+      `Created ${written.id}\t${loaded.workflow.name}#${loaded.exportName}\t${catalog.pathFor(workflowId)}`
+    )
   })
 ).pipe(
   Command.withDescription("Create or import a workflow file into the local catalog"),
@@ -883,10 +783,9 @@ const validateCommand = (runtime: CliRuntimeOptions) => Command.make(
     ),
     json: Flag.boolean("json").pipe(
       Flag.withDescription("Print the complete validation graph as JSON")
-    ),
-    verbose: verboseFlag()
+    )
   },
-  ({ id, file, input, json, verbose }) => runCliTask(async () => {
+  ({ id, file, input, json }) => runCliTask(async () => {
     const idValue = Option.getOrUndefined(id)
     const fileValue = Option.getOrUndefined(file)
     if (idValue !== undefined && fileValue !== undefined) {
@@ -899,34 +798,44 @@ const validateCommand = (runtime: CliRuntimeOptions) => Command.make(
         : (() => { throw new Error("wf validate requires a workflow id or --file") })()
     const inputText = Option.getOrUndefined(input)
     const artifact = target.kind === "catalog"
-      ? await catalogValidationArtifact(await openCatalog(runtime, verbose), target)
+      ? await catalogValidationArtifact(await openCatalog(runtime), target)
       : await fileValidationArtifact(target)
-    const result = await traceWorkflowArtifact(artifact, inputText, verbose)
+    const result = await traceWorkflowArtifact(artifact, inputText)
     const invalid = result.diagnostics.length > 0 ||
       result.graph === undefined ||
       result.graph.diagnostics.length > 0
-    const integrations = result.graph === undefined ? [] : await checkGraphIntegrations(result.graph)
-    const missingIntegrations = integrations.filter((entry) => !entry.report.ok)
+    // Structural diagnostics come first: an unloadable workflow has no trace to
+    // read requirements from, so there is nothing to check connections against.
+    const integrations = invalid || result.graph === undefined
+      ? []
+      : await checkGraphIntegrations(runtime.executor, result.graph)
+    const unmet = integrations.filter((entry) =>
+      entry.resolution.status !== "resolved" && entry.resolution.status !== "legacy-address"
+    )
     if (json) {
-      console.log(toJsonText({ ...result, integrations }))
-      if (invalid || missingIntegrations.length > 0) process.exitCode = 1
+      console.log(toJsonText({
+        ...result,
+        integrationReadinessScope: "traced-path",
+        integrations
+      }))
+      if (invalid || unmet.length > 0) process.exitCode = 1
       return
     }
-    if (invalid) {
-      printIntegrationReadiness(integrations, verbose)
-      throw validationError(result, verbose)
-    }
-    printValidationResult(result, verbose)
-    printIntegrationReadiness(integrations, verbose)
-    if (missingIntegrations.length > 0) {
+    if (invalid) throw validationError(result)
+    printValidationResult(result)
+    printIntegrationReadiness(integrations)
+    console.log(dim("integration readiness covers only the traced path; use --input for other branches"))
+    // A workflow can be structurally perfect and still unrunnable here. Exit
+    // nonzero so a caller scripting `wf validate` before `wf run` stops.
+    if (unmet.length > 0) {
       throw new Error(
-        `${artifact.id} needs ${missingIntegrations.length} integration tool${missingIntegrations.length === 1 ? "" : "s"} connected before it can run`
+        `${artifact.id} needs ${unmet.length} integration${unmet.length === 1 ? "" : "s"} connected before it can run`
       )
     }
   })
 ).pipe(
   Command.withDescription(
-    "Validate a workflow and its integration connections without starting a durable run"
+    "Validate a workflow without starting a durable run, and report which of its integrations still need connecting"
   ),
   Command.withExamples([
     { command: "wf validate welcome-email" },
@@ -936,21 +845,21 @@ const validateCommand = (runtime: CliRuntimeOptions) => Command.make(
 
 const listCommand = (runtime: CliRuntimeOptions) => Command.make(
   "list",
-  { verbose: verboseFlag() },
-  ({ verbose }) => runCliTask(async () => {
-    const catalog = await openCatalog(runtime, verbose)
-    printWorkflows(catalog, await catalog.list(), verbose)
+  {},
+  () => runCliTask(async () => {
+    const catalog = await openCatalog(runtime)
+    printWorkflows(catalog, await catalog.list())
   })
 ).pipe(Command.withDescription("List workflow files in the local catalog"))
 
 const runsCommand = (runtime: CliRuntimeOptions) => Command.make(
   "runs",
-  { verbose: verboseFlag() },
-  ({ verbose }) => runCliTask(async () => {
-    const catalog = await openCatalog(runtime, verbose)
-    const { client } = createEngineBackedClient(runtime.storageDir)
+  {},
+  () => runCliTask(async () => {
+    const catalog = await openCatalog(runtime)
+    const { client } = createEngineBackedClient(runtime)
     try {
-      printRuns(await lifecycleRunRecords(client, await catalog.list()), verbose)
+      printRuns(await lifecycleRunRecords(client, await catalog.list()))
     } finally {
       await client.dispose()
     }
@@ -959,11 +868,11 @@ const runsCommand = (runtime: CliRuntimeOptions) => Command.make(
 
 const historyCommand = (runtime: CliRuntimeOptions) => Command.make(
   "history",
-  { runId: Argument.string("run-id"), verbose: verboseFlag() },
-  ({ runId, verbose }) => runCliTask(async () => {
-    const { client } = createEngineBackedClient(runtime.storageDir)
+  { runId: Argument.string("run-id") },
+  ({ runId }) => runCliTask(async () => {
+    const { client } = createEngineBackedClient(runtime)
     try {
-      printRunEvents(await client.history(runId), verbose)
+      printRunEvents(await client.history(runId))
     } finally {
       await client.dispose()
     }
@@ -977,26 +886,24 @@ const runCommand = (runtime: CliRuntimeOptions) => Command.make(
   "run",
   {
     id: Argument.string("workflow-id"),
-    input: Argument.string("json-input").pipe(Argument.optional),
-    verbose: verboseFlag()
+    input: Argument.string("json-input").pipe(Argument.optional)
   },
-  ({ id, input, verbose }) => runCliTask(async () => {
-    const catalog = await openCatalog(runtime, verbose)
+  ({ id, input }) => runCliTask(async () => {
+    const catalog = await openCatalog(runtime)
     const artifact = await catalog.get(id)
     if (artifact === undefined) throw new Error(`Unknown workflow id: ${id}`)
-    const loaded = await withConsoleOutput(verbose, () => loadWorkflowArtifact(artifact))
+    const loaded = await loadWorkflowArtifact(artifact)
     // Snapshot before starting: from here on this run replays the source as it
     // is right now, however the catalog file changes afterwards.
     const sourceHash = await sourceStoreFor(runtime).save(artifact.source)
-    const { client } = createEngineBackedClient(runtime.storageDir)
+    const { client } = createEngineBackedClient(runtime)
     try {
-      const handle = await withConsoleOutput(verbose, () => client.start(
-        loaded.workflow,
-        parseJsonInput(Option.getOrUndefined(input)),
-        { artifactId: artifact.id, sourceHash }
-      ))
+      const handle = await client.start(loaded.workflow, parseJsonInput(Option.getOrUndefined(input)), {
+        artifactId: artifact.id,
+        sourceHash
+      })
       console.error(`${eventTag("run")} id ${bold(handle.executionId)}`)
-      await awaitAndPrintRun({ client, runId: handle.executionId, historyLength: 1, verbose })
+      await awaitAndPrintRun({ client, runId: handle.executionId, historyLength: 1 })
     } finally {
       await client.dispose()
     }
@@ -1018,21 +925,20 @@ const signalCommand = (runtime: CliRuntimeOptions) => Command.make(
     actor: Flag.string("actor").pipe(
       Flag.optional,
       Flag.withDescription("Record who delivered the signal")
-    ),
-    verbose: verboseFlag()
+    )
   },
-  ({ runId, signalName, payload, actor, verbose }) => runCliTask(async () => {
-    const catalog = await openCatalog(runtime, verbose)
+  ({ runId, signalName, payload, actor }) => runCliTask(async () => {
+    const catalog = await openCatalog(runtime)
     const sources = sourceStoreFor(runtime)
-    const { runtime: engine, client } = createEngineBackedClient(runtime.storageDir)
+    const { runtime: engine, client } = createEngineBackedClient(runtime)
     try {
       const execution = await client.execution(runId)
       const artifact = await artifactForExecution(catalog, sources, execution, runId)
-      const loaded = await withConsoleOutput(verbose, () => loadWorkflowArtifact(artifact))
+      const loaded = await loadWorkflowArtifact(artifact)
       engine.register([loaded.workflow])
       const historyLength = (await client.history(runId)).length
       try {
-        await withConsoleOutput(verbose, () => client.signal(
+        await client.signal(
           runId,
           signalName,
           parseJsonInput(Option.getOrUndefined(payload)),
@@ -1040,18 +946,12 @@ const signalCommand = (runtime: CliRuntimeOptions) => Command.make(
             onNone: () => ({}),
             onSome: (value) => ({ actor: value })
           })
-        ))
-        await awaitAndPrintRun({ client, runId, historyLength, verbose })
+        )
+        await awaitAndPrintRun({ client, runId, historyLength })
       } catch (error) {
         const pendingSignals = await client.pendingSignals(runId).catch(() => [])
         if (pendingSignals.length === 0) throw error
-        const visibleSignals = verbose
-          ? pendingSignals
-          : pendingSignals.slice(0, defaultDiagnosticLimit)
-        const lines = visibleSignals.map((pending) => describePendingSignal(runId, pending, verbose))
-        if (visibleSignals.length < pendingSignals.length) {
-          lines.push(`${pendingSignals.length - visibleSignals.length} more pending signals; rerun with --verbose for all.`)
-        }
+        const lines = pendingSignals.map((pending) => describePendingSignal(runId, pending))
         throw new Error(`${formatError(error)}\n${lines.join("\n")}`)
       }
     } finally {
@@ -1068,5 +968,5 @@ export const makeWorkflowCommands = (runtime: CliRuntimeOptions) => [
   runsCommand(runtime),
   historyCommand(runtime),
   signalCommand(runtime),
-  makeIntegrationsCommand({ storageDir: runtime.storageDir })
+  makeIntegrationsCommand({ executor: runtime.executor })
 ] as const

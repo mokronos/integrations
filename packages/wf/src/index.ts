@@ -78,7 +78,7 @@ export {
   sampleValueForJsonSchema,
   sampleValueForSchema,
   workflowArtifactToGraph,
-  workflowGraphIntegrationAddresses,
+  workflowGraphIntegrations,
   workflowToGraph
 } from "./sdk/index.ts"
 export { createTestRuntime } from "./testing/index.ts"

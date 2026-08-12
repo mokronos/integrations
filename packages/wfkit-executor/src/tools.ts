@@ -1,9 +1,15 @@
-import { ConnectionName, IntegrationSlug, ToolAddress } from "@executor-js/sdk/core"
+import {
+  ConnectionName,
+  IntegrationSlug,
+  parseToolAddress,
+  ToolAddress
+} from "@executor-js/sdk/core"
 import { Option, Schema } from "effect"
 import { runExecutor } from "./default-host.ts"
 import type { ExecutorRunner } from "./host.ts"
 import {
   ExecutorToolAddress,
+  ExecutorOwner,
   ExecutorTool,
   ExecutorToolSummary
 } from "./schemas.ts"
@@ -82,6 +88,7 @@ const optionalJson = <A>(value: A | undefined) =>
 
 export interface ExecutorToolFilter {
   readonly integration?: string
+  readonly owner?: ExecutorOwner
   readonly connection?: string
 }
 
@@ -107,6 +114,7 @@ export const createExecutorTools = (runner: ExecutorRunner): ExecutorTools => {
   const summaries = async (filter: ExecutorToolFilter = {}) => {
     const tools = await runner.run((executor) => executor.tools.list({
       ...(filter.integration === undefined ? {} : { integration: IntegrationSlug.make(filter.integration) }),
+      ...(filter.owner === undefined ? {} : { owner: filter.owner }),
       ...(filter.connection === undefined ? {} : { connection: ConnectionName.make(filter.connection) })
     }))
     const callableTools = tools.filter((tool) => String(tool.address).startsWith("tools."))
@@ -116,6 +124,7 @@ export const createExecutorTools = (runner: ExecutorRunner): ExecutorTools => {
         name: String(tool.name),
         description: tool.description,
         integration: String(tool.integration),
+        owner: tool.owner,
         connection: String(tool.connection)
       }))
     )
@@ -127,6 +136,13 @@ export const createExecutorTools = (runner: ExecutorRunner): ExecutorTools => {
     )
     const inputSchema = optionalJson(schema?.inputSchema)
     const outputSchema = optionalJson(schema?.outputSchema)
+    const schemaDefinitions = schema?.schemaDefinitions === undefined
+      ? undefined
+      : Option.getOrUndefined(
+          Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.Json))(
+            schema.schemaDefinitions
+          )
+        )
     const normalizedOutputSchema = outputSchema === undefined
       ? undefined
       : normalizeExecutorToolOutputSchema(outputSchema)
@@ -135,23 +151,30 @@ export const createExecutorTools = (runner: ExecutorRunner): ExecutorTools => {
       ...summary,
       ...(inputSchema === undefined ? {} : { inputSchema }),
       ...(normalizedOutputSchema === undefined ? {} : { outputSchema: normalizedOutputSchema }),
+      ...(schemaDefinitions === undefined ? {} : { schemaDefinitions }),
       ...(schema?.inputTypeScript === undefined ? {} : { inputTypeScript: schema.inputTypeScript }),
       ...(hasMcpEnvelopeOutput
         ? { outputTypeScript: "Json" }
         : schema?.outputTypeScript === undefined
           ? {}
-          : { outputTypeScript: schema.outputTypeScript })
+          : { outputTypeScript: schema.outputTypeScript }),
+      ...(schema?.typeScriptDefinitions === undefined
+        ? {}
+        : { typeScriptDefinitions: schema.typeScriptDefinitions })
     })
   }
 
   // `tools.<integration>.<owner>.<connection>.<name>`, per ExecutorToolAddress.
   // Narrowing the listing this way keeps a lookup by address as cheap as one by
-  // integration and name.
+  // integration and name. The name may itself contain dots, but every segment
+  // ahead of it is positional, so destructuring the split is enough.
   const addressFilter = (address: ExecutorToolAddress): ExecutorToolFilter => {
-    const [, integration, , connection] = address.split(".")
+    const parsed = parseToolAddress(address)
+    if (parsed === null) return {}
     return {
-      ...(integration === undefined ? {} : { integration }),
-      ...(connection === undefined ? {} : { connection })
+      integration: String(parsed.integration),
+      owner: parsed.owner,
+      connection: String(parsed.connection)
     }
   }
 

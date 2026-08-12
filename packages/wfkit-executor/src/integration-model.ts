@@ -5,9 +5,9 @@ import {
   ExecutorIntegration,
   ExecutorMcpProbe,
   ExecutorOpenApiPreview,
-  ExecutorTool,
-  ExecutorToolAddress
+  ExecutorTool
 } from "./schemas.ts"
+import { IntegrationSource } from "@mokronos/wfkit/integrations"
 
 export const IntegrationKind = Schema.Literals(["mcp", "openapi"])
 export type IntegrationKind = typeof IntegrationKind.Type
@@ -65,11 +65,22 @@ export interface DiscoverIntegrationsOptions {
   readonly connection?: string
 }
 
+/**
+ * What `wf i validate` accepts. Two forms, because the two surfaces speak
+ * different dialects on purpose:
+ *
+ * - `address` — a fully-resolved `tools.…` address. Still the currency of the
+ *   discovery commands, where you have just listed a specific connection's tools
+ *   and want to check one of them.
+ * - `integration` + `tool` (+ optional `owner`) — the portable reference a
+ *   workflow actually authors. Carries no connection, so validating it answers
+ *   "would this resolve here?" rather than "does this exact row exist?".
+ */
+export const IntegrationNodeSource = IntegrationSource
+export type IntegrationNodeSource = typeof IntegrationNodeSource.Type
+
 export const IntegrationNodeConfig = Schema.Struct({
-  source: Schema.Struct({
-    kind: Schema.Literal("executor"),
-    address: ExecutorToolAddress
-  })
+  source: IntegrationNodeSource
 })
 export type IntegrationNodeConfig = typeof IntegrationNodeConfig.Type
 

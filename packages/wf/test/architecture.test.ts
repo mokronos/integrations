@@ -92,6 +92,38 @@ describe("package architecture", () => {
     )).toBe(true)
   })
 
+  test("local steps cannot invoke integrations outside first-class integration steps", async () => {
+    const workflowModel = await readFile(join(packageDirectory, "src", "workflow-model.ts"), "utf8")
+    const integrationStep = await readFile(join(packageDirectory, "src", "integration.ts"), "utf8")
+
+    expect(workflowModel).not.toContain("invokeIntegration")
+    expect(integrationStep).not.toContain("execute:")
+    expect(integrationStep).toContain('kind: "integration"')
+  })
+
+  test("authoring and integration contracts have explicit package subpaths", async () => {
+    const packageJson = await readFile(join(packageDirectory, "package.json"), "utf8")
+
+    expect(packageJson).toContain('"./authoring"')
+    expect(packageJson).toContain('"./integrations"')
+  })
+
+  test("the CLI composes Executor through an explicit host", async () => {
+    const cliRoot = await readFile(
+      join(packageDirectory, "..", "..", "apps", "cli", "src", "main.ts"),
+      "utf8"
+    )
+    const workflowCommands = await readFile(
+      join(packageDirectory, "..", "..", "apps", "cli", "src", "cli", "main.ts"),
+      "utf8"
+    )
+
+    expect(cliRoot).toContain("createExecutorHost")
+    expect(cliRoot).toContain("createExecutorServices")
+    expect(cliRoot).not.toContain("setExecutorStorageDirectory")
+    expect(workflowCommands).not.toContain("executorIntegrationInvoker")
+  })
+
   test("production TypeScript has no explicit any escape hatches", async () => {
     const sourceRoots = [
       join(packageDirectory, "src"),

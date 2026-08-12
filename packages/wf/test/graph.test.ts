@@ -3,9 +3,8 @@ import {
   defineStep,
   defineWorkflow,
   integration,
-  sampleValueForSchema,
   t,
-  workflowGraphIntegrationAddresses,
+  workflowGraphIntegrations,
   workflowToGraph
 } from "../src/index"
 
@@ -88,12 +87,66 @@ const ParallelWorkflow = defineWorkflow({
 })
 
 describe("workflowToGraph", () => {
-  test("creates a valid Date sample for t.date", () => {
-    const sample = sampleValueForSchema(t.date)
+  test("records portable integration requirements without invoking a host", async () => {
+    const createIssue = integration({
+      source: { kind: "executor", integration: "linear", tool: "issues.create", owner: "org" },
+      input: t.struct({ title: t.string }),
+      output: t.struct({ id: t.string })
+    })
+    const workflow = defineWorkflow({
+      name: "IntegrationGraphWorkflow",
+      input: t.struct({ title: t.string }),
+      output: t.struct({ id: t.string }),
+      run: function* (input, ctx) {
+        return yield* ctx.run(createIssue, input)
+      }
+    })
 
-    expect(sample).toBeInstanceOf(Date)
-    expect(sample).toEqual(new Date(0))
+    const graph = await workflowToGraph(workflow, { input: { title: "Inspect me" } })
+
+    expect(graph.nodes.find((node) => node.kind === "step")?.metadata.integration).toEqual({
+      kind: "executor",
+      integration: "linear",
+      tool: "issues.create",
+      owner: "org"
+    })
+    expect(workflowGraphIntegrations(graph)).toEqual([{
+      kind: "executor",
+      integration: "linear",
+      tool: "issues.create",
+      owner: "org"
+    }])
   })
+
+  test("keeps dotted tool names distinct from owner-qualified requirements", async () => {
+    const dotted = integration({
+      source: { kind: "executor", integration: "linear", tool: "org.create" },
+      input: t.struct({}),
+      output: t.struct({})
+    })
+    const owned = integration({
+      source: { kind: "executor", integration: "linear", owner: "org", tool: "create" },
+      input: t.struct({}),
+      output: t.struct({})
+    })
+    const workflow = defineWorkflow({
+      name: "DistinctIntegrationRequirements",
+      input: t.struct({}),
+      output: t.struct({}),
+      run: function* (_, ctx) {
+        yield* ctx.run(dotted, {})
+        return yield* ctx.run(owned, {})
+      }
+    })
+
+    expect(dotted.name).not.toBe(owned.name)
+    const graph = await workflowToGraph(workflow, { input: {} })
+    expect(workflowGraphIntegrations(graph)).toEqual([
+      { kind: "executor", integration: "linear", tool: "org.create" },
+      { kind: "executor", integration: "linear", owner: "org", tool: "create" }
+    ])
+  })
+
 
   test("does not run real void steps when the tracer returns undefined", async () => {
     let executions = 0
@@ -178,24 +231,6 @@ describe("workflowToGraph", () => {
     expect(graph.diagnostics).toEqual([])
   })
 
-  test("renders the durable date codec as one JSON string schema", async () => {
-    const workflow = defineWorkflow({
-      name: "DateGraphWorkflow",
-      input: t.struct({}),
-      output: t.struct({ capturedAt: t.date }),
-      run: function* (_input, ctx) {
-        return { capturedAt: yield* ctx.now() }
-      }
-    })
-
-    const graph = await workflowToGraph(workflow, { input: {} })
-
-    expect(graph.schemas?.output).toMatchObject({
-      properties: { capturedAt: { type: "string" } }
-    })
-    expect(graph.schemas?.output?.properties?.["capturedAt"]?.anyOf).toBeUndefined()
-  })
-
   test("renders ctx.all as a fork with branch fan-in", async () => {
     const graph = await workflowToGraph(ParallelWorkflow, { input: { id: "demo" } })
 
@@ -228,43 +263,5 @@ describe("workflowToGraph", () => {
       { kind: "step", name: "Notify", counter: 1 }
     ])
     expect(graph.diagnostics).toEqual([])
-  })
-
-  test("exposes distinct integration addresses without invoking them", async () => {
-    const first = integration({
-      source: { kind: "executor", address: "tools.docs.org.default.lookup" },
-      input: t.struct({ query: t.string }),
-      output: t.string
-    })
-    const duplicate = integration({
-      source: { kind: "executor", address: "tools.docs.org.default.lookup" },
-      input: t.struct({ query: t.string }),
-      output: t.string
-    })
-    const second = integration({
-      source: { kind: "executor", address: "tools.catalog.org.default.list" },
-      input: t.struct({}),
-      output: t.unknown
-    })
-    const workflow = defineWorkflow({
-      name: "IntegrationGraphWorkflow",
-      input: t.struct({ query: t.string }),
-      output: t.void,
-      run: function* (input, ctx) {
-        yield* ctx.run(first, input)
-        yield* ctx.run(duplicate, input)
-        yield* ctx.run(second, {})
-      }
-    })
-
-    const graph = await workflowToGraph(workflow, { input: { query: "durability" } })
-
-    expect(workflowGraphIntegrationAddresses(graph)).toEqual([
-      "tools.docs.org.default.lookup",
-      "tools.catalog.org.default.list"
-    ])
-    expect(String(
-      graph.nodes.find((node) => node.label.includes("tools.docs"))?.metadata.integration?.address
-    )).toBe("tools.docs.org.default.lookup")
   })
 })

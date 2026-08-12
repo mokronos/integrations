@@ -6,8 +6,8 @@ import { homedir } from "node:os"
 import { workflowArtifactToGraph } from "../../packages/wf/src/sdk/graph"
 import { createDirectoryWorkflowCatalog } from "../../packages/wf/src/sdk/catalog"
 import {
-  listIntegrationOverviews,
-  setExecutorStorageDirectory
+  createExecutorHost,
+  createExecutorServices
 } from "../../packages/wfkit-executor/src/index"
 
 const wfHome = process.env["WF_HOME"] ?? path.join(homedir(), ".wf")
@@ -24,6 +24,9 @@ const executorStorageDirectory = (): string => {
     : path.resolve(configured)
 }
 
+const executorHost = createExecutorHost(executorStorageDirectory())
+const executor = createExecutorServices(executorHost)
+
 const json = (response: { statusCode: number; setHeader: (name: string, value: string) => void; end: (body: string) => void }, statusCode: number, body: unknown) => {
   response.statusCode = statusCode
   response.setHeader("Content-Type", "application/json")
@@ -37,6 +40,9 @@ export default defineConfig({
     {
       name: "wf-dashboard-api",
       configureServer(server) {
+        server.httpServer?.once("close", () => {
+          void executorHost.close()
+        })
         const catalog = createDirectoryWorkflowCatalog({
           directory: path.join(wfHome, "workflows")
         })
@@ -61,11 +67,9 @@ export default defineConfig({
             }
 
             if (pathname === "/integrations") {
-              setExecutorStorageDirectory(executorStorageDirectory())
-
               json(response, 200, {
                 generatedAt: new Date().toISOString(),
-                integrations: await listIntegrationOverviews()
+                integrations: await executor.listIntegrationOverviews()
               })
               return
             }
@@ -77,6 +81,12 @@ export default defineConfig({
             })
           }
         })
+      }
+    },
+    {
+      name: "wf-executor-lifecycle",
+      closeBundle() {
+        return executorHost.close()
       }
     }
   ],

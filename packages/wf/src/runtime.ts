@@ -11,7 +11,7 @@ import {
   ExecutionResourceRegistry,
   makeExecutionResourceRegistry
 } from "./execution-resources.ts"
-import type { IntegrationInvoker } from "./integration-invoker.ts"
+import type { IntegrationInvoker } from "./integration-contract.ts"
 import { createConcurrencyLimiter } from "./concurrency.ts"
 import type { ConcurrencyLimiter } from "./concurrency.ts"
 import { createSignalTransport } from "./signal.ts"

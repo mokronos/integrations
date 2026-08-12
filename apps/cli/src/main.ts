@@ -12,10 +12,10 @@ import {
   workflowArtifactToGraph
 } from "@mokronos/wfkit"
 import {
-  closeExecutor,
-  listIntegrationOverviews,
-  setExecutorStorageDirectory
+  createExecutorHost,
+  createExecutorServices
 } from "@mokronos/wfkit-executor"
+import type { ExecutorServices } from "@mokronos/wfkit-executor"
 import type { WorkflowCatalog } from "@mokronos/wfkit"
 import { makeWorkflowCommands, type CliRuntimeOptions } from "./cli/main.ts"
 import assets from "./embedded-web-assets.gen.ts"
@@ -70,6 +70,7 @@ const dashboardResponse = async (pathname: string): Promise<Response> => {
 
 const api = async (
   catalog: WorkflowCatalog,
+  executor: ExecutorServices,
   engineDatabasePath: string,
   pathname: string
 ): Promise<Response> => {
@@ -81,7 +82,7 @@ const api = async (
   if (pathname === "/api/integrations") {
     return json(JSON.stringify({
       generatedAt: new Date().toISOString(),
-      integrations: await listIntegrationOverviews()
+      integrations: await executor.listIntegrationOverviews()
     }))
   }
   if (pathname === "/api/runs") {
@@ -134,7 +135,10 @@ const openBrowser = (url: string): void => {
   Bun.spawn(command, { stdout: "ignore", stderr: "ignore" })
 }
 
-const runServer = async (options: ServerOptions): Promise<void> => {
+const runServer = async (
+  options: ServerOptions,
+  runtime: CliRuntimeOptions
+): Promise<void> => {
   const home = wfHome()
   const catalog = createDirectoryWorkflowCatalog({ directory: workflowsPath(home) })
   const server = Bun.serve({
@@ -144,7 +148,7 @@ const runServer = async (options: ServerOptions): Promise<void> => {
       const pathname = new URL(request.url).pathname
       if (pathname.startsWith("/api/")) {
         try {
-          return await api(catalog, enginePath(home), pathname)
+          return await api(catalog, runtime.executor, enginePath(home), pathname)
         } catch (error) {
           const message = error instanceof Error ? error.message : "Dashboard API request failed"
           return json(JSON.stringify({ error: message }), 500)
@@ -172,9 +176,12 @@ const runServer = async (options: ServerOptions): Promise<void> => {
 const serviceProgram = (): ReadonlyArray<string> =>
   dashboardIsEmbedded ? [process.execPath] : [process.execPath, path.resolve(import.meta.dir, "main.ts")]
 
-const openInstalledDashboard = async (options: ServerOptions): Promise<void> => {
+const openInstalledDashboard = async (
+  options: ServerOptions,
+  runtime: CliRuntimeOptions
+): Promise<void> => {
   if (options.foreground) {
-    await runServer(options)
+    await runServer(options, runtime)
     return
   }
   if (options.port !== defaultPort) {
@@ -234,7 +241,7 @@ const makeRootCommand = (runtime: CliRuntimeOptions) => {
       foreground,
       open: !noOpen,
       port: validatePort(port)
-    }))
+    }, runtime))
   ).pipe(Command.withDescription("Open the installed local dashboard"))
 
   const daemonCommand = Command.make(
@@ -250,7 +257,7 @@ const makeRootCommand = (runtime: CliRuntimeOptions) => {
     },
     ({ foreground, port }) => serviceTask(async () => {
       if (!foreground) throw new Error("Usage: wf daemon --foreground")
-      await runServer({ foreground: true, open: false, port: validatePort(port) })
+      await runServer({ foreground: true, open: false, port: validatePort(port) }, runtime)
     })
   ).pipe(Command.withDescription("Run the dashboard service in the foreground"))
 
@@ -267,9 +274,13 @@ const makeRootCommand = (runtime: CliRuntimeOptions) => {
 
 const runCommandLine = async (
   arguments_: ReadonlyArray<string>,
-  runtime: CliRuntimeOptions
+  options: { readonly rootDir: string; readonly storageDir: string }
 ): Promise<void> => {
-  setExecutorStorageDirectory(runtime.storageDir)
+  const host = createExecutorHost(options.storageDir)
+  const runtime: CliRuntimeOptions = {
+    ...options,
+    executor: createExecutorServices(host)
+  }
   try {
     await Effect.runPromise(
       Command.runWith(makeRootCommand(runtime), { version: packageMetadata.version })(
@@ -282,7 +293,7 @@ const runCommandLine = async (
       )
     )
   } finally {
-    await closeExecutor(runtime.storageDir)
+    await host.close()
   }
 }
 

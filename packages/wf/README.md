@@ -34,13 +34,17 @@ export const HelloWorkflow = defineWorkflow({
 run(HelloWorkflow, { message: "hello from @mokronos/wfkit" })
 ```
 
-Subpath exports: `@mokronos/wfkit/schemas` (shared Effect schemas) and `@mokronos/wfkit/testing` (test helpers).
+Subpath exports: `@mokronos/wfkit/authoring` (workflow-definition API),
+`@mokronos/wfkit/integrations` (the dependency-light integration contract),
+`@mokronos/wfkit/schemas` (shared Effect schemas), and
+`@mokronos/wfkit/testing` (test helpers).
 
 ## Executor integrations
 
-`integration(...)` is one durable node backed by an Executor tool address.
+`integration(...)` is one durable node backed by a portable Executor tool requirement.
 Executor owns MCP/OpenAPI protocol handling, auth connections, schema discovery,
-and invocation. The workflow stores only the address. Discovery and connection
+connection resolution, and invocation. The workflow stores only the integration
+slug, tool name, and optional credential tier. Discovery and connection
 management are provided by the separate `@mokronos/wfkit-executor` package and
 the `wf` CLI; authored workflows only need `@mokronos/wfkit`.
 
@@ -52,7 +56,8 @@ const CreatedIssue = t.struct({ id: t.string, title: t.string })
 const createIssue = integration({
   source: {
     kind: "executor",
-    address: "tools.linear.org.default.create_issue"
+    integration: "linear",
+    tool: "create_issue"
   },
   input: t.struct({ teamId: t.string, title: t.string }),
   output: CreatedIssue

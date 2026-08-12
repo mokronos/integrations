@@ -1,15 +1,19 @@
 import { Schema } from "effect"
 import {
   IntegrationNodeConfig,
+  type IntegrationNodeSource,
   type IntegrationValidationFinding,
   type IntegrationValidationReport
 } from "./integration-model.ts"
-import { ExecutorToolAddress } from "./schemas.ts"
-import { listExecutorToolSummaries } from "./tools.ts"
+import {
+  describeIntegrationResolution,
+  resolveIntegrationSource
+} from "./integration-resolution.ts"
+import { listExecutorTools, listExecutorToolSummaries } from "./tools.ts"
 import type { ExecutorTools } from "./tools.ts"
 
 export interface IntegrationValidationDependencies {
-  readonly tools: Pick<ExecutorTools, "summaries">
+  readonly tools: Pick<ExecutorTools, "list" | "summaries">
 }
 
 const finding = (
@@ -17,6 +21,30 @@ const finding = (
   check: string,
   message: string
 ): IntegrationValidationFinding => ({ severity, check, message })
+
+const isAddressForm = (
+  source: IntegrationNodeSource
+): source is Extract<IntegrationNodeSource, { readonly address: string }> => "address" in source
+
+/** The live half: does this node point at something callable right now? An
+ *  address is looked up as-is; a portable reference goes through the same
+ *  resolution the invoker uses, so validation and execution cannot disagree. */
+const liveFindings = async (
+  source: IntegrationNodeSource,
+  tools: Pick<ExecutorTools, "list" | "summaries">
+): Promise<ReadonlyArray<IntegrationValidationFinding>> => {
+  if (isAddressForm(source)) {
+    const tool = (await tools.list()).find((candidate) => candidate.address === source.address)
+    return tool === undefined
+      ? [finding("error", "catalog", `Executor tool not found: ${source.address}`)]
+      : [finding("info", "catalog", `${tool.name} is available`)]
+  }
+  const resolution = await resolveIntegrationSource(source, tools)
+  const message = describeIntegrationResolution(source, resolution)
+  return resolution.status === "resolved"
+    ? [finding("info", "catalog", message)]
+    : [finding("error", "catalog", message)]
+}
 
 export const createIntegrationValidation = (
   dependencies: IntegrationValidationDependencies
@@ -34,17 +62,16 @@ export const createIntegrationValidation = (
     }
   }
   const findings: Array<IntegrationValidationFinding> = [
-    finding("info", "structural", "Executor tool address is valid")
+    finding(
+      "info",
+      "structural",
+      isAddressForm(node.source)
+        ? "Executor tool address is valid"
+        : "Integration reference is valid"
+    )
   ]
   if (options.live === true) {
-    const tool = (await dependencies.tools.summaries()).find((candidate) =>
-      candidate.address === node.source.address
-    )
-    if (tool === undefined) {
-      findings.push(finding("error", "catalog", `Executor tool not found: ${node.source.address}`))
-    } else {
-      findings.push(finding("info", "catalog", `${tool.name} is available`))
-    }
+    findings.push(...await liveFindings(node.source, dependencies.tools))
   }
   return {
     ok: !findings.some((entry) => entry.severity === "error"),
@@ -53,59 +80,5 @@ export const createIntegrationValidation = (
 }
 
 export const validateIntegrationNode = createIntegrationValidation({
-  tools: { summaries: listExecutorToolSummaries }
+  tools: { list: listExecutorTools, summaries: listExecutorToolSummaries }
 })
-
-export const validateExecutorToolAddress = async (
-  address: string,
-  tools: Pick<ExecutorTools, "summaries"> = { summaries: listExecutorToolSummaries }
-): Promise<IntegrationValidationReport> => {
-  let decoded: typeof ExecutorToolAddress.Type
-  try {
-    decoded = await Schema.decodeUnknownPromise(ExecutorToolAddress)(address)
-  } catch (error) {
-    return {
-      ok: false,
-      findings: [finding("error", "structural", `invalid Executor tool address: ${String(error)}`)]
-    }
-  }
-  try {
-    return await createIntegrationValidation({ tools })(
-      { source: { kind: "executor", address: decoded } },
-      { live: true }
-    )
-  } catch (error) {
-    return {
-      ok: false,
-      findings: [
-        finding("info", "structural", "Executor tool address is valid"),
-        finding("error", "catalog", `Could not inspect Executor tools: ${String(error)}`)
-      ]
-    }
-  }
-}
-
-export const validateExecutorToolAddresses = async (
-  addresses: ReadonlyArray<string>,
-  tools: Pick<ExecutorTools, "summaries"> = { summaries: listExecutorToolSummaries }
-): Promise<ReadonlyArray<{ readonly address: string; readonly report: IntegrationValidationReport }>> => {
-  if (addresses.length === 0) return []
-  let summaries: Awaited<ReturnType<ExecutorTools["summaries"]>>
-  try {
-    summaries = await tools.summaries()
-  } catch (error) {
-    return addresses.map((address) => ({
-      address,
-      report: {
-        ok: false,
-        findings: [finding("error", "catalog", `Could not inspect Executor tools: ${String(error)}`)]
-      }
-    }))
-  }
-  const snapshot = { summaries: async () => summaries }
-  const reports: Array<{ readonly address: string; readonly report: IntegrationValidationReport }> = []
-  for (const address of addresses) {
-    reports.push({ address, report: await validateExecutorToolAddress(address, snapshot) })
-  }
-  return reports
-}

@@ -1,48 +1,48 @@
 import { Schema } from "effect"
-import type { Step, StepRetryPolicy } from "./core.ts"
-import { IntegrationToolAddress } from "./workflow-model.ts"
-export type { IntegrationInvoker } from "./integration-invoker.ts"
+import type {
+  DefinedIntegrationStep,
+  StepRetryPolicy,
+  SynchronousSchema
+} from "./workflow-model.ts"
+import { integrationSourceKey, IntegrationSource } from "./integration-contract.ts"
+export type { IntegrationInvoker } from "./integration-contract.ts"
+export {
+  formatIntegrationSource,
+  integrationSourceKey,
+  IntegrationOwner,
+  IntegrationSource
+} from "./integration-contract.ts"
 
-export const IntegrationSource = Schema.Struct({
-  kind: Schema.Literal("executor"),
-  address: IntegrationToolAddress
-})
-export type IntegrationSource = typeof IntegrationSource.Type
-
+/** Kept for source snapshots that imported the old integration error schema.
+ * Current integration failures are transient runtime failures instead. */
 export class IntegrationError extends Schema.TaggedErrorClass<IntegrationError>()("IntegrationError", {
   message: Schema.String,
   address: Schema.String
 }) {}
 
-const IntegrationErrorSchema = IntegrationError
-const Json = Schema.Json
-
 export const integration = <I, O>(config: {
   readonly name?: string
-  readonly source: typeof IntegrationSource.Encoded
+  readonly source: IntegrationSource
   readonly input: Schema.Codec<I>
   readonly output: Schema.Codec<O>
   readonly retry?: StepRetryPolicy
-}): Step<I, O, IntegrationError> => {
+}): DefinedIntegrationStep<
+  SynchronousSchema<I>,
+  SynchronousSchema<O>,
+  typeof Schema.Never
+> => {
   const source = Schema.decodeUnknownSync(IntegrationSource)(config.source)
   return {
-    name: config.name ?? `Integration:${source.address}`,
+    kind: "integration",
+    // Preserve the pre-portability activity name when loading an old source
+    // snapshot so a suspended run can replay to the same durable call.
+    name: config.name ?? ("address" in source
+      ? `Integration:${source.address}`
+      : `Integration:${integrationSourceKey(source)}`),
     input: config.input,
     output: config.output,
-    errors: IntegrationErrorSchema,
-    integration: { address: source.address },
-    ...(config.retry === undefined ? {} : { retry: config.retry }),
-    execute: async (input, step) => {
-      try {
-        const jsonInput = Schema.decodeUnknownSync(Json)(input)
-        const result = await step.invokeIntegration(source.address, jsonInput)
-        return await Schema.decodeUnknownPromise(config.output)(result)
-      } catch (cause) {
-        throw new IntegrationError({
-          message: cause instanceof Error ? cause.message : String(cause),
-          address: source.address
-        })
-      }
-    }
+    errors: Schema.Never,
+    source,
+    ...(config.retry === undefined ? {} : { retry: config.retry })
   }
 }

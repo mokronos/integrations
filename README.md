@@ -12,7 +12,7 @@ The `wf` CLI is the primary surface. Everything below is a command you can run.
   human tasks, and signals are first-class, because the runtime has to
   understand them.
 - **Typed integrations** — Executor detects MCP/OpenAPI from a URL, discovers
-  auth and schemas, and invokes a stable tool address.
+  auth and schemas, resolves a portable tool requirement, and invokes it.
 - **Code for computation** — mapping, formatting, and business rules stay in
   small TypeScript islands instead of a catalog of specialized nodes.
 
@@ -159,7 +159,8 @@ implemented yet.
 
 The first example never left your machine. This one connects a real service and
 calls it from a workflow. Executor owns protocol detection, auth, schema
-discovery, and invocation; the workflow stores only a tool address.
+discovery, connection resolution, and invocation; the workflow stores only the
+integration slug, tool name, and optional credential tier.
 
 ### 1. Discover the integration
 
@@ -185,8 +186,9 @@ For OAuth, Executor discovers authorization metadata, dynamically registers a
 client when supported, and runs authorization code + PKCE against a loopback
 callback. Add `--no-open` to print the URL instead of launching a browser. For
 API keys and bearer tokens, use `--credential-env NAME`; the secret value is not
-printed. When `--scopes` is provided, those exact scopes replace the provider's
-discovered defaults in the authorization request.
+printed. Auth methods with several credential variables use
+`--credential-values variable=ENV_NAME,...`. OAuth scopes come from the
+integration auth metadata Executor discovered.
 
 Confirm it landed, and see every connection you hold:
 
@@ -212,8 +214,8 @@ wf i schema <tool-name>
 ```
 
 That returns the tool's address, its full description, and complete input and
-output schemas. Mirror the schemas in the workflow's `input` and `output`, and
-use the address to author the node. A bare tool name is enough while it is
+output schemas. Mirror the schemas in the workflow's `input` and `output`, then
+author the node with the integration slug and tool name. A bare tool name is enough while it is
 unique across your integrations; otherwise pass
 `wf i schema <integration-slug> <tool-name>`, or a full tool address.
 Generic MCP envelopes are normalized before they reach workflows: structured
@@ -226,13 +228,14 @@ Safely inspect a read-only tool before authoring:
 wf i invoke <tool-address> '{"query":"workflow integrations"}'
 ```
 
-> Linear does not publish a stable list of MCP tool names, so the address and
+> Linear does not publish a stable list of MCP tool names, so the tool and
 > field names below are illustrative. Replace them with the exact tool output.
 
 ### 4. Author the workflow
 
 Save this as `linear-issue.ts`. The only integration identity persisted in the
-workflow is its Executor address:
+workflow is the integration slug and the tool name — never the connection, so the
+file stays shareable:
 
 ```ts
 import { defineWorkflow, integration, t } from "@mokronos/wfkit"
@@ -241,7 +244,8 @@ const createIssue = integration({
   name: "CreateLinearIssue",
   source: {
     kind: "executor",
-    address: "tools.linear.org.default.create_issue"
+    integration: "linear",
+    tool: "create_issue"
   },
   input: t.struct({ team: t.string, title: t.string, description: t.string }),
   output: t.struct({ id: t.string, identifier: t.string, url: t.string }),
@@ -333,6 +337,75 @@ Only then does the workflow reach the integration step. Executor resolves the
 connection and invokes the tool; credentials are never written into workflow
 source or durable history.
 
+## Connections: requirements vs. environment
+
+A workflow never carries credentials, and it never carries a connection. It
+carries only the *name* of what it needs. That means **a workflow you received
+from someone else will not run until this machine has the connections it asks
+for** — and finding out which ones is a single command:
+
+```bash
+wf validate <workflow>
+```
+
+```text
+integrations:
+  ready	issues.createIssue resolves to tools.issues.org.default.createIssue
+  integration-not-connected	linear.create_issue: no connection for integration "linear". Connect it with: wf i connect linear
+```
+
+It exits nonzero while anything is unconnected, so it works as a gate before
+`wf run`.
+
+### The rule
+
+> A workflow may only name things whose meaning is identical on every machine
+> that runs it.
+
+Everything else follows from that:
+
+| Named in the workflow | Why it travels |
+| --- | --- |
+| integration slug | derived from what the remote calls itself (MCP server name, OpenAPI title) |
+| tool name | declared by the remote |
+| `owner` tier | semantic — `org` is "the team's", `user` is "the runner's own" |
+
+| Never in the workflow | Why not |
+| --- | --- |
+| connection name | a label a human typed on one machine |
+| tenant / subject | supplied by the executor binding, not nameable |
+| credentials | secret |
+| resolved tool address | contains the connection; pins the definition to one machine |
+
+### The three tiers
+
+```
+~/.wf/
+├── workflows/<id>.ts     DEFINITION   what it needs      shareable, belongs in git
+├── executor.sqlite       ENVIRONMENT  what you have      per machine, never shared
+├── executor-auth.json    SECRETS      the credentials    encrypted, never leaves
+└── executor-auth.key                                     mode 0600
+```
+
+The definition names requirements; the environment supplies bindings;
+`wf validate` is the diff between them. Every question about where something
+belongs reduces to *"does this mean the same thing on someone else's machine?"*
+
+### Bootstrapping a workflow you were given
+
+```bash
+wf validate their-workflow          # what is missing
+wf i discover <url>                 # install the integration it names
+wf i connect <integration-slug>     # authorize it
+wf validate their-workflow          # exits 0 — now runnable
+wf run their-workflow '{...}'
+```
+
+The integration slug is a **local name for a remote's self-declared identity**,
+not a URL. Two people who discover the same server get the same slug, which is
+what makes the definition portable — but the binding from slug to endpoint and
+credentials is always environmental.
+
 ## Command reference
 
 ```bash
@@ -376,10 +449,11 @@ wf i
 `search` returns JSON by default with exact catalog and surface URLs; use `--text`
 for a readable result. `discover` uses Executor to identify MCP or OpenAPI,
 register the integration, discover auth, and list the number of available tools.
-After `connect`, `tools` returns JSON by default with complete schemas; use
-`--text` for concise canonical addresses and input shapes. The default connection is `default`. `validate <tool-address>` checks
-an authored address against the live catalog. `invoke` executes one tool directly
-and prints its normalized JSON result.
+After `connect`, `tools` returns compact names and descriptions; `schema` returns
+the selected tool's complete input/output schemas and resolved address. The
+default connection is `default`. `validate <tool-address>` checks a resolved
+address or portable integration config against the live catalog. `invoke`
+executes one resolved tool directly and prints its normalized JSON result.
 
 The dashboard's **Integrations** view (`wf web`) shows the same catalog in the
 browser: which integrations are connected, the connections authorizing them, and

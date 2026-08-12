@@ -23,7 +23,6 @@ const AuthorizeExecutorOptions = Schema.Struct({
   integration: Schema.String,
   connection: Schema.String,
   authMethod: ExecutorAuthMethod,
-  scopes: Schema.optional(Schema.Array(Schema.String)),
   clientId: Schema.optional(Schema.String),
   clientSecret: Schema.optional(Schema.String),
   timeoutMs: Schema.optional(Schema.Number)
@@ -41,23 +40,6 @@ const defaultExecutorAuth: ExecutorOAuthOperations = {
   createClient: createExecutorOAuthClient,
   start: startExecutorOAuth,
   complete: completeExecutorOAuth
-}
-
-const normalizedScopes = (scopes: ReadonlyArray<string>): ReadonlyArray<string> =>
-  [...new Set(scopes.map((scope) => scope.trim()).filter((scope) => scope.length > 0))]
-
-export const authorizationUrlWithScopes = (
-  authorizationUrl: string,
-  scopes: ReadonlyArray<string>
-): string => {
-  const url = new URL(authorizationUrl)
-  const requested = normalizedScopes(scopes)
-  if (requested.length === 0) {
-    url.searchParams.delete("scope")
-  } else {
-    url.searchParams.set("scope", requested.join(" "))
-  }
-  return url.toString()
 }
 
 const browserResponse = (options: {
@@ -152,9 +134,6 @@ export const authorizeExecutorInBrowser = async (
   try {
     const redirectUri = `http://127.0.0.1:${server.port}/oauth/callback`
     const oauth = options.authMethod.oauth
-    const requestedScopes = options.scopes === undefined
-      ? undefined
-      : normalizedScopes(options.scopes)
     const discovered = oauth.discoveryUrl === undefined
       ? undefined
       : await auth.probe(oauth.discoveryUrl)
@@ -188,7 +167,7 @@ export const authorizeExecutorInBrowser = async (
         registrationEndpoint,
         authorizationUrl,
         tokenUrl,
-        scopes: requestedScopes ?? oauth.scopes ?? discovered?.scopesSupported ?? [],
+        scopes: oauth.scopes ?? discovered?.scopesSupported ?? [],
         ...(discovered?.issuer === undefined ? {} : { issuer: discovered.issuer }),
         ...(resource === undefined ? {} : { resource }),
         ...(discovered?.tokenEndpointAuthMethodsSupported === undefined
@@ -207,26 +186,11 @@ export const authorizeExecutorInBrowser = async (
       redirectUri
     })
     if (started.status === "connected") {
-      return {
-        owner: started.connection.owner,
-        name: String(started.connection.name),
-        integration: String(started.connection.integration),
-        template: String(started.connection.template),
-        address: String(started.connection.address),
-        ...(started.connection.identityLabel === undefined
-          ? {}
-          : { identityLabel: started.connection.identityLabel }),
-        ...(started.connection.expiresAt === undefined
-          ? {}
-          : { expiresAt: started.connection.expiresAt })
-      }
+      return started.connection
     }
     expectedState = started.state
-    const authorizationUrlToOpen = requestedScopes === undefined
-      ? started.authorizationUrl
-      : authorizationUrlWithScopes(started.authorizationUrl, requestedScopes)
-    input.onAuthorizationUrl?.(authorizationUrlToOpen)
-    await (input.open ?? openBrowser)(authorizationUrlToOpen)
+    input.onAuthorizationUrl?.(started.authorizationUrl)
+    await (input.open ?? openBrowser)(started.authorizationUrl)
     return await completion.promise
   } finally {
     clearTimeout(timeout)

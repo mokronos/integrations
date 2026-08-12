@@ -9,6 +9,7 @@ export {
   ExecutorOpenApiPreview,
   ExecutorOAuthProbe,
   ExecutorOAuthStart,
+  ExecutorOwner,
   ExecutorTool,
   ExecutorToolAddress,
   ExecutorToolSummary,
@@ -86,8 +87,6 @@ export {
   IntegrationValidationFinding as IntegrationValidationFindingSchema,
   IntegrationValidationReport as IntegrationValidationReportSchema,
   listIntegrationOverviews,
-  validateExecutorToolAddress,
-  validateExecutorToolAddresses,
   validateIntegrationNode
 } from "./integrations.ts"
 export type {
@@ -102,6 +101,11 @@ export {
   createExecutorIntegrationInvoker,
   executorIntegrationInvoker
 } from "./invoker.ts"
+export {
+  describeIntegrationResolution,
+  IntegrationResolution,
+  resolveIntegrationSource
+} from "./integration-resolution.ts"
 export { createExecutorServices } from "./services.ts"
 export type { ExecutorServices } from "./services.ts"
 export {

@@ -3,7 +3,7 @@ import { Activity, DurableClock, DurableDeferred, Workflow, WorkflowEngine } fro
 import { Cause, Effect, Exit, Layer, Option, Schema } from "effect"
 import type * as Duration from "effect/Duration"
 import { emitWorkflowEvent } from "./events.ts"
-import type { IntegrationInvoker } from "./integration-invoker.ts"
+import type { IntegrationInvoker } from "./integration-contract.ts"
 import {
   ExecutionResourceRegistry,
   makeExecutionResourceRegistry
@@ -33,22 +33,36 @@ import {
   verifyOrchestrationCall
 } from "./determinism.ts"
 import type { InMemoryDeterminismState } from "./determinism.ts"
-import { isTerminalFailure, StepRetryPolicy, terminalFailure } from "./workflow-model.ts"
+import {
+  formatIntegrationSource,
+  isTerminalFailure,
+  StepRetryPolicy,
+  terminalFailure
+} from "./workflow-model.ts"
 import type {
   DefinedStep,
   DynamicService,
+  IntegrationSource,
   StepContext,
   StepExecutionContext,
   SignalOutcome,
-  StepIntegrationRequirement,
   SynchronousSchema,
+  TerminalFailure,
   WorkflowAllError,
   WorkflowAllSuccess,
   WorkflowContext,
   WorkflowGenerator,
   WorkflowValue
 } from "./workflow-model.ts"
-export { defineStep, StepRetryPolicy, terminalFailure } from "./workflow-model.ts"
+export {
+  defineStep,
+  formatIntegrationSource,
+  integrationSourceKey,
+  IntegrationOwner,
+  IntegrationSource,
+  StepRetryPolicy,
+  terminalFailure
+} from "./workflow-model.ts"
 export type {
   DefinedStep,
   Step,
@@ -56,7 +70,6 @@ export type {
   StepContext,
   StepExecutionContext,
   SignalOutcome,
-  StepIntegrationRequirement,
   SynchronousSchema,
   TerminalFailure,
   WorkflowContext,
@@ -207,6 +220,7 @@ export interface InMemoryExecutionOptions {
 }
 
 export interface InspectableStep {
+  readonly kind: "local" | "integration"
   readonly name: string
   readonly input: Schema.Top
   readonly output: Schema.Top
@@ -214,7 +228,7 @@ export interface InspectableStep {
   readonly retry?: StepRetryPolicy
   readonly concurrency?: { readonly limit: number; readonly key?: object }
   readonly compensate?: object
-  readonly integration?: StepIntegrationRequirement
+  readonly source?: IntegrationSource
 }
 
 export type StepExecutionOverride =
@@ -270,11 +284,9 @@ const preserveNonDeterminismError = (error: unknown): NonDeterminismError => {
 }
 
 const makeStepContext = <E>(
-  _errors: SynchronousSchema<E>,
   executionId: string,
   attempt: number,
-  resolver?: SecretResolver,
-  integrations?: IntegrationInvoker
+  resolver?: SecretResolver
 ): StepContext<E> => ({
   attempt,
   executionId,
@@ -282,14 +294,31 @@ const makeStepContext = <E>(
   resolveSecret: (name, context) => {
     if (resolver === undefined) throw new Error(`No secret resolver configured for ${name}`)
     return Promise.resolve(resolver.resolve(name, context))
-  },
-  invokeIntegration: (address, input) => {
-    if (integrations === undefined) {
-      throw new Error(`No integration invoker configured for ${address}`)
-    }
-    return integrations.invoke(address, input)
   }
 })
+
+const executeStep = async <
+  Input extends SynchronousSchema<DynamicService>,
+  Output extends SynchronousSchema<DynamicService>,
+  Errors extends SynchronousSchema<DynamicService>
+>(options: {
+  readonly step: DefinedStep<Input, Output, Errors>
+  readonly input: Input["Type"]
+  readonly context: StepContext<Errors["Type"]>
+  readonly integrations?: IntegrationInvoker
+}): Promise<Output["Type"] | TerminalFailure<Errors["Type"]>> => {
+  if (options.step.kind === "local") {
+    return await options.step.execute(options.input, options.context)
+  }
+  if (options.integrations === undefined) {
+    throw new Error(
+      `No integration invoker configured for ${formatIntegrationSource(options.step.source)}`
+    )
+  }
+  const input = Schema.decodeUnknownSync(Schema.Json)(options.input)
+  const result = await options.integrations.invoke(options.step.source, input)
+  return decodeSync(options.step.output, result)
+}
 
 const nextInvocation = (counters: Map<string, number>, name: string): number => {
   const invocation = (counters.get(name) ?? 0) + 1
@@ -445,10 +474,12 @@ const makeCtx = <WErrors>(
                 step.input,
                 await resolveSecretReferences(input, resolver)
               )
-              const value = await step.execute(
-                executeInput,
-                makeStepContext(step.errors, executionId, attempt, resolver, integrations)
-              )
+               const value = await executeStep({
+                 step,
+                 input: executeInput,
+                 context: makeStepContext(executionId, attempt, resolver),
+                 ...(integrations === undefined ? {} : { integrations })
+               })
               if (isTerminalFailure(value)) {
                 throw value
               }
@@ -900,12 +931,10 @@ const makeInMemoryCtx = <WErrors>(
 
             try {
               const stepContext = makeStepContext(
-                step.errors,
-                executionId,
-                attempt,
-                options.secrets,
-                options.integrations
-              )
+                 executionId,
+                 attempt,
+                 options.secrets
+               )
               const release = await (options.concurrency ?? defaultConcurrencyLimiter)
                 .acquire(step.name, step.concurrency, input, options.signal)
               try {
@@ -924,10 +953,19 @@ const makeInMemoryCtx = <WErrors>(
                     })
                 const value = override.handled
                   ? override.value
-                  : await step.execute(executeInput, stepContext)
+                  : await executeStep({
+                      step,
+                      input: executeInput,
+                      context: stepContext,
+                      ...(options.integrations === undefined
+                        ? {}
+                        : { integrations: options.integrations })
+                    })
                 if (isTerminalFailure(value)) {
-                  const terminal = decodeSync(step.errors, value.error)
-                  throw terminal
+                  throw {
+                    _wfFailureType: "terminal",
+                    error: decodeSync(step.errors, value.error)
+                  } satisfies ActivityFailure
                 }
 
                 const result = decodeSync(step.output, value)
@@ -962,11 +1000,9 @@ const makeInMemoryCtx = <WErrors>(
                 release()
               }
             } catch (error) {
-              const terminal = isDeclaredTerminal(step.errors, error)
+              const terminal = isActivityFailure(error) && error._wfFailureType === "terminal"
               if (attempt === attempts || terminal) {
-                const failure = terminal
-                  ? error
-                  : new StepExecutionError({ stepName: step.name, cause: error })
+                const failure = typedStepFailure(step.name, error)
                 await emit({
                   type: "step.failed",
                   executionId,
@@ -1306,15 +1342,6 @@ const makeInMemoryCtx = <WErrors>(
     effect(effect) {
       return effect
     }
-  }
-}
-
-const isDeclaredTerminal = <E>(schema: SynchronousSchema<E>, error: unknown): boolean => {
-  try {
-    decodeSync(schema, error)
-    return true
-  } catch {
-    return false
   }
 }
 

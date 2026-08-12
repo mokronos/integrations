@@ -14,7 +14,13 @@ export {
   StepExecutionError,
   StepRetryPolicy
 } from "./core.ts"
-export { integration, IntegrationError, IntegrationSource } from "./integration.ts"
+export {
+  formatIntegrationSource,
+  integration,
+  IntegrationError,
+  IntegrationOwner,
+  IntegrationSource
+} from "./integration.ts"
 export type { IntegrationInvoker } from "./integration.ts"
 export type {
   DefinedWorkflow,

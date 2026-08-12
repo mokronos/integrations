@@ -13,10 +13,7 @@ import {
   listExecutorTools,
   setExecutorStorageDirectory
 } from "@mokronos/wfkit-executor"
-import {
-  authorizationUrlWithScopes,
-  authorizeExecutorInBrowser
-} from "../src/cli/oauth.ts"
+import { authorizeExecutorInBrowser } from "../src/cli/oauth.ts"
 
 const servers: Array<ReturnType<typeof Bun.serve>> = []
 const directories: Array<string> = []
@@ -30,14 +27,6 @@ afterEach(async () => {
 })
 
 describe("Executor connections", () => {
-  test("explicit OAuth scopes override discovered authorization scopes", () => {
-    const authorizationUrl = authorizationUrlWithScopes(
-      "https://provider.example/authorize?scope=read+write&state=test",
-      ["read", "read"]
-    )
-    expect(new URL(authorizationUrl).searchParams.get("scope")).toBe("read")
-  })
-
   test("persists the catalog and keeps credentials outside workflow state", async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), "wf-executor-connections-"))
     directories.push(directory)
@@ -207,7 +196,6 @@ describe("Executor connections", () => {
       connection: "default",
       authMethod,
       clientId: "wf-test-client",
-      scopes: ["profile"],
       open: async (authorizationUrl) => {
         const authorization = await fetch(authorizationUrl, { redirect: "manual" })
         const callback = authorization.headers.get("location")

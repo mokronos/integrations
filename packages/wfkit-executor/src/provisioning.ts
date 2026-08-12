@@ -57,7 +57,7 @@ const installWith = async (
       spec: decoded.detection.endpoint,
       slug: decoded.detection.slug,
       name: decoded.detection.name,
-      ...(preview.servers[0]?.url === undefined ? {} : { baseUrl: preview.servers[0].url })
+      ...(preview.description === null ? {} : { description: preview.description })
     })
   }
 

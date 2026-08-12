@@ -6,19 +6,16 @@ import { Schema } from "effect"
 import {
   closeExecutor,
   decodeIntegrationsResponse,
-  ExecutorToolAddress,
   listExecutorIntegrations,
   normalizeExecutorToolOutputSchema,
   normalizeExecutorToolResult,
   setExecutorStorageDirectory
 } from "../src/index.ts"
 import {
-  createIntegrationValidation,
   createIntegrationDiscovery,
   discoverIntegration,
   listIntegrationOverviews,
   searchIntegrations,
-  validateExecutorToolAddresses,
   validateIntegrationNode
 } from "../src/index.ts"
 
@@ -57,8 +54,11 @@ describe("Executor discovery SDK", () => {
         }),
         previewOpenApi: async () => ({
           title: null,
+          description: null,
           version: null,
           operationCount: 0,
+          operations: [],
+          tags: [],
           servers: [],
           securitySchemes: []
         })
@@ -347,42 +347,17 @@ describe("Executor discovery SDK", () => {
     expect(report.findings[0]?.check).toBe("structural")
   })
 
-  test("live validation uses tool summaries without loading schemas", async () => {
-    const validate = createIntegrationValidation({
-      tools: {
-        summaries: async () => [{
-          address: ExecutorToolAddress.make("tools.docs.org.default.get"),
-          name: "get",
-          description: "Get one doc",
-          integration: "docs",
-          connection: "default"
-        }]
+  test("rejects integration source that mixes portable and resolved forms", async () => {
+    const report = await validateIntegrationNode(json(JSON.stringify({
+      source: {
+        kind: "executor",
+        address: "tools.linear.org.default.createIssue",
+        integration: "linear",
+        tool: "createIssue"
       }
-    })
+    })))
 
-    const report = await validate(json(JSON.stringify({
-      source: { kind: "executor", address: "tools.docs.org.default.get" }
-    })), { live: true })
-
-    expect(report.ok).toBe(true)
-    expect(report.findings).toContainEqual({
-      severity: "info",
-      check: "catalog",
-      message: "get is available"
-    })
-  })
-
-  test("does not inspect Executor tools when there are no addresses", async () => {
-    let calls = 0
-
-    const reports = await validateExecutorToolAddresses([], {
-      summaries: async () => {
-        calls++
-        return []
-      }
-    })
-
-    expect(reports).toEqual([])
-    expect(calls).toBe(0)
+    expect(report.ok).toBe(false)
+    expect(report.findings[0]?.check).toBe("structural")
   })
 })

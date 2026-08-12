@@ -1,5 +1,13 @@
 import { Option, Schema } from "effect"
 
+/** Which principal a connection — and so every tool reached through it —
+ *  belongs to. `org` credentials are shared by the whole tenant; `user`
+ *  credentials belong to the acting subject. The tool address names this
+ *  segment, so the two are distinct addresses rather than one shadowing the
+ *  other. */
+export const ExecutorOwner = Schema.Literals(["org", "user"])
+export type ExecutorOwner = typeof ExecutorOwner.Type
+
 export const ExecutorToolAddress = Schema.String.pipe(
   Schema.refine(
     (value): value is string => /^tools\.[^.]+\.(org|user)\.[^.]+\..+$/.test(value)
@@ -17,11 +25,21 @@ export const ExecutorDetection = Schema.Struct({
 })
 export type ExecutorDetection = typeof ExecutorDetection.Type
 
+export const ExecutorAuthPlacement = Schema.Struct({
+  carrier: Schema.Literals(["header", "query", "env"]),
+  name: Schema.String,
+  prefix: Schema.String,
+  variable: Schema.optional(Schema.String),
+  literal: Schema.optional(Schema.String)
+})
+export type ExecutorAuthPlacement = typeof ExecutorAuthPlacement.Type
+
 export const ExecutorAuthMethod = Schema.Struct({
   id: Schema.String,
   label: Schema.String,
   kind: Schema.Literals(["oauth", "apikey", "header", "none"]),
   template: Schema.String,
+  placements: Schema.optional(Schema.Array(ExecutorAuthPlacement)),
   oauth: Schema.optional(Schema.Struct({
     discoveryUrl: Schema.optional(Schema.String),
     authorizationUrl: Schema.optional(Schema.String),
@@ -29,7 +47,8 @@ export const ExecutorAuthMethod = Schema.Struct({
     resource: Schema.optional(Schema.NullOr(Schema.String)),
     scopes: Schema.optional(Schema.Array(Schema.String)),
     registrationEndpoint: Schema.optional(Schema.String),
-    supportsDynamicRegistration: Schema.optional(Schema.Boolean)
+    supportsDynamicRegistration: Schema.optional(Schema.Boolean),
+    supportsClientIdMetadataDocument: Schema.optional(Schema.Boolean)
   }))
 })
 export type ExecutorAuthMethod = typeof ExecutorAuthMethod.Type
@@ -39,18 +58,27 @@ export const ExecutorIntegration = Schema.Struct({
   name: Schema.String,
   description: Schema.String,
   kind: Schema.String,
+  canRemove: Schema.Boolean,
+  canRefresh: Schema.Boolean,
   authMethods: Schema.Array(ExecutorAuthMethod),
-  displayUrl: Schema.optional(Schema.String)
+  displayUrl: Schema.optional(Schema.String),
+  family: Schema.optional(Schema.String)
 })
 export type ExecutorIntegration = typeof ExecutorIntegration.Type
 
 export const ExecutorConnection = Schema.Struct({
-  owner: Schema.Literals(["org", "user"]),
+  owner: ExecutorOwner,
   name: Schema.String,
   integration: Schema.String,
   template: Schema.String,
   address: Schema.String,
+  provider: Schema.String,
   identityLabel: Schema.optional(Schema.NullOr(Schema.String)),
+  description: Schema.optional(Schema.NullOr(Schema.String)),
+  oauthClient: Schema.optional(Schema.NullOr(Schema.String)),
+  oauthClientOwner: Schema.optional(Schema.NullOr(ExecutorOwner)),
+  oauthScope: Schema.optional(Schema.NullOr(Schema.String)),
+  missingOAuthScopes: Schema.optional(Schema.Array(Schema.String)),
   expiresAt: Schema.optional(Schema.NullOr(Schema.Number))
 })
 export type ExecutorConnection = typeof ExecutorConnection.Type
@@ -82,12 +110,17 @@ export type ExecutorOAuthStart = typeof ExecutorOAuthStart.Type
 
 /** A tool's identity and purpose without its schemas. Listing this level of
  *  detail keeps browsing an integration cheap; `ExecutorTool` is the follow-up
- *  for one chosen tool. */
+ *  for one chosen tool.
+ *
+ *  `owner` and `connection` together spell out the two address segments between
+ *  the integration and the tool name, so a reader never has to parse `address`
+ *  back apart to learn which credentials a tool runs under. */
 export const ExecutorToolSummary = Schema.Struct({
   address: ExecutorToolAddress,
   name: Schema.String,
   description: Schema.String,
   integration: Schema.String,
+  owner: ExecutorOwner,
   connection: Schema.String
 })
 export type ExecutorToolSummary = typeof ExecutorToolSummary.Type
@@ -96,8 +129,10 @@ export const ExecutorTool = Schema.Struct({
   ...ExecutorToolSummary.fields,
   inputSchema: Schema.optional(Schema.Json),
   outputSchema: Schema.optional(Schema.Json),
+  schemaDefinitions: Schema.optional(Schema.Record(Schema.String, Schema.Json)),
   inputTypeScript: Schema.optional(Schema.String),
-  outputTypeScript: Schema.optional(Schema.String)
+  outputTypeScript: Schema.optional(Schema.String),
+  typeScriptDefinitions: Schema.optional(Schema.Record(Schema.String, Schema.String))
 })
 export type ExecutorTool = typeof ExecutorTool.Type
 
@@ -116,14 +151,31 @@ export type ExecutorMcpProbe = typeof ExecutorMcpProbe.Type
 
 export const ExecutorOpenApiPreview = Schema.Struct({
   title: Schema.NullOr(Schema.String),
+  description: Schema.NullOr(Schema.String),
   version: Schema.NullOr(Schema.String),
   operationCount: Schema.Number,
-  servers: Schema.Array(Schema.Struct({ url: Schema.String })),
+  operations: Schema.Array(Schema.Struct({
+    operationId: Schema.String,
+    method: Schema.Literals(["get", "put", "post", "delete", "patch", "head", "options", "trace"]),
+    path: Schema.String,
+    summary: Schema.NullOr(Schema.String),
+    tags: Schema.Array(Schema.String),
+    deprecated: Schema.Boolean
+  })),
+  tags: Schema.Array(Schema.String),
+  servers: Schema.Array(Schema.Struct({
+    url: Schema.String,
+    description: Schema.NullOr(Schema.String)
+  })),
   securitySchemes: Schema.Array(Schema.Struct({
     name: Schema.String,
     type: Schema.Literals(["http", "apiKey", "oauth2", "openIdConnect"]),
     scheme: Schema.NullOr(Schema.String),
-    headerName: Schema.NullOr(Schema.String)
+    bearerFormat: Schema.NullOr(Schema.String),
+    in: Schema.NullOr(Schema.Literals(["header", "query", "cookie"])),
+    headerName: Schema.NullOr(Schema.String),
+    description: Schema.NullOr(Schema.String),
+    openIdConnectUrl: Schema.NullOr(Schema.String)
   }))
 })
 export type ExecutorOpenApiPreview = typeof ExecutorOpenApiPreview.Type

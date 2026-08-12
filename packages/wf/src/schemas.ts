@@ -1,5 +1,11 @@
 import { Schema } from "effect"
-import { StepIntegrationRequirement } from "./workflow-model.ts"
+export {
+  formatIntegrationSource,
+  integrationSourceKey,
+  IntegrationOwner,
+  IntegrationSource
+} from "./integration-contract.ts"
+import { IntegrationSource } from "./integration-contract.ts"
 
 export const ExecutionId = Schema.String.pipe(Schema.brand("ExecutionId"))
 export type ExecutionId = typeof ExecutionId.Type
@@ -55,37 +61,10 @@ export const decodeJsonSchema = (value: unknown): JsonSchema =>
  *  has no JSON representation. */
 export const jsonSchemaOf = (schema: Schema.Top): JsonSchema | undefined => {
   try {
-    return simplifyJsonSchema(decodeJsonSchema(Schema.toJsonSchemaDocument(schema).schema))
+    return decodeJsonSchema(Schema.toJsonSchemaDocument(schema).schema)
   } catch {
     return undefined
   }
-}
-
-const simplifyJsonSchema = (schema: JsonSchema): JsonSchema => {
-  const simplifiedAnyOf = schema.anyOf === undefined
-    ? undefined
-    : [...new Map(
-        schema.anyOf.map(simplifyJsonSchema).map((item) => [JSON.stringify(item), item])
-      ).values()]
-  const simplifiedOneOf = schema.oneOf?.map(simplifyJsonSchema)
-  const simplifiedItems = schema.items === undefined ? undefined : simplifyJsonSchema(schema.items)
-  const simplifiedProperties = schema.properties === undefined
-    ? undefined
-    : Object.fromEntries(
-        Object.entries(schema.properties).map(([key, value]) => [key, simplifyJsonSchema(value)])
-      )
-  const simplified: JsonSchema = {
-    ...schema,
-    ...(simplifiedAnyOf === undefined ? {} : { anyOf: simplifiedAnyOf }),
-    ...(simplifiedOneOf === undefined ? {} : { oneOf: simplifiedOneOf }),
-    ...(simplifiedItems === undefined ? {} : { items: simplifiedItems }),
-    ...(simplifiedProperties === undefined ? {} : { properties: simplifiedProperties })
-  }
-  if (
-    simplifiedAnyOf?.length === 1 &&
-    Object.keys(simplified).every((key) => key === "anyOf")
-  ) return simplifiedAnyOf[0]!
-  return simplified
 }
 
 const WorkflowStartedEvent = Schema.Struct({
@@ -424,7 +403,10 @@ export const WorkflowGraphNodeMetadata = Schema.Struct({
     keyed: Schema.Boolean
   })),
   compensates: Schema.optionalKey(Schema.Boolean),
-  integration: Schema.optionalKey(StepIntegrationRequirement)
+  /** Present on steps built by `integration()`. This is what makes a workflow's
+   *  external dependencies readable from a trace, so `wf validate` can report
+   *  what needs connecting without executing anything. */
+  integration: Schema.optionalKey(IntegrationSource)
 })
 export type WorkflowGraphNodeMetadata = typeof WorkflowGraphNodeMetadata.Type
 

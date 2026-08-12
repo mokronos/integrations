@@ -38,4 +38,37 @@ describe("executor services", () => {
       directory
     })
   })
+
+  test("keeps concurrently active hosts isolated", async () => {
+    const firstDirectory = await mkdtemp(path.join(tmpdir(), "wf-executor-first-"))
+    const secondDirectory = await mkdtemp(path.join(tmpdir(), "wf-executor-second-"))
+    directories.push(firstDirectory, secondDirectory)
+    const firstHost = createExecutorHost(firstDirectory)
+    const secondHost = createExecutorHost(secondDirectory)
+    const first = createExecutorServices(firstHost)
+    const second = createExecutorServices(secondHost)
+    const server = Bun.serve({
+      port: 0,
+      fetch: () => Response.json({
+        openapi: "3.1.0",
+        info: { title: "First", version: "1" },
+        paths: {}
+      })
+    })
+
+    try {
+      expect(await Promise.all([first.catalog.list(), second.catalog.list()])).toEqual([[], []])
+      await first.catalog.addOpenApi({
+        slug: "first",
+        spec: `http://127.0.0.1:${server.port}/openapi.json`
+      })
+
+      expect((await first.catalog.list()).map((integration) => integration.slug)).toContain("first")
+      expect(await second.catalog.list()).toEqual([])
+    } finally {
+      server.stop(true)
+    }
+
+    await Promise.all([firstHost.close(), secondHost.close()])
+  })
 })

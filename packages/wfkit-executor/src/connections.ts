@@ -17,14 +17,17 @@ export const createExecutorConnection = async (options: {
   readonly integration: string
   readonly name: string
   readonly template: string
-  readonly value: string
+  readonly value?: string
+  readonly values?: Readonly<Record<string, string>>
 }, runner: ExecutorRunner = defaultExecutorRunner): Promise<ExecutorConnection> =>
   await runner.run((executor) => executor.connections.create({
     owner: "org",
     integration: IntegrationSlug.make(options.integration),
     name: ConnectionName.make(options.name),
     template: AuthTemplateSlug.make(options.template),
-    value: options.value
+    ...(options.values === undefined
+      ? { value: options.value ?? "" }
+      : { values: { ...options.values } })
   })).then(Schema.decodeUnknownSync(ExecutorConnection))
 
 export const listExecutorConnections = async (

@@ -41,4 +41,20 @@ describe("workflow artifact loader", () => {
     expect(first.workflow.sourceHash).toBe(same.workflow.sourceHash)
     expect(first.workflow.sourceHash).not.toBe(second.workflow.sourceHash)
   })
+
+  test("keeps IntegrationError available to legacy source snapshots", async () => {
+    const loaded = await loadWorkflowArtifact({
+      id: parseWorkflowId("legacy-integration-error"),
+      source: `import { defineWorkflow, IntegrationError, t } from "@mokronos/wfkit"
+export const LegacyIntegrationErrorWorkflow = defineWorkflow({
+  name: "LegacyIntegrationErrorWorkflow",
+  input: t.void,
+  output: t.void,
+  errors: IntegrationError,
+  run: function* () { return undefined }
+})`
+    })
+
+    expect(loaded.workflow.errors).toBeDefined()
+  })
 })

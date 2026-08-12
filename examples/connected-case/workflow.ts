@@ -1,16 +1,5 @@
 import { defineWorkflow, integration, t } from "@mokronos/wfkit"
 
-const requiredEnvironment = (name: string): string => {
-  const value = process.env[name]
-  if (value === undefined || value.length === 0) throw new Error(`Set ${name} before loading ConnectedCaseWorkflow`)
-  return value
-}
-
-const getCustomerTool = requiredEnvironment("WF_CONNECTED_CASE_GET_CUSTOMER_TOOL")
-const getPolicyTool = requiredEnvironment("WF_CONNECTED_CASE_GET_POLICY_TOOL")
-const createCaseTool = requiredEnvironment("WF_CONNECTED_CASE_CREATE_CASE_TOOL")
-const approveCaseTool = requiredEnvironment("WF_CONNECTED_CASE_APPROVE_CASE_TOOL")
-
 const Customer = t.struct({ id: t.string, name: t.string, tier: t.string })
 const Policy = t.struct({ tier: t.string, requiresApproval: t.boolean })
 const CreatedCase = t.struct({ caseId: t.string, title: t.string })
@@ -18,7 +7,7 @@ const ApprovalAudit = t.struct({ auditId: t.string, caseId: t.string, approvedBy
 
 const lookupCustomer = integration({
   name: "LookupCustomer",
-  source: { kind: "executor", address: getCustomerTool },
+  source: { kind: "executor", integration: "crm", tool: "getCustomer" },
   input: t.struct({ customerId: t.string, include: t.string }),
   output: Customer,
   retry: { attempts: 3, backoff: "exponential" }
@@ -26,22 +15,26 @@ const lookupCustomer = integration({
 
 const lookupPolicy = integration({
   name: "LookupPolicy",
-  source: { kind: "executor", address: getPolicyTool },
+  source: { kind: "executor", integration: "crm", tool: "getPolicy" },
   input: t.struct({ tier: t.string }),
   output: Policy
 })
 
 const createCase = integration({
   name: "CreateCase",
-  source: { kind: "executor", address: createCaseTool },
+  source: { kind: "executor", integration: "crm", tool: "createCase" },
   input: t.struct({ customerId: t.string, title: t.string }),
   output: CreatedCase,
   retry: { attempts: 3, backoff: "exponential" }
 })
 
 const approveCase = integration({
+  // An approval must be recorded against the team's shared credential, never
+  // whichever personal account happens to be connected — so this step pins the
+  // org tier. Pinning is a constraint: if only a user connection exists, the
+  // step fails rather than silently filing the audit under one person.
   name: "ApproveCase",
-  source: { kind: "executor", address: approveCaseTool },
+  source: { kind: "executor", integration: "case_review", tool: "approveCase", owner: "org" },
   input: t.struct({
     caseId: t.string,
     body: t.struct({ approvedBy: t.string, summary: t.string })

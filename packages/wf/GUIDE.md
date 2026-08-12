@@ -63,6 +63,10 @@ name that variable; never place the value on the command line:
 wf i connect <integration-slug> --credential-env SERVICE_TOKEN
 ```
 
+If the selected auth method declares several credential variables, map each one
+to an environment variable with
+`--credential-values apiKey=SERVICE_API_KEY,applicationKey=SERVICE_APP_KEY`.
+
 Then inspect the available tools. Browse names and descriptions first, and pull
 the schemas for the one tool you settle on. Integration commands return JSON by
 default; use `--text` for a concise human-readable output:
@@ -74,8 +78,9 @@ wf i tools --search <text>
 wf i schema <tool-name>
 ```
 
-`schema` returns the Executor address to copy into the workflow, together with
-the input and output schemas to mirror in `input` and `output`. It accepts a
+`schema` returns the Executor address for direct inspection, together with the
+input and output schemas to mirror in `input` and `output`. Author workflows with
+the returned integration slug and tool name, not that resolved address. It accepts a
 bare tool name while that name is unique across the connected integrations, an
 integration slug plus a tool name, or a full tool address.
 
@@ -87,7 +92,25 @@ wf i invoke <tool-address> '{"query":"status"}'
 ```
 
 Author the node as
-`source: { kind: "executor", address: "tools.<integration>.org.<connection>.<tool>" }`.
+`source: { kind: "executor", integration: "<integration>", tool: "<tool>" }`.
+
+Note what is *not* in there: the address you invoked with has `owner` and
+`connection` segments, and neither belongs in a workflow. A connection name is a
+label chosen on one machine, so persisting it makes the workflow unshareable — and
+because the step name feeds the durable replay key, it also changes activity
+identity between two people running the same definition. The connection is
+resolved from whatever is connected locally, at the moment the step runs.
+
+Add `owner: "org"` or `owner: "user"` only when the tier matters — for example an
+audit trail that must be written with the team's shared credential rather than
+whoever's personal account happens to be connected. A pinned tier is a hard
+constraint: if that tier is not connected the step fails instead of quietly using
+the other one. Leave it off and either tier satisfies the step.
+
+Run `wf validate <workflow>` to see which of a workflow's integrations resolve on
+this machine and which still need connecting; it exits nonzero while any are
+unmet, so it works as a gate before `wf run`.
+
 Never put a returned credential into workflow source or input. Treat unsupported
 protocol features or unresolved schemas as a design question for the user.
 
@@ -182,6 +205,7 @@ wf history <run-id>
 
 When adapting this example to an authenticated API, do not place secret values
 in workflow inputs or source code. Use `wf i connect`, then persist
-only the selected Executor tool address in the workflow.
+only the selected integration slug, tool name, and optional credential tier in
+the workflow.
 
 For human approval flows, explain the decision and payload to the user before starting. When the run suspends, copy the exact `wf signal ...` command printed by the CLI and wait for the user's response before sending it.
