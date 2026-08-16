@@ -4,6 +4,7 @@
   "type": "module",
   "workspaces": [
     "apps/*",
+    "apps/integrations/*",
     "packages/*",
     "examples/*"
   ],

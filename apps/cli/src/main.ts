@@ -14,8 +14,8 @@ import {
 import {
   createExecutorHost,
   createExecutorServices
-} from "@mokronos/wfkit-executor"
-import type { ExecutorServices } from "@mokronos/wfkit-executor"
+} from "@mokronos/integrations"
+import type { ExecutorServices } from "@mokronos/integrations"
 import type { WorkflowCatalog } from "@mokronos/wfkit"
 import { makeWorkflowCommands, type CliRuntimeOptions } from "./cli/main.ts"
 import assets from "./embedded-web-assets.gen.ts"
