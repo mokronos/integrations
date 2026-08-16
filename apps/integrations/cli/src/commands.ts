@@ -1,6 +1,7 @@
 import { Effect, Option, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
-import type { GatewayClient } from "@mokronos/integrations-client"
+import { generateModule } from "@mokronos/integrations-client"
+import type { CodegenTarget, GatewayClient } from "@mokronos/integrations-client"
 import { cliError, connectToGateway, describeError, openBrowser } from "./connection.ts"
 import type { IntegrationsCliError } from "./connection.ts"
 import {
@@ -841,6 +842,50 @@ const driftCommand = Command.make(
   )
 )
 
+const codegenCommand = Command.make(
+  "codegen",
+  {
+    target: Flag.choice("target", ["effect", "ts"]).pipe(
+      Flag.withDefault("effect" as const),
+      Flag.withDescription(
+        "effect: Effect Schema plus integration() steps for wf. ts: typed calls over the client"
+      )
+    ),
+    out: Flag.string("out").pipe(
+      Flag.optional,
+      Flag.withDescription("Write to a file instead of stdout")
+    )
+  },
+  ({ target, out }) =>
+    gatewayTask(async (client) => {
+      // Generated from this key's grants, so the generated surface is the
+      // authorized surface. Adding a tool here means adding a grant.
+      const tools = await client.tools({ schemas: true })
+      if (tools.length === 0) {
+        throw cliError(
+          "This key holds no grants, so there is nothing to generate. Run: integrations grant <client-id> <alias> <tool> --integration <slug>"
+        )
+      }
+      const module_ = generateModule(target as CodegenTarget, tools, client.url)
+      const destination = Option.getOrUndefined(out)
+      if (destination !== undefined) {
+        await Bun.write(destination, module_)
+        return { written: destination, tools: tools.length }
+      }
+      return { module: module_, tools: tools.length }
+    }).pipe(Effect.flatMap((result) =>
+      typeof result.module === "string"
+        ? writeStdoutLine(result.module)
+        : writeStdoutLine(
+          `Wrote ${text(result.written)} (${result.tools} tool(s))`
+        )
+    ))
+).pipe(
+  Command.withDescription(
+    "Generate typed bindings for the tools this key can reach"
+  )
+)
+
 export const integrationsSubcommands = [
   discoverCommand,
   searchCommand,
@@ -863,5 +908,6 @@ export const integrationsSubcommands = [
   approveCommand,
   denyCommand,
   auditCommand,
-  driftCommand
+  driftCommand,
+  codegenCommand
 ] as const

@@ -160,7 +160,12 @@ export const makeRoutes = (dependencies: ApiDependencies): ReadonlyArray<Route> 
       method: "GET",
       path: "/v1/tools",
       access: "delegated",
-      handle: async (request) => ok({ tools: await listGrantedTools(store, request.client.id) })
+      handle: async (request) => ok({
+        tools: await listGrantedTools(store, request.client.id, {
+          schemas: request.query.get("schemas") === "true",
+          executor
+        })
+      })
     },
     {
       method: "POST",

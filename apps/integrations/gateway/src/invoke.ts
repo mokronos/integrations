@@ -150,21 +150,56 @@ export const executeAuthorized = async (
   }
 }
 
-/** The tools a client may actually reach. Discovery is grant-scoped, which is
- * why there is no `block` decision: an ungranted tool is invisible rather than
- * visible-then-failing. */
-export const listGrantedTools = async (
-  store: GatewayStore,
-  grantsOwner: Parameters<GatewayStore["listGrants"]>[0]
-): Promise<ReadonlyArray<{
+export interface GrantedTool {
   readonly alias: Alias
   readonly tool: ToolName
   readonly integration: string
   readonly decision: Grant["decision"]
-}>> =>
-  (await store.listGrants(grantsOwner)).map((grant) => ({
+  readonly inputSchema?: Json
+  readonly outputSchema?: Json
+}
+
+/** The tools a client may actually reach. Discovery is grant-scoped, which is
+ * why there is no `block` decision: an ungranted tool is invisible rather than
+ * visible-then-failing.
+ *
+ * Schemas are opt-in because fetching them costs one catalog read per grant.
+ * With them, this listing is exactly what codegen emits — so the generated
+ * surface and the authorized surface cannot drift apart. */
+export const listGrantedTools = async (
+  store: GatewayStore,
+  clientId: Parameters<GatewayStore["listGrants"]>[0],
+  options: {
+    readonly schemas?: boolean
+    readonly executor?: Pick<ExecutorServices, "tools">
+  } = {}
+): Promise<ReadonlyArray<GrantedTool>> => {
+  const grants = await store.listGrants(clientId)
+  const base = grants.map((grant) => ({
     alias: grant.alias,
     tool: grant.tool,
     integration: grant.connection.integration,
     decision: grant.decision
   }))
+  if (options.schemas !== true || options.executor === undefined) return base
+
+  const executor = options.executor
+  return await Promise.all(base.map(async (entry, index) => {
+    const grant = grants[index]
+    if (grant === undefined) return entry
+    try {
+      const described = await executor.tools.describe(
+        grantToolAddress(grant.connection, grant.tool)
+      )
+      return {
+        ...entry,
+        ...(described.inputSchema === undefined ? {} : { inputSchema: described.inputSchema }),
+        ...(described.outputSchema === undefined ? {} : { outputSchema: described.outputSchema })
+      }
+    } catch {
+      // A tool that has since disappeared should not fail the whole listing —
+      // that is what `integrations drift` is for.
+      return entry
+    }
+  }))
+}

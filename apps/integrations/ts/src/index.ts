@@ -32,7 +32,9 @@ const GrantedTool = Schema.Struct({
   alias: Schema.String,
   tool: Schema.String,
   integration: Schema.String,
-  decision: Schema.Literals(["allow", "require_approval"])
+  decision: Schema.Literals(["allow", "require_approval"]),
+  inputSchema: Schema.optional(Schema.Json),
+  outputSchema: Schema.optional(Schema.Json)
 })
 export type GrantedTool = typeof GrantedTool.Type
 
@@ -78,8 +80,10 @@ export interface GatewayClient {
   request(method: string, path: string, body?: unknown): Promise<unknown>
 
   /** The tools this key can reach. Grant-scoped, so an ungranted tool is
-   *  absent rather than present-and-failing. */
-  tools(): Promise<ReadonlyArray<GrantedTool>>
+   *  absent rather than present-and-failing.
+   *
+   *  Schemas are opt-in because they cost a catalog read per grant. */
+  tools(options?: { readonly schemas?: boolean }): Promise<ReadonlyArray<GrantedTool>>
   execute(input: {
     readonly alias: string
     readonly tool: string
@@ -116,7 +120,10 @@ export const createGatewayClient = (options: GatewayClientOptions): GatewayClien
   return {
     url: base,
     request,
-    tools: async () => decodeGrantedTools(await request("GET", "/v1/tools")).tools,
+    tools: async (options) =>
+      decodeGrantedTools(
+        await request("GET", options?.schemas === true ? "/v1/tools?schemas=true" : "/v1/tools")
+      ).tools,
     execute: async (input) =>
       decodeOutcome(await request("POST", "/v1/execute", {
         alias: input.alias,
@@ -145,3 +152,12 @@ export {
   writeGatewayConfig
 } from "./config.ts"
 export type { ClientConnection } from "./config.ts"
+
+export {
+  bindingName,
+  generateEffectModule,
+  generateModule,
+  generateTypeScriptModule,
+  typeName
+} from "./codegen.ts"
+export type { CodegenTarget, GeneratableTool } from "./codegen.ts"
