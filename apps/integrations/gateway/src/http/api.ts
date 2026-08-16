@@ -2,6 +2,8 @@ import { Schema } from "effect"
 import type { ExecutorServices } from "@mokronos/wfkit-executor"
 import { searchIntegrations } from "@mokronos/wfkit-executor"
 import { ExecutorToolAddress } from "@mokronos/wfkit-executor/schemas"
+import { refreshIntegrationSnapshot } from "../drift.ts"
+import { runMaintenance } from "../maintenance.ts"
 import type { OAuthSessions } from "../oauth-sessions.ts"
 import {
   Alias,
@@ -573,6 +575,28 @@ export const makeRoutes = (dependencies: ApiDependencies): ReadonlyArray<Route> 
         })
         return ok({ approval: await store.getApproval(id) })
       }
+    },
+    {
+      method: "POST",
+      path: "/v1/drift/refresh",
+      access: "privileged",
+      handle: async (request) => {
+        const slug = request.query.get("integration")
+        const integrations = slug === null
+          ? (await executor.catalog.list()).map((entry) => entry.slug)
+          : [slug]
+        const reports = []
+        for (const integration of integrations) {
+          reports.push(await refreshIntegrationSnapshot({ store, executor }, integration))
+        }
+        return ok({ reports })
+      }
+    },
+    {
+      method: "POST",
+      path: "/v1/maintenance",
+      access: "privileged",
+      handle: async () => ok(await runMaintenance(store))
     },
     {
       method: "GET",

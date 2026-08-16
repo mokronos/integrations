@@ -417,6 +417,17 @@ export interface GatewayStore {
 
   putToolSnapshots(snapshots: ReadonlyArray<ToolSnapshot>): Promise<void>
   listToolSnapshots(integration: IntegrationSlug): Promise<ReadonlyArray<ToolSnapshot>>
+  forgetToolSnapshots(
+    keys: ReadonlyArray<{
+      readonly integration: IntegrationSlug
+      readonly connection: ConnectionName
+      readonly tool: ToolName
+    }>
+  ): Promise<void>
+
+  /** Turns approvals nobody decided on into decisions. Expiry means the
+   *  invocation does not happen — it is not an absence of an answer. */
+  expireApprovals(now: Date): Promise<number>
 
   close(): Promise<void>
 }
@@ -675,6 +686,26 @@ export const createGatewayStore = async (databasePath: string): Promise<GatewayS
         "SELECT * FROM gateway_tool_snapshot WHERE integration = ? ORDER BY connection_name, tool",
         [integration]
       )).map(toSnapshot),
+
+    forgetToolSnapshots: async (keys) => {
+      for (const key of keys) {
+        await run(
+          `DELETE FROM gateway_tool_snapshot
+             WHERE integration = ? AND connection_name = ? AND tool = ?`,
+          [key.integration, key.connection, key.tool]
+        )
+      }
+    },
+
+    expireApprovals: async (at) => {
+      const result = await database.execute({
+        sql: `UPDATE gateway_pending_approval
+                SET status = 'expired', decided_at = ?, error = 'expired before a decision was recorded'
+              WHERE status = 'pending' AND expires_at <= ?`,
+        args: [now(), millis(at)]
+      })
+      return Number(result.rowsAffected)
+    },
 
     close: async () => {
       database.close()

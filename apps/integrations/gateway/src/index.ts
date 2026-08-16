@@ -76,6 +76,13 @@ export {
 } from "./invoke.ts"
 export type { InvocationOutcome, InvokeDependencies } from "./invoke.ts"
 
+export { diffSnapshots, refreshIntegrationSnapshot } from "./drift.ts"
+export type { DriftReport } from "./drift.ts"
+export { runMaintenance, startMaintenanceLoop } from "./maintenance.ts"
+export type { MaintenanceLoop, MaintenanceResult } from "./maintenance.ts"
+export { createOAuthSessions } from "./oauth-sessions.ts"
+export type { OAuthSession, OAuthSessions, OAuthSessionState } from "./oauth-sessions.ts"
+
 export { makeRoutes } from "./http/api.ts"
 export type { ApiDependencies } from "./http/api.ts"
 export { createGatewayHandler } from "./http/handler.ts"

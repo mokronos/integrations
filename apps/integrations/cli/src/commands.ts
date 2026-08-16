@@ -801,6 +801,46 @@ const auditCommand = Command.make(
     )
 ).pipe(Command.withDescription("Read the gateway's audit trail"))
 
+const driftCommand = Command.make(
+  "drift",
+  {
+    integration: Argument.string("integration").pipe(Argument.optional),
+    text: textFlag(),
+    verbose: verboseFlag()
+  },
+  ({ integration, text: asText, verbose }) =>
+    gatewayTask((client) =>
+      client.request(
+        "POST",
+        Option.isNone(integration)
+          ? "/v1/drift/refresh"
+          : `/v1/drift/refresh?integration=${encodeURIComponent(integration.value)}`
+      )
+    ).pipe(Effect.flatMap((result) => {
+      const reports = array(record(result)["reports"])
+      const entries: ReadonlyArray<Record<string, unknown>> = reports.flatMap((report) =>
+        array(report["entries"]).map((entry) => ({
+          ...entry,
+          integration: report["integration"]
+        }))
+      )
+      const shown = visibleItems(entries, verbose)
+      const hint = moreHint(shown.length, entries.length)
+      if (asText) {
+        const lines = shown.map((entry) =>
+          `${text(entry["kind"])}\t${text(entry["integration"])}.${text(entry["tool"])}`
+        )
+        if (hint !== undefined) lines.push(hint)
+        return writeStdoutLine(lines.join("\n") || "No drift since the last refresh.")
+      }
+      return writeStdoutLine(jsonOutput({ drift: shown, checked: reports.length }, verbose))
+    }))
+).pipe(
+  Command.withDescription(
+    "Re-read tools and report what a vendor added, removed, or reshaped since the last sync"
+  )
+)
+
 export const integrationsSubcommands = [
   discoverCommand,
   searchCommand,
@@ -822,5 +862,6 @@ export const integrationsSubcommands = [
   approvalsCommand,
   approveCommand,
   denyCommand,
-  auditCommand
+  auditCommand,
+  driftCommand
 ] as const
