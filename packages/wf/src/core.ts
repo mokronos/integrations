@@ -58,7 +58,6 @@ export {
   defineStep,
   formatIntegrationSource,
   integrationSourceKey,
-  IntegrationOwner,
   IntegrationSource,
   StepRetryPolicy,
   terminalFailure

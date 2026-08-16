@@ -14,7 +14,6 @@ export type SynchronousSchema<A> = Schema.Codec<A, DynamicService, never, never>
 export {
   formatIntegrationSource,
   integrationSourceKey,
-  IntegrationOwner,
   IntegrationSource
 } from "./integration-contract.ts"
 

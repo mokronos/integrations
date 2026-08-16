@@ -97,15 +97,6 @@ export type {
   IntegrationSearchSurface,
   SearchIntegrationsOptions
 } from "./registry.ts"
-export {
-  createExecutorIntegrationInvoker,
-  executorIntegrationInvoker
-} from "./invoker.ts"
-export {
-  describeIntegrationResolution,
-  IntegrationResolution,
-  resolveIntegrationSource
-} from "./integration-resolution.ts"
 export { createExecutorServices } from "./services.ts"
 export type { ExecutorServices } from "./services.ts"
 export {

@@ -324,10 +324,28 @@ describe("integrations CLI acceptance", () => {
     const slug = discovered.integration.slug
     await integrations(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
 
+    // The workflow names an alias, so the local client needs a grant binding
+    // that alias to the connection just made. This is the deployment-time
+    // binding from ADR 0003: the definition is portable, the grant is not.
+    const clients = JSON.parse((await integrations(["clients"])).stdout) as {
+      clients: ReadonlyArray<{ id: string; name: string }>
+    }
+    const local = clients.clients.find((entry) => entry.name === "local")
+    expect(local).toBeDefined()
+    const granted = await integrations([
+      "grant",
+      local?.id ?? "",
+      "tickets",
+      "tickets.create",
+      "--integration",
+      slug
+    ])
+    expect(granted.exitCode, granted.stderr).toBe(0)
+
     const source = `import { defineWorkflow, integration, t } from "@mokronos/wfkit"
 const Output = t.struct({ id: t.string, title: t.string })
 const createTicket = integration({
-  source: { kind: "executor", integration: ${JSON.stringify(slug)}, tool: "tickets.create" },
+  source: { kind: "gateway", alias: "tickets", tool: "tickets.create" },
   input: t.struct({ body: t.struct({ title: t.string }) }),
   output: Output
 })
@@ -356,9 +374,11 @@ export const Acceptance = defineWorkflow({
     expect(vendor.invocations()).toBe(1)
 
     const stored = await readFile(path.join(gateway.home, "workflows", "acceptance.ts"), "utf8")
-    expect(stored).toContain(slug)
-    // The definition names the tool, never the connection that served it or the
-    // credential behind it.
+    expect(stored).toContain("tickets.create")
+    // The definition names an alias and a tool. Not the integration slug, not
+    // the connection that served it, not the credential behind it — so handing
+    // this file to someone else needs only a grant on their side.
+    expect(stored).not.toContain(slug)
     expect(stored).not.toContain("acceptance-secret")
     expect(stored).not.toContain(vendor.specUrl)
 

@@ -3,8 +3,6 @@ import { createExecutorCatalog } from "./catalog.ts"
 import { createExecutorConnections } from "./connections.ts"
 import { createIntegrationDiscovery } from "./discovery.ts"
 import type { ExecutorRunner } from "./host.ts"
-import { createExecutorIntegrationInvoker } from "./invoker.ts"
-import { resolveIntegrationSource } from "./integration-resolution.ts"
 import { createIntegrationOverview } from "./overview.ts"
 import { createIntegrationProvisioning } from "./provisioning.ts"
 import { createExecutorTools } from "./tools.ts"
@@ -25,10 +23,7 @@ export const createExecutorServices = (runner: ExecutorRunner) => {
     discovery,
     provisioning: createIntegrationProvisioning({ discovery, catalog, connections, tools }),
     validateIntegrationNode: createIntegrationValidation({ tools }),
-    listIntegrationOverviews: createIntegrationOverview({ catalog, connections, tools }),
-    resolveIntegration: (source: Parameters<typeof resolveIntegrationSource>[0]) =>
-      resolveIntegrationSource(source, tools),
-    integrationInvoker: createExecutorIntegrationInvoker(tools)
+    listIntegrationOverviews: createIntegrationOverview({ catalog, connections, tools })
   }
 }
 

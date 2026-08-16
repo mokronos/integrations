@@ -19,7 +19,7 @@ tool addresses, and schemas. Do not guess any of them. Work autonomously until
 - Explain external reads and writes before invoking them. Get explicit approval
   before a workflow will create, update, send, publish, charge, or delete data.
 - Keep credentials out of commands, workflow source, workflow input, logs, and
-  chat. Use `wf i connect` and environment-variable options.
+  chat. Use `integrations connect` and environment-variable options.
 - Prefer OAuth over asking for a token. Before OAuth, tell the human which
   service/account, requested scopes, and purpose; request only needed scopes.
 - Ask the human only for native-human steps: choosing an account, browser
@@ -38,7 +38,7 @@ First run:
 
 ```sh
 wf --help
-wf i --help
+integrations --help
 ```
 
 If `wf` is absent, tell the user that the following installs a global command,
@@ -65,42 +65,42 @@ human will read it.
 1. Check what is already known and connected:
 
    ```sh
-   wf i list
-   wf i connections
-   wf i tools --search '<capability>'
+   integrations list
+   integrations connections
+   integrations tools --search '<capability>'
    ```
 
 2. If no connected tool fits, search the public catalog by service or
    capability. Search is read-only and returns candidate discovery URLs:
 
    ```sh
-   wf i search '<service-or-capability>' --text
+   integrations search '<service-or-capability>' --text
    ```
 
 3. Select an exact MCP endpoint or OpenAPI document URL from the result or the
    service's official docs, then let Executor detect and register it:
 
    ```sh
-   wf i discover '<mcp-endpoint-or-openapi-url>' --text --verbose
+   integrations discover '<mcp-endpoint-or-openapi-url>' --text --verbose
    ```
 
    `discover` mutates the local catalog. A no-auth integration is connected
-   automatically and reports tools. Do not run `wf i connect` for a no-auth
+   automatically and reports tools. Do not run `integrations connect` for a no-auth
    integration.
 
 4. If discovery says authentication is required, stop for the human handoff.
    Inspect the selected method's complete auth metadata from verbose discovery
-   (or `wf i list --verbose`). For OAuth, identify the minimum scopes required
+   (or `integrations list --verbose`). For OAuth, identify the minimum scopes required
    by the selected tools from that metadata and the provider's official docs.
    Explain the account, exact scopes, purpose, and next action, then use the
    method reported by discovery:
 
    ```sh
    # OAuth; always pass the reviewed minimum set (use '' when none is needed).
-   wf i connect <integration-slug> --scopes '<minimum-scopes>' --text
+   integrations connect <integration-slug> --scopes '<minimum-scopes>' --text
 
    # API key, bearer, or header; the human sets the value outside chat first.
-   wf i connect <integration-slug> --credential-env SERVICE_TOKEN --text
+   integrations connect <integration-slug> --credential-env SERVICE_TOKEN --text
    ```
 
    Use `--no-open` when a browser cannot be launched and relay the printed URL.
@@ -111,12 +111,12 @@ human will read it.
    likely to be used:
 
    ```sh
-   wf i tools <integration-slug> --text
-   wf i tools <integration-slug> --search '<operation>' --text
-   wf i schema <integration-slug> <tool-name> --verbose
+   integrations tools <integration-slug> --text
+   integrations tools <integration-slug> --search '<operation>' --text
+   integrations schema <integration-slug> <tool-name> --verbose
    ```
 
-   Only `wf i schema --verbose` returns the complete input and output schemas;
+   Only `integrations schema --verbose` returns the complete input and output schemas;
    the default output is truncated. It also returns the canonical `tools.<...>`
    address. A bare tool name works only when unique.
 
@@ -124,8 +124,8 @@ human will read it.
    also use a minimal safe invocation when useful:
 
    ```sh
-   wf i validate '<tool-address>' --text
-   wf i invoke '<tool-address>' '<minimal-json-input>'
+   integrations validate '<tool-address>' --text
+   integrations invoke '<tool-address>' '<minimal-json-input>'
    ```
 
    Direct address validation is live. Do not invoke a write tool merely as a
@@ -162,7 +162,7 @@ Use this loop:
 5. Confirm the `integrations:` section from `wf validate` reports every address
    as `ready`. Workflow validation traces integration steps with fake outputs
    and live-checks the addresses it reached without invoking them. Also keep the
-   explicit `wf i validate` checks above when documenting each selected tool.
+   explicit `integrations validate` checks above when documenting each selected tool.
 6. Tell the human exactly what the representative run will read/write and any
    signal it may request. With approval, run and inspect it:
 
@@ -202,21 +202,21 @@ workflow:
    For each address, run:
 
    ```sh
-   wf i validate '<tool-address>' --text
+   integrations validate '<tool-address>' --text
    ```
 
 5. Repair each missing address in order:
 
    - Parse the integration slug, connection name, and tool name from the
-     address. Check `wf i list`, `wf i connections`, and
-     `wf i tools <slug> --connection <connection> --text`.
-   - If the integration is absent, run `wf i search '<slug>' --text`. Discover
+     address. Check `integrations list`, `integrations connections`, and
+     `integrations tools <slug> --connection <connection> --text`.
+   - If the integration is absent, run `integrations search '<slug>' --text`. Discover
      only an exact, trusted endpoint. If no exact match exists, use the
      workflow's documentation or ask the human; do not substitute a similar
      service.
    - Preserve the workflow's connection name with
-     `wf i discover <url> --connection <connection>` for no-auth integrations,
-     or `wf i connect <slug> --connection <connection>` for authenticated ones.
+     `integrations discover <url> --connection <connection>` for no-auth integrations,
+     or `integrations connect <slug> --connection <connection>` for authenticated ones.
    - Complete any human authentication handoff, inspect the exact tool schema,
      and compare it to the authored `input` and `output`. If the provider's
      canonical address changed, update the workflow source rather than trying

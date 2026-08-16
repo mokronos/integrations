@@ -5,10 +5,6 @@ import {
   type IntegrationValidationFinding,
   type IntegrationValidationReport
 } from "./integration-model.ts"
-import {
-  describeIntegrationResolution,
-  resolveIntegrationSource
-} from "./integration-resolution.ts"
 import { listExecutorTools, listExecutorToolSummaries } from "./tools.ts"
 import type { ExecutorTools } from "./tools.ts"
 
@@ -26,9 +22,10 @@ const isAddressForm = (
   source: IntegrationNodeSource
 ): source is Extract<IntegrationNodeSource, { readonly address: string }> => "address" in source
 
-/** The live half: does this node point at something callable right now? An
- *  address is looked up as-is; a portable reference goes through the same
- *  resolution the invoker uses, so validation and execution cannot disagree. */
+/** The live half: does this node point at something callable right now?
+ *
+ * This checks the catalog only. Whether a *caller* may reach it is a different
+ * question, answered by the gateway against that caller's grants. */
 const liveFindings = async (
   source: IntegrationNodeSource,
   tools: Pick<ExecutorTools, "list" | "summaries">
@@ -39,11 +36,20 @@ const liveFindings = async (
       ? [finding("error", "catalog", `Executor tool not found: ${source.address}`)]
       : [finding("info", "catalog", `${tool.name} is available`)]
   }
-  const resolution = await resolveIntegrationSource(source, tools)
-  const message = describeIntegrationResolution(source, resolution)
-  return resolution.status === "resolved"
-    ? [finding("info", "catalog", message)]
-    : [finding("error", "catalog", message)]
+  const matches = (await tools.summaries({ integration: source.integration }))
+    .filter((candidate) => candidate.name === source.tool)
+  if (matches.length === 0) {
+    return [finding(
+      "error",
+      "catalog",
+      `${source.integration}.${source.tool} is not available on this machine`
+    )]
+  }
+  return [finding(
+    "info",
+    "catalog",
+    `${source.tool} is available on ${matches.map((match) => match.connection).join(", ")}`
+  )]
 }
 
 export const createIntegrationValidation = (

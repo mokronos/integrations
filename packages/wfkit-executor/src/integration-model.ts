@@ -7,7 +7,6 @@ import {
   ExecutorOpenApiPreview,
   ExecutorTool
 } from "./schemas.ts"
-import { IntegrationSource } from "@mokronos/wfkit/integrations"
 
 export const IntegrationKind = Schema.Literals(["mcp", "openapi"])
 export type IntegrationKind = typeof IntegrationKind.Type
@@ -66,17 +65,37 @@ export interface DiscoverIntegrationsOptions {
 }
 
 /**
- * What `wf i validate` accepts. Two forms, because the two surfaces speak
- * different dialects on purpose:
+ * What `integrations validate` accepts. Two forms, because the two surfaces
+ * speak different dialects on purpose:
  *
- * - `address` — a fully-resolved `tools.…` address. Still the currency of the
- *   discovery commands, where you have just listed a specific connection's tools
- *   and want to check one of them.
- * - `integration` + `tool` (+ optional `owner`) — the portable reference a
- *   workflow actually authors. Carries no connection, so validating it answers
- *   "would this resolve here?" rather than "does this exact row exist?".
+ * - `address` — a fully-resolved `tools.…` address, the currency of the
+ *   discovery commands: you have just listed a connection's tools and want to
+ *   check one of them.
+ * - `integration` + `tool` — no connection named, so validating it answers
+ *   "does this tool exist anywhere here?" rather than "does this exact row
+ *   exist?".
+ *
+ * Neither is the form a workflow authors. A workflow names an alias, which only
+ * the gateway can resolve, because only the gateway holds the grant that says
+ * which connection the alias means.
  */
-export const IntegrationNodeSource = IntegrationSource
+export const IntegrationNodeSource = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("executor"),
+    address: Schema.String,
+    // A node carrying both forms is ambiguous — the two can disagree about
+    // which tool is meant — so it is rejected rather than silently resolved by
+    // whichever variant matched first.
+    integration: Schema.optionalKey(Schema.Never),
+    tool: Schema.optionalKey(Schema.Never)
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("executor"),
+    integration: Schema.String,
+    tool: Schema.String,
+    address: Schema.optionalKey(Schema.Never)
+  })
+])
 export type IntegrationNodeSource = typeof IntegrationNodeSource.Type
 
 export const IntegrationNodeConfig = Schema.Struct({

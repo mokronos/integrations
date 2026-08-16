@@ -2,7 +2,6 @@ import { Schema } from "effect"
 export {
   formatIntegrationSource,
   integrationSourceKey,
-  IntegrationOwner,
   IntegrationSource
 } from "./integration-contract.ts"
 import { IntegrationSource } from "./integration-contract.ts"

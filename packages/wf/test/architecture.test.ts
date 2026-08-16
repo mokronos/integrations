@@ -108,7 +108,7 @@ describe("package architecture", () => {
     expect(packageJson).toContain('"./integrations"')
   })
 
-  test("the CLI composes Executor through an explicit host", async () => {
+  test("the workflow CLI reaches integrations only through the gateway", async () => {
     const cliRoot = await readFile(
       join(packageDirectory, "..", "..", "apps", "cli", "src", "main.ts"),
       "utf8"
@@ -118,10 +118,16 @@ describe("package architecture", () => {
       "utf8"
     )
 
-    expect(cliRoot).toContain("createExecutorHost")
-    expect(cliRoot).toContain("createExecutorServices")
-    expect(cliRoot).not.toContain("setExecutorStorageDirectory")
-    expect(workflowCommands).not.toContain("executorIntegrationInvoker")
+    // wf holds no credentials and composes no Executor of its own. It is a
+    // gateway client like any other, which is what keeps the privileged
+    // boundary in one process. See docs/adr/0001.
+    for (const source of [cliRoot, workflowCommands]) {
+      expect(source).not.toContain("createExecutorHost")
+      expect(source).not.toContain("createExecutorServices")
+      expect(source).not.toContain("setExecutorStorageDirectory")
+      expect(source).not.toContain("@mokronos/wfkit-executor")
+    }
+    expect(cliRoot).toContain("@mokronos/integrations-client")
   })
 
   test("production TypeScript has no explicit any escape hatches", async () => {

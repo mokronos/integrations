@@ -165,7 +165,7 @@ integration slug, tool name, and optional credential tier.
 ### 1. Discover the integration
 
 ```bash
-wf integrations discover https://mcp.linear.app/mcp
+integrations discover https://mcp.linear.app/mcp
 ```
 
 This performs the complete discovery chain:
@@ -179,7 +179,7 @@ integration slug to connect.
 ### 2. Authorize it in the browser
 
 ```bash
-wf i connect <integration-slug>
+integrations connect <integration-slug>
 ```
 
 For OAuth, Executor discovers authorization metadata, dynamically registers a
@@ -193,13 +193,13 @@ integration auth metadata Executor discovered.
 Confirm it landed, and see every connection you hold:
 
 ```bash
-wf i connections
+integrations connections
 ```
 
 ### 3. Inspect the operations you can call
 
 ```bash
-wf i tools <integration-slug>
+integrations tools <integration-slug>
 ```
 
 This returns the tool names and descriptions of each integration, grouped by
@@ -210,14 +210,14 @@ to keep only the tools whose name or description mentions it.
 Then ask for the one you picked:
 
 ```bash
-wf i schema <tool-name>
+integrations schema <tool-name>
 ```
 
 That returns the tool's address, its full description, and complete input and
 output schemas. Mirror the schemas in the workflow's `input` and `output`, then
 author the node with the integration slug and tool name. A bare tool name is enough while it is
 unique across your integrations; otherwise pass
-`wf i schema <integration-slug> <tool-name>`, or a full tool address.
+`integrations schema <integration-slug> <tool-name>`, or a full tool address.
 Generic MCP envelopes are normalized before they reach workflows: structured
 content is returned directly, JSON text is parsed, and plain text remains a
 string.
@@ -225,7 +225,7 @@ string.
 Safely inspect a read-only tool before authoring:
 
 ```bash
-wf i invoke <tool-address> '{"query":"workflow integrations"}'
+integrations invoke <tool-address> '{"query":"workflow integrations"}'
 ```
 
 > Linear does not publish a stable list of MCP tool names, so the tool and
@@ -242,11 +242,7 @@ import { defineWorkflow, integration, t } from "@mokronos/wfkit"
 
 const createIssue = integration({
   name: "CreateLinearIssue",
-  source: {
-    kind: "executor",
-    integration: "linear",
-    tool: "create_issue"
-  },
+  source: { kind: "gateway", alias: "linear", tool: "create_issue" },
   input: t.struct({ team: t.string, title: t.string, description: t.string }),
   output: t.struct({ id: t.string, identifier: t.string, url: t.string }),
   retry: { attempts: 3, backoff: "exponential" }
@@ -350,8 +346,8 @@ wf validate <workflow>
 
 ```text
 integrations:
-  ready	issues.createIssue resolves to tools.issues.org.default.createIssue
-  integration-not-connected	linear.create_issue: no connection for integration "linear". Connect it with: wf i connect linear
+  ready	issues.createIssue: issues
+  not-granted	linear.create_issue: no grant aliased linear exposes create_issue to this key
 ```
 
 It exits nonzero while anything is unconnected, so it works as a gate before
@@ -394,17 +390,20 @@ belongs reduces to *"does this mean the same thing on someone else's machine?"*
 ### Bootstrapping a workflow you were given
 
 ```bash
-wf validate their-workflow          # what is missing
-wf i discover <url>                 # install the integration it names
-wf i connect <integration-slug>     # authorize it
-wf validate their-workflow          # exits 0 — now runnable
+wf validate their-workflow                    # which aliases are unbound
+integrations discover <url>                   # install the integration
+integrations connect <integration-slug>       # authorize it
+integrations grant <client-id> <alias> <tool> --integration <slug>
+wf validate their-workflow                    # exits 0 — now runnable
 wf run their-workflow '{...}'
 ```
 
-The integration slug is a **local name for a remote's self-declared identity**,
-not a URL. Two people who discover the same server get the same slug, which is
-what makes the definition portable — but the binding from slug to endpoint and
-credentials is always environmental.
+A workflow names an **alias**, not an integration slug and never a connection.
+The alias is a requirement the definition declares, like an environment
+variable; `integrations grant` binds it to a connection on this machine. That
+binding is what makes one definition runnable by different people against their
+own accounts — so bootstrapping someone else's workflow means creating grants,
+not editing their source.
 
 ## Command reference
 
@@ -421,7 +420,7 @@ wf <command>
 | `wf runs` | List persisted runs |
 | `wf history` / `wf events` | Show the persisted event history for a run |
 | `wf signal` | Resume a run waiting for a signal |
-| `wf integrations` / `wf i` | Discover, authorize, inspect, and validate integrations |
+| `integrations` | Discover, authorize, inspect, and validate integrations |
 | `wf install` | Install the local dashboard service |
 | `wf web` | Open the local dashboard |
 | `wf daemon` | Run the dashboard service in the foreground |
@@ -431,29 +430,36 @@ nested subcommands.
 
 ### Integration commands
 
-All integration commands also accept the shorter `wf i` alias.
+Integrations live behind a **gateway**: a local service that holds every
+credential, decides whether a call may happen, and performs it. Nothing else
+ever sees a credential. The `integrations` binary installs alongside `wf` and is
+a thin client over that gateway's HTTP surface.
 
 ```text
-wf i
-├── search
-├── discover
-├── list
-├── connect
-├── connections
-├── tools
-├── disconnect
-├── invoke
-└── validate
+integrations
+├── serve                       # run the gateway
+├── search / discover / list    # find and register integrations
+├── connect / connections / disconnect
+├── tools / schema              # inspect what a connection exposes
+├── invoke / execute / validate
+├── client / key / grant / grants / clients / granted
+├── approvals / approve / deny
+└── audit / drift
 ```
 
-`search` returns JSON by default with exact catalog and surface URLs; use `--text`
-for a readable result. `discover` uses Executor to identify MCP or OpenAPI,
-register the integration, discover auth, and list the number of available tools.
-After `connect`, `tools` returns compact names and descriptions; `schema` returns
-the selected tool's complete input/output schemas and resolved address. The
-default connection is `default`. `validate <tool-address>` checks a resolved
-address or portable integration config against the live catalog. `invoke`
-executes one resolved tool directly and prints its normalized JSON result.
+`search` returns JSON by default with exact catalog and surface URLs; use
+`--text` for a readable result. `discover` identifies MCP or OpenAPI, registers
+the integration, and reports how many tools it exposes. After `connect`, `tools`
+returns compact names and descriptions; `schema` returns one tool's complete
+input/output schemas. The default connection is `default`.
+
+`invoke` takes a resolved tool address and is **privileged** — it is how you
+prove a connection works right after making it. `execute` takes an alias and a
+tool and is what a delegated caller uses: it can only reach what a grant exposes
+to its key.
+
+Every listing is bounded by default with a `Showing N of M` hint; `--verbose`
+opts out. The reader is usually an agent with a finite context window.
 
 The dashboard's **Integrations** view (`wf web`) shows the same catalog in the
 browser: which integrations are connected, the connections authorizing them, and
@@ -470,8 +476,14 @@ every tool with its input and output schema.
   flight.
 - `~/.wf/engine.sqlite` — durable engine state: completed step results, timers,
   suspended signal waits.
-- `~/.wf/executor.sqlite` — Executor integration, connection, and tool metadata.
-- `~/.wf/executor-auth.json` — AES-GCM-encrypted credentials.
+- `~/.wf/executor.sqlite` — integration, connection, and tool metadata.
+- `~/.wf/executor-auth.json` — AES-GCM-encrypted credentials. Only the gateway
+  process ever reads this.
+- `~/.wf/gateway.sqlite` — clients, API keys, grants, frozen approvals, and the
+  audit trail. Separate from the above because resolving a grant is what decides
+  which credential a call may use.
+- `~/.wf/gateway.json` — where the local gateway is listening and the key for
+  it, written `0600`. This file is a credential.
 - `~/.wf/executor-auth.key` — user-only local encryption key.
 
 ## Authoring reference

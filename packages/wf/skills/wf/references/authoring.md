@@ -36,14 +36,20 @@ t.optional(t.string)
 t.union([First, Second])
 ```
 
-Mirror a tool's actual schema from `wf i schema`; never infer it from the tool
-name. Integration input must be JSON-compatible. Generic MCP results are
-normalized before output decoding, so use the normalized output schema shown by
-the CLI and confirmed by a safe invocation when possible.
+Mirror a tool's actual schema from `integrations schema`; never infer it from
+the tool name. Integration input must be JSON-compatible. Generic MCP results
+are normalized before output decoding, so use the normalized output schema shown
+by the CLI and confirmed by a safe invocation when possible.
 
 ## Integration and parallel template
 
-Replace both addresses and all schemas with values returned by the CLI:
+A workflow names an **alias** and a **tool**, never a connection or an address.
+The alias is a requirement you declare, like an environment variable: whoever
+deploys the workflow binds it with `integrations grant`. That is what lets the
+same definition run for different people against their own connections.
+
+Choose the alias yourself while authoring — do not copy one out of the catalog.
+Replace all schemas with values returned by the CLI:
 
 ```ts
 import { defineWorkflow, integration, t } from "@mokronos/wfkit"
@@ -53,10 +59,7 @@ const DetailResult = t.struct({ detail: t.string })
 
 const lookup = integration({
   name: "Lookup",
-  source: {
-    kind: "executor",
-    address: "tools.service-a.org.default.lookup"
-  },
+  source: { kind: "gateway", alias: "service-a", tool: "lookup" },
   input: t.struct({ query: t.string }),
   output: LookupResult,
   retry: { attempts: 3, backoff: "exponential" }
@@ -64,10 +67,7 @@ const lookup = integration({
 
 const details = integration({
   name: "Details",
-  source: {
-    kind: "executor",
-    address: "tools.service-b.org.default.details"
-  },
+  source: { kind: "gateway", alias: "service-b", tool: "details" },
   input: t.struct({ topic: t.string }),
   output: DetailResult
 })

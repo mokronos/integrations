@@ -27,7 +27,9 @@ describe("executor services", () => {
     expect(services.discovery.inspect).toBeFunction()
     expect(services.provisioning.install).toBeFunction()
     expect(services.validateIntegrationNode).toBeFunction()
-    expect(services.integrationInvoker.invoke).toBeFunction()
+    // No invoker here any more: turning a workflow's alias into a call is the
+    // gateway's job, because only it holds the grant that resolves the alias.
+    expect(services).not.toHaveProperty("integrationInvoker")
 
     await expect(Promise.all([host.close(), host.close()])).resolves.toEqual([
       undefined,

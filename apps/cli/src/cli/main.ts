@@ -17,8 +17,9 @@ import {
   workflowArtifactToGraph,
   workflowGraphIntegrations
 } from "@mokronos/wfkit"
-import { describeIntegrationResolution } from "@mokronos/wfkit-executor"
-import type { ExecutorServices, IntegrationResolution } from "@mokronos/wfkit-executor"
+import { formatIntegrationSource } from "@mokronos/wfkit/integrations"
+import { createGatewayIntegrationInvoker } from "../gateway-invoker.ts"
+import { createGatewayClient, resolveClientConnection } from "@mokronos/integrations-client"
 import { migrateLegacyCatalog } from "../migrate-catalog.ts"
 import { sourcesPath, workflowsPath } from "../paths.ts"
 import type {
@@ -391,32 +392,66 @@ const printValidationResult = (
   }
 }
 
-/** One traced integration requirement paired with what it resolves to on this
- *  machine right now. */
+/** One traced integration requirement paired with whether the locally
+ *  configured key can actually reach it. */
 interface IntegrationReadiness {
   readonly source: IntegrationSource
-  readonly resolution: IntegrationResolution
+  readonly status: "ready" | "requires-approval" | "not-granted" | "no-gateway"
+  readonly detail: string
 }
 
-/** Checks every integration the trace reached against the local executor.
+/** Checks every alias the trace reached against the grants of whichever key is
+ * configured here.
  *
  * This is the half of validation that is NOT a property of the workflow source:
- * the same definition is ready on one machine and unconnected on another. A
- * workflow arriving from a colleague validates structurally but reports here
- * exactly which connections its new owner still has to make. */
+ * the same definition is ready for one person and ungranted for another,
+ * because an alias is bound per deployment. A workflow arriving from a
+ * colleague validates structurally but reports here exactly which aliases its
+ * new owner still has to bind. See docs/adr/0003. */
 const checkGraphIntegrations = async (
-  executor: ExecutorServices,
   graph: NonNullable<Awaited<ReturnType<typeof workflowArtifactToGraph>>["graph"]>
-): Promise<ReadonlyArray<IntegrationReadiness>> =>
-  await Promise.all(
-    workflowGraphIntegrations(graph).map(async (source) => ({
+): Promise<ReadonlyArray<IntegrationReadiness>> => {
+  const required = workflowGraphIntegrations(graph)
+  if (required.length === 0) return []
+  const connection = await resolveClientConnection()
+  if (connection === undefined) {
+    return required.map((source) => ({
       source,
-      resolution: await executor.resolveIntegration(source)
+      status: "no-gateway" as const,
+      detail: "no gateway configured; start one with `integrations serve`"
     }))
-  )
+  }
+  const granted = await createGatewayClient(connection).tools().catch(() => undefined)
+  if (granted === undefined) {
+    return required.map((source) => ({
+      source,
+      status: "no-gateway" as const,
+      detail: "the configured gateway did not answer"
+    }))
+  }
+  return required.map((source) => {
+    const match = granted.find((tool) =>
+      tool.alias === source.alias && tool.tool === source.tool
+    )
+    if (match === undefined) {
+      return {
+        source,
+        status: "not-granted" as const,
+        detail: `no grant aliased ${source.alias} exposes ${source.tool} to this key`
+      }
+    }
+    return match.decision === "require_approval"
+      ? {
+        source,
+        status: "requires-approval" as const,
+        detail: `${match.integration}; each call waits for a human`
+      }
+      : { source, status: "ready" as const, detail: match.integration }
+  })
+}
 
-const isReadyResolution = (resolution: IntegrationResolution): boolean =>
-  resolution.status === "resolved" || resolution.status === "legacy-address"
+const isReadyReadiness = (entry: IntegrationReadiness): boolean =>
+  entry.status === "ready" || entry.status === "requires-approval"
 
 const printIntegrationReadiness = (
   entries: ReadonlyArray<IntegrationReadiness>,
@@ -425,14 +460,14 @@ const printIntegrationReadiness = (
   if (entries.length === 0) return
   console.log(bold("integrations:"))
   const visible = verbose ? entries : entries.slice(0, defaultDiagnosticLimit)
-  for (const { source, resolution } of visible) {
-    const line = describeIntegrationResolution(source, resolution)
+  for (const entry of visible) {
+    const line = `${formatIntegrationSource(entry.source)}: ${entry.detail}`
     const detail = verbose || line.length <= defaultDiagnosticDetailLimit
       ? line
       : `${line.slice(0, defaultDiagnosticDetailLimit)}… (+${line.length - defaultDiagnosticDetailLimit} chars)`
-    // The resolution status is the label because it says what to do next —
-    // "not connected" and "tool not found" need different fixes.
-    console.log(`  ${isReadyResolution(resolution) ? green("ready") : red(resolution.status)}\t${detail}`)
+    console.log(
+      `  ${isReadyReadiness(entry) ? green(entry.status) : red(entry.status)}\t${detail}`
+    )
   }
   printMoreHint(visible.length, entries.length)
 }
@@ -724,7 +759,7 @@ const createEngineBackedClient = (runtimeOptions: CliRuntimeOptions) => {
   const runtime = createWorkflowRuntime({
     backend: "sqlite",
     databasePath: engineDatabasePath(runtimeOptions.storageDir),
-    integrations: runtimeOptions.executor.integrationInvoker
+    integrations: createGatewayIntegrationInvoker()
   })
   const client = createWorkflowClient(runtime)
   return { runtime, client }
@@ -733,7 +768,6 @@ const createEngineBackedClient = (runtimeOptions: CliRuntimeOptions) => {
 export interface CliRuntimeOptions {
   readonly rootDir: string
   readonly storageDir: string
-  readonly executor: ExecutorServices
 }
 
 class WorkflowCliError extends Data.TaggedError("WorkflowCliError")<{
@@ -917,8 +951,8 @@ const validateCommand = (runtime: CliRuntimeOptions) => Command.make(
     // and reporting them now saves a second round trip.
     const integrations = result.graph === undefined
       ? []
-      : await checkGraphIntegrations(runtime.executor, result.graph)
-    const unmet = integrations.filter((entry) => !isReadyResolution(entry.resolution))
+      : await checkGraphIntegrations(result.graph)
+    const unmet = integrations.filter((entry) => !isReadyReadiness(entry))
     if (json) {
       console.log(toJsonText({
         ...result,

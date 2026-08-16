@@ -11,11 +11,7 @@ import {
   toJsonText,
   workflowArtifactToGraph
 } from "@mokronos/wfkit"
-import {
-  createExecutorHost,
-  createExecutorServices
-} from "@mokronos/integrations"
-import type { ExecutorServices } from "@mokronos/integrations"
+import { createGatewayClient, resolveClientConnection } from "@mokronos/integrations-client"
 import type { WorkflowCatalog } from "@mokronos/wfkit"
 import { makeWorkflowCommands, type CliRuntimeOptions } from "./cli/main.ts"
 import assets from "./embedded-web-assets.gen.ts"
@@ -68,9 +64,25 @@ const dashboardResponse = async (pathname: string): Promise<Response> => {
   })
 }
 
+/** The dashboard reads integrations through the gateway like any other client,
+ *  rather than composing Executor itself. It has no credentials of its own. */
+const gatewayIntegrations = async (): Promise<unknown> => {
+  const connection = await resolveClientConnection()
+  if (connection === undefined) {
+    return { integrations: [], error: "No integration gateway configured" }
+  }
+  try {
+    return await createGatewayClient(connection).request("GET", "/v1/integrations")
+  } catch (error) {
+    return {
+      integrations: [],
+      error: error instanceof Error ? error.message : "The gateway did not answer"
+    }
+  }
+}
+
 const api = async (
   catalog: WorkflowCatalog,
-  executor: ExecutorServices,
   engineDatabasePath: string,
   pathname: string
 ): Promise<Response> => {
@@ -80,9 +92,10 @@ const api = async (
     return json(JSON.stringify({ generatedAt: new Date().toISOString(), workflows }))
   }
   if (pathname === "/api/integrations") {
+    const body = await gatewayIntegrations()
     return json(JSON.stringify({
       generatedAt: new Date().toISOString(),
-      integrations: await executor.listIntegrationOverviews()
+      ...(typeof body === "object" && body !== null ? body : { integrations: [] })
     }))
   }
   if (pathname === "/api/runs") {
@@ -135,10 +148,7 @@ const openBrowser = (url: string): void => {
   Bun.spawn(command, { stdout: "ignore", stderr: "ignore" })
 }
 
-const runServer = async (
-  options: ServerOptions,
-  runtime: CliRuntimeOptions
-): Promise<void> => {
+const runServer = async (options: ServerOptions): Promise<void> => {
   const home = wfHome()
   const catalog = createDirectoryWorkflowCatalog({ directory: workflowsPath(home) })
   const server = Bun.serve({
@@ -148,7 +158,7 @@ const runServer = async (
       const pathname = new URL(request.url).pathname
       if (pathname.startsWith("/api/")) {
         try {
-          return await api(catalog, runtime.executor, enginePath(home), pathname)
+          return await api(catalog, enginePath(home), pathname)
         } catch (error) {
           const message = error instanceof Error ? error.message : "Dashboard API request failed"
           return json(JSON.stringify({ error: message }), 500)
@@ -176,12 +186,9 @@ const runServer = async (
 const serviceProgram = (): ReadonlyArray<string> =>
   dashboardIsEmbedded ? [process.execPath] : [process.execPath, path.resolve(import.meta.dir, "main.ts")]
 
-const openInstalledDashboard = async (
-  options: ServerOptions,
-  runtime: CliRuntimeOptions
-): Promise<void> => {
+const openInstalledDashboard = async (options: ServerOptions): Promise<void> => {
   if (options.foreground) {
-    await runServer(options, runtime)
+    await runServer(options)
     return
   }
   if (options.port !== defaultPort) {
@@ -241,7 +248,7 @@ const makeRootCommand = (runtime: CliRuntimeOptions) => {
       foreground,
       open: !noOpen,
       port: validatePort(port)
-    }, runtime))
+    }))
   ).pipe(Command.withDescription("Open the installed local dashboard"))
 
   const daemonCommand = Command.make(
@@ -257,7 +264,7 @@ const makeRootCommand = (runtime: CliRuntimeOptions) => {
     },
     ({ foreground, port }) => serviceTask(async () => {
       if (!foreground) throw new Error("Usage: wf daemon --foreground")
-      await runServer({ foreground: true, open: false, port: validatePort(port) }, runtime)
+      await runServer({ foreground: true, open: false, port: validatePort(port) })
     })
   ).pipe(Command.withDescription("Run the dashboard service in the foreground"))
 
@@ -276,25 +283,17 @@ const runCommandLine = async (
   arguments_: ReadonlyArray<string>,
   options: { readonly rootDir: string; readonly storageDir: string }
 ): Promise<void> => {
-  const host = createExecutorHost(options.storageDir)
-  const runtime: CliRuntimeOptions = {
-    ...options,
-    executor: createExecutorServices(host)
-  }
-  try {
-    await Effect.runPromise(
-      Command.runWith(makeRootCommand(runtime), { version: packageMetadata.version })(
-        arguments_
-      ).pipe(
-        Effect.catchTag("ShowHelp", (error) => error.errors.length === 0
-          ? Effect.void
-          : Effect.sync(() => { process.exitCode = 1 })),
-        Effect.provide(BunServices.layer)
-      )
+  const runtime: CliRuntimeOptions = { ...options }
+  await Effect.runPromise(
+    Command.runWith(makeRootCommand(runtime), { version: packageMetadata.version })(
+      arguments_
+    ).pipe(
+      Effect.catchTag("ShowHelp", (error) => error.errors.length === 0
+        ? Effect.void
+        : Effect.sync(() => { process.exitCode = 1 })),
+      Effect.provide(BunServices.layer)
     )
-  } finally {
-    await host.close()
-  }
+  )
 }
 
 export const main = async (): Promise<void> => {

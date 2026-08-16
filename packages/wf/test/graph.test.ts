@@ -87,9 +87,9 @@ const ParallelWorkflow = defineWorkflow({
 })
 
 describe("workflowToGraph", () => {
-  test("records portable integration requirements without invoking a host", async () => {
+  test("records alias requirements without invoking a host", async () => {
     const createIssue = integration({
-      source: { kind: "executor", integration: "linear", tool: "issues.create", owner: "org" },
+      source: { kind: "gateway", alias: "linear", tool: "issues.create" },
       input: t.struct({ title: t.string }),
       output: t.struct({ id: t.string })
     })
@@ -104,28 +104,28 @@ describe("workflowToGraph", () => {
 
     const graph = await workflowToGraph(workflow, { input: { title: "Inspect me" } })
 
+    // The graph carries the alias and the tool, and nothing about which
+    // connection serves them — that is bound per deployment.
     expect(graph.nodes.find((node) => node.kind === "step")?.metadata.integration).toEqual({
-      kind: "executor",
-      integration: "linear",
-      tool: "issues.create",
-      owner: "org"
+      kind: "gateway",
+      alias: "linear",
+      tool: "issues.create"
     })
     expect(workflowGraphIntegrations(graph)).toEqual([{
-      kind: "executor",
-      integration: "linear",
-      tool: "issues.create",
-      owner: "org"
+      kind: "gateway",
+      alias: "linear",
+      tool: "issues.create"
     }])
   })
 
-  test("keeps dotted tool names distinct from owner-qualified requirements", async () => {
+  test("keeps requirements on different aliases distinct", async () => {
     const dotted = integration({
-      source: { kind: "executor", integration: "linear", tool: "org.create" },
+      source: { kind: "gateway", alias: "linear", tool: "org.create" },
       input: t.struct({}),
       output: t.struct({})
     })
     const owned = integration({
-      source: { kind: "executor", integration: "linear", owner: "org", tool: "create" },
+      source: { kind: "gateway", alias: "linear-org", tool: "create" },
       input: t.struct({}),
       output: t.struct({})
     })
@@ -142,8 +142,8 @@ describe("workflowToGraph", () => {
     expect(dotted.name).not.toBe(owned.name)
     const graph = await workflowToGraph(workflow, { input: {} })
     expect(workflowGraphIntegrations(graph)).toEqual([
-      { kind: "executor", integration: "linear", tool: "org.create" },
-      { kind: "executor", integration: "linear", owner: "org", tool: "create" }
+      { kind: "gateway", alias: "linear", tool: "org.create" },
+      { kind: "gateway", alias: "linear-org", tool: "create" }
     ])
   })
 

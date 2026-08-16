@@ -65,7 +65,7 @@ export const ValidateDemoWorkflow = defineWorkflow({
 const integrationWorkflowSource = `import { defineWorkflow, integration, t } from "@mokronos/wfkit"
 
 const lookup = integration({
-  source: { kind: "executor", integration: "missing", tool: "lookup" },
+  source: { kind: "gateway", alias: "missing", tool: "lookup" },
   input: t.struct({ query: t.string }),
   output: t.string
 })
@@ -83,7 +83,7 @@ export const MissingIntegrationWorkflow = defineWorkflow({
 const partiallyInvalidIntegrationWorkflowSource = `import { defineWorkflow, integration, t } from "@mokronos/wfkit"
 
 const lookup = integration({
-  source: { kind: "executor", integration: "missing", tool: "lookup" },
+  source: { kind: "gateway", alias: "missing", tool: "lookup" },
   input: t.struct({ query: t.string }),
   output: t.string
 })
@@ -106,7 +106,7 @@ export const PartiallyInvalidIntegrationWorkflow = defineWorkflow({
 const manyIntegrationsWorkflowSource = `import { defineWorkflow, integration, t } from "@mokronos/wfkit"
 
 const tools = Array.from({ length: 7 }, (_, index) => integration({
-  source: { kind: "executor", integration: "missing", tool: \`lookup-\${index + 1}\` },
+  source: { kind: "gateway", alias: "missing", tool: \`lookup-\${index + 1}\` },
   input: t.void,
   output: t.void
 }))
@@ -243,7 +243,7 @@ export const BranchingWorkflow = defineWorkflow({
     expect(result.stderr).toContain("wf validate requires a workflow id or --file")
   })
 
-  test("reports every unresolved integration reached by the trace", () => {
+  test("reports every unreachable alias the trace needs", () => {
     const cwd = makeTempDir()
     const file = path.join(cwd, "missing-integration.ts")
     writeFileSync(file, integrationWorkflowSource)
@@ -252,9 +252,9 @@ export const BranchingWorkflow = defineWorkflow({
 
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toContain("integrations:")
-    // The resolution status is the label, because "not connected" and "tool not
-    // found" call for different fixes.
-    expect(result.stdout).toContain("integration-not-connected\tmissing.lookup")
+    // Readiness is answered against whichever key is configured here, so with
+    // no gateway at all the report says so rather than guessing.
+    expect(result.stdout).toContain("no-gateway\tmissing.lookup")
     expect(result.stderr).toContain("needs 1 integration tool connected")
   })
 
@@ -270,8 +270,8 @@ export const BranchingWorkflow = defineWorkflow({
     expect(output.integrationReadinessScope).toBe("traced-path")
     expect(output.integrations).toHaveLength(1)
     expect(output.integrations[0]).toMatchObject({
-      source: { kind: "executor", integration: "missing", tool: "lookup" },
-      resolution: { status: "integration-not-connected" }
+      source: { kind: "gateway", alias: "missing", tool: "lookup" },
+      status: "no-gateway"
     })
   })
 

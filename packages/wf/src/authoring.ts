@@ -17,8 +17,6 @@ export {
 export {
   formatIntegrationSource,
   integration,
-  IntegrationError,
-  IntegrationOwner,
   IntegrationSource
 } from "./integration.ts"
 export type { IntegrationInvoker } from "./integration.ts"

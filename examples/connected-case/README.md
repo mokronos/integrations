@@ -20,10 +20,10 @@ connection exists, the step fails instead of filing the audit under one person.
 Discovery and credentials stay outside the authored workflow:
 
 ```bash
-wf i discover <mcp-or-openapi-url>
-wf i connect <integration-slug> --connection default
-wf i tools <integration-slug> --connection default
-wf i schema <integration-slug> <tool-name>
+integrations discover <mcp-or-openapi-url>
+integrations connect <integration-slug> --connection default
+integrations tools <integration-slug> --connection default
+integrations schema <integration-slug> <tool-name>
 ```
 
 To find out what this workflow still needs on your machine, ask it:

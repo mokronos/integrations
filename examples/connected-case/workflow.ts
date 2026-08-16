@@ -7,7 +7,7 @@ const ApprovalAudit = t.struct({ auditId: t.string, caseId: t.string, approvedBy
 
 const lookupCustomer = integration({
   name: "LookupCustomer",
-  source: { kind: "executor", integration: "crm", tool: "getCustomer" },
+  source: { kind: "gateway", alias: "crm", tool: "getCustomer" },
   input: t.struct({ customerId: t.string, include: t.string }),
   output: Customer,
   retry: { attempts: 3, backoff: "exponential" }
@@ -15,14 +15,14 @@ const lookupCustomer = integration({
 
 const lookupPolicy = integration({
   name: "LookupPolicy",
-  source: { kind: "executor", integration: "crm", tool: "getPolicy" },
+  source: { kind: "gateway", alias: "crm", tool: "getPolicy" },
   input: t.struct({ tier: t.string }),
   output: Policy
 })
 
 const createCase = integration({
   name: "CreateCase",
-  source: { kind: "executor", integration: "crm", tool: "createCase" },
+  source: { kind: "gateway", alias: "crm", tool: "createCase" },
   input: t.struct({ customerId: t.string, title: t.string }),
   output: CreatedCase,
   retry: { attempts: 3, backoff: "exponential" }
@@ -30,11 +30,11 @@ const createCase = integration({
 
 const approveCase = integration({
   // An approval must be recorded against the team's shared credential, never
-  // whichever personal account happens to be connected — so this step pins the
-  // org tier. Pinning is a constraint: if only a user connection exists, the
-  // step fails rather than silently filing the audit under one person.
+  // whichever personal account happens to be connected. The workflow cannot
+  // express that itself: it names an alias, and whoever binds `case-review`
+  // decides which connection it means. Bind it to an org-tier connection.
   name: "ApproveCase",
-  source: { kind: "executor", integration: "case_review", tool: "approveCase", owner: "org" },
+  source: { kind: "gateway", alias: "case-review", tool: "approveCase" },
   input: t.struct({
     caseId: t.string,
     body: t.struct({ approvedBy: t.string, summary: t.string })
