@@ -121,9 +121,18 @@ and address-invocation resolves then grant-checks (ADR 0002).
 
 ### Phase 2 — HTTP server
 
-Effect `HttpApi` (the current dashboard is `if`-chains over `Bun.serve`; this
-is the point to stop doing that). Bearer key auth, `127.0.0.1` default, TLS
-required when bound externally.
+Bearer key auth, `127.0.0.1` default, TLS required when bound externally.
+
+**Deviation from the original plan: a typed route table over `Bun.serve`, not
+Effect `HttpApi`.** `effect/unstable/httpapi` does exist in beta.59, so this was
+a choice rather than a constraint. The gateway is a published package, and
+pinning it to a beta HTTP surface would propagate that instability to every
+consumer. What the `if`-chains actually cost was type safety at the boundary,
+and that is bought back by routes-as-data with Schema-decoded bodies: the
+surface can be enumerated, each route declares `delegated` or `privileged` so
+the dispatcher enforces access and a new endpoint cannot forget to, and
+`createGatewayHandler` is a plain `Request → Response` so every rejection path
+is testable without a socket. Revisit once Effect's HTTP API stabilises.
 
 Delegated surface (any key):
 - `GET /v1/tools` — the caller's granted tools, aliases and schemas

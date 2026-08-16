@@ -382,6 +382,7 @@ export interface GatewayStore {
 
   createClient(input: CreateClientInput): Promise<Client>
   listClients(): Promise<ReadonlyArray<Client>>
+  findClientById(id: ClientId): Promise<Client | undefined>
   findClientByName(name: string): Promise<Client | undefined>
   revokeClient(id: ClientId): Promise<void>
 
@@ -462,6 +463,11 @@ export const createGatewayStore = async (databasePath: string): Promise<GatewayS
 
     listClients: async () =>
       (await all("SELECT * FROM gateway_client ORDER BY created_at", [])).map(toClient),
+
+    findClientById: async (id) => {
+      const row = await one("SELECT * FROM gateway_client WHERE id = ?", [id])
+      return row === undefined ? undefined : toClient(row)
+    },
 
     findClientByName: async (name) => {
       const row = await one("SELECT * FROM gateway_client WHERE name = ?", [name])

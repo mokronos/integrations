@@ -53,7 +53,47 @@ export type {
   RecordAuditInput
 } from "./store.ts"
 
-export { authorizeInvocation, authorizeMutation } from "./authorize.ts"
+export { authenticateClient, authorizeInvocation, authorizeMutation } from "./authorize.ts"
+export type { ClientAuthentication, MutationAuthorization } from "./authorize.ts"
+
+export {
+  defaultApprovalExpiryHours,
+  defaultArgumentRetentionDays,
+  defaultGatewayPort,
+  gatewayConfigPath,
+  GatewayConfigFile,
+  readGatewayConfig,
+  resolveClientConnection,
+  writeGatewayConfig
+} from "./config.ts"
+export type { ClientConnection } from "./config.ts"
+
+export {
+  executeAuthorized,
+  grantToolAddress,
+  invokeThroughGateway,
+  listGrantedTools
+} from "./invoke.ts"
+export type { InvocationOutcome, InvokeDependencies } from "./invoke.ts"
+
+export { makeRoutes } from "./http/api.ts"
+export type { ApiDependencies } from "./http/api.ts"
+export { createGatewayHandler } from "./http/handler.ts"
+export { matchRoute } from "./http/router.ts"
+export type { Route, RouteAccess, RouteRequest, RouteResult } from "./http/router.ts"
+
+export {
+  createGatewayService,
+  ensureLocalCredential,
+  localClientName,
+  serveGateway
+} from "./service.ts"
+export type {
+  GatewayService,
+  GatewayServiceOptions,
+  RunningGateway,
+  ServeOptions
+} from "./service.ts"
 
 // Re-exported so consumers compose Executor through the gateway rather than
 // reaching for the host package directly. `wfkit-executor` is an internal
