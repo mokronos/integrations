@@ -35,8 +35,11 @@ describe("CLI help", () => {
 
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain("Durable workflows and a local dashboard")
-    expect(result.stdout).toContain("integrations, i")
     expect(result.stdout).toContain("install")
+    // Integrations moved to their own binary, which installs alongside wf.
+    // (The word still appears in `wf validate`'s description, so this checks
+    // for the subcommand entry rather than the bare word.)
+    expect(result.stdout).not.toContain("integrations, i")
   })
 
   test("shows command-specific help from the command definition", () => {
@@ -48,36 +51,6 @@ describe("CLI help", () => {
     expect(helpFlag.stdout).toContain("--force")
     expect(helpFlag.stdout).toContain("--verbose")
   })
-
-  test("generates nested integrations help from the command hierarchy", () => {
-    const parent = runCli(["integrations"])
-    const helpFlag = runCli(["integrations", "--help"])
-    const aliasHelpFlag = runCli(["i", "--help"])
-    const subcommandHelp = runCli(["integrations", "discover", "--help"])
-    const aliasSubcommandHelp = runCli(["i", "discover", "--help"])
-
-    expect(parent.exitCode).toBe(0)
-    expect(parent.stdout).toContain("SUBCOMMANDS")
-    expect(parent.stdout).toContain("discover")
-    expect(parent.stdout).toContain("search")
-    expect(parent.stdout).toContain("list")
-    expect(parent.stdout).toContain("invoke")
-    expect(helpFlag.stdout).toBe(parent.stdout)
-    expect(aliasHelpFlag.stdout).toBe(parent.stdout)
-    expect(subcommandHelp.stdout).toContain("ARGUMENTS")
-    expect(subcommandHelp.stdout).toContain("url string")
-    expect(aliasSubcommandHelp.stdout).toBe(subcommandHelp.stdout)
-
-    const searchHelp = runCli(["i", "search", "--help"])
-    expect(searchHelp.exitCode).toBe(0)
-    expect(searchHelp.stdout).toContain("query string")
-    expect(searchHelp.stdout).toContain("--text")
-    // --verbose is deliberately not asserted here yet. Progressive output was
-    // reverted out of the integrations commands by 16a656b, and the gateway
-    // migration replaces this whole command tree with a thin HTTP client, so
-    // parity is a requirement of that rewrite rather than a merge back into
-    // code scheduled for deletion. See docs/plans/integration-gateway.md.
-  }, 15_000)
 
   test("rejects help for an unknown command", () => {
     const result = runCli(["missing"])

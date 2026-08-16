@@ -24,7 +24,12 @@ boundary, and it should not be able to grow without a human.
   grant-scoped, so an ungranted tool is invisible rather than visible-then-
   failing, which is the property a deny state would otherwise have provided. A
   grant carries `allow | require_approval` and nothing else.
-- Invocation by resolved tool address stays available for ergonomics, but
-  resolves first and then checks the resulting `(connection, tool)` against the
-  caller's grants like any other call. Without that check, address-invocation
-  would walk around delegation entirely.
+- The delegated surface has no address form at all. A caller names an alias and
+  a tool, and the gateway builds the Executor address from the grant, so an
+  address cannot be forged or guessed past delegation.
+- Invocation by raw address survives only as a *privileged* operation, alongside
+  discovery and connection management. It is not grant-checked, and does not
+  need to be: a client that may mutate grants could grant itself the tool in one
+  extra call, so requiring one would be friction rather than a control. This is
+  what keeps `integrations invoke <address>` usable for testing a tool right
+  after connecting it.

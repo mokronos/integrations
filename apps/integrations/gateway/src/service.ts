@@ -7,6 +7,7 @@ import { createGateway } from "./host.ts"
 import type { Gateway } from "./host.ts"
 import { createGatewayHandler } from "./http/handler.ts"
 import { makeRoutes } from "./http/api.ts"
+import { createOAuthSessions } from "./oauth-sessions.ts"
 import { generateApiKey, newClientId } from "./keys.ts"
 import { integrationsHome } from "./paths.ts"
 import { createGatewayStore } from "./store.ts"
@@ -36,10 +37,12 @@ export const createGatewayService = async (
   const home = options.home ?? integrationsHome()
   const store = await createGatewayStore(`${home}/gateway.sqlite`)
   const gateway = createGateway({ directory: home })
+  const oauth = createOAuthSessions(gateway.executor)
   const routes = makeRoutes({
     store,
     executor: gateway.executor,
-    retentionDays: options.retentionDays ?? defaultArgumentRetentionDays
+    retentionDays: options.retentionDays ?? defaultArgumentRetentionDays,
+    oauth
   })
   return {
     home,
@@ -47,6 +50,7 @@ export const createGatewayService = async (
     gateway,
     handle: createGatewayHandler({ store, routes }),
     close: async () => {
+      oauth.stop()
       await gateway.close()
       await store.close()
     }

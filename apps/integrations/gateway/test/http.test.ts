@@ -94,7 +94,17 @@ const setup = async (options: {
   const stub = stubExecutor(options.fail === undefined ? {} : { fail: options.fail })
   const handle = createGatewayHandler({
     store,
-    routes: makeRoutes({ store, executor: stub.executor, retentionDays: 30 })
+    routes: makeRoutes({
+      store,
+      executor: stub.executor,
+      retentionDays: 30,
+      // No OAuth flow is exercised here; these tests are about authority.
+      oauth: {
+        start: async () => { throw new Error("not used") },
+        get: () => undefined,
+        stop: () => undefined
+      }
+    })
   })
 
   const call = async (

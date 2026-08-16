@@ -10,14 +10,9 @@ import {
   startExecutorOAuth
 } from "@mokronos/wfkit-executor"
 
-export const openBrowser = (url: string): void => {
-  const command = process.platform === "darwin"
-    ? ["open", url]
-    : process.platform === "win32"
-      ? ["cmd", "/c", "start", "", url]
-      : ["xdg-open", url]
-  Bun.spawn(command, { stdout: "ignore", stderr: "ignore" })
-}
+// Opening a browser is the client's job — the gateway may be running headless
+// on another machine. It returns the authorization URL and lets the caller
+// decide how a human reaches it.
 
 const AuthorizeExecutorOptions = Schema.Struct({
   integration: Schema.String,
@@ -190,7 +185,7 @@ export const authorizeExecutorInBrowser = async (
     }
     expectedState = started.state
     input.onAuthorizationUrl?.(started.authorizationUrl)
-    await (input.open ?? openBrowser)(started.authorizationUrl)
+    await input.open?.(started.authorizationUrl)
     return await completion.promise
   } finally {
     clearTimeout(timeout)

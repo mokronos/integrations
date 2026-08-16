@@ -1,5 +1,8 @@
 import { Schema } from "effect"
 import type { ExecutorServices } from "@mokronos/wfkit-executor"
+import { searchIntegrations } from "@mokronos/wfkit-executor"
+import { ExecutorToolAddress } from "@mokronos/wfkit-executor/schemas"
+import type { OAuthSessions } from "../oauth-sessions.ts"
 import {
   Alias,
   ApprovalId,
@@ -21,6 +24,7 @@ export interface ApiDependencies {
   readonly store: GatewayStore
   readonly executor: ExecutorServices
   readonly retentionDays: number
+  readonly oauth: OAuthSessions
 }
 
 // --- wire schemas -----------------------------------------------------------
@@ -67,6 +71,34 @@ const DiscoverBody = Schema.Struct({
   connection: Schema.optional(Schema.String)
 })
 
+const ConnectBody = Schema.Struct({
+  integration: Schema.String,
+  connection: Schema.optional(Schema.String),
+  template: Schema.optional(Schema.String),
+  /** Credential values, resolved from the environment by the *client* before
+   *  they get here. The gateway never reads a caller's environment. */
+  values: Schema.optional(Schema.Record(Schema.String, Schema.String))
+})
+
+const OAuthStartBody = Schema.Struct({
+  integration: Schema.String,
+  connection: Schema.optional(Schema.String),
+  template: Schema.optional(Schema.String),
+  clientId: Schema.optional(Schema.String),
+  clientSecret: Schema.optional(Schema.String),
+  timeoutSeconds: Schema.optional(Schema.Number)
+})
+
+const InvokeAddressBody = Schema.Struct({
+  address: Schema.String,
+  arguments: Schema.optional(Schema.Json)
+})
+
+const ValidateBody = Schema.Struct({
+  node: Schema.Json,
+  live: Schema.optional(Schema.Boolean)
+})
+
 const toConnectionRef = (value: typeof ConnectionRefBody.Type): ConnectionRef =>
   value.owner === "org"
     ? {
@@ -96,8 +128,29 @@ const positiveInt = (value: string | null, fallback: number): number => {
 
 // --- routes -----------------------------------------------------------------
 
+/** Picks the auth method a connect request should use, preferring an explicit
+ *  template and otherwise the integration's only sensible option. */
+const selectAuthMethod = (
+  methods: ReadonlyArray<{ readonly id: string; readonly template: string; readonly kind: string }>,
+  template: string | undefined
+) => {
+  if (template !== undefined) {
+    const chosen = methods.find((method) => method.template === template || method.id === template)
+    if (chosen === undefined) {
+      throw new Error(
+        `Unknown auth template "${template}". Available: ${methods.map((m) => m.template).join(", ")}`
+      )
+    }
+    return chosen
+  }
+  if (methods.length === 0) return { id: "none", template: "none", kind: "none" }
+  if (methods.length === 1) return methods[0]!
+  const single = methods.find((method) => method.kind === "oauth") ?? methods[0]!
+  return single
+}
+
 export const makeRoutes = (dependencies: ApiDependencies): ReadonlyArray<Route> => {
-  const { store, executor, retentionDays } = dependencies
+  const { store, executor, retentionDays, oauth } = dependencies
 
   return [
     // --- delegated: any live key -------------------------------------------
@@ -187,9 +240,132 @@ export const makeRoutes = (dependencies: ApiDependencies): ReadonlyArray<Route> 
     },
     {
       method: "GET",
+      path: "/v1/registry/search",
+      access: "privileged",
+      handle: async (request) => {
+        const query = request.query.get("q")
+        if (query === null) return badRequest("search requires a q query parameter")
+        const kind = request.query.get("kind")
+        return ok(await searchIntegrations({
+          q: query,
+          limit: positiveInt(request.query.get("limit"), 5),
+          ...(kind === null
+            ? {}
+            : {
+              kind: Schema.decodeUnknownSync(
+                Schema.Literals(["mcp", "openapi", "graphql", "cli"])
+              )(kind)
+            })
+        }))
+      }
+    },
+    {
+      method: "POST",
+      path: "/v1/tools/invoke",
+      access: "privileged",
+      handle: async (request) => {
+        const body = decodeBody(InvokeAddressBody, request.body)
+        // Privileged, and deliberately not grant-checked: a client that may
+        // mutate grants could grant itself this tool in one extra call, so a
+        // check here would be friction rather than a control. The delegated
+        // surface has no address form at all. See docs/adr/0002.
+        const result = await executor.tools.execute(
+          ExecutorToolAddress.make(body.address),
+          body.arguments ?? {}
+        )
+        return ok(result)
+      }
+    },
+    {
+      method: "POST",
+      path: "/v1/validate",
+      access: "privileged",
+      handle: async (request) => {
+        const body = decodeBody(ValidateBody, request.body)
+        return ok(await executor.validateIntegrationNode(body.node, { live: body.live ?? false }))
+      }
+    },
+    {
+      method: "GET",
       path: "/v1/connections",
       access: "privileged",
       handle: async () => ok({ connections: await executor.connections.list() })
+    },
+    {
+      method: "POST",
+      path: "/v1/connections",
+      access: "privileged",
+      handle: async (request) => {
+        const body = decodeBody(ConnectBody, request.body)
+        const integration = await executor.catalog.find(body.integration)
+        if (integration === undefined) return notFound(`Unknown integration ${body.integration}`)
+        const method = selectAuthMethod(integration.authMethods, body.template)
+        if (method.kind === "oauth") {
+          return badRequest(
+            `${integration.slug} uses OAuth; start it at POST /v1/connections/oauth`
+          )
+        }
+        const values = body.values ?? {}
+        const names = Object.keys(values)
+        const connection = await executor.connections.create({
+          integration: integration.slug,
+          name: body.connection ?? "default",
+          template: method.template,
+          ...(names.length === 0
+            ? { value: "" }
+            : names.length === 1 && values["token"] !== undefined
+            ? { value: values["token"] }
+            : { values })
+        })
+        return created({
+          connection,
+          tools: await executor.tools.summaries({
+            integration: integration.slug,
+            connection: connection.name
+          })
+        })
+      }
+    },
+    {
+      method: "POST",
+      path: "/v1/connections/oauth",
+      access: "privileged",
+      handle: async (request) => {
+        const body = decodeBody(OAuthStartBody, request.body)
+        const integration = await executor.catalog.find(body.integration)
+        if (integration === undefined) return notFound(`Unknown integration ${body.integration}`)
+        const method = integration.authMethods.find((candidate) =>
+          body.template === undefined
+            ? candidate.kind === "oauth"
+            : candidate.template === body.template || candidate.id === body.template
+        )
+        if (method === undefined || method.kind !== "oauth") {
+          return badRequest(`${integration.slug} has no OAuth auth method`)
+        }
+        // The gateway drives the flow and hosts the callback, because it is
+        // what holds credentials. The caller opens a browser and polls.
+        const session = await oauth.start({
+          integration: integration.slug,
+          connection: body.connection ?? "default",
+          authMethod: method,
+          ...(body.clientId === undefined ? {} : { clientId: body.clientId }),
+          ...(body.clientSecret === undefined ? {} : { clientSecret: body.clientSecret }),
+          ...(body.timeoutSeconds === undefined
+            ? {}
+            : { timeoutMs: Math.max(1, body.timeoutSeconds) * 1000 })
+        })
+        return created(session)
+      }
+    },
+    {
+      method: "GET",
+      path: "/v1/connections/oauth/:id",
+      access: "privileged",
+      handle: async (request) => {
+        const session = oauth.get(request.params["id"] ?? "")
+        if (session === undefined) return notFound("Unknown or expired OAuth session")
+        return ok(session)
+      }
     },
     {
       method: "DELETE",

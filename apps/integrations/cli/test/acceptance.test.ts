@@ -1,0 +1,373 @@
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises"
+import os from "node:os"
+import path from "node:path"
+import { afterEach, describe, expect, test } from "bun:test"
+import { Schema } from "effect"
+import { serveGateway } from "@mokronos/integrations"
+import type { RunningGateway } from "@mokronos/integrations"
+
+const repoRoot = path.resolve(import.meta.dir, "../../../..")
+const integrationsCli = path.join(repoRoot, "apps", "integrations", "cli", "src", "main.ts")
+const wfCli = path.join(repoRoot, "apps", "cli", "src", "main.ts")
+
+const servers: Array<ReturnType<typeof Bun.serve>> = []
+const gateways: Array<RunningGateway> = []
+const directories: Array<string> = []
+
+afterEach(async () => {
+  for (const server of servers.splice(0)) server.stop(true)
+  await Promise.all(gateways.splice(0).map((gateway) => gateway.stop()))
+  for (const directory of directories.splice(0)) {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+const run = async (
+  cli: string,
+  args: ReadonlyArray<string>,
+  environment: Readonly<Record<string, string | undefined>>
+) => {
+  const subprocess = Bun.spawn({
+    cmd: [process.execPath, "run", cli, ...args],
+    cwd: repoRoot,
+    stdout: "pipe",
+    stderr: "pipe",
+    env: environment
+  })
+  const [exitCode, stdout, stderr] = await Promise.all([
+    subprocess.exited,
+    new Response(subprocess.stdout).text(),
+    new Response(subprocess.stderr).text()
+  ])
+  return { exitCode, stdout, stderr }
+}
+
+/** A vendor: an OpenAPI document plus the endpoint it describes, guarded by an
+ *  API key the gateway must inject. */
+const startVendor = () => {
+  let invocations = 0
+  const seenKeys: Array<string | null> = []
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request): Promise<Response> {
+      const url = new URL(request.url)
+      if (url.pathname === "/openapi.json") {
+        return Response.json({
+          openapi: "3.1.0",
+          info: { title: "Acceptance", version: "1.0.0", description: "Creates tickets" },
+          servers: [{ url: `http://127.0.0.1:${server.port}` }],
+          security: [{ apiKey: [] }],
+          paths: {
+            "/tickets": {
+              post: {
+                operationId: "tickets.create",
+                requestBody: {
+                  required: true,
+                  content: {
+                    "application/json": {
+                      schema: {
+                        type: "object",
+                        required: ["title"],
+                        properties: { title: { type: "string" } }
+                      }
+                    }
+                  }
+                },
+                responses: {
+                  "200": {
+                    description: "Created",
+                    content: {
+                      "application/json": {
+                        schema: {
+                          type: "object",
+                          required: ["id", "title"],
+                          properties: { id: { type: "string" }, title: { type: "string" } }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          components: {
+            securitySchemes: { apiKey: { type: "apiKey", in: "header", name: "x-api-key" } }
+          }
+        })
+      }
+      if (url.pathname !== "/tickets") return new Response("not found", { status: 404 })
+      seenKeys.push(request.headers.get("x-api-key"))
+      const body = await Schema.decodeUnknownPromise(
+        Schema.Struct({ title: Schema.String })
+      )(await request.json())
+      invocations += 1
+      return Response.json({ id: "T-1", title: body.title })
+    }
+  })
+  servers.push(server)
+  return {
+    specUrl: `http://127.0.0.1:${server.port}/openapi.json`,
+    invocations: () => invocations,
+    seenKeys: () => seenKeys
+  }
+}
+
+const startGateway = async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "wf-acceptance-"))
+  directories.push(home)
+  const gateway = await serveGateway({ home, port: 0 })
+  gateways.push(gateway)
+  const config = await readFile(path.join(home, "gateway.json"), "utf8")
+  const { apiKey } = JSON.parse(config) as { apiKey: string }
+  return {
+    home,
+    url: gateway.url,
+    apiKey,
+    environment: {
+      ...process.env,
+      WF_HOME: home,
+      INTEGRATIONS_HOME: home,
+      INTEGRATIONS_URL: gateway.url,
+      INTEGRATIONS_API_KEY: apiKey,
+      ACCEPTANCE_TOKEN: "acceptance-secret",
+      NO_COLOR: "1"
+    }
+  }
+}
+
+describe("integrations CLI acceptance", () => {
+  test(
+    "an agent discovers, connects, inspects, delegates, and invokes — all through the gateway",
+    async () => {
+      const vendor = startVendor()
+      const gateway = await startGateway()
+      const integrations = (args: ReadonlyArray<string>) =>
+        run(integrationsCli, args, gateway.environment)
+
+      const discovered = await integrations(["discover", vendor.specUrl])
+      expect(discovered.exitCode, discovered.stderr).toBe(0)
+      const discoveredBody = JSON.parse(discovered.stdout) as Record<string, unknown>
+      const slug = (discoveredBody["integration"] as { slug: string }).slug
+      // Listings tell an agent what to do next rather than making it guess.
+      expect(discoveredBody["next"]).toBe(`integrations connect ${slug}`)
+
+      const connected = await integrations([
+        "connect",
+        slug,
+        "--credential-env",
+        "ACCEPTANCE_TOKEN"
+      ])
+      expect(connected.exitCode, connected.stderr).toBe(0)
+      // The credential was read from this process's environment and handed to
+      // the gateway; it is never echoed back.
+      expect(connected.stdout).not.toContain("acceptance-secret")
+
+      const tools = await integrations(["tools", slug])
+      expect(tools.exitCode, tools.stderr).toBe(0)
+      expect(tools.stdout).toContain("tickets.create")
+
+      const schema = await integrations(["schema", slug, "tickets.create"])
+      expect(schema.exitCode, schema.stderr).toBe(0)
+      expect(schema.stdout).toContain("title")
+
+      const listed = JSON.parse((await integrations(["connections"])).stdout) as {
+        connections: ReadonlyArray<{ address: string; name: string }>
+      }
+      const address = listed.connections[0]?.address ?? ""
+      expect(address).toStartWith(`tools.${slug}.org.`)
+
+      // invoke is privileged and takes an address: this is how an agent proves a
+      // connection works right after making it.
+      const invoked = await integrations([
+        "invoke",
+        `${address}.tickets.create`,
+        JSON.stringify({ body: { title: "Direct" } })
+      ])
+      expect(invoked.exitCode, invoked.stderr).toBe(0)
+      expect(invoked.stdout).toContain("T-1")
+      expect(vendor.invocations()).toBe(1)
+      // The gateway injected the credential; the caller never saw it.
+      expect(vendor.seenKeys()).toEqual(["acceptance-secret"])
+    },
+    30_000
+  )
+
+  test("a delegated key reaches only what it was granted", async () => {
+    const vendor = startVendor()
+    const gateway = await startGateway()
+    const integrations = (args: ReadonlyArray<string>, environment = gateway.environment) =>
+      run(integrationsCli, args, environment)
+
+    const discovered = JSON.parse((await integrations(["discover", vendor.specUrl])).stdout) as {
+      integration: { slug: string }
+    }
+    const slug = discovered.integration.slug
+    await integrations(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
+
+    const client = JSON.parse((await integrations(["client", "sandbox"])).stdout) as { id: string }
+    const key = JSON.parse((await integrations(["key", client.id])).stdout) as { secret: string }
+    const sandbox = {
+      ...gateway.environment,
+      INTEGRATIONS_API_KEY: key.secret
+    }
+
+    // Nothing granted yet.
+    const beforeGrant = await integrations(["granted"], sandbox)
+    expect(beforeGrant.exitCode, beforeGrant.stderr).toBe(0)
+    expect(JSON.parse(beforeGrant.stdout)).toEqual({ tools: [] })
+
+    // A sandbox key cannot mint capabilities for itself.
+    const escalation = await integrations(["client", "escalated"], sandbox)
+    expect(escalation.exitCode).toBe(1)
+    expect(escalation.stderr).toContain("not permitted")
+
+    const discoverAttempt = await integrations(["discover", vendor.specUrl], sandbox)
+    expect(discoverAttempt.exitCode).toBe(1)
+
+    await integrations([
+      "grant",
+      client.id,
+      "tickets",
+      "tickets.create",
+      "--integration",
+      slug
+    ])
+
+    const afterGrant = JSON.parse((await integrations(["granted"], sandbox)).stdout) as {
+      tools: ReadonlyArray<{
+        alias: string
+        tool: string
+        integration: string
+        decision: string
+      }>
+    }
+    expect(afterGrant.tools).toEqual([
+      { alias: "tickets", tool: "tickets.create", integration: slug, decision: "allow" }
+    ])
+
+    const executed = await integrations([
+      "execute",
+      "tickets",
+      "tickets.create",
+      JSON.stringify({ body: { title: "Delegated" } })
+    ], sandbox)
+    expect(executed.exitCode, executed.stderr).toBe(0)
+    expect(executed.stdout).toContain("succeeded")
+    expect(vendor.seenKeys()).toEqual(["acceptance-secret"])
+
+    // An ungranted tool on a granted alias is refused.
+    const refused = await integrations([
+      "execute",
+      "tickets",
+      "tickets.delete",
+      "{}"
+    ], sandbox)
+    expect(refused.exitCode).toBe(1)
+  }, 30_000)
+
+  test("a require-approval grant freezes the call until a human decides", async () => {
+    const vendor = startVendor()
+    const gateway = await startGateway()
+    const integrations = (args: ReadonlyArray<string>, environment = gateway.environment) =>
+      run(integrationsCli, args, environment)
+
+    const discovered = JSON.parse((await integrations(["discover", vendor.specUrl])).stdout) as {
+      integration: { slug: string }
+    }
+    const slug = discovered.integration.slug
+    await integrations(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
+    const client = JSON.parse((await integrations(["client", "sales"])).stdout) as { id: string }
+    const key = JSON.parse((await integrations(["key", client.id])).stdout) as { secret: string }
+    await integrations([
+      "grant",
+      client.id,
+      "tickets",
+      "tickets.create",
+      "--integration",
+      slug,
+      "--require-approval"
+    ])
+
+    const frozen = JSON.parse((await integrations([
+      "execute",
+      "tickets",
+      "tickets.create",
+      JSON.stringify({ body: { title: "Needs a human" } })
+    ], { ...gateway.environment, INTEGRATIONS_API_KEY: key.secret })).stdout) as {
+      status: string
+      approvalId: string
+    }
+
+    expect(frozen.status).toBe("pending")
+    expect(vendor.invocations()).toBe(0)
+
+    const approved = await integrations(["approve", frozen.approvalId, "--by", "sebastian"])
+    expect(approved.exitCode, approved.stderr).toBe(0)
+    // The gateway performed the frozen call itself.
+    expect(vendor.invocations()).toBe(1)
+
+    const audit = JSON.parse((await integrations(["audit"])).stdout) as {
+      records: ReadonlyArray<{ outcome: string }>
+    }
+    expect(audit.records.map((entry) => entry.outcome)).toContain("succeeded")
+  }, 30_000)
+
+  test("a workflow authored against the catalog runs and keeps secrets out of its source", async () => {
+    const vendor = startVendor()
+    const gateway = await startGateway()
+    const integrations = (args: ReadonlyArray<string>) =>
+      run(integrationsCli, args, gateway.environment)
+
+    const discovered = JSON.parse((await integrations(["discover", vendor.specUrl])).stdout) as {
+      integration: { slug: string }
+    }
+    const slug = discovered.integration.slug
+    await integrations(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
+
+    const source = `import { defineWorkflow, integration, t } from "@mokronos/wfkit"
+const Output = t.struct({ id: t.string, title: t.string })
+const createTicket = integration({
+  source: { kind: "executor", integration: ${JSON.stringify(slug)}, tool: "tickets.create" },
+  input: t.struct({ body: t.struct({ title: t.string }) }),
+  output: Output
+})
+export const Acceptance = defineWorkflow({
+  name: "Acceptance",
+  input: t.struct({ title: t.string }),
+  output: Output,
+  run: function* (input, ctx) {
+    return yield* ctx.run(createTicket, { body: input })
+  }
+})`
+    const created = await run(wfCli, ["create", "acceptance", "--source", source], gateway.environment)
+    expect(created.exitCode, created.stderr).toBe(0)
+
+    const validated = await run(wfCli, ["validate", "acceptance"], gateway.environment)
+    expect(validated.exitCode, validated.stderr).toBe(0)
+    expect(validated.stdout).toContain("ready")
+
+    const ran = await run(
+      wfCli,
+      ["run", "acceptance", JSON.stringify({ title: "From a workflow" })],
+      gateway.environment
+    )
+    expect(ran.exitCode, ran.stderr).toBe(0)
+    expect(ran.stdout).toContain("T-1")
+    expect(vendor.invocations()).toBe(1)
+
+    const stored = await readFile(path.join(gateway.home, "workflows", "acceptance.ts"), "utf8")
+    expect(stored).toContain(slug)
+    // The definition names the tool, never the connection that served it or the
+    // credential behind it.
+    expect(stored).not.toContain("acceptance-secret")
+    expect(stored).not.toContain(vendor.specUrl)
+
+    const files = (await readdir(gateway.home, { recursive: true, withFileTypes: true }))
+      .filter((entry) => entry.isFile() && entry.name !== "executor-auth.json")
+      .map((entry) => path.join(entry.parentPath, entry.name))
+    const persisted = Buffer.concat(
+      await Promise.all(files.map((file) => readFile(file)))
+    ).toString("utf8")
+    expect(persisted).not.toContain("acceptance-secret")
+  }, 40_000)
+})

@@ -19,7 +19,6 @@ import {
 } from "@mokronos/wfkit"
 import { describeIntegrationResolution } from "@mokronos/wfkit-executor"
 import type { ExecutorServices, IntegrationResolution } from "@mokronos/wfkit-executor"
-import { makeIntegrationsCommand } from "./integrations.ts"
 import { migrateLegacyCatalog } from "../migrate-catalog.ts"
 import { sourcesPath, workflowsPath } from "../paths.ts"
 import type {
@@ -1087,6 +1086,5 @@ export const makeWorkflowCommands = (runtime: CliRuntimeOptions) => [
   runCommand(runtime),
   runsCommand(runtime),
   historyCommand(runtime),
-  signalCommand(runtime),
-  makeIntegrationsCommand({ executor: runtime.executor })
+  signalCommand(runtime)
 ] as const

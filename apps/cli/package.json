@@ -3,7 +3,12 @@
   "version": "0.2.0",
   "type": "module",
   "description": "The globally installable wf workflow service and dashboard.",
-  "keywords": ["workflow", "durable-execution", "cli", "agent"],
+  "keywords": [
+    "workflow",
+    "durable-execution",
+    "cli",
+    "agent"
+  ],
   "homepage": "https://mokronos.github.io/wf/",
   "bugs": "https://github.com/mokronos/wf/issues",
   "repository": {
@@ -19,7 +24,10 @@
     "access": "public",
     "registry": "https://registry.npmjs.org"
   },
-  "files": ["bin", "README.md"],
+  "files": [
+    "bin",
+    "README.md"
+  ],
   "engines": {
     "node": ">=20"
   },
@@ -36,5 +44,8 @@
     "@mokronos/wfkit": "workspace:*",
     "@mokronos/wfkit-executor": "workspace:*",
     "effect": "4.0.0-beta.59"
+  },
+  "dependencies": {
+    "@mokronos/integrations-cli": "workspace:*"
   }
 }
