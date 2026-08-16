@@ -1,7 +1,32 @@
 # Integration gateway — implementation plan
 
 Turns the in-process integration host into a standalone gateway service with
-thin CLI/TS/Python clients, without losing in-workflow integration use.
+thin CLI/TS clients, without losing in-workflow integration use.
+
+## Status: phases 0–6 complete
+
+All seven phases shipped. What differed from the plan as written, and why:
+
+- **Phase 0** — `default-host.ts` stayed in `wfkit-executor`. Five modules
+  import `runExecutor` from it, so moving it was its own phase and bought
+  nothing until the HTTP surface existed.
+- **Phase 2** — a typed route table over `Bun.serve` rather than Effect
+  `HttpApi`. `effect/unstable/httpapi` does exist in beta.59, so this was a
+  choice: the gateway is published, and pinning it to a beta HTTP surface would
+  propagate that instability to consumers. Details in the phase below.
+- **Phase 3** — progressive output was reintroduced in the new CLI rather than
+  merged back into the old `wf i` tree, which this phase deletes.
+- **Phase 5** — `wfkit-executor` lost `integration-resolution` and `invoker`
+  entirely, which the plan did not anticipate. Resolving an alias needs a grant,
+  and only the gateway holds one, so an Executor-side resolver had nothing left
+  to resolve.
+- **Deferred** — the Python client, per the decision to feel out the TS and CLI
+  clients first.
+
+Before this work started, `bun test` had 14 failures on `main`: commit
+`16a656b` reverted two unrelated features (`simplifyJsonSchema` and progressive
+output) while leaving their tests in place. Those were restored first, in
+`861f51b`.
 
 Design is settled in [CONTEXT.md](../../CONTEXT.md) and ADRs
 [0001](../adr/0001-subjects-are-human-clients-are-delegated-to.md),
