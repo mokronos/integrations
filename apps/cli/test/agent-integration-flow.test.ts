@@ -340,8 +340,19 @@ export const AgentAcceptance = defineWorkflow({
       JSON.stringify({ title: longTitle })
     ], environment)
     expect(run.exitCode).toBe(0)
-    expect(run.stdout).toContain('"id": "T-1"')
-    expect(run.stderr).toContain("… (+")
+    // A 5 KB result is summarised rather than dumped, and the envelope says how
+    // to get the whole thing. Both streams stay small enough for an agent to
+    // read without paging.
+    const runResult = Schema.decodeUnknownSync(Schema.Struct({
+      truncated: Schema.Literal(true),
+      characters: Schema.Number,
+      preview: Schema.String,
+      next: Schema.String
+    }))(JSON.parse(run.stdout))
+    expect(runResult.preview).toContain('"id":"T-1"')
+    expect(runResult.next).toContain("--verbose")
+    expect(run.stderr).not.toContain(longTitle)
+    expect(run.stderr).toContain("[run] completed")
     expect(run.stderr.length).toBeLessThan(2_000)
     expect(invocationCount).toBe(2)
 

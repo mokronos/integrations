@@ -65,7 +65,7 @@ export const ValidateDemoWorkflow = defineWorkflow({
 const integrationWorkflowSource = `import { defineWorkflow, integration, t } from "@mokronos/wfkit"
 
 const lookup = integration({
-  source: { kind: "executor", address: "tools.missing.org.default.lookup" },
+  source: { kind: "executor", integration: "missing", tool: "lookup" },
   input: t.struct({ query: t.string }),
   output: t.string
 })
@@ -83,7 +83,7 @@ export const MissingIntegrationWorkflow = defineWorkflow({
 const partiallyInvalidIntegrationWorkflowSource = `import { defineWorkflow, integration, t } from "@mokronos/wfkit"
 
 const lookup = integration({
-  source: { kind: "executor", address: "tools.missing.org.default.lookup" },
+  source: { kind: "executor", integration: "missing", tool: "lookup" },
   input: t.struct({ query: t.string }),
   output: t.string
 })
@@ -106,7 +106,7 @@ export const PartiallyInvalidIntegrationWorkflow = defineWorkflow({
 const manyIntegrationsWorkflowSource = `import { defineWorkflow, integration, t } from "@mokronos/wfkit"
 
 const tools = Array.from({ length: 7 }, (_, index) => integration({
-  source: { kind: "executor", address: \`tools.missing.org.default.lookup-\${index + 1}\` },
+  source: { kind: "executor", integration: "missing", tool: \`lookup-\${index + 1}\` },
   input: t.void,
   output: t.void
 }))
@@ -243,7 +243,7 @@ export const BranchingWorkflow = defineWorkflow({
     expect(result.stderr).toContain("wf validate requires a workflow id or --file")
   })
 
-  test("reports every missing integration address reached by the trace", () => {
+  test("reports every unresolved integration reached by the trace", () => {
     const cwd = makeTempDir()
     const file = path.join(cwd, "missing-integration.ts")
     writeFileSync(file, integrationWorkflowSource)
@@ -252,7 +252,9 @@ export const BranchingWorkflow = defineWorkflow({
 
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toContain("integrations:")
-    expect(result.stdout).toContain("missing\ttools.missing.org.default.lookup")
+    // The resolution status is the label, because "not connected" and "tool not
+    // found" call for different fixes.
+    expect(result.stdout).toContain("integration-not-connected\tmissing.lookup")
     expect(result.stderr).toContain("needs 1 integration tool connected")
   })
 
@@ -265,10 +267,11 @@ export const BranchingWorkflow = defineWorkflow({
     const output = JSON.parse(result.stdout)
 
     expect(result.exitCode).toBe(1)
+    expect(output.integrationReadinessScope).toBe("traced-path")
     expect(output.integrations).toHaveLength(1)
     expect(output.integrations[0]).toMatchObject({
-      address: "tools.missing.org.default.lookup",
-      report: { ok: false }
+      source: { kind: "executor", integration: "missing", tool: "lookup" },
+      resolution: { status: "integration-not-connected" }
     })
   })
 
@@ -281,7 +284,7 @@ export const BranchingWorkflow = defineWorkflow({
 
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toContain("integrations:")
-    expect(result.stdout).toContain("tools.missing.org.default.lookup")
+    expect(result.stdout).toContain("missing.lookup")
     expect(result.stderr).toContain("trace exploded")
   })
 
@@ -293,13 +296,13 @@ export const BranchingWorkflow = defineWorkflow({
     const result = runCli(cwd, ["validate", "--file", file])
 
     expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("tools.missing.org.default.lookup-5")
-    expect(result.stdout).not.toContain("tools.missing.org.default.lookup-6")
+    expect(result.stdout).toContain("missing.lookup-5")
+    expect(result.stdout).not.toContain("missing.lookup-6")
     expect(result.stdout).toContain("Showing 5 of 7. Rerun with --verbose for all.")
 
     const verbose = runCli(cwd, ["validate", "--file", file, "--verbose"])
     expect(verbose.exitCode).toBe(1)
-    expect(verbose.stdout).toContain("tools.missing.org.default.lookup-7")
+    expect(verbose.stdout).toContain("missing.lookup-7")
     expect(verbose.stdout).not.toContain("Showing 5 of 7")
   })
 })

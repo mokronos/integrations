@@ -61,10 +61,41 @@ export const decodeJsonSchema = (value: unknown): JsonSchema =>
  *  has no JSON representation. */
 export const jsonSchemaOf = (schema: Schema.Top): JsonSchema | undefined => {
   try {
-    return decodeJsonSchema(Schema.toJsonSchemaDocument(schema).schema)
+    return simplifyJsonSchema(decodeJsonSchema(Schema.toJsonSchemaDocument(schema).schema))
   } catch {
     return undefined
   }
+}
+
+/** Collapses the duplicate alternatives Effect emits for unions whose members
+ *  share an encoded form — `Union([DateFromString, Date])` is two branches that
+ *  are both `{ type: "string" }`. Agents read these schemas, so the noise is
+ *  worth removing at the source rather than in every consumer. */
+const simplifyJsonSchema = (schema: JsonSchema): JsonSchema => {
+  const simplifiedAnyOf = schema.anyOf === undefined
+    ? undefined
+    : [...new Map(
+      schema.anyOf.map(simplifyJsonSchema).map((item) => [JSON.stringify(item), item])
+    ).values()]
+  const simplifiedOneOf = schema.oneOf?.map(simplifyJsonSchema)
+  const simplifiedItems = schema.items === undefined ? undefined : simplifyJsonSchema(schema.items)
+  const simplifiedProperties = schema.properties === undefined
+    ? undefined
+    : Object.fromEntries(
+      Object.entries(schema.properties).map(([key, value]) => [key, simplifyJsonSchema(value)])
+    )
+  const simplified: JsonSchema = {
+    ...schema,
+    ...(simplifiedAnyOf === undefined ? {} : { anyOf: simplifiedAnyOf }),
+    ...(simplifiedOneOf === undefined ? {} : { oneOf: simplifiedOneOf }),
+    ...(simplifiedItems === undefined ? {} : { items: simplifiedItems }),
+    ...(simplifiedProperties === undefined ? {} : { properties: simplifiedProperties })
+  }
+  if (
+    simplifiedAnyOf?.length === 1 &&
+    Object.keys(simplified).every((key) => key === "anyOf")
+  ) return simplifiedAnyOf[0]!
+  return simplified
 }
 
 const WorkflowStartedEvent = Schema.Struct({

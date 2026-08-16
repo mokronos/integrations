@@ -72,7 +72,11 @@ describe("CLI help", () => {
     expect(searchHelp.exitCode).toBe(0)
     expect(searchHelp.stdout).toContain("query string")
     expect(searchHelp.stdout).toContain("--text")
-    expect(searchHelp.stdout).toContain("--verbose")
+    // --verbose is deliberately not asserted here yet. Progressive output was
+    // reverted out of the integrations commands by 16a656b, and the gateway
+    // migration replaces this whole command tree with a thin HTTP client, so
+    // parity is a requirement of that rewrite rather than a merge back into
+    // code scheduled for deletion. See docs/plans/integration-gateway.md.
   }, 15_000)
 
   test("rejects help for an unknown command", () => {
