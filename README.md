@@ -8,6 +8,8 @@ artifact, not an expensive LLM execution trace.
 
 The `wf` CLI is the primary surface. Everything below is a command you can run.
 
+**Documentation:** [mokronos.github.io/wf/docs](https://mokronos.github.io/wf/docs/) — [wf CLI](https://mokronos.github.io/wf/docs/cli/), [TypeScript SDK](https://mokronos.github.io/wf/docs/wfkit/), [integrations CLI](https://mokronos.github.io/wf/docs/integrations/), [gateway client](https://mokronos.github.io/wf/docs/client/).
+
 - **Structured orchestration** — steps, branches, waits, retries, timeouts,
   human tasks, and signals are first-class, because the runtime has to
   understand them.
