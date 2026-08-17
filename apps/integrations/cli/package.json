@@ -18,7 +18,8 @@
     "agent"
   ],
   "bin": {
-    "integrations": "src/main.ts"
+    "integrations": "src/main.ts",
+    "i": "src/main.ts"
   },
   "engines": {
     "bun": ">=1.2"

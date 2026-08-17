@@ -25,7 +25,10 @@ interface Installable {
 
 const installables = (): ReadonlyArray<Installable> => [
   { name: "wf", entry: entryPoint },
-  { name: "integrations", entry: integrationsEntryPoint }
+  { name: "integrations", entry: integrationsEntryPoint },
+  // `i` is the short alias, mirroring the second bin entry in the
+  // integrations-cli package so local and published installs match.
+  { name: "i", entry: integrationsEntryPoint }
 ]
 
 type Mode = "source" | "compiled"
@@ -37,7 +40,7 @@ interface Options {
 
 const usage = `Install the working tree's binaries onto your PATH.
 
-Installs both wf and integrations.
+Installs wf, integrations, and i (a second name for integrations).
 
 Usage:
   bun run install:local [--compiled] [--dir <directory>]
@@ -49,7 +52,7 @@ Usage:
                 so restart it after source changes with: wf install
   --compiled    Build the current-platform wf binary and link that instead.
                 Slower and needs a rebuild per change, but matches the published
-                shape. integrations is always a source shim; it has no
+                shape. integrations and i are always source shims; they have no
                 compiled variant yet.
   --dir <path>  Install directory. Defaults to the first of ~/.bun/bin or
                 ~/.local/bin that already exists.
@@ -194,7 +197,7 @@ const main = async (): Promise<void> => {
     const suffix = process.platform === "win32" ? ".exe" : ""
     const target = path.join(options.directory, `${installable.name}${suffix}`)
     await clearTarget(target)
-    // Only wf has a compiled variant; integrations is always a source shim.
+    // Only wf has a compiled variant; integrations and its alias stay source shims.
     if (options.mode === "compiled" && installable.name === "wf") await installCompiled(target)
     else await installShim(target, installable.entry)
     await chmod(target, 0o755).catch(() => undefined)

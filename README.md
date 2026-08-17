@@ -433,7 +433,8 @@ nested subcommands.
 Integrations live behind a **gateway**: a local service that holds every
 credential, decides whether a call may happen, and performs it. Nothing else
 ever sees a credential. The `integrations` binary installs alongside `wf` and is
-a thin client over that gateway's HTTP surface.
+a thin client over that gateway's HTTP surface. It also installs as `i`, so
+`i tools linear` and `integrations tools linear` are the same command.
 
 ```text
 integrations
