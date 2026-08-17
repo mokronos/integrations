@@ -7,6 +7,7 @@ on:
     paths:
       - ".github/workflows/deploy-pages.yml"
       - "apps/marketing/**"
+      - "apps/docs/**"
       - "bun.lock"
       - "package.json"
   workflow_dispatch:
@@ -30,6 +31,10 @@ jobs:
         with:
           bun-version: "1.3.14"
 
+      - uses: astral-sh/setup-uv@v10
+        with:
+          version: "0.12.5"
+
       - name: Configure GitHub Pages
         id: pages
         uses: actions/configure-pages@v5
@@ -44,6 +49,11 @@ jobs:
           BASE_PATH: ${{ steps.pages.outputs.base_path }}
           SITE_URL: ${{ steps.pages.outputs.origin }}
         run: bun run build:marketing
+
+      # MkDocs writes into the marketing output, so this has to follow the
+      # Astro build — Astro clears dist/ on every run.
+      - name: Build documentation
+        run: bun run build:docs
 
       - name: Upload website
         uses: actions/upload-pages-artifact@v4

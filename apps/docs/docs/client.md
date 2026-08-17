@@ -1,9 +1,3 @@
----
-layout: ../../layouts/DocsLayout.astro
-title: Gateway client
-description: Reference for @mokronos/integrations-client — the thin TypeScript client for calling granted tools through the integration gateway.
----
-
 # Gateway client
 
 `@mokronos/integrations-client` is the TypeScript client for the integration
@@ -208,7 +202,7 @@ The generator is exported, so you can drive it yourself:
 
 ## Using it from a workflow
 
-Workflows do not use this client directly. `wf` is the composition root: it
+Workflows do not use this client directly. [`wf`](cli.md) is the composition root: it
 turns a workflow's `{ alias, tool }` into `gateway.execute(...)`, and maps the
 outcomes onto durable semantics — `pending` and `failed` are thrown so the
 durable engine retries them, and a denial fails the step. A daemon restart, or a

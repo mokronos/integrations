@@ -1,9 +1,3 @@
----
-layout: ../../layouts/DocsLayout.astro
-title: wf CLI
-description: Complete reference for the wf command — create, validate, run, signal, and inspect durable workflows.
----
-
 # wf CLI
 
 `wf` is the primary surface: durable workflows and a local dashboard. It is
@@ -28,7 +22,7 @@ wf
 └── daemon
 ```
 
-Integrations are a separate binary — see the Integrations CLI page.
+Integrations are a separate binary — see the [Integrations CLI](integrations.md).
 
 ## Global flags
 

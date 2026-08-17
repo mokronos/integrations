@@ -1,9 +1,3 @@
----
-layout: ../../layouts/DocsLayout.astro
-title: Overview
-description: What wf is, how the pieces fit together, and the first run end to end.
----
-
 # wf documentation
 
 `wf` is an agent-first workflow platform. An agent designs the workflow; a small,
@@ -187,9 +181,10 @@ workflow while one of its runs is parked on a signal.
 
 ## Where to go next
 
-- **wf CLI** — every command, flag, and output mode.
-- **TypeScript SDK** — `defineStep`, `defineWorkflow`, the `ctx` orchestration
-  calls, the embeddable runtime, and the test runtime.
-- **Integrations CLI** — discovery, connections, grants, approvals, drift, and
-  codegen.
-- **Gateway client** — calling granted tools from your own TypeScript.
+- [**wf CLI**](cli.md) — every command, flag, and output mode.
+- [**TypeScript SDK**](wfkit.md) — `defineStep`, `defineWorkflow`, the `ctx`
+  orchestration calls, the embeddable runtime, and the test runtime.
+- [**Integrations CLI**](integrations.md) — discovery, connections, grants,
+  approvals, drift, and codegen.
+- [**Gateway client**](client.md) — calling granted tools from your own
+  TypeScript.

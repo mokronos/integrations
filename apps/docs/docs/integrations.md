@@ -1,9 +1,3 @@
----
-layout: ../../layouts/DocsLayout.astro
-title: Integrations CLI
-description: Reference for the integrations command — discover and authorize external systems, delegate them to clients, and decide what may run.
----
-
 # Integrations CLI
 
 `integrations` is a thin client over the **gateway**: the local service that
@@ -249,5 +243,5 @@ integrations codegen [--target effect|ts] [--out <file>]
 
 Generation runs against *your* gateway with *your* key, so the generated surface
 is exactly the grant surface: least privilege shows up in autocomplete, and
-adding a tool means adding a grant. See the Gateway client page for what the
-output looks like.
+adding a tool means adding a grant. See the [Gateway client](client.md) for
+what the output looks like.

@@ -18,6 +18,8 @@
     "build": "bun run build:executor",
     "build:cli": "bun run build:executor && bun run --cwd apps/cli build",
     "build:marketing": "bun run --cwd apps/marketing build",
+    "build:docs": "cd apps/docs && uv run --no-project --with-requirements requirements.txt mkdocs build",
+    "build:site": "bun run build:marketing && bun run build:docs",
     "cli": "bun run apps/cli/src/main.ts",
     "dev:marketing": "bun run --cwd apps/marketing dev",
     "dev:cli": "bun run apps/cli/src/main.ts",
@@ -29,7 +31,7 @@
     "prepare": "effect-language-service patch",
     "typecheck": "tsc --build --noEmit",
     "test": "bun test",
-    "verify": "bun run typecheck && bun test && bun run example:order-saga && bun run example:approval && bun run build && bun run build:marketing && bun run build:cli",
+    "verify": "bun run typecheck && bun test && bun run example:order-saga && bun run example:approval && bun run build && bun run build:site && bun run build:cli",
     "wf": "bun run apps/cli/src/main.ts"
   },
   "devDependencies": {
@@ -37,5 +39,8 @@
     "@types/bun": "latest",
     "effect-solutions": "^0.5.3",
     "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "playwright-core": "1.62.1"
   }
 }

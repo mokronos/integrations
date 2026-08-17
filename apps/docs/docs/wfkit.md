@@ -1,9 +1,3 @@
----
-layout: ../../layouts/DocsLayout.astro
-title: TypeScript SDK
-description: Reference for @mokronos/wfkit — defining steps and workflows, the orchestration calls, the embeddable runtime, and the test runtime.
----
-
 # TypeScript SDK
 
 `@mokronos/wfkit` is the authoring surface: the stable API workflows are written
@@ -241,7 +235,7 @@ steps declare no typed errors: gateway failures (a restart, an approval a human
 has not decided yet) are transient, and the durable engine rides them out.
 
 Generated bindings for exactly the tools your key can reach are available with
-`integrations codegen --target effect`; see the Gateway client page.
+`integrations codegen --target effect`; see the [Gateway client](client.md).
 
 ## Secrets
 
