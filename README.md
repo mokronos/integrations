@@ -424,6 +424,7 @@ wf <command>
 | `wf signal` | Resume a run waiting for a signal |
 | `integrations` | Discover, authorize, inspect, and validate integrations |
 | `wf install` | Install the local dashboard service |
+| `wf upgrade` | Upgrade the CLI to the latest published version |
 | `wf web` | Open the local dashboard |
 | `wf daemon` | Run the dashboard service in the foreground |
 
@@ -440,7 +441,9 @@ a thin client over that gateway's HTTP surface. It also installs as `i`, so
 
 ```text
 integrations
-├── serve                       # run the gateway
+├── serve [-d]                  # run the gateway, in this terminal or detached
+├── install / uninstall         # run the gateway as a per-user service
+├── upgrade                     # replace this CLI with the published version
 ├── search / discover / list    # find and register integrations
 ├── connect / connections / disconnect
 ├── tools / schema              # inspect what a connection exposes

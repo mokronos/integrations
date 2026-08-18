@@ -78,6 +78,15 @@ export const launchdPlist = (descriptor: ServiceDescriptor): string => `<?xml ve
 </dict></plist>
 `
 
+/** Whether a service definition exists, so a command can say that the running
+ *  dashboard is older than the code on disk. */
+export const serviceIsRegistered = async (): Promise<boolean> => {
+  const definition = process.platform === "darwin"
+    ? path.join(homedir(), "Library", "LaunchAgents", `${serviceLabel}.plist`)
+    : path.join(homedir(), ".config", "systemd", "user", `${serviceLabel}.service`)
+  return await Bun.file(definition).exists()
+}
+
 const command = async (
   program: string,
   arguments_: ReadonlyArray<string>,

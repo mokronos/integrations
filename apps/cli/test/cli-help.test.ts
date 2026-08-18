@@ -42,6 +42,16 @@ describe("CLI help", () => {
     expect(result.stdout).not.toContain("integrations, i")
   })
 
+  test("offers an upgrade command that reports before it changes anything", () => {
+    const listed = runCli(["--help"])
+    expect(listed.stdout).toContain("upgrade")
+
+    const help = runCli(["upgrade", "--help"])
+    expect(help.exitCode).toBe(0)
+    expect(help.stdout).toContain("--check")
+    expect(help.stdout).toContain("--pull")
+  })
+
   test("shows command-specific help from the command definition", () => {
     const helpFlag = runCli(["create", "--help"])
 

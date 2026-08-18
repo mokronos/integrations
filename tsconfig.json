@@ -21,6 +21,7 @@
       "@mokronos/wfkit-executor/schemas": ["packages/wfkit-executor/src/schemas.ts"],
       "@mokronos/integrations": ["apps/integrations/gateway/src/index.ts"],
       "@mokronos/integrations-client": ["apps/integrations/ts/src/index.ts"],
+      "@mokronos/integrations-cli/upgrade": ["apps/integrations/cli/src/upgrade.ts"],
       "@mokronos/wfkit/integrations": ["packages/wf/src/integration-contract.ts"],
       "@mokronos/wfkit/schemas": ["packages/wf/src/schemas.ts"],
       "@mokronos/wfkit/testing": ["packages/wf/src/testing/index.ts"],

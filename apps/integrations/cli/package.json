@@ -21,6 +21,9 @@
     "integrations": "src/main.ts",
     "i": "src/main.ts"
   },
+  "exports": {
+    "./upgrade": "./src/upgrade.ts"
+  },
   "engines": {
     "bun": ">=1.2"
   },

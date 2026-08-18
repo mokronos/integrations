@@ -43,6 +43,7 @@ integrations serve
 | --- | --- |
 | `--port <integer>` | Port to listen on. Defaults to 4788 (the dashboard already owns 4787) |
 | `--host <string>` | Bind address. Defaults to `127.0.0.1` |
+| `--detach`, `-d` | Start in the background and return once the gateway answers |
 
 On start it ensures a local privileged client exists, mints a key for it, and
 writes `~/.wf/gateway.json` (mode `0600`) with the URL and that key — so the
@@ -55,6 +56,86 @@ local case is zero-configuration. Clients read it automatically; set
 
 If nothing is running you get: *No gateway found. Start one with `integrations
 serve`, or set INTEGRATIONS_URL and INTEGRATIONS_API_KEY.*
+
+### Keeping it running
+
+Three lifetimes, in order of how long they last:
+
+```bash
+integrations serve       # this terminal
+integrations serve -d    # background, until logout
+integrations install     # a per-user service, across reboots
+```
+
+`-d` is what `&` would do, without needing to know that: it spawns the gateway,
+waits until it answers an authenticated request, then prints the pid and the log
+path and exits. Output goes to `~/.wf/logs/integrations.log` and
+`integrations.error.log`. Stop it with `kill <pid>`. It does not survive logout
+or a reboot.
+
+## integrations install
+
+Register and start the gateway as a per-user service.
+
+```text
+integrations install [--port <integer>] [--verbose]
+```
+
+`systemd --user` on Linux, `launchd` on macOS, under the label
+`dev.mokronos.integrations` — its own unit rather than the dashboard's
+`dev.mokronos.wf`, because the gateway holds the credentials the dashboard reads
+and has to be able to outlive it. Windows service registration is not
+implemented yet.
+
+The service always binds loopback: a service that starts at login and exposes a
+credential-unlocking port to the network should be a deliberate `integrations
+serve --host` in a terminal. On Linux it also asks for `enable-linger`, so the
+gateway is up on a machine reached over SSH; that is best effort and needs
+polkit.
+
+Installing is idempotent, and rerunning it is also how you restart the service
+onto upgraded sources — the background service keeps running the code it started
+with. The command returns only once the gateway answers, not once the service
+manager accepts the unit.
+
+## integrations upgrade
+
+Upgrade this CLI to the latest published version.
+
+```text
+integrations upgrade [--check] [--pull]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--check` | Report the version that is available and change nothing |
+| `--pull` | For a source install: fast-forward the checkout the CLI runs from |
+
+It works out how this copy was installed and then uses whatever installed it: a
+global install is replaced through its own package manager (`bun`, `npm`, `pnpm`,
+or `yarn`, read off the tree it lives in), and the version to install comes from
+the registry rather than a hardcoded number. An unpublished package is reported
+as unpublished instead of failing obscurely.
+
+A **source install** — the shims `bun run install:local` writes — has no package
+to replace, because it runs the working tree directly. `--pull` fast-forwards
+that checkout instead, and runs `bun install` if the pull moved the lockfile. It
+refuses a dirty tree or a non-fast-forward: the job is to update a CLI, not to
+resolve a merge.
+
+Upgrading never restarts anything. The installed service keeps serving the
+version it started with — the command says so, and `integrations install`
+restarts it when you are ready.
+
+## integrations uninstall
+
+```text
+integrations uninstall [--verbose]
+```
+
+Stops and deregisters the service. `~/.wf` is left alone: it holds the
+connections and credentials, and removing a service definition is not consent to
+delete those.
 
 ## Output conventions
 

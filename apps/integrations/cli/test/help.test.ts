@@ -45,7 +45,10 @@ describe("integrations CLI help", () => {
       "grant",
       "approve",
       "audit",
-      "serve"
+      "serve",
+      "install",
+      "uninstall",
+      "upgrade"
     ]) {
       expect(`${command} listed: ${result.stdout.includes(command)}`)
         .toBe(`${command} listed: true`)
@@ -63,6 +66,24 @@ describe("integrations CLI help", () => {
         .toBe(`${command} has --verbose: true`)
     }
   }, 20_000)
+
+  test("offers a detached start and a service install", () => {
+    // Two ways to get a gateway that stays up: `&` without knowing about `&`,
+    // and a real service that survives a reboot.
+    const serve = runCli(["serve", "--help"])
+    expect(serve.exitCode).toBe(0)
+    expect(serve.stdout).toContain("--detach")
+    expect(serve.stdout).toContain("-d")
+
+    const install = runCli(["install", "--help"])
+    expect(install.exitCode).toBe(0)
+    expect(install.stdout).toContain("--port")
+
+    const upgrade = runCli(["upgrade", "--help"])
+    expect(upgrade.exitCode).toBe(0)
+    expect(upgrade.stdout).toContain("--check")
+    expect(upgrade.stdout).toContain("--pull")
+  })
 
   test("shows arguments and flags for a specific command", () => {
     const help = runCli(["search", "--help"])
