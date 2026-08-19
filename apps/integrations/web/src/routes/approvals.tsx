@@ -14,14 +14,14 @@ import { useApprovals, useInvalidate, useMutation } from "@/lib/queries"
 import { decodeApprovalFilter } from "@/lib/schemas"
 import type { ApprovalStatus, PendingApproval } from "@/lib/schemas"
 
-const statusVariant: Readonly<
-  Record<ApprovalStatus, "default" | "secondary" | "destructive" | "outline">
-> = {
+const statusVariant = {
   pending: "default",
   approved: "secondary",
   denied: "destructive",
   expired: "outline"
-}
+} satisfies Readonly<
+  Record<ApprovalStatus, "default" | "secondary" | "destructive" | "outline">
+>
 
 function ApprovalCard({ approval }: { readonly approval: PendingApproval }) {
   const invalidate = useInvalidate()

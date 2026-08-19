@@ -24,14 +24,14 @@ import { connectionLabel, when } from "@/lib/format"
 import { useAudit } from "@/lib/queries"
 import type { AuditRecord } from "@/lib/schemas"
 
-const outcomeVariant: Readonly<
-  Record<AuditRecord["outcome"], "default" | "secondary" | "destructive" | "outline">
-> = {
+const outcomeVariant = {
   succeeded: "secondary",
   failed: "destructive",
   denied: "destructive",
   pending: "default"
-}
+} satisfies Readonly<
+  Record<AuditRecord["outcome"], "default" | "secondary" | "destructive" | "outline">
+>
 
 const limits = [50, 100, 250, 500] as const
 

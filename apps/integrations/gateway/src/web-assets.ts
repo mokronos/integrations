@@ -8,21 +8,24 @@ import path from "node:path"
  * gateway ships as an ordinary package whose files are still there at runtime.
  */
 
-const contentTypes: Readonly<Record<string, string>> = {
-  ".html": "text/html; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".ico": "image/x-icon",
-  ".woff2": "font/woff2",
-  ".woff": "font/woff",
-  ".map": "application/json; charset=utf-8"
-}
+/** A Map rather than an object literal: the key is an arbitrary file extension,
+ *  so the lookup has to accept any string, and Map keeps that honest without an
+ *  index signature that would erase which extensions are actually known. */
+const contentTypes = new Map([
+  [".html", "text/html; charset=utf-8"],
+  [".css", "text/css; charset=utf-8"],
+  [".js", "text/javascript; charset=utf-8"],
+  [".json", "application/json; charset=utf-8"],
+  [".svg", "image/svg+xml"],
+  [".png", "image/png"],
+  [".ico", "image/x-icon"],
+  [".woff2", "font/woff2"],
+  [".woff", "font/woff"],
+  [".map", "application/json; charset=utf-8"]
+])
 
 const contentTypeFor = (location: string): string =>
-  contentTypes[path.extname(location).toLowerCase()] ?? "application/octet-stream"
+  contentTypes.get(path.extname(location).toLowerCase()) ?? "application/octet-stream"
 
 const packageDirectory = path.resolve(import.meta.dirname, "..")
 

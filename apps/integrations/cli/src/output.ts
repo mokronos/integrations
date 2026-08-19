@@ -52,10 +52,7 @@ export const page = <A>(items: ReadonlyArray<A>, window: Window): Page<A> => {
 /** What a listing reports about its own shape. Present only when it says
  *  something the rows do not: a window was applied, or the result is large
  *  enough to be worth narrowing. */
-export const pageFields = <A>(
-  result: Page<A>,
-  narrowing: string
-): Record<string, typeof Schema.Json.Type> => {
+export const pageFields = <A>(result: Page<A>, narrowing: string) => {
   const windowed = result.limit !== undefined || result.offset > 0
   return {
     count: result.count,

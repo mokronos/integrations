@@ -46,11 +46,14 @@ function literalText(n: ts.Node | undefined): string | undefined {
 }
 
 // ── Extractor ──
-function extractSteps(code: string): {
+/** What one workflow source file tells us before it becomes a diagram. */
+interface ExtractedWorkflow {
   steps: Step[]
   wfName: string
   payloadStr: string
-} {
+}
+
+function extractSteps(code: string): ExtractedWorkflow {
   const sf = ts.createSourceFile("workflow.ts", code, ts.ScriptTarget.Latest, true)
   let wfName = "Workflow"
   let payloadStr = ""
@@ -172,10 +175,13 @@ function extractSteps(code: string): {
 }
 
 // ── Graph builder ──
-function buildGraph(steps: Step[], wfName: string, payloadStr: string): {
+/** The diagram itself, before it is rendered to mermaid text. */
+interface WorkflowGraph {
   nodes: Node[]
   edges: Edge[]
-} {
+}
+
+function buildGraph(steps: Step[], wfName: string, payloadStr: string): WorkflowGraph {
   const nodes: Node[] = []
   const edges: Edge[] = []
   let i = 0

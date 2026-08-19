@@ -27,10 +27,17 @@ const PageOffset = Schema.NumberFromString.pipe(
 
 const PageLimit = Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0)))
 
+/** One window into a listing, plus the cursor that reaches the next one. The
+ *  cursor is absent rather than null at the end of the list. */
+export interface PaginatedPage<T> {
+  readonly items: ReadonlyArray<T>
+  readonly cursor?: string
+}
+
 export const paginate = <T>(
   values: ReadonlyArray<T>,
   options: { readonly cursor?: string; readonly limit?: number }
-): { readonly items: ReadonlyArray<T>; readonly cursor?: string } => {
+): PaginatedPage<T> => {
   const start = options.cursor === undefined
     ? 0
     : Schema.decodeUnknownSync(PageOffset)(options.cursor)

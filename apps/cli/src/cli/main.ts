@@ -561,7 +561,7 @@ const yellow = paint("33")
 
 type EventCategory = "run" | "workflow" | "step" | "code" | "sleep" | "signal" | "compensation" | "all"
 
-const categoryPaint: Record<EventCategory, (text: string) => string> = {
+const categoryPaint = {
   run: paint("1;32"),
   workflow: paint("1;35"),
   step: paint("1;34"),
@@ -570,7 +570,7 @@ const categoryPaint: Record<EventCategory, (text: string) => string> = {
   signal: paint("1;33"),
   compensation: paint("1;31"),
   all: paint("1;94")
-}
+} satisfies Record<EventCategory, (text: string) => string>
 
 const eventTag = (category: EventCategory): string => categoryPaint[category](`[${category}]`)
 

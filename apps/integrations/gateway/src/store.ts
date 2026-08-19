@@ -489,9 +489,16 @@ const addMissingColumns = async (
 
 /** One filter builder for both the page and its total, so a listing can never
  *  report a count that belongs to a different question than the rows. */
+/** A composed SQL fragment and the values it binds, kept together so a caller
+ *  cannot pass one without the other. */
+interface SqlFilter {
+  readonly where: string
+  readonly args: ReadonlyArray<InValue>
+}
+
 const auditFilter = (
   options: Omit<AuditQuery, "limit" | "offset">
-): { readonly where: string; readonly args: ReadonlyArray<InValue> } => {
+): SqlFilter => {
   const clauses: Array<string> = []
   const args: Array<InValue> = []
   if (options.clientId !== undefined) {

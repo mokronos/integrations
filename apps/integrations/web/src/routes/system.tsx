@@ -16,15 +16,15 @@ import {
 import { pluralise, when } from "@/lib/format"
 import * as gateway from "@/lib/gateway"
 import { useIntegrations, useInvalidate, useMutation } from "@/lib/queries"
-import type { DriftReport } from "@/lib/schemas"
+import type { DriftEntry, DriftReport } from "@/lib/schemas"
 
 const ALL = "__all__"
 
-const driftVariant: Readonly<Record<string, "default" | "secondary" | "destructive">> = {
+const driftVariant = {
   added: "default",
   changed: "secondary",
   removed: "destructive"
-}
+} satisfies Readonly<Record<DriftEntry["kind"], "default" | "secondary" | "destructive">>
 
 export function SystemRoute() {
   const invalidate = useInvalidate()

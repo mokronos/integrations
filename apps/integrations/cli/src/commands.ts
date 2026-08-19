@@ -816,7 +816,7 @@ const grantCommand = Command.make(
     }))
 ).pipe(Command.withDescription("Delegate one tool through one connection to one client"))
 
-const grantRow = (tool: GrantedTool): Record<string, typeof Schema.Json.Type> => ({
+const grantRow = (tool: GrantedTool) => ({
   alias: tool.alias,
   tool: tool.tool,
   integration: tool.integration,

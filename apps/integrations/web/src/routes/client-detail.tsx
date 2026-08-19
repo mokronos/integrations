@@ -58,10 +58,10 @@ import type { ConnectionRefInput } from "@/lib/gateway"
 import { decodeGrantDecision } from "@/lib/schemas"
 import type { Grant, GrantDecision } from "@/lib/schemas"
 
-const decisionLabel: Readonly<Record<GrantDecision, string>> = {
+const decisionLabel = {
   allow: "Allow",
   require_approval: "Ask a human"
-}
+} satisfies Readonly<Record<GrantDecision, string>>
 
 /** Grants are per tool, never per pattern: a vendor shipping a new tool must not
  *  land inside an existing grant. That is why this dialog makes you pick one. */

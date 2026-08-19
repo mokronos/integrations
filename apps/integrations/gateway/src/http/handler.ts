@@ -1,4 +1,5 @@
 import { authenticateClient, authorizeMutation } from "../authorize.ts"
+import type { MutationAuthorization } from "../authorize.ts"
 import type { GatewayStore } from "../store.ts"
 import { matchRoute, pathExists, RequestBodyError } from "./router.ts"
 import type { Route } from "./router.ts"
@@ -32,26 +33,31 @@ const readBody = async (request: Request): Promise<unknown> => {
   }
 }
 
-const authenticationStatus: Record<string, number> = {
+/** Every way a credential can be refused. Naming the union instead of keying
+ *  these tables by `string` makes both of them total, so a new refusal reason
+ *  cannot be introduced without also giving it a status code and a sentence. */
+type RefusalStatus = Exclude<MutationAuthorization["status"], "authorized">
+
+const authenticationStatus = {
   "unknown-key": 401,
   "key-revoked": 401,
   "client-revoked": 403,
   "not-permitted": 403
-}
+} satisfies Record<RefusalStatus, number>
 
-const authenticationMessage: Record<string, string> = {
+const authenticationMessage = {
   "unknown-key": "This API key is not known to the gateway",
   "key-revoked": "This API key was revoked",
   "client-revoked": "The client this key belongs to was revoked",
   "not-permitted": "This key may not change the catalog, connections, grants, or policy"
-}
+} satisfies Record<RefusalStatus, string>
 
 /** A refusal states both a sentence and a `code`. Clients branch on the code:
  *  matching on prose is how "not granted" ends up being explained to a user as
  *  a permissions-tier problem. */
-const refusal = (status: string): Response =>
-  json(authenticationStatus[status] ?? 403, {
-    error: authenticationMessage[status] ?? status,
+const refusal = (status: RefusalStatus): Response =>
+  json(authenticationStatus[status], {
+    error: authenticationMessage[status],
     code: status
   })
 

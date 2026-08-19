@@ -190,9 +190,10 @@ const setup = async (options: {
     pathname: string,
     init: { readonly body?: unknown; readonly secret?: string | null } = {}
   ) => {
-    const headers: Record<string, string> = { "content-type": "application/json" }
     const secret = init.secret === undefined ? key.secret : init.secret
-    if (secret !== null) headers["authorization"] = `Bearer ${secret}`
+    const headers = secret === null
+      ? { "content-type": "application/json" }
+      : { "content-type": "application/json", authorization: `Bearer ${secret}` }
     const response = await handle(new Request(`http://gateway.test${pathname}`, {
       method,
       headers,
