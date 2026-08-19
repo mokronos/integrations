@@ -67,13 +67,18 @@ const ApprovalRecord = Schema.Struct({
   expiresAt: Schema.String,
   decidedBy: Schema.NullOr(Schema.String),
   result: Schema.NullOr(Schema.Json),
-  error: Schema.NullOr(Schema.String)
+  error: Schema.NullOr(Schema.String),
+  /** When the decision was handed back to the caller. A settled approval is
+   *  delivered through `execute` exactly once; an identical call after that
+   *  asks for a fresh decision rather than replaying an old one. */
+  collectedAt: Schema.NullOr(Schema.String)
 })
 export type ApprovalRecord = typeof ApprovalRecord.Type
 
 const decodeGrantedTools = Schema.decodeUnknownSync(GrantedTools)
 const decodeOutcome = Schema.decodeUnknownSync(InvocationOutcome)
 const decodeApproval = Schema.decodeUnknownSync(ApprovalRecord)
+const isOutcome = Schema.is(InvocationOutcome)
 
 export interface GatewayClient {
   readonly url: string
@@ -84,6 +89,21 @@ export interface GatewayClient {
    *
    *  Schemas are opt-in because they cost a catalog read per grant. */
   tools(options?: { readonly schemas?: boolean }): Promise<ReadonlyArray<GrantedTool>>
+
+  /** The tools *another* client can reach. Privileged, and the reason codegen
+   *  can emit bindings for the client being provisioned rather than only for
+   *  the key running the command. */
+  clientTools(
+    clientId: string,
+    options?: { readonly schemas?: boolean }
+  ): Promise<ReadonlyArray<GrantedTool>>
+
+  /** Performs a delegated call.
+   *
+   *  Every answer the *policy* produced comes back as a value, `denied` and
+   *  `failed` included: the gateway answered, and which answer it gave is the
+   *  caller's to branch on. A thrown `GatewayError` means the gateway did not
+   *  answer at all — bad key, no route, unreachable. */
   execute(input: {
     readonly alias: string
     readonly tool: string
@@ -97,7 +117,11 @@ export const createGatewayClient = (options: GatewayClientOptions): GatewayClien
   const doFetch = options.fetch ?? globalThis.fetch
   const base = options.url.replace(/\/+$/, "")
 
-  const request = async (method: string, path: string, body?: unknown): Promise<unknown> => {
+  const send = async (
+    method: string,
+    path: string,
+    body?: unknown
+  ): Promise<{ readonly ok: boolean; readonly status: number; readonly parsed: unknown }> => {
     const response = await doFetch(`${base}${path}`, {
       method,
       headers: {
@@ -107,29 +131,61 @@ export const createGatewayClient = (options: GatewayClientOptions): GatewayClien
       ...(body === undefined ? {} : { body: JSON.stringify(body) })
     })
     const text = await response.text()
-    const parsed: unknown = text.trim().length === 0 ? {} : JSON.parse(text)
-    if (!response.ok) {
-      const message = typeof parsed === "object" && parsed !== null && "error" in parsed
-        ? String((parsed as { error: unknown }).error)
-        : `${method} ${path} failed with ${response.status}`
-      throw new GatewayError(response.status, parsed, message)
+    return {
+      ok: response.ok,
+      status: response.status,
+      parsed: text.trim().length === 0 ? {} : JSON.parse(text)
     }
-    return parsed
   }
+
+  const failure = (method: string, path: string, status: number, parsed: unknown): GatewayError => {
+    // The gateway states a refusal in `error`; a policy answer states it in
+    // `reason`. Reading both is what keeps "alias not granted" from being
+    // reported as the generic "failed with 403".
+    const message = typeof parsed === "object" && parsed !== null
+      ? "error" in parsed
+        ? String((parsed as { error: unknown }).error)
+        : "reason" in parsed
+        ? String((parsed as { reason: unknown }).reason)
+        : `${method} ${path} failed with ${status}`
+      : `${method} ${path} failed with ${status}`
+    return new GatewayError(status, parsed, message)
+  }
+
+  const request = async (method: string, path: string, body?: unknown): Promise<unknown> => {
+    const response = await send(method, path, body)
+    if (!response.ok) throw failure(method, path, response.status, response.parsed)
+    return response.parsed
+  }
+
+  const query = (schemas: boolean | undefined): string => schemas === true ? "?schemas=true" : ""
 
   return {
     url: base,
     request,
     tools: async (options) =>
+      decodeGrantedTools(await request("GET", `/v1/tools${query(options?.schemas)}`)).tools,
+    clientTools: async (clientId, options) =>
       decodeGrantedTools(
-        await request("GET", options?.schemas === true ? "/v1/tools?schemas=true" : "/v1/tools")
+        await request(
+          "GET",
+          `/v1/clients/${encodeURIComponent(clientId)}/tools${query(options?.schemas)}`
+        )
       ).tools,
-    execute: async (input) =>
-      decodeOutcome(await request("POST", "/v1/execute", {
+    execute: async (input) => {
+      const response = await send("POST", "/v1/execute", {
         alias: input.alias,
         tool: input.tool,
         arguments: input.arguments ?? {}
-      })),
+      })
+      // A denial and a vendor failure are answers, carried on 403 and 502 so
+      // that HTTP callers see them too. They decode into the outcome union
+      // rather than throwing, so one branch handles every policy result.
+      if (!response.ok && !isOutcome(response.parsed)) {
+        throw failure("POST", "/v1/execute", response.status, response.parsed)
+      }
+      return decodeOutcome(response.parsed)
+    },
     approval: async (id) => decodeApproval(await request("GET", `/v1/approvals/${id}`)),
     health: async () => {
       try {

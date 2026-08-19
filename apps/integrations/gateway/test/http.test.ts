@@ -45,8 +45,13 @@ interface ExecutedCall {
 /** A stand-in for the Executor tool surface. The gateway's job is deciding
  *  whether a call happens and with which credential — not what the vendor
  *  returns — so the tests assert on which address was reached. */
-const stubExecutor = (behaviour: { readonly fail?: boolean } = {}) => {
+const stubExecutor = (behaviour: {
+  readonly fail?: boolean
+  readonly connections?: ReadonlyArray<{ readonly integration: string; readonly name: string }>
+  readonly tools?: ReadonlyArray<{ readonly address: string; readonly name: string }>
+} = {}) => {
   const calls: Array<ExecutedCall> = []
+  const removed: Array<{ readonly integration: string; readonly name: string }> = []
   const executor = {
     tools: {
       execute: async (address: string, input: unknown) => {
@@ -56,19 +61,26 @@ const stubExecutor = (behaviour: { readonly fail?: boolean } = {}) => {
       },
       summaries: async () => [],
       describe: async () => ({}),
-      list: async () => []
+      list: async () => behaviour.tools ?? []
     },
-    connections: { list: async () => [], remove: async () => undefined },
+    connections: {
+      list: async () => behaviour.connections ?? [],
+      remove: async (reference: { readonly integration: string; readonly name: string }) => {
+        removed.push(reference)
+      }
+    },
     provisioning: { provision: async () => ({ installed: true }) },
     listIntegrationOverviews: async () => []
   }
-  return { calls, executor: executor as unknown as ExecutorServices }
+  return { calls, removed, executor: executor as unknown as ExecutorServices }
 }
 
 const setup = async (options: {
   readonly decision?: "allow" | "require_approval"
   readonly mayMutate?: boolean
   readonly fail?: boolean
+  readonly connections?: ReadonlyArray<{ readonly integration: string; readonly name: string }>
+  readonly tools?: ReadonlyArray<{ readonly address: string; readonly name: string }>
 } = {}) => {
   const directory = await mkdtemp(path.join(tmpdir(), "wf-gateway-http-"))
   directories.push(directory)
@@ -91,7 +103,11 @@ const setup = async (options: {
     decision: options.decision ?? "allow"
   })
 
-  const stub = stubExecutor(options.fail === undefined ? {} : { fail: options.fail })
+  const stub = stubExecutor({
+    ...(options.fail === undefined ? {} : { fail: options.fail }),
+    ...(options.connections === undefined ? {} : { connections: options.connections }),
+    ...(options.tools === undefined ? {} : { tools: options.tools })
+  })
   const handle = createGatewayHandler({
     store,
     routes: makeRoutes({
@@ -123,7 +139,7 @@ const setup = async (options: {
     return { status: response.status, body: await response.json() as Record<string, unknown> }
   }
 
-  return { store, client, key, grant, call, calls: stub.calls }
+  return { store, client, key, grant, call, calls: stub.calls, removed: stub.removed }
 }
 
 describe("gateway http surface", () => {
@@ -358,5 +374,207 @@ describe("gateway approval settlement", () => {
 
     expect(denied.status).toBe(200)
     expect(calls).toHaveLength(0)
+  })
+})
+
+describe("frozen calls and retries", () => {
+  const send = (
+    call: Awaited<ReturnType<typeof setup>>["call"],
+    args: Record<string, unknown> = { to: "a@b.c" }
+  ) => call("POST", "/v1/execute", {
+    body: { alias: "gmail-work", tool: "sendEmail", arguments: args }
+  })
+
+  test("a retry meets the frozen call it already proposed", async () => {
+    const { call, store } = await setup({ decision: "require_approval", mayMutate: true })
+
+    const first = await send(call)
+    const second = await send(call)
+    // Key order is an artefact of how the caller built its JSON, not part of
+    // what it asked for.
+    const third = await call("POST", "/v1/execute", {
+      body: { alias: "gmail-work", tool: "sendEmail", arguments: { to: "a@b.c" } }
+    })
+
+    expect(second.body["approvalId"]).toBe(first.body["approvalId"])
+    expect(third.body["approvalId"]).toBe(first.body["approvalId"])
+    // One decision to make, however many times the caller retried.
+    expect(await store.listApprovals("pending")).toHaveLength(1)
+  })
+
+  test("different arguments are a different frozen call", async () => {
+    const { call, store } = await setup({ decision: "require_approval", mayMutate: true })
+
+    const first = await send(call, { to: "a@b.c" })
+    const second = await send(call, { to: "someone-else@b.c" })
+
+    expect(second.body["approvalId"]).not.toBe(first.body["approvalId"])
+    expect(await store.listApprovals("pending")).toHaveLength(2)
+  })
+
+  test("the retry after approval collects the result exactly once", async () => {
+    const { call, store, calls } = await setup({ decision: "require_approval", mayMutate: true })
+    const frozen = await send(call)
+    const approvalId = String(frozen.body["approvalId"])
+    await call("POST", `/v1/approvals/${approvalId}/approve`, { body: {} })
+    // The gateway performed it at approval time, not on the caller's behalf.
+    expect(calls).toHaveLength(1)
+
+    const collected = await send(call)
+    expect(collected.body["status"]).toBe("succeeded")
+    expect(collected.body["result"]).toEqual({ ok: true })
+    expect(calls).toHaveLength(1)
+
+    // And the call after that is a new request, so it needs its own decision
+    // rather than replaying a "yes" forever.
+    const afterCollection = await send(call)
+    expect(afterCollection.body["status"]).toBe("pending")
+    expect(afterCollection.body["approvalId"]).not.toBe(approvalId)
+    expect(await store.listApprovals("pending")).toHaveLength(1)
+  })
+
+  test("a denial is delivered to the caller rather than left pending forever", async () => {
+    const { call } = await setup({ decision: "require_approval", mayMutate: true })
+    const frozen = await send(call)
+    const approvalId = String(frozen.body["approvalId"])
+    await call("POST", `/v1/approvals/${approvalId}/deny`, { body: { decidedBy: "sebastian" } })
+
+    const collected = await send(call)
+
+    expect(collected.status).toBe(403)
+    expect(collected.body["status"]).toBe("denied")
+    expect(String(collected.body["reason"])).toContain("sebastian")
+  })
+
+  test("the caller can read its own frozen call without a privileged key", async () => {
+    const { call } = await setup({ decision: "require_approval" })
+    const frozen = await send(call)
+
+    const polled = await call("GET", `/v1/approvals/${String(frozen.body["approvalId"])}`)
+
+    expect(polled.status).toBe(200)
+    expect(polled.body["status"]).toBe("pending")
+    expect(polled.body["collectedAt"]).toBeNull()
+  })
+})
+
+describe("provisioning surface", () => {
+  test("validates the node shape a workflow actually authors", async () => {
+    const { call } = await setup({
+      mayMutate: true,
+      tools: [{ address: "tools.gmail.user.work.sendEmail", name: "sendEmail" }]
+    })
+
+    const report = await call("POST", "/v1/validate", {
+      body: { node: { source: { kind: "gateway", alias: "gmail-work", tool: "sendEmail" } } }
+    })
+
+    expect(report.status).toBe(200)
+    expect(report.body["ok"]).toBe(true)
+    const checks = (report.body["findings"] as ReadonlyArray<{ check: string }>)
+      .map((finding) => finding.check)
+    expect(checks).toEqual(["structural", "grant", "catalog"])
+  })
+
+  test("reports an alias this key does not hold", async () => {
+    const { call } = await setup({ mayMutate: true })
+
+    const report = await call("POST", "/v1/validate", {
+      body: { node: { source: { kind: "gateway", alias: "gmail-work", tool: "deleteEverything" } } }
+    })
+
+    expect(report.body["ok"]).toBe(false)
+    expect(JSON.stringify(report.body)).toContain("not granted")
+  })
+
+  test("refuses a grant against a connection tier that cannot exist", async () => {
+    const { call, client } = await setup({ mayMutate: true })
+
+    const response = await call("POST", "/v1/grants", {
+      body: {
+        clientId: client.id,
+        alias: "gmail-personal",
+        tool: "sendEmail",
+        connection: {
+          owner: "user",
+          subject: "sebastian",
+          integration: "gmail",
+          name: "personal"
+        }
+      }
+    })
+
+    // Better a refusal here than a grant that can only fail at invoke time.
+    expect(response.status).toBe(400)
+    expect(String(response.body["error"])).toContain("User-tier")
+  })
+
+  test("removes a connection by the name it was asked for, not the stored one", async () => {
+    const { call, removed } = await setup({
+      mayMutate: true,
+      connections: [{ integration: "gmail", name: "docsDemo" }]
+    })
+
+    const response = await call("DELETE", "/v1/connections/gmail/docs-demo")
+
+    expect(response.status).toBe(200)
+    expect(response.body["connection"]).toBe("docsDemo")
+    expect(removed).toEqual([{ integration: "gmail", name: "docsDemo" }])
+  })
+
+  test("says which connections exist when none matches", async () => {
+    const { call } = await setup({
+      mayMutate: true,
+      connections: [{ integration: "gmail", name: "work" }]
+    })
+
+    const response = await call("DELETE", "/v1/connections/gmail/personal")
+
+    expect(response.status).toBe(404)
+    expect(String(response.body["error"])).toContain("work")
+  })
+
+  test("lists a client's keys without their hashes, and revokes one", async () => {
+    const { call, client, key, store } = await setup({ mayMutate: true })
+
+    const listed = await call("GET", `/v1/clients/${client.id}/keys`)
+    const keys = listed.body["keys"] as ReadonlyArray<Record<string, unknown>>
+    expect(keys).toHaveLength(1)
+    expect(keys[0]?.["id"]).toBe(key.id)
+    expect(JSON.stringify(keys)).not.toContain(key.hash)
+
+    const revoked = await call("POST", `/v1/keys/${key.id}/revoke`)
+    expect(revoked.status).toBe(200)
+    const after = await store.listApiKeys(client.id)
+    expect(after[0]?.revokedAt).not.toBeNull()
+  })
+
+  test("reads another client's granted surface, so codegen does not need its key", async () => {
+    const { call, client } = await setup({ mayMutate: true })
+
+    const response = await call("GET", `/v1/clients/${client.id}/tools`)
+
+    expect(response.status).toBe(200)
+    expect(response.body["tools"]).toEqual([
+      { alias: "gmail-work", tool: "sendEmail", integration: "gmail", decision: "allow" }
+    ])
+  })
+
+  test("filters and windows the audit trail, and says how much there is", async () => {
+    const { call } = await setup({ mayMutate: true })
+    await call("POST", "/v1/execute", { body: { alias: "gmail-work", tool: "sendEmail" } })
+    await call("POST", "/v1/execute", { body: { alias: "gmail-work", tool: "nope" } })
+
+    const all = await call("GET", "/v1/audit")
+    expect(all.body["total"]).toBe(2)
+
+    const denied = await call("GET", "/v1/audit?outcome=denied")
+    expect(denied.body["total"]).toBe(1)
+    expect((denied.body["records"] as ReadonlyArray<unknown>)).toHaveLength(1)
+
+    const windowed = await call("GET", "/v1/audit?limit=1&offset=1")
+    expect(windowed.body["total"]).toBe(2)
+    expect(windowed.body["offset"]).toBe(1)
+    expect((windowed.body["records"] as ReadonlyArray<unknown>)).toHaveLength(1)
   })
 })

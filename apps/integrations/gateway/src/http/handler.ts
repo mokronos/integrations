@@ -39,6 +39,22 @@ const authenticationStatus: Record<string, number> = {
   "not-permitted": 403
 }
 
+const authenticationMessage: Record<string, string> = {
+  "unknown-key": "This API key is not known to the gateway",
+  "key-revoked": "This API key was revoked",
+  "client-revoked": "The client this key belongs to was revoked",
+  "not-permitted": "This key may not change the catalog, connections, grants, or policy"
+}
+
+/** A refusal states both a sentence and a `code`. Clients branch on the code:
+ *  matching on prose is how "not granted" ends up being explained to a user as
+ *  a permissions-tier problem. */
+const refusal = (status: string): Response =>
+  json(authenticationStatus[status] ?? 403, {
+    error: authenticationMessage[status] ?? status,
+    code: status
+  })
+
 export interface HandlerDependencies {
   readonly store: GatewayStore
   readonly routes: ReadonlyArray<Route>
@@ -87,22 +103,12 @@ async (request, context) => {
   // you invoke this" but "may you change what is invocable".
   if (match.route.access === "privileged") {
     const authorization = await authorizeMutation(dependencies.store, secret)
-    if (authorization.status !== "authorized") {
-      return json(authenticationStatus[authorization.status] ?? 403, {
-        error: authorization.status === "not-permitted"
-          ? "This key may not change the catalog, connections, grants, or policy"
-          : authorization.status
-      })
-    }
+    if (authorization.status !== "authorized") return refusal(authorization.status)
     return await dispatch(match.route, request, url, authorization.client, secret)
   }
 
   const authentication = await authenticateClient(dependencies.store, secret)
-  if (authentication.status !== "authenticated") {
-    return json(authenticationStatus[authentication.status] ?? 401, {
-      error: authentication.status
-    })
-  }
+  if (authentication.status !== "authenticated") return refusal(authentication.status)
   return await dispatch(match.route, request, url, authentication.client, secret)
 
   async function dispatch(

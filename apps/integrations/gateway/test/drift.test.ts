@@ -101,11 +101,15 @@ describe("catalog drift", () => {
 
   test("surfaces new tools, which explicit grants otherwise make invisible", async () => {
     const store = await makeStore()
+    // The first sync has nothing to compare against, so it records the shape
+    // and reports a baseline. Calling an integration's entire surface "added"
+    // would bury the one real change in the run that matters.
     const first = await refreshIntegrationSnapshot(
       { store, executor: executorWithTools([{ name: "create", input: null }]) },
       "tickets"
     )
-    expect(first.entries.map((entry) => entry.kind)).toEqual(["added"])
+    expect(first.baseline).toBe(true)
+    expect(first.entries).toEqual([])
 
     const second = await refreshIntegrationSnapshot(
       {
@@ -224,7 +228,7 @@ describe("gateway maintenance", () => {
     const result = await runMaintenance(store)
 
     expect(result.expiredAuditArguments).toBe(1)
-    expect(await store.listAudit(10)).toHaveLength(1)
+    expect(await store.listAudit({ limit: 10 })).toHaveLength(1)
   })
 
   test("is safe to run when there is nothing to do", async () => {

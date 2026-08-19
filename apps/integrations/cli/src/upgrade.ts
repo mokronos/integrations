@@ -85,13 +85,16 @@ export interface UnknownInstall {
 
 export type InstallShape = WorkspaceInstall | PackageInstall | UnknownInstall
 
-const isDirectory = async (location: string): Promise<boolean> =>
-  await stat(location).then((entry) => entry.isDirectory()).catch(() => false)
+/** A checkout is marked by `.git`, which is a directory in the main checkout
+ *  and a *file* pointing at it in a worktree. Only accepting the directory
+ *  makes a worktree look like it is not a checkout at all. */
+const isCheckout = async (location: string): Promise<boolean> =>
+  await stat(location).then((entry) => entry.isDirectory() || entry.isFile()).catch(() => false)
 
 const repositoryAbove = async (location: string): Promise<string | undefined> => {
   let directory = path.dirname(location)
   for (;;) {
-    if (await isDirectory(path.join(directory, ".git"))) return directory
+    if (await isCheckout(path.join(directory, ".git"))) return directory
     const parent = path.dirname(directory)
     if (parent === directory) return undefined
     directory = parent

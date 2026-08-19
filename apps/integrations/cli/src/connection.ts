@@ -9,13 +9,22 @@ export class IntegrationsCliError extends Data.TaggedError("IntegrationsCliError
 export const cliError = (message: string): IntegrationsCliError =>
   new IntegrationsCliError({ message })
 
+/** Whether a refusal is about what this key *may do* rather than about what it
+ *  asked for. Only that one is worth explaining rather than restating, because
+ *  the fix is a different key rather than a different request — and saying so
+ *  about an ordinary denial sends the reader after the wrong thing. */
+const isCapabilityRefusal = (error: GatewayError): boolean =>
+  error.status === 403 &&
+  typeof error.body === "object" &&
+  error.body !== null &&
+  "code" in error.body &&
+  error.body.code === "not-permitted"
+
 export const describeError = (error: unknown): string => {
   if (error instanceof IntegrationsCliError) return error.message
   if (error instanceof GatewayError) {
-    // A capability refusal is the one failure worth explaining rather than
-    // restating, because the fix is a different key, not a different request.
-    return error.status === 403
-      ? `${error.message} (this key is not permitted; use a key whose client may mutate)`
+    return isCapabilityRefusal(error)
+      ? `${error.message} (use a key whose client may mutate)`
       : error.message
   }
   return error instanceof Error ? error.message : String(error)

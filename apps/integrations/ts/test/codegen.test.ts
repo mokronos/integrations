@@ -81,7 +81,7 @@ describe("effect target", () => {
     const module_ = generateEffectModule([ticketTool], "http://127.0.0.1:4788")
     expect(module_).toContain("Do not edit")
     expect(module_).toContain("http://127.0.0.1:4788")
-    expect(module_).toContain("adding a tool here means adding a grant")
+    expect(module_).toContain("adding a tool to it means adding a grant")
   })
 })
 

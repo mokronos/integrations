@@ -9,6 +9,7 @@ import {
   ApiKeyId,
   ApprovalId,
   AuditId,
+  canonicalArguments,
   ClientId,
   ConnectionName,
   GrantId,
@@ -80,8 +81,13 @@ const ddl = [
      decided_at INTEGER,
      decided_by TEXT,
      result TEXT,
-     error TEXT
+     error TEXT,
+     collected_at INTEGER
    )`,
+  // Finding the frozen call a retry belongs to is a lookup on every frozen
+  // invocation, so it is indexed rather than scanned.
+  `CREATE INDEX IF NOT EXISTS gateway_pending_approval_retry
+     ON gateway_pending_approval (grant_id, arguments) WHERE collected_at IS NULL`,
   `CREATE TABLE IF NOT EXISTS gateway_audit (
      id TEXT PRIMARY KEY,
      client_id TEXT,
@@ -168,7 +174,8 @@ const ApprovalRow = Schema.Struct({
   decided_at: NullableNumber,
   decided_by: NullableString,
   result: NullableString,
-  error: NullableString
+  error: NullableString,
+  collected_at: NullableNumber
 })
 
 const AuditRow = Schema.Struct({
@@ -203,7 +210,7 @@ const grantColumns = [
 ]
 const approvalColumns = [
   "id", "client_id", "grant_id", "alias", "tool", "arguments", "status",
-  "created_at", "expires_at", "decided_at", "decided_by", "result", "error"
+  "created_at", "expires_at", "decided_at", "decided_by", "result", "error", "collected_at"
 ]
 const auditColumns = [
   "id", "client_id", "alias", "tool", "owner", "subject", "integration",
@@ -296,7 +303,8 @@ const toApproval = (row: Row): PendingApproval => {
     decidedAt: nullableDate(decoded.decided_at),
     decidedBy: decoded.decided_by,
     result: decoded.result === null ? null : parseJsonColumn(decoded.result),
-    error: decoded.error
+    error: decoded.error,
+    collectedAt: nullableDate(decoded.collected_at)
   }
 }
 
@@ -362,6 +370,18 @@ export interface CreateApprovalInput {
   readonly expiresAt: Date
 }
 
+/** Which slice of the trail to read. Every field narrows; none of them is
+ *  required, and `limit`/`offset` window whatever is left. */
+export interface AuditQuery {
+  readonly limit?: number
+  readonly offset?: number
+  readonly clientId?: ClientId
+  readonly alias?: Alias
+  readonly tool?: ToolName
+  readonly outcome?: AuditOutcome
+  readonly since?: Date
+}
+
 export interface RecordAuditInput {
   readonly id: AuditId
   readonly clientId: ClientId | null
@@ -400,6 +420,16 @@ export interface GatewayStore {
   createApproval(input: CreateApprovalInput): Promise<PendingApproval>
   getApproval(id: ApprovalId): Promise<PendingApproval | undefined>
   listApprovals(status?: ApprovalStatus): Promise<ReadonlyArray<PendingApproval>>
+  /** The frozen call a retry of these arguments belongs to, if one is still
+   *  undelivered. This is what makes a retrying step ask a human once. */
+  findUncollectedApproval(
+    grantId: GrantId,
+    argumentsValue: Schema.Json
+  ): Promise<PendingApproval | undefined>
+  /** Hands a settled approval's outcome to the caller, once. Returns false if
+   *  another attempt collected it first, so concurrent retries cannot both
+   *  claim the same decision. */
+  collectApproval(id: ApprovalId): Promise<boolean>
   settleApproval(input: {
     readonly id: ApprovalId
     readonly status: ApprovalStatus
@@ -412,7 +442,10 @@ export interface GatewayStore {
   cancelApprovalsForClient(clientId: ClientId): Promise<number>
 
   recordAudit(input: RecordAuditInput): Promise<void>
-  listAudit(limit: number): Promise<ReadonlyArray<AuditRecord>>
+  /** The trail is permanent and therefore unbounded, so it is the one listing
+   *  that is read through a window and a filter rather than whole. */
+  listAudit(options: AuditQuery): Promise<ReadonlyArray<AuditRecord>>
+  countAudit(options: Omit<AuditQuery, "limit" | "offset">): Promise<number>
   expireAuditArguments(now: Date): Promise<number>
 
   putToolSnapshots(snapshots: ReadonlyArray<ToolSnapshot>): Promise<void>
@@ -434,11 +467,71 @@ export interface GatewayStore {
 
 const now = (): number => Date.now()
 
+/** Adds columns an older database is missing. Idempotent, and narrow on
+ *  purpose: this is a schema top-up for additive changes, not a migration
+ *  framework. Anything that rewrites data belongs in one. */
+const addMissingColumns = async (
+  database: LibsqlClient,
+  table: string,
+  columns: Readonly<Record<string, string>>
+): Promise<void> => {
+  const existing = new Set(
+    (await database.execute(`PRAGMA table_info(${table})`)).rows.map((row) => String(row["name"]))
+  )
+  // No columns means no table: this is a fresh database, and the DDL that
+  // follows creates it with every column already in place.
+  if (existing.size === 0) return
+  for (const [column, type] of Object.entries(columns)) {
+    if (existing.has(column)) continue
+    await database.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`)
+  }
+}
+
+/** One filter builder for both the page and its total, so a listing can never
+ *  report a count that belongs to a different question than the rows. */
+const auditFilter = (
+  options: Omit<AuditQuery, "limit" | "offset">
+): { readonly where: string; readonly args: ReadonlyArray<InValue> } => {
+  const clauses: Array<string> = []
+  const args: Array<InValue> = []
+  if (options.clientId !== undefined) {
+    clauses.push("client_id = ?")
+    args.push(options.clientId)
+  }
+  if (options.alias !== undefined) {
+    clauses.push("alias = ?")
+    args.push(options.alias)
+  }
+  if (options.tool !== undefined) {
+    clauses.push("tool = ?")
+    args.push(options.tool)
+  }
+  if (options.outcome !== undefined) {
+    clauses.push("outcome = ?")
+    args.push(options.outcome)
+  }
+  if (options.since !== undefined) {
+    clauses.push("created_at >= ?")
+    args.push(options.since.getTime())
+  }
+  return {
+    where: clauses.length === 0 ? "" : ` WHERE ${clauses.join(" AND ")}`,
+    args
+  }
+}
+
 export const createGatewayStore = async (databasePath: string): Promise<GatewayStore> => {
   mkdirSync(path.dirname(databasePath), { recursive: true, mode: 0o700 })
   const database: LibsqlClient = createClient({ url: `file:${databasePath}` })
   await database.execute("PRAGMA journal_mode = WAL")
   await database.execute("PRAGMA foreign_keys = ON")
+  // `CREATE TABLE IF NOT EXISTS` does nothing for a database that already
+  // exists, so a column added after the fact has to be added explicitly — and
+  // before the DDL below, which indexes it. A gateway that has been running
+  // since before delivery-once tracking must not have to be deleted to get it.
+  await addMissingColumns(database, "gateway_pending_approval", {
+    collected_at: "INTEGER"
+  })
   for (const statement of ddl) await database.execute(statement)
 
   const one = async (sql: string, args: ReadonlyArray<InValue>): Promise<Row | undefined> => {
@@ -561,15 +654,17 @@ export const createGatewayStore = async (databasePath: string): Promise<GatewayS
     createApproval: async (input) => {
       await run(
         `INSERT INTO gateway_pending_approval
-           (id, client_id, grant_id, alias, tool, arguments, status, created_at, expires_at, decided_at, decided_by, result, error)
-         VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, NULL, NULL, NULL, NULL)`,
+           (id, client_id, grant_id, alias, tool, arguments, status, created_at, expires_at, decided_at, decided_by, result, error, collected_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, NULL, NULL, NULL, NULL, NULL)`,
         [
           input.id,
           input.clientId,
           input.grantId,
           input.alias,
           input.tool,
-          JSON.stringify(input.arguments),
+          // Stored canonically so that the same request, however its JSON was
+          // built, matches the frozen call it is a retry of.
+          canonicalArguments(input.arguments),
           now(),
           millis(input.expiresAt)
         ]
@@ -577,6 +672,26 @@ export const createGatewayStore = async (databasePath: string): Promise<GatewayS
       const row = await one("SELECT * FROM gateway_pending_approval WHERE id = ?", [input.id])
       if (row === undefined) throw new Error(`Failed to store approval ${input.id}`)
       return toApproval(row)
+    },
+
+    findUncollectedApproval: async (grantId, argumentsValue) => {
+      const row = await one(
+        `SELECT * FROM gateway_pending_approval
+          WHERE grant_id = ? AND arguments = ? AND collected_at IS NULL
+          ORDER BY created_at DESC LIMIT 1`,
+        [grantId, canonicalArguments(argumentsValue)]
+      )
+      return row === undefined ? undefined : toApproval(row)
+    },
+
+    collectApproval: async (id) => {
+      const result = await database.execute({
+        sql: `UPDATE gateway_pending_approval
+                SET collected_at = ?
+              WHERE id = ? AND collected_at IS NULL AND status <> 'pending'`,
+        args: [now(), id]
+      })
+      return Number(result.rowsAffected) > 0
     },
 
     getApproval: async (id) => {
@@ -647,9 +762,22 @@ export const createGatewayStore = async (databasePath: string): Promise<GatewayS
       }
     },
 
-    listAudit: async (limit) =>
-      (await all("SELECT * FROM gateway_audit ORDER BY created_at DESC LIMIT ?", [limit]))
-        .map(toAuditRecord),
+    listAudit: async (options) => {
+      const filter = auditFilter(options)
+      return (await all(
+        `SELECT * FROM gateway_audit${filter.where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+        [...filter.args, options.limit ?? 50, options.offset ?? 0]
+      )).map(toAuditRecord)
+    },
+
+    countAudit: async (options) => {
+      const filter = auditFilter(options)
+      const row = await one(
+        `SELECT COUNT(*) AS total FROM gateway_audit${filter.where}`,
+        filter.args
+      )
+      return row === undefined ? 0 : Number(row["total"] ?? 0)
+    },
 
     expireAuditArguments: async (at) => {
       const result = await database.execute({

@@ -59,6 +59,76 @@ const auditFor = (
   }
 })
 
+/** The approval half of an invocation: meet the frozen call this request
+ * already belongs to, or freeze a new one.
+ *
+ * A caller that retries — and the retrying caller is the normal case, because a
+ * durable step is how a workflow waits — must not ask a human again for a
+ * decision it already asked for. So the same (grant, arguments) resolves to the
+ * same approval until that approval's outcome has been handed back exactly
+ * once. After delivery an identical call is a *new* request, and needs its own
+ * decision; replaying an old approval forever would turn one "yes" into
+ * standing permission, which is precisely what this design refuses to grant. */
+const freezeOrCollect = async (
+  dependencies: {
+    readonly store: GatewayStore
+    readonly retentionDays: number
+    readonly expiryHours: number
+  },
+  authorization: Extract<Authorization, { status: "authorized" }>,
+  argumentsValue: Json
+): Promise<InvocationOutcome> => {
+  const { store, retentionDays } = dependencies
+  const existing = await store.findUncollectedApproval(authorization.grant.id, argumentsValue)
+
+  if (existing !== undefined && existing.status === "pending") {
+    // Deliberately not audited: the frozen call was recorded when it was
+    // proposed, and one decision pending is one event, however many times a
+    // retry loop looks at it.
+    return { status: "pending", approvalId: existing.id, expiresAt: existing.expiresAt }
+  }
+
+  if (existing !== undefined && await store.collectApproval(existing.id)) {
+    if (existing.status === "approved") {
+      // The gateway already performed this call, at approval time. What is
+      // being handed back is that call's result, not a second call.
+      await store.recordAudit(auditFor(
+        authorization,
+        existing.error === null ? "succeeded" : "failed",
+        `approval ${existing.id} collected`,
+        argumentsValue,
+        retentionDays
+      ))
+      return existing.error === null
+        ? { status: "succeeded", result: existing.result }
+        : { status: "failed", message: existing.error }
+    }
+    const reason = existing.status === "expired"
+      ? `approval ${existing.id} expired before a decision was recorded`
+      : `approval ${existing.id} was denied${
+        existing.decidedBy === null ? "" : ` by ${existing.decidedBy}`
+      }`
+    await store.recordAudit(
+      auditFor(authorization, "denied", reason, argumentsValue, retentionDays)
+    )
+    return { status: "denied", reason }
+  }
+
+  const approval = await store.createApproval({
+    id: newApprovalId(),
+    clientId: authorization.client.id,
+    grantId: authorization.grant.id,
+    alias: authorization.grant.alias,
+    tool: authorization.grant.tool,
+    arguments: argumentsValue,
+    expiresAt: new Date(Date.now() + dependencies.expiryHours * 60 * 60 * 1000)
+  })
+  await store.recordAudit(
+    auditFor(authorization, "pending", `approval ${approval.id}`, argumentsValue, retentionDays)
+  )
+  return { status: "pending", approvalId: approval.id, expiresAt: approval.expiresAt }
+}
+
 /** Performs one delegated invocation: authorize, then either execute with
  * injected credentials or freeze the call for a human.
  *
@@ -100,19 +170,11 @@ export const invokeThroughGateway = async (
   }
 
   if (authorization.grant.decision === "require_approval") {
-    const approval = await store.createApproval({
-      id: newApprovalId(),
-      clientId: authorization.client.id,
-      grantId: authorization.grant.id,
-      alias: authorization.grant.alias,
-      tool: authorization.grant.tool,
-      arguments: input.arguments,
-      expiresAt: new Date(Date.now() + expiryHours * 60 * 60 * 1000)
-    })
-    await store.recordAudit(
-      auditFor(authorization, "pending", `approval ${approval.id}`, input.arguments, retentionDays)
+    return await freezeOrCollect(
+      { store, retentionDays, expiryHours },
+      authorization,
+      input.arguments
     )
-    return { status: "pending", approvalId: approval.id, expiresAt: approval.expiresAt }
   }
 
   return await executeAuthorized(

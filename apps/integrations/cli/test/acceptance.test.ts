@@ -212,14 +212,17 @@ describe("integrations CLI acceptance", () => {
     }
 
     // Nothing granted yet.
-    const beforeGrant = await integrations(["granted"], sandbox)
+    const beforeGrant = await integrations(["grants", "--mine"], sandbox)
     expect(beforeGrant.exitCode, beforeGrant.stderr).toBe(0)
-    expect(JSON.parse(beforeGrant.stdout)).toEqual({ tools: [] })
+    expect(JSON.parse(beforeGrant.stdout)).toEqual({ grants: [], count: 0 })
 
     // A sandbox key cannot mint capabilities for itself.
     const escalation = await integrations(["client", "escalated"], sandbox)
     expect(escalation.exitCode).toBe(1)
-    expect(escalation.stderr).toContain("not permitted")
+    // Says what was refused and what would fix it, because a capability
+    // refusal is fixed with a different key rather than a different request.
+    expect(escalation.stderr).toContain("may not change")
+    expect(escalation.stderr).toContain("may mutate")
 
     const discoverAttempt = await integrations(["discover", vendor.specUrl], sandbox)
     expect(discoverAttempt.exitCode).toBe(1)
@@ -233,15 +236,15 @@ describe("integrations CLI acceptance", () => {
       slug
     ])
 
-    const afterGrant = JSON.parse((await integrations(["granted"], sandbox)).stdout) as {
-      tools: ReadonlyArray<{
+    const afterGrant = JSON.parse((await integrations(["grants", "--mine"], sandbox)).stdout) as {
+      grants: ReadonlyArray<{
         alias: string
         tool: string
         integration: string
         decision: string
       }>
     }
-    expect(afterGrant.tools).toEqual([
+    expect(afterGrant.grants).toEqual([
       { alias: "tickets", tool: "tickets.create", integration: slug, decision: "allow" }
     ])
 
@@ -389,5 +392,130 @@ export const Acceptance = defineWorkflow({
       await Promise.all(files.map((file) => readFile(file)))
     ).toString("utf8")
     expect(persisted).not.toContain("acceptance-secret")
+  }, 40_000)
+
+  test("every result is JSON a reader can parse, whole", async () => {
+    const vendor = startVendor()
+    const gateway = await startGateway()
+    const integrations = (args: ReadonlyArray<string>, environment = gateway.environment) =>
+      run(integrationsCli, args, environment)
+
+    const discovered = JSON.parse((await integrations(["discover", vendor.specUrl])).stdout) as {
+      integration: { slug: string }
+    }
+    const slug = discovered.integration.slug
+    await integrations(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
+
+    // A tool result is the machine-facing payload. Cutting the document to
+    // save tokens does not make it a smaller answer, it makes it unusable, so
+    // the default output has to parse.
+    const direct = await integrations([
+      "execute",
+      "--direct",
+      `tools.${slug}.org.default.tickets.create`,
+      JSON.stringify({ body: { title: "x".repeat(2000) } })
+    ])
+    expect(direct.exitCode, direct.stderr).toBe(0)
+    const outcome = JSON.parse(direct.stdout) as { status: string; result: { title: string } }
+    expect(outcome.status).toBe("succeeded")
+    expect(outcome.result.title).toHaveLength(2000)
+
+    // The previous name for the same thing still resolves.
+    const aliased = await integrations([
+      "invoke",
+      `tools.${slug}.org.default.tickets.create`,
+      JSON.stringify({ body: { title: "Through the old name" } })
+    ])
+    expect(aliased.exitCode, aliased.stderr).toBe(0)
+    expect(JSON.parse(aliased.stdout)).toHaveProperty("status", "succeeded")
+
+    // A refusal is an answer, and it arrives as one: parseable, with a
+    // non-zero exit code to say which answer it was.
+    const client = JSON.parse((await integrations(["client", "sandbox"])).stdout) as { id: string }
+    const key = JSON.parse((await integrations(["key", client.id])).stdout) as { secret: string }
+    const refused = await integrations(
+      ["execute", "nothing", "tickets.create", "{}"],
+      { ...gateway.environment, INTEGRATIONS_API_KEY: key.secret }
+    )
+    expect(refused.exitCode).toBe(1)
+    expect(JSON.parse(refused.stdout)).toHaveProperty("status", "denied")
+  }, 40_000)
+
+  test("listings return every row, and window only when asked", async () => {
+    const vendor = startVendor()
+    const gateway = await startGateway()
+    const integrations = (args: ReadonlyArray<string>) =>
+      run(integrationsCli, args, gateway.environment)
+
+    const discovered = JSON.parse((await integrations(["discover", vendor.specUrl])).stdout) as {
+      integration: { slug: string }
+    }
+    const slug = discovered.integration.slug
+    await integrations(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
+
+    const whole = JSON.parse((await integrations(["tools", slug])).stdout) as {
+      count: number
+      tools: ReadonlyArray<{ name: string }>
+      showing?: number
+    }
+    // Nothing is held back behind a flag the reader did not know to pass.
+    expect(whole.tools).toHaveLength(whole.count)
+    expect(whole.showing).toBeUndefined()
+
+    const windowed = JSON.parse(
+      (await integrations(["tools", slug, "--limit", "1", "--offset", "0"])).stdout
+    ) as { count: number; showing: number; offset: number; tools: ReadonlyArray<unknown> }
+    expect(windowed.tools).toHaveLength(1)
+    expect(windowed.showing).toBe(1)
+    expect(windowed.count).toBe(whole.count)
+
+    // The old name for the catalog listing still works.
+    const catalog = JSON.parse((await integrations(["list"])).stdout) as { count: number }
+    expect(catalog.count).toBeGreaterThan(0)
+  }, 40_000)
+
+  test("a grant can be revoked, and a key listed and revoked, from the CLI", async () => {
+    const vendor = startVendor()
+    const gateway = await startGateway()
+    const integrations = (args: ReadonlyArray<string>, environment = gateway.environment) =>
+      run(integrationsCli, args, environment)
+
+    const discovered = JSON.parse((await integrations(["discover", vendor.specUrl])).stdout) as {
+      integration: { slug: string }
+    }
+    const slug = discovered.integration.slug
+    await integrations(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
+    const client = JSON.parse((await integrations(["client", "sandbox"])).stdout) as { id: string }
+    const key = JSON.parse((await integrations(["key", client.id])).stdout) as {
+      id: string
+      secret: string
+    }
+    const sandbox = { ...gateway.environment, INTEGRATIONS_API_KEY: key.secret }
+    const grant = JSON.parse((await integrations([
+      "grant",
+      client.id,
+      "tickets",
+      "tickets.create",
+      "--integration",
+      slug
+    ])).stdout) as { id: string }
+
+    const keys = JSON.parse((await integrations(["keys", client.id])).stdout) as {
+      keys: ReadonlyArray<{ id: string; revokedAt: string | null }>
+    }
+    expect(keys.keys.map((entry) => entry.id)).toEqual([key.id])
+
+    // Undoing a delegation was the one thing the CLI could not do.
+    const revokedGrant = await integrations(["revoke", "grant", grant.id])
+    expect(revokedGrant.exitCode, revokedGrant.stderr).toBe(0)
+    const afterRevoke = JSON.parse((await integrations(["grants", "--mine"], sandbox)).stdout) as {
+      grants: ReadonlyArray<unknown>
+    }
+    expect(afterRevoke.grants).toEqual([])
+
+    const revokedKey = await integrations(["revoke", "key", key.id])
+    expect(revokedKey.exitCode, revokedKey.stderr).toBe(0)
+    const withRevokedKey = await integrations(["grants", "--mine"], sandbox)
+    expect(withRevokedKey.exitCode).toBe(1)
   }, 40_000)
 })

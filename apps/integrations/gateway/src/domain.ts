@@ -180,7 +180,12 @@ export type ApprovalStatus = typeof ApprovalStatus.Type
 
 /** An invocation frozen awaiting a human. The arguments are captured at propose
  *  time and the gateway performs the call itself on approval, so approving
- *  discharges one specific invocation rather than granting a capability. */
+ *  discharges one specific invocation rather than granting a capability.
+ *
+ *  One frozen call, not one per attempt: a caller that retries the same
+ *  arguments through the same grant meets the approval it already proposed.
+ *  Otherwise a step with `retry: { attempts: 3 }` asks a human three times for
+ *  one decision. */
 export const PendingApproval = Schema.Struct({
   id: ApprovalId,
   clientId: ClientId,
@@ -194,9 +199,34 @@ export const PendingApproval = Schema.Struct({
   decidedAt: Schema.NullOr(Schema.Date),
   decidedBy: Schema.NullOr(Schema.String),
   result: Schema.NullOr(Schema.Json),
-  error: Schema.NullOr(Schema.String)
+  error: Schema.NullOr(Schema.String),
+  /** When the decision was handed back to the caller. Delivery happens once:
+   *  until it does, retries keep meeting this approval; after it, an identical
+   *  call is a new request that needs its own decision. */
+  collectedAt: Schema.NullOr(Schema.Date)
 })
 export type PendingApproval = typeof PendingApproval.Type
+
+/** The identity of a frozen call's arguments.
+ *
+ * Key order is an artefact of how a caller built its JSON, not part of what it
+ * asked for, so it is normalised away before two attempts are compared. */
+export const canonicalArguments = (value: Schema.Json): string =>
+  JSON.stringify(canonicalise(value))
+
+const canonicalise = (value: Schema.Json): Schema.Json => {
+  if (Array.isArray(value)) return value.map(canonicalise)
+  if (typeof value === "object" && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value)
+        // Codepoint order rather than locale order: this string is compared
+        // against one written by another process, possibly on another machine.
+        .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+        .map(([key, nested]) => [key, canonicalise(nested)])
+    )
+  }
+  return value
+}
 
 // --- audit ------------------------------------------------------------------
 

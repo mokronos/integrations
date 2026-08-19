@@ -7,6 +7,7 @@ import { runMaintenance } from "../maintenance.ts"
 import type { OAuthSessions } from "../oauth-sessions.ts"
 import {
   Alias,
+  ApiKeyId,
   ApprovalId,
   ClientId,
   ConnectionName,
@@ -16,7 +17,12 @@ import {
   ToolName
 } from "../domain.ts"
 import type { ConnectionRef } from "../domain.ts"
-import { executeAuthorized, invokeThroughGateway, listGrantedTools } from "../invoke.ts"
+import {
+  executeAuthorized,
+  grantToolAddress,
+  invokeThroughGateway,
+  listGrantedTools
+} from "../invoke.ts"
 import { generateApiKey, newClientId, newGrantId } from "../keys.ts"
 import type { GatewayStore } from "../store.ts"
 import { badRequest, created, decodeBody, notFound, ok } from "./router.ts"
@@ -101,6 +107,21 @@ const ValidateBody = Schema.Struct({
   live: Schema.optional(Schema.Boolean)
 })
 
+/** The source form a workflow actually authors: an alias bound by a grant, not
+ *  a catalog address. Validating it is a question about *this caller's* grants,
+ *  which is why it is answered here rather than in the executor — the executor
+ *  knows the catalog and nothing about delegation. */
+const GatewayNodeSource = Schema.Struct({
+  source: Schema.Struct({
+    kind: Schema.Literal("gateway"),
+    alias: Schema.String,
+    tool: Schema.String
+  })
+})
+
+const isGatewayNode = Schema.is(GatewayNodeSource)
+const decodeGatewayNode = Schema.decodeUnknownSync(GatewayNodeSource)
+
 const toConnectionRef = (value: typeof ConnectionRefBody.Type): ConnectionRef =>
   value.owner === "org"
     ? {
@@ -126,6 +147,86 @@ const positiveInt = (value: string | null, fallback: number): number => {
   if (value === null) return fallback
   const parsed = Number.parseInt(value, 10)
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
+
+/** Compares connection names the way a human means them. The executor stores a
+ *  normalised name (`docs-demo` becomes `docsDemo`), and rather than reproduce
+ *  that transformation — which belongs to the executor and may change — this
+ *  compares the parts a separator convention cannot alter. */
+const normalizeName = (value: string): string => value.toLowerCase().replace(/[^a-z0-9]/g, "")
+
+const nonNegativeInt = (value: string | null, fallback: number): number => {
+  if (value === null) return fallback
+  const parsed = Number.parseInt(value, 10)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback
+}
+
+/** Answers the question a workflow author is actually asking: will this step
+ *  resolve when it runs, as *this* caller? An alias is not a name in the
+ *  catalog — it is a binding held by a grant — so structural validity and
+ *  reachability are separate findings. */
+const validateGatewayNode = async (
+  dependencies: {
+    readonly store: GatewayStore
+    readonly executor: Pick<ExecutorServices, "tools">
+  },
+  clientId: ClientId,
+  source: { readonly alias: string; readonly tool: string },
+  live: boolean
+): Promise<{
+  readonly ok: boolean
+  readonly findings: ReadonlyArray<
+    { readonly severity: string; readonly check: string; readonly message: string }
+  >
+}> => {
+  const findings: Array<{ severity: string; check: string; message: string }> = []
+  const aliasIsWellFormed = /^[a-z][a-z0-9-]*$/.test(source.alias)
+  findings.push(
+    aliasIsWellFormed
+      ? { severity: "info", check: "structural", message: "Gateway integration reference is valid" }
+      : {
+        severity: "error",
+        check: "structural",
+        message: `Alias "${source.alias}" must be lowercase letters, digits, and dashes`
+      }
+  )
+
+  if (aliasIsWellFormed && live) {
+    const grants = await dependencies.store.listGrants(clientId)
+    const grant = grants.find((candidate) =>
+      candidate.alias === source.alias && candidate.tool === source.tool
+    )
+    if (grant === undefined) {
+      findings.push({
+        severity: "error",
+        check: "grant",
+        // Naming the alias but not what else it exposes: a validation report is
+        // not a place to enumerate a caller's other capabilities.
+        message: `${source.alias}.${source.tool} is not granted to this key`
+      })
+    } else {
+      findings.push({
+        severity: "info",
+        check: "grant",
+        message: `${source.alias}.${source.tool} resolves to ${grant.connection.integration}/${grant.connection.name}${
+          grant.decision === "require_approval" ? " and is frozen for a human" : ""
+        }`
+      })
+      const address = grantToolAddress(grant.connection, grant.tool)
+      const tools = await dependencies.executor.tools.list()
+      findings.push(
+        tools.some((candidate) => candidate.address === address)
+          ? { severity: "info", check: "catalog", message: `${grant.tool} is available` }
+          : {
+            severity: "error",
+            check: "catalog",
+            message: `${grant.tool} is granted but no longer in the catalog: ${address}`
+          }
+      )
+    }
+  }
+
+  return { ok: !findings.some((finding) => finding.severity === "error"), findings }
 }
 
 // --- routes -----------------------------------------------------------------
@@ -289,7 +390,15 @@ export const makeRoutes = (dependencies: ApiDependencies): ReadonlyArray<Route> 
       access: "privileged",
       handle: async (request) => {
         const body = decodeBody(ValidateBody, request.body)
-        return ok(await executor.validateIntegrationNode(body.node, { live: body.live ?? false }))
+        if (isGatewayNode(body.node)) {
+          return ok(await validateGatewayNode(
+            { store, executor },
+            request.client.id,
+            decodeGatewayNode(body.node).source,
+            body.live ?? true
+          ))
+        }
+        return ok(await executor.validateIntegrationNode(body.node, { live: body.live ?? true }))
       }
     },
     {
@@ -379,11 +488,29 @@ export const makeRoutes = (dependencies: ApiDependencies): ReadonlyArray<Route> 
       path: "/v1/connections/:integration/:name",
       access: "privileged",
       handle: async (request) => {
-        await executor.connections.remove({
-          integration: request.params["integration"] ?? "",
-          name: request.params["name"] ?? ""
-        })
-        return ok({ removed: true })
+        const integration = request.params["integration"] ?? ""
+        const requested = request.params["name"] ?? ""
+        // Connection names are normalised on the way in (`docs-demo` is stored
+        // as `docsDemo`), so removing one by the name you typed has to resolve
+        // through the same normalisation. Otherwise a connection you just made
+        // cannot be deleted by the name you made it with.
+        const connections = await executor.connections.list()
+        const match = connections.find((connection) =>
+          connection.integration === integration &&
+          (connection.name === requested || normalizeName(connection.name) === normalizeName(requested))
+        )
+        if (match === undefined) {
+          const known = connections
+            .filter((connection) => connection.integration === integration)
+            .map((connection) => connection.name)
+          return notFound(
+            known.length === 0
+              ? `${integration} has no connections`
+              : `${integration} has no connection ${requested}. Known: ${known.join(", ")}`
+          )
+        }
+        await executor.connections.remove({ integration, name: match.name })
+        return ok({ removed: true, integration, connection: match.name })
       }
     },
 
@@ -427,6 +554,62 @@ export const makeRoutes = (dependencies: ApiDependencies): ReadonlyArray<Route> 
       }
     },
     {
+      method: "GET",
+      path: "/v1/clients/:id/keys",
+      access: "privileged",
+      handle: async (request) => {
+        const clientId = ClientId.make(request.params["id"] ?? "")
+        if (await store.findClientById(clientId) === undefined) {
+          return notFound(`Unknown client ${clientId}`)
+        }
+        // Hashes stay behind the gateway. What an operator needs is which keys
+        // exist, when each was last used, and which are still live.
+        const keys = await store.listApiKeys(clientId)
+        return ok({
+          keys: keys.map((key) => ({
+            id: key.id,
+            clientId: key.clientId,
+            createdAt: key.createdAt,
+            lastUsedAt: key.lastUsedAt,
+            revokedAt: key.revokedAt
+          }))
+        })
+      }
+    },
+    {
+      method: "POST",
+      path: "/v1/keys/:id/revoke",
+      access: "privileged",
+      handle: async (request) => {
+        const keyId = ApiKeyId.make(request.params["id"] ?? "")
+        await store.revokeApiKey(keyId)
+        // Rotation, not containment: a revoked key's frozen calls stay armed
+        // because the client behind them is still trusted. Revoking the client
+        // is what cancels those.
+        return ok({ revoked: true, key: keyId })
+      }
+    },
+    {
+      method: "GET",
+      path: "/v1/clients/:id/tools",
+      access: "privileged",
+      handle: async (request) => {
+        const clientId = ClientId.make(request.params["id"] ?? "")
+        if (await store.findClientById(clientId) === undefined) {
+          return notFound(`Unknown client ${clientId}`)
+        }
+        // The same listing `/v1/tools` gives a key about itself, asked about
+        // someone else. Generating bindings for the client you are
+        // provisioning should not require holding its key.
+        return ok({
+          tools: await listGrantedTools(store, clientId, {
+            schemas: request.query.get("schemas") === "true",
+            executor
+          })
+        })
+      }
+    },
+    {
       method: "POST",
       path: "/v1/clients/:id/revoke",
       access: "privileged",
@@ -461,6 +644,16 @@ export const makeRoutes = (dependencies: ApiDependencies): ReadonlyArray<Route> 
         const clientId = ClientId.make(body.clientId)
         if (await store.findClientById(clientId) === undefined) {
           return notFound(`Unknown client ${clientId}`)
+        }
+        if (body.connection.owner === "user") {
+          // The wire contract keeps the user tier because that is where the
+          // design is going, but nothing can create a user-tier *connection*
+          // yet, so such a grant resolves to an address that does not exist. A
+          // grant that can only fail at invoke time is worse than a refusal
+          // here.
+          return badRequest(
+            "User-tier connections do not exist yet, so a user-tier grant cannot resolve. Grant against an org connection."
+          )
         }
         const grant = await store.createGrant({
           id: newGrantId(),
@@ -607,9 +800,38 @@ export const makeRoutes = (dependencies: ApiDependencies): ReadonlyArray<Route> 
       method: "GET",
       path: "/v1/audit",
       access: "privileged",
-      handle: async (request) => ok({
-        records: await store.listAudit(positiveInt(request.query.get("limit"), 50))
-      })
+      handle: async (request) => {
+        const since = request.query.get("since")
+        const sinceDate = since === null ? undefined : new Date(since)
+        if (sinceDate !== undefined && Number.isNaN(sinceDate.getTime())) {
+          return badRequest(`since is not a date: ${since}`)
+        }
+        const outcome = request.query.get("outcome")
+        const clientId = request.query.get("clientId")
+        const alias = request.query.get("alias")
+        const tool = request.query.get("tool")
+        const filter = {
+          ...(clientId === null ? {} : { clientId: ClientId.make(clientId) }),
+          ...(alias === null ? {} : { alias: Alias.make(alias) }),
+          ...(tool === null ? {} : { tool: ToolName.make(tool) }),
+          ...(outcome === null ? {} : {
+            outcome: Schema.decodeUnknownSync(
+              Schema.Literals(["succeeded", "failed", "denied", "pending"])
+            )(outcome)
+          }),
+          ...(sinceDate === undefined ? {} : { since: sinceDate })
+        }
+        const limit = positiveInt(request.query.get("limit"), 50)
+        const offset = nonNegativeInt(request.query.get("offset"), 0)
+        // The trail is permanent, so the count is what tells a reader whether
+        // the window they asked for is the whole answer.
+        return ok({
+          records: await store.listAudit({ ...filter, limit, offset }),
+          total: await store.countAudit(filter),
+          limit,
+          offset
+        })
+      }
     }
   ]
 }

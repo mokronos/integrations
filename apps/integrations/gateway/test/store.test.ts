@@ -204,7 +204,7 @@ describe("gateway store", () => {
     const removed = await store.expireAuditArguments(new Date())
 
     expect(removed).toBe(1)
-    const records = await store.listAudit(10)
+    const records = await store.listAudit({ limit: 10 })
     expect(records).toHaveLength(1)
     // The compliance half survives: who acted for whom, and what was decided.
     expect(records[0]?.subject).toBe(SubjectId.make("sebastian"))
@@ -225,7 +225,7 @@ describe("gateway store", () => {
       message: "unknown-key"
     })
 
-    const records = await store.listAudit(10)
+    const records = await store.listAudit({ limit: 10 })
     expect(records[0]?.outcome).toBe("denied")
     expect(records[0]?.connection).toBeNull()
   })

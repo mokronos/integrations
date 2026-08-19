@@ -1,33 +1,59 @@
 import { Effect, Option, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import { generateModule } from "@mokronos/integrations-client"
-import type { CodegenTarget, GatewayClient } from "@mokronos/integrations-client"
+import type { CodegenTarget, GatewayClient, GrantedTool } from "@mokronos/integrations-client"
 import { cliError, connectToGateway, describeError, openBrowser } from "./connection.ts"
 import type { IntegrationsCliError } from "./connection.ts"
 import {
   inline,
   jsonOutput,
-  moreHint,
+  page,
+  pageFields,
+  pageLine,
+  textBlock,
   truncate,
-  visibleItems,
   withNext,
   writeStdoutLine
 } from "./output.ts"
+import type { Page, Window } from "./output.ts"
 
 const verboseFlag = () =>
   Flag.boolean("verbose").pipe(
     Flag.withAlias("v"),
-    Flag.withDescription("Show complete details")
+    // Says how much of each row to show. It does not say how many rows: a
+    // listing returns all of them either way, so nothing is hidden behind a
+    // flag the reader did not know to pass.
+    Flag.withDescription("Show complete objects, pretty-printed")
   )
 
 const textFlag = () =>
   Flag.boolean("text").pipe(Flag.withDescription("Print a human-readable result"))
+
+const limitFlag = () =>
+  Flag.integer("limit").pipe(
+    Flag.optional,
+    Flag.withDescription("Return at most this many rows (default: all of them)")
+  )
+
+const offsetFlag = () =>
+  Flag.integer("offset").pipe(
+    Flag.optional,
+    Flag.withDescription("Skip this many rows. Listings are ordered, so a window is stable")
+  )
 
 const connectionFlag = () =>
   Flag.string("connection").pipe(
     Flag.withDefault("default"),
     Flag.withDescription("Connection name (default: default)")
   )
+
+const window = (
+  limit: Option.Option<number>,
+  offset: Option.Option<number>
+): Window => ({
+  limit: Option.getOrUndefined(limit),
+  offset: Option.getOrUndefined(offset)
+})
 
 const gatewayTask = <A>(
   task: (client: GatewayClient) => Promise<A>
@@ -45,6 +71,14 @@ const array = (value: unknown): ReadonlyArray<Record<string, unknown>> =>
 
 const text = (value: unknown): string => value === undefined || value === null ? "" : String(value)
 
+/** Listings are ordered before they are windowed. An offset into an unordered
+ *  result addresses different rows on every call, which makes paging worse than
+ *  no paging. */
+const sortedBy = <A>(
+  items: ReadonlyArray<A>,
+  key: (item: A) => string
+): ReadonlyArray<A> => [...items].sort((left, right) => key(left).localeCompare(key(right)))
+
 const readJsonArgument = async (
   inline_: string | undefined,
   file: string | undefined
@@ -56,8 +90,44 @@ const readJsonArgument = async (
   try {
     return JSON.parse(source)
   } catch (error) {
-    throw cliError(`Invalid JSON input: ${error instanceof Error ? error.message : String(error)}`)
+    throw cliError(
+      `Input is not valid JSON: ${error instanceof Error ? error.message : String(error)}`
+    )
   }
+}
+
+/** Prints a listing, in whichever of the two formats was asked for. Keeping
+ *  this in one place is what makes `count`, the window fields, and the hint
+ *  behave the same on every listing. */
+const listing = <A>(
+  result: Page<A>,
+  options: {
+    readonly key: string
+    readonly narrowing: string
+    readonly asText: boolean
+    readonly verbose: boolean
+    readonly line: (item: A) => string
+    readonly row: (item: A) => unknown
+    readonly empty: string
+    readonly next?: string
+    readonly extra?: Record<string, unknown>
+  }
+): Effect.Effect<void> => {
+  if (options.asText) {
+    return writeStdoutLine(textBlock(
+      result.items.map(options.line),
+      pageLine(result, options.narrowing),
+      options.empty
+    ))
+  }
+  return writeStdoutLine(jsonOutput(
+    withNext({
+      ...(options.extra ?? {}),
+      [options.key]: result.items.map(options.row),
+      ...pageFields(result, options.narrowing)
+    }, options.next),
+    options.verbose
+  ))
 }
 
 // --- catalog ----------------------------------------------------------------
@@ -86,9 +156,7 @@ const discoverCommand = Command.make(
         }
         return writeStdoutLine(jsonOutput(
           withNext(
-            verbose
-              ? body
-              : { integration, toolCount: tools.length },
+            verbose ? body : { integration, toolCount: tools.length },
             `integrations connect ${slug}`
           ),
           verbose
@@ -108,7 +176,9 @@ const searchCommand = Command.make(
     ),
     limit: Flag.integer("limit").pipe(
       Flag.withDefault(5),
-      Flag.withDescription("Maximum results (default: 5, range: 1-100)")
+      // Not a window over a local listing: this one is asked of the registry,
+      // which ranks by relevance. Reordering it here would throw that away.
+      Flag.withDescription("How many results to ask the registry for (default: 5)")
     ),
     text: textFlag(),
     verbose: verboseFlag()
@@ -121,75 +191,78 @@ const searchCommand = Command.make(
     }).pipe(Effect.flatMap((result) => {
       const body = record(result)
       const results = array(body["results"])
-      const shown = visibleItems(results, verbose)
-      const hint = moreHint(shown.length, results.length)
       if (asText) {
-        const lines = shown.map((entry) =>
-          `${text(entry["name"])}\t${text(entry["kind"])}\t${text(entry["url"])}`
-        )
-        if (hint !== undefined) lines.push(hint)
-        return writeStdoutLine(lines.join("\n") || "No matching integrations.")
+        return writeStdoutLine(textBlock(
+          results.map((entry) =>
+            `${text(entry["name"])}\t${
+              (Array.isArray(entry["kinds"]) ? entry["kinds"] : []).join(",")
+            }\t${text(entry["url"])}`
+          ),
+          undefined,
+          "No matching integrations."
+        ))
       }
       return writeStdoutLine(jsonOutput(
-        withNext({ ...body, results: shown }, "integrations discover <url>"),
+        withNext({ ...body, count: results.length }, "integrations discover <url>"),
         verbose
       ))
     }))
 ).pipe(Command.withDescription("Search integrations.sh for exact integration URLs"))
 
-const listCommand = Command.make(
-  "list",
-  { text: textFlag(), verbose: verboseFlag() },
-  ({ text: asText, verbose }) =>
+const integrationsCommand = Command.make(
+  "integrations",
+  {
+    limit: limitFlag(),
+    offset: offsetFlag(),
+    text: textFlag(),
+    verbose: verboseFlag()
+  },
+  ({ limit, offset, text: asText, verbose }) =>
     gatewayTask((client) => client.request("GET", "/v1/integrations")).pipe(
       Effect.flatMap((result) => {
-        const integrations = array(record(result)["integrations"])
-        const shown = visibleItems(integrations, verbose)
-        const hint = moreHint(shown.length, integrations.length)
-        if (asText) {
-          const lines = shown.map((integration) =>
-            `${text(integration["slug"])}\t${text(integration["kind"])}\t${text(integration["name"])}`
-          )
-          if (hint !== undefined) lines.push(hint)
-          return writeStdoutLine(lines.join("\n") || "No integrations discovered.")
-        }
-        return writeStdoutLine(jsonOutput(
-          withNext(
-            {
-              integrations: shown.map((integration) =>
-                verbose ? integration : {
-                  slug: integration["slug"],
-                  kind: integration["kind"],
-                  name: integration["name"],
-                  connections: array(integration["connections"]).length
-                }
-              ),
-              ...(hint === undefined ? {} : { showing: shown.length, total: integrations.length })
-            },
-            "integrations tools <integration>"
-          ),
-          verbose
-        ))
+        const all = sortedBy(array(record(result)["integrations"]), (entry) => text(entry["slug"]))
+        return listing(page(all, window(limit, offset)), {
+          key: "integrations",
+          narrowing: "window with --limit/--offset",
+          asText,
+          verbose,
+          empty: "No integrations discovered.",
+          next: "integrations tools <integration>",
+          line: (integration) =>
+            `${text(integration["slug"])}\t${text(integration["kind"])}\t${text(integration["name"])}`,
+          row: (integration) =>
+            verbose ? integration : {
+              slug: integration["slug"],
+              kind: integration["kind"],
+              name: integration["name"],
+              connections: array(integration["connections"]).length
+            }
+        })
       })
     )
-).pipe(Command.withDescription("List the gateway's persisted integration catalog"))
+).pipe(
+  Command.withAlias("list"),
+  Command.withDescription("List the gateway's persisted integration catalog")
+)
 
 const toolsCommand = Command.make(
   "tools",
   {
     integration: Argument.string("integration"),
-    search: Flag.string("search").pipe(
+    filter: Flag.string("filter").pipe(
       Flag.optional,
       Flag.withDescription("Only list tools whose name or description contains this text")
     ),
+    limit: limitFlag(),
+    offset: offsetFlag(),
     text: textFlag(),
     verbose: verboseFlag()
   },
-  ({ integration, search, text: asText, verbose }) =>
+  ({ integration, filter, limit, offset, text: asText, verbose }) =>
     gatewayTask((client) =>
       client.request("GET", `/v1/integrations/${encodeURIComponent(integration)}/tools`)
     ).pipe(Effect.flatMap((result) => {
-      const term = Option.getOrUndefined(search)?.toLowerCase()
+      const term = Option.getOrUndefined(filter)?.toLowerCase()
       const all = array(record(result)["tools"])
       const matching = term === undefined
         ? all
@@ -197,33 +270,24 @@ const toolsCommand = Command.make(
           text(tool["name"]).toLowerCase().includes(term) ||
           text(tool["description"]).toLowerCase().includes(term)
         )
-      const shown = visibleItems(matching, verbose)
-      const hint = moreHint(shown.length, matching.length)
-      if (asText) {
-        const lines = shown.map((tool) =>
-          `${text(tool["name"])}\t${inline(text(tool["description"]), 120)}${
-            verbose ? `\t${text(tool["address"])}` : ""
-          }`
-        )
-        if (hint !== undefined) lines.push(hint)
-        return writeStdoutLine(
-          lines.join("\n") ||
-            (term === undefined ? "No tools available." : `No tools match "${term}".`)
-        )
-      }
-      return writeStdoutLine(jsonOutput(
-        withNext(
-          {
-            integration,
-            tools: shown.map((tool) =>
-              verbose ? tool : { name: tool["name"], description: inline(text(tool["description"]), 200) }
-            ),
-            ...(hint === undefined ? {} : { showing: shown.length, total: matching.length })
-          },
-          `integrations schema ${integration} <tool>`
-        ),
-        verbose
-      ))
+      return listing(
+        page(sortedBy(matching, (tool) => text(tool["name"])), window(limit, offset)),
+        {
+          key: "tools",
+          narrowing: "narrow with --filter <text>, or window with --limit/--offset",
+          asText,
+          verbose,
+          empty: term === undefined ? "No tools available." : `No tools match "${term}".`,
+          next: `integrations schema ${integration} <tool>`,
+          extra: { integration },
+          line: (tool) =>
+            `${text(tool["name"])}\t${inline(text(tool["description"]), 120)}${
+              verbose ? `\t${text(tool["address"])}` : ""
+            }`,
+          row: (tool) =>
+            verbose ? tool : { name: tool["name"], description: inline(text(tool["description"]), 200) }
+        }
+      )
     }))
 ).pipe(Command.withDescription("List tool names and descriptions for an integration"))
 
@@ -246,25 +310,23 @@ const schemaCommand = Command.make(
       )
     ).pipe(Effect.flatMap((result) => {
       const detail = record(result)
-      const input = JSON.stringify(detail["inputSchema"] ?? {})
-      const output = JSON.stringify(detail["outputSchema"] ?? {})
       if (asText) {
         return writeStdoutLine([
           `${text(detail["name"])}\t${text(detail["address"])}`,
           inline(text(detail["description"]), 400),
-          `input: ${truncate(input, verbose)}`,
-          `output: ${truncate(output, verbose)}`,
-          ...(verbose ? [] : ["details: rerun with --verbose for complete schemas"])
+          `input: ${truncate(JSON.stringify(detail["inputSchema"] ?? {}), verbose)}`,
+          `output: ${truncate(JSON.stringify(detail["outputSchema"] ?? {}), verbose)}`
         ].join("\n"))
       }
+      // Schemas stay objects, whole, at both verbosities. They are the reason
+      // to run this command, and a schema handed back as a truncated string
+      // has to be re-fetched before it can be used for anything.
+      const { inputTypeScript, outputTypeScript, ...core } = detail
       return writeStdoutLine(jsonOutput(
-        verbose ? detail : withNext({
-          address: detail["address"],
-          name: detail["name"],
-          description: inline(text(detail["description"]), 400),
-          input: truncate(input, false),
-          output: truncate(output, false)
-        }, "integrations invoke <tool-address> '<json>'"),
+        withNext(
+          verbose ? detail : core,
+          `integrations execute --direct ${text(detail["address"])} '<json>'`
+        ),
         verbose
       ))
     }))
@@ -319,9 +381,7 @@ const connectCommand = Command.make(
   },
   (options) =>
     gatewayTask(async (client) => {
-      const catalog = record(
-        await client.request("GET", "/v1/integrations")
-      )
+      const catalog = record(await client.request("GET", "/v1/integrations"))
       const integration = array(catalog["integrations"]).find((candidate) =>
         text(candidate["slug"]) === options.integration
       )
@@ -332,10 +392,25 @@ const connectCommand = Command.make(
       }
       const methods = array(integration["authMethods"])
       const template = Option.getOrUndefined(options.template)
+      const credentialsOffered = Option.isSome(options.credentialEnv) ||
+        Option.isSome(options.credentialValues)
       const oauthMethod = methods.find((method) =>
         text(method["kind"]) === "oauth" &&
         (template === undefined || text(method["template"]) === template)
       )
+
+      if (oauthMethod !== undefined && credentialsOffered && template === undefined) {
+        // Silently ignoring the credential and opening a browser is the worst
+        // of both: the caller thinks it authorized with the key it named.
+        const alternatives = methods.filter((method) => text(method["kind"]) !== "oauth")
+        throw cliError(
+          alternatives.length === 0
+            ? `${options.integration} only supports OAuth, so --credential-env cannot be used. Drop it and authorize in a browser.`
+            : `${options.integration} supports OAuth and ${
+              alternatives.map((method) => text(method["template"])).join(", ")
+            }. Name the one you mean with --template.`
+        )
+      }
 
       if (oauthMethod !== undefined) {
         const secretName = Option.getOrUndefined(options.clientSecretEnv)
@@ -376,26 +451,31 @@ const connectCommand = Command.make(
         Option.getOrUndefined(options.credentialEnv),
         Option.getOrUndefined(options.credentialValues)
       )
-      const result = record(await client.request("POST", "/v1/connections", {
+      return record(await client.request("POST", "/v1/connections", {
         integration: options.integration,
         connection: options.connection,
         ...(template === undefined ? {} : { template }),
         values
       }))
-      return result
     }).pipe(Effect.flatMap((result) => {
       const connection = record(result["connection"] ?? result)
       const tools = array(result["tools"])
+      const storedName = text(connection["name"])
+      // The stored name is normalised, so say so rather than letting the next
+      // command fail on the name that was typed.
+      if (storedName.length > 0 && storedName !== options.connection) {
+        console.error(
+          `Note: connection stored as "${storedName}", not "${options.connection}". Use that name from here on.`
+        )
+      }
       if (options.text) {
         return writeStdoutLine(
-          `Connected ${text(connection["integration"])}/${text(connection["name"])}\t${tools.length} tool(s)`
+          `Connected ${text(connection["integration"])}/${storedName}\t${tools.length} tool(s)`
         )
       }
       return writeStdoutLine(jsonOutput(
         withNext(
-          options.verbose
-            ? { connection, tools }
-            : { connection, toolCount: tools.length },
+          options.verbose ? { connection, tools } : { connection, toolCount: tools.length },
           `integrations tools ${text(connection["integration"])}`
         ),
         options.verbose
@@ -405,21 +485,24 @@ const connectCommand = Command.make(
 
 const connectionsCommand = Command.make(
   "connections",
-  { text: textFlag(), verbose: verboseFlag() },
-  ({ text: asText, verbose }) =>
+  { limit: limitFlag(), offset: offsetFlag(), text: textFlag(), verbose: verboseFlag() },
+  ({ limit, offset, text: asText, verbose }) =>
     gatewayTask((client) => client.request("GET", "/v1/connections")).pipe(
       Effect.flatMap((result) => {
-        const connections = array(record(result)["connections"])
-        const shown = visibleItems(connections, verbose)
-        const hint = moreHint(shown.length, connections.length)
-        if (asText) {
-          const lines = shown.map((connection) =>
-            `${text(connection["integration"])}\t${text(connection["name"])}\t${text(connection["template"])}`
-          )
-          if (hint !== undefined) lines.push(hint)
-          return writeStdoutLine(lines.join("\n") || "No connected integrations.")
-        }
-        return writeStdoutLine(jsonOutput({ connections: shown }, verbose))
+        const all = sortedBy(
+          array(record(result)["connections"]),
+          (connection) => `${text(connection["integration"])} ${text(connection["name"])}`
+        )
+        return listing(page(all, window(limit, offset)), {
+          key: "connections",
+          narrowing: "window with --limit/--offset",
+          asText,
+          verbose,
+          empty: "No connected integrations.",
+          line: (connection) =>
+            `${text(connection["integration"])}\t${text(connection["name"])}\t${text(connection["template"])}`,
+          row: (connection) => connection
+        })
       })
     )
 ).pipe(Command.withDescription("List connections without exposing credentials"))
@@ -433,69 +516,107 @@ const disconnectCommand = Command.make(
         "DELETE",
         `/v1/connections/${encodeURIComponent(integration)}/${encodeURIComponent(connection)}`
       )
-    ).pipe(Effect.flatMap(() =>
-      writeStdoutLine(
+    ).pipe(Effect.flatMap((result) => {
+      // The gateway resolves the name it actually removed, which may differ
+      // from the one typed. Report that one.
+      const removed = text(record(result)["connection"] ?? connection)
+      return writeStdoutLine(
         asText
-          ? `Disconnected ${integration}/${connection}`
-          : jsonOutput({ disconnected: true, integration, connection }, false)
+          ? `Disconnected ${integration}/${removed}`
+          : jsonOutput({ disconnected: true, integration, connection: removed }, false)
       )
-    ))
+    }))
 ).pipe(Command.withDescription("Delete a connection"))
 
 // --- invocation -------------------------------------------------------------
 
-const invokeCommand = Command.make(
-  "invoke",
+/** A tool address is recognisable: an alias is lowercase letters, digits, and
+ *  dashes, so it can never look like one. `--direct` states the intent
+ *  explicitly and fails if the target is not an address. */
+const looksLikeAddress = (value: string): boolean => value.startsWith("tools.")
+
+const executeCommand = Command.make(
+  "execute",
   {
-    address: Argument.string("tool-address"),
-    input: Argument.string("json").pipe(Argument.optional),
+    target: Argument.string("alias-or-address").pipe(
+      Argument.withDescription("Granted alias, or a tools.… address with --direct")
+    ),
+    second: Argument.string("tool").pipe(
+      Argument.optional,
+      Argument.withDescription("Tool name. Omitted in direct mode, where the address names it")
+    ),
+    third: Argument.string("json").pipe(
+      Argument.optional,
+      Argument.withDescription("Arguments as JSON (default: {})")
+    ),
+    direct: Flag.boolean("direct").pipe(
+      Flag.withDescription(
+        "Call a tool address with this key's own authority, bypassing aliases. For testing a connection"
+      )
+    ),
     file: Flag.string("file").pipe(
       Flag.optional,
       Flag.withDescription("Read the JSON input from a file")
     ),
     verbose: verboseFlag()
   },
-  ({ address, input, file, verbose }) =>
-    gatewayTask(async (client) => {
+  ({ target, second, third, direct, file, verbose }) => {
+    const isDirect = direct || looksLikeAddress(target)
+    return gatewayTask(async (client) => {
+      if (isDirect) {
+        if (!looksLikeAddress(target)) {
+          throw cliError(`--direct expects a tools.… address, got "${target}"`)
+        }
+        if (Option.isSome(third)) {
+          throw cliError("In direct mode the address is followed by the JSON input only")
+        }
+        const payload = await readJsonArgument(
+          Option.getOrUndefined(second),
+          Option.getOrUndefined(file)
+        )
+        try {
+          return {
+            status: "succeeded",
+            result: await client.request("POST", "/v1/tools/invoke", {
+              address: target,
+              arguments: payload
+            })
+          } as const
+        } catch (error) {
+          // Reported in the same shape as a delegated call, so one reader
+          // handles both. The exit code still says it failed.
+          return { status: "failed", message: describeError(error) } as const
+        }
+      }
+      if (Option.isNone(second)) {
+        throw cliError("Provide an alias and a tool, or a tools.… address with --direct")
+      }
       const payload = await readJsonArgument(
-        Option.getOrUndefined(input),
-        Option.getOrUndefined(file)
-      )
-      return await client.request("POST", "/v1/tools/invoke", { address, arguments: payload })
-    }).pipe(Effect.flatMap((result) =>
-      writeStdoutLine(truncate(jsonOutput(result, verbose), verbose))
-    ))
-).pipe(
-  Command.withDescription(
-    "Invoke a tool by address. Privileged: for testing a connection, not for delegated use"
-  )
-)
-
-const executeCommand = Command.make(
-  "execute",
-  {
-    alias: Argument.string("alias"),
-    tool: Argument.string("tool"),
-    input: Argument.string("json").pipe(Argument.optional),
-    file: Flag.string("file").pipe(Flag.optional),
-    verbose: verboseFlag()
-  },
-  ({ alias, tool, input, file, verbose }) =>
-    gatewayTask(async (client) => {
-      const payload = await readJsonArgument(
-        Option.getOrUndefined(input),
+        Option.getOrUndefined(third),
         Option.getOrUndefined(file)
       )
       return await client.execute({
-        alias,
-        tool,
+        alias: target,
+        tool: second.value,
         arguments: Schema.decodeUnknownSync(Schema.Json)(payload)
       })
     }).pipe(Effect.flatMap((outcome) =>
-      writeStdoutLine(truncate(jsonOutput(outcome, verbose), verbose))
+      // Always whole JSON: this is the machine-facing result, and a document
+      // cut mid-token is not a smaller answer, it is an unusable one.
+      writeStdoutLine(jsonOutput(outcome, verbose)).pipe(Effect.flatMap(() =>
+        outcome.status === "succeeded" || outcome.status === "pending"
+          ? Effect.void
+          : Effect.fail(cliError(
+            outcome.status === "denied" ? outcome.reason : outcome.message
+          ))
+      ))
     ))
+  }
 ).pipe(
-  Command.withDescription("Invoke a granted tool through an alias, as a delegated caller would")
+  Command.withAlias("invoke"),
+  Command.withDescription(
+    "Invoke a granted tool through an alias, as a delegated caller would. --direct calls an address instead"
+  )
 )
 
 const validateCommand = Command.make(
@@ -503,37 +624,39 @@ const validateCommand = Command.make(
   {
     config: Argument.string("json-or-tool-address").pipe(Argument.optional),
     file: Flag.string("file").pipe(Flag.optional),
-    live: Flag.boolean("live"),
-    text: textFlag()
+    structural: Flag.boolean("structural").pipe(
+      Flag.withDescription("Check the shape only, without asking the gateway what resolves")
+    ),
+    text: textFlag(),
+    verbose: verboseFlag()
   },
-  ({ config, file, live, text: asText }) =>
+  ({ config, file, structural, text: asText, verbose }) =>
     gatewayTask(async (client) => {
       const configText = Option.getOrUndefined(config)
       const filePath = Option.getOrUndefined(file)
       if ((configText === undefined) === (filePath === undefined)) {
         throw cliError("Provide exactly one of a JSON config or --file")
       }
-      const directAddress = configText?.startsWith("tools.") === true
       const source = filePath === undefined
-        ? directAddress
+        ? looksLikeAddress(configText ?? "")
           ? JSON.stringify({ source: { kind: "executor", address: configText } })
           : configText ?? "{}"
         : await Bun.file(filePath).text()
-      return {
-        directAddress,
-        report: record(await client.request("POST", "/v1/validate", {
-          node: JSON.parse(source),
-          live: live || directAddress
-        }))
-      }
-    }).pipe(Effect.flatMap(({ report }) => {
+      return record(await client.request("POST", "/v1/validate", {
+        node: JSON.parse(source),
+        // Whether it resolves is the question worth asking, so it is asked by
+        // default, for every input form rather than only for a bare address.
+        live: !structural
+      }))
+    }).pipe(Effect.flatMap((report) => {
       const findings = array(report["findings"])
-      const rendered = asText
-        ? findings.map((finding) =>
-          `${text(finding["severity"])}\t${text(finding["check"])}\t${text(finding["message"])}`
-        ).join("\n")
-        : jsonOutput(report, false)
-      return writeStdoutLine(rendered).pipe(
+      return writeStdoutLine(
+        asText
+          ? findings.map((finding) =>
+            `${text(finding["severity"])}\t${text(finding["check"])}\t${text(finding["message"])}`
+          ).join("\n")
+          : jsonOutput(report, verbose)
+      ).pipe(
         Effect.flatMap(() =>
           report["ok"] === true
             ? Effect.void
@@ -541,29 +664,33 @@ const validateCommand = Command.make(
         )
       )
     }))
-).pipe(Command.withDescription("Validate a tool address or integration node config"))
+).pipe(
+  Command.withDescription(
+    "Validate an integration node: a gateway alias, an executor address, or a node config"
+  )
+)
 
 // --- delegation -------------------------------------------------------------
 
 const clientsCommand = Command.make(
   "clients",
-  { text: textFlag(), verbose: verboseFlag() },
-  ({ text: asText, verbose }) =>
+  { limit: limitFlag(), offset: offsetFlag(), text: textFlag(), verbose: verboseFlag() },
+  ({ limit, offset, text: asText, verbose }) =>
     gatewayTask((client) => client.request("GET", "/v1/clients")).pipe(
       Effect.flatMap((result) => {
-        const clients = array(record(result)["clients"])
-        const shown = visibleItems(clients, verbose)
-        const hint = moreHint(shown.length, clients.length)
-        if (asText) {
-          const lines = shown.map((entry) =>
+        const all = sortedBy(array(record(result)["clients"]), (entry) => text(entry["name"]))
+        return listing(page(all, window(limit, offset)), {
+          key: "clients",
+          narrowing: "window with --limit/--offset",
+          asText,
+          verbose,
+          empty: "No clients.",
+          line: (entry) =>
             `${text(entry["name"])}\t${entry["mayMutate"] === true ? "may-mutate" : "delegated"}\t${
               entry["revokedAt"] === null ? "live" : "revoked"
-            }\t${text(entry["id"])}`
-          )
-          if (hint !== undefined) lines.push(hint)
-          return writeStdoutLine(lines.join("\n") || "No clients.")
-        }
-        return writeStdoutLine(jsonOutput({ clients: shown }, verbose))
+            }\t${text(entry["id"])}`,
+          row: (entry) => entry
+        })
       })
     )
 ).pipe(Command.withDescription("List clients that may hold grants"))
@@ -611,6 +738,36 @@ const keyCommand = Command.make(
     }))
 ).pipe(Command.withDescription("Issue an API key for a client. Shown once"))
 
+const keysCommand = Command.make(
+  "keys",
+  {
+    clientId: Argument.string("client-id"),
+    limit: limitFlag(),
+    offset: offsetFlag(),
+    text: textFlag(),
+    verbose: verboseFlag()
+  },
+  ({ clientId, limit, offset, text: asText, verbose }) =>
+    gatewayTask((client) =>
+      client.request("GET", `/v1/clients/${encodeURIComponent(clientId)}/keys`)
+    ).pipe(Effect.flatMap((result) => {
+      const all = sortedBy(array(record(result)["keys"]), (key) => text(key["createdAt"]))
+      return listing(page(all, window(limit, offset)), {
+        key: "keys",
+        narrowing: "window with --limit/--offset",
+        asText,
+        verbose,
+        empty: "No keys issued.",
+        next: "integrations revoke key <key-id>",
+        line: (key) =>
+          `${text(key["id"])}\t${key["revokedAt"] === null ? "live" : "revoked"}\tlast used ${
+            key["lastUsedAt"] === null ? "never" : text(key["lastUsedAt"])
+          }`,
+        row: (key) => key
+      })
+    }))
+).pipe(Command.withDescription("List a client's API keys. Secrets are never shown again"))
+
 const grantCommand = Command.make(
   "grant",
   {
@@ -621,37 +778,25 @@ const grantCommand = Command.make(
       Flag.withDescription("Integration slug the alias resolves to")
     ),
     connection: connectionFlag(),
-    owner: Flag.choice("owner", ["org", "user"]).pipe(Flag.withDefault("org" as const)),
-    subject: Flag.string("subject").pipe(
-      Flag.optional,
-      Flag.withDescription("Required for a user-tier connection: the human it belongs to")
-    ),
     requireApproval: Flag.boolean("require-approval").pipe(
       Flag.withDescription("Freeze this tool's calls for a human instead of running them")
     ),
     text: textFlag()
   },
   (options) =>
-    gatewayTask((client) => {
-      const subject = Option.getOrUndefined(options.subject)
-      if (options.owner === "user" && subject === undefined) {
-        throw cliError("--subject is required for a user-tier connection")
-      }
-      return client.request("POST", "/v1/grants", {
+    gatewayTask((client) =>
+      client.request("POST", "/v1/grants", {
         clientId: options.clientId,
         alias: options.alias,
         tool: options.tool,
-        connection: options.owner === "org"
-          ? { owner: "org", integration: options.integration, name: options.connection }
-          : {
-            owner: "user",
-            subject,
-            integration: options.integration,
-            name: options.connection
-          },
+        connection: {
+          owner: "org",
+          integration: options.integration,
+          name: options.connection
+        },
         decision: options.requireApproval ? "require_approval" : "allow"
       })
-    }).pipe(Effect.flatMap((result) => {
+    ).pipe(Effect.flatMap((result) => {
       const grant = record(result)
       return writeStdoutLine(
         options.text
@@ -661,45 +806,101 @@ const grantCommand = Command.make(
     }))
 ).pipe(Command.withDescription("Delegate one tool through one connection to one client"))
 
+const grantRow = (tool: GrantedTool): Record<string, unknown> => ({
+  alias: tool.alias,
+  tool: tool.tool,
+  integration: tool.integration,
+  decision: tool.decision
+})
+
 const grantsCommand = Command.make(
   "grants",
-  { clientId: Argument.string("client-id"), text: textFlag(), verbose: verboseFlag() },
-  ({ clientId, text: asText, verbose }) =>
-    gatewayTask((client) =>
-      client.request("GET", `/v1/grants?clientId=${encodeURIComponent(clientId)}`)
-    ).pipe(Effect.flatMap((result) => {
-      const grants = array(record(result)["grants"])
-      const shown = visibleItems(grants, verbose)
-      const hint = moreHint(shown.length, grants.length)
-      if (asText) {
-        const lines = shown.map((grant) => {
+  {
+    clientId: Argument.string("client-id").pipe(Argument.optional),
+    mine: Flag.boolean("mine").pipe(
+      Flag.withDescription("List what this key itself can reach, rather than another client's")
+    ),
+    limit: limitFlag(),
+    offset: offsetFlag(),
+    text: textFlag(),
+    verbose: verboseFlag()
+  },
+  ({ clientId, mine, limit, offset, text: asText, verbose }) =>
+    gatewayTask(async (client) => {
+      if (mine) {
+        if (Option.isSome(clientId)) {
+          throw cliError("--mine lists this key's own grants, so it takes no client id")
+        }
+        return (await client.tools()).map(grantRow)
+      }
+      if (Option.isNone(clientId)) {
+        throw cliError("Provide a client id, or --mine for this key's own grants")
+      }
+      return array(
+        record(
+          await client.request("GET", `/v1/grants?clientId=${encodeURIComponent(clientId.value)}`)
+        )["grants"]
+      )
+    }).pipe(Effect.flatMap((grants) => {
+      const all = sortedBy(grants, (grant) => `${text(grant["alias"])} ${text(grant["tool"])}`)
+      return listing(page(all, window(limit, offset)), {
+        key: "grants",
+        narrowing: "window with --limit/--offset",
+        asText,
+        verbose,
+        empty: mine ? "No granted tools." : "No grants.",
+        line: (grant) => {
           const connection = record(grant["connection"])
-          return `${text(grant["alias"])}.${text(grant["tool"])}\t${text(grant["decision"])}\t${
-            text(connection["owner"])
-          }:${text(connection["integration"])}/${text(connection["name"])}`
-        })
-        if (hint !== undefined) lines.push(hint)
-        return writeStdoutLine(lines.join("\n") || "No grants.")
-      }
-      return writeStdoutLine(jsonOutput({ grants: shown }, verbose))
+          const target = grant["connection"] === undefined
+            ? text(grant["integration"])
+            : `${text(connection["owner"])}:${text(connection["integration"])}/${
+              text(connection["name"])
+            }`
+          return `${text(grant["alias"])}.${text(grant["tool"])}\t${text(grant["decision"])}\t${target}`
+        },
+        row: (grant) => grant
+      })
     }))
-).pipe(Command.withDescription("List a client's grants"))
+).pipe(Command.withDescription("List a client's grants, or this key's own with --mine"))
 
-const toolsForKeyCommand = Command.make(
-  "granted",
-  { text: textFlag(), verbose: verboseFlag() },
-  ({ text: asText, verbose }) =>
-    gatewayTask((client) => client.tools()).pipe(Effect.flatMap((tools) => {
-      const shown = visibleItems(tools, verbose)
-      const hint = moreHint(shown.length, tools.length)
-      if (asText) {
-        const lines = shown.map((tool) => `${tool.alias}.${tool.tool}\t${tool.decision}`)
-        if (hint !== undefined) lines.push(hint)
-        return writeStdoutLine(lines.join("\n") || "No granted tools.")
-      }
-      return writeStdoutLine(jsonOutput({ tools: shown }, verbose))
+const revokeCommand = Command.make(
+  "revoke",
+  {
+    kind: Argument.choice("kind", ["grant", "client", "key"]).pipe(
+      Argument.withDescription("What to revoke")
+    ),
+    id: Argument.string("id"),
+    text: textFlag()
+  },
+  ({ kind, id, text: asText }) =>
+    gatewayTask((client) =>
+      client.request(
+        "POST",
+        kind === "grant"
+          ? `/v1/grants/${encodeURIComponent(id)}/revoke`
+          : kind === "client"
+          ? `/v1/clients/${encodeURIComponent(id)}/revoke`
+          : `/v1/keys/${encodeURIComponent(id)}/revoke`,
+        {}
+      )
+    ).pipe(Effect.flatMap((result) => {
+      const body = record(result)
+      const cancelled = body["cancelledApprovals"]
+      return writeStdoutLine(
+        asText
+          ? `Revoked ${kind} ${id}${
+            typeof cancelled === "number" && cancelled > 0
+              ? ` (${cancelled} frozen call(s) cancelled)`
+              : ""
+          }`
+          : jsonOutput({ revoked: true, kind, id, ...body }, false)
+      )
     }))
-).pipe(Command.withDescription("List the tools this key can reach"))
+).pipe(
+  Command.withDescription(
+    "Revoke a grant, a client, or one API key. Revoked rows stay as history"
+  )
+)
 
 // --- approvals and audit ----------------------------------------------------
 
@@ -707,43 +908,65 @@ const approvalsCommand = Command.make(
   "approvals",
   {
     status: Flag.choice("status", ["pending", "approved", "denied", "expired"]).pipe(Flag.optional),
+    limit: limitFlag(),
+    offset: offsetFlag(),
     text: textFlag(),
     verbose: verboseFlag()
   },
-  ({ status, text: asText, verbose }) =>
+  ({ status, limit, offset, text: asText, verbose }) =>
     gatewayTask((client) =>
       client.request(
         "GET",
         Option.isNone(status) ? "/v1/approvals" : `/v1/approvals?status=${status.value}`
       )
     ).pipe(Effect.flatMap((result) => {
-      const approvals = array(record(result)["approvals"])
-      const shown = visibleItems(approvals, verbose)
-      const hint = moreHint(shown.length, approvals.length)
-      if (asText) {
-        const lines = shown.map((approval) =>
+      // Newest first: an approvals queue is read at its head, not its tail.
+      const all = [...array(record(result)["approvals"])].sort((left, right) =>
+        text(right["createdAt"]).localeCompare(text(left["createdAt"]))
+      )
+      return listing(page(all, window(limit, offset)), {
+        key: "approvals",
+        narrowing: "narrow with --status, or window with --limit/--offset",
+        asText,
+        verbose,
+        empty: "No approvals.",
+        next: "integrations approve <id>",
+        line: (approval) =>
           `${text(approval["id"])}\t${text(approval["status"])}\t${text(approval["alias"])}.${
             text(approval["tool"])
-          }`
-        )
-        if (hint !== undefined) lines.push(hint)
-        return writeStdoutLine(lines.join("\n") || "No approvals.")
-      }
-      return writeStdoutLine(jsonOutput(
-        withNext({ approvals: shown }, "integrations approve <id>"),
-        verbose
-      ))
+          }`,
+        row: (approval) => approval
+      })
     }))
 ).pipe(Command.withDescription("List frozen invocations awaiting a decision"))
+
+const approvalCommand = Command.make(
+  "approval",
+  { id: Argument.string("approval-id"), text: textFlag(), verbose: verboseFlag() },
+  ({ id, text: asText, verbose }) =>
+    // Deliberately the delegated route: the caller that proposed a frozen call
+    // is the one that needs to watch it, and that caller holds no privileged
+    // key. Without this, `execute` hands back an id nothing can resolve.
+    gatewayTask((client) => client.approval(id)).pipe(Effect.flatMap((approval) =>
+      writeStdoutLine(
+        asText
+          ? `${approval.id}\t${approval.status}\t${approval.alias}.${approval.tool}${
+            approval.decidedBy === null ? "" : `\tby ${approval.decidedBy}`
+          }`
+          : jsonOutput(approval, verbose)
+      )
+    ))
+).pipe(Command.withDescription("Read one frozen invocation, as the caller that proposed it"))
 
 const approveCommand = Command.make(
   "approve",
   {
     id: Argument.string("approval-id"),
     by: Flag.string("by").pipe(Flag.optional, Flag.withDescription("Record who approved")),
-    text: textFlag()
+    text: textFlag(),
+    verbose: verboseFlag()
   },
-  ({ id, by, text: asText }) =>
+  ({ id, by, text: asText, verbose }) =>
     gatewayTask((client) =>
       client.request("POST", `/v1/approvals/${encodeURIComponent(id)}/approve`, {
         ...Option.match(by, { onNone: () => ({}), onSome: (value) => ({ decidedBy: value }) })
@@ -754,7 +977,7 @@ const approveCommand = Command.make(
       // The gateway performed the call. Approving discharged one frozen
       // invocation; it did not hand anyone a capability.
       return writeStdoutLine(
-        asText ? `Approved ${id}\t${text(outcome["status"])}` : jsonOutput(body, false)
+        asText ? `Approved ${id}\t${text(outcome["status"])}` : jsonOutput(body, verbose)
       )
     }))
 ).pipe(Command.withDescription("Approve a frozen invocation; the gateway then performs it"))
@@ -764,52 +987,92 @@ const denyCommand = Command.make(
   {
     id: Argument.string("approval-id"),
     by: Flag.string("by").pipe(Flag.optional),
-    text: textFlag()
+    text: textFlag(),
+    verbose: verboseFlag()
   },
-  ({ id, by, text: asText }) =>
+  ({ id, by, text: asText, verbose }) =>
     gatewayTask((client) =>
       client.request("POST", `/v1/approvals/${encodeURIComponent(id)}/deny`, {
         ...Option.match(by, { onNone: () => ({}), onSome: (value) => ({ decidedBy: value }) })
       })
     ).pipe(Effect.flatMap((result) =>
-      writeStdoutLine(asText ? `Denied ${id}` : jsonOutput(record(result), false))
+      writeStdoutLine(asText ? `Denied ${id}` : jsonOutput(record(result), verbose))
     ))
 ).pipe(Command.withDescription("Deny a frozen invocation"))
 
 const auditCommand = Command.make(
   "audit",
   {
-    limit: Flag.integer("limit").pipe(Flag.withDefault(20)),
+    limit: Flag.integer("limit").pipe(
+      Flag.withDefault(50),
+      Flag.withDescription("How many records to read (default: 50)")
+    ),
+    offset: offsetFlag(),
+    client: Flag.string("client").pipe(Flag.optional, Flag.withDescription("Only this client id")),
+    alias: Flag.string("alias").pipe(Flag.optional, Flag.withDescription("Only this alias")),
+    tool: Flag.string("tool").pipe(Flag.optional, Flag.withDescription("Only this tool")),
+    outcome: Flag.choice("outcome", ["succeeded", "failed", "denied", "pending"]).pipe(
+      Flag.optional,
+      Flag.withDescription("Only this outcome")
+    ),
+    since: Flag.string("since").pipe(
+      Flag.optional,
+      Flag.withDescription("Only records at or after this time (ISO 8601)")
+    ),
     text: textFlag(),
     verbose: verboseFlag()
   },
-  ({ limit, text: asText, verbose }) =>
-    gatewayTask((client) => client.request("GET", `/v1/audit?limit=${limit}`)).pipe(
-      Effect.flatMap((result) => {
-        const records = array(record(result)["records"])
-        const shown = visibleItems(records, verbose, limit)
-        if (asText) {
-          return writeStdoutLine(
-            shown.map((entry) =>
-              `${text(entry["createdAt"])}\t${text(entry["outcome"])}\t${text(entry["alias"])}.${
-                text(entry["tool"])
-              }\t${text(entry["subject"])}`
-            ).join("\n") || "No audit records."
-          )
-        }
-        return writeStdoutLine(jsonOutput({ records: shown }, verbose))
+  (options) =>
+    gatewayTask((client) => {
+      // The one listing read through a window rather than whole: the trail is
+      // permanent, so "all of it" grows without bound. It is filtered and
+      // windowed at the gateway rather than here for the same reason.
+      const parameters = new URLSearchParams({
+        limit: String(options.limit),
+        offset: String(Option.getOrElse(options.offset, () => 0))
       })
-    )
+      if (Option.isSome(options.client)) parameters.set("clientId", options.client.value)
+      if (Option.isSome(options.alias)) parameters.set("alias", options.alias.value)
+      if (Option.isSome(options.tool)) parameters.set("tool", options.tool.value)
+      if (Option.isSome(options.outcome)) parameters.set("outcome", options.outcome.value)
+      if (Option.isSome(options.since)) parameters.set("since", options.since.value)
+      return client.request("GET", `/v1/audit?${parameters.toString()}`)
+    }).pipe(Effect.flatMap((result) => {
+      const body = record(result)
+      const records = array(body["records"])
+      const total = typeof body["total"] === "number" ? body["total"] : records.length
+      const offset = typeof body["offset"] === "number" ? body["offset"] : 0
+      if (options.text) {
+        const lines = records.map((entry) =>
+          `${text(entry["createdAt"])}\t${text(entry["outcome"])}\t${text(entry["alias"])}.${
+            text(entry["tool"])
+          }\t${text(entry["subject"])}`
+        )
+        return writeStdoutLine(textBlock(
+          lines,
+          records.length < total
+            ? `Showing ${records.length} of ${total} (offset ${offset}).`
+            : undefined,
+          "No audit records."
+        ))
+      }
+      return writeStdoutLine(jsonOutput(
+        { records, count: total, showing: records.length, offset },
+        options.verbose
+      ))
+    }))
 ).pipe(Command.withDescription("Read the gateway's audit trail"))
 
 const driftCommand = Command.make(
   "drift",
   {
     integration: Argument.string("integration").pipe(Argument.optional),
+    limit: limitFlag(),
+    offset: offsetFlag(),
     text: textFlag(),
     verbose: verboseFlag()
   },
-  ({ integration, text: asText, verbose }) =>
+  ({ integration, limit, offset, text: asText, verbose }) =>
     gatewayTask((client) =>
       client.request(
         "POST",
@@ -819,22 +1082,33 @@ const driftCommand = Command.make(
       )
     ).pipe(Effect.flatMap((result) => {
       const reports = array(record(result)["reports"])
-      const entries: ReadonlyArray<Record<string, unknown>> = reports.flatMap((report) =>
-        array(report["entries"]).map((entry) => ({
-          ...entry,
-          integration: report["integration"]
-        }))
+      const baselines = reports.filter((report) => report["baseline"] === true)
+      const entries = sortedBy(
+        reports.flatMap((report): ReadonlyArray<Record<string, unknown>> =>
+          array(report["entries"]).map((entry) => ({ ...entry, integration: report["integration"] }))
+        ),
+        (entry) => `${text(entry["integration"])} ${text(entry["tool"])}`
       )
-      const shown = visibleItems(entries, verbose)
-      const hint = moreHint(shown.length, entries.length)
-      if (asText) {
-        const lines = shown.map((entry) =>
-          `${text(entry["kind"])}\t${text(entry["integration"])}.${text(entry["tool"])}`
-        )
-        if (hint !== undefined) lines.push(hint)
-        return writeStdoutLine(lines.join("\n") || "No drift since the last refresh.")
-      }
-      return writeStdoutLine(jsonOutput({ drift: shown, checked: reports.length }, verbose))
+      // A first sync has nothing to compare against. Saying so beats reporting
+      // an integration's entire surface as newly added.
+      const baselineNote = baselines.length === 0
+        ? undefined
+        : `Recorded a baseline for ${
+          baselines.map((report) => text(report["integration"])).join(", ")
+        }; drift is reported from the next refresh.`
+      return listing(page(entries, window(limit, offset)), {
+        key: "drift",
+        narrowing: "window with --limit/--offset",
+        asText,
+        verbose,
+        empty: baselineNote ?? "No drift since the last refresh.",
+        extra: {
+          checked: reports.length,
+          ...(baselineNote === undefined ? {} : { baseline: baselineNote })
+        },
+        line: (entry) => `${text(entry["kind"])}\t${text(entry["integration"])}.${text(entry["tool"])}`,
+        row: (entry) => entry
+      })
     }))
 ).pipe(
   Command.withDescription(
@@ -851,19 +1125,29 @@ const codegenCommand = Command.make(
         "effect: Effect Schema plus integration() steps for wf. ts: typed calls over the client"
       )
     ),
+    client: Flag.string("client").pipe(
+      Flag.optional,
+      Flag.withDescription("Generate the surface of another client's grants, by id")
+    ),
     out: Flag.string("out").pipe(
       Flag.optional,
       Flag.withDescription("Write to a file instead of stdout")
     )
   },
-  ({ target, out }) =>
+  ({ target, client: clientId, out }) =>
     gatewayTask(async (client) => {
-      // Generated from this key's grants, so the generated surface is the
-      // authorized surface. Adding a tool here means adding a grant.
-      const tools = await client.tools({ schemas: true })
+      // Generated from grants, so the generated surface is the authorized
+      // surface. Adding a tool here means adding a grant — for whichever client
+      // is being provisioned, which is usually not the one running this.
+      const forClient = Option.getOrUndefined(clientId)
+      const tools = forClient === undefined
+        ? await client.tools({ schemas: true })
+        : await client.clientTools(forClient, { schemas: true })
       if (tools.length === 0) {
         throw cliError(
-          "This key holds no grants, so there is nothing to generate. Run: integrations grant <client-id> <alias> <tool> --integration <slug>"
+          forClient === undefined
+            ? "This key holds no grants, so there is nothing to generate. Generate for another client with --client <id>, or run: integrations grant <client-id> <alias> <tool> --integration <slug>"
+            : `Client ${forClient} holds no grants, so there is nothing to generate.`
         )
       }
       const module_ = generateModule(target as CodegenTarget, tools, client.url)
@@ -876,38 +1160,56 @@ const codegenCommand = Command.make(
     }).pipe(Effect.flatMap((result) =>
       typeof result.module === "string"
         ? writeStdoutLine(result.module)
-        : writeStdoutLine(
-          `Wrote ${text(result.written)} (${result.tools} tool(s))`
-        )
+        : writeStdoutLine(`Wrote ${text(result.written)} (${result.tools} tool(s))`)
     ))
+).pipe(Command.withDescription("Generate typed bindings for the tools a key can reach"))
+
+const maintenanceCommand = Command.make(
+  "maintenance",
+  { text: textFlag() },
+  ({ text: asText }) =>
+    gatewayTask((client) => client.request("POST", "/v1/maintenance", {})).pipe(
+      Effect.flatMap((result) => {
+        const body = record(result)
+        return writeStdoutLine(
+          asText
+            ? `Expired ${text(body["expiredApprovals"])} approval(s) and ${
+              text(body["expiredAuditArguments"])
+            } audit argument record(s)`
+            : jsonOutput(body, false)
+        )
+      })
+    )
 ).pipe(
   Command.withDescription(
-    "Generate typed bindings for the tools this key can reach"
+    "Run the sweep the gateway runs on a clock: expire frozen calls and aged-out arguments"
   )
 )
 
 export const integrationsSubcommands = [
   discoverCommand,
   searchCommand,
-  listCommand,
+  integrationsCommand,
   toolsCommand,
   schemaCommand,
   connectCommand,
   connectionsCommand,
   disconnectCommand,
-  invokeCommand,
   executeCommand,
   validateCommand,
   clientsCommand,
   clientCommand,
   keyCommand,
+  keysCommand,
   grantCommand,
   grantsCommand,
-  toolsForKeyCommand,
+  revokeCommand,
   approvalsCommand,
+  approvalCommand,
   approveCommand,
   denyCommand,
   auditCommand,
   driftCommand,
-  codegenCommand
+  codegenCommand,
+  maintenanceCommand
 ] as const

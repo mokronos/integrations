@@ -33,18 +33,22 @@ describe("integrations CLI help", () => {
     for (const command of [
       "discover",
       "search",
-      "list",
+      "integrations",
       "tools",
       "schema",
       "connect",
       "connections",
       "disconnect",
-      "invoke",
       "execute",
       "validate",
       "grant",
+      "grants",
+      "revoke",
+      "keys",
+      "approval",
       "approve",
       "audit",
+      "maintenance",
       "serve",
       "install",
       "uninstall",
@@ -55,17 +59,31 @@ describe("integrations CLI help", () => {
     }
   })
 
-  test("every listing command offers --verbose", () => {
-    // Progressive output is on by default and --verbose opts out of it. This
-    // was reverted out of the old `wf i` tree by 16a656b; it is a requirement
-    // of this CLI rather than something to rediscover later.
-    for (const command of ["search", "list", "tools", "connections", "audit", "approvals"]) {
+  test("keeps the old names working as aliases", () => {
+    // Renaming a command in a CLI an agent has already been taught is a cost
+    // paid by whoever wrote the prompt, so the previous names keep resolving.
+    const result = runCli(["--help"])
+    expect(result.stdout).toContain("integrations, list")
+    expect(result.stdout).toContain("execute, invoke")
+  })
+
+  test("every listing command windows with --limit and --offset", () => {
+    // Listings return everything by default. What they must never do is drop
+    // rows silently — so the window is explicit, and it is the same window on
+    // every listing rather than a different mechanism per command.
+    for (
+      const command of ["integrations", "tools", "connections", "clients", "audit", "approvals"]
+    ) {
       const help = runCli([command, "--help"])
       expect(`${command}: ${help.exitCode}`).toBe(`${command}: 0`)
+      expect(`${command} has --limit: ${help.stdout.includes("--limit")}`)
+        .toBe(`${command} has --limit: true`)
+      expect(`${command} has --offset: ${help.stdout.includes("--offset")}`)
+        .toBe(`${command} has --offset: true`)
       expect(`${command} has --verbose: ${help.stdout.includes("--verbose")}`)
         .toBe(`${command} has --verbose: true`)
     }
-  }, 20_000)
+  }, 30_000)
 
   test("offers a detached start and a service install", () => {
     // Two ways to get a gateway that stays up: `&` without knowing about `&`,
@@ -96,7 +114,7 @@ describe("integrations CLI help", () => {
   })
 
   test("reports a missing gateway instead of failing obscurely", () => {
-    const result = runCli(["list"])
+    const result = runCli(["integrations"])
 
     expect(result.exitCode).toBe(1)
     expect(result.stderr).toContain("No gateway found")
