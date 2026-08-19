@@ -10,7 +10,9 @@ credential. Nothing else sees a credential. `i` and `integrations` are the same
 command.
 
 Commands print JSON by default; add `--text` for human-readable output, `-v` for
-full objects.
+full objects. Listings return every row — nothing is hidden — so narrow them
+yourself: `--filter` on `tools`, `--limit`/`--offset` on any listing, or a pipe
+into `jq`.
 
 ## Quickstart
 
@@ -21,7 +23,7 @@ i search linear                              # 1. find the integration's discove
 i discover https://mcp.linear.app/mcp        # 2. register it; returns slug, tools, auth templates
 i connect mcp_linear_app                     # 3. authorize (OAuth opens a browser)
 
-i tools mcp_linear_app --search issue        # browse tool names
+i tools mcp_linear_app --filter issue        # browse tool names
 i schema mcp_linear_app list_issues          # read one tool's input/output schema
 
 i grant <client-id> linear list_issues \
@@ -29,8 +31,14 @@ i grant <client-id> linear list_issues \
 i execute linear list_issues '{"limit":5}'   # 4b. call it as a delegated caller
 ```
 
-`i invoke <tool-address> '<json>'` is the privileged shortcut — use it to prove a
-fresh connection works, not for real calls.
+`i execute --direct <tool-address> '<json>'` runs with your own authority — use
+it to prove a fresh connection works, not for real calls.
+
+Every call answers in one shape: `{"status":"succeeded","result":…}`,
+`{"status":"pending","approvalId":…}`, `{"status":"denied","reason":…}`, or
+`{"status":"failed","message":…}`. `pending` means a human has to decide: poll
+`i approval <id>`, or just run the same call again — a retry meets the same
+frozen call rather than asking again, and collects the decision once it lands.
 
 ## Rules
 

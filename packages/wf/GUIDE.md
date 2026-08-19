@@ -8,7 +8,7 @@ Before running a workflow, tell the user about every action they may need to tak
 
 Never invent credentials, silently substitute a different service, or leave the user with a workflow that appears to hang. If `wf` prints a pending signal command, relay that command and the expected payload to the user verbatim.
 
-When OAuth is available, prefer `wf i connect` over asking the user
+When OAuth is available, prefer `integrations connect` over asking the user
 to create or copy a token. Before running it, tell the user which account will
 open in the browser, the scopes requested, and why the workflow needs them.
 Never request every advertised scope by default.
@@ -43,7 +43,7 @@ Start from the service URL instead of guessing protocol, auth, operation names,
 or schemas:
 
 ```sh
-wf i discover <mcp-endpoint-or-openapi-url>
+integrations discover <mcp-endpoint-or-openapi-url>
 ```
 
 `discover` delegates URL detection, MCP/OpenAPI registration, auth discovery,
@@ -52,15 +52,15 @@ integration slug. OAuth opens the browser and uses dynamic client registration
 when supported, PKCE, a loopback callback, and refresh:
 
 ```sh
-wf i connect <integration-slug>
-wf i connections
+integrations connect <integration-slug>
+integrations connections
 ```
 
 For an API key or bearer token, put the value in an environment variable and
 name that variable; never place the value on the command line:
 
 ```sh
-wf i connect <integration-slug> --credential-env SERVICE_TOKEN
+integrations connect <integration-slug> --credential-env SERVICE_TOKEN
 ```
 
 If the selected auth method declares several credential variables, map each one
@@ -72,10 +72,10 @@ the schemas for the one tool you settle on. Integration commands return JSON by
 default; use `--text` for a concise human-readable output:
 
 ```sh
-wf i tools <integration-slug>
-wf i tools <integration-slug> --text
-wf i tools --search <text>
-wf i schema <tool-name>
+integrations tools <integration-slug>
+integrations tools <integration-slug> --text
+integrations tools <integration-slug> --filter <text>
+integrations schema <tool-name>
 ```
 
 `schema` returns the Executor address for direct inspection, together with the
@@ -88,7 +88,7 @@ For a safe read-only smoke test, invoke the selected address directly before
 authoring:
 
 ```sh
-wf i invoke <tool-address> '{"query":"status"}'
+integrations execute --direct <tool-address> '{"query":"status"}'
 ```
 
 Author the node as
@@ -204,7 +204,7 @@ wf history <run-id>
 ## Continue from here
 
 When adapting this example to an authenticated API, do not place secret values
-in workflow inputs or source code. Use `wf i connect`, then persist
+in workflow inputs or source code. Use `integrations connect`, then persist
 only the selected integration slug, tool name, and optional credential tier in
 the workflow.
 

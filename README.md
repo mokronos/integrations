@@ -206,7 +206,7 @@ integrations tools <integration-slug>
 
 This returns the tool names and descriptions of each integration, grouped by
 integration and connection — enough to pick one without reading a hundred JSON
-Schemas. Use `--text` for concise human-readable output, and `--search <text>`
+Schemas. Use `--text` for concise human-readable output, and `--filter <text>`
 to keep only the tools whose name or description mentions it.
 
 Then ask for the one you picked:
@@ -227,7 +227,7 @@ string.
 Safely inspect a read-only tool before authoring:
 
 ```bash
-integrations invoke <tool-address> '{"query":"workflow integrations"}'
+integrations execute --direct <tool-address> '{"query":"workflow integrations"}'
 ```
 
 > Linear does not publish a stable list of MCP tool names, so the tool and

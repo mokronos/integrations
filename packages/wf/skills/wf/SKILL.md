@@ -67,7 +67,7 @@ human will read it.
    ```sh
    integrations list
    integrations connections
-   integrations tools --search '<capability>'
+   integrations tools <integration-slug> --filter '<capability>'
    ```
 
 2. If no connected tool fits, search the public catalog by service or
@@ -112,20 +112,21 @@ human will read it.
 
    ```sh
    integrations tools <integration-slug> --text
-   integrations tools <integration-slug> --search '<operation>' --text
-   integrations schema <integration-slug> <tool-name> --verbose
+   integrations tools <integration-slug> --filter '<operation>' --text
+   integrations schema <integration-slug> <tool-name>
    ```
 
-   Only `integrations schema --verbose` returns the complete input and output schemas;
-   the default output is truncated. It also returns the canonical `tools.<...>`
-   address. A bare tool name works only when unique.
+   `integrations tools` lists every tool, so narrow it with `--filter` or window
+   it with `--limit`/`--offset` rather than reading all of them. `integrations
+   schema` returns the complete input and output schemas as objects, and the
+   canonical `tools.<...>` address. A bare tool name works only when unique.
 
 6. Before authoring, live-validate each selected address. For a read-only tool,
    also use a minimal safe invocation when useful:
 
    ```sh
    integrations validate '<tool-address>' --text
-   integrations invoke '<tool-address>' '<minimal-json-input>'
+   integrations execute --direct '<tool-address>' '<minimal-json-input>'
    ```
 
    Direct address validation is live. Do not invoke a write tool merely as a

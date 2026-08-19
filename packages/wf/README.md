@@ -77,19 +77,19 @@ Start with one URL. The discovery command runs detection, auth discovery,
 registration, and tool-schema discovery:
 
 ```sh
-wf i search <service-or-capability>
-wf i discover https://mcp.example.com/mcp
-wf i connect <integration-slug>
-wf i tools <integration-slug> --search release
-wf i schema <tool-name> --verbose
-wf i invoke <tool-address> '{"query":"status"}'
-wf i connections
+integrations search <service-or-capability>
+integrations discover https://mcp.example.com/mcp
+integrations connect <integration-slug>
+integrations tools <integration-slug> --filter release
+integrations schema <tool-name> --verbose
+integrations execute --direct <tool-address> '{"query":"status"}'
+integrations connections
 ```
 
 The default connection is `default`. Integration commands return JSON by default;
 use `--text` for human-readable output. `tools` lists names and descriptions
-grouped by integration, narrowed by `--search`; `schema --verbose` returns one
-tool's address and full input and output schemas, from a bare tool name, an
+grouped by integration, narrowed by `--filter`; `schema` returns one tool's
+address and full input and output schemas, from a bare tool name, an
 integration slug plus a tool name, or a tool address.
 
 For API keys or bearer tokens, pass the name of an environment variable with

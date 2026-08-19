@@ -48,12 +48,12 @@ details. Explicit machine-detail modes such as `wf validate --json` remain lossl
 Integration discovery and execution use Executor for both MCP and OpenAPI:
 
 ```sh
-wf i discover https://mcp.example.com/mcp
-wf i search linear
-wf i connect <integration-slug>
-wf i tools <integration-slug> --search release
-wf i schema <tool-name>
-wf i invoke <tool-address> '{"query":"status"}'
+integrations discover https://mcp.example.com/mcp
+integrations search linear
+integrations connect <integration-slug>
+integrations tools <integration-slug> --filter release
+integrations schema <tool-name>
+integrations execute --direct <tool-address> '{"query":"status"}'
 ```
 
 The default connection is named `default`. Integration commands return compact
@@ -63,9 +63,9 @@ detection, auth discovery, registration, and tool discovery. For OAuth, `connect
 opens a browser and returns through a loopback callback.
 Multi-value API-key methods use comma-separated
 `--credential-values variable=ENV_NAME,...` mappings.
-Inspection is progressive: `tools` lists names and descriptions grouped by
-integration (narrow it with `--search`), and `schema` summarizes one named tool's
-address and input and output schemas. Add `--verbose` for the complete schemas.
+`tools` lists every tool's name and description (narrow it with `--filter`, or
+window it with `--limit`/`--offset`), and `schema` returns one named tool's
+address and its complete input and output schemas.
 `schema` takes a bare tool name while
 it is unique, an integration slug plus a tool name, or a tool address.
 Credentials are AES-GCM encrypted with a separate user-only key; workflows

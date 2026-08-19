@@ -55,6 +55,7 @@ createGatewayClient({ url, apiKey, fetch? })
 | Method | Meaning |
 | --- | --- |
 | `tools({ schemas? })` | The tools this key can reach. Grant-scoped, so an ungranted tool is absent rather than present-and-failing. Schemas are opt-in because they cost a catalog read per grant |
+| `clientTools(clientId, { schemas? })` | The tools *another* client can reach. Privileged — how you generate bindings for the client you are provisioning without holding its key |
 | `execute({ alias, tool, arguments? })` | Invoke a granted tool through its alias |
 | `approval(id)` | Read one approval record |
 | `health()` | `true` if the gateway answers |
@@ -91,22 +92,34 @@ outcomes:
 | `denied` | `{ status, reason }` | Policy refused it |
 | `failed` | `{ status, message }` | The call was attempted and failed |
 
+Every answer the policy produced is a value, `denied` and `failed` included:
+the gateway answered, and which answer it gave is yours to branch on. They
+travel on 403 and 502 so HTTP callers see them too, but `execute` decodes them
+rather than throwing. A thrown `GatewayError` means the gateway did not answer
+at all — bad key, no route, unreachable — and carries `status`, `body`, and a
+message taken from the gateway's `error` or the outcome's `reason`.
+
 `pending` is a first-class outcome rather than an error: blocking would hold a
-sandbox process open across a human's lunch break. When the human approves, the
-gateway performs the call itself and stores the result — the caller reads it on
-a later poll and never gains the capability.
+sandbox process open across a human's lunch break. Either way of waiting works:
 
 ```ts
 const outcome = await gateway.execute({ alias: "issues", tool: "create_issue", arguments: input })
 if (outcome.status === "pending") {
+  // Poll the record…
   const record = await gateway.approval(outcome.approvalId)
   // record.status: "pending" | "approved" | "denied" | "expired"
-  // record.result once approved
+  // record.result once approved; record.collectedAt once handed back
+
+  // …or just call again. The same arguments meet the same frozen call rather
+  // than asking a human twice, and the decision is delivered once it lands.
+  const later = await gateway.execute({ alias: "issues", tool: "create_issue", arguments: input })
 }
 ```
 
-Transport and protocol failures throw `GatewayError`, which carries `status`,
-`body`, and a message taken from the gateway's `error` field.
+That is what makes a retrying durable step correct: the retry is not a second
+request. Once the outcome has been collected, though, an identical call *is* a
+new request and needs its own decision — one approval is one invocation, never
+standing permission.
 
 ## Generated bindings
 
