@@ -59,5 +59,15 @@
   // The two React apps each own an `@/*` alias pointing at their own src, which
   // a single root project cannot resolve two ways. They are type-checked
   // through their own tsconfigs instead — see the `typecheck` script.
-  "exclude": ["**/dist", "node_modules", "**/.tmp/**", "apps/wf/web", "apps/integrations/web"]
+  // The vendored anti-slop Oxlint plugin is third-party tooling source, not
+  // owned project source: it is type-checked upstream and does not compile
+  // under this repo's stricter options. Oxlint ignores it too.
+  "exclude": [
+    "**/dist",
+    "node_modules",
+    "**/.tmp/**",
+    "apps/wf/web",
+    "apps/integrations/web",
+    "tools/oxlint/anti-slop"
+  ]
 }

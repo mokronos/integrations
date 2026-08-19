@@ -33,6 +33,7 @@
     "example:order-saga": "cd examples/order-saga && bun run main.ts",
     "example:approval": "cd examples/approval && bun run main.ts demo",
     "install:local": "bun run apps/cli/install-local.ts",
+    "lint": "oxlint",
     "prepare": "effect-language-service patch",
     "typecheck": "tsc --build --noEmit && tsc -p apps/wf/web && tsc -p apps/integrations/web",
     "test": "bun test",
@@ -41,8 +42,10 @@
   },
   "devDependencies": {
     "@effect/language-service": "^0.86.4",
+    "@oxlint/plugins": "1.79.0",
     "@types/bun": "latest",
     "effect-solutions": "^0.5.3",
+    "oxlint": "1.79.0",
     "typescript": "^6.0.3"
   }
 }
