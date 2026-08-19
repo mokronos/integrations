@@ -3,7 +3,12 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { Schema } from "effect"
-import type { ExecutorServices } from "@mokronos/wfkit-executor"
+import { ExecutorToolAddress } from "@mokronos/wfkit-executor"
+import type {
+  ExecutorConnection,
+  ExecutorServices,
+  ExecutorTool
+} from "@mokronos/wfkit-executor"
 import {
   Alias,
   ClientId,
@@ -39,8 +44,40 @@ const connection: ConnectionRef = {
 
 interface ExecutedCall {
   readonly address: string
-  readonly input: unknown
+  readonly input: typeof Schema.Json.Type
 }
+
+/** Members these tests never reach. Throwing is deliberate: a partial fake that
+ *  returned `undefined` would let a handler quietly start depending on one of
+ *  these and still pass. */
+const notStubbed = (member: string) => () => {
+  throw new Error(`stubExecutor: ${member} is not stubbed for these tests`)
+}
+
+/** Fills in the fields a vendor connection always carries so a test only has to
+ *  name the part it cares about. */
+const stubConnection = (
+  reference: { readonly integration: string; readonly name: string }
+): ExecutorConnection => ({
+  owner: "user",
+  name: reference.name,
+  integration: reference.integration,
+  template: reference.integration,
+  address: `connections.${reference.integration}.user.${reference.name}`,
+  provider: reference.integration
+})
+
+/** Fills in a tool's descriptive fields, which these tests never assert on. */
+const stubTool = (
+  tool: { readonly address: string; readonly name: string }
+): ExecutorTool => ({
+  address: ExecutorToolAddress.make(tool.address),
+  name: tool.name,
+  description: "",
+  integration: "gmail",
+  owner: "user",
+  connection: "work"
+})
 
 /** A stand-in for the Executor tool surface. The gateway's job is deciding
  *  whether a call happens and with which credential — not what the vendor
@@ -52,27 +89,50 @@ const stubExecutor = (behaviour: {
 } = {}) => {
   const calls: Array<ExecutedCall> = []
   const removed: Array<{ readonly integration: string; readonly name: string }> = []
-  const executor = {
+  const executor: ExecutorServices = {
     tools: {
-      execute: async (address: string, input: unknown) => {
-        calls.push({ address, input })
+      execute: async (address, input) => {
+        calls.push({ address: String(address), input })
         if (behaviour.fail === true) throw new Error("vendor exploded")
-        return { ok: true } as typeof Schema.Json.Type
+        return { ok: true }
       },
       summaries: async () => [],
-      describe: async () => ({}),
-      list: async () => behaviour.tools ?? []
+      describe: notStubbed("tools.describe"),
+      list: async () => (behaviour.tools ?? []).map(stubTool)
     },
     connections: {
-      list: async () => behaviour.connections ?? [],
-      remove: async (reference: { readonly integration: string; readonly name: string }) => {
-        removed.push(reference)
-      }
+      list: async () => (behaviour.connections ?? []).map(stubConnection),
+      remove: async (reference) => {
+        removed.push({ integration: reference.integration, name: reference.name })
+      },
+      create: notStubbed("connections.create"),
+      ensure: notStubbed("connections.ensure")
     },
-    provisioning: { provision: async () => ({ installed: true }) },
+    catalog: {
+      detectIntegration: notStubbed("catalog.detectIntegration"),
+      probeMcp: notStubbed("catalog.probeMcp"),
+      previewOpenApi: notStubbed("catalog.previewOpenApi"),
+      list: notStubbed("catalog.list"),
+      find: notStubbed("catalog.find"),
+      addMcp: notStubbed("catalog.addMcp"),
+      addOpenApi: notStubbed("catalog.addOpenApi")
+    },
+    auth: {
+      probe: notStubbed("auth.probe"),
+      registerClient: notStubbed("auth.registerClient"),
+      createClient: notStubbed("auth.createClient"),
+      start: notStubbed("auth.start"),
+      complete: notStubbed("auth.complete")
+    },
+    discovery: { inspect: notStubbed("discovery.inspect") },
+    provisioning: {
+      install: notStubbed("provisioning.install"),
+      provision: notStubbed("provisioning.provision")
+    },
+    validateIntegrationNode: notStubbed("validateIntegrationNode"),
     listIntegrationOverviews: async () => []
   }
-  return { calls, removed, executor: executor as unknown as ExecutorServices }
+  return { calls, removed, executor }
 }
 
 const setup = async (options: {

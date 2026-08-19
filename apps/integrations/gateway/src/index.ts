@@ -77,6 +77,7 @@ export {
 export type { InvocationOutcome, InvokeDependencies } from "./invoke.ts"
 
 export { diffSnapshots, refreshIntegrationSnapshot } from "./drift.ts"
+export type { ToolCatalogReader } from "./drift.ts"
 export type { DriftReport } from "./drift.ts"
 export { runMaintenance, startMaintenanceLoop } from "./maintenance.ts"
 export type { MaintenanceLoop, MaintenanceResult } from "./maintenance.ts"

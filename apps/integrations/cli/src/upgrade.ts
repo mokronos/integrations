@@ -83,7 +83,7 @@ export interface UnknownInstall {
   readonly location: string
 }
 
-export type InstallShape = WorkspaceInstall | PackageInstall | UnknownInstall
+export type InstallKind = WorkspaceInstall | PackageInstall | UnknownInstall
 
 /** A checkout is marked by `.git`, which is a directory in the main checkout
  *  and a *file* pointing at it in a worktree. Only accepting the directory
@@ -112,7 +112,7 @@ export interface InstallProbe {
 const isVirtual = (entry: string): boolean =>
   entry.startsWith("/$bunfs/") || entry.startsWith("B:\\~BUN\\")
 
-export const describeInstall = async (probe: InstallProbe): Promise<InstallShape> => {
+export const describeInstall = async (probe: InstallProbe): Promise<InstallKind> => {
   const location = isVirtual(probe.entry) ? probe.executable : probe.entry
   const owner = packageOwner(location)
   if (owner !== undefined) {
@@ -213,16 +213,16 @@ export interface UpgradeResult {
 
 const probeDefault = (): InstallProbe => ({ entry: Bun.main, executable: process.execPath })
 
-const describeShape = (shape: InstallShape, compiled: boolean): string => {
-  switch (shape._tag) {
+const describeInstallKind = (install: InstallKind, compiled: boolean): string => {
+  switch (install._tag) {
     case "workspace":
       return compiled
-        ? `a binary built from the checkout at ${shape.repository}`
-        : `a source checkout at ${shape.repository}`
+        ? `a binary built from the checkout at ${install.repository}`
+        : `a source checkout at ${install.repository}`
     case "package":
-      return `${shape.owner.name} installed by ${shape.manager} in ${shape.owner.root}`
+      return `${install.owner.name} installed by ${install.manager} in ${install.owner.root}`
     case "unknown":
-      return `an install this command does not recognise (${shape.location})`
+      return `an install this command does not recognise (${install.location})`
   }
 }
 
@@ -289,19 +289,19 @@ const upgradePackage = async (
 
 export const upgradeCli = async (options: UpgradeOptions): Promise<UpgradeResult> => {
   const probe = options.probe ?? probeDefault()
-  const shape = await describeInstall(probe)
+  const install = await describeInstall(probe)
   // A compiled binary built from this checkout keeps running the code it was
   // built from, so pulling sources is only half of its upgrade.
   const rebuildHint = isVirtual(probe.entry) ? options.rebuildHint : undefined
   if (options.check) {
-    const latest = shape._tag === "package"
+    const latest = install._tag === "package"
       ? await latestPublishedVersion(options.packageName)
       : undefined
     return {
       changed: false,
       lines: [
-        `Version ${options.currentVersion}, running from ${describeShape(shape, rebuildHint !== undefined)}.`,
-        ...(shape._tag === "package"
+        `Version ${options.currentVersion}, running from ${describeInstallKind(install, rebuildHint !== undefined)}.`,
+        ...(install._tag === "package"
           ? [
             latest === undefined
               ? `${options.packageName} is not published yet.`
@@ -309,7 +309,7 @@ export const upgradeCli = async (options: UpgradeOptions): Promise<UpgradeResult
               ? `${options.packageName} is up to date (${latest}).`
               : `${options.packageName} ${latest} is available. Upgrade with: ${options.command}`
           ]
-          : shape._tag === "workspace"
+          : install._tag === "workspace"
           ? [
             `Update it with: ${options.command} --pull, or git pull yourself.`,
             ...(rebuildHint === undefined ? [] : [`Then rebuild it with ${rebuildHint}`])
@@ -318,24 +318,24 @@ export const upgradeCli = async (options: UpgradeOptions): Promise<UpgradeResult
       ]
     }
   }
-  switch (shape._tag) {
+  switch (install._tag) {
     case "package":
-      return await upgradePackage(shape, options)
+      return await upgradePackage(install, options)
     case "workspace":
       return options.pull
-        ? await pullRepository(shape.repository, rebuildHint)
+        ? await pullRepository(install.repository, rebuildHint)
         : {
           changed: false,
           lines: [
             rebuildHint === undefined
-              ? `This is a source install: it runs the working tree at ${shape.repository} directly, so there is no published package to replace.`
-              : `This is a binary built from the checkout at ${shape.repository}, not a published package.`,
+              ? `This is a source install: it runs the working tree at ${install.repository} directly, so there is no published package to replace.`
+              : `This is a binary built from the checkout at ${install.repository}, not a published package.`,
             `Fast-forward the checkout with: ${options.command} --pull`
           ]
         }
     case "unknown":
       throw new Error(
-        `Cannot tell how this copy was installed (${shape.location}), so it cannot upgrade itself. Reinstall it with your package manager.`
+        `Cannot tell how this copy was installed (${install.location}), so it cannot upgrade itself. Reinstall it with your package manager.`
       )
   }
 }

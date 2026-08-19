@@ -2,7 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import type { ExecutorServices } from "@mokronos/wfkit-executor"
+import { ExecutorToolAddress } from "@mokronos/wfkit-executor"
+import type { ExecutorTool } from "@mokronos/wfkit-executor"
 import {
   Alias,
   ConnectionName,
@@ -17,7 +18,7 @@ import {
   runMaintenance,
   ToolName
 } from "../src/index.ts"
-import type { ConnectionRef, GatewayStore, ToolSnapshot } from "../src/index.ts"
+import type { ConnectionRef, GatewayStore, ToolCatalogReader, ToolSnapshot } from "../src/index.ts"
 
 const directories: Array<string> = []
 const stores: Array<GatewayStore> = []
@@ -46,24 +47,25 @@ const snapshot = (tool: string, input: unknown): ToolSnapshot => ({
   syncedAt: new Date()
 })
 
-/** Stands in for a vendor whose catalog we do not control. */
+/** Stands in for a vendor whose catalog we do not control. Satisfying
+ *  `ToolCatalogReader` rather than the whole Executor surface is what lets this
+ *  build a real, fully typed tool list without casting. */
 const executorWithTools = (
-  tools: ReadonlyArray<{ name: string; input: unknown }>
-): Pick<ExecutorServices, "tools"> =>
-  ({
-    tools: {
-      list: async () =>
-        tools.map((tool) => ({
-          address: `tools.tickets.org.default.${tool.name}`,
-          name: tool.name,
-          description: "",
-          integration: "tickets",
-          owner: "org",
-          connection: "default",
-          inputSchema: tool.input
-        }))
-    }
-  }) as unknown as Pick<ExecutorServices, "tools">
+  tools: ReadonlyArray<{ name: string; input: ExecutorTool["inputSchema"] }>
+): ToolCatalogReader => ({
+  tools: {
+    list: async () =>
+      tools.map((tool) => ({
+        address: ExecutorToolAddress.make(`tools.tickets.org.default.${tool.name}`),
+        name: tool.name,
+        description: "",
+        integration: "tickets",
+        owner: "org",
+        connection: "default",
+        inputSchema: tool.input
+      }))
+  }
+})
 
 describe("catalog drift", () => {
   test("reports nothing when a vendor has not moved", () => {

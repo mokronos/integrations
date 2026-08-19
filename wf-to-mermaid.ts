@@ -22,7 +22,7 @@ interface Node {
   id: string
   label: string
   class?: string
-  shape?: string
+  kind?: string
 }
 interface Edge {
   from: string
@@ -185,7 +185,7 @@ function buildGraph(steps: Step[], wfName: string, payloadStr: string): {
   nodes.push({
     id: startId,
     label: payloadStr ? `${wfName}<br/>(${payloadStr})` : wfName,
-    shape: "start"
+    kind: "start"
   })
   let lastId = startId
   let pendingLabel: string | undefined
@@ -240,7 +240,7 @@ function buildGraph(steps: Step[], wfName: string, payloadStr: string): {
   }
 
   const endId = nid()
-  nodes.push({ id: endId, label: "End", shape: "end" })
+  nodes.push({ id: endId, label: "End", kind: "end" })
   advance(endId)
   return { nodes, edges }
 }
@@ -257,8 +257,8 @@ function renderMermaid(nodes: Node[], edges: Edge[]): string {
 
   for (const n of nodes) {
     const label = mermaidEsc(n.label)
-    if (n.shape === "start") out += `    ${n.id}("${label}")\n`
-    else if (n.shape === "end") out += `    ${n.id}(["${label}"])\n`
+    if (n.kind === "start") out += `    ${n.id}("${label}")\n`
+    else if (n.kind === "end") out += `    ${n.id}(["${label}"])\n`
     else out += `    ${n.id}["${label}"]\n`
     if (n.class) out += `    class ${n.id} ${n.class};\n`
   }

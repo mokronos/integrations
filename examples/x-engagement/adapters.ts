@@ -191,7 +191,7 @@ export const selectCandidates = async (input: SelectCandidatesInput): Promise<Re
       content: JSON.stringify({
         maxCandidates: input.maxCandidates,
         posts: filtered.map((post) => ({ id: post.id, author: post.author, text: post.text })),
-        responseShape: [{ postId: "string", reason: "one line" }]
+        responseFormat: [{ postId: "string", reason: "one line" }]
       })
     }
   ])

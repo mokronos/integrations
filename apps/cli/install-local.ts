@@ -201,8 +201,8 @@ const main = async (): Promise<void> => {
     if (options.mode === "compiled" && installable.name === "wf") await installCompiled(target)
     else await installShim(target, installable.entry)
     await chmod(target, 0o755).catch(() => undefined)
-    const shape = options.mode === "compiled" && installable.name === "wf" ? "compiled" : "source"
-    console.log(`installed ${installable.name} -> ${target} (${shape})`)
+    const installKind = options.mode === "compiled" && installable.name === "wf" ? "compiled" : "source"
+    console.log(`installed ${installable.name} -> ${target} (${installKind})`)
     await reportShadowing(target)
   }
 

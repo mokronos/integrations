@@ -10,7 +10,7 @@ import type { GatewayStore } from "./store.ts"
  * The failure direction is already safe: a grant that no longer matches denies
  * rather than allows. What is missing without this is the *signal*, so a
  * workflow does not die at 3am with "tool not found" and no explanation. */
-const shapeOf = (snapshot: Pick<ToolSnapshot, "inputSchema" | "outputSchema">): string =>
+const schemaFingerprint = (snapshot: Pick<ToolSnapshot, "inputSchema" | "outputSchema">): string =>
   JSON.stringify([snapshot.inputSchema ?? null, snapshot.outputSchema ?? null])
 
 export const diffSnapshots = (
@@ -36,7 +36,7 @@ export const diffSnapshots = (
       })
       continue
     }
-    if (shapeOf(existing) !== shapeOf(snapshot)) {
+    if (schemaFingerprint(existing) !== schemaFingerprint(snapshot)) {
       entries.push({
         kind: "changed",
         integration: snapshot.integration,
@@ -59,6 +59,14 @@ export const diffSnapshots = (
   return entries
 }
 
+/** The single Executor capability drift detection needs: re-reading what a
+ *  vendor exposes right now. Naming the narrow contract here means a stand-in
+ *  satisfies it honestly, instead of impersonating the whole Executor surface
+ *  and casting the gap away. */
+export interface ToolCatalogReader {
+  readonly tools: Pick<ExecutorServices["tools"], "list">
+}
+
 export interface DriftReport {
   readonly integration: string
   readonly entries: ReadonlyArray<DriftEntry>
@@ -77,7 +85,7 @@ export interface DriftReport {
 export const refreshIntegrationSnapshot = async (
   dependencies: {
     readonly store: GatewayStore
-    readonly executor: Pick<ExecutorServices, "tools">
+    readonly executor: ToolCatalogReader
   },
   integration: string
 ): Promise<DriftReport> => {
