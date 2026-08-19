@@ -7,6 +7,7 @@ import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query"
 
 import * as gateway from "@/lib/gateway"
 import type { ApprovalStatus } from "@/lib/schemas"
+import type { AuditQuery } from "@/lib/gateway"
 
 /** Query keys, in one place so an invalidation cannot miss a view.
  *
@@ -20,7 +21,7 @@ export const keys = {
   clients: ["clients"] as const,
   grants: (clientId: string) => ["grants", clientId] as const,
   approvals: (status: ApprovalStatus | "all") => ["approvals", status] as const,
-  audit: (limit: number) => ["audit", limit] as const
+  audit: (input: AuditQuery) => ["audit", input] as const
 }
 
 export const useIntegrations = () =>
@@ -55,8 +56,8 @@ export const useApprovals = (status: ApprovalStatus | "all") =>
     refetchInterval: status === "pending" ? 5_000 : false
   })
 
-export const useAudit = (limit: number) =>
-  useQuery({ queryKey: keys.audit(limit), queryFn: () => gateway.listAudit(limit) })
+export const useAudit = (input: AuditQuery) =>
+  useQuery({ queryKey: keys.audit(input), queryFn: () => gateway.listAudit(input) })
 
 export type { UseMutationResult, UseQueryResult }
 

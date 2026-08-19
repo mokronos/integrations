@@ -9,6 +9,7 @@ import { ClientsRoute } from "@/routes/clients"
 import { ExecutionsRoute } from "@/routes/executions"
 import { IntegrationsRoute } from "@/routes/integrations"
 import { SystemRoute } from "@/routes/system"
+import { WorkbenchRoute } from "@/routes/workbench"
 
 export default function App() {
   const [dark, setDark] = useState(() => localStorage.getItem("gateway-theme") !== "light")
@@ -30,6 +31,7 @@ export default function App() {
           <Route path="/clients/:clientId" element={<ClientDetailRoute />} />
           <Route path="/approvals" element={<ApprovalsRoute />} />
           <Route path="/executions" element={<ExecutionsRoute />} />
+          <Route path="/workbench" element={<WorkbenchRoute />} />
           <Route path="/system" element={<SystemRoute />} />
           <Route path="*" element={<Navigate to="/integrations" replace />} />
         </Route>

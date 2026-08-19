@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from "react-router"
-import { Activity, KeyRound, Moon, Plug, ShieldCheck, Sun, Wrench } from "lucide-react"
+import { Activity, Braces, KeyRound, Moon, Plug, ShieldCheck, Sun, Wrench } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
@@ -11,6 +11,7 @@ const navigation = [
   { to: "/clients", label: "Clients", icon: KeyRound },
   { to: "/approvals", label: "Approvals", icon: ShieldCheck },
   { to: "/executions", label: "Executions", icon: Activity },
+  { to: "/workbench", label: "Workbench", icon: Braces },
   { to: "/system", label: "System", icon: Wrench }
 ] as const
 

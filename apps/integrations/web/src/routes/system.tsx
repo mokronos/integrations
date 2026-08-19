@@ -107,7 +107,13 @@ export function SystemRoute() {
                       </span>
                     </div>
                     {report.entries.length === 0
-                      ? <p className="text-muted-foreground mt-1 text-sm">Unchanged.</p>
+                      ? (
+                        <p className="text-muted-foreground mt-1 text-sm">
+                          {report.baseline === true
+                            ? "Baseline recorded. Future refreshes report changes from here."
+                            : "Unchanged."}
+                        </p>
+                      )
                       : (
                         <ul className="mt-2 space-y-1">
                           {report.entries.map((entry) => (

@@ -47,6 +47,12 @@
       "bun": "./src/integration-model.ts",
       "development": "./src/integration-model.ts",
       "default": "./dist/integration-model.js"
+    },
+    "./registry": {
+      "types": "./dist/registry.d.ts",
+      "bun": "./src/registry.ts",
+      "development": "./src/registry.ts",
+      "default": "./dist/registry.js"
     }
   },
   "scripts": {

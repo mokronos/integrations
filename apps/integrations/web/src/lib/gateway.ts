@@ -13,16 +13,20 @@ import {
   decodeDiscovery,
   decodeDrift,
   decodeGrant,
+  decodeGrantedTools,
   decodeGrants,
   decodeIntegrations,
   decodeInvocation,
   decodeIssuedKey,
+  decodeKeys,
   decodeMaintenance,
   decodeOAuthSession,
   decodeRemoved,
+  decodeRegistrySearch,
   decodeRevoked,
   decodeTool,
-  decodeTools
+  decodeTools,
+  decodeValidation
 } from "@/lib/schemas"
 import type { ApprovalStatus, GrantDecision } from "@/lib/schemas"
 
@@ -131,6 +135,15 @@ export const describeTool = async (input: {
     }`
   ))
 
+export const searchRegistry = async (input: {
+  readonly query: string
+  readonly kind?: "mcp" | "openapi" | "graphql" | "cli"
+  readonly limit?: number
+}) => decodeRegistrySearch(await request(
+  "GET",
+  `/v1/registry/search${query({ q: input.query, kind: input.kind, limit: input.limit })}`
+))
+
 export const discoverIntegration = async (input: {
   readonly url: string
   readonly connection?: string
@@ -184,6 +197,18 @@ export const createClient = async (input: {
 export const issueKey = async (clientId: string) =>
   decodeIssuedKey(await request("POST", `/v1/clients/${segment(clientId)}/keys`))
 
+export const listKeys = async (clientId: string) =>
+  decodeKeys(await request("GET", `/v1/clients/${segment(clientId)}/keys`)).keys
+
+export const revokeKey = async (keyId: string) =>
+  decodeRevoked(await request("POST", `/v1/keys/${segment(keyId)}/revoke`))
+
+export const listClientTools = async (clientId: string, schemas = false) =>
+  decodeGrantedTools(await request(
+    "GET",
+    `/v1/clients/${segment(clientId)}/tools${query({ schemas: schemas ? "true" : undefined })}`
+  )).tools
+
 export const revokeClient = async (clientId: string) =>
   decodeRevoked(await request("POST", `/v1/clients/${segment(clientId)}/revoke`))
 
@@ -226,8 +251,38 @@ export const denyApproval = async (input: {
     { decidedBy: input.decidedBy }
   ))
 
-export const listAudit = async (limit: number) =>
-  decodeAudit(await request("GET", `/v1/audit${query({ limit })}`)).records
+export type AuditQuery = {
+  readonly limit: number
+  readonly offset: number
+  readonly clientId?: string
+  readonly alias?: string
+  readonly tool?: string
+  readonly outcome?: "succeeded" | "failed" | "denied" | "pending"
+  readonly since?: string
+}
+
+export const listAudit = async (input: AuditQuery) => {
+  const response = decodeAudit(await request("GET", `/v1/audit${query({
+    limit: input.limit,
+    offset: input.offset,
+    clientId: input.clientId,
+    alias: input.alias,
+    tool: input.tool,
+    outcome: input.outcome,
+    since: input.since
+  })}`))
+  return {
+    records: response.records,
+    total: response.total ?? response.records.length,
+    limit: response.limit ?? input.limit,
+    offset: response.offset ?? input.offset
+  }
+}
+
+export const validateNode = async (input: {
+  readonly node: JsonEncodable
+  readonly live: boolean
+}) => decodeValidation(await request("POST", "/v1/validate", input))
 
 export const refreshDrift = async (integration?: string) =>
   decodeDrift(await request("POST", `/v1/drift/refresh${query({ integration })}`)).reports

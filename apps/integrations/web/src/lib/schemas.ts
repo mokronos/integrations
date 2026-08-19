@@ -1,14 +1,23 @@
 import { Schema } from "effect"
 import {
+  ApiKey,
   ApprovalStatus as ApprovalStatusSchema,
   AuditRecord,
+  AuditOutcome,
   Client,
   DriftEntry,
   Grant,
   GrantDecision as GrantDecisionSchema,
   PendingApproval
 } from "@mokronos/integrations/domain"
-import { IntegrationDiscovery } from "@mokronos/wfkit-executor/integration-model"
+import {
+  IntegrationDiscovery,
+  IntegrationValidationReport
+} from "@mokronos/wfkit-executor/integration-model"
+import {
+  IntegrationSearchKind,
+  IntegrationSearchResponse
+} from "@mokronos/wfkit-executor/registry"
 import {
   ExecutorConnection,
   ExecutorTool,
@@ -27,6 +36,7 @@ import {
 
 export type {
   AuditRecord,
+  AuditOutcome,
   Client,
   DriftEntry,
   ExecutorConnection,
@@ -68,13 +78,41 @@ export const GrantsResponse = Schema.Struct({
   grants: Schema.Array(Grant)
 })
 
+export const GrantedTool = Schema.Struct({
+  alias: Grant.fields.alias,
+  tool: Grant.fields.tool,
+  integration: Schema.String,
+  decision: Grant.fields.decision,
+  inputSchema: Schema.optional(Schema.Json),
+  outputSchema: Schema.optional(Schema.Json)
+})
+export type GrantedTool = typeof GrantedTool.Type
+
+export const GrantedToolsResponse = Schema.Struct({ tools: Schema.Array(GrantedTool) })
+
 export const ApprovalsResponse = Schema.Struct({
   approvals: Schema.Array(PendingApproval)
 })
 
 export const AuditResponse = Schema.Struct({
-  records: Schema.Array(AuditRecord)
+  records: Schema.Array(AuditRecord),
+  // Optional for rolling upgrades: older gateway processes returned only rows.
+  total: Schema.optional(Schema.Number),
+  limit: Schema.optional(Schema.Number),
+  offset: Schema.optional(Schema.Number)
 })
+export type AuditResponse = typeof AuditResponse.Type
+
+export const ApiKeySummary = Schema.Struct({
+  id: ApiKey.fields.id,
+  clientId: ApiKey.fields.clientId,
+  createdAt: ApiKey.fields.createdAt,
+  lastUsedAt: ApiKey.fields.lastUsedAt,
+  revokedAt: ApiKey.fields.revokedAt
+})
+export type ApiKeySummary = typeof ApiKeySummary.Type
+
+export const KeysResponse = Schema.Struct({ keys: Schema.Array(ApiKeySummary) })
 
 export const ToolsResponse = Schema.Struct({
   tools: Schema.Array(ExecutorToolSummary)
@@ -118,7 +156,8 @@ export type OAuthSession = typeof OAuthSession.Type
 export const DriftReport = Schema.Struct({
   integration: Schema.String,
   entries: Schema.Array(DriftEntry),
-  checkedAt: Schema.Date
+  checkedAt: Schema.Date,
+  baseline: Schema.optional(Schema.Boolean)
 })
 export type DriftReport = typeof DriftReport.Type
 
@@ -148,8 +187,10 @@ export const decodeIntegrations = json(IntegrationsResponse)
 export const decodeConnections = json(ConnectionsResponse)
 export const decodeClients = json(ClientsResponse)
 export const decodeGrants = json(GrantsResponse)
+export const decodeGrantedTools = json(GrantedToolsResponse)
 export const decodeApprovals = json(ApprovalsResponse)
 export const decodeAudit = json(AuditResponse)
+export const decodeKeys = json(KeysResponse)
 export const decodeTools = json(ToolsResponse)
 export const decodeTool = json(ExecutorTool)
 export const decodeIssuedKey = json(IssuedKey)
@@ -163,6 +204,8 @@ export const decodeRemoved = json(Removed)
 export const decodeClient = json(Client)
 export const decodeGrant = json(Grant)
 export const decodeInvocation = json(InvocationResult)
+export const decodeRegistrySearch = json(IntegrationSearchResponse)
+export const decodeValidation = json(IntegrationValidationReport)
 
 /** Values arriving from a widget are strings; these turn them back into the
  * domain's own types rather than asserting them. A Select that somehow yields
@@ -171,6 +214,12 @@ export const decodeInvocation = json(InvocationResult)
 export const decodeGrantDecision = Schema.decodeUnknownSync(GrantDecisionSchema)
 export const decodeApprovalFilter = Schema.decodeUnknownSync(
   Schema.Union([ApprovalStatusSchema, Schema.Literal("all")])
+)
+export const decodeIntegrationSearchFilter = Schema.decodeUnknownSync(
+  Schema.Union([IntegrationSearchKind, Schema.Literal("__all__")])
+)
+export const decodeAuditOutcomeFilter = Schema.decodeUnknownSync(
+  Schema.Union([AuditOutcome, Schema.Literal("all")])
 )
 
 /** `approve` performs the call, so it answers with both the settled approval

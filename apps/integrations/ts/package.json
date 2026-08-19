@@ -21,6 +21,12 @@
       "bun": "./src/index.ts",
       "development": "./src/index.ts",
       "default": "./dist/index.js"
+    },
+    "./codegen": {
+      "types": "./dist/codegen.d.ts",
+      "bun": "./src/codegen.ts",
+      "development": "./src/codegen.ts",
+      "default": "./dist/codegen.js"
     }
   },
   "scripts": {

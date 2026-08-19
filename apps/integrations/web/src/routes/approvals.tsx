@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Check, ShieldCheck, X } from "lucide-react"
 import { toast } from "sonner"
 
@@ -7,9 +7,11 @@ import { LoadingRows, Page, QueryError, ReloadButton } from "@/components/page"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { until, when } from "@/lib/format"
 import * as gateway from "@/lib/gateway"
+import { whenPresent } from "@/lib/optional"
 import { useApprovals, useInvalidate, useMutation } from "@/lib/queries"
 import { decodeApprovalFilter } from "@/lib/schemas"
 import type { ApprovalStatus, PendingApproval } from "@/lib/schemas"
@@ -25,13 +27,27 @@ const statusVariant = {
 
 function ApprovalCard({ approval }: { readonly approval: PendingApproval }) {
   const invalidate = useInvalidate()
-  const expired = approval.expiresAt.getTime() <= Date.now()
+  const [expired, setExpired] = useState(false)
+  const [decidedBy, setDecidedBy] = useState("")
+
+  useEffect(() => {
+    if (approval.status !== "pending") return
+    const remaining = approval.expiresAt.getTime() - Date.now()
+    const timer = window.setTimeout(() => setExpired(true), Math.max(0, remaining))
+    return () => window.clearTimeout(timer)
+  }, [approval.expiresAt, approval.status])
 
   const decide = useMutation({
     mutationFn: (verdict: "approve" | "deny") =>
       verdict === "approve"
-        ? gateway.approveApproval({ id: approval.id })
-        : gateway.denyApproval({ id: approval.id }),
+        ? gateway.approveApproval({
+          id: approval.id,
+          ...whenPresent("decidedBy", decidedBy.trim() || undefined)
+        })
+        : gateway.denyApproval({
+          id: approval.id,
+          ...whenPresent("decidedBy", decidedBy.trim() || undefined)
+        }),
     onSuccess: (_, verdict) => {
       invalidate(["approvals"], ["audit"])
       toast.success(verdict === "approve" ? "Approved and performed" : "Denied")
@@ -72,7 +88,14 @@ function ApprovalCard({ approval }: { readonly approval: PendingApproval }) {
 
         {approval.status === "pending"
           ? (
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
+              <Input
+                className="h-8 max-w-48"
+                value={decidedBy}
+                onChange={(event) => setDecidedBy(event.target.value)}
+                placeholder="Decided by (optional)"
+                aria-label="Decided by"
+              />
               <Button
                 size="sm"
                 onClick={() => decide.mutate("approve")}

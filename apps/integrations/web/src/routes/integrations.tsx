@@ -1,7 +1,7 @@
-import { whenPresent, whenPresentFields, whenPresentMap } from "@/lib/optional"
+import { whenPresent, whenPresentMap } from "@/lib/optional"
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router"
-import { ExternalLink, Plug, Search, Unplug } from "lucide-react"
+import { Download, ExternalLink, Plug, Search, Unplug } from "lucide-react"
 import { toast } from "sonner"
 
 import { JsonView } from "@/components/json-view"
@@ -30,7 +30,13 @@ import {
 import { Separator } from "@/components/ui/separator"
 import * as gateway from "@/lib/gateway"
 import { keys, useIntegrations, useInvalidate, useMutation } from "@/lib/queries"
-import type { ExecutorConnection, ExecutorTool, IntegrationOverview } from "@/lib/schemas"
+import {
+  decodeIntegrationSearchFilter,
+  type ExecutorConnection,
+  type ExecutorTool,
+  type IntegrationOverview
+} from "@/lib/schemas"
+import type { IntegrationSearchKind, IntegrationSearchMatch } from "@mokronos/wfkit-executor/registry"
 import { when } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
@@ -48,6 +54,147 @@ function ConnectionBadge({ integration }: { readonly integration: IntegrationOve
     <Badge variant={integration.requiresAuthentication ? "destructive" : "secondary"}>
       {integration.requiresAuthentication ? "needs auth" : "not connected"}
     </Badge>
+  )
+}
+
+const ALL_KINDS = "__all__"
+
+/** Search is deliberately next to discovery: the registry finds an exact
+ * installable endpoint, then the existing provisioning path owns installation. */
+function RegistrySearchDialog() {
+  const invalidate = useInvalidate()
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState("")
+  const [kind, setKind] = useState<IntegrationSearchKind | typeof ALL_KINDS>(ALL_KINDS)
+  const [results, setResults] = useState<ReadonlyArray<IntegrationSearchMatch>>([])
+  const [installing, setInstalling] = useState<string | undefined>()
+
+  const search = useMutation({
+    mutationFn: () => gateway.searchRegistry({
+      query: query.trim(),
+      ...whenPresent("kind", kind === ALL_KINDS ? undefined : kind),
+      limit: 12
+    }),
+    onSuccess: (response) => setResults(response.results),
+    onError: (error: Error) => toast.error("Search failed", { description: error.message })
+  })
+
+  const install = useMutation({
+    mutationFn: (url: string) => {
+      setInstalling(url)
+      return gateway.discoverIntegration({ url })
+    },
+    onSuccess: (result) => {
+      invalidate(keys.integrations, keys.connections)
+      toast.success(`Installed ${result.integration.name}`, {
+        description: `${result.tools.length} tools discovered`
+      })
+      setOpen(false)
+    },
+    onError: (error: Error) => toast.error("Installation failed", { description: error.message }),
+    onSettled: () => setInstalling(undefined)
+  })
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button><Search className="size-4" /> Find integration</Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Find an integration</DialogTitle>
+          <DialogDescription>
+            Search integrations.sh by service, domain, or capability, then install an exact MCP or OpenAPI endpoint.
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          className="flex gap-2"
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (query.trim().length > 0) search.mutate()
+          }}
+        >
+          <div className="relative flex-1">
+            <Search className="text-muted-foreground absolute left-2.5 top-1/2 size-4 -translate-y-1/2" />
+            <Input
+              className="pl-8"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Slack, github.com, issue tracking…"
+            />
+          </div>
+          <Select
+            value={kind}
+            onValueChange={(value) => setKind(decodeIntegrationSearchFilter(value))}
+          >
+            <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_KINDS}>Any kind</SelectItem>
+              <SelectItem value="mcp">MCP</SelectItem>
+              <SelectItem value="openapi">OpenAPI</SelectItem>
+              <SelectItem value="graphql">GraphQL</SelectItem>
+              <SelectItem value="cli">CLI</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button type="submit" disabled={query.trim().length === 0 || search.isPending}>
+            {search.isPending ? "Searching…" : "Search"}
+          </Button>
+        </form>
+
+        <div className="max-h-[28rem] space-y-2 overflow-y-auto pr-1">
+          {!search.isPending && results.length === 0
+            ? (
+              <div className="text-muted-foreground rounded-lg border border-dashed px-4 py-10 text-center text-sm">
+                {search.isSuccess ? "No matching integrations." : "Search the public registry to begin."}
+              </div>
+            )
+            : results.map((result) => {
+              const installable = result.surfaces.filter(
+                (surface) => surface.discoveryUrl !== undefined
+              )
+              return (
+                <div key={result.domain} className="space-y-3 rounded-lg border p-3">
+                  <div className="flex items-start gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium">{result.name}</span>
+                        {result.kinds.map((value) => <Badge key={value} variant="outline">{value}</Badge>)}
+                      </div>
+                      <p className="text-muted-foreground mt-1 text-sm">{result.description}</p>
+                      <a
+                        className="text-muted-foreground mt-1 inline-flex items-center gap-1 text-xs hover:text-foreground"
+                        href={result.url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {result.domain}<ExternalLink className="size-3" />
+                      </a>
+                    </div>
+                  </div>
+                  {installable.length === 0
+                    ? <p className="text-muted-foreground text-xs">No browser-installable surface was published.</p>
+                    : (
+                      <div className="flex flex-wrap gap-2">
+                        {installable.map((surface) => (
+                          <Button
+                            key={`${surface.type}-${surface.slug}`}
+                            size="sm"
+                            variant="outline"
+                            onClick={() => install.mutate(surface.discoveryUrl ?? "")}
+                            disabled={install.isPending}
+                          >
+                            <Download className="size-3" />
+                            {installing === surface.discoveryUrl ? "Installing…" : `Install ${surface.name}`}
+                          </Button>
+                        ))}
+                      </div>
+                    )}
+                </div>
+              )
+            })}
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -130,19 +277,33 @@ function ConnectDialog({ integration }: { readonly integration: IntegrationOverv
   const [name, setName] = useState("default")
   const [template, setTemplate] = useState(integration.authMethods[0]?.template ?? "")
   const [token, setToken] = useState("")
+  const [credentialValues, setCredentialValues] = useState<Readonly<Record<string, string>>>({})
+  const [oauthClientId, setOAuthClientId] = useState("")
+  const [oauthClientSecret, setOAuthClientSecret] = useState("")
   const [session, setSession] = useState<string | undefined>()
 
   const method = integration.authMethods.find((candidate) => candidate.template === template)
   const isOAuth = method?.kind === "oauth"
+  const credentialVariables = [...new Set(
+    (method?.placements ?? []).flatMap((placement) =>
+      placement.variable === undefined ? [] : [placement.variable]
+    )
+  )]
 
   const connect = useMutation({
-    mutationFn: () =>
-      gateway.createConnection({
+    mutationFn: () => {
+      const values = credentialVariables.length === 0
+        ? token.length === 0 ? undefined : { token }
+        : credentialVariables.some((variable) => (credentialValues[variable] ?? "").length > 0)
+        ? credentialValues
+        : undefined
+      return gateway.createConnection({
         integration: integration.slug,
         connection: name,
         ...whenPresent("template", template || undefined),
-        ...whenPresentFields(token || undefined, (present) => ({ values: { token: present } }))
-      }),
+        ...whenPresent("values", values)
+      })
+    },
     onSuccess: (result) => {
       invalidate(keys.integrations, keys.connections)
       toast.success(`Connected ${integration.name}`, {
@@ -150,6 +311,7 @@ function ConnectDialog({ integration }: { readonly integration: IntegrationOverv
       })
       setOpen(false)
       setToken("")
+      setCredentialValues({})
     },
     onError: (error: Error) => toast.error("Could not connect", { description: error.message })
   })
@@ -159,7 +321,9 @@ function ConnectDialog({ integration }: { readonly integration: IntegrationOverv
       gateway.startOAuth({
         integration: integration.slug,
         connection: name,
-        ...whenPresent("template", template || undefined)
+        ...whenPresent("template", template || undefined),
+        ...whenPresent("clientId", oauthClientId.trim() || undefined),
+        ...whenPresent("clientSecret", oauthClientSecret || undefined)
       }),
     onSuccess: (started) => {
       setSession(started.id)
@@ -237,7 +401,43 @@ function ConnectDialog({ integration }: { readonly integration: IntegrationOverv
               </Select>
             </div>
           )}
-          {isOAuth ? null : (
+          {isOAuth
+            ? (
+              <div className="grid gap-3 rounded-lg border p-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="oauth-client-id">OAuth client ID <span className="text-muted-foreground">(optional)</span></Label>
+                  <Input id="oauth-client-id" value={oauthClientId} onChange={(event) => setOAuthClientId(event.target.value)} placeholder="Use dynamic registration" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="oauth-client-secret">Client secret <span className="text-muted-foreground">(optional)</span></Label>
+                  <Input id="oauth-client-secret" type="password" value={oauthClientSecret} onChange={(event) => setOAuthClientSecret(event.target.value)} />
+                </div>
+                <p className="text-muted-foreground text-xs sm:col-span-2">
+                  Leave these blank when the provider supports dynamic client registration.
+                </p>
+              </div>
+            )
+            : credentialVariables.length > 0
+            ? (
+              <div className="space-y-3">
+                {credentialVariables.map((variable) => (
+                  <div key={variable} className="space-y-1.5">
+                    <Label htmlFor={`credential-${variable}`}>{variable}</Label>
+                    <Input
+                      id={`credential-${variable}`}
+                      type="password"
+                      value={credentialValues[variable] ?? ""}
+                      onChange={(event) => setCredentialValues({
+                        ...credentialValues,
+                        [variable]: event.target.value
+                      })}
+                      placeholder={`Paste ${variable}`}
+                    />
+                  </div>
+                ))}
+              </div>
+            )
+            : (
             <div className="space-y-1.5">
               <Label htmlFor="connect-token">Token</Label>
               <Input
@@ -248,7 +448,7 @@ function ConnectDialog({ integration }: { readonly integration: IntegrationOverv
                 placeholder="Paste the API key or token"
               />
             </div>
-          )}
+            )}
         </div>
         <DialogFooter>
           {isOAuth
@@ -449,7 +649,7 @@ export function IntegrationsRoute() {
   const integrations = useIntegrations()
   const [filter, setFilter] = useState("")
 
-  const all = integrations.data ?? []
+  const all = useMemo(() => integrations.data ?? [], [integrations.data])
   const selected = all.find((integration) => integration.slug === slug) ?? all[0]
 
   const listed = useMemo(() => {
@@ -466,6 +666,7 @@ export function IntegrationsRoute() {
       description="What this gateway knows how to reach, and which of it is connected."
       actions={
         <>
+          <RegistrySearchDialog />
           <DiscoverDialog />
           <ReloadButton
             onClick={() => void integrations.refetch()}
