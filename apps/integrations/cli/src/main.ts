@@ -4,6 +4,7 @@ import { Data, Effect } from "effect"
 import { Command, Flag } from "effect/unstable/cli"
 import { defaultGatewayPort } from "@mokronos/integrations-client"
 import { integrationsSubcommands } from "./commands.ts"
+import { openBrowser } from "./connection.ts"
 import { writeStdoutLine } from "./output.ts"
 import {
   installService,
@@ -79,6 +80,44 @@ const serveCommand = Command.make(
       catch: serveError
     })
 ).pipe(Command.withDescription("Run the integration gateway, in this terminal or detached"))
+
+/** The control plane is served by the gateway itself, so there is nothing to
+ * start here — this only finds it and opens it. It deliberately does not fall
+ * back to starting a gateway: a UI that silently launches the thing holding
+ * every credential is not a convenience. */
+const dashboardCommand = Command.make(
+  "dashboard",
+  {
+    print: Flag.boolean("print").pipe(
+      Flag.withDescription("Print the URL instead of opening a browser")
+    )
+  },
+  ({ print }) =>
+    Effect.tryPromise({
+      try: async () => {
+        const { readGatewayConfig, integrationsHome } = await import("@mokronos/integrations-client")
+        const config = await readGatewayConfig(integrationsHome())
+        if (config === undefined) {
+          throw new Error(
+            "No gateway found. Start one with `integrations serve`, then try again."
+          )
+        }
+        const healthy = await fetch(`${config.url}/v1/health`).then((response) => response.ok).catch(
+          () => false
+        )
+        if (!healthy) {
+          throw new Error(
+            `Nothing is answering at ${config.url}. Start the gateway with \`integrations serve\`.`
+          )
+        }
+        if (!print) openBrowser(config.url)
+        await Effect.runPromise(writeStdoutLine(
+          print ? config.url : `Opening the control plane at ${config.url}`
+        ))
+      },
+      catch: serveError
+    })
+).pipe(Command.withDescription("Open the gateway's control plane in a browser"))
 
 /** The gateway is a machine-level service, not a session tool: a workflow that
  * touches an integration cannot run without it, and the credentials it holds
@@ -167,6 +206,7 @@ const rootCommand = Command.make("integrations").pipe(
   Command.withSubcommands([
     ...integrationsSubcommands,
     serveCommand,
+    dashboardCommand,
     installCommand,
     uninstallCommand,
     upgradeCommand

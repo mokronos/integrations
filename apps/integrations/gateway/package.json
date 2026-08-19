@@ -28,6 +28,7 @@
   "files": [
     "src",
     "dist",
+    "web",
     "README.md"
   ],
   "exports": {
@@ -36,11 +37,18 @@
       "bun": "./src/index.ts",
       "development": "./src/index.ts",
       "default": "./dist/index.js"
+    },
+    "./domain": {
+      "types": "./dist/domain.d.ts",
+      "bun": "./src/domain.ts",
+      "development": "./src/domain.ts",
+      "default": "./dist/domain.js"
     }
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
-    "prepublishOnly": "bun run build"
+    "build:web": "bun run --cwd ../web build && rm -rf web && cp -R ../web/dist web",
+    "prepublishOnly": "bun run build && bun run build:web"
   },
   "dependencies": {
     "@libsql/client": "0.17.3",

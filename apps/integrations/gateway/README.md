@@ -12,14 +12,26 @@ recorded in
 the build sequence in
 [docs/plans/integration-gateway.md](../../../docs/plans/integration-gateway.md).
 
-## Status
-
-Phase 0 — scaffolding. The package owns storage-directory resolution and
-gateway composition over Executor. The domain store, HTTP surface, policy, and
-approvals are not built yet.
-
 ## Storage
 
 `INTEGRATIONS_HOME`, falling back to `WF_HOME`, then `~/.wf`. The directory
-holds Executor's catalog and sealed credentials, and will hold the gateway's
-own store (`gateway.sqlite`) from phase 1.
+holds Executor's catalog, sealed credentials, and the gateway's own store
+(`gateway.sqlite`).
+
+## The control plane
+
+`serveGateway` also serves the browser control plane built from
+`apps/integrations/web`, at the root of the same port. Assets are resolved from
+disk in this order:
+
+1. `INTEGRATIONS_WEB_DIR`
+2. `<this package>/web` — the published layout, written by `bun run build:web`
+3. `../web/dist` — the source checkout, so `vite build` is enough in a working
+   tree
+
+Pass `{ web: false }` to `serveGateway` for a headless gateway with nothing but
+the API on the port.
+
+Requests from that page carry no API key. `src/http/loopback.ts` decides when a
+request may borrow the local client's credential instead, and documents both
+what that defends against and what it does not.

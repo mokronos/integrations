@@ -86,6 +86,15 @@ export type { OAuthSession, OAuthSessions, OAuthSessionState } from "./oauth-ses
 export { makeRoutes } from "./http/api.ts"
 export type { ApiDependencies } from "./http/api.ts"
 export { createGatewayHandler } from "./http/handler.ts"
+export type { GatewayRequestContext } from "./http/handler.ts"
+export {
+  isLoopbackAddress,
+  isLoopbackHostHeader,
+  mayBorrowLocalCredential
+} from "./http/loopback.ts"
+export type { LoopbackBootstrap } from "./http/loopback.ts"
+export { createWebAssets } from "./web-assets.ts"
+export type { WebAssets, WebAssetsOptions } from "./web-assets.ts"
 export { matchRoute } from "./http/router.ts"
 export type { Route, RouteAccess, RouteRequest, RouteResult } from "./http/router.ts"
 

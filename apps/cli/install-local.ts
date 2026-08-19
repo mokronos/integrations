@@ -47,7 +47,7 @@ Usage:
 
   (default)     Install shims that run the sources directly, so source changes
                 take effect with no rebuild. The dashboard is served from
-                apps/web/dist, refreshed by: bun run --cwd apps/web build
+                apps/wf/web/dist, refreshed by: bun run --cwd apps/wf/web build
                 The background service keeps running the code it started with,
                 so restart it after source changes with: wf install
   --compiled    Build the current-platform wf binary and link that instead.

@@ -44,6 +44,16 @@ export interface HandlerDependencies {
   readonly routes: ReadonlyArray<Route>
 }
 
+/** What the server knows about a request that the request itself cannot say.
+ *
+ * `localSecret` is the local client's key, and is set only by a server that has
+ * already decided this request may borrow it — see `http/loopback.ts`. The
+ * handler does not re-derive that decision, so a caller cannot reach it by
+ * setting a header. */
+export interface GatewayRequestContext {
+  readonly localSecret?: string
+}
+
 /** Turns a Request into a Response with no socket involved, so the whole
  * surface — including every rejection path — is testable directly.
  *
@@ -51,8 +61,8 @@ export interface HandlerDependencies {
  * is delegated or privileged, and a new endpoint cannot forget to check. */
 export const createGatewayHandler = (
   dependencies: HandlerDependencies
-): ((request: Request) => Promise<Response>) =>
-async (request) => {
+): ((request: Request, context?: GatewayRequestContext) => Promise<Response>) =>
+async (request, context) => {
   const url = new URL(request.url)
 
   if (url.pathname === "/v1/health") {
@@ -66,7 +76,9 @@ async (request) => {
       : json(404, { error: `No route for ${request.method} ${url.pathname}` })
   }
 
-  const secret = presentedSecret(request)
+  // An explicit key always wins: a caller that presented one gets its own
+  // identity and its own grants, never the local client's.
+  const secret = presentedSecret(request) ?? context?.localSecret
   if (secret === undefined) {
     return json(401, { error: "An API key is required" })
   }

@@ -19,13 +19,14 @@
       "@mokronos/wfkit/authoring": ["packages/wf/src/authoring.ts"],
       "@mokronos/wfkit-executor": ["packages/wfkit-executor/src/index.ts"],
       "@mokronos/wfkit-executor/schemas": ["packages/wfkit-executor/src/schemas.ts"],
+      "@mokronos/wfkit-executor/integration-model": ["packages/wfkit-executor/src/integration-model.ts"],
       "@mokronos/integrations": ["apps/integrations/gateway/src/index.ts"],
+      "@mokronos/integrations/domain": ["apps/integrations/gateway/src/domain.ts"],
       "@mokronos/integrations-client": ["apps/integrations/ts/src/index.ts"],
       "@mokronos/integrations-cli/upgrade": ["apps/integrations/cli/src/upgrade.ts"],
       "@mokronos/wfkit/integrations": ["packages/wf/src/integration-contract.ts"],
       "@mokronos/wfkit/schemas": ["packages/wf/src/schemas.ts"],
-      "@mokronos/wfkit/testing": ["packages/wf/src/testing/index.ts"],
-      "@/*": ["apps/web/src/*"]
+      "@mokronos/wfkit/testing": ["packages/wf/src/testing/index.ts"]
     },
     "allowImportingTsExtensions": true,
     "rewriteRelativeImportExtensions": true,
@@ -55,5 +56,8 @@
       }
     ]
   },
-  "exclude": ["**/dist", "node_modules", "**/.tmp/**"]
+  // The two React apps each own an `@/*` alias pointing at their own src, which
+  // a single root project cannot resolve two ways. They are type-checked
+  // through their own tsconfigs instead — see the `typecheck` script.
+  "exclude": ["**/dist", "node_modules", "**/.tmp/**", "apps/wf/web", "apps/integrations/web"]
 }

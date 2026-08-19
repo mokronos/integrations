@@ -467,9 +467,27 @@ to its key.
 Every listing is bounded by default with a `Showing N of M` hint; `--verbose`
 opts out. The reader is usually an agent with a finite context window.
 
-The dashboard's **Integrations** view (`wf web`) shows the same catalog in the
-browser: which integrations are connected, the connections authorizing them, and
-every tool with its input and output schema.
+### The control plane
+
+The gateway serves its own browser UI at the port it listens on, and
+`integrations dashboard` opens it. It is the whole privileged surface, not a
+read-only view: the catalog and its connections, per-tool grants with their
+allow-or-ask decision, clients and their keys, approvals waiting on a human, and
+every execution the gateway recorded.
+
+```bash
+integrations serve -d
+integrations dashboard        # opens http://127.0.0.1:4788
+```
+
+It carries no API key. The page is served by the gateway on loopback, so the
+browser's own same-origin request is what authenticates it — the local key stays
+in `~/.wf/gateway.json` and never reaches the page. A request from any other
+site is refused, and the mechanism turns itself off entirely if the gateway is
+bound anywhere but loopback.
+
+`wf web` is a different UI for a different thing: workflows and runs. It no
+longer shows integrations.
 
 ### Storage
 

@@ -41,7 +41,7 @@ integrations serve
 
 | Flag | Meaning |
 | --- | --- |
-| `--port <integer>` | Port to listen on. Defaults to 4788 (the dashboard already owns 4787) |
+| `--port <integer>` | Port to listen on. Defaults to 4788 (the workflow dashboard already owns 4787) |
 | `--host <string>` | Bind address. Defaults to `127.0.0.1` |
 | `--detach`, `-d` | Start in the background and return once the gateway answers |
 
@@ -72,6 +72,58 @@ waits until it answers an authenticated request, then prints the pid and the log
 path and exits. Output goes to `~/.wf/logs/integrations.log` and
 `integrations.error.log`. Stop it with `kill <pid>`. It does not survive logout
 or a reboot.
+
+## integrations dashboard
+
+The gateway serves a browser control plane on the same port it listens on. This
+command finds a running gateway and opens it.
+
+```bash
+integrations dashboard
+integrations dashboard --print   # print the URL, open nothing
+```
+
+It will not start a gateway for you: a UI that silently launches the process
+holding every credential is not a convenience. If nothing is running you get
+told to run `integrations serve`.
+
+### What it covers
+
+| View | What you can do |
+| --- | --- |
+| Integrations | Discover an endpoint, connect and disconnect, browse every tool with its input and output schema |
+| Clients | Create a client, issue and revoke keys, revoke the client |
+| Clients → grants | Grant one tool through one connection under an alias, switch a grant between *allow* and *ask a human*, revoke it |
+| Approvals | See frozen calls with their exact arguments, approve (the gateway performs the call) or deny |
+| Executions | The audit trail: every attempt, its outcome, and which grant decided it |
+| System | Refresh a catalog snapshot and read the drift report; run maintenance now |
+
+### How it authenticates
+
+It does not carry an API key, and there is nowhere to put one. The page is
+served by the gateway itself, so a request from it is same-origin, arrives over
+loopback, and is authenticated as the local client — the key stays in
+`~/.wf/gateway.json`, mode `0600`, and never reaches the browser.
+
+Four things must all hold, or the request gets the same 401 as any stranger:
+
+- the gateway is bound to loopback (`--host` anything else turns this off
+  entirely, because a proxy on the same box would make every forwarded request
+  look local)
+- the request arrived from a loopback address
+- `Host` names a loopback host, which is what stops DNS rebinding
+- `Sec-Fetch-Site` is `same-origin`, and any `Origin` present is the gateway's
+  own — which is what stops a page on another site reaching for `127.0.0.1:4788`
+
+A caller that presents a key of its own is that client, with that client's
+limits; the ambient credential never upgrades anyone. Callers that are not
+browsers — curl, the CLI, any API client — send no `Sec-Fetch-Site` and go on
+authenticating exactly as before.
+
+> This is a boundary against other *sites*, not against other *processes* on
+> your machine. Anything that can open a socket to loopback can send these
+> headers too. Binding the gateway to loopback already trusts local processes;
+> this does not widen that, but it does not narrow it either.
 
 ## integrations install
 

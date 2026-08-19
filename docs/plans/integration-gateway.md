@@ -63,10 +63,14 @@ Grouped by product rather than by kind:
 | `apps/cli` | `@mokronos/wf` | Depends on `@mokronos/integrations-cli` so both binaries install together. |
 
 A Python client (`apps/integrations/python`) is deferred until the TS and CLI
-clients have been used in anger. Moving `apps/cli` → `apps/wf/cli` and
-`apps/web` → `apps/wf/web` for symmetry is deferred too: it churns the build
-scripts, embedded-asset generation, publish scripts, and the hardcoded paths in
-`packages/wf/test/architecture.test.ts` for no functional gain.
+clients have been used in anger. Moving `apps/cli` → `apps/wf/cli` is deferred
+too: it churns the publish scripts for no functional gain.
+
+`apps/web` → `apps/wf/web` **has** happened, driven by the control plane rather
+than by symmetry: the gateway now serves its own UI at
+`apps/integrations/web`, and two React apps in one repo cannot both be
+`apps/web`. The workflow dashboard kept its workflows and runs views and lost
+its read-only integrations view, which the control plane replaces.
 
 Nested workspaces mean the root `workspaces` glob needs `apps/*/*` alongside
 `apps/*`.
@@ -211,7 +215,7 @@ including `--text` rendering and the `next:` hint lines, and `npm i -g
 
 - `require_approval` grants freeze arguments and return `{status: "pending", id}` — never block (Q18)
 - Expiry is terminal: the invocation does not happen
-- `integrations approve <id>` / dashboard approval view
+- `integrations approve <id>` / control-plane approval view
 - Revoking a *client* cancels its pending approvals; revoking a *key* does not
 - Audit written for every attempt; arguments in a separate expirable row
 - Catalog refresh diffs against `CatalogSnapshot`, reports added/removed/changed

@@ -127,7 +127,12 @@ describe("package architecture", () => {
       expect(source).not.toContain("setExecutorStorageDirectory")
       expect(source).not.toContain("@mokronos/wfkit-executor")
     }
-    expect(cliRoot).toContain("@mokronos/integrations-client")
+    // Where wf does reach integrations, it is through the thin gateway client.
+    expect(workflowCommands).toContain("@mokronos/integrations-client")
+    // ...and the dashboard does not reach them at all any more: the gateway
+    // serves its own control plane, which is the only surface holding the
+    // privileged API. wf serves workflows and runs.
+    expect(cliRoot).not.toContain("/api/integrations")
   })
 
   test("production TypeScript has no explicit any escape hatches", async () => {

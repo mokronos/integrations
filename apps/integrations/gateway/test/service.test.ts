@@ -4,7 +4,9 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import {
   gatewayConfigPath,
+  generateApiKey,
   localClientName,
+  newClientId,
   readGatewayConfig,
   resolveClientConnection,
   serveGateway
@@ -74,6 +76,51 @@ describe("gateway service", () => {
   test("rejects a request with no credential over the wire", async () => {
     const gateway = await start()
     expect((await fetch(`${gateway.url}/v1/clients`)).status).toBe(401)
+  })
+
+  test("the control plane's own page is authenticated without carrying a key", async () => {
+    const gateway = await start()
+
+    const response = await fetch(`${gateway.url}/v1/clients`, {
+      headers: { "sec-fetch-site": "same-origin" }
+    })
+
+    expect(response.status).toBe(200)
+  })
+
+  test("a page on another site is not, even reaching the same loopback port", async () => {
+    const gateway = await start()
+
+    const response = await fetch(`${gateway.url}/v1/clients`, {
+      headers: {
+        "sec-fetch-site": "cross-site",
+        origin: "https://evil.example.com"
+      }
+    })
+
+    expect(response.status).toBe(401)
+  })
+
+  test("an explicit key wins over the ambient one", async () => {
+    const gateway = await start()
+    const sandbox = await gateway.service.store.createClient({
+      id: newClientId(),
+      name: "sandbox",
+      mayMutate: false
+    })
+    const key = generateApiKey()
+    await gateway.service.store.addApiKey({ id: key.id, clientId: sandbox.id, hash: key.hash })
+
+    // Same browser-shaped request, but carrying a key of its own: it must be
+    // that client, with that client's limits, and not quietly upgraded.
+    const response = await fetch(`${gateway.url}/v1/clients`, {
+      headers: {
+        "sec-fetch-site": "same-origin",
+        authorization: `Bearer ${key.secret}`
+      }
+    })
+
+    expect(response.status).toBe(403)
   })
 
   test("prefers an explicit environment over the local config file", async () => {

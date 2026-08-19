@@ -6,6 +6,8 @@ import {
 import { createGateway } from "./host.ts"
 import type { Gateway } from "./host.ts"
 import { createGatewayHandler } from "./http/handler.ts"
+import type { GatewayRequestContext } from "./http/handler.ts"
+import { isLoopbackAddress, mayBorrowLocalCredential } from "./http/loopback.ts"
 import { makeRoutes } from "./http/api.ts"
 import { startMaintenanceLoop } from "./maintenance.ts"
 import { createOAuthSessions } from "./oauth-sessions.ts"
@@ -13,6 +15,7 @@ import { generateApiKey, newClientId } from "./keys.ts"
 import { integrationsHome } from "./paths.ts"
 import { createGatewayStore } from "./store.ts"
 import type { GatewayStore } from "./store.ts"
+import { createWebAssets } from "./web-assets.ts"
 
 /** The client the local machine uses. Created on first start with mayMutate so
  *  an agent authoring workflows can discover and connect, with the human needed
@@ -23,7 +26,7 @@ export interface GatewayService {
   readonly home: string
   readonly store: GatewayStore
   readonly gateway: Gateway
-  readonly handle: (request: Request) => Promise<Response>
+  readonly handle: (request: Request, context?: GatewayRequestContext) => Promise<Response>
   close(): Promise<void>
 }
 
@@ -88,12 +91,18 @@ export interface ServeOptions {
   readonly port?: number
   readonly hostname?: string
   readonly home?: string
+  /** Serve the control plane at `/`. On by default; a headless gateway can turn
+   *  it off so the only thing on the port is the API. */
+  readonly web?: boolean
 }
 
 export interface RunningGateway {
   readonly port: number
   readonly url: string
   readonly service: GatewayService
+  /** Where the control plane is being served from, or `undefined` when it is
+   *  not being served at all. */
+  readonly web: string | undefined
   stop(): Promise<void>
 }
 
@@ -105,17 +114,38 @@ export const serveGateway = async (options: ServeOptions = {}): Promise<RunningG
     options.home === undefined ? {} : { home: options.home }
   )
   const hostname = options.hostname ?? "127.0.0.1"
+  const boundToLoopback = isLoopbackAddress(hostname)
+  const web = options.web === false ? undefined : await createWebAssets()
+
+  // The local key is minted below, once the port is known. Until then there is
+  // nothing to borrow and a browser gets the same 401 as anyone else.
+  let localSecret: string | undefined
+
   const server = Bun.serve({
     hostname,
     port: options.port ?? defaultGatewayPort,
-    fetch: (request) => service.handle(request)
+    fetch: async (request, running) => {
+      const pathname = new URL(request.url).pathname
+      if (web !== undefined && !pathname.startsWith("/v1/")) {
+        const asset = await web.respond(pathname)
+        if (asset !== undefined) return asset
+      }
+      const local = localSecret
+      const borrow = local !== undefined && mayBorrowLocalCredential(request, {
+        boundToLoopback,
+        port: Number(running.port),
+        remoteAddress: running.requestIP(request)?.address
+      })
+      return await service.handle(request, borrow && local !== undefined ? { localSecret: local } : {})
+    }
   })
   const port = Number(server.port)
-  await ensureLocalCredential(service, port)
+  localSecret = await ensureLocalCredential(service, port)
   return {
     port,
     url: `http://${hostname}:${port}`,
     service,
+    web: web?.directory,
     stop: async () => {
       server.stop(true)
       await service.close()

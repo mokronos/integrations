@@ -41,6 +41,12 @@
       "bun": "./src/schemas.ts",
       "development": "./src/schemas.ts",
       "default": "./dist/schemas.js"
+    },
+    "./integration-model": {
+      "types": "./dist/integration-model.d.ts",
+      "bun": "./src/integration-model.ts",
+      "development": "./src/integration-model.ts",
+      "default": "./dist/integration-model.js"
     }
   },
   "scripts": {

@@ -11,7 +11,6 @@ import {
   toJsonText,
   workflowArtifactToGraph
 } from "@mokronos/wfkit"
-import { createGatewayClient, resolveClientConnection } from "@mokronos/integrations-client"
 import type { WorkflowCatalog } from "@mokronos/wfkit"
 import { makeWorkflowCommands, type CliRuntimeOptions } from "./cli/main.ts"
 import assets from "./embedded-web-assets.gen.ts"
@@ -39,7 +38,7 @@ const json = (body: string, status = 200): Response => new Response(body, {
 // embedded-web-assets.gen.ts as an empty stub, so fall back to apps/web/dist on disk
 // and a `vite build` is enough to refresh the dashboard — no binary recompile.
 const dashboardIsEmbedded = Object.keys(assets).length > 0
-const dashboardSourceDirectory = path.resolve(import.meta.dir, "..", "..", "..", "apps", "web", "dist")
+const dashboardSourceDirectory = path.resolve(import.meta.dir, "..", "..", "..", "apps", "wf", "web", "dist")
 
 const dashboardFileResponse = async (pathname: string): Promise<Response> => {
   const location = path.resolve(dashboardSourceDirectory, pathname === "/" ? "index.html" : pathname.slice(1))
@@ -49,7 +48,7 @@ const dashboardFileResponse = async (pathname: string): Promise<Response> => {
   const file = Bun.file(location)
   if (!(await file.exists())) {
     return new Response(
-      `Dashboard assets not found at ${dashboardSourceDirectory}. Run: bun run --cwd apps/web build`,
+      `Dashboard assets not found at ${dashboardSourceDirectory}. Run: bun run --cwd apps/wf/web build`,
       { status: 404 }
     )
   }
@@ -65,23 +64,6 @@ const dashboardResponse = async (pathname: string): Promise<Response> => {
   })
 }
 
-/** The dashboard reads integrations through the gateway like any other client,
- *  rather than composing Executor itself. It has no credentials of its own. */
-const gatewayIntegrations = async (): Promise<unknown> => {
-  const connection = await resolveClientConnection()
-  if (connection === undefined) {
-    return { integrations: [], error: "No integration gateway configured" }
-  }
-  try {
-    return await createGatewayClient(connection).request("GET", "/v1/integrations")
-  } catch (error) {
-    return {
-      integrations: [],
-      error: error instanceof Error ? error.message : "The gateway did not answer"
-    }
-  }
-}
-
 const api = async (
   catalog: WorkflowCatalog,
   engineDatabasePath: string,
@@ -91,13 +73,6 @@ const api = async (
     const artifacts = await catalog.list()
     const workflows = await Promise.all(artifacts.map((artifact) => workflowArtifactToGraph(artifact, { maxNodes: 120 })))
     return json(JSON.stringify({ generatedAt: new Date().toISOString(), workflows }))
-  }
-  if (pathname === "/api/integrations") {
-    const body = await gatewayIntegrations()
-    return json(JSON.stringify({
-      generatedAt: new Date().toISOString(),
-      ...(typeof body === "object" && body !== null ? body : { integrations: [] })
-    }))
   }
   if (pathname === "/api/runs") {
     const runtime = createWorkflowRuntime({ backend: "sqlite", databasePath: engineDatabasePath })

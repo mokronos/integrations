@@ -4,7 +4,7 @@ import packageMetadata from "./package.json" with { type: "json" }
 
 const packageDirectory = import.meta.dirname
 const repositoryDirectory = path.resolve(packageDirectory, "../..")
-const webDirectory = path.join(repositoryDirectory, "apps", "web")
+const webDirectory = path.join(repositoryDirectory, "apps", "wf", "web")
 const distributionDirectory = path.join(packageDirectory, "dist")
 const embeddedAssetsPath = path.join(packageDirectory, "src", "embedded-web-assets.gen.ts")
 const embeddedAssetsStub = `export interface EmbeddedWebAsset {
@@ -141,7 +141,7 @@ const writeWrapperPackage = async (): Promise<void> => {
 
 const main = async (): Promise<void> => {
   await rm(distributionDirectory, { recursive: true, force: true })
-  await run(["bun", "run", "--cwd", "apps/web", "build"])
+  await run(["bun", "run", "--cwd", "apps/wf/web", "build"])
   await generateEmbeddedAssets()
   try {
     const selectedTargets = process.argv.includes("--all") ? targets : [currentTarget()]

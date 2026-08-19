@@ -1,18 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 
 import { AppSidebar, type AppView } from "@/components/app-sidebar"
-import { IntegrationsView } from "@/components/integrations-view"
 import { RunsView } from "@/components/runs-view"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { WorkflowsView } from "@/components/workflows-view"
 import { useApi } from "@/hooks/use-api"
-import {
-  fetchIntegrations,
-  fetchRuns,
-  fetchWorkflows,
-  workflowKey,
-  workflowLabel
-} from "@/lib/api"
+import { fetchRuns, fetchWorkflows, workflowKey, workflowLabel } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 const SIDEBAR_STORAGE_KEY = "wf.sidebarCollapsed"
@@ -21,7 +14,6 @@ export default function App() {
   const workflowsState = useApi(fetchWorkflows)
   const runsState = useApi(fetchRuns)
   const [view, setView] = useState<AppView>("workflows")
-  const integrationsState = useApi(fetchIntegrations, view === "integrations")
   const [query, setQuery] = useState("")
   const [selectedWorkflowKey, setSelectedWorkflowKey] = useState<string | undefined>()
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -97,21 +89,13 @@ export default function App() {
             onSelectedKeyChange={setSelectedWorkflowKey}
             onReload={workflowsState.reload}
           />
-        ) : view === "runs" ? (
+        ) : (
           <RunsView
             runs={runsState.data?.runs ?? []}
             loading={runsState.loading}
             error={runsState.error}
             generatedAt={runsState.data?.generatedAt}
             onReload={runsState.reload}
-          />
-        ) : (
-          <IntegrationsView
-            integrations={integrationsState.data?.integrations ?? []}
-            loading={integrationsState.loading}
-            error={integrationsState.error}
-            generatedAt={integrationsState.data?.generatedAt}
-            onReload={integrationsState.reload}
           />
         )}
       </main>
