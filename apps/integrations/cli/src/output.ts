@@ -1,4 +1,4 @@
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 
 /** How results are shaped for the reader.
  *
@@ -55,7 +55,7 @@ export const page = <A>(items: ReadonlyArray<A>, window: Window): Page<A> => {
 export const pageFields = <A>(
   result: Page<A>,
   narrowing: string
-): Record<string, unknown> => {
+): Record<string, typeof Schema.Json.Type> => {
   const windowed = result.limit !== undefined || result.offset > 0
   return {
     count: result.count,
@@ -106,9 +106,9 @@ export const writeStdoutLine = (text: string): Effect.Effect<void> =>
  *  the next step. `<…>` marks what the reader fills in; anything else is
  *  runnable as printed. */
 export const withNext = (
-  body: Record<string, unknown>,
+  body: Record<string, typeof Schema.Json.Type>,
   next: string | undefined
-): Record<string, unknown> => next === undefined ? body : { ...body, next }
+): Record<string, typeof Schema.Json.Type> => next === undefined ? body : { ...body, next }
 
 /** Joins `--text` lines, including the trailing page line when there is one. */
 export const textBlock = (

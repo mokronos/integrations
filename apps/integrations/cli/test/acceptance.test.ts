@@ -146,10 +146,16 @@ describe("integrations CLI acceptance", () => {
 
       const discovered = await integrations(["discover", vendor.specUrl])
       expect(discovered.exitCode, discovered.stderr).toBe(0)
-      const discoveredBody = JSON.parse(discovered.stdout) as Record<string, unknown>
-      const slug = (discoveredBody["integration"] as { slug: string }).slug
+      const DiscoverBody = Schema.Struct({
+        integration: Schema.Struct({ slug: Schema.String }),
+        next: Schema.String
+      })
+      const discoveredBody = Schema.decodeUnknownSync(DiscoverBody)(
+        JSON.parse(discovered.stdout)
+      )
+      const slug = discoveredBody.integration.slug
       // Listings tell an agent what to do next rather than making it guess.
-      expect(discoveredBody["next"]).toBe(`integrations connect ${slug}`)
+      expect(discoveredBody.next).toBe(`integrations connect ${slug}`)
 
       const connected = await integrations([
         "connect",

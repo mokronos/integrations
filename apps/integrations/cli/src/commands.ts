@@ -63,11 +63,18 @@ const gatewayTask = <A>(
     catch: (error) => cliError(describeError(error))
   })
 
-const record = (value: unknown): Record<string, unknown> =>
-  typeof value === "object" && value !== null ? value as Record<string, unknown> : {}
+const JsonObject = Schema.Record(Schema.String, Schema.Json)
+const JsonArray = Schema.Array(Schema.Json)
 
-const array = (value: unknown): ReadonlyArray<Record<string, unknown>> =>
-  Array.isArray(value) ? value.map(record) : []
+/** The gateway's responses arrive as unparsed JSON. These decode a response into
+ *  a usable value and fall back to empty rather than failing the command: a
+ *  listing that renders nothing is easier for a reader to act on than a crash,
+ *  and the gateway is the party responsible for its own response shape. */
+const record = (value: unknown): Record<string, typeof Schema.Json.Type> =>
+  Option.getOrElse(Schema.decodeUnknownOption(JsonObject)(value), () => ({}))
+
+const array = (value: unknown): ReadonlyArray<Record<string, typeof Schema.Json.Type>> =>
+  Option.getOrElse(Schema.decodeUnknownOption(JsonArray)(value), () => []).map(record)
 
 const text = (value: unknown): string => value === undefined || value === null ? "" : String(value)
 
@@ -107,10 +114,10 @@ const listing = <A>(
     readonly asText: boolean
     readonly verbose: boolean
     readonly line: (item: A) => string
-    readonly row: (item: A) => unknown
+    readonly row: (item: A) => typeof Schema.Json.Type
     readonly empty: string
     readonly next?: string
-    readonly extra?: Record<string, unknown>
+    readonly extra?: Record<string, typeof Schema.Json.Type>
   }
 ): Effect.Effect<void> => {
   if (options.asText) {
@@ -232,9 +239,9 @@ const integrationsCommand = Command.make(
             `${text(integration["slug"])}\t${text(integration["kind"])}\t${text(integration["name"])}`,
           row: (integration) =>
             verbose ? integration : {
-              slug: integration["slug"],
-              kind: integration["kind"],
-              name: integration["name"],
+              slug: integration["slug"] ?? null,
+              kind: integration["kind"] ?? null,
+              name: integration["name"] ?? null,
               connections: array(integration["connections"]).length
             }
         })
@@ -285,7 +292,10 @@ const toolsCommand = Command.make(
               verbose ? `\t${text(tool["address"])}` : ""
             }`,
           row: (tool) =>
-            verbose ? tool : { name: tool["name"], description: inline(text(tool["description"]), 200) }
+            verbose ? tool : {
+              name: tool["name"] ?? null,
+              description: inline(text(tool["description"]), 200)
+            }
         }
       )
     }))
@@ -806,7 +816,7 @@ const grantCommand = Command.make(
     }))
 ).pipe(Command.withDescription("Delegate one tool through one connection to one client"))
 
-const grantRow = (tool: GrantedTool): Record<string, unknown> => ({
+const grantRow = (tool: GrantedTool): Record<string, typeof Schema.Json.Type> => ({
   alias: tool.alias,
   tool: tool.tool,
   integration: tool.integration,
@@ -1084,8 +1094,8 @@ const driftCommand = Command.make(
       const reports = array(record(result)["reports"])
       const baselines = reports.filter((report) => report["baseline"] === true)
       const entries = sortedBy(
-        reports.flatMap((report): ReadonlyArray<Record<string, unknown>> =>
-          array(report["entries"]).map((entry) => ({ ...entry, integration: report["integration"] }))
+        reports.flatMap((report): ReadonlyArray<Record<string, typeof Schema.Json.Type>> =>
+          array(report["entries"]).map((entry) => ({ ...entry, integration: report["integration"] ?? null }))
         ),
         (entry) => `${text(entry["integration"])} ${text(entry["tool"])}`
       )

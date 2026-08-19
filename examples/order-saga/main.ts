@@ -2,6 +2,7 @@
 // backend and validates the recorded history: event counts, compensation
 // order, retry behavior, and the mock services' final state.
 
+import { Option, Schema } from "effect"
 import { rmSync } from "node:fs"
 import path from "node:path"
 import { createWorkflowClient, createWorkflowRuntime } from "@mokronos/wfkit"
@@ -30,12 +31,10 @@ const eventTypes = (history: ReadonlyArray<WorkflowHistoryRecord>) =>
 
 // The client API surfaces results/errors as unknown; narrow field access here
 // at the boundary instead of casting.
-const asRecord = (value: unknown): Record<string, unknown> | undefined => {
-  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    return Object.fromEntries(Object.entries(value))
-  }
-  return undefined
-}
+const JsonObject = Schema.Record(Schema.String, Schema.Json)
+
+const asRecord = (value: unknown): Record<string, typeof Schema.Json.Type> | undefined =>
+  Option.getOrUndefined(Schema.decodeUnknownOption(JsonObject)(value))
 
 const stringField = (value: unknown, key: string): string | undefined => {
   const entry = asRecord(value)?.[key]

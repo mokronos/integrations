@@ -124,7 +124,7 @@ const ddl = [
 // libsql rows carry numeric indices and a length alongside the named columns,
 // so fields are picked explicitly rather than spread.
 
-const pick = (row: Row, keys: ReadonlyArray<string>): Record<string, unknown> =>
+const pick = (row: Row, keys: ReadonlyArray<string>): Record<string, Row[string]> =>
   Object.fromEntries(keys.map((key) => [key, row[key] ?? null]))
 
 const NullableNumber = Schema.NullOr(Schema.Number)

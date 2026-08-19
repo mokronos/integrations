@@ -25,6 +25,8 @@ import {
 } from "../src/index.ts"
 import type { ConnectionRef, GatewayStore } from "../src/index.ts"
 
+const JsonBody = Schema.Record(Schema.String, Schema.Json)
+
 const directories: Array<string> = []
 const stores: Array<GatewayStore> = []
 
@@ -196,7 +198,10 @@ const setup = async (options: {
       headers,
       ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) })
     }))
-    return { status: response.status, body: await response.json() as Record<string, unknown> }
+    return {
+      status: response.status,
+      body: Schema.decodeUnknownSync(JsonBody)(await response.json())
+    }
   }
 
   return { store, client, key, grant, call, calls: stub.calls, removed: stub.removed }
@@ -440,7 +445,7 @@ describe("gateway approval settlement", () => {
 describe("frozen calls and retries", () => {
   const send = (
     call: Awaited<ReturnType<typeof setup>>["call"],
-    args: Record<string, unknown> = { to: "a@b.c" }
+    args: Record<string, typeof Schema.Json.Type> = { to: "a@b.c" }
   ) => call("POST", "/v1/execute", {
     body: { alias: "gmail-work", tool: "sendEmail", arguments: args }
   })
@@ -598,7 +603,7 @@ describe("provisioning surface", () => {
     const { call, client, key, store } = await setup({ mayMutate: true })
 
     const listed = await call("GET", `/v1/clients/${client.id}/keys`)
-    const keys = listed.body["keys"] as ReadonlyArray<Record<string, unknown>>
+    const keys = Schema.decodeUnknownSync(Schema.Array(JsonBody))(listed.body["keys"])
     expect(keys).toHaveLength(1)
     expect(keys[0]?.["id"]).toBe(key.id)
     expect(JSON.stringify(keys)).not.toContain(key.hash)
