@@ -4,7 +4,6 @@ import {
   writeGatewayConfig
 } from "./config.ts"
 import { whenPresent } from "@mokronos/wfkit"
-import { createGateway } from "./host.ts"
 import type { Gateway } from "./host.ts"
 import { createGatewayHandler } from "./http/handler.ts"
 import type { GatewayRequestContext } from "./http/handler.ts"
@@ -14,9 +13,14 @@ import { startMaintenanceLoop } from "./maintenance.ts"
 import { createOAuthSessions } from "./oauth-sessions.ts"
 import { generateApiKey, newClientId } from "./keys.ts"
 import { integrationsHome } from "./paths.ts"
-import { createGatewayStore } from "./store.ts"
 import type { GatewayStore } from "./store.ts"
+import { GatewayStoreService } from "./store.ts"
 import { createWebAssets } from "./web-assets.ts"
+import {
+  ExecutorHostService,
+  ExecutorServicesService
+} from "@mokronos/wfkit-executor"
+import { Effect, Layer, ManagedRuntime } from "effect"
 
 /** The client the local machine uses. Created on first start with mayMutate so
  *  an agent authoring workflows can discover and connect, with the human needed
@@ -42,28 +46,49 @@ export const createGatewayService = async (
   options: GatewayServiceOptions = {}
 ): Promise<GatewayService> => {
   const home = options.home ?? integrationsHome()
-  const store = await createGatewayStore(`${home}/gateway.sqlite`)
-  const gateway = createGateway({ directory: home })
-  const oauth = createOAuthSessions(gateway.executor)
-  const maintenance = startMaintenanceLoop(store)
-  const routes = gatewayRoutes({
-    store,
-    executor: gateway.executor,
-    retentionDays: options.retentionDays ?? defaultArgumentRetentionDays,
-    oauth,
-    ...whenPresent("registryUrl", options.registryUrl)
-  })
-  return {
-    home,
-    store,
-    gateway,
-    handle: createGatewayHandler({ store, routes }),
-    close: async () => {
-      maintenance.stop()
-      oauth.stop()
-      await gateway.close()
-      await store.close()
+  const dependencies = ManagedRuntime.make(Layer.merge(
+    GatewayStoreService.layer(`${home}/gateway.sqlite`),
+    ExecutorServicesService.layerWithHost(home)
+  ))
+  try {
+    const resources = await dependencies.runPromise(Effect.gen(function* () {
+      const store = yield* GatewayStoreService
+      const host = yield* ExecutorHostService
+      const executor = yield* ExecutorServicesService
+      return { store, host, executor }
+    }))
+    const gateway: Gateway = {
+      directory: resources.host.directory,
+      host: resources.host,
+      executor: resources.executor,
+      close: () => resources.host.close()
     }
+    const oauth = createOAuthSessions(gateway.executor)
+    const maintenance = startMaintenanceLoop(resources.store)
+    const routes = gatewayRoutes({
+      store: resources.store,
+      executor: gateway.executor,
+      retentionDays: options.retentionDays ?? defaultArgumentRetentionDays,
+      oauth,
+      ...whenPresent("registryUrl", options.registryUrl)
+    })
+    let closed = false
+    return {
+      home,
+      store: resources.store,
+      gateway,
+      handle: createGatewayHandler({ store: resources.store, routes }),
+      close: async () => {
+        if (closed) return
+        closed = true
+        maintenance.stop()
+        oauth.stop()
+        await dependencies.dispose()
+      }
+    }
+  } catch (error) {
+    await dependencies.dispose()
+    throw error
   }
 }
 
@@ -122,40 +147,53 @@ export const serveGateway = async (options: ServeOptions = {}): Promise<RunningG
   })
   const hostname = options.hostname ?? "127.0.0.1"
   const boundToLoopback = isLoopbackAddress(hostname)
-  const web = options.web === false ? undefined : await createWebAssets()
+  let server: ReturnType<typeof Bun.serve> | undefined
+  try {
+    const web = options.web === false ? undefined : await createWebAssets()
 
-  // The local key is minted below, once the port is known. Until then there is
-  // nothing to borrow and a browser gets the same 401 as anyone else.
-  let localSecret: string | undefined
+    // The local key is minted below, once the port is known. Until then there is
+    // nothing to borrow and a browser gets the same 401 as anyone else.
+    let localSecret: string | undefined
 
-  const server = Bun.serve({
-    hostname,
-    port: options.port ?? defaultGatewayPort,
-    fetch: async (request, running) => {
-      const pathname = new URL(request.url).pathname
-      if (web !== undefined && !pathname.startsWith("/v1/")) {
-        const asset = await web.respond(pathname)
-        if (asset !== undefined) return asset
+    server = Bun.serve({
+      hostname,
+      port: options.port ?? defaultGatewayPort,
+      fetch: async (request, running) => {
+        const pathname = new URL(request.url).pathname
+        if (web !== undefined && !pathname.startsWith("/v1/")) {
+          const asset = await web.respond(pathname)
+          if (asset !== undefined) return asset
+        }
+        const local = localSecret
+        const borrow = local !== undefined && mayBorrowLocalCredential(request, {
+          boundToLoopback,
+          port: Number(running.port),
+          remoteAddress: running.requestIP(request)?.address
+        })
+        return await service.handle(
+          request,
+          borrow && local !== undefined ? { localSecret: local } : {}
+        )
       }
-      const local = localSecret
-      const borrow = local !== undefined && mayBorrowLocalCredential(request, {
-        boundToLoopback,
-        port: Number(running.port),
-        remoteAddress: running.requestIP(request)?.address
-      })
-      return await service.handle(request, borrow && local !== undefined ? { localSecret: local } : {})
+    })
+    const port = Number(server.port)
+    localSecret = await ensureLocalCredential(service, port)
+    let stopped = false
+    return {
+      port,
+      url: `http://${hostname}:${port}`,
+      service,
+      web: web?.directory,
+      stop: async () => {
+        if (stopped) return
+        stopped = true
+        server?.stop(true)
+        await service.close()
+      }
     }
-  })
-  const port = Number(server.port)
-  localSecret = await ensureLocalCredential(service, port)
-  return {
-    port,
-    url: `http://${hostname}:${port}`,
-    service,
-    web: web?.directory,
-    stop: async () => {
-      server.stop(true)
-      await service.close()
-    }
+  } catch (error) {
+    server?.stop(true)
+    await service.close()
+    throw error
   }
 }

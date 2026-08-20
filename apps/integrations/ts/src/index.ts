@@ -28,6 +28,7 @@ export class GatewayError extends Error {
 }
 
 type Json = typeof Schema.Json.Type
+const decodeJsonText = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
 
 const GrantedTool = Schema.Struct({
   alias: Schema.String,
@@ -135,7 +136,7 @@ export const createGatewayClient = (options: GatewayClientOptions): GatewayClien
     return {
       ok: response.ok,
       status: response.status,
-      parsed: text.trim().length === 0 ? {} : JSON.parse(text)
+      parsed: text.trim().length === 0 ? {} : decodeJsonText(text)
     }
   }
 

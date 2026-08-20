@@ -1,3 +1,5 @@
+import { Schema } from "effect"
+
 // Error has no enumerable own properties, so plain JSON.stringify turns a
 // thrown Error into "{}" and history loses the failure message. Keep name,
 // message, and any own enumerable fields (e.g. _tag on tagged errors).
@@ -20,8 +22,7 @@ export const toJsonText = (value: unknown): string => {
   }
 }
 
-// Serialises whatever it is handed, including values that were thrown, so it
-// cannot name its input.
-// oxlint-disable-next-line anti-slop/no-unknown-returns
-export const parseJsonText = (value: string | null): unknown =>
-  value === null ? undefined : JSON.parse(value)
+const decodeJsonText = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
+
+export const parseJsonText = (value: string | null): Schema.Json | undefined =>
+  value === null ? undefined : decodeJsonText(value)

@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs"
 import path from "node:path"
 import { createClient } from "@libsql/client"
 import type { Client as LibsqlClient, InValue, Row } from "@libsql/client"
-import { Schema } from "effect"
+import { Context, Effect, Layer, Schema } from "effect"
 import {
   Alias,
   ApiKeyHash,
@@ -226,10 +226,10 @@ const decodeGrantRow = Schema.decodeUnknownSync(GrantRow)
 const decodeApprovalRow = Schema.decodeUnknownSync(ApprovalRow)
 const decodeAuditRow = Schema.decodeUnknownSync(AuditRow)
 const decodeSnapshotRow = Schema.decodeUnknownSync(SnapshotRow)
-const decodeJson = Schema.decodeUnknownSync(Schema.Json)
+const decodeJsonText = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
 
 const parseJsonColumn = (value: string): typeof Schema.Json.Type =>
-  decodeJson(JSON.parse(value))
+  decodeJsonText(value)
 
 const date = (value: number): Date => new Date(value)
 const nullableDate = (value: number | null): Date | null =>
@@ -463,6 +463,32 @@ export interface GatewayStore {
   expireApprovals(now: Date): Promise<number>
 
   close(): Promise<void>
+}
+
+export class GatewayStoreInitializationError extends Schema.TaggedErrorClass<GatewayStoreInitializationError>()(
+  "GatewayStoreInitializationError",
+  { databasePath: Schema.String, cause: Schema.Defect }
+) {}
+
+/** Scoped access to the gateway database. Promise-based store methods remain at
+ * the libsql boundary; acquisition and release belong to the Layer lifecycle. */
+export class GatewayStoreService extends Context.Service<
+  GatewayStoreService,
+  GatewayStore
+>()("@mokronos/integrations/GatewayStore") {
+  static readonly layer = (
+    databasePath: string
+  ): Layer.Layer<GatewayStoreService, GatewayStoreInitializationError> =>
+    Layer.effect(
+      GatewayStoreService,
+      Effect.acquireRelease(
+        Effect.tryPromise({
+          try: () => createGatewayStore(databasePath),
+          catch: (cause) => new GatewayStoreInitializationError({ databasePath, cause })
+        }),
+        (store) => Effect.promise(() => store.close())
+      )
+    )
 }
 
 const now = (): number => Date.now()

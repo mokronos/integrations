@@ -23,6 +23,7 @@ export {
   createExecutorAuth,
   createExecutorCatalog,
   createExecutorHost,
+  ExecutorHostService,
   ExecutorHostClosedError,
   completeExecutorOAuth,
   createExecutorConnection,
@@ -97,7 +98,7 @@ export type {
   IntegrationSearchSurface,
   SearchIntegrationsOptions
 } from "./registry.ts"
-export { createExecutorServices } from "./services.ts"
+export { createExecutorServices, ExecutorServicesService } from "./services.ts"
 export type { ExecutorServices } from "./services.ts"
 export {
   IntegrationSearchKind as IntegrationSearchKindSchema,

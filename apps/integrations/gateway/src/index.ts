@@ -44,7 +44,11 @@ export {
 } from "./keys.ts"
 export type { IssuedApiKey } from "./keys.ts"
 
-export { createGatewayStore } from "./store.ts"
+export {
+  createGatewayStore,
+  GatewayStoreInitializationError,
+  GatewayStoreService
+} from "./store.ts"
 export type {
   CreateApprovalInput,
   CreateClientInput,
@@ -117,7 +121,9 @@ export type {
 // dependency of the gateway from here on.
 export {
   createExecutorHost,
-  createExecutorServices
+  createExecutorServices,
+  ExecutorHostService,
+  ExecutorServicesService
 } from "@mokronos/wfkit-executor"
 export type {
   ExecutorHost,

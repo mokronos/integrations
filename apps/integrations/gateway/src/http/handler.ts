@@ -29,7 +29,7 @@ const readBody = async (request: Request): Promise<Schema.Json> => {
   const text = await request.text()
   if (text.trim().length === 0) return {}
   try {
-    return JSON.parse(text)
+    return Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(text)
   } catch {
     throw new RequestBodyError("Request body is not valid JSON")
   }

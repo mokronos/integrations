@@ -56,6 +56,9 @@ nav:
   - TypeScript SDK: wfkit.md
   - Integrations CLI: integrations.md
   - Gateway client: client.md
+  - Architecture:
+      - Effect services and layers: effect-services-and-layers.md
+      - System and call stacks: system-architecture.md
   - Home ↗: https://mokronos.github.io/wf/
 
 markdown_extensions:

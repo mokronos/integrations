@@ -14,7 +14,7 @@ import {
 } from "@executor-js/sdk/core"
 import { createExecutorFumaDb } from "@executor-js/sdk/host-internal"
 import { drizzle } from "drizzle-orm/libsql"
-import { Effect, Schema } from "effect"
+import { Context, Effect, Layer, Schema } from "effect"
 import { fileCredentialProvider } from "./credential-provider.ts"
 
 const plugins = [
@@ -71,6 +71,22 @@ export interface ExecutorHost extends ExecutorRunner {
   readonly directory: string
   executor(): Promise<WfExecutor>
   close(): Promise<void>
+}
+
+/** Effect capability for an explicitly owned Executor host. The layer brackets
+ * the host even though Executor construction itself stays lazy. */
+export class ExecutorHostService extends Context.Service<
+  ExecutorHostService,
+  ExecutorHost
+>()("@mokronos/wfkit-executor/ExecutorHost") {
+  static readonly layer = (directory: string): Layer.Layer<ExecutorHostService> =>
+    Layer.effect(
+      ExecutorHostService,
+      Effect.acquireRelease(
+        Effect.sync(() => createExecutorHost(directory)),
+        (host) => Effect.promise(() => host.close())
+      )
+    )
 }
 
 export class ExecutorHostClosedError extends Schema.TaggedErrorClass<ExecutorHostClosedError>()(

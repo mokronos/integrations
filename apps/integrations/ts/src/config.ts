@@ -36,13 +36,13 @@ export type GatewayConfigFile = typeof GatewayConfigFile.Type
 export const gatewayConfigPath = (home: string): string =>
   path.join(home, "gateway.json")
 
-const decodeConfig = Schema.decodeUnknownSync(GatewayConfigFile)
+const decodeConfig = Schema.decodeUnknownSync(Schema.fromJsonString(GatewayConfigFile))
 
 export const readGatewayConfig = async (
   home: string
 ): Promise<GatewayConfigFile | undefined> => {
   try {
-    return decodeConfig(JSON.parse(await readFile(gatewayConfigPath(home), "utf8")))
+    return decodeConfig(await readFile(gatewayConfigPath(home), "utf8"))
   } catch {
     return undefined
   }

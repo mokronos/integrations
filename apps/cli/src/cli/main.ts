@@ -42,7 +42,7 @@ const parseJsonInput = (input: string | undefined): WorkflowPayload => {
   }
 
   try {
-    return Schema.decodeUnknownSync(Schema.UndefinedOr(Schema.Json))(JSON.parse(input))
+    return Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(input)
   } catch (error) {
     throw new Error(`Invalid JSON input: ${formatError(error)}`)
   }

@@ -38,6 +38,7 @@ export {
 export {
   createExecutorHost,
   ExecutorHostClosedError,
+  ExecutorHostService,
 } from "./host.ts"
 export type { ExecutorHost, ExecutorRunner } from "./host.ts"
 export {

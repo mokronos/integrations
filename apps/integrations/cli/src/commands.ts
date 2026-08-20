@@ -66,6 +66,7 @@ const gatewayTask = <A>(
 
 const JsonObject = Schema.Record(Schema.String, Schema.Json)
 const JsonArray = Schema.Array(Schema.Json)
+const decodeJsonText = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
 
 /** The gateway's responses arrive as unparsed JSON. These decode a response into
  *  a usable value and fall back to empty rather than failing the command: a
@@ -96,7 +97,7 @@ const readJsonArgument = async (
   }
   const source = file === undefined ? inline_ ?? "{}" : await Bun.file(file).text()
   try {
-    return JSON.parse(source)
+    return decodeJsonText(source)
   } catch (error) {
     throw cliError(
       `Input is not valid JSON: ${error instanceof Error ? error.message : String(error)}`
@@ -130,7 +131,7 @@ const listing = <A>(
   }
   return writeStdoutLine(jsonOutput(
     withNext({
-      ...(options.extra ?? {}),
+      ...options.extra,
       [options.key]: result.items.map(options.row),
       ...pageFields(result, options.narrowing)
     }, options.next),
@@ -332,7 +333,11 @@ const schemaCommand = Command.make(
       // Schemas stay objects, whole, at both verbosities. They are the reason
       // to run this command, and a schema handed back as a truncated string
       // has to be re-fetched before it can be used for anything.
-      const { inputTypeScript, outputTypeScript, ...core } = detail
+      const core = Object.fromEntries(
+        Object.entries(detail).filter(([key]) =>
+          key !== "inputTypeScript" && key !== "outputTypeScript"
+        )
+      )
       return writeStdoutLine(jsonOutput(
         withNext(
           verbose ? detail : core,
@@ -656,7 +661,7 @@ const validateCommand = Command.make(
           : configText ?? "{}"
         : await Bun.file(filePath).text()
       return record(await client.request("POST", "/v1/validate", {
-        node: JSON.parse(source),
+        node: decodeJsonText(source),
         // Whether it resolves is the question worth asking, so it is asked by
         // default, for every input form rather than only for a bare address.
         live: !structural

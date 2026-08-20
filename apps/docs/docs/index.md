@@ -188,3 +188,7 @@ workflow while one of its runs is parked on a signal.
   approvals, drift, and codegen.
 - [**Gateway client**](client.md) — calling granted tools from your own
   TypeScript.
+- [**Effect services and layers**](effect-services-and-layers.md) — every Effect
+  capability, its layer, dependencies, consumers, and lifecycle.
+- [**System and call stacks**](system-architecture.md) — how the CLIs, gateway,
+  executor, workflow runtime, storage, and external systems fit together.

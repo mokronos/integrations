@@ -184,6 +184,20 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
   ) =>
     getManagedRuntime().runPromise(effect)
 
+  const runWithResources = <A>(
+    executionId: string,
+    onEvent: WorkflowEventSink | undefined,
+    effect: Effect.Effect<
+      A,
+      DynamicService,
+      WorkflowEngine.WorkflowEngine | ExecutionResourceRegistry
+    >
+  ): Promise<A> => runEffect(Effect.acquireUseRelease(
+    Effect.sync(() => registerResources(executionId, onEvent)),
+    () => effect,
+    () => Effect.sync(() => removeResources(executionId))
+  ))
+
   return {
     backend: options.backend,
     ...whenPresent("databasePath", databasePath),
@@ -216,7 +230,6 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
     async execute({ workflow, payload, executionId, onEvent }) {
       Schema.decodeUnknownSync(workflow.input)(payload)
       const workflowName = String(workflow.workflow.name ?? workflow.name)
-      registerResources(executionId, onEvent)
       const effect = Effect.gen(function* () {
         const engine = yield* WorkflowEngine.WorkflowEngine
         yield* emitWorkflowEvent({ type: "workflow.started", executionId: ExecutionId.make(executionId), workflowName, payload })
@@ -234,15 +247,12 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
         )
         return result
       })
-      return await runEffect(effect).finally(() => {
-        removeResources(executionId)
-      })
+      return await runWithResources(executionId, onEvent, effect)
     },
 
     deliverSignal({ workflow, executionId, deferredName, payload, onEvent }) {
       // The resumed replay may execute steps in THIS process, so all execution
       // resources are registered together before the wake-up.
-      registerResources(executionId, onEvent)
       const effect = Effect.gen(function* () {
         const engine = yield* WorkflowEngine.WorkflowEngine
         const deferred = DurableDeferred.make(deferredName, { success: Schema.Unknown })
@@ -264,7 +274,7 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
       // The resumed replay may run inside THIS call's engine environment, so
       // it needs the same event sink as the original execute to record
       // history (compensations, cancellation, signal receipt).
-      return runEffect(effect)
+      return runWithResources(executionId, onEvent, effect)
     },
 
     interrupt({ workflow, executionId }) {
@@ -276,12 +286,11 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
     },
 
     resume({ workflow, executionId }) {
-      registerResources(executionId)
       const effect = Effect.gen(function* () {
         const engine = yield* WorkflowEngine.WorkflowEngine
         yield* workflow.workflow.resume(engine, executionId)
       })
-      return runEffect(effect)
+      return runWithResources(executionId, undefined, effect)
     },
 
     async dispose() {

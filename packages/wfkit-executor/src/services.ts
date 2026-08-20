@@ -7,6 +7,8 @@ import { createIntegrationOverview } from "./overview.ts"
 import { createIntegrationProvisioning } from "./provisioning.ts"
 import { createExecutorTools } from "./tools.ts"
 import { createIntegrationValidation } from "./validation.ts"
+import { Context, Effect, Layer } from "effect"
+import { ExecutorHostService } from "./host.ts"
 
 /** All Executor-backed capabilities sharing one explicitly owned host. */
 export const createExecutorServices = (runner: ExecutorRunner) => {
@@ -28,3 +30,31 @@ export const createExecutorServices = (runner: ExecutorRunner) => {
 }
 
 export type ExecutorServices = ReturnType<typeof createExecutorServices>
+
+/** The complete Executor capability derived from one scoped host. */
+export class ExecutorServicesService extends Context.Service<
+  ExecutorServicesService,
+  ExecutorServices
+>()("@mokronos/wfkit-executor/ExecutorServices") {
+  static readonly layerNoDeps: Layer.Layer<
+    ExecutorServicesService,
+    never,
+    ExecutorHostService
+  > = Layer.effect(
+    ExecutorServicesService,
+    Effect.gen(function* () {
+      const host = yield* ExecutorHostService
+      return createExecutorServices(host)
+    })
+  )
+
+  static readonly layer = (directory: string): Layer.Layer<ExecutorServicesService> =>
+    this.layerNoDeps.pipe(Layer.provide(ExecutorHostService.layer(directory)))
+
+  /** Exposes the host as well for composition roots that publish lifecycle
+   * diagnostics in addition to the focused services. */
+  static readonly layerWithHost = (
+    directory: string
+  ): Layer.Layer<ExecutorServicesService | ExecutorHostService> =>
+    this.layerNoDeps.pipe(Layer.provideMerge(ExecutorHostService.layer(directory)))
+}

@@ -77,7 +77,7 @@ const messageFrom = (payload: Schema.Json, fallback: string): string => {
 
 /** The response body is unparsed text off the wire, so it is decoded rather
  *  than trusted before any caller sees it. */
-const decodeJson = Schema.decodeUnknownSync(Schema.Json)
+const decodeJsonText = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
 
 const request = async (
   method: "GET" | "POST" | "DELETE",
@@ -94,7 +94,7 @@ const request = async (
     }))
   })
   const text = await response.text()
-  const payload = decodeJson(text.trim().length === 0 ? {} : JSON.parse(text))
+  const payload = text.trim().length === 0 ? {} : decodeJsonText(text)
   if (!response.ok) {
     throw new GatewayError(
       response.status,

@@ -2,8 +2,9 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { createExecutorHost } from "../src/host.ts"
-import { createExecutorServices } from "../src/services.ts"
+import { Effect, ManagedRuntime } from "effect"
+import { createExecutorHost, ExecutorHostService } from "../src/host.ts"
+import { createExecutorServices, ExecutorServicesService } from "../src/services.ts"
 
 const directories: string[] = []
 
@@ -15,6 +16,25 @@ afterEach(async () => {
 })
 
 describe("executor services", () => {
+  test("scopes a host and all derived services to one layer lifetime", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "wf-executor-layer-"))
+    directories.push(directory)
+    const runtime = ManagedRuntime.make(ExecutorServicesService.layerWithHost(directory))
+    const resources = await runtime.runPromise(Effect.gen(function* () {
+      return {
+        host: yield* ExecutorHostService,
+        services: yield* ExecutorServicesService
+      }
+    }))
+
+    expect(await resources.services.catalog.list()).toEqual([])
+    await runtime.dispose()
+    await expect(resources.host.executor()).rejects.toMatchObject({
+      _tag: "ExecutorHostClosedError",
+      directory
+    })
+  })
+
   test("bind all capabilities to one explicitly owned host", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "wf-executor-services-"))
     directories.push(directory)
