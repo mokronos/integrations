@@ -475,11 +475,11 @@ function ConnectDialog({ integration }: { readonly integration: IntegrationOverv
 
 function ToolCard({ tool }: { readonly tool: ExecutorTool }) {
   return (
-    <details className="group rounded-lg border p-3">
-      <summary className="flex cursor-pointer list-none items-center gap-2">
-        <span className="font-medium">{tool.name}</span>
+    <details className="group min-w-0 rounded-lg border p-3">
+      <summary className="flex min-w-0 cursor-pointer list-none items-center gap-2">
+        <span className="min-w-0 truncate font-medium">{tool.name}</span>
         <Badge variant="outline">{tool.connection}</Badge>
-        <code className="text-muted-foreground ml-auto truncate font-mono text-xs">
+        <code className="text-muted-foreground ml-auto min-w-0 truncate font-mono text-xs">
           {tool.address}
         </code>
       </summary>
@@ -524,11 +524,11 @@ function IntegrationDetail({ integration }: { readonly integration: IntegrationO
   }, [filter, integration.tools])
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4">
       <Card>
-        <CardHeader className="flex-row items-center gap-2 space-y-0">
+        <CardHeader className="flex-row flex-wrap items-center gap-2 space-y-0">
           <Plug className="size-4" />
-          <CardTitle>{integration.name}</CardTitle>
+          <CardTitle className="min-w-0 break-words">{integration.name}</CardTitle>
           <ConnectionBadge integration={integration} />
           <div className="ml-auto">
             <ConnectDialog integration={integration} />
@@ -536,15 +536,15 @@ function IntegrationDetail({ integration }: { readonly integration: IntegrationO
         </CardHeader>
         <CardContent className="space-y-4">
           <dl className="grid gap-3 text-sm sm:grid-cols-3">
-            <div>
+            <div className="min-w-0">
               <dt className="text-muted-foreground text-xs uppercase">Slug</dt>
-              <dd><code className="font-mono">{integration.slug}</code></dd>
+              <dd><code className="break-all font-mono">{integration.slug}</code></dd>
             </div>
-            <div>
+            <div className="min-w-0">
               <dt className="text-muted-foreground text-xs uppercase">Kind</dt>
               <dd>{integration.kind}</dd>
             </div>
-            <div>
+            <div className="min-w-0">
               <dt className="text-muted-foreground text-xs uppercase">Auth</dt>
               <dd>
                 {integration.authMethods.length === 0
@@ -557,13 +557,13 @@ function IntegrationDetail({ integration }: { readonly integration: IntegrationO
 
           {integration.displayUrl === undefined ? null : (
             <a
-              className="text-primary inline-flex items-center gap-1 text-sm hover:underline"
+              className="text-primary inline-flex max-w-full items-center gap-1 break-all text-sm hover:underline"
               href={integration.displayUrl}
               target="_blank"
               rel="noreferrer"
             >
               {integration.displayUrl}
-              <ExternalLink className="size-3" />
+              <ExternalLink className="size-3 shrink-0" />
             </a>
           )}
 
@@ -610,9 +610,9 @@ function IntegrationDetail({ integration }: { readonly integration: IntegrationO
       </Card>
 
       <Card>
-        <CardHeader className="flex-row items-center justify-between space-y-0">
+        <CardHeader className="flex-row flex-wrap items-center justify-between gap-2 space-y-0">
           <CardTitle>Tools</CardTitle>
-          <div className="relative w-64">
+          <div className="relative w-full sm:w-64">
             <Search className="text-muted-foreground absolute left-2 top-1/2 size-3.5 -translate-y-1/2" />
             <Input
               className="pl-7"
@@ -688,7 +688,7 @@ export function IntegrationsRoute() {
           </Card>
         )
         : (
-          <div className="grid gap-4 lg:grid-cols-[20rem_1fr]">
+           <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(14rem,18rem)_minmax(0,1fr)] xl:grid-cols-[20rem_minmax(0,1fr)]">
             <Card className="h-fit">
               <CardHeader>
                 <Input
@@ -704,19 +704,19 @@ export function IntegrationsRoute() {
                     type="button"
                     onClick={() => void navigate(`/integrations/${integration.slug}`)}
                     className={cn(
-                      "flex w-full flex-col gap-1 rounded-md border p-2 text-left text-sm transition-colors",
+                      "flex min-w-0 w-full flex-col gap-1 rounded-md border p-2 text-left text-sm transition-colors",
                       selected?.slug === integration.slug
                         ? "border-primary bg-accent/40"
                         : "hover:bg-accent/20"
                     )}
                   >
-                    <span className="flex items-center gap-2">
-                      <span className="font-medium">{integration.name}</span>
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="min-w-0 truncate font-medium">{integration.name}</span>
                       <ConnectionBadge integration={integration} />
                     </span>
-                    <span className="text-muted-foreground flex items-center gap-2 font-mono text-xs">
-                      {integration.slug}
-                      <span>· {integration.tools.length} tools</span>
+                    <span className="text-muted-foreground flex min-w-0 items-center gap-2 font-mono text-xs">
+                      <span className="min-w-0 truncate">{integration.slug}</span>
+                      <span className="shrink-0">· {integration.tools.length} tools</span>
                     </span>
                   </button>
                 ))}
