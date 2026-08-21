@@ -3,6 +3,7 @@ import { whenPresent } from "@mokronos/wfkit"
 import { authenticateClient, authorizeMutation } from "../authorize.ts"
 import { hashSessionToken } from "../passwords.ts"
 import { SessionTokenHash } from "../domain.ts"
+import type { RateLimiter } from "../ratelimit.ts"
 import type { GatewayStore } from "../store.ts"
 import { matchRoute, pathExists, RequestBodyError } from "./router.ts"
 import type { JsonEncodable, RouteIdentity } from "./router.ts"
@@ -44,6 +45,12 @@ const json = (
     headers: { "content-type": "application/json; charset=utf-8", ...headers }
   })
 
+const tooManyRequests = (retryAfterSeconds: number): Response =>
+  json(429, {
+    error: `Too many requests; retry in ${retryAfterSeconds} seconds`,
+    code: "rate-limited"
+  }, { "retry-after": String(retryAfterSeconds) })
+
 /** `Authorization: Bearer <key>`, or the `x-api-key` header. Nothing reads a
  *  key from the query string, where it would land in access logs. */
 const presentedSecret = (request: Request): string | undefined => {
@@ -56,9 +63,18 @@ const presentedSecret = (request: Request): string | undefined => {
   return apiKey === null || apiKey.length === 0 ? undefined : apiKey
 }
 
-const readBody = async (request: Request): Promise<Schema.Json> => {
+const readBody = async (request: Request, maxBytes: number): Promise<Schema.Json> => {
   if (request.method === "GET" || request.method === "DELETE") return {}
+  const declared = request.headers.get("content-length")
+  // Refuse before reading when the size is declared; otherwise the read below
+  // is bounded by a post-read check.
+  if (declared !== null && Number.parseInt(declared, 10) > maxBytes) {
+    throw new RequestBodyError(`Request body exceeds ${maxBytes} bytes`, 413)
+  }
   const text = await request.text()
+  if (text.length > maxBytes) {
+    throw new RequestBodyError(`Request body exceeds ${maxBytes} bytes`, 413)
+  }
   if (text.trim().length === 0) return {}
   try {
     return Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(text)
@@ -66,6 +82,8 @@ const readBody = async (request: Request): Promise<Schema.Json> => {
     throw new RequestBodyError("Request body is not valid JSON")
   }
 }
+
+export const defaultMaxBodyBytes = 1024 * 1024
 
 /** Every way a credential can be refused. Naming the union instead of keying
  *  these tables by `string` makes both of them total, so a new refusal reason
@@ -99,6 +117,13 @@ const refusal = (status: RefusalStatus): Response =>
 export interface HandlerDependencies {
   readonly store: GatewayStore
   readonly routes: ReadonlyArray<Route>
+  /** Optional traffic shaping, in two buckets with distinct key spaces: a
+   *  per-address limit before authentication protects the credential machinery
+   *  itself, and a per-principal limit after it keeps one misbehaving client
+   *  from starving its neighbours. */
+  readonly addressRateLimiter?: RateLimiter
+  readonly rateLimiter?: RateLimiter
+  readonly maxBodyBytes?: number
 }
 
 /** What the server knows about a request that the request itself cannot say.
@@ -106,9 +131,11 @@ export interface HandlerDependencies {
  * `localSecret` is the local client's key, and is set only by a server that has
  * already decided this request may borrow it — see `http/loopback.ts`. The
  * handler does not re-derive that decision, so a caller cannot reach it by
- * setting a header. */
+ * setting a header. `remoteAddress` feeds the pre-authentication rate bucket;
+ * without it those requests share one anonymous key. */
 export interface GatewayRequestContext {
   readonly localSecret?: string
+  readonly remoteAddress?: string
 }
 
 /** Decides who a request is, from at most one credential source.
@@ -193,6 +220,17 @@ async (request, context) => {
     return json(200, { ok: true })
   }
 
+  if (dependencies.addressRateLimiter !== undefined) {
+    // Before authentication, so guessing credentials costs a bucket slot per
+    // attempt rather than a key lookup.
+    const addressVerdict = dependencies.addressRateLimiter.take(
+      `addr:${context?.remoteAddress ?? "unknown"}`
+    )
+    if (!addressVerdict.allowed) {
+      return tooManyRequests(addressVerdict.retryAfterSeconds)
+    }
+  }
+
   const matched = matchRoute(dependencies.routes, request.method, url.pathname)
   if (matched === undefined) {
     return pathExists(dependencies.routes, url.pathname)
@@ -202,6 +240,17 @@ async (request, context) => {
   const { route, params } = matched
 
   const identity = await resolveIdentity(dependencies, request, context)
+
+  if (dependencies.rateLimiter !== undefined &&
+    identity.kind !== "anonymous" && identity.kind !== "refused") {
+    const principalKey = identity.kind === "client"
+      ? `client:${identity.client.id}`
+      : `subject:${identity.subjectId}`
+    const verdict = dependencies.rateLimiter.take(principalKey)
+    if (!verdict.allowed) {
+      return tooManyRequests(verdict.retryAfterSeconds)
+    }
+  }
 
   // A session riding a cookie must prove same-origin for anything but a read,
   // whatever route it is headed for.
@@ -252,7 +301,7 @@ async (request, context) => {
       const result = await route.handle({
         params,
         query: location.searchParams,
-        body: await readBody(request),
+        body: await readBody(request, dependencies.maxBodyBytes ?? defaultMaxBodyBytes),
         identity
       })
       if (result.html !== undefined) {
@@ -266,7 +315,9 @@ async (request, context) => {
       }
       return json(result.status, result.body, result.headers)
     } catch (error) {
-      if (error instanceof RequestBodyError) return json(400, { error: error.message })
+      if (error instanceof RequestBodyError) {
+        return json(error.status, { error: error.message })
+      }
       return json(500, {
         error: error instanceof Error ? error.message : "Gateway request failed"
       })

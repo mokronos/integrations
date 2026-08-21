@@ -13,6 +13,7 @@ import { isLoopbackAddress, mayBorrowLocalCredential } from "./http/loopback.ts"
 import { gatewayRoutes } from "./http/api.ts"
 import { startMaintenanceLoop } from "./maintenance.ts"
 import { createOAuthSessions } from "./oauth-sessions.ts"
+import { createRateLimiter } from "./ratelimit.ts"
 import { generateApiKey, newClientId } from "./keys.ts"
 import { integrationsHome } from "./paths.ts"
 import type { GatewayStore } from "./store.ts"
@@ -49,6 +50,11 @@ export interface GatewayServiceOptions {
   /** Set when the socket is bound off loopback, so session cookies carry
    *  `Secure` and a stolen cookie is worth less on the wire. */
   readonly secureCookies?: boolean
+  /** Per-principal request budget per minute; falls back to
+   *  INTEGRATIONS_RATE_LIMIT, then {@link defaultRateLimitPerMinute}. */
+  readonly rateLimitPerMinute?: number
+  /** Largest accepted JSON body in bytes; defaults to one mebibyte. */
+  readonly maxBodyBytes?: number
 }
 
 /** Signup is open exactly while the gateway has no humans at all — its first
@@ -58,6 +64,11 @@ const signupOpen = async (
   environment: NodeJS.ProcessEnv = process.env
 ): Promise<boolean> =>
   environment["INTEGRATIONS_ALLOW_SIGNUP"] === "1" || await store.countLogins() === 0
+
+/** Requests per minute one client or signed-in human may make. The address
+ *  bucket that guards unauthenticated traffic is a fraction of this, since a
+ *  credential guesser has no principal to be generous to. */
+export const defaultRateLimitPerMinute = 600
 
 export const createGatewayService = async (
   options: GatewayServiceOptions = {}
@@ -103,11 +114,32 @@ export const createGatewayService = async (
       ...whenPresent("registryUrl", options.registryUrl)
     })
     let closed = false
+    const perMinute = options.rateLimitPerMinute ??
+      Number.parseInt(process.env["INTEGRATIONS_RATE_LIMIT"] ?? "", 10)
+    const rateLimiter = createRateLimiter({
+      // The principal bucket is the configured budget; the address bucket that
+      // guards unauthenticated traffic is a fifth of it, floored so a tiny
+      // configured limit still leaves credential guessing meaningfully bounded.
+      limit: Number.isFinite(perMinute) && perMinute > 0 ? perMinute : defaultRateLimitPerMinute,
+      windowMs: 60_000
+    })
+    const addressLimiter = createRateLimiter({
+      limit: Math.max(20, Math.floor((Number.isFinite(perMinute) && perMinute > 0
+        ? perMinute
+        : defaultRateLimitPerMinute) / 5)),
+      windowMs: 60_000
+    })
     return {
       home,
       store: resources.store,
       gateway,
-      handle: createGatewayHandler({ store: resources.store, routes }),
+      handle: createGatewayHandler({
+        store: resources.store,
+        routes,
+        rateLimiter,
+        addressRateLimiter: addressLimiter,
+        ...whenPresent("maxBodyBytes", options.maxBodyBytes)
+      }),
       close: async () => {
         if (closed) return
         closed = true
@@ -202,10 +234,13 @@ export const serveGateway = async (options: ServeOptions = {}): Promise<RunningG
           port: Number(running.port),
           remoteAddress: running.requestIP(request)?.address
         })
-        return await service.handle(
-          request,
-          borrow && local !== undefined ? { localSecret: local } : {}
-        )
+        const requestContext: {
+          -readonly [K in keyof GatewayRequestContext]: GatewayRequestContext[K]
+        } = {
+          ...whenPresent("remoteAddress", running.requestIP(request)?.address)
+        }
+        if (borrow && local !== undefined) requestContext.localSecret = local
+        return await service.handle(request, requestContext)
       }
     })
     const port = Number(server.port)

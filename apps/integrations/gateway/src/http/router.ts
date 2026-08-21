@@ -178,7 +178,15 @@ export const pathExists = (
 ): boolean =>
   routes.some((route) => matchRoute([route], route.method, pathname) !== undefined)
 
-export class RequestBodyError extends Error {}
+export class RequestBodyError extends Error {
+  /** 400 for malformed bodies, 413 for oversized ones — both are boundary
+   *  refusals, but only one means "try again with less". */
+  readonly status: number
+  constructor(message: string, status = 400) {
+    super(message)
+    this.status = status
+  }
+}
 
 /** Decodes a request body at the boundary. Handlers receive parsed values and
  *  never inspect `unknown`. */
