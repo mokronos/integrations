@@ -5,6 +5,7 @@ import {
 } from "./config.ts"
 import { whenPresent } from "@mokronos/wfkit"
 import { defaultTenantId } from "./domain.ts"
+import { resolveEncryption } from "./crypto.ts"
 import type { Gateway } from "./host.ts"
 import { createGatewayHandler } from "./http/handler.ts"
 import type { GatewayRequestContext } from "./http/handler.ts"
@@ -62,8 +63,15 @@ export const createGatewayService = async (
   options: GatewayServiceOptions = {}
 ): Promise<GatewayService> => {
   const home = options.home ?? integrationsHome()
+  // Payloads at rest are sealed when a master key is available: from the
+  // environment, or a keyfile created inside `home` on first start. An
+  // unconfigured local gateway stays plaintext — same behaviour as always.
+  const encryption = await resolveEncryption({
+    ...whenPresent("envValue", process.env["INTEGRATIONS_MASTER_KEY"]),
+    keyFile: `${home}/gateway.key`
+  })
   const dependencies = ManagedRuntime.make(Layer.merge(
-    GatewayStoreService.layer(`${home}/gateway.sqlite`),
+    GatewayStoreService.layer(`${home}/gateway.sqlite`, encryption),
     ExecutorServicesService.layerWithHost(home)
   ))
   try {

@@ -3,6 +3,7 @@ import path from "node:path"
 import { createClient } from "@libsql/client"
 import type { Client as LibsqlClient, InValue, Row } from "@libsql/client"
 import { Context, Effect, Layer, Schema } from "effect"
+import type { Encryption } from "./crypto.ts"
 import {
   Alias,
   ApiKeyHash,
@@ -125,6 +126,7 @@ const ddl = [
      alias TEXT NOT NULL,
      tool TEXT NOT NULL,
      arguments TEXT NOT NULL,
+     arguments_lookup TEXT,
      status TEXT NOT NULL,
      created_at INTEGER NOT NULL,
      expires_at INTEGER NOT NULL,
@@ -428,7 +430,10 @@ const toGrant = (row: Row): Grant => {
   }
 }
 
-const toApproval = (row: Row): PendingApproval => {
+/** Reads a stored approval back into the domain. `open` undoes whatever the
+ *  write side did to `arguments`/`result`; for plaintext stores it is the
+ *  identity, so one reader serves both worlds. */
+const toApproval = (row: Row, open: (text: string) => string = identity): PendingApproval => {
   const decoded = decodeApprovalRow(pick(row, approvalColumns))
   return {
     id: ApprovalId.make(decoded.id),
@@ -436,17 +441,19 @@ const toApproval = (row: Row): PendingApproval => {
     grantId: GrantId.make(decoded.grant_id),
     alias: Alias.make(decoded.alias),
     tool: ToolName.make(decoded.tool),
-    arguments: parseJsonColumn(decoded.arguments),
+    arguments: parseJsonColumn(open(decoded.arguments)),
     status: decoded.status,
     createdAt: date(decoded.created_at),
     expiresAt: date(decoded.expires_at),
     decidedAt: nullableDate(decoded.decided_at),
     decidedBy: decoded.decided_by,
-    result: decoded.result === null ? null : parseJsonColumn(decoded.result),
+    result: decoded.result === null ? null : parseJsonColumn(open(decoded.result)),
     error: decoded.error,
     collectedAt: nullableDate(decoded.collected_at)
   }
 }
+
+const identity = (text: string): string => text
 
 const toAuditRecord = (row: Row): AuditRecord => {
   const decoded = decodeAuditRow(pick(row, auditColumns))
@@ -677,13 +684,14 @@ export class GatewayStoreService extends Context.Service<
   GatewayStore
 >()("@mokronos/integrations/GatewayStore") {
   static readonly layer = (
-    databasePath: string
+    databasePath: string,
+    encryption?: Encryption
   ): Layer.Layer<GatewayStoreService, GatewayStoreInitializationError> =>
     Layer.effect(
       GatewayStoreService,
       Effect.acquireRelease(
         Effect.tryPromise({
-          try: () => createGatewayStore(databasePath),
+          try: () => createGatewayStore(databasePath, encryption),
           catch: (cause) => new GatewayStoreInitializationError({ databasePath, cause })
         }),
         (store) => Effect.promise(() => store.close())
@@ -846,7 +854,10 @@ const auditFilter = (
   }
 }
 
-export const createGatewayStore = async (databasePath: string): Promise<GatewayStore> => {
+export const createGatewayStore = async (
+  databasePath: string,
+  encryption?: Encryption
+): Promise<GatewayStore> => {
   mkdirSync(path.dirname(databasePath), { recursive: true, mode: 0o700 })
   const database: LibsqlClient = createClient({ url: `file:${databasePath}` })
   await database.execute("PRAGMA journal_mode = WAL")
@@ -856,7 +867,8 @@ export const createGatewayStore = async (databasePath: string): Promise<GatewayS
   // before the DDL below, which indexes it. A gateway that has been running
   // since before delivery-once tracking must not have to be deleted to get it.
   await addMissingColumns(database, "gateway_pending_approval", {
-    collected_at: "INTEGER"
+    collected_at: "INTEGER",
+    arguments_lookup: "TEXT"
   })
   // Tenancy tables first, then the backfill that references them, then the
   // rest of the final shape.
@@ -883,6 +895,17 @@ export const createGatewayStore = async (databasePath: string): Promise<GatewayS
     if (row === undefined) throw new Error(`Unknown client ${id}`)
     return toClient(row)
   }
+
+  // --- payload sealing --------------------------------------------------------
+  // Approval arguments/results and audit arguments are where caller data (and
+  // therefore PII) lives. When a master key is configured they are sealed at
+  // rest; reads open them, and rows written before encryption stay readable
+  // because `open` passes plaintext through.
+
+  const sealText = (text: string): string =>
+    encryption === undefined ? text : encryption.seal(text)
+  const openApproval = (row: Row): PendingApproval =>
+    toApproval(row, encryption === undefined ? identity : encryption.open)
 
   const requireSession = async (tokenHash: SessionTokenHash): Promise<AuthSession> => {
     const row = await one(
@@ -1135,10 +1158,15 @@ export const createGatewayStore = async (databasePath: string): Promise<GatewayS
     },
 
     createApproval: async (input) => {
+      // Stored canonically so that the same request, however its JSON was
+      // built, matches the frozen call it is a retry of — then sealed. The
+      // keyed digest of the canonical text rides alongside, because equality
+      // search over randomised ciphertext is impossible by design.
+      const canonical = canonicalArguments(input.arguments)
       await run(
         `INSERT INTO gateway_pending_approval
-           (id, tenant_id, client_id, grant_id, alias, tool, arguments, status, created_at, expires_at, decided_at, decided_by, result, error, collected_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, NULL, NULL, NULL, NULL, NULL)`,
+           (id, tenant_id, client_id, grant_id, alias, tool, arguments, arguments_lookup, status, created_at, expires_at, decided_at, decided_by, result, error, collected_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, NULL, NULL, NULL, NULL, NULL)`,
         [
           input.id,
           input.tenantId,
@@ -1146,26 +1174,33 @@ export const createGatewayStore = async (databasePath: string): Promise<GatewayS
           input.grantId,
           input.alias,
           input.tool,
-          // Stored canonically so that the same request, however its JSON was
-          // built, matches the frozen call it is a retry of.
-          canonicalArguments(input.arguments),
+          sealText(canonical),
+          encryption === undefined ? null : encryption.lookup(canonical),
           now(),
           millis(input.expiresAt)
         ]
       )
       const row = await one("SELECT * FROM gateway_pending_approval WHERE id = ?", [input.id])
       if (row === undefined) throw new Error(`Failed to store approval ${input.id}`)
-      return toApproval(row)
+      return openApproval(row)
     },
 
     findUncollectedApproval: async (grantId, argumentsValue) => {
+      const canonical = canonicalArguments(argumentsValue)
       const row = await one(
         `SELECT * FROM gateway_pending_approval
-          WHERE grant_id = ? AND arguments = ? AND collected_at IS NULL
+          WHERE grant_id = ?
+            AND ((arguments_lookup IS NOT NULL AND arguments_lookup = ?)
+              OR (arguments_lookup IS NULL AND arguments = ?))
+            AND collected_at IS NULL
           ORDER BY created_at DESC LIMIT 1`,
-        [grantId, canonicalArguments(argumentsValue)]
+        [
+          grantId,
+          encryption === undefined ? canonical : encryption.lookup(canonical),
+          canonical
+        ]
       )
-      return row === undefined ? undefined : toApproval(row)
+      return row === undefined ? undefined : openApproval(row)
     },
 
     collectApproval: async (tenantId, id) => {
@@ -1183,7 +1218,7 @@ export const createGatewayStore = async (databasePath: string): Promise<GatewayS
         "SELECT * FROM gateway_pending_approval WHERE tenant_id = ? AND id = ?",
         [tenantId, id]
       )
-      return row === undefined ? undefined : toApproval(row)
+      return row === undefined ? undefined : openApproval(row)
     },
 
     listApprovals: async (tenantId, status) =>
@@ -1195,7 +1230,7 @@ export const createGatewayStore = async (databasePath: string): Promise<GatewayS
         : await all(
           "SELECT * FROM gateway_pending_approval WHERE tenant_id = ? AND status = ? ORDER BY created_at DESC",
           [tenantId, status]
-        )).map(toApproval),
+        )).map(openApproval),
 
     settleApproval: async (input) => {
       await run(
@@ -1206,7 +1241,7 @@ export const createGatewayStore = async (databasePath: string): Promise<GatewayS
           input.status,
           now(),
           input.decidedBy,
-          input.result === null ? null : JSON.stringify(input.result),
+          input.result === null ? null : sealText(JSON.stringify(input.result)),
           input.error,
           input.tenantId,
           input.id
@@ -1249,7 +1284,11 @@ export const createGatewayStore = async (databasePath: string): Promise<GatewayS
       if (input.arguments !== undefined) {
         await run(
           "INSERT INTO gateway_audit_arguments (audit_id, arguments, expires_at) VALUES (?, ?, ?)",
-          [input.id, JSON.stringify(input.arguments.value), millis(input.arguments.expiresAt)]
+          [
+            input.id,
+            sealText(JSON.stringify(input.arguments.value)),
+            millis(input.arguments.expiresAt)
+          ]
         )
       }
     },
