@@ -41,7 +41,18 @@ export interface GatewayServiceOptions {
   readonly retentionDays?: number
   /** Overrides integrations.sh for a private or test registry. */
   readonly registryUrl?: string
+  /** Set when the socket is bound off loopback, so session cookies carry
+   *  `Secure` and a stolen cookie is worth less on the wire. */
+  readonly secureCookies?: boolean
 }
+
+/** Signup is open exactly while the gateway has no humans at all — its first
+ *  login claims the instance — or when an operator opts in explicitly. */
+const signupOpen = async (
+  store: GatewayStore,
+  environment: NodeJS.ProcessEnv = process.env
+): Promise<boolean> =>
+  environment["INTEGRATIONS_ALLOW_SIGNUP"] === "1" || await store.countLogins() === 0
 
 export const createGatewayService = async (
   options: GatewayServiceOptions = {}
@@ -71,6 +82,10 @@ export const createGatewayService = async (
       executor: gateway.executor,
       retentionDays: options.retentionDays ?? defaultArgumentRetentionDays,
       oauth,
+      sessions: {
+        signupOpen: await signupOpen(resources.store),
+        secureCookies: options.secureCookies ?? false
+      },
       ...whenPresent("registryUrl", options.registryUrl)
     })
     let closed = false
@@ -143,12 +158,13 @@ export interface RunningGateway {
  * credential that unlocks every connection a client holds, so exposing it
  * externally has to be a deliberate act rather than a default. */
 export const serveGateway = async (options: ServeOptions = {}): Promise<RunningGateway> => {
-  const service = await createGatewayService({
-    ...whenPresent("home", options.home),
-    ...whenPresent("registryUrl", options.registryUrl)
-  })
   const hostname = options.hostname ?? "127.0.0.1"
   const boundToLoopback = isLoopbackAddress(hostname)
+  const service = await createGatewayService({
+    ...whenPresent("home", options.home),
+    ...whenPresent("registryUrl", options.registryUrl),
+    secureCookies: !boundToLoopback
+  })
   let server: ReturnType<typeof Bun.serve> | undefined
   try {
     const web = options.web === false ? undefined : await createWebAssets()

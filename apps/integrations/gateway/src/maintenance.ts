@@ -3,11 +3,13 @@ import type { GatewayStore } from "./store.ts"
 export type MaintenanceResult = {
   readonly expiredApprovals: number
   readonly expiredAuditArguments: number
+  /** Signed-in humans whose session simply ran out. */
+  readonly deletedSessions: number
 }
 
-/** The two things that must happen on a clock rather than on a request.
+/** The things that must happen on a clock rather than on a request.
  *
- * Both are decisions, not cleanups. An approval that expired did not "fail to
+ * Each is a decision, not a cleanup. An approval that expired did not "fail to
  * be answered" — the answer is that the invocation does not happen. Arguments
  * that aged out are the deliberate half of the audit split: the record stays
  * forever, the payload does not. */
@@ -16,7 +18,8 @@ export const runMaintenance = async (
   at: Date = new Date()
 ): Promise<MaintenanceResult> => ({
   expiredApprovals: await store.expireApprovals(at),
-  expiredAuditArguments: await store.expireAuditArguments(at)
+  expiredAuditArguments: await store.expireAuditArguments(at),
+  deletedSessions: await store.deleteExpiredSessions(at)
 })
 
 export interface MaintenanceLoop {

@@ -15,6 +15,7 @@ import {
   defaultTenantId,
   GrantId,
   IntegrationSlug,
+  SessionTokenHash,
   SubjectId,
   TenantId,
   ToolName
@@ -24,10 +25,12 @@ import type {
   ApprovalStatus,
   AuditOutcome,
   AuditRecord,
+  AuthSession,
   Client,
   ConnectionRef,
   Grant,
   GrantDecision,
+  Login,
   PendingApproval,
   Subject,
   Tenant,
@@ -56,6 +59,22 @@ const tenancyTableDdl = [
      id TEXT PRIMARY KEY,
      tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
      created_at INTEGER NOT NULL
+   )`,
+  // Authentication details live beside the subject, never on it — the subject
+  // stays an opaque human. Deleting a login deletes its sessions with it.
+  `CREATE TABLE IF NOT EXISTS gateway_login (
+     subject_id TEXT PRIMARY KEY REFERENCES gateway_subject (id) ON DELETE CASCADE,
+     tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
+     email TEXT NOT NULL UNIQUE,
+     password_hash TEXT NOT NULL,
+     created_at INTEGER NOT NULL
+   )`,
+  `CREATE TABLE IF NOT EXISTS gateway_session (
+     token_hash TEXT PRIMARY KEY,
+     subject_id TEXT NOT NULL REFERENCES gateway_subject (id) ON DELETE CASCADE,
+     tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
+     created_at INTEGER NOT NULL,
+     expires_at INTEGER NOT NULL
    )`
 ] as const
 
@@ -192,6 +211,22 @@ const SubjectRow = Schema.Struct({
   created_at: Schema.Number
 })
 
+const LoginRow = Schema.Struct({
+  subject_id: Schema.String,
+  tenant_id: Schema.String,
+  email: Schema.String,
+  password_hash: Schema.String,
+  created_at: Schema.Number
+})
+
+const SessionRow = Schema.Struct({
+  token_hash: Schema.String,
+  subject_id: Schema.String,
+  tenant_id: Schema.String,
+  created_at: Schema.Number,
+  expires_at: Schema.Number
+})
+
 const ApiKeyRow = Schema.Struct({
   id: Schema.String,
   client_id: Schema.String,
@@ -259,6 +294,8 @@ const SnapshotRow = Schema.Struct({
 const clientColumns = ["id", "tenant_id", "name", "may_mutate", "created_at", "revoked_at"]
 const tenantColumns = ["id", "name", "created_at"]
 const subjectColumns = ["id", "tenant_id", "created_at"]
+const loginColumns = ["subject_id", "tenant_id", "email", "password_hash", "created_at"]
+const sessionColumns = ["token_hash", "subject_id", "tenant_id", "created_at", "expires_at"]
 const apiKeyColumns = ["id", "client_id", "hash", "created_at", "last_used_at", "revoked_at"]
 const grantColumns = [
   "id", "client_id", "alias", "tool", "owner", "subject",
@@ -279,6 +316,8 @@ const snapshotColumns = [
 const decodeClientRow = Schema.decodeUnknownSync(ClientRow)
 const decodeTenantRow = Schema.decodeUnknownSync(TenantRow)
 const decodeSubjectRow = Schema.decodeUnknownSync(SubjectRow)
+const decodeLoginRow = Schema.decodeUnknownSync(LoginRow)
+const decodeSessionRow = Schema.decodeUnknownSync(SessionRow)
 const decodeApiKeyRow = Schema.decodeUnknownSync(ApiKeyRow)
 const decodeGrantRow = Schema.decodeUnknownSync(GrantRow)
 const decodeApprovalRow = Schema.decodeUnknownSync(ApprovalRow)
@@ -321,6 +360,30 @@ const toSubject = (row: Row): Subject => {
     id: SubjectId.make(decoded.id),
     tenantId: TenantId.make(decoded.tenant_id),
     createdAt: date(decoded.created_at)
+  }
+}
+
+const toLoginRecord = (row: Row): LoginRecord => {
+  const decoded = decodeLoginRow(pick(row, loginColumns))
+  return {
+    subjectId: SubjectId.make(decoded.subject_id),
+    tenantId: TenantId.make(decoded.tenant_id),
+    email: decoded.email,
+    passwordHash: decoded.password_hash,
+    createdAt: date(decoded.created_at)
+  }
+}
+
+const toAuthSession = (row: Row): AuthSession => {
+  const decoded = decodeSessionRow(pick(row, sessionColumns))
+  return {
+    tokenHash: SessionTokenHash.make(decoded.token_hash),
+    tenantId: TenantId.make(decoded.tenant_id),
+    subjectId: SubjectId.make(decoded.subject_id),
+    // Joined from the login; a session always has one.
+    email: String(row["email"] ?? ""),
+    createdAt: date(decoded.created_at),
+    expiresAt: date(decoded.expires_at)
   }
 }
 
@@ -432,6 +495,13 @@ export interface CreateSubjectInput {
   readonly tenantId: TenantId
 }
 
+/** A login as stored: everything {@link Login} carries plus the password hash.
+ *  The hash never leaves the store boundary — verification happens through
+ *  `findLoginByEmail` returning it, and nothing serialises this type. */
+export interface LoginRecord extends Login {
+  readonly passwordHash: string
+}
+
 export interface CreateClientInput {
   readonly tenantId: TenantId
   readonly id: ClientId
@@ -500,6 +570,27 @@ export interface GatewayStore {
   listSubjects(tenantId: TenantId): Promise<ReadonlyArray<Subject>>
   countSubjects(tenantId: TenantId): Promise<number>
   findSubjectById(id: SubjectId): Promise<Subject | undefined>
+
+  createLogin(input: {
+    readonly subjectId: SubjectId
+    readonly tenantId: TenantId
+    readonly email: string
+    readonly passwordHash: string
+  }): Promise<LoginRecord>
+  findLoginByEmail(email: string): Promise<LoginRecord | undefined>
+  countLogins(): Promise<number>
+
+  createSession(input: {
+    readonly tokenHash: SessionTokenHash
+    readonly subjectId: SubjectId
+    readonly tenantId: TenantId
+    readonly expiresAt: Date
+  }): Promise<AuthSession>
+  /** A live session, or nothing. Expired sessions read as absent: expiry is
+   *  the same decision revocation is. */
+  findLiveSession(tokenHash: SessionTokenHash): Promise<AuthSession | undefined>
+  revokeSession(tokenHash: SessionTokenHash): Promise<void>
+  deleteExpiredSessions(now: Date): Promise<number>
 
   createClient(input: CreateClientInput): Promise<Client>
   listClients(tenantId: TenantId): Promise<ReadonlyArray<Client>>
@@ -793,6 +884,17 @@ export const createGatewayStore = async (databasePath: string): Promise<GatewayS
     return toClient(row)
   }
 
+  const requireSession = async (tokenHash: SessionTokenHash): Promise<AuthSession> => {
+    const row = await one(
+      `SELECT gateway_session.*, gateway_login.email
+         FROM gateway_session JOIN gateway_login ON gateway_login.subject_id = gateway_session.subject_id
+        WHERE gateway_session.token_hash = ?`,
+      [tokenHash]
+    )
+    if (row === undefined) throw new Error(`Failed to store session`)
+    return toAuthSession(row)
+  }
+
   return {
     databasePath,
 
@@ -848,6 +950,57 @@ export const createGatewayStore = async (databasePath: string): Promise<GatewayS
     findSubjectById: async (id) => {
       const row = await one("SELECT * FROM gateway_subject WHERE id = ?", [id])
       return row === undefined ? undefined : toSubject(row)
+    },
+
+    createLogin: async (input) => {
+      await run(
+        "INSERT INTO gateway_login (subject_id, tenant_id, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+        [input.subjectId, input.tenantId, input.email, input.passwordHash, now()]
+      )
+      const row = await one("SELECT * FROM gateway_login WHERE subject_id = ?", [input.subjectId])
+      if (row === undefined) throw new Error(`Failed to store login for ${input.email}`)
+      return toLoginRecord(row)
+    },
+
+    findLoginByEmail: async (email) => {
+      const row = await one("SELECT * FROM gateway_login WHERE email = ?", [email])
+      return row === undefined ? undefined : toLoginRecord(row)
+    },
+
+    countLogins: async () => {
+      const row = await one("SELECT COUNT(*) AS total FROM gateway_login", [])
+      return row === undefined ? 0 : Number(row["total"] ?? 0)
+    },
+
+    createSession: async (input) => {
+      await run(
+        "INSERT INTO gateway_session (token_hash, subject_id, tenant_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
+        [input.tokenHash, input.subjectId, input.tenantId, now(), millis(input.expiresAt)]
+      )
+      return await requireSession(input.tokenHash)
+    },
+
+    // Joined with the login for the display email; expired rows read as absent.
+    findLiveSession: async (tokenHash) => {
+      const row = await one(
+        `SELECT gateway_session.*, gateway_login.email
+           FROM gateway_session JOIN gateway_login ON gateway_login.subject_id = gateway_session.subject_id
+          WHERE gateway_session.token_hash = ? AND gateway_session.expires_at > ?`,
+        [tokenHash, now()]
+      )
+      return row === undefined ? undefined : toAuthSession(row)
+    },
+
+    revokeSession: async (tokenHash) => {
+      await run("DELETE FROM gateway_session WHERE token_hash = ?", [tokenHash])
+    },
+
+    deleteExpiredSessions: async (at) => {
+      const result = await database.execute({
+        sql: "DELETE FROM gateway_session WHERE expires_at <= ?",
+        args: [millis(at)]
+      })
+      return Number(result.rowsAffected)
     },
 
     createClient: async (input) => {

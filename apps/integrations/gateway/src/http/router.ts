@@ -1,5 +1,5 @@
 import { Schema } from "effect"
-import type { Client } from "../domain.ts"
+import type { Client, SessionTokenHash, SubjectId, TenantId } from "../domain.ts"
 
 /** Routes are data rather than an if-chain over pathnames, so the surface can
  * be enumerated, access-classified, and tested without a socket.
@@ -10,22 +10,81 @@ import type { Client } from "../domain.ts"
  * boundary, and a route table with Schema-decoded bodies buys that back. */
 export type HttpVerb = "GET" | "POST" | "DELETE"
 
-/** `delegated` needs any live key; `privileged` additionally needs mayMutate.
- * Classification lives on the route so a new endpoint cannot forget to be
- * guarded — the dispatcher reads this, not the handler. */
-export type RouteAccess = "delegated" | "privileged"
+/** `delegated` needs any live key; `privileged` additionally needs mayMutate —
+ * or a human session, since administering the gateway is exactly what the
+ * dashboard exists for. `public` needs neither: the login surface cannot
+ * require the credential it creates. Classification lives on the route so a
+ * new endpoint cannot forget to be guarded — the dispatcher reads this, not
+ * the handler. */
+export type RouteAccess = "public" | "delegated" | "privileged"
 
-export interface RouteRequest {
+/** Who the dispatcher decided this request is. Every authenticated request is
+ * exactly one of these; there is no blending of a session and a key. `refused`
+ * means a credential was presented and rejected — protected routes turn that
+ * into the exact refusal, public routes treat it as anonymous. */
+export type RouteIdentity =
+  | { readonly kind: "anonymous" }
+  | {
+    readonly kind: "refused"
+    readonly reason: "unknown-key" | "key-revoked" | "client-revoked"
+  }
+  | { readonly kind: "client"; readonly client: Client; readonly secret: string }
+  | {
+    readonly kind: "session"
+    readonly tenantId: TenantId
+    readonly subjectId: SubjectId
+    readonly email: string
+    /** The hash of the cookie's token, so logout can revoke server-side rather
+     *  than only dropping the cookie. */
+    readonly tokenHash: SessionTokenHash
+  }
+
+export type RouteRequest = {
   readonly params: Readonly<Record<string, string>>
   readonly query: URLSearchParams
   /** Already parsed from the request's JSON text by the handler, so a route
    *  never sees a raw string. */
   readonly body: Schema.Json
-  /** The authenticated caller. Present for every route: there are no
-   *  unauthenticated endpoints. */
-  readonly client: Client
-  readonly secret: string
+  readonly identity: RouteIdentity
 }
+
+/** The API client behind this request. The dispatcher only hands a route its
+ *  declared identity class, so a handler whose route is `delegated` or
+ *  `privileged` may assert this; a stray call on a public route is a bug and
+ *  fails loudly instead of authorizing nobody. */
+export const clientOf = (request: RouteRequest): Client => {
+  if (request.identity.kind !== "client") {
+    throw new Error(`A client identity is required, got ${request.identity.kind}`)
+  }
+  return request.identity.client
+}
+
+/** The presented API key. Only meaningful alongside {@link clientOf}. */
+export const secretOf = (request: RouteRequest): string => {
+  if (request.identity.kind !== "client") {
+    throw new Error(`A client secret is required, got ${request.identity.kind}`)
+  }
+  return request.identity.secret
+}
+
+/** The tenant this request acts within: the client's partition, or the signed-in
+ *  human's. Every tenant-scoped read goes through here so a session and a key
+ *  see the same slice of the world. */
+export const tenantOf = (request: RouteRequest): TenantId => {
+  switch (request.identity.kind) {
+    case "client":
+      return request.identity.client.tenantId
+    case "session":
+      return request.identity.tenantId
+    default:
+      throw new Error(`A tenant is required, got identity ${request.identity.kind}`)
+  }
+}
+
+/** The signed-in human behind this request, if there is one. Used for display
+ *  and attribution — `decidedBy` on an approval — never for authority. */
+export const sessionOf = (request: RouteRequest): { readonly email: string } | undefined =>
+  request.identity.kind === "session" ? request.identity : undefined
 
 /** A value on its way out through JSON.stringify.
  *
@@ -43,6 +102,9 @@ export type JsonEncodable =
 export interface RouteResult {
   readonly status: number
   readonly body: JsonEncodable
+  /** Extra response headers — `Set-Cookie` for the session surface, which
+   *  cannot be expressed as JSON. */
+  readonly headers?: Readonly<Record<string, string>>
 }
 
 export interface Route {

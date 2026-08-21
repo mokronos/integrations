@@ -51,6 +51,11 @@ export type ConnectionName = typeof ConnectionName.Type
 export const ApiKeyHash = Schema.String.pipe(Schema.brand("ApiKeyHash"))
 export type ApiKeyHash = typeof ApiKeyHash.Type
 
+/** The SHA-256 of a session token. Like an API key hash, the token itself is
+ *  never stored — only the human's cookie holds it. */
+export const SessionTokenHash = Schema.String.pipe(Schema.brand("SessionTokenHash"))
+export type SessionTokenHash = typeof SessionTokenHash.Type
+
 // --- tenants ----------------------------------------------------------------
 
 /** The well-known tenant every pre-existing deployment belongs to. A gateway
@@ -75,6 +80,28 @@ export const Subject = Schema.Struct({
   createdAt: Schema.Date
 })
 export type Subject = typeof Subject.Type
+
+/** The credential a human signs in with. Held beside the subject rather than on
+ *  it: the subject remains an opaque identity, and a login can be deleted
+ *  without touching anything the subject is referenced by. */
+export const Login = Schema.Struct({
+  subjectId: SubjectId,
+  tenantId: TenantId,
+  email: Schema.String,
+  createdAt: Schema.Date
+})
+export type Login = typeof Login.Type
+
+export const AuthSession = Schema.Struct({
+  tokenHash: SessionTokenHash,
+  tenantId: TenantId,
+  subjectId: SubjectId,
+  /** Carried for display and audit; never used for lookup. */
+  email: Schema.String,
+  createdAt: Schema.Date,
+  expiresAt: Schema.Date
+})
+export type AuthSession = typeof AuthSession.Type
 
 // --- connections ------------------------------------------------------------
 

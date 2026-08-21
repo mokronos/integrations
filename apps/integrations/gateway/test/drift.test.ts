@@ -248,7 +248,8 @@ describe("gateway maintenance", () => {
     const store = await makeStore()
     expect(await runMaintenance(store)).toEqual({
       expiredApprovals: 0,
-      expiredAuditArguments: 0
+      expiredAuditArguments: 0,
+      deletedSessions: 0
     })
   })
 })
