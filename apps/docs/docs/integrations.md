@@ -73,6 +73,21 @@ path and exits. Output goes to `~/.wf/logs/integrations.log` and
 `integrations.error.log`. Stop it with `kill <pid>`. It does not survive logout
 or a reboot.
 
+### Hosting it
+
+The same gateway can run as a multi-tenant hosted service: humans sign in to
+the dashboard with email and password (the first signup claims the instance),
+clients keep using API keys, OAuth callbacks arrive at the gateway's public URL
+instead of a loopback port, and gateway-held payloads are sealed at rest under
+a master key. Point clients at it with `INTEGRATIONS_URL` and
+`INTEGRATIONS_API_KEY`; nothing else about the client surface changes.
+
+See [Hosting the gateway](../../../docs/deploy/gateway-cloud.md) for the
+environment variables (`INTEGRATIONS_PUBLIC_URL`, `INTEGRATIONS_ALLOW_SIGNUP`,
+`INTEGRATIONS_MASTER_KEY`, `INTEGRATIONS_RATE_LIMIT`,
+`INTEGRATIONS_MAX_BODY_BYTES`), TLS setup, deployment targets, and operational
+notes.
+
 ## integrations dashboard
 
 The gateway serves a browser control plane on the same port it listens on. This

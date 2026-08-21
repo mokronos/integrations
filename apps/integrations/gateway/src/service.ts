@@ -234,12 +234,10 @@ export const serveGateway = async (options: ServeOptions = {}): Promise<RunningG
           port: Number(running.port),
           remoteAddress: running.requestIP(request)?.address
         })
-        const requestContext: {
-          -readonly [K in keyof GatewayRequestContext]: GatewayRequestContext[K]
-        } = {
-          ...whenPresent("remoteAddress", running.requestIP(request)?.address)
+        const requestContext: GatewayRequestContext = {
+          ...whenPresent("remoteAddress", running.requestIP(request)?.address),
+          ...whenPresent("localSecret", borrow && local !== undefined ? local : undefined)
         }
-        if (borrow && local !== undefined) requestContext.localSecret = local
         return await service.handle(request, requestContext)
       }
     })

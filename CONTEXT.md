@@ -37,6 +37,23 @@ The credential a client presents. Identifies the client and nothing else; the
 tenant and the humans acted for are derived from the client's grants.
 _Avoid_: Token, session token, secret
 
+**Login**:
+The email-and-password credential by which a subject signs in. Held beside the
+subject — the subject itself stays opaque — so removing a login never disturbs
+what the subject is referenced by.
+_Avoid_: Account, user, identity
+
+**Session**:
+A signed-in human's bearer token, held in a cookie and stored only as its
+SHA-256. May administer; may never invoke. Expires, and expiry is the same
+outcome as logout: the token stops working everywhere at once.
+_Avoid_: Login (the credential, not the live sign-in), cookie
+
+**Master key**:
+The secret that seals gateway-held payloads at rest. Comes from the
+environment or a minted keyfile; its absence means plaintext, not breakage.
+_Avoid_: Encryption key (say which), password
+
 **Grant**:
 A delegation: one client may invoke one tool through one connection. The only
 source of a client's access.
@@ -101,3 +118,15 @@ The service holding connections and credentials, resolving grants, deciding
 policy, and performing invocations. The only component that ever sees a
 credential.
 _Avoid_: Server, proxy, broker, hub
+
+### Hosting
+
+**Public URL**:
+The origin callers and providers reach the gateway on. Set, it makes OAuth
+callbacks arrive at the gateway itself instead of a private loopback port.
+_Avoid_: Base URL, host, endpoint
+
+**Rate limit**:
+A ceiling on requests per window, enforced per address before authentication
+and per principal after it. In-process; the edge in front owns anything larger.
+_Avoid_: Throttle, quota (a billing concept)
