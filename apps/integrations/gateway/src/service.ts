@@ -41,6 +41,10 @@ export interface GatewayServiceOptions {
   readonly retentionDays?: number
   /** Overrides integrations.sh for a private or test registry. */
   readonly registryUrl?: string
+  /** The gateway's externally reachable origin, e.g. https://gw.example.com.
+   *  Set on a hosted deployment so OAuth callbacks arrive at the gateway's own
+   *  public URL instead of an ephemeral loopback listener. */
+  readonly publicUrl?: string
   /** Set when the socket is bound off loopback, so session cookies carry
    *  `Secure` and a stolen cookie is worth less on the wire. */
   readonly secureCookies?: boolean
@@ -75,7 +79,9 @@ export const createGatewayService = async (
       executor: resources.executor,
       close: () => resources.host.close()
     }
-    const oauth = createOAuthSessions(gateway.executor)
+    const oauth = createOAuthSessions(gateway.executor, {
+      ...whenPresent("publicUrl", options.publicUrl ?? process.env["INTEGRATIONS_PUBLIC_URL"])
+    })
     const maintenance = startMaintenanceLoop(resources.store)
     const routes = gatewayRoutes({
       store: resources.store,

@@ -119,7 +119,12 @@ const setup = async (options: SetupOptions = {}) => {
       store,
       executor: stubExecutor(),
       retentionDays: 30,
-      oauth: { start: async () => { throw new Error("not used") }, get: () => undefined, stop: () => undefined },
+      oauth: {
+        start: async () => { throw new Error("not used") },
+        get: () => undefined,
+        completeByState: async () => undefined,
+        stop: () => undefined
+      },
       sessions: {
         signupOpen: options.signupOpen ?? false,
         secureCookies: options.secureCookies ?? false

@@ -5,6 +5,7 @@ import { searchIntegrations } from "@mokronos/wfkit-executor"
 import { ExecutorToolAddress } from "@mokronos/wfkit-executor/schemas"
 import { refreshIntegrationSnapshot } from "../drift.ts"
 import { runMaintenance } from "../maintenance.ts"
+import { oauthBrowserPage } from "../oauth.ts"
 import type { OAuthSessions } from "../oauth-sessions.ts"
 import { authRoutes } from "./auth-api.ts"
 import {
@@ -513,6 +514,69 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
         const session = oauth.get(request.params["id"] ?? "")
         if (session === undefined) return notFound("Unknown or expired OAuth session")
         return ok(session)
+      }
+    },
+    {
+      // The provider's browser redirect lands here. Public by necessity: no
+      // gateway credential rides a vendor's redirect, and the state parameter
+      // is the proof the flow is ours. Only meaningful when the gateway runs
+      // hosted — locally, callbacks arrive on the flow's private loopback
+      // listener and this route answers "not found" for any state, which is
+      // exactly what an unknown callback deserves.
+      method: "GET",
+      path: "/v1/oauth/callback",
+      access: "public",
+      handle: async (request) => {
+        const state = request.query.get("state")
+        const code = request.query.get("code")
+        const errorDescription = request.query.get("error_description") ?? request.query.get("error")
+        if (state === null || code === null || errorDescription !== null) {
+          return {
+            status: 400,
+            body: undefined,
+            html: oauthBrowserPage({
+              title: "Authorization failed",
+              message: errorDescription ?? "The provider did not return a usable authorization code."
+            })
+          }
+        }
+        const completed = await oauth.completeByState(state, {
+          code,
+          ...whenPresentMap(
+            "callbackDomain",
+            request.query.get("domain") ?? request.query.get("site"),
+            (domain) => domain
+          )
+        })
+        if (completed === undefined) {
+          return {
+            status: 400,
+            body: undefined,
+            html: oauthBrowserPage({
+              title: "Unknown authorization",
+              message:
+                "This callback does not match any authorization in progress. Return to the terminal or dashboard and start again."
+            })
+          }
+        }
+        if (completed.state.status === "failed") {
+          return {
+            status: 400,
+            body: undefined,
+            html: oauthBrowserPage({
+              title: "Authorization failed",
+              message: completed.state.message
+            })
+          }
+        }
+        return {
+          status: 200,
+          body: undefined,
+          html: oauthBrowserPage({
+            title: "Account connected",
+            message: `${completed.integration} was connected. You can close this window.`
+          })
+        }
       }
     },
     {

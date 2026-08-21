@@ -94,6 +94,8 @@ export { runMaintenance, startMaintenanceLoop } from "./maintenance.ts"
 export type { MaintenanceLoop, MaintenanceResult } from "./maintenance.ts"
 export { createOAuthSessions } from "./oauth-sessions.ts"
 export type { OAuthSession, OAuthSessions, OAuthSessionState } from "./oauth-sessions.ts"
+export { authorizeExecutorInBrowser, oauthBrowserPage, startHostedExecutorOAuth } from "./oauth.ts"
+export type { HostedAuthorization, HostedAuthorizationFlow } from "./oauth.ts"
 
 export { gatewayRoutes } from "./http/api.ts"
 export type { ApiDependencies } from "./http/api.ts"

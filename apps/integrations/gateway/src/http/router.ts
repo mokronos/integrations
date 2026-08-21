@@ -105,6 +105,10 @@ export interface RouteResult {
   /** Extra response headers — `Set-Cookie` for the session surface, which
    *  cannot be expressed as JSON. */
   readonly headers?: Readonly<Record<string, string>>
+  /** When set, sent verbatim as `text/html` instead of serialising `body`.
+   *  For the browser-facing endpoints (the OAuth callback) whose reader is a
+   *  human on a redirect, not an API client. */
+  readonly html?: string
 }
 
 export interface Route {

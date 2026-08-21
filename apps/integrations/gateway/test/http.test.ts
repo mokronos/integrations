@@ -184,6 +184,7 @@ const setup = async (options: {
       oauth: {
         start: async () => { throw new Error("not used") },
         get: () => undefined,
+        completeByState: async () => undefined,
         stop: () => undefined
       }
     })

@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import { whenPresent } from "@mokronos/wfkit"
 import { authenticateClient, authorizeMutation } from "../authorize.ts"
 import { hashSessionToken } from "../passwords.ts"
 import { SessionTokenHash } from "../domain.ts"
@@ -254,6 +255,15 @@ async (request, context) => {
         body: await readBody(request),
         identity
       })
+      if (result.html !== undefined) {
+        return new Response(result.html, {
+          status: result.status,
+          headers: {
+            "content-type": "text/html; charset=utf-8",
+            ...whenPresent("content-type", result.headers?.["content-type"])
+          }
+        })
+      }
       return json(result.status, result.body, result.headers)
     } catch (error) {
       if (error instanceof RequestBodyError) return json(400, { error: error.message })
