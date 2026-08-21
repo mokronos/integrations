@@ -3,6 +3,7 @@ import { mkdtemp, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import {
+  defaultTenantId,
   gatewayConfigPath,
   generateApiKey,
   localClientName,
@@ -48,7 +49,7 @@ describe("gateway service", () => {
     expect(config?.port).toBe(gateway.port)
     expect(config?.apiKey).toStartWith("wfi_")
 
-    const local = await gateway.service.store.findClientByName(localClientName)
+    const local = await gateway.service.store.findClientByName(defaultTenantId, localClientName)
     // The local machine's own key is the admin credential: this is what lets an
     // agent discover and connect with the human needed only for auth.
     expect(local?.mayMutate).toBe(true)
@@ -105,6 +106,7 @@ describe("gateway service", () => {
     const gateway = await start()
     const sandbox = await gateway.service.store.createClient({
       id: newClientId(),
+      tenantId: defaultTenantId,
       name: "sandbox",
       mayMutate: false
     })

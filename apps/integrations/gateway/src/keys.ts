@@ -1,5 +1,14 @@
 import { createHash, randomUUID, randomBytes } from "node:crypto"
-import { ApiKeyHash, ApiKeyId, ApprovalId, AuditId, ClientId, GrantId } from "./domain.ts"
+import {
+  ApiKeyHash,
+  ApiKeyId,
+  ApprovalId,
+  AuditId,
+  ClientId,
+  GrantId,
+  SubjectId,
+  TenantId
+} from "./domain.ts"
 
 /** Keys are shown once and never stored. The prefix makes a leaked key
  *  greppable in logs and recognisable in a secret scanner. */
@@ -30,3 +39,5 @@ export const newClientId = (): ClientId => ClientId.make(randomUUID())
 export const newGrantId = (): GrantId => GrantId.make(randomUUID())
 export const newApprovalId = (): ApprovalId => ApprovalId.make(randomUUID())
 export const newAuditId = (): AuditId => AuditId.make(randomUUID())
+export const newTenantId = (): TenantId => TenantId.make(randomUUID())
+export const newSubjectId = (): SubjectId => SubjectId.make(randomUUID())

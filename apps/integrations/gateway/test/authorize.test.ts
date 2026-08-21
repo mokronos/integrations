@@ -8,6 +8,7 @@ import {
   authorizeMutation,
   ConnectionName,
   createGatewayStore,
+  defaultTenantId,
   generateApiKey,
   IntegrationSlug,
   newClientId,
@@ -55,6 +56,7 @@ const seed = async (store: GatewayStore, options: {
 } = {}) => {
   const client = await store.createClient({
     id: newClientId(),
+    tenantId: defaultTenantId,
     name: "support-agent",
     mayMutate: options.mayMutate ?? false
   })
@@ -62,6 +64,7 @@ const seed = async (store: GatewayStore, options: {
   await store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
   const grant = await store.createGrant({
     id: newGrantId(),
+    tenantId: defaultTenantId,
     clientId: client.id,
     alias: Alias.make("sharepoint-app"),
     tool: ToolName.make("getDocument"),
@@ -139,7 +142,7 @@ describe("gateway authorization", () => {
     const second = generateApiKey()
     await store.addApiKey({ id: second.id, clientId: client.id, hash: second.hash })
 
-    await store.revokeClient(client.id)
+    await store.revokeClient(defaultTenantId, client.id)
 
     expect((await invoke(store, key.secret)).status).toBe("client-revoked")
     expect((await invoke(store, second.secret)).status).toBe("client-revoked")
@@ -184,6 +187,7 @@ describe("gateway authorization", () => {
     const { client, key, grant } = await seed(store)
     await store.createGrant({
       id: newGrantId(),
+      tenantId: defaultTenantId,
       clientId: client.id,
       alias: Alias.make("gmail-work"),
       tool: ToolName.make("search"),
@@ -191,7 +195,7 @@ describe("gateway authorization", () => {
       decision: "allow"
     })
 
-    await store.revokeGrant(grant.id)
+    await store.revokeGrant(defaultTenantId, grant.id)
 
     expect((await invoke(store, key.secret)).status).toBe("not-granted")
     expect((await invoke(store, key.secret, "gmail-work", "search")).status).toBe("authorized")
@@ -202,6 +206,7 @@ describe("gateway authorization", () => {
     const { key: readerKey } = await seed(store)
     const writer = await store.createClient({
       id: newClientId(),
+      tenantId: defaultTenantId,
       name: "sales-campaign",
       mayMutate: false
     })
@@ -209,6 +214,7 @@ describe("gateway authorization", () => {
     await store.addApiKey({ id: writerKey.id, clientId: writer.id, hash: writerKey.hash })
     await store.createGrant({
       id: newGrantId(),
+      tenantId: defaultTenantId,
       clientId: writer.id,
       alias: Alias.make("sharepoint-app"),
       tool: ToolName.make("getDocument"),
@@ -233,6 +239,7 @@ describe("gateway authorization", () => {
     const { client, key } = await seed(store)
     await store.createGrant({
       id: newGrantId(),
+      tenantId: defaultTenantId,
       clientId: client.id,
       alias: Alias.make("sharepoint-me"),
       tool: ToolName.make("getDocument"),
@@ -289,7 +296,7 @@ describe("gateway mutation authorization", () => {
 
     expect((await authorizeMutation(store, "wfi_nope")).status).toBe("unknown-key")
 
-    await store.revokeClient(client.id)
+    await store.revokeClient(defaultTenantId, client.id)
     expect((await authorizeMutation(store, key.secret)).status).toBe("client-revoked")
   })
 })

@@ -51,6 +51,31 @@ export type ConnectionName = typeof ConnectionName.Type
 export const ApiKeyHash = Schema.String.pipe(Schema.brand("ApiKeyHash"))
 export type ApiKeyHash = typeof ApiKeyHash.Type
 
+// --- tenants ----------------------------------------------------------------
+
+/** The well-known tenant every pre-existing deployment belongs to. A gateway
+ *  that predates tenancy keeps working unchanged: its rows are backfilled here
+ *  rather than rewritten into some generated partition. */
+export const defaultTenantId = TenantId.make("default")
+
+/** The isolation partition itself. An opaque identifier plus a display name —
+ *  nothing else. Everything else the gateway stores hangs off one. */
+export const Tenant = Schema.Struct({
+  id: TenantId,
+  name: Schema.String,
+  createdAt: Schema.Date
+})
+export type Tenant = typeof Tenant.Type
+
+/** A human identity within a tenant. Still opaque — authentication details
+ *  live in their own tables (logins, sessions), never on the subject. */
+export const Subject = Schema.Struct({
+  id: SubjectId,
+  tenantId: TenantId,
+  createdAt: Schema.Date
+})
+export type Subject = typeof Subject.Type
+
 // --- connections ------------------------------------------------------------
 
 /** Which partition a connection is filed under. Not an entity. */
@@ -84,6 +109,9 @@ export const connectionSubject = (connection: ConnectionRef): SubjectId | undefi
 
 export const Client = Schema.Struct({
   id: ClientId,
+  /** The tenant this client belongs to. Every grant, key, and audit record the
+   *  client produces resolves inside this partition. */
+  tenantId: TenantId,
   name: Schema.String,
   /** Whether this key may mutate the catalog, connections, grants, and policy.
    *  A local development client has it; one issued to a sandbox does not, so a

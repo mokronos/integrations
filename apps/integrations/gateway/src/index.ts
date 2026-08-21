@@ -19,6 +19,7 @@ export {
   connectionSubject,
   ConnectionName,
   ConnectionRef,
+  defaultTenantId,
   describeAuthorization,
   DriftEntry,
   DriftKind,
@@ -28,7 +29,9 @@ export {
   IntegrationSlug,
   OwnerTier,
   PendingApproval,
+  Subject,
   SubjectId,
+  Tenant,
   TenantId,
   ToolName,
   ToolSnapshot
@@ -40,7 +43,9 @@ export {
   newApprovalId,
   newAuditId,
   newClientId,
-  newGrantId
+  newGrantId,
+  newSubjectId,
+  newTenantId
 } from "./keys.ts"
 export type { IssuedApiKey } from "./keys.ts"
 
@@ -53,6 +58,8 @@ export type {
   CreateApprovalInput,
   CreateClientInput,
   CreateGrantInput,
+  CreateSubjectInput,
+  CreateTenantInput,
   GatewayStore,
   RecordAuditInput
 } from "./store.ts"

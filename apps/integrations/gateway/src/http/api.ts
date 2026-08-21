@@ -299,7 +299,7 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
       access: "delegated",
       handle: async (request) => {
         const id = ApprovalId.make(request.params["id"] ?? "")
-        const approval = await store.getApproval(id)
+        const approval = await store.getApproval(request.client.tenantId, id)
         if (approval === undefined) return notFound(`Unknown approval ${id}`)
         // Scoped to the caller: one client must not read another's frozen call.
         if (approval.clientId !== request.client.id) return notFound(`Unknown approval ${id}`)
@@ -521,7 +521,7 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
       method: "GET",
       path: "/v1/clients",
       access: "privileged",
-      handle: async () => ok({ clients: await store.listClients() })
+      handle: async (request) => ok({ clients: await store.listClients(request.client.tenantId) })
     },
     {
       method: "POST",
@@ -529,11 +529,14 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
       access: "privileged",
       handle: async (request) => {
         const body = decodeBody(CreateClientBody, request.body)
-        if (await store.findClientByName(body.name) !== undefined) {
+        if (await store.findClientByName(request.client.tenantId, body.name) !== undefined) {
           return badRequest(`A client named ${body.name} already exists`)
         }
         const client = await store.createClient({
           id: newClientId(),
+          // Clients are created inside the caller's partition. There is no way
+          // to provision into another tenant over this surface, by design.
+          tenantId: request.client.tenantId,
           name: body.name,
           mayMutate: body.mayMutate ?? false
         })
@@ -546,7 +549,7 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
       access: "privileged",
       handle: async (request) => {
         const clientId = ClientId.make(request.params["id"] ?? "")
-        if (await store.findClientById(clientId) === undefined) {
+        if (await store.findClientById(request.client.tenantId, clientId) === undefined) {
           return notFound(`Unknown client ${clientId}`)
         }
         const key = generateApiKey()
@@ -561,7 +564,7 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
       access: "privileged",
       handle: async (request) => {
         const clientId = ClientId.make(request.params["id"] ?? "")
-        if (await store.findClientById(clientId) === undefined) {
+        if (await store.findClientById(request.client.tenantId, clientId) === undefined) {
           return notFound(`Unknown client ${clientId}`)
         }
         // Hashes stay behind the gateway. What an operator needs is which keys
@@ -597,7 +600,7 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
       access: "privileged",
       handle: async (request) => {
         const clientId = ClientId.make(request.params["id"] ?? "")
-        if (await store.findClientById(clientId) === undefined) {
+        if (await store.findClientById(request.client.tenantId, clientId) === undefined) {
           return notFound(`Unknown client ${clientId}`)
         }
         // The same listing `/v1/tools` gives a key about itself, asked about
@@ -617,10 +620,10 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
       access: "privileged",
       handle: async (request) => {
         const clientId = ClientId.make(request.params["id"] ?? "")
-        if (await store.findClientById(clientId) === undefined) {
+        if (await store.findClientById(request.client.tenantId, clientId) === undefined) {
           return notFound(`Unknown client ${clientId}`)
         }
-        await store.revokeClient(clientId)
+        await store.revokeClient(request.client.tenantId, clientId)
         // Revoking a client is done because something is wrong, so its frozen
         // actions must not stay armed. Revoking a single key does not do this.
         const cancelled = await store.cancelApprovalsForClient(clientId)
@@ -644,7 +647,7 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
       handle: async (request) => {
         const body = decodeBody(CreateGrantBody, request.body)
         const clientId = ClientId.make(body.clientId)
-        if (await store.findClientById(clientId) === undefined) {
+        if (await store.findClientById(request.client.tenantId, clientId) === undefined) {
           return notFound(`Unknown client ${clientId}`)
         }
         if (body.connection.owner === "user") {
@@ -659,6 +662,7 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
         }
         const grant = await store.createGrant({
           id: newGrantId(),
+          tenantId: request.client.tenantId,
           clientId,
           alias: parseAlias(body.alias),
           tool: ToolName.make(body.tool),
@@ -673,7 +677,7 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
       path: "/v1/grants/:id/revoke",
       access: "privileged",
       handle: async (request) => {
-        await store.revokeGrant(GrantId.make(request.params["id"] ?? ""))
+        await store.revokeGrant(request.client.tenantId, GrantId.make(request.params["id"] ?? ""))
         return ok({ revoked: true })
       }
     },
@@ -687,8 +691,9 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
         const status = request.query.get("status")
         return ok({
           approvals: status === null
-            ? await store.listApprovals()
+            ? await store.listApprovals(request.client.tenantId)
             : await store.listApprovals(
+              request.client.tenantId,
               Schema.decodeUnknownSync(
                 Schema.Literals(["pending", "approved", "denied", "expired"])
               )(status)
@@ -703,13 +708,14 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
       handle: async (request) => {
         const body = decodeBody(DecideApprovalBody, request.body ?? {})
         const id = ApprovalId.make(request.params["id"] ?? "")
-        const approval = await store.getApproval(id)
+        const approval = await store.getApproval(request.client.tenantId, id)
         if (approval === undefined) return notFound(`Unknown approval ${id}`)
         if (approval.status !== "pending") {
           return badRequest(`Approval ${id} is already ${approval.status}`)
         }
         if (approval.expiresAt.getTime() <= Date.now()) {
           await store.settleApproval({
+            tenantId: request.client.tenantId,
             id,
             status: "expired",
             decidedBy: null,
@@ -720,11 +726,12 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
           return badRequest(`Approval ${id} expired`)
         }
 
-        const client = await store.findClientById(approval.clientId)
+        const client = await store.findClientById(request.client.tenantId, approval.clientId)
         const grants = await store.listGrants(approval.clientId)
         const grant = grants.find((candidate) => candidate.id === approval.grantId)
         if (client === undefined || client.revokedAt !== null || grant === undefined) {
           await store.settleApproval({
+            tenantId: request.client.tenantId,
             id,
             status: "denied",
             decidedBy: body.decidedBy ?? null,
@@ -748,13 +755,14 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
           approval.arguments
         )
         await store.settleApproval({
+          tenantId: request.client.tenantId,
           id,
           status: "approved",
           decidedBy: body.decidedBy ?? null,
           result: outcome.status === "succeeded" ? outcome.result : null,
           error: outcome.status === "failed" ? outcome.message : null
         })
-        return ok({ approval: await store.getApproval(id), outcome })
+        return ok({ approval: await store.getApproval(request.client.tenantId, id), outcome })
       }
     },
     {
@@ -764,16 +772,17 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
       handle: async (request) => {
         const body = decodeBody(DecideApprovalBody, request.body ?? {})
         const id = ApprovalId.make(request.params["id"] ?? "")
-        const approval = await store.getApproval(id)
+        const approval = await store.getApproval(request.client.tenantId, id)
         if (approval === undefined) return notFound(`Unknown approval ${id}`)
         await store.settleApproval({
+          tenantId: request.client.tenantId,
           id,
           status: "denied",
           decidedBy: body.decidedBy ?? null,
           result: null,
           error: null
         })
-        return ok({ approval: await store.getApproval(id) })
+        return ok({ approval: await store.getApproval(request.client.tenantId, id) })
       }
     },
     {
@@ -787,7 +796,11 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
           : [slug]
         const reports = []
         for (const integration of integrations) {
-          reports.push(await refreshIntegrationSnapshot({ store, executor }, integration))
+          reports.push(await refreshIntegrationSnapshot(
+            { store, executor },
+            integration,
+            request.client.tenantId
+          ))
         }
         return ok({ reports })
       }
@@ -828,8 +841,8 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
         // The trail is permanent, so the count is what tells a reader whether
         // the window they asked for is the whole answer.
         return ok({
-          records: await store.listAudit({ ...filter, limit, offset }),
-          total: await store.countAudit(filter),
+          records: await store.listAudit(request.client.tenantId, { ...filter, limit, offset }),
+          total: await store.countAudit(request.client.tenantId, filter),
           limit,
           offset
         })

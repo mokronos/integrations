@@ -12,19 +12,20 @@ export type ClientAuthentication =
   | { readonly status: "client-revoked" }
 
 /** Checks in the order they get more expensive: key exists, key live, client
- *  live. Touching last-used only happens once the credential is accepted. */
+ *  live. The key and its client resolve in one read — the tenant comes *from*
+ *  that read — and touching last-used happens only once it is accepted. */
 export const authenticateClient = async (
   store: GatewayStore,
   secret: string
 ): Promise<ClientAuthentication> => {
-  const key = await store.findApiKeyByHash(hashApiKey(secret))
-  if (key === undefined) return { status: "unknown-key" }
-  if (key.revokedAt !== null) return { status: "key-revoked" }
+  const resolved = await store.findApiKeyByHash(hashApiKey(secret))
+  if (resolved === undefined) return { status: "unknown-key" }
+  if (resolved.key.revokedAt !== null) return { status: "key-revoked" }
 
-  const client = await store.findClientById(key.clientId)
-  if (client === undefined || client.revokedAt !== null) return { status: "client-revoked" }
+  const client = resolved.client
+  if (client.revokedAt !== null) return { status: "client-revoked" }
 
-  await store.touchApiKey(key.id)
+  await store.touchApiKey(resolved.key.id)
   return { status: "authenticated", client }
 }
 

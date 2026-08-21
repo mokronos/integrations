@@ -16,6 +16,7 @@ import {
   ConnectionName,
   createGatewayHandler,
   createGatewayStore,
+  defaultTenantId,
   generateApiKey,
   IntegrationSlug,
   gatewayRoutes,
@@ -152,6 +153,7 @@ const setup = async (options: {
 
   const client = await store.createClient({
     id: newClientId(),
+    tenantId: defaultTenantId,
     name: "support-agent",
     mayMutate: options.mayMutate ?? false
   })
@@ -159,6 +161,7 @@ const setup = async (options: {
   await store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
   const grant = await store.createGrant({
     id: newGrantId(),
+    tenantId: defaultTenantId,
     clientId: client.id,
     alias: Alias.make("gmail-work"),
     tool: ToolName.make("sendEmail"),
@@ -225,7 +228,7 @@ describe("gateway http surface", () => {
     const { call, client, store } = await setup()
     expect((await call("GET", "/v1/tools", { secret: "wfi_nope" })).status).toBe(401)
 
-    await store.revokeClient(client.id)
+    await store.revokeClient(defaultTenantId, client.id)
     expect((await call("GET", "/v1/tools")).status).toBe(403)
   })
 
@@ -335,6 +338,7 @@ describe("gateway http surface", () => {
 
     const other = await store.createClient({
       id: newClientId(),
+      tenantId: defaultTenantId,
       name: "someone-else",
       mayMutate: false
     })
@@ -421,7 +425,7 @@ describe("gateway approval settlement", () => {
     })
     const approvalId = String(frozen.body["approvalId"])
 
-    await store.revokeGrant(grant.id)
+    await store.revokeGrant(defaultTenantId, grant.id)
     const approved = await call("POST", `/v1/approvals/${approvalId}/approve`, { body: {} })
 
     expect(approved.status).toBe(400)
@@ -466,7 +470,7 @@ describe("frozen calls and retries", () => {
     expect(second.body["approvalId"]).toBe(first.body["approvalId"])
     expect(third.body["approvalId"]).toBe(first.body["approvalId"])
     // One decision to make, however many times the caller retried.
-    expect(await store.listApprovals("pending")).toHaveLength(1)
+    expect(await store.listApprovals(defaultTenantId, "pending")).toHaveLength(1)
   })
 
   test("different arguments are a different frozen call", async () => {
@@ -476,7 +480,7 @@ describe("frozen calls and retries", () => {
     const second = await send(call, { to: "someone-else@b.c" })
 
     expect(second.body["approvalId"]).not.toBe(first.body["approvalId"])
-    expect(await store.listApprovals("pending")).toHaveLength(2)
+    expect(await store.listApprovals(defaultTenantId, "pending")).toHaveLength(2)
   })
 
   test("the retry after approval collects the result exactly once", async () => {
@@ -497,7 +501,7 @@ describe("frozen calls and retries", () => {
     const afterCollection = await send(call)
     expect(afterCollection.body["status"]).toBe("pending")
     expect(afterCollection.body["approvalId"]).not.toBe(approvalId)
-    expect(await store.listApprovals("pending")).toHaveLength(1)
+    expect(await store.listApprovals(defaultTenantId, "pending")).toHaveLength(1)
   })
 
   test("a denial is delivered to the caller rather than left pending forever", async () => {

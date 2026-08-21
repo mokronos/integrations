@@ -4,7 +4,7 @@ import type { ExecutorServices } from "@mokronos/wfkit-executor"
 import { ExecutorToolAddress } from "@mokronos/wfkit-executor/schemas"
 import { authorizeInvocation } from "./authorize.ts"
 import { defaultApprovalExpiryHours, defaultArgumentRetentionDays } from "./config.ts"
-import { describeAuthorization } from "./domain.ts"
+import { defaultTenantId, describeAuthorization } from "./domain.ts"
 import type {
   Alias,
   ApprovalId,
@@ -46,6 +46,9 @@ const auditFor = (
   argumentsValue: Json,
   retentionDays: number
 ): RecordAuditInput => ({
+  // The trail belongs to the client's partition, not to whoever happens to be
+  // asking: a tenant reads its own history and nothing else's.
+  tenantId: authorization.client.tenantId,
   id: newAuditId(),
   clientId: authorization.client.id,
   alias: authorization.grant.alias,
@@ -89,7 +92,7 @@ const freezeOrCollect = async (
     return { status: "pending", approvalId: existing.id, expiresAt: existing.expiresAt }
   }
 
-  if (existing !== undefined && await store.collectApproval(existing.id)) {
+  if (existing !== undefined && await store.collectApproval(authorization.client.tenantId, existing.id)) {
     if (existing.status === "approved") {
       // The gateway already performed this call, at approval time. What is
       // being handed back is that call's result, not a second call.
@@ -117,6 +120,7 @@ const freezeOrCollect = async (
 
   const approval = await store.createApproval({
     id: newApprovalId(),
+    tenantId: authorization.client.tenantId,
     clientId: authorization.client.id,
     grantId: authorization.grant.id,
     alias: authorization.grant.alias,
@@ -156,8 +160,11 @@ export const invokeThroughGateway = async (
   })
 
   if (authorization.status !== "authorized") {
-    // No client id: an unknown key names nobody. The reason is still recorded.
+    // No client id: an unknown key names nobody. The reason is still recorded,
+    // under the default tenant — there is nothing else an unauthenticated call
+    // could be filed under.
     await store.recordAudit({
+      tenantId: defaultTenantId,
       id: newAuditId(),
       clientId: null,
       alias: input.alias,

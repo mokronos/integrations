@@ -8,6 +8,7 @@ import {
   Alias,
   ConnectionName,
   createGatewayStore,
+  defaultTenantId,
   diffSnapshots,
   IntegrationSlug,
   newApprovalId,
@@ -108,7 +109,8 @@ describe("catalog drift", () => {
     // would bury the one real change in the run that matters.
     const first = await refreshIntegrationSnapshot(
       { store, executor: executorWithTools([{ name: "create", input: null }]) },
-      "tickets"
+      "tickets",
+      defaultTenantId
     )
     expect(first.baseline).toBe(true)
     expect(first.entries).toEqual([])
@@ -121,7 +123,8 @@ describe("catalog drift", () => {
           { name: "deleteEverything", input: null }
         ])
       },
-      "tickets"
+      "tickets",
+      defaultTenantId
     )
 
     // Unreachable until someone grants it — which is exactly why it has to be
@@ -146,16 +149,19 @@ describe("catalog drift", () => {
           { name: "legacy", input: null }
         ])
       },
-      "tickets"
+      "tickets",
+      defaultTenantId
     )
 
     const removal = await refreshIntegrationSnapshot(
       { store, executor: executorWithTools([{ name: "create", input: null }]) },
-      "tickets"
+      "tickets",
+      defaultTenantId
     )
     const afterwards = await refreshIntegrationSnapshot(
       { store, executor: executorWithTools([{ name: "create", input: null }]) },
-      "tickets"
+      "tickets",
+      defaultTenantId
     )
 
     expect(removal.entries.map((entry) => entry.kind)).toEqual(["removed"])
@@ -174,11 +180,13 @@ describe("gateway maintenance", () => {
     const store = await makeStore()
     const client = await store.createClient({
       id: newClientId(),
+      tenantId: defaultTenantId,
       name: "sales",
       mayMutate: false
     })
     const grant = await store.createGrant({
       id: newGrantId(),
+      tenantId: defaultTenantId,
       clientId: client.id,
       alias: Alias.make("tickets"),
       tool: ToolName.make("create"),
@@ -187,6 +195,7 @@ describe("gateway maintenance", () => {
     })
     const stale = await store.createApproval({
       id: newApprovalId(),
+      tenantId: defaultTenantId,
       clientId: client.id,
       grantId: grant.id,
       alias: grant.alias,
@@ -196,6 +205,7 @@ describe("gateway maintenance", () => {
     })
     const fresh = await store.createApproval({
       id: newApprovalId(),
+      tenantId: defaultTenantId,
       clientId: client.id,
       grantId: grant.id,
       alias: Alias.make("tickets"),
@@ -208,14 +218,15 @@ describe("gateway maintenance", () => {
 
     expect(result.expiredApprovals).toBe(1)
     // Expiry is a decision: the invocation does not happen.
-    expect((await store.getApproval(stale.id))?.status).toBe("expired")
-    expect((await store.getApproval(fresh.id))?.status).toBe("pending")
+    expect((await store.getApproval(defaultTenantId, stale.id))?.status).toBe("expired")
+    expect((await store.getApproval(defaultTenantId, fresh.id))?.status).toBe("pending")
   })
 
   test("ages out audit arguments while keeping the record", async () => {
     const store = await makeStore()
     const id = newAuditId()
     await store.recordAudit({
+      tenantId: defaultTenantId,
       id,
       clientId: null,
       alias: Alias.make("tickets"),
@@ -230,7 +241,7 @@ describe("gateway maintenance", () => {
     const result = await runMaintenance(store)
 
     expect(result.expiredAuditArguments).toBe(1)
-    expect(await store.listAudit({ limit: 10 })).toHaveLength(1)
+    expect(await store.listAudit(defaultTenantId, { limit: 10 })).toHaveLength(1)
   })
 
   test("is safe to run when there is nothing to do", async () => {

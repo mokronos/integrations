@@ -4,6 +4,7 @@ import {
   writeGatewayConfig
 } from "./config.ts"
 import { whenPresent } from "@mokronos/wfkit"
+import { defaultTenantId } from "./domain.ts"
 import type { Gateway } from "./host.ts"
 import { createGatewayHandler } from "./http/handler.ts"
 import type { GatewayRequestContext } from "./http/handler.ts"
@@ -100,9 +101,10 @@ export const ensureLocalCredential = async (
   service: GatewayService,
   port: number
 ): Promise<string> => {
-  const existing = await service.store.findClientByName(localClientName)
+  const existing = await service.store.findClientByName(defaultTenantId, localClientName)
   const client = existing ?? await service.store.createClient({
     id: newClientId(),
+    tenantId: defaultTenantId,
     name: localClientName,
     mayMutate: true
   })

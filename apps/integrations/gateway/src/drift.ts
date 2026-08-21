@@ -1,5 +1,5 @@
 import type { ExecutorServices } from "@mokronos/wfkit-executor"
-import { ConnectionName, IntegrationSlug, ToolName } from "./domain.ts"
+import { ConnectionName, IntegrationSlug, TenantId, ToolName } from "./domain.ts"
 import type { DriftEntry, ToolSnapshot } from "./domain.ts"
 import type { GatewayStore } from "./store.ts"
 
@@ -81,13 +81,15 @@ export type DriftReport = {
 }
 
 /** Re-reads an integration's tools, reports what moved since the last sync, and
- *  records the new shape as the baseline. */
+ *  records the new shape as the baseline. Snapshots are per tenant: two tenants
+ *  connecting to the same vendor track their drift independently. */
 export const refreshIntegrationSnapshot = async (
   dependencies: {
     readonly store: GatewayStore
     readonly executor: ToolCatalogReader
   },
-  integration: string
+  integration: string,
+  tenantId: TenantId
 ): Promise<DriftReport> => {
   const slug = IntegrationSlug.make(integration)
   const checkedAt = new Date()
@@ -100,13 +102,14 @@ export const refreshIntegrationSnapshot = async (
     outputSchema: tool.outputSchema ?? null,
     syncedAt: checkedAt
   }))
-  const previous = await dependencies.store.listToolSnapshots(slug)
+  const previous = await dependencies.store.listToolSnapshots(tenantId, slug)
   const baseline = previous.length === 0
   const entries = baseline ? [] : diffSnapshots(previous, current)
-  await dependencies.store.putToolSnapshots(current)
+  await dependencies.store.putToolSnapshots(tenantId, current)
   // Removed tools keep their old snapshot row, so the next refresh does not
   // report the same removal forever.
   await dependencies.store.forgetToolSnapshots(
+    tenantId,
     entries.filter((entry) => entry.kind === "removed").map((entry) => ({
       integration: slug,
       connection: entry.connection,
