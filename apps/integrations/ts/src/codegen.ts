@@ -112,7 +112,7 @@ const toEffectSchema = (schema: Json | undefined, indent = ""): string => {
   const enumValues = schema["enum"]
   if (Array.isArray(enumValues) && enumValues.length > 0) {
     return enumValues.every(Predicate.isString)
-      ? `t.literals([${enumValues.map((value) => quote(String(value))).join(", ")}])`
+      ? `t.union([${enumValues.map((value) => `t.literal(${quote(value)})`).join(", ")}])`
       : "t.unknown"
   }
 
@@ -220,7 +220,7 @@ export const ${bindingName(entry.alias, entry.tool)} = (
   client.execute({
     alias: ${quote(entry.alias)},
     tool: ${quote(entry.tool)},
-    arguments: input as never
+    arguments: input
   })`
   })
 

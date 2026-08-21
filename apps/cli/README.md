@@ -68,9 +68,10 @@ window it with `--limit`/`--offset`), and `schema` returns one named tool's
 address and its complete input and output schemas.
 `schema` takes a bare tool name while
 it is unique, an integration slug plus a tool name, or a tool address.
-Credentials are AES-GCM encrypted with a separate user-only key; workflows
-persist only the integration slug, tool name, and optional credential tier, never
-the resolved address or connection name.
+Credentials are AES-GCM encrypted with a separate user-only key. Workflows
+persist only a gateway alias and tool name; grants resolve that requirement to a
+connection on the machine that runs it. Resolved addresses and connection names
+never enter workflow source.
 
 `search` queries the public integrations.sh catalog and returns the preferred
 discovery URL for each result. Use `--verbose` for every MCP, API, and GraphQL

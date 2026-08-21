@@ -1,4 +1,9 @@
-# Workflow SDK — API Specification
+# Historical: workflow SDK design specification
+
+> **Status:** Superseded by the implemented SDK and the canonical
+> [TypeScript SDK documentation](../apps/docs/docs/wfkit.md). This is a dated
+> design record, retained to explain earlier decisions. It is not an API
+> contract and may describe deferred work as future work.
 
 A thin, opinionated SDK over `@effect/workflow`. Goal: hide syntax boilerplate **and** semantic footguns (duplicate step names, retryable-vs-terminal errors, and nondeterminism), while keeping the full engine reachable through an escape hatch.
 

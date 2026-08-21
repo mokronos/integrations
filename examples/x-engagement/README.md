@@ -37,7 +37,8 @@ Cost warning: X API access is not free for new developers as of 2026-07-04. Home
 Optional Zen settings:
 
 - `OPENCODE_ZEN_API_KEY`: enables OpenAI-compatible Zen chat completions.
-- `ZEN_MODEL`: intended model override; the workflow currently passes the free default model from the plan.
+- `ZEN_MODEL`: model override used when the workflow calls Zen; otherwise the
+  adapter's default is used.
 
 Secrets are passed to steps as `secret(...)` references. The shared runtime uses
 `envSecretResolver({ fallback: "" })`, so unset env vars fall back to mock/local

@@ -41,12 +41,12 @@ Subpath exports: `@mokronos/wfkit/authoring` (workflow-definition API),
 
 ## Executor integrations
 
-`integration(...)` is one durable node backed by a portable Executor tool requirement.
-Executor owns MCP/OpenAPI protocol handling, auth connections, schema discovery,
-connection resolution, and invocation. The workflow stores only the integration
-slug, tool name, and optional credential tier. Discovery and connection
-management are provided by the separate `@mokronos/wfkit-executor` package and
-the `wf` CLI; authored workflows only need `@mokronos/wfkit`.
+`integration(...)` is one durable node backed by a gateway grant. The gateway
+owns MCP/OpenAPI protocol handling, connections, credentials, schema discovery,
+authorization, and invocation. A workflow stores only an alias and a tool name;
+the grant binds that requirement to a connection per deployment. Discovery and
+connection management are provided by the `integrations` CLI; authored workflows
+only need `@mokronos/wfkit`.
 
 ```ts
 import { defineWorkflow, integration, t } from "@mokronos/wfkit"
@@ -55,8 +55,8 @@ const CreatedIssue = t.struct({ id: t.string, title: t.string })
 
 const createIssue = integration({
   source: {
-    kind: "executor",
-    integration: "linear",
+    kind: "gateway",
+    alias: "issues",
     tool: "create_issue"
   },
   input: t.struct({ teamId: t.string, title: t.string }),
@@ -96,8 +96,8 @@ For API keys or bearer tokens, pass the name of an environment variable with
 `--credential-env`; the value is never printed. OAuth uses Executor's discovery,
 dynamic registration when supported, PKCE, token refresh, and a loopback
 callback. Credentials are AES-GCM encrypted in `~/.wf/executor-auth.json` using
-the user-only `~/.wf/executor-auth.key`; they are not written to workflow source
-or durable history.
+the user-only `~/.wf/executor-auth.key`; neither credentials, connection names,
+nor resolved tool addresses are written to workflow source or durable history.
 
 ## CLI
 

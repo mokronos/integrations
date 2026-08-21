@@ -369,7 +369,6 @@ Validates an integration node. Three input forms, one command:
 | --- | --- |
 | `{"source":{"kind":"gateway","alias":"…","tool":"…"}}` | The shape a workflow authors: is the alias well formed, does this key hold a grant for it, is the tool still in the catalog |
 | `tools.<slug>.<owner>.<connection>.<tool>` | A resolved address: is it well formed and still in the catalog |
-| `{"source":{"kind":"executor","integration":"…","tool":"…"}}` | The executor's own reference form |
 
 Resolution is checked by default, for every form — `--structural` asks for the
 shape check alone. A failed report exits 1.

@@ -78,11 +78,11 @@ integrations tools <integration-slug> --filter <text>
 integrations schema <tool-name>
 ```
 
-`schema` returns the Executor address for direct inspection, together with the
-input and output schemas to mirror in `input` and `output`. Author workflows with
-the returned integration slug and tool name, not that resolved address. It accepts a
-bare tool name while that name is unique across the connected integrations, an
-integration slug plus a tool name, or a full tool address.
+`schema` returns a resolved address for direct inspection, together with the
+input and output schemas to mirror in `input` and `output`. Author workflows
+with a stable alias you choose and the returned tool name, never the resolved
+address. A grant binds that alias to an integration and connection on the
+machine where the workflow runs.
 
 For a safe read-only smoke test, invoke the selected address directly before
 authoring:
@@ -92,24 +92,16 @@ integrations execute --direct <tool-address> '{"query":"status"}'
 ```
 
 Author the node as
-`source: { kind: "executor", integration: "<integration>", tool: "<tool>" }`.
+`source: { kind: "gateway", alias: "<requirement-name>", tool: "<tool>" }`.
 
-Note what is *not* in there: the address you invoked with has `owner` and
-`connection` segments, and neither belongs in a workflow. A connection name is a
-label chosen on one machine, so persisting it makes the workflow unshareable — and
-because the step name feeds the durable replay key, it also changes activity
-identity between two people running the same definition. The connection is
-resolved from whatever is connected locally, at the moment the step runs.
+The alias is a stable requirement, like an environment variable. Create a grant
+to bind it to the selected integration and connection for each deployment. The
+resolved address, connection name, and owner tier are environment details; none
+belong in workflow source.
 
-Add `owner: "org"` or `owner: "user"` only when the tier matters — for example an
-audit trail that must be written with the team's shared credential rather than
-whoever's personal account happens to be connected. A pinned tier is a hard
-constraint: if that tier is not connected the step fails instead of quietly using
-the other one. Leave it off and either tier satisfies the step.
-
-Run `wf validate <workflow>` to see which of a workflow's integrations resolve on
-this machine and which still need connecting; it exits nonzero while any are
-unmet, so it works as a gate before `wf run`.
+Run `wf validate <workflow>` to see which aliases have grants on this machine;
+it exits nonzero while any requirement is unmet, so it works as a gate before
+`wf run`.
 
 Never put a returned credential into workflow source or input. Treat unsupported
 protocol features or unresolved schemas as a design question for the user.
@@ -204,8 +196,8 @@ wf history <run-id>
 ## Continue from here
 
 When adapting this example to an authenticated API, do not place secret values
-in workflow inputs or source code. Use `integrations connect`, then persist
-only the selected integration slug, tool name, and optional credential tier in
-the workflow.
+in workflow inputs or source code. Use `integrations connect`, then persist only
+a stable alias and tool name in the workflow. Bind the alias with an
+`integrations grant` for each deployment.
 
 For human approval flows, explain the decision and payload to the user before starting. When the run suspends, copy the exact `wf signal ...` command printed by the CLI and wait for the user's response before sending it.

@@ -140,7 +140,7 @@ modifying workflow TypeScript.
 Use this loop:
 
 1. Write one self-contained `.ts` file in the user's project. Mirror selected
-   tool schemas with `t`, and persist only canonical Executor addresses.
+   tool schemas with `t`, and persist only gateway aliases and tool names.
 2. Validate before importing. Use representative inputs for every important
    branch because one validation traces only one path:
 
@@ -160,10 +160,10 @@ Use this loop:
    Use `--force` only when intentionally replacing that catalog ID. The catalog
    copy under `~/.wf/workflows/` is what `wf run` executes; later edits to the
    project copy are not synchronized automatically.
-5. Confirm the `integrations:` section from `wf validate` reports every address
+5. Confirm the `integrations:` section from `wf validate` reports every alias
    as `ready`. Workflow validation traces integration steps with fake outputs
-   and live-checks the addresses it reached without invoking them. Also keep the
-   explicit `integrations validate` checks above when documenting each selected tool.
+   and checks the grants it reached without invoking them. Keep the explicit
+   `integrations validate` checks above when documenting each selected tool.
 6. Tell the human exactly what the representative run will read/write and any
    signal it may request. With approval, run and inspect it:
 
@@ -197,32 +197,27 @@ workflow:
    ```
 
 4. Run representative traces and use the resulting `integrations:` section as
-   the missing-connection worklist. Because validation follows one branch at a
-   time, also inventory every literal address matching
-   `tools.<integration>.<org|user>.<connection>.<tool>` in the complete source.
-   For each address, run:
+   the missing-grant worklist. Because validation follows one branch at a time,
+   also inventory every gateway integration source in the complete source. For
+   each alias and tool, run:
 
    ```sh
-   integrations validate '<tool-address>' --text
+   integrations validate '{"source":{"kind":"gateway","alias":"<alias>","tool":"<tool>"}}' --text
    ```
 
-5. Repair each missing address in order:
+5. Repair each missing gateway requirement in order:
 
-   - Parse the integration slug, connection name, and tool name from the
-     address. Check `integrations list`, `integrations connections`, and
-     `integrations tools <slug> --connection <connection> --text`.
-   - If the integration is absent, run `integrations search '<slug>' --text`. Discover
-     only an exact, trusted endpoint. If no exact match exists, use the
-     workflow's documentation or ask the human; do not substitute a similar
-     service.
-   - Preserve the workflow's connection name with
-     `integrations discover <url> --connection <connection>` for no-auth integrations,
-     or `integrations connect <slug> --connection <connection>` for authenticated ones.
-   - Complete any human authentication handoff, inspect the exact tool schema,
-     and compare it to the authored `input` and `output`. If the provider's
-     canonical address changed, update the workflow source rather than trying
-     to fabricate the old address.
-   - Repeat live validation until the address passes.
+    - Read the alias and tool from the workflow source. Check the current grants
+      with `integrations grants --mine` and inspect connected integrations with
+      `integrations connections` and `integrations tools <slug> --text`.
+    - If the required tool is absent, discover only an exact, trusted endpoint.
+      If no exact match exists, use the workflow's documentation or ask the
+      human; do not substitute a similar service.
+    - Complete any human authentication handoff, inspect the exact tool schema,
+      and compare it to the authored `input` and `output`.
+    - Create or repair the deployment binding with
+      `integrations grant <client-id> <alias> <tool> --integration <slug>`.
+    - Repeat validation until the gateway requirement passes.
 
 6. Validate representative workflow branches again, import, validate the
    catalog copy, and run only after all addresses pass:
@@ -242,9 +237,9 @@ chosen input.
 Report:
 
 - project source path and catalog ID;
-- integrations and connection names used, without credentials;
+- integration aliases and tools used, without credentials;
 - workflow validation inputs tested and whether each passed;
-- live validation status of every tool address;
+- validation status of every gateway requirement;
 - whether a representative run occurred, its run ID/result, or why it was not
   safe/possible;
 - any remaining human action, copied as an exact command when appropriate.

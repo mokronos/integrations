@@ -1,4 +1,8 @@
-# Phase 1 spike notes
+# Historical: Phase 1 spike notes
+
+> **Status:** Dated investigation notes. Version numbers and substrate behavior
+> below reflect the environment at the time of each entry; consult the current
+> dependency source and SDK documentation before relying on them.
 
 Source checked: installed `@effect/workflow@0.18.2` and `@effect/cluster@0.59.0` package source under `node_modules/.bun`. Context7 did not have `@effect/workflow` indexed.
 

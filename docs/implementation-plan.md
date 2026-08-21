@@ -1,4 +1,8 @@
-# Core Wrapper Implementation Plan
+# Historical: core wrapper implementation plan
+
+> **Status:** Completed planning record. For the current API, use the
+> [TypeScript SDK documentation](../apps/docs/docs/wfkit.md). This document
+> preserves implementation rationale and does not describe the current scope.
 
 Target: implement the `docs/spec.md` API as a wrapper over `@effect/workflow`, plus the
 handful of operational primitives that competitor research showed cannot be layered on later

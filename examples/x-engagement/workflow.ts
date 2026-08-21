@@ -145,8 +145,7 @@ export const XEngagementWorkflow = defineWorkflow({
     const candidates = yield* ctx.run(selectCandidates, {
       posts: timeline,
       maxCandidates,
-      apiKey: secret("opencode-zen-api-key"),
-      model: "minimax-m2.5-free"
+      apiKey: secret("opencode-zen-api-key")
     })
 
     const posted: Array<typeof PostedReply.Type> = []
@@ -160,8 +159,7 @@ export const XEngagementWorkflow = defineWorkflow({
         const draft = yield* ctx.run(draftReply, {
           post: candidate.post,
           feedback,
-          apiKey: secret("opencode-zen-api-key"),
-          model: "minimax-m2.5-free"
+          apiKey: secret("opencode-zen-api-key")
         })
         const signalName = `reviewDecision:${candidate.post.id}`
         yield* ctx.run(notifyReviewer, {

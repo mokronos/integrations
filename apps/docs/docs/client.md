@@ -160,7 +160,7 @@ export const ticketsTicketsCreate = (
   client.execute({
     alias: "tickets",
     tool: "tickets.create",
-    arguments: input as never
+    arguments: input
   })
 ```
 
@@ -196,11 +196,6 @@ wrong-but-narrow type would reject calls the gateway would have accepted.
 Regenerate after `integrations grant`, or when `integrations drift` reports a
 vendor change — a reshaped schema then fails typecheck instead of failing at
 3am.
-
-> **Known gap.** For a string `enum`, the `effect` target emits
-> `t.literals([...])`, which the current `t` vocabulary does not export (it has
-> `t.literal`). Replace it with `t.union([t.literal("a"), t.literal("b")])`
-> until the generator is fixed.
 
 ### Programmatic generation
 

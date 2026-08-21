@@ -1,11 +1,16 @@
-# Integration gateway — implementation plan
+# Historical: integration gateway implementation record
+
+> **Status:** Completed. The gateway is implemented; use the canonical
+> [Integrations CLI documentation](../../apps/docs/docs/integrations.md) and
+> [Gateway client documentation](../../apps/docs/docs/client.md) for current
+> behavior. This document preserves the delivery record and rationale.
 
 Turns the in-process integration host into a standalone gateway service with
 thin CLI/TS clients, without losing in-workflow integration use.
 
-## Status: phases 0–6 complete
+## Status: all seven phases complete
 
-All seven phases shipped. What differed from the plan as written, and why:
+What differed from the original plan, and why:
 
 - **Phase 0** — `default-host.ts` stayed in `wfkit-executor`. Five modules
   import `runExecutor` from it, so moving it was its own phase and bought

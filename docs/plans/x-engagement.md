@@ -1,11 +1,15 @@
-# Plan: X.com Engagement Assistant (example workflow)
+# Historical: X.com engagement example implementation record
+
+> **Status:** Completed. Run and configure the example through its
+> [README](../../examples/x-engagement/README.md). This document records the
+> original design and research; it is not current SDK reference material.
 
 An example workflow that sweeps the user's X.com home timeline, drafts a
 question/comment per interesting post via an LLM, runs a human-in-the-loop
 review (accept / edit / feedback / decline), and posts the approved reply.
 
 This doubles as a dogfooding test: it should be implementable against the
-current `@mokronos/wfkit` SDK surface (see `docs/spec.md`, `examples/quickstart/`) without
+current `@mokronos/wfkit` SDK surface (see the SDK documentation and `examples/quickstart/`) without
 touching the SDK itself. If something in the SDK blocks a natural
 implementation, record it in `examples/x-engagement/FRICTION.md` instead of
 working around it silently.

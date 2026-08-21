@@ -78,6 +78,18 @@ describe("effect target", () => {
     expect(module_).toContain("t.unknown")
   })
 
+  test("renders string enums as a union of supported literals", () => {
+    const module_ = generateEffectModule(
+      [{
+        ...ticketTool,
+        inputSchema: { type: "string", enum: ["open", "closed"] }
+      }],
+      "http://gateway"
+    )
+
+    expect(module_).toContain('t.union([t.literal("open"), t.literal("closed")])')
+  })
+
   test("records where it came from and that it is generated", () => {
     const module_ = generateEffectModule([ticketTool], "http://127.0.0.1:4788")
     expect(module_).toContain("Do not edit")
@@ -94,6 +106,8 @@ describe("ts target", () => {
     expect(module_).toContain('readonly "priority"?: number')
     expect(module_).toContain("ReadonlyArray<string>")
     expect(module_).toContain('alias: "tickets"')
+    expect(module_).toContain("arguments: input")
+    expect(module_).not.toContain(" as never")
   })
 
   test("renders enums as a union of literals", () => {

@@ -1,9 +1,14 @@
-# Plan: resolve the x-engagement FRICTION.md items in the SDK
+# Historical: X-engagement friction-fix implementation record
+
+> **Status:** Completed. The current behavior is documented in the
+> [TypeScript SDK](../../apps/docs/docs/wfkit.md) and the
+> [X-engagement example](../../examples/x-engagement/README.md). This document
+> preserves the implementation rationale.
 
 Source: `examples/x-engagement/FRICTION.md`. Item 4 (signal-resume secret
 resolver) is already fixed. This plan resolves items 1–3 with small, additive
-SDK changes plus example cleanup. Spec (`docs/spec.md`) gets updated where the
-client surface changes.
+SDK changes plus example cleanup. The canonical SDK documentation is updated
+where the client surface changes.
 
 ## 1. Signal discovery → `client.pendingSignals(executionId)`
 
@@ -34,7 +39,7 @@ Derivation: a `signal.waiting` history event is pending iff there is no later
   re-suspension after a feedback decision).
 - Update `examples/x-engagement/main.ts` to poll `pendingSignals` instead of
   scanning history.
-- Document in `docs/spec.md` §4 (Client).
+- Document the client surface in the canonical SDK reference.
 - Tests (extend `packages/wf/test/phase4-client.test.ts` or 4b): pending shows
   the waiting signal; empty after delivery; two sequential waits on the same
   name are disambiguated by `invocation`; timeout-consumed waits are not
@@ -65,7 +70,7 @@ envSecretResolver(options?: {
   `examples/x-engagement/runtime.ts` that uses
   `envSecretResolver({ fallback: "" })` (the adapters already treat empty as
   "unconfigured → fixture/local fallback").
-- Document in `docs/spec.md` §7 (Bootstrap).
+- Document the resolver in the canonical SDK reference.
 - Tests: default mapping, explicit mapping, fallback, and the throwing case.
 
 ## 3. SQLite multi-process contention → busy_timeout + documented ownership
@@ -83,7 +88,7 @@ Solution (v1-scoped — do NOT build distributed ownership):
   (`sqliteBusyTimeoutMs?: number`, default 5000).
 - Keep and document the single-live-owner pattern: the example's `main.ts`
   exits after suspension; `review.ts` owns the DB while resuming. State this
-  in `examples/x-engagement/README.md` and one line in `docs/spec.md` §7.
+  in `examples/x-engagement/README.md` and the canonical SDK reference.
 - Test: best effort — a test with two concurrently-open sqlite runtimes on the
   same file (starter keeps its runtime alive while the signaler delivers and
   drives to completion). If it cannot be made reliably green, keep the
