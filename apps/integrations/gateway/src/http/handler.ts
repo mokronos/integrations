@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import type { RequestTracer } from "@mokronos/observability"
 import { whenPresent } from "@mokronos/wfkit/optional"
 import { authenticateClient, authorizeMutation } from "../authorize.ts"
 import { hashSessionToken } from "../passwords.ts"
@@ -124,6 +125,9 @@ export interface HandlerDependencies {
   readonly addressRateLimiter?: RateLimiter
   readonly rateLimiter?: RateLimiter
   readonly maxBodyBytes?: number
+  /** Per-request OTLP tracing. Absent — the default, when no telemetry
+   *  endpoint is configured — leaves the handler untouched. */
+  readonly telemetry?: RequestTracer
 }
 
 /** What the server knows about a request that the request itself cannot say.
@@ -212,115 +216,123 @@ const cookieRequestIsSameOrigin = (request: Request): boolean => {
  * check. */
 export const createGatewayHandler = (
   dependencies: HandlerDependencies
-): ((request: Request, context?: GatewayRequestContext) => Promise<Response>) =>
-async (request, context) => {
-  const url = new URL(request.url)
+): ((request: Request, context?: GatewayRequestContext) => Promise<Response>) => {
+  const handle = async (request: Request, context?: GatewayRequestContext): Promise<Response> => {
+    const url = new URL(request.url)
 
-  if (url.pathname === "/v1/health") {
-    return json(200, { ok: true })
-  }
-
-  if (dependencies.addressRateLimiter !== undefined) {
-    // Before authentication, so guessing credentials costs a bucket slot per
-    // attempt rather than a key lookup.
-    const addressVerdict = dependencies.addressRateLimiter.take(
-      `addr:${context?.remoteAddress ?? "unknown"}`
-    )
-    if (!addressVerdict.allowed) {
-      return tooManyRequests(addressVerdict.retryAfterSeconds)
+    if (url.pathname === "/v1/health") {
+      return json(200, { ok: true })
     }
-  }
 
-  const matched = matchRoute(dependencies.routes, request.method, url.pathname)
-  if (matched === undefined) {
-    return pathExists(dependencies.routes, url.pathname)
-      ? json(405, { error: `${request.method} is not allowed on ${url.pathname}` })
-      : json(404, { error: `No route for ${request.method} ${url.pathname}` })
-  }
-  const { route, params } = matched
-
-  const identity = await resolveIdentity(dependencies, request, context)
-
-  if (dependencies.rateLimiter !== undefined &&
-    identity.kind !== "anonymous" && identity.kind !== "refused") {
-    const principalKey = identity.kind === "client"
-      ? `client:${identity.client.id}`
-      : `subject:${identity.subjectId}`
-    const verdict = dependencies.rateLimiter.take(principalKey)
-    if (!verdict.allowed) {
-      return tooManyRequests(verdict.retryAfterSeconds)
+    if (dependencies.addressRateLimiter !== undefined) {
+      // Before authentication, so guessing credentials costs a bucket slot per
+      // attempt rather than a key lookup.
+      const addressVerdict = dependencies.addressRateLimiter.take(
+        `addr:${context?.remoteAddress ?? "unknown"}`
+      )
+      if (!addressVerdict.allowed) {
+        return tooManyRequests(addressVerdict.retryAfterSeconds)
+      }
     }
-  }
 
-  // A session riding a cookie must prove same-origin for anything but a read,
-  // whatever route it is headed for.
-  if (identity.kind === "session" && request.method !== "GET" && !cookieRequestIsSameOrigin(request)) {
-    return json(403, { error: "Cross-site requests are not permitted", code: "cross-site" })
-  }
-
-  if (route.access === "public") {
-    // Public routes decide for themselves what an absent identity means; the
-    // login surface cannot require the credential it creates.
-    return await dispatch(route, url, identity)
-  }
-
-  // Humans administer through the dashboard; machines invoke through keys. A
-  // session never reaches the delegated surface — issuing a client key is how
-  // a human delegates.
-  if (identity.kind === "session") {
-    if (route.access !== "privileged") {
-      return json(403, {
-        error: "A signed-in session may not invoke tools; issue a client key instead",
-        code: "not-permitted"
-      })
+    const matched = matchRoute(dependencies.routes, request.method, url.pathname)
+    if (matched === undefined) {
+      return pathExists(dependencies.routes, url.pathname)
+        ? json(405, { error: `${request.method} is not allowed on ${url.pathname}` })
+        : json(404, { error: `No route for ${request.method} ${url.pathname}` })
     }
-    return await dispatch(route, url, identity)
-  }
+    const { route, params } = matched
 
-  if (identity.kind === "refused") return refusal(identity.reason)
+    const identity = await resolveIdentity(dependencies, request, context)
 
-  if (identity.kind === "anonymous") {
-    return json(401, { error: "An API key is required", code: "unknown-key" })
-  }
+    if (dependencies.rateLimiter !== undefined &&
+      identity.kind !== "anonymous" && identity.kind !== "refused") {
+      const principalKey = identity.kind === "client"
+        ? `client:${identity.client.id}`
+        : `subject:${identity.subjectId}`
+      const verdict = dependencies.rateLimiter.take(principalKey)
+      if (!verdict.allowed) {
+        return tooManyRequests(verdict.retryAfterSeconds)
+      }
+    }
 
-  // Privileged routes ask a different question than delegated ones: not "may
-  // you invoke this" but "may you change what is invocable".
-  if (route.access === "privileged") {
-    const authorization = await authorizeMutation(dependencies.store, identity.secret)
-    if (authorization.status !== "authorized") return refusal(authorization.status)
-  }
+    // A session riding a cookie must prove same-origin for anything but a read,
+    // whatever route it is headed for.
+    if (identity.kind === "session" && request.method !== "GET" && !cookieRequestIsSameOrigin(request)) {
+      return json(403, { error: "Cross-site requests are not permitted", code: "cross-site" })
+    }
 
-  return await dispatch(route, url, identity)
+    if (route.access === "public") {
+      // Public routes decide for themselves what an absent identity means; the
+      // login surface cannot require the credential it creates.
+      return await dispatch(route, url, identity)
+    }
 
-  async function dispatch(
-    route: Route,
-    location: URL,
-    identity: RouteIdentity
-  ): Promise<Response> {
-    try {
-      const result = await route.handle({
-        params,
-        query: location.searchParams,
-        body: await readBody(request, dependencies.maxBodyBytes ?? defaultMaxBodyBytes),
-        identity
-      })
-      if (result.html !== undefined) {
-        return new Response(result.html, {
-          status: result.status,
-          headers: {
-            "content-type": "text/html; charset=utf-8",
-            ...whenPresent("content-type", result.headers?.["content-type"])
-          }
+    // Humans administer through the dashboard; machines invoke through keys. A
+    // session never reaches the delegated surface — issuing a client key is how
+    // a human delegates.
+    if (identity.kind === "session") {
+      if (route.access !== "privileged") {
+        return json(403, {
+          error: "A signed-in session may not invoke tools; issue a client key instead",
+          code: "not-permitted"
         })
       }
-      return json(result.status, result.body, result.headers)
-    } catch (error) {
-      if (error instanceof RequestBodyError) {
-        return json(error.status, { error: error.message })
+      return await dispatch(route, url, identity)
+    }
+
+    if (identity.kind === "refused") return refusal(identity.reason)
+
+    if (identity.kind === "anonymous") {
+      return json(401, { error: "An API key is required", code: "unknown-key" })
+    }
+
+    // Privileged routes ask a different question than delegated ones: not "may
+    // you invoke this" but "may you change what is invocable".
+    if (route.access === "privileged") {
+      const authorization = await authorizeMutation(dependencies.store, identity.secret)
+      if (authorization.status !== "authorized") return refusal(authorization.status)
+    }
+
+    return await dispatch(route, url, identity)
+
+    async function dispatch(
+      route: Route,
+      location: URL,
+      identity: RouteIdentity
+    ): Promise<Response> {
+      try {
+        const result = await route.handle({
+          params,
+          query: location.searchParams,
+          body: await readBody(request, dependencies.maxBodyBytes ?? defaultMaxBodyBytes),
+          identity
+        })
+        if (result.html !== undefined) {
+          return new Response(result.html, {
+            status: result.status,
+            headers: {
+              "content-type": "text/html; charset=utf-8",
+              ...whenPresent("content-type", result.headers?.["content-type"])
+            }
+          })
+        }
+        return json(result.status, result.body, result.headers)
+      } catch (error) {
+        if (error instanceof RequestBodyError) {
+          return json(error.status, { error: error.message })
+        }
+        return json(500, {
+          error: error instanceof Error ? error.message : "Gateway request failed"
+        })
       }
-      return json(500, {
-        error: error instanceof Error ? error.message : "Gateway request failed"
-      })
     }
   }
+  if (dependencies.telemetry === undefined) return handle
+  const telemetry = dependencies.telemetry
+  // Health checks are liveness noise; tracing them only fills the backend.
+  return (request, context) =>
+    new URL(request.url).pathname === "/v1/health"
+      ? handle(request, context)
+      : telemetry.run(request, () => handle(request, context))
 }

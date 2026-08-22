@@ -28,6 +28,7 @@ import {
   ExecutorServicesService
 } from "@mokronos/wfkit-executor"
 import { Effect, Layer, ManagedRuntime } from "effect"
+import { createRequestTracer } from "@mokronos/observability"
 
 /** The client the local machine uses. Created on first start with mayMutate so
  *  an agent authoring workflows can discover and connect, with the human needed
@@ -84,6 +85,13 @@ export interface GatewayServiceOptions {
    *  cron trigger calls runMaintenance(store) itself — so no in-process
    *  interval runs. */
   readonly externalMaintenance?: boolean
+  /** OTLP/HTTP base URL for request tracing (e.g. motel's
+   *  http://127.0.0.1:27686). Defaults to WF_OTLP_ENDPOINT; unset keeps the
+   *  gateway untraced with no exporter built. */
+  readonly telemetryEndpoint?: string
+  /** Extra export headers, e.g. hosted-endpoint auth (`authorization: Basic …`).
+   *  Merged over WF_OTLP_AUTHORIZATION. */
+  readonly telemetryHeaders?: Record<string, string>
 }
 
 /** Signup is open exactly while the gateway has no humans at all — its first
@@ -171,6 +179,14 @@ export const createGatewayService = async (
         : defaultRateLimitPerMinute) / 5)),
       windowMs: 60_000
     })
+    // Undefined unless an endpoint is configured (option or WF_OTLP_ENDPOINT);
+    // the handler then skips wrapping entirely.
+    const requestTracer = await createRequestTracer({
+      serviceName: "integrations-gateway",
+      spanName: "gateway.request",
+      ...whenPresent("endpoint", options.telemetryEndpoint),
+      ...whenPresent("headers", options.telemetryHeaders)
+    })
     return {
       home,
       store: resources.store,
@@ -180,13 +196,16 @@ export const createGatewayService = async (
         routes,
         rateLimiter,
         addressRateLimiter: addressLimiter,
-        ...whenPresent("maxBodyBytes", options.maxBodyBytes)
+        ...whenPresent("maxBodyBytes", options.maxBodyBytes),
+        ...whenPresent("telemetry", requestTracer)
       }),
       close: async () => {
         if (closed) return
         closed = true
         maintenance?.stop()
         oauth.stop()
+        // Flush pending trace batches before the runtime underneath goes away.
+        await requestTracer?.dispose()
         await dependencies.dispose()
       }
     }

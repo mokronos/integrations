@@ -201,5 +201,7 @@ console.log("\nScenario 3: out of stock fails fast")
 }
 
 console.log(`\n${failures === 0 ? "All order-saga checks passed." : `${failures} order-saga check(s) FAILED.`}`)
+// Dispose before exit so batched telemetry exports flush with the runtime.
+await client.dispose()
 api.stop()
 process.exit(failures === 0 ? 0 : 1)

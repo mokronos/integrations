@@ -15,6 +15,7 @@
     "moduleResolution": "bundler",
     "baseUrl": ".",
     "paths": {
+      "@mokronos/observability": ["packages/observability/src/index.ts"],
       "@mokronos/wfkit": ["packages/wf/src/index.ts"],
       "@mokronos/wfkit/optional": ["packages/wf/src/optional.ts"],
       "@mokronos/wfkit/authoring": ["packages/wf/src/authoring.ts"],

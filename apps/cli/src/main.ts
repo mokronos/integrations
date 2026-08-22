@@ -2,7 +2,7 @@
 import path from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { Command, Flag } from "effect/unstable/cli"
-import { Data, Effect } from "effect"
+import { Data, Effect, Layer } from "effect"
 import {
   createDirectoryWorkflowCatalog,
   createWorkflowClient,
@@ -13,6 +13,7 @@ import {
 } from "@mokronos/wfkit"
 import type { WorkflowCatalog } from "@mokronos/wfkit"
 import { workflowCommands, type CliRuntimeOptions } from "./cli/main.ts"
+import { telemetryLayer } from "@mokronos/observability"
 import assets from "./embedded-web-assets.gen.ts"
 import { enginePath, wfHome, workflowsPath } from "./paths.ts"
 import { defaultPort, installService, serviceIsRegistered } from "./service.ts"
@@ -301,7 +302,12 @@ const runCommandLine = async (
       Effect.catchTag("ShowHelp", (error) => error.errors.length === 0
         ? Effect.void
         : Effect.sync(() => { process.exitCode = 1 })),
-      Effect.provide(BunServices.layer)
+      // No-op unless WF_OTLP_ENDPOINT points somewhere; otherwise every
+      // command's Effect.fn spans and logs export as one trace.
+      Effect.provide(Layer.merge(
+        BunServices.layer,
+        telemetryLayer({ serviceName: "wf-cli" })
+      ))
     )
   )
 }

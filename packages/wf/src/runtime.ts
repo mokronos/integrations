@@ -20,6 +20,7 @@ import { createSignalTransport } from "./signal.ts"
 import type { SignalTransport } from "./signal.ts"
 import { ExecutionId } from "./schemas.ts"
 import { engineLayer } from "./engine-layer.ts"
+import { telemetryLayer } from "@mokronos/observability"
 
 export { engineLayer } from "./engine-layer.ts"
 
@@ -28,6 +29,19 @@ type DynamicService = Schema.Schema.Type<Schema.Top>
 export interface ExecuteWorkflowOptions {
   readonly onEvent?: WorkflowEventSink
   readonly engineDatabasePath?: string
+}
+
+/** Attributes riding a runtime entry's root span; usage analytics is queries
+ *  over these (counts and durations per workflow name, error rates, signal
+ *  deliveries) rather than a separate event system. */
+export type ExecutionSpanAttributes = {
+  readonly "wf.workflow.name"?: string
+  readonly "wf.signal.deferred"?: string
+}
+
+export interface ExecutionSpan {
+  readonly name: string
+  readonly attributes?: ExecutionSpanAttributes
 }
 
 export interface WorkflowRuntimeOptions {
@@ -139,6 +153,11 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
     const runtimeDependencies = Layer.merge(
       base,
       ExecutionResourceRegistry.layerOf(resourceRegistry)
+    ).pipe(
+      // provideMerge, not provide: the tracer must sit in the runtime's root
+      // environment or the outermost execution span falls back to the no-op
+      // default tracer and is never exported.
+      Layer.provideMerge(telemetryLayer({ serviceName: "wf-runtime" }))
     )
     return workflowLayers.reduce(
       (layer, workflowLayer) => Layer.provideMerge(workflowLayer, layer),
@@ -191,11 +210,18 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
       A,
       DynamicService,
       WorkflowEngine.WorkflowEngine | ExecutionResourceRegistry
-    >
+    >,
+    span?: ExecutionSpan
   ): Promise<A> => runEffect(Effect.acquireUseRelease(
     Effect.sync(() => registerResources(executionId, onEvent)),
     () => effect,
     () => Effect.sync(() => removeResources(executionId))
+  ).pipe(
+    // One root per runtime entry: every engine poll, activity, and step below
+    // lands inside it, so a single execution id pulls up the whole trace tree.
+    Effect.withSpan(span?.name ?? "wf.execution", {
+      attributes: { "wf.execution.id": executionId, ...span?.attributes }
+    })
   ))
 
   return {
@@ -238,16 +264,23 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
           executionId,
           payload
         ).pipe(
+          // Usage analytics is a query over spans: outcome rides the root
+          // execution span next to the id and name.
+          Effect.tap(() => Effect.annotateCurrentSpan({ "wf.execution.outcome": "completed" })),
           Effect.tap((result) =>
             emitWorkflowEvent({ type: "workflow.completed", executionId: ExecutionId.make(executionId), workflowName, result })
           ),
+          Effect.tapError(() => Effect.annotateCurrentSpan({ "wf.execution.outcome": "failed" })),
           Effect.tapError((error) =>
             emitWorkflowEvent({ type: "workflow.failed", executionId: ExecutionId.make(executionId), workflowName, error })
           )
         )
         return result
       })
-      return await runWithResources(executionId, onEvent, effect)
+      return await runWithResources(executionId, onEvent, effect, {
+        name: "wf.execution",
+        attributes: { "wf.workflow.name": workflowName }
+      })
     },
 
     deliverSignal({ workflow, executionId, deferredName, payload, onEvent }) {
@@ -274,7 +307,10 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
       // The resumed replay may run inside THIS call's engine environment, so
       // it needs the same event sink as the original execute to record
       // history (compensations, cancellation, signal receipt).
-      return runWithResources(executionId, onEvent, effect)
+      return runWithResources(executionId, onEvent, effect, {
+        name: "wf.signal",
+        attributes: { "wf.signal.deferred": deferredName }
+      })
     },
 
     interrupt({ workflow, executionId }) {
@@ -282,7 +318,9 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
         const engine = yield* WorkflowEngine.WorkflowEngine
         yield* workflow.workflow.interrupt(engine, executionId)
       })
-      return runEffect(effect)
+      return runEffect(effect.pipe(
+        Effect.withSpan("wf.interrupt", { attributes: { "wf.execution.id": executionId } })
+      ))
     },
 
     resume({ workflow, executionId }) {
@@ -290,7 +328,7 @@ export const createWorkflowRuntime = (options: WorkflowRuntimeOptions): Workflow
         const engine = yield* WorkflowEngine.WorkflowEngine
         yield* workflow.workflow.resume(engine, executionId)
       })
-      return runWithResources(executionId, undefined, effect)
+      return runWithResources(executionId, undefined, effect, { name: "wf.resume" })
     },
 
     async dispose() {
@@ -322,16 +360,20 @@ export const makeWorkflowEffect = (
     )),
     Layer.provideMerge(ExecutionResourceRegistry.layer(
       options.onEvent === undefined ? {} : { events: options.onEvent }
-    ))
+    )),
+    // Merged upward so the tracer reaches this program's own root span too.
+    Layer.provideMerge(telemetryLayer({ serviceName: "wf-runtime" }))
   )
   const workflowName = String(wf.workflow.name ?? wf.name ?? "Workflow")
   const execution = Effect.gen(function* () {
     Schema.decodeUnknownSync(wf.input)(payload)
     yield* emitWorkflowEvent({ type: "workflow.started", workflowName, payload })
     const result = yield* wf.workflow.executeStandalone({ value: payload }).pipe(
+      Effect.tap(() => Effect.annotateCurrentSpan({ "wf.execution.outcome": "completed" })),
       Effect.tap((result) =>
         emitWorkflowEvent({ type: "workflow.completed", workflowName, result })
       ),
+      Effect.tapError(() => Effect.annotateCurrentSpan({ "wf.execution.outcome": "failed" })),
       Effect.tapError((error) =>
         emitWorkflowEvent({ type: "workflow.failed", workflowName, error })
       )
@@ -340,6 +382,7 @@ export const makeWorkflowEffect = (
   })
 
   return execution.pipe(
+    Effect.withSpan("wf.execution", { attributes: { "wf.workflow.name": workflowName } }),
     Effect.provide(env)
   )
 }

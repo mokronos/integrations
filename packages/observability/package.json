@@ -1,0 +1,49 @@
+{
+  "name": "@mokronos/observability",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "OTLP tracing and logging for the wf platform — one telemetry layer, off unless WF_OTLP_ENDPOINT is set.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mokronos/wf.git",
+    "directory": "packages/observability"
+  },
+  "homepage": "https://github.com/mokronos/wf#readme",
+  "bugs": {
+    "url": "https://github.com/mokronos/wf/issues"
+  },
+  "keywords": [
+    "workflow",
+    "observability",
+    "opentelemetry",
+    "otlp",
+    "effect"
+  ],
+  "engines": {
+    "bun": ">=1.2"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
+  "files": [
+    "src",
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "bun": "./src/index.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "effect": "4.0.0-beta.59"
+  }
+}

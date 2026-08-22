@@ -25,6 +25,7 @@
       "devDependencies": {
         "@effect/platform-bun": "4.0.0-beta.59",
         "@mokronos/integrations": "workspace:*",
+        "@mokronos/observability": "workspace:*",
         "@mokronos/wfkit": "workspace:*",
         "@mokronos/wfkit-executor": "workspace:*",
         "effect": "4.0.0-beta.59",
@@ -35,9 +36,11 @@
       "version": "0.2.0",
       "bin": {
         "integrations": "src/main.ts",
+        "i": "src/main.ts",
       },
       "dependencies": {
         "@mokronos/integrations-client": "workspace:*",
+        "@mokronos/observability": "workspace:*",
         "effect": "4.0.0-beta.59",
       },
       "devDependencies": {
@@ -51,6 +54,7 @@
       "dependencies": {
         "@libsql/client": "0.17.3",
         "@mokronos/integrations-client": "workspace:*",
+        "@mokronos/observability": "workspace:*",
         "@mokronos/wfkit-executor": "workspace:*",
         "effect": "4.0.0-beta.59",
       },
@@ -201,6 +205,13 @@
         "effect": "4.0.0-beta.59",
       },
     },
+    "packages/observability": {
+      "name": "@mokronos/observability",
+      "version": "0.1.0",
+      "dependencies": {
+        "effect": "4.0.0-beta.59",
+      },
+    },
     "packages/wf": {
       "name": "@mokronos/wfkit",
       "version": "0.2.0",
@@ -210,6 +221,7 @@
         "@effect/platform-node-shared": "4.0.0-beta.59",
         "@effect/sql-sqlite-bun": "4.0.0-beta.59",
         "@libsql/client": "0.17.3",
+        "@mokronos/observability": "workspace:*",
         "drizzle-orm": "0.45.2",
         "effect": "4.0.0-beta.59",
         "yaml": "^2.9.0",
@@ -548,6 +560,8 @@
     "@mokronos/integrations-client": ["@mokronos/integrations-client@workspace:apps/integrations/ts"],
 
     "@mokronos/integrations-worker": ["@mokronos/integrations-worker@workspace:apps/integrations/worker"],
+
+    "@mokronos/observability": ["@mokronos/observability@workspace:packages/observability"],
 
     "@mokronos/wf": ["@mokronos/wf@workspace:apps/cli"],
 

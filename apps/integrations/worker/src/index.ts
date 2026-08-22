@@ -48,6 +48,12 @@ export interface Env {
   /** The origin callers reach, e.g. https://integrations-gateway.example.workers.dev.
    *  Drives OAuth callback URLs; set it before running authorization flows. */
   readonly INTEGRATIONS_PUBLIC_URL?: string
+  /** OTLP/HTTP base URL traces export to (e.g. a hosted collector). Unset
+   *  keeps the worker untraced — nothing is built, nothing is exported. */
+  readonly WF_OTLP_ENDPOINT?: string
+  /** Raw `authorization` header value on every export, e.g.
+   *  Grafana Cloud's `Basic <base64(instance-id:token)>`. */
+  readonly WF_OTLP_AUTHORIZATION?: string
 }
 
 /** One service per isolate. Workers keep module state across requests, so the
@@ -57,6 +63,16 @@ let servicePromise: Promise<GatewayService> | undefined
 
 const publicUrlOption = (value: string | undefined): { readonly publicUrl?: string } =>
   value === undefined || value.length === 0 ? {} : { publicUrl: value }
+
+const telemetryEndpointOption = (value: string | undefined): { readonly telemetryEndpoint?: string } =>
+  value === undefined || value.length === 0 ? {} : { telemetryEndpoint: value }
+
+const telemetryHeadersOption = (
+  value: string | undefined
+): { readonly telemetryHeaders?: Record<string, string> } =>
+  value === undefined || value.length === 0
+    ? {}
+    : { telemetryHeaders: { authorization: value } }
 
 const getService = (env: Env): Promise<GatewayService> => {
   servicePromise ??= (async () => {
@@ -75,7 +91,9 @@ const getService = (env: Env): Promise<GatewayService> => {
       oauthStore: new D1OAuthSessionStore(database),
       externalMaintenance: true,
       secureCookies: true,
-      ...publicUrlOption(env.INTEGRATIONS_PUBLIC_URL)
+      ...publicUrlOption(env.INTEGRATIONS_PUBLIC_URL),
+      ...telemetryEndpointOption(env.WF_OTLP_ENDPOINT),
+      ...telemetryHeadersOption(env.WF_OTLP_AUTHORIZATION)
     })
   })()
   // An isolate whose bootstrap failed once should not serve half a gateway;

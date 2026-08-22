@@ -14,7 +14,8 @@
     "effect": "4.0.0-beta.59"
   },
   "scripts": {
-    "build:wf": "bun run --cwd packages/wf build",
+    "build:observability": "bun run --cwd packages/observability build",
+    "build:wf": "bun run build:observability && bun run --cwd packages/wf build",
     "build:executor": "bun run build:wf && bun run --cwd packages/wfkit-executor build",
     "build": "bun run build:executor",
     "build:cli": "bun run build:executor && bun run --cwd apps/cli build",
