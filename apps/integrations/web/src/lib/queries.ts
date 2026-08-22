@@ -25,7 +25,18 @@ export const keys = {
 }
 
 export const useIntegrations = () =>
-  useQuery({ queryKey: keys.integrations, queryFn: gateway.listIntegrations })
+  useQuery({
+    queryKey: keys.integrations,
+    queryFn: gateway.listIntegrations,
+    select: (response) => response.integrations
+  })
+
+export const useOAuthCallbackUrl = () =>
+  useQuery({
+    queryKey: keys.integrations,
+    queryFn: gateway.listIntegrations,
+    select: (response) => response.oauthCallbackUrl
+  })
 
 export const useIntegrationTools = (slug: string | undefined) =>
   useQuery({

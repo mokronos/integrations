@@ -19,6 +19,7 @@ import {
   IntegrationSearchResponse
 } from "@mokronos/wfkit-executor/registry"
 import {
+  ExecutorAuthMethod,
   ExecutorConnection,
   ExecutorTool,
   ExecutorToolSummary,
@@ -39,6 +40,7 @@ export type {
   AuditOutcome,
   Client,
   DriftEntry,
+  ExecutorAuthMethod,
   ExecutorConnection,
   ExecutorTool,
   ExecutorToolSummary,
@@ -63,7 +65,8 @@ const json = <T, E>(schema: Schema.Codec<T, E>) =>
   Schema.decodeUnknownSync(Schema.toCodecJson(schema))
 
 export const IntegrationsResponse = Schema.Struct({
-  integrations: Schema.Array(IntegrationOverview)
+  integrations: Schema.Array(IntegrationOverview),
+  oauthCallbackUrl: Schema.optional(Schema.NullOr(Schema.String))
 })
 
 export const ConnectionsResponse = Schema.Struct({

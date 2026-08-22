@@ -46,6 +46,11 @@ export interface ApiDependencies {
   readonly executor: ExecutorServices
   readonly retentionDays: number
   readonly oauth: OAuthSessions
+  /** Where a provider must redirect after the human approves, so clients can
+   *  show it before a flow starts — providers like Google and Microsoft want
+   *  this exact URI registered in their consoles up front. `undefined` when no
+   *  callback origin applies (headless, no publicUrl). */
+  readonly oauthCallbackUrl?: () => string | undefined
   /** Overrides the public registry for an isolated deployment or acceptance test. */
   readonly registryUrl?: string
   /** Login-surface configuration; defaults close signup and serve insecure
@@ -343,7 +348,10 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
       method: "GET",
       path: "/v1/integrations",
       access: "privileged",
-      handle: async () => ok({ integrations: await executor.listIntegrationOverviews() })
+      handle: async () => ok({
+        integrations: await executor.listIntegrationOverviews(),
+        oauthCallbackUrl: dependencies.oauthCallbackUrl?.()
+      })
     },
     {
       method: "POST",

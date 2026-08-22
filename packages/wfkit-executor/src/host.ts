@@ -7,6 +7,7 @@ import {
 } from "@executor-js/fumadb/adapters/drizzle"
 import { mcpPlugin } from "@executor-js/plugin-mcp/core"
 import { openApiPlugin } from "@executor-js/plugin-openapi/core"
+import { googleDiscoveryAdapter } from "@executor-js/plugin-openapi/providers/google"
 import {
   createExecutor,
   type Executor,
@@ -19,7 +20,12 @@ import { fileCredentialProvider } from "./credential-provider.ts"
 
 const plugins = [
   mcpPlugin({ dangerouslyAllowStdioMCP: false }),
-  openApiPlugin()
+  openApiPlugin({
+    // Google publishes its APIs as Discovery documents, not OpenAPI; the
+    // adapter converts them so `specFormat: "google-discovery"` specs load
+    // like any other.
+    specFormats: [googleDiscoveryAdapter]
+  })
 ] as const
 
 export type WfExecutor = Executor<typeof plugins>

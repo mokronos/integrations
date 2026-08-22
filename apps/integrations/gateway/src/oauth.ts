@@ -10,6 +10,7 @@ import {
   registerExecutorOAuthClient,
   startExecutorOAuth
 } from "@mokronos/wfkit-executor"
+import { oauthSetupGuidance } from "./oauth-guidance.ts"
 
 // Opening a browser is the client's job — the gateway may be running headless
 // on another machine. It returns the authorization URL and lets the caller
@@ -101,7 +102,11 @@ const prepareFlow = async (
   } else {
     const registrationEndpoint = oauth.registrationEndpoint ?? discovered?.registrationEndpoint
     if (registrationEndpoint === null || registrationEndpoint === undefined) {
-      throw new Error("OAuth server does not support dynamic registration; provide --client-id")
+      throw new Error(oauthSetupGuidance({
+        integration: input.integration,
+        method: input.authMethod,
+        redirectUri
+      }))
     }
     client = await auth.registerClient({
       slug: clientSlug,

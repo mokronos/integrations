@@ -1,5 +1,6 @@
 import { whenPresent } from "@mokronos/wfkit"
 import { IntegrationSlug } from "@executor-js/sdk/core"
+import { isGoogleDiscoveryUrl } from "@executor-js/plugin-openapi/providers/google"
 import { Option, Schema } from "effect"
 import { runExecutor } from "./default-host.ts"
 import type { ExecutorRunner } from "./host.ts"
@@ -48,7 +49,11 @@ export const createExecutorCatalog = (runner: ExecutorRunner): ExecutorCatalog =
       await runner.run((executor) => executor.mcp.probeEndpoint(url))
     ),
     previewOpenApi: async (spec) => {
-      const preview = await runner.run((executor) => executor.openapi.previewSpec(spec))
+      // Google's Discovery dialect is not OpenAPI; the executor converts it
+      // when told which format the URL speaks.
+      const preview = await runner.run((executor) => executor.openapi.previewSpec(
+        isGoogleDiscoveryUrl(spec) ? { spec, specFormat: "google-discovery" } : spec
+      ))
       return Schema.decodeUnknownSync(ExecutorOpenApiPreview)({
         title: Option.getOrNull(preview.title),
         description: Option.getOrNull(preview.description),
@@ -92,6 +97,12 @@ export const createExecutorCatalog = (runner: ExecutorRunner): ExecutorCatalog =
     addOpenApi: async (options) =>
       await runner.run((executor) => executor.openapi.addSpec({
         spec: { kind: "url", url: options.spec },
+        // Persisted with the integration so tool resolution converts on every
+        // load, exactly as the preview did.
+        ...whenPresent(
+          "specFormat",
+          isGoogleDiscoveryUrl(options.spec) ? "google-discovery" : undefined
+        ),
         slug: options.slug,
         ...whenPresent("name", options.name),
         ...whenPresent("description", options.description),

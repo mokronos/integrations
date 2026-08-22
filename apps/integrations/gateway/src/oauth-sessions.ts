@@ -41,8 +41,11 @@ export interface OAuthSessions {
 export interface OAuthSessionsOptions {
   /** The gateway's externally reachable origin. Set on a hosted deployment:
    *  callbacks then arrive at `${publicUrl}/v1/oauth/callback` instead of an
-   *  ephemeral loopback listener this process may not own. */
+   *  ephemeral loopback listener this process may not own. When the origin
+   *  depends on the port the socket actually binds, supply it lazily via
+   *  `publicUrlOf`, which is read at flow-start time. */
   readonly publicUrl?: string
+  readonly publicUrlOf?: () => string | undefined
 }
 
 /** Sessions live in memory only. An in-flight browser redirect cannot survive a
@@ -77,15 +80,16 @@ export const createOAuthSessions = (
     start: async (input) => {
       if (stopped) throw new Error("The gateway is shutting down")
       const id = randomUUID()
+      const publicUrl = options.publicUrlOf?.() ?? options.publicUrl
 
       // Hosted mode: register against the public URL and hand back a URL for
       // the human's browser. Completion arrives at the callback route.
-      if (options.publicUrl !== undefined) {
+      if (publicUrl !== undefined) {
         const flow = await startHostedExecutorOAuth({
           integration: input.integration,
           connection: input.connection,
           authMethod: input.authMethod,
-          publicUrl: options.publicUrl,
+          publicUrl,
           ...whenPresent("clientId", input.clientId),
           ...whenPresent("clientSecret", input.clientSecret),
           ...whenPresent("timeoutMs", input.timeoutMs)

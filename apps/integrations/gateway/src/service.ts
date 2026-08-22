@@ -47,6 +47,11 @@ export interface GatewayServiceOptions {
    *  Set on a hosted deployment so OAuth callbacks arrive at the gateway's own
    *  public URL instead of an ephemeral loopback listener. */
   readonly publicUrl?: string
+  /** Loopback origin of this very process, e.g. http://127.0.0.1:4788. Used as
+   *  the OAuth callback origin when no publicUrl is configured, so the redirect
+   *  URI is stable enough to pre-register at providers that demand an exact one
+   *  (Google, Microsoft) before any flow starts. */
+  readonly localCallbackOrigin?: string
   /** Set when the socket is bound off loopback, so session cookies carry
    *  `Secure` and a stolen cookie is worth less on the wire. */
   readonly secureCookies?: boolean
@@ -98,8 +103,14 @@ export const createGatewayService = async (
       executor: resources.executor,
       close: () => resources.host.close()
     }
+    // Read at flow-start time, not construction time: the local origin is only
+    // known once serveGateway has decided how the socket is bound. The callback
+    // route is GET /v1/oauth/callback either way.
+    const resolvePublicUrl = (): string | undefined =>
+      options.publicUrl ?? process.env["INTEGRATIONS_PUBLIC_URL"] ??
+        options.localCallbackOrigin
     const oauth = createOAuthSessions(gateway.executor, {
-      ...whenPresent("publicUrl", options.publicUrl ?? process.env["INTEGRATIONS_PUBLIC_URL"])
+      publicUrlOf: resolvePublicUrl
     })
     const maintenance = startMaintenanceLoop(resources.store)
     const routes = gatewayRoutes({
@@ -107,6 +118,10 @@ export const createGatewayService = async (
       executor: gateway.executor,
       retentionDays: options.retentionDays ?? defaultArgumentRetentionDays,
       oauth,
+      oauthCallbackUrl: () => {
+        const origin = resolvePublicUrl()
+        return origin === undefined ? undefined : `${origin.replace(/\/+$/, "")}/v1/oauth/callback`
+      },
       sessions: {
         signupOpen: await signupOpen(resources.store),
         secureCookies: options.secureCookies ?? false
@@ -206,10 +221,21 @@ export interface RunningGateway {
 export const serveGateway = async (options: ServeOptions = {}): Promise<RunningGateway> => {
   const hostname = options.hostname ?? "127.0.0.1"
   const boundToLoopback = isLoopbackAddress(hostname)
+  // The port is deterministic — Bun.serve would fail rather than relocate a
+  // busy port — so the OAuth redirect URI can be computed before binding.
+  // Port 0 means the OS picks, which is unregistrable at providers that want
+  // an exact redirect URI, so no local callback origin applies there.
+  const requestedPort = options.port ?? defaultGatewayPort
   const service = await createGatewayService({
     ...whenPresent("home", options.home),
     ...whenPresent("registryUrl", options.registryUrl),
-    secureCookies: !boundToLoopback
+    secureCookies: !boundToLoopback,
+    ...whenPresent(
+      "localCallbackOrigin",
+      boundToLoopback && requestedPort !== 0
+        ? `http://${hostname}:${requestedPort}`
+        : undefined
+    )
   })
   let server: ReturnType<typeof Bun.serve> | undefined
   try {
@@ -221,7 +247,7 @@ export const serveGateway = async (options: ServeOptions = {}): Promise<RunningG
 
     server = Bun.serve({
       hostname,
-      port: options.port ?? defaultGatewayPort,
+      port: requestedPort,
       fetch: async (request, running) => {
         const pathname = new URL(request.url).pathname
         if (web !== undefined && !pathname.startsWith("/v1/")) {
@@ -241,12 +267,12 @@ export const serveGateway = async (options: ServeOptions = {}): Promise<RunningG
         return await service.handle(request, requestContext)
       }
     })
-    const port = Number(server.port)
-    localSecret = await ensureLocalCredential(service, port)
+    const boundPort = Number(server.port)
+    localSecret = await ensureLocalCredential(service, boundPort)
     let stopped = false
     return {
-      port,
-      url: `http://${hostname}:${port}`,
+      port: boundPort,
+      url: `http://${hostname}:${boundPort}`,
       service,
       web: web?.directory,
       stop: async () => {
@@ -256,6 +282,7 @@ export const serveGateway = async (options: ServeOptions = {}): Promise<RunningG
         await service.close()
       }
     }
+
   } catch (error) {
     server?.stop(true)
     await service.close()

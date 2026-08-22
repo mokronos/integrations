@@ -117,8 +117,13 @@ const segment = (value: string): string => encodeURIComponent(value)
 
 // --- catalog and connections ------------------------------------------------
 
-export const listIntegrations = async () =>
-  decodeIntegrations(await request("GET", "/v1/integrations")).integrations
+export const listIntegrations = async () => {
+  const response = decodeIntegrations(await request("GET", "/v1/integrations"))
+  return {
+    integrations: response.integrations,
+    oauthCallbackUrl: response.oauthCallbackUrl ?? undefined
+  }
+}
 
 export const listIntegrationTools = async (slug: string) =>
   decodeTools(await request("GET", `/v1/integrations/${segment(slug)}/tools`)).tools
