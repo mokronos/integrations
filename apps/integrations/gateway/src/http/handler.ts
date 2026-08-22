@@ -1,5 +1,5 @@
 import { Schema } from "effect"
-import { whenPresent } from "@mokronos/wfkit"
+import { whenPresent } from "@mokronos/wfkit/optional"
 import { authenticateClient, authorizeMutation } from "../authorize.ts"
 import { hashSessionToken } from "../passwords.ts"
 import { SessionTokenHash } from "../domain.ts"

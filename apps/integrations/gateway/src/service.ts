@@ -3,7 +3,7 @@ import {
   defaultGatewayPort,
   writeGatewayConfig
 } from "./config.ts"
-import { whenPresent } from "@mokronos/wfkit"
+import { whenPresent } from "@mokronos/wfkit/optional"
 import { defaultTenantId } from "./domain.ts"
 import { resolveEncryption } from "./crypto.ts"
 import type { Gateway } from "./host.ts"
@@ -12,10 +12,14 @@ import type { GatewayRequestContext } from "./http/handler.ts"
 import { isLoopbackAddress, mayBorrowLocalCredential } from "./http/loopback.ts"
 import { gatewayRoutes } from "./http/api.ts"
 import { startMaintenanceLoop } from "./maintenance.ts"
+import type { MaintenanceLoop } from "./maintenance.ts"
 import { createOAuthSessions } from "./oauth-sessions.ts"
+import type { OAuthSessionStore } from "./oauth-sessions.ts"
 import { createRateLimiter } from "./ratelimit.ts"
 import { generateApiKey, newClientId } from "./keys.ts"
 import { integrationsHome } from "./paths.ts"
+import type { ExecutorHostStorage } from "@mokronos/wfkit-executor"
+import type { GatewayStoreInitializationError, GatewayStoreOptions } from "./store.ts"
 import type { GatewayStore } from "./store.ts"
 import { GatewayStoreService } from "./store.ts"
 import { createWebAssets } from "./web-assets.ts"
@@ -60,6 +64,26 @@ export interface GatewayServiceOptions {
   readonly rateLimitPerMinute?: number
   /** Largest accepted JSON body in bytes; defaults to one mebibyte. */
   readonly maxBodyBytes?: number
+  // --- deployment seams ------------------------------------------------------
+  // A gateway whose storage is not a directory on disk — Cloudflare Workers
+  // with a D1 binding, an integration test — supplies these instead of the
+  // file-backed defaults. Everything unset keeps the historical behaviour.
+  /** Replaces the file SQLite store layer entirely. When given, `home` is
+   *  neither created nor read for storage. */
+  readonly storeLayer?: Layer.Layer<GatewayStoreService, GatewayStoreInitializationError>
+  /** Storage overrides forwarded to the Executor host (credential provider
+   *  and database). See {@link ExecutorHostStorage}. */
+  readonly executorStorage?: ExecutorHostStorage
+  /** Shared OAuth session storage for deployments that serve requests from
+   *  more than one process. Absent keeps sessions in memory. */
+  readonly oauthStore?: OAuthSessionStore
+  /** Options forwarded to {@link GatewayStoreService.layer} when no explicit
+   *  storeLayer is supplied. */
+  readonly storeOptions?: GatewayStoreOptions
+  /** Set on deployments whose clock lives outside the process — a Workers
+   *  cron trigger calls runMaintenance(store) itself — so no in-process
+   *  interval runs. */
+  readonly externalMaintenance?: boolean
 }
 
 /** Signup is open exactly while the gateway has no humans at all — its first
@@ -87,8 +111,9 @@ export const createGatewayService = async (
     keyFile: `${home}/gateway.key`
   })
   const dependencies = ManagedRuntime.make(Layer.merge(
-    GatewayStoreService.layer(`${home}/gateway.sqlite`, encryption),
-    ExecutorServicesService.layerWithHost(home)
+    options.storeLayer ??
+      GatewayStoreService.layer(`${home}/gateway.sqlite`, encryption, options.storeOptions),
+    ExecutorServicesService.layerWithHost(home, options.executorStorage)
   ))
   try {
     const resources = await dependencies.runPromise(Effect.gen(function* () {
@@ -110,9 +135,11 @@ export const createGatewayService = async (
       options.publicUrl ?? process.env["INTEGRATIONS_PUBLIC_URL"] ??
         options.localCallbackOrigin
     const oauth = createOAuthSessions(gateway.executor, {
-      publicUrlOf: resolvePublicUrl
+      publicUrlOf: resolvePublicUrl,
+      ...whenPresent("store", options.oauthStore)
     })
-    const maintenance = startMaintenanceLoop(resources.store)
+    const maintenance: MaintenanceLoop | undefined =
+      options.externalMaintenance === true ? undefined : startMaintenanceLoop(resources.store)
     const routes = gatewayRoutes({
       store: resources.store,
       executor: gateway.executor,
@@ -158,7 +185,7 @@ export const createGatewayService = async (
       close: async () => {
         if (closed) return
         closed = true
-        maintenance.stop()
+        maintenance?.stop()
         oauth.stop()
         await dependencies.dispose()
       }

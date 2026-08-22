@@ -55,6 +55,7 @@ export type {
   ExecutorCatalog,
   ExecutorConnections,
   ExecutorHost,
+  ExecutorHostStorage,
   ExecutorRunner,
   ExecutorToolFilter,
   ExecutorTools,

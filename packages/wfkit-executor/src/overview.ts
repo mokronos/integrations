@@ -1,4 +1,4 @@
-import { whenPresent } from "@mokronos/wfkit"
+import { whenPresent } from "@mokronos/wfkit/optional"
 import { listExecutorIntegrations } from "./catalog.ts"
 import type { ExecutorCatalog } from "./catalog.ts"
 import { listExecutorConnections } from "./connections.ts"

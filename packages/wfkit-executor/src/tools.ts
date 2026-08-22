@@ -1,4 +1,4 @@
-import { whenPresent, whenPresentMap } from "@mokronos/wfkit"
+import { whenPresent, whenPresentMap } from "@mokronos/wfkit/optional"
 import {
   ConnectionName,
   IntegrationSlug,

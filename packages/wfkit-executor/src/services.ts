@@ -2,7 +2,7 @@ import { createExecutorAuth } from "./auth.ts"
 import { createExecutorCatalog } from "./catalog.ts"
 import { createExecutorConnections } from "./connections.ts"
 import { createIntegrationDiscovery } from "./discovery.ts"
-import type { ExecutorRunner } from "./host.ts"
+import type { ExecutorHostStorage, ExecutorRunner } from "./host.ts"
 import { createIntegrationOverview } from "./overview.ts"
 import { createIntegrationProvisioning } from "./provisioning.ts"
 import { createExecutorTools } from "./tools.ts"
@@ -48,13 +48,17 @@ export class ExecutorServicesService extends Context.Service<
     })
   )
 
-  static readonly layer = (directory: string): Layer.Layer<ExecutorServicesService> =>
-    this.layerNoDeps.pipe(Layer.provide(ExecutorHostService.layer(directory)))
+  static readonly layer = (
+    directory: string,
+    storage?: ExecutorHostStorage
+  ): Layer.Layer<ExecutorServicesService> =>
+    this.layerNoDeps.pipe(Layer.provide(ExecutorHostService.layer(directory, storage)))
 
   /** Exposes the host as well for composition roots that publish lifecycle
    * diagnostics in addition to the focused services. */
   static readonly layerWithHost = (
-    directory: string
+    directory: string,
+    storage?: ExecutorHostStorage
   ): Layer.Layer<ExecutorServicesService | ExecutorHostService> =>
-    this.layerNoDeps.pipe(Layer.provideMerge(ExecutorHostService.layer(directory)))
+    this.layerNoDeps.pipe(Layer.provideMerge(ExecutorHostService.layer(directory, storage)))
 }

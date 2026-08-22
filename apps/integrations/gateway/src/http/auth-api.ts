@@ -1,6 +1,7 @@
 import { Schema } from "effect"
 import { generateSessionToken, hashPassword, verifyPassword } from "../passwords.ts"
 import { newSubjectId, newTenantId } from "../keys.ts"
+import type { SessionTokenHash } from "../domain.ts"
 import type { GatewayStore } from "../store.ts"
 import { badRequest, created, decodeBody, ok } from "./router.ts"
 import type { Route } from "./router.ts"
@@ -23,6 +24,22 @@ const SignupBody = Schema.Struct({
 
 const LoginBody = Schema.Struct({
   email: Email,
+  password: Schema.String
+})
+
+const ChangeEmailBody = Schema.Struct({
+  email: Email,
+  /** Re-authentication on the way in: whoever can type the current password
+   *  may redirect the account, and a hijacked tab cannot. */
+  password: Schema.String
+})
+
+const ChangePasswordBody = Schema.Struct({
+  currentPassword: Schema.String,
+  newPassword: Schema.String.check(Schema.isMinLength(8))
+})
+
+const DeleteAccountBody = Schema.Struct({
   password: Schema.String
 })
 
@@ -177,6 +194,102 @@ export const authRoutes = (dependencies: AuthDependencies): ReadonlyArray<Route>
           })
         }
         return ok({ authenticated: false })
+      }
+    },
+    {
+      method: "POST",
+      path: "/v1/auth/email",
+      access: "privileged",
+      handle: async (request) => {
+        if (request.identity.kind !== "session") {
+          return { status: 403, body: { error: "Only a signed-in human may change account details", code: "not-permitted" } }
+        }
+        const session = request.identity
+        const body = decodeBody(ChangeEmailBody, request.body)
+        const login = await dependencies.store.findLoginByEmail(session.email)
+        if (login === undefined || !(await verifyPassword(body.password, login.passwordHash))) {
+          return {
+            status: 401,
+            body: { error: "Email or password is not correct", code: "invalid-credentials" }
+          }
+        }
+        // Same email is a no-op rather than an argument with the schema.
+        if (body.email !== login.email &&
+          await dependencies.store.findLoginByEmail(body.email) !== undefined
+        ) {
+          return badRequest(`An account for ${body.email} already exists`)
+        }
+        await dependencies.store.changeLoginEmail(session.subjectId, body.email)
+        // The identity travels in the session row's join; sessions survive an
+        // email change, so no re-login is forced.
+        return ok({ email: body.email })
+      }
+    },
+    {
+      method: "POST",
+      path: "/v1/auth/password",
+      access: "privileged",
+      handle: async (request) => {
+        if (request.identity.kind !== "session") {
+          return { status: 403, body: { error: "Only a signed-in human may change account details", code: "not-permitted" } }
+        }
+        const session = request.identity
+        const body = decodeBody(ChangePasswordBody, request.body)
+        const login = await dependencies.store.findLoginByEmail(session.email)
+        if (login === undefined || !(await verifyPassword(body.currentPassword, login.passwordHash))) {
+          return {
+            status: 401,
+            body: { error: "Email or password is not correct", code: "invalid-credentials" }
+          }
+        }
+        await dependencies.store.changeLoginPassword(
+          session.subjectId,
+          await hashPassword(body.newPassword)
+        )
+        // A password change is a statement that the old one was compromised-
+        // adjacent at best; every other device re-authenticates.
+        const revoked = await dependencies.store.revokeSubjectSessions(
+          session.subjectId,
+          request.identity.kind === "session" ? request.identity.tokenHash : undefined satisfies SessionTokenHash | undefined
+        )
+        return ok({ updated: true, revokedSessions: revoked })
+      }
+    },
+    {
+      // POST rather than DELETE because the confirmation password must ride
+      // the body, and the handler treats DELETE bodies as absent.
+      method: "POST",
+      path: "/v1/auth/account/delete",
+      access: "privileged",
+      handle: async (request) => {
+        if (request.identity.kind !== "session") {
+          return { status: 403, body: { error: "Only a signed-in human may change account details", code: "not-permitted" } }
+        }
+        const session = request.identity
+        const body = decodeBody(DeleteAccountBody, request.body)
+        const login = await dependencies.store.findLoginByEmail(session.email)
+        if (login === undefined || !(await verifyPassword(body.password, login.passwordHash))) {
+          return {
+            status: 401,
+            body: { error: "Email or password is not correct", code: "invalid-credentials" }
+          }
+        }
+        // The subject goes first — its cascade takes the login and sessions —
+        // and the workspace follows only when nobody is left inside it. A
+        // shared tenant survives its member; a solo signup takes its clients,
+        // keys, grants, approvals, and audit rows down with it.
+        await dependencies.store.deleteSubject(session.subjectId)
+        if (await dependencies.store.countSubjects(session.tenantId) === 0) {
+          await dependencies.store.deleteTenant(session.tenantId)
+        }
+        // Vendor connections live in Executor's own storage keyed by address,
+        // outside this store; they are not reclaimed here.
+        return {
+          ...ok({ deleted: true }),
+          headers: {
+            "set-cookie": clearedSessionCookieHeader({ secure: dependencies.secureCookies })
+          }
+        }
       }
     }
   ]

@@ -586,6 +586,18 @@ export interface GatewayStore {
   }): Promise<LoginRecord>
   findLoginByEmail(email: string): Promise<LoginRecord | undefined>
   countLogins(): Promise<number>
+  /** Rewrites the login's email. Uniqueness is enforced by the schema; the
+   *  route checks for a friendly message first. */
+  changeLoginEmail(subjectId: SubjectId, email: string): Promise<void>
+  changeLoginPassword(subjectId: SubjectId, passwordHash: string): Promise<void>
+  /** Removes the subject and, by cascade, its login and every session. */
+  deleteSubject(subjectId: SubjectId): Promise<void>
+  /** Removes a workspace and everything scoped to it — clients, keys, grants,
+   *  approvals, audit rows. Only safe once no subjects remain. */
+  deleteTenant(id: TenantId): Promise<void>
+  /** Deletes the subject's sessions, keeping at most one (the device asking).
+   *  Returns how many died. */
+  revokeSubjectSessions(subjectId: SubjectId, exceptTokenHash?: SessionTokenHash): Promise<number>
 
   createSession(input: {
     readonly tokenHash: SessionTokenHash
@@ -685,13 +697,14 @@ export class GatewayStoreService extends Context.Service<
 >()("@mokronos/integrations/GatewayStore") {
   static readonly layer = (
     databasePath: string,
-    encryption?: Encryption
+    encryption?: Encryption,
+    options?: GatewayStoreOptions
   ): Layer.Layer<GatewayStoreService, GatewayStoreInitializationError> =>
     Layer.effect(
       GatewayStoreService,
       Effect.acquireRelease(
         Effect.tryPromise({
-          try: () => createGatewayStore(databasePath, encryption),
+          try: () => createGatewayStore(databasePath, encryption, options),
           catch: (cause) => new GatewayStoreInitializationError({ databasePath, cause })
         }),
         (store) => Effect.promise(() => store.close())
@@ -854,14 +867,30 @@ const auditFilter = (
   }
 }
 
-export const createGatewayStore = async (
-  databasePath: string,
-  encryption?: Encryption
-): Promise<GatewayStore> => {
+/** Overrides for where the gateway database actually lives. Everything unset
+ *  keeps the historical behaviour: one SQLite file under `home`. */
+export interface GatewayStoreOptions {
+  /** A caller-built client. When present, the store skips creating its own
+   *  file-backed client and the engine-level pragmas — the caller owns the
+   *  storage engine and its setup (e.g. a D1 binding on Workers). */
+  readonly client?: LibsqlClient
+}
+
+const openFileDatabase = async (databasePath: string): Promise<LibsqlClient> => {
   mkdirSync(path.dirname(databasePath), { recursive: true, mode: 0o700 })
   const database: LibsqlClient = createClient({ url: `file:${databasePath}` })
   await database.execute("PRAGMA journal_mode = WAL")
   await database.execute("PRAGMA foreign_keys = ON")
+  return database
+}
+
+export const createGatewayStore = async (
+  databasePath: string,
+  encryption?: Encryption,
+  options: GatewayStoreOptions = {}
+): Promise<GatewayStore> => {
+  const database: LibsqlClient =
+    options.client ?? await openFileDatabase(databasePath)
   // `CREATE TABLE IF NOT EXISTS` does nothing for a database that already
   // exists, so a column added after the fact has to be added explicitly — and
   // before the DDL below, which indexes it. A gateway that has been running
@@ -993,6 +1022,43 @@ export const createGatewayStore = async (
     countLogins: async () => {
       const row = await one("SELECT COUNT(*) AS total FROM gateway_login", [])
       return row === undefined ? 0 : Number(row["total"] ?? 0)
+    },
+
+    changeLoginEmail: async (subjectId, email) => {
+      await run("UPDATE gateway_login SET email = ? WHERE subject_id = ?", [email, subjectId])
+    },
+
+    changeLoginPassword: async (subjectId, passwordHash) => {
+      await run("UPDATE gateway_login SET password_hash = ? WHERE subject_id = ?", [
+        passwordHash,
+        subjectId
+      ])
+    },
+
+    deleteSubject: async (subjectId) => {
+      // The cascade takes the login and every session with it — the store's
+      // own DDL declares login and session as children of the subject.
+      await run("DELETE FROM gateway_subject WHERE id = ?", [subjectId])
+    },
+
+    deleteTenant: async (id) => {
+      // Every tenant-scoped table declares ON DELETE CASCADE, so one delete
+      // reclaims clients, keys, grants, approvals, audit rows, and snapshots.
+      await run("DELETE FROM gateway_tenant WHERE id = ?", [id])
+    },
+
+    revokeSubjectSessions: async (subjectId, exceptTokenHash) => {
+      const result =
+        exceptTokenHash === undefined
+          ? await database.execute({
+            sql: "DELETE FROM gateway_session WHERE subject_id = ?",
+            args: [subjectId]
+          })
+          : await database.execute({
+            sql: "DELETE FROM gateway_session WHERE subject_id = ? AND token_hash != ?",
+            args: [subjectId, exceptTokenHash]
+          })
+      return Number(result.rowsAffected)
     },
 
     createSession: async (input) => {

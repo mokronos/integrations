@@ -232,3 +232,40 @@ export const ApprovalDecided = Schema.Struct({
   outcome: Schema.optional(Schema.Json)
 })
 export const decodeApprovalDecided = json(ApprovalDecided)
+
+/** Who the gateway thinks is asking. A session means a signed-in human; a
+ *  client means an API key spoke; neither means the login form belongs on
+ *  screen. Mirrors GET /v1/auth/me. */
+export const Me = Schema.Union([
+  Schema.Struct({
+    authenticated: Schema.Literal(true),
+    kind: Schema.Literal("session"),
+    email: Schema.String,
+    tenantId: Schema.String,
+    subjectId: Schema.String
+  }),
+  Schema.Struct({
+    authenticated: Schema.Literal(true),
+    kind: Schema.Literal("client"),
+    clientId: Schema.String,
+    tenantId: Schema.String,
+    mayMutate: Schema.Boolean
+  }),
+  Schema.Struct({
+    authenticated: Schema.Literal(false)
+  })
+])
+export type Me = typeof Me.Type
+
+export const decodeMe = json(Me)
+
+export const EmailChanged = Schema.Struct({ email: Schema.String })
+export const PasswordChanged = Schema.Struct({
+  updated: Schema.Literal(true),
+  revokedSessions: Schema.Number
+})
+export const AccountDeleted = Schema.Struct({ deleted: Schema.Literal(true) })
+
+export const decodeEmailChanged = json(EmailChanged)
+export const decodePasswordChanged = json(PasswordChanged)
+export const decodeAccountDeleted = json(AccountDeleted)

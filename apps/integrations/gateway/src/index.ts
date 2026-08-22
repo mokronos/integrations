@@ -61,6 +61,7 @@ export type {
   CreateSubjectInput,
   CreateTenantInput,
   GatewayStore,
+  GatewayStoreOptions,
   RecordAuditInput
 } from "./store.ts"
 
@@ -97,7 +98,13 @@ export type { Encryption, EncryptionSource } from "./crypto.ts"
 export { createRateLimiter } from "./ratelimit.ts"
 export type { RateLimiter, RateLimiterOptions, RateLimitDecision } from "./ratelimit.ts"
 export { createOAuthSessions } from "./oauth-sessions.ts"
-export type { OAuthSession, OAuthSessions, OAuthSessionState } from "./oauth-sessions.ts"
+export type {
+  OAuthSession,
+  OAuthSessionStore,
+  OAuthSessions,
+  OAuthSessionsOptions,
+  OAuthSessionState
+} from "./oauth-sessions.ts"
 export { authorizeExecutorInBrowser, oauthBrowserPage, startHostedExecutorOAuth } from "./oauth.ts"
 export type { HostedAuthorization, HostedAuthorizationFlow } from "./oauth.ts"
 

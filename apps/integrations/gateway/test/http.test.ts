@@ -183,7 +183,7 @@ const setup = async (options: {
       // No OAuth flow is exercised here; these tests are about authority.
       oauth: {
         start: async () => { throw new Error("not used") },
-        get: () => undefined,
+        get: async () => undefined,
         completeByState: async () => undefined,
         stop: () => undefined
       }

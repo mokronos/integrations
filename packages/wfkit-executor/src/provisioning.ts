@@ -1,4 +1,4 @@
-import { whenPresent } from "@mokronos/wfkit"
+import { whenPresent } from "@mokronos/wfkit/optional"
 import { Schema } from "effect"
 import {
   addExecutorMcp,

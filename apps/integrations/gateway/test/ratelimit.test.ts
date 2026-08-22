@@ -141,7 +141,7 @@ describe("gateway traffic shaping", () => {
         retentionDays: 30,
         oauth: {
           start: async () => { throw new Error("not used") },
-          get: () => undefined,
+          get: async () => undefined,
           completeByState: async () => undefined,
           stop: () => undefined
         }

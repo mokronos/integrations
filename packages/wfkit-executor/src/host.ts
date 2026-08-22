@@ -10,6 +10,8 @@ import { openApiPlugin } from "@executor-js/plugin-openapi/core"
 import { googleDiscoveryAdapter } from "@executor-js/plugin-openapi/providers/google"
 import {
   createExecutor,
+  type CredentialProvider,
+  type ExecutorDbFactory,
   type Executor,
   Tenant
 } from "@executor-js/sdk/core"
@@ -30,42 +32,64 @@ const plugins = [
 
 export type WfExecutor = Executor<typeof plugins>
 
-const makeExecutor = async (directory: string): Promise<WfExecutor> => {
-  mkdirSync(directory, { recursive: true, mode: 0o700 })
+/** Storage overrides for hosts whose storage is not a directory on disk —
+ *  Cloudflare D1, an in-memory test client. Everything unset keeps the
+ *  historical behaviour: credentials and SQLite in `directory`. */
+export interface ExecutorHostStorage {
+  /** Replaces the default file-backed credential provider. */
+  readonly providers?: ReadonlyArray<CredentialProvider>
+  /** Replaces the default per-directory SQLite database: receives the runtime
+   *  table definitions and returns the FumaDb handle createExecutor expects.
+   *  When supplied, no directory is created. */
+  readonly buildDatabase?: ExecutorDbFactory
+}
+
+const defaultDatabase = (directory: string): ExecutorDbFactory =>
+  ({ tables }) => Effect.promise(async () => {
+    const databasePath = path.join(directory, "executor.sqlite")
+    const client = createClient({ url: `file:${databasePath}` })
+    await client.execute("PRAGMA foreign_keys = ON")
+    await client.execute("PRAGMA journal_mode = WAL")
+    const schema = createDrizzleRuntimeSchemaFromTables({
+      tables,
+      namespace: "wf_executor",
+      version: "1.0.0",
+      provider: "sqlite"
+    })
+    const drizzleDatabase = drizzle({ client, schema })
+    await ensureDrizzleRuntimeSchemaFromTables(drizzleDatabase, {
+      tables,
+      namespace: "wf_executor",
+      version: "1.0.0",
+      provider: "sqlite"
+    })
+    const handle = createExecutorFumaDb(drizzleDatabase, {
+      tables,
+      namespace: "wf_executor",
+      version: "1.0.0",
+      provider: "sqlite"
+    })
+    return {
+      db: handle.db,
+      close: async () => client.close()
+    }
+  })
+
+const makeExecutor = async (
+  directory: string,
+  storage: ExecutorHostStorage = {}
+): Promise<WfExecutor> => {
+  // The default database lives in the directory; a replacement owns its own
+  // location entirely, so creating the directory would be dead weight.
+  if (storage.buildDatabase === undefined) {
+    mkdirSync(directory, { recursive: true, mode: 0o700 })
+  }
   return await Effect.runPromise(createExecutor({
     tenant: Tenant.make("wf-local"),
     plugins,
-    providers: [fileCredentialProvider(directory)],
+    providers: storage.providers ?? [fileCredentialProvider(directory)],
     onElicitation: "accept-all",
-    db: ({ tables }) => Effect.promise(async () => {
-      const databasePath = path.join(directory, "executor.sqlite")
-      const client = createClient({ url: `file:${databasePath}` })
-      await client.execute("PRAGMA foreign_keys = ON")
-      await client.execute("PRAGMA journal_mode = WAL")
-      const schema = createDrizzleRuntimeSchemaFromTables({
-        tables,
-        namespace: "wf_executor",
-        version: "1.0.0",
-        provider: "sqlite"
-      })
-      const drizzleDatabase = drizzle({ client, schema })
-      await ensureDrizzleRuntimeSchemaFromTables(drizzleDatabase, {
-        tables,
-        namespace: "wf_executor",
-        version: "1.0.0",
-        provider: "sqlite"
-      })
-      const handle = createExecutorFumaDb(drizzleDatabase, {
-        tables,
-        namespace: "wf_executor",
-        version: "1.0.0",
-        provider: "sqlite"
-      })
-      return {
-        db: handle.db,
-        close: async () => client.close()
-      }
-    })
+    db: storage.buildDatabase ?? defaultDatabase(directory)
   }))
 }
 
@@ -85,11 +109,14 @@ export class ExecutorHostService extends Context.Service<
   ExecutorHostService,
   ExecutorHost
 >()("@mokronos/wfkit-executor/ExecutorHost") {
-  static readonly layer = (directory: string): Layer.Layer<ExecutorHostService> =>
+  static readonly layer = (
+    directory: string,
+    storage?: ExecutorHostStorage
+  ): Layer.Layer<ExecutorHostService> =>
     Layer.effect(
       ExecutorHostService,
       Effect.acquireRelease(
-        Effect.sync(() => createExecutorHost(directory)),
+        Effect.sync(() => createExecutorHost(directory, storage)),
         (host) => Effect.promise(() => host.close())
       )
     )
@@ -105,8 +132,11 @@ export class ExecutorHostClosedError extends Schema.TaggedErrorClass<ExecutorHos
 }
 
 /** Owns one Executor instance and its storage resources for an explicit
- * directory. Construction is lazy; close releases the database handle. */
-export const createExecutorHost = (directory: string): ExecutorHost => {
+ *  directory. Construction is lazy; close releases the database handle. */
+export const createExecutorHost = (
+  directory: string,
+  storage: ExecutorHostStorage = {}
+): ExecutorHost => {
   const resolvedDirectory = path.resolve(directory)
   let pending: Promise<WfExecutor> | undefined
   let closed = false
@@ -117,7 +147,7 @@ export const createExecutorHost = (directory: string): ExecutorHost => {
       return Promise.reject(new ExecutorHostClosedError({ directory: resolvedDirectory }))
     }
     if (pending !== undefined) return pending
-    const created = makeExecutor(resolvedDirectory)
+    const created = makeExecutor(resolvedDirectory, storage)
     pending = created
     void created.catch(() => {
       if (pending === created) pending = undefined

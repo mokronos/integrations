@@ -1,4 +1,4 @@
-import { whenPresent, whenPresentMap } from "@mokronos/wfkit"
+import { whenPresent, whenPresentMap } from "@mokronos/wfkit/optional"
 import { Schema } from "effect"
 import type { ExecutorServices } from "@mokronos/wfkit-executor"
 import { searchIntegrations } from "@mokronos/wfkit-executor"
@@ -519,7 +519,7 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
       path: "/v1/connections/oauth/:id",
       access: "privileged",
       handle: async (request) => {
-        const session = oauth.get(request.params["id"] ?? "")
+        const session = await oauth.get(request.params["id"] ?? "")
         if (session === undefined) return notFound("Unknown or expired OAuth session")
         return ok(session)
       }

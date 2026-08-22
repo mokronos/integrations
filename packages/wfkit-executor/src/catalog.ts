@@ -1,4 +1,4 @@
-import { whenPresent } from "@mokronos/wfkit"
+import { whenPresent } from "@mokronos/wfkit/optional"
 import { IntegrationSlug } from "@executor-js/sdk/core"
 import { isGoogleDiscoveryUrl } from "@executor-js/plugin-openapi/providers/google"
 import { Option, Schema } from "effect"

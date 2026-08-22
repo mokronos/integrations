@@ -16,6 +16,7 @@
     "baseUrl": ".",
     "paths": {
       "@mokronos/wfkit": ["packages/wf/src/index.ts"],
+      "@mokronos/wfkit/optional": ["packages/wf/src/optional.ts"],
       "@mokronos/wfkit/authoring": ["packages/wf/src/authoring.ts"],
       "@mokronos/wfkit-executor": ["packages/wfkit-executor/src/index.ts"],
       "@mokronos/wfkit-executor/schemas": ["packages/wfkit-executor/src/schemas.ts"],
@@ -58,7 +59,9 @@
   },
   // The two React apps each own an `@/*` alias pointing at their own src, which
   // a single root project cannot resolve two ways. They are type-checked
-  // through their own tsconfigs instead — see the `typecheck` script.
+  // through their own tsconfigs instead — see the `typecheck` script. Same for
+  // the Workers deployment: it types D1 through structural interfaces rather
+  // than ambient globals, which belongs in its own project.
   // The vendored anti-slop Oxlint plugin is third-party tooling source, not
   // owned project source: it is type-checked upstream and does not compile
   // under this repo's stricter options. Oxlint ignores it too.
@@ -68,6 +71,7 @@
     "**/.tmp/**",
     "apps/wf/web",
     "apps/integrations/web",
+    "apps/integrations/worker",
     "tools/oxlint/anti-slop"
   ]
 }

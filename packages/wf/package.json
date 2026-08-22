@@ -39,6 +39,12 @@
       "development": "./src/index.ts",
       "default": "./dist/index.js"
     },
+    "./optional": {
+      "types": "./dist/optional.d.ts",
+      "bun": "./src/optional.ts",
+      "development": "./src/optional.ts",
+      "default": "./dist/optional.js"
+    },
     "./authoring": {
       "types": "./dist/authoring.d.ts",
       "bun": "./src/authoring.ts",

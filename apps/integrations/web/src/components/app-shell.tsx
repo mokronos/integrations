@@ -1,21 +1,25 @@
 import { useState } from "react"
-import { NavLink, Outlet } from "react-router"
+import { NavLink, Outlet, useNavigate } from "react-router"
 import {
   Activity,
   Braces,
   KeyRound,
+  LogOut,
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
   Plug,
+  UserRound,
   ShieldCheck,
   Sun,
   Wrench
 } from "lucide-react"
+import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
+import { logOut } from "@/lib/gateway"
 import { useApprovals } from "@/lib/queries"
 import { cn } from "@/lib/utils"
 
@@ -25,7 +29,8 @@ const navigation = [
   { to: "/approvals", label: "Approvals", icon: ShieldCheck },
   { to: "/executions", label: "Executions", icon: Activity },
   { to: "/workbench", label: "Workbench", icon: Braces },
-  { to: "/system", label: "System", icon: Wrench }
+  { to: "/system", label: "System", icon: Wrench },
+  { to: "/account", label: "Account", icon: UserRound }
 ] as const
 
 /** The count is the point of the badge: a frozen invocation is a person waiting,
@@ -41,6 +46,29 @@ function PendingBadge({ compact }: { readonly compact: boolean }) {
     >
       {count}
     </Badge>
+  )
+}
+
+function SignOutButton() {
+  const navigate = useNavigate()
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      className="w-full justify-start gap-2 px-2 text-sm"
+      onClick={() => {
+        void logOut()
+          .then(() => {
+            // A full reload, not a route change: the auth gate re-checks the
+            // (now revoked) session from scratch.
+            navigate(0)
+          })
+          .catch((error: Error) => toast.error("Could not sign out", { description: error.message }))
+      }}
+    >
+      <LogOut className="size-4" />
+      Sign out
+    </Button>
   )
 }
 
@@ -115,9 +143,10 @@ export function AppShell({
                     onCheckedChange={onDarkChange}
                   />
                 </label>
+                <SignOutButton />
                 <p className="text-sidebar-foreground/50 text-xs leading-relaxed">
-                  Served by the gateway on loopback. Every action here is performed with
-                  the local client's key.
+                  Served by the gateway. Actions run with your signed-in session,
+                  or the local client's key on loopback.
                 </p>
               </>
             )

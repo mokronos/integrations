@@ -27,17 +27,22 @@ const contentTypes = new Map([
 const contentTypeFor = (location: string): string =>
   contentTypes.get(path.extname(location).toLowerCase()) ?? "application/octet-stream"
 
-const packageDirectory = path.resolve(import.meta.dirname, "..")
+/** Resolved on first use, not at module load: hosts without a filesystem
+ *  (Cloudflare Workers) have no `import.meta.dirname`, and this module rides
+ *  along in bundles that never serve assets from disk. */
+const packageDirectory = (): string =>
+  path.resolve(import.meta.dirname ?? process.cwd(), "..")
 
 /** In order: an explicit override, the published layout, then the source
  *  checkout — so a working tree serves `vite build` output with no packaging
  *  step, and a published install serves what shipped with it. */
 const candidateDirectories = (): ReadonlyArray<string> => {
   const configured = process.env["INTEGRATIONS_WEB_DIR"]
+  const packageDirectory_ = packageDirectory()
   return [
     ...(configured === undefined || configured.length === 0 ? [] : [path.resolve(configured)]),
-    path.join(packageDirectory, "web"),
-    path.resolve(packageDirectory, "..", "web", "dist")
+    path.join(packageDirectory_, "web"),
+    path.resolve(packageDirectory_, "..", "web", "dist")
   ]
 }
 

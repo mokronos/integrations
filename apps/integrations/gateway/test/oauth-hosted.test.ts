@@ -238,7 +238,7 @@ describe("the hosted callback route", () => {
     let completed: { state?: string; code?: string } | undefined
     const call = await setup({
       start: async () => { throw new Error("not used") },
-      get: () => undefined,
+      get: async () => undefined,
       stop: () => undefined,
       completeByState: async (state, input) => {
         completed = { state, code: input.code }
@@ -260,7 +260,7 @@ describe("the hosted callback route", () => {
   test("answers an unknown or error callback with a readable page, not JSON", async () => {
     const unknownCall = await setup({
       start: async () => { throw new Error("not used") },
-      get: () => undefined,
+      get: async () => undefined,
       stop: () => undefined,
       completeByState: async () => undefined
     })
@@ -270,7 +270,7 @@ describe("the hosted callback route", () => {
 
     const erroredCall = await setup({
       start: async () => { throw new Error("not used") },
-      get: () => undefined,
+      get: async () => undefined,
       stop: () => undefined,
       completeByState: async () => undefined
     })
@@ -284,7 +284,7 @@ describe("the hosted callback route", () => {
   test("reports a flow that failed during completion", async () => {
     const call = await setup({
       start: async () => { throw new Error("not used") },
-      get: () => undefined,
+      get: async () => undefined,
       stop: () => undefined,
       completeByState: async () => ({
         id: "s1",

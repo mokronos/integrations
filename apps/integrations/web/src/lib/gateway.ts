@@ -1,5 +1,5 @@
 import { Schema } from "effect"
-import { whenPresentFields } from "./optional.ts"
+import { whenPresent, whenPresentFields } from "./optional.ts"
 import type { JsonEncodable } from "./optional.ts"
 import { Predicate } from "effect"
 import {
@@ -18,6 +18,9 @@ import {
   decodeIntegrations,
   decodeInvocation,
   decodeIssuedKey,
+  decodeEmailChanged,
+  decodeMe,
+  decodePasswordChanged,
   decodeKeys,
   decodeMaintenance,
   decodeOAuthSession,
@@ -294,3 +297,52 @@ export const refreshDrift = async (integration?: string) =>
 
 export const runMaintenance = async () =>
   decodeMaintenance(await request("POST", "/v1/maintenance"))
+
+// --- who is asking -----------------------------------------------------------
+
+export type Me = ReturnType<typeof decodeMe>
+
+export const fetchMe = async (): Promise<Me> => decodeMe(await request("GET", "/v1/auth/me"))
+
+export const signUp = async (input: {
+  readonly email: string
+  readonly password: string
+  readonly tenantName?: string | undefined
+}): Promise<void> => {
+  await request("POST", "/v1/auth/signup", {
+    email: input.email,
+    password: input.password,
+    ...whenPresent("tenantName", input.tenantName)
+  })
+}
+
+export const logIn = async (input: { readonly email: string; readonly password: string }): Promise<void> => {
+  await request("POST", "/v1/auth/login", input)
+}
+
+export const logOut = async (): Promise<void> => {
+  await request("POST", "/v1/auth/logout")
+}
+
+// --- account self-service ----------------------------------------------------
+
+export const changeEmail = async (input: {
+  readonly email: string
+  readonly password: string
+}): Promise<string> =>
+  decodeEmailChanged(await request("POST", "/v1/auth/email", input)).email
+
+export const changePassword = async (input: {
+  readonly currentPassword: string
+  readonly newPassword: string
+}): Promise<number> =>
+  decodePasswordChanged(await request("POST", "/v1/auth/password", input)).revokedSessions
+
+/** Deleting the account is final; the caller confirms out of band. POST
+ *  rather than DELETE because the confirmation password rides the body and
+ *  the gateway ignores DELETE bodies. */
+export const deleteAccount = async (input: {
+  readonly password: string
+}): Promise<void> => {
+  await request("POST", "/v1/auth/account/delete", input)
+}

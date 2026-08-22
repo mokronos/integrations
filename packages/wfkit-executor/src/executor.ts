@@ -40,7 +40,7 @@ export {
   ExecutorHostClosedError,
   ExecutorHostService,
 } from "./host.ts"
-export type { ExecutorHost, ExecutorRunner } from "./host.ts"
+export type { ExecutorHost, ExecutorHostStorage, ExecutorRunner } from "./host.ts"
 export {
   createExecutorTools,
   describeExecutorTool,
