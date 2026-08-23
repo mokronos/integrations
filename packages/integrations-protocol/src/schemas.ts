@@ -125,8 +125,10 @@ export const ExecutorToolSummary = Schema.Struct({
   owner: ExecutorOwner,
   connection: Schema.String,
   /** Conservative policy hint for a newly-created gateway grant. An operator
-   * may override it, but an omitted choice never silently makes a mutating or
-   * unclassified tool run without review. */
+   * may override it, but an omitted choice never silently makes a tool run
+   * without review unless its own source declares it read-only — see
+   * `toolDefaultDecision`, which is deliberately stricter than the plugin's
+   * `requiresApproval` (that one only means "not destructive"). */
   defaultDecision: Schema.Literals(["allow", "require_approval"])
 })
 export type ExecutorToolSummary = typeof ExecutorToolSummary.Type

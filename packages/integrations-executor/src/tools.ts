@@ -5,6 +5,7 @@ import {
   parseToolAddress,
   ToolAddress
 } from "@executor-js/sdk/core"
+import type { ToolAnnotations } from "@executor-js/sdk/core"
 import { Option, Predicate, Schema } from "effect"
 import { runExecutor } from "./default-host.ts"
 import type { ExecutorRunner } from "./host.ts"
@@ -87,6 +88,43 @@ const optionalJson = <A>(value: A | undefined) =>
     ? undefined
     : Option.getOrUndefined(Schema.decodeUnknownOption(Schema.Json)(value))
 
+/** The upstream MCP `ToolAnnotations` the MCP plugin stamps onto each tool row
+ *  under `mcp.upstream`. The SDK's declared `ToolAnnotations` does not include
+ *  it, so it is parsed rather than trusted: a plugin that stamps nothing, or
+ *  something else, simply does not match. */
+const McpAnnotationStamp = Schema.Struct({
+  mcp: Schema.Struct({
+    upstream: Schema.Struct({
+      readOnlyHint: Schema.optional(Schema.Boolean)
+    })
+  })
+})
+
+const decodeMcpStamp = Schema.decodeUnknownOption(McpAnnotationStamp)
+
+/** The conservative policy hint a newly-created gateway grant starts from.
+ *
+ *  `allow` is reserved for tools their own source declares read-only. The
+ *  plugin's `requiresApproval` cannot stand in for that: it is derived from
+ *  MCP's `destructiveHint`, and non-destructive is a much weaker claim than
+ *  read-only — Gmail's `create_draft` is annotated non-destructive and still
+ *  writes to the mailbox. Everything that does not declare itself read-only,
+ *  and everything the plugin flags outright, needs a human.
+ *
+ *  A source with no read-only declaration to offer therefore gets
+ *  `require_approval` for all of its tools. That is the intended direction to
+ *  fail: an operator can widen a grant, but a grant that was never reviewed
+ *  cannot be narrowed after the call. */
+export const toolDefaultDecision = (
+  annotations: ToolAnnotations | undefined
+): "allow" | "require_approval" => {
+  if (annotations?.requiresApproval === true) return "require_approval"
+  return Option.match(decodeMcpStamp(annotations), {
+    onNone: () => "require_approval",
+    onSome: (stamp) => stamp.mcp.upstream.readOnlyHint === true ? "allow" : "require_approval"
+  })
+}
+
 export interface ExecutorToolFilter {
   readonly integration?: string
   readonly owner?: ExecutorOwner
@@ -127,9 +165,7 @@ export const createExecutorTools = (runner: ExecutorRunner): ExecutorTools => {
         integration: String(tool.integration),
         owner: tool.owner,
         connection: String(tool.connection),
-        defaultDecision: tool.annotations?.requiresApproval === false
-          ? "allow"
-          : "require_approval"
+        defaultDecision: toolDefaultDecision(tool.annotations)
       }))
     )
   }
