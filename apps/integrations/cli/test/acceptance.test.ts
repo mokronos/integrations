@@ -356,14 +356,14 @@ describe("integrations CLI acceptance", () => {
         query: Schema.String,
         results: Schema.Array(Schema.Struct({
           name: Schema.String,
-          surfaces: Schema.Array(Schema.Struct({ discoveryUrl: Schema.optional(Schema.String) }))
+          surfaces: Schema.Array(Schema.Struct({ url: Schema.optional(Schema.String) }))
         }))
       })
       const searchBody = Schema.decodeUnknownSync(SearchBody)(JSON.parse(searched.stdout))
       expect(searchBody.query).toBe("acceptance tickets")
       expect(searchBody.results).toHaveLength(1)
       expect(searchBody.results[0]?.name).toBe("Acceptance Tickets")
-      const discoveryUrl = searchBody.results[0]?.surfaces[0]?.discoveryUrl
+      const discoveryUrl = searchBody.results[0]?.surfaces[0]?.url
       expect(discoveryUrl).toBe(vendor.specUrl)
 
       const discovered = await integrations(["discover", discoveryUrl ?? ""])

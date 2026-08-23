@@ -14,15 +14,16 @@ export const IntegrationSearchQuery = Schema.Struct({
 })
 export type IntegrationSearchQuery = typeof IntegrationSearchQuery.Type
 
+/** `url` is the one address `discover` accepts for this surface — the MCP
+ * endpoint, or the OpenAPI document, never the human landing page. Absent when
+ * the surface cannot be discovered (GraphQL) or is not addressed by URL (CLI). */
 export const IntegrationSearchSurface = Schema.Struct({
   type: Schema.Literals(["http", "openapi", "graphql", "mcp", "cli"]),
   slug: Schema.String,
   name: Schema.String,
   url: Schema.optional(Schema.String),
-  spec: Schema.optional(Schema.String),
   transports: Schema.optional(Schema.Array(Schema.String)),
-  command: Schema.optional(Schema.String),
-  discoveryUrl: Schema.optional(Schema.String)
+  command: Schema.optional(Schema.String)
 })
 export type IntegrationSearchSurface = typeof IntegrationSearchSurface.Type
 
@@ -30,8 +31,6 @@ export const IntegrationSearchMatch = Schema.Struct({
   domain: Schema.String,
   name: Schema.String,
   description: Schema.String,
-  kinds: Schema.Array(IntegrationSearchKind),
-  url: Schema.String,
   surfaces: Schema.Array(IntegrationSearchSurface)
 })
 export type IntegrationSearchMatch = typeof IntegrationSearchMatch.Type

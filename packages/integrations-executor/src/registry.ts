@@ -1,10 +1,10 @@
 import { Schema } from "effect"
 import {
-  IntegrationSearchKind,
   IntegrationSearchQuery,
   IntegrationSearchResponse,
   IntegrationSearchSurface
 } from "@mokronos/integrations-protocol/registry"
+import { whenPresent } from "./optional.ts"
 
 export {
   IntegrationSearchKind,
@@ -20,21 +20,35 @@ export interface SearchIntegrationsOptions {
 
 const integrationsRegistryUrl = "https://integrations.sh"
 
+/** integrations.sh returns a registry landing page and a redundant `kinds`
+ * summary of the surfaces it is about to list. Neither is actionable, so
+ * neither is decoded. */
 const RegistrySearchResponse = Schema.Struct({
   results: Schema.Array(Schema.Struct({
     domain: Schema.String,
     name: Schema.String,
-    description: Schema.String,
-    kinds: Schema.Array(IntegrationSearchKind),
-    url: Schema.String
+    description: Schema.String
   }))
 })
 
+const RegistrySurface = Schema.Struct({
+  type: Schema.Literals(["http", "openapi", "graphql", "mcp", "cli"]),
+  slug: Schema.String,
+  name: Schema.String,
+  url: Schema.optional(Schema.String),
+  spec: Schema.optional(Schema.String),
+  transports: Schema.optional(Schema.Array(Schema.String)),
+  command: Schema.optional(Schema.String)
+})
+type RegistrySurface = typeof RegistrySurface.Type
+
 const RegistrySurfaceResponse = Schema.Struct({
-  surfaces: Schema.Array(IntegrationSearchSurface)
+  surfaces: Schema.Array(RegistrySurface)
 })
 
-const discoveryUrlFor = (surface: IntegrationSearchSurface): string | undefined => {
+/** The registry spreads a surface's address over `url` and `spec`; discover
+ * takes exactly one. */
+const discoveryUrlFor = (surface: RegistrySurface): string | undefined => {
   switch (surface.type) {
     case "mcp":
       return surface.url
@@ -47,6 +61,15 @@ const discoveryUrlFor = (surface: IntegrationSearchSurface): string | undefined 
   }
 }
 
+const toSearchSurface = (surface: RegistrySurface): IntegrationSearchSurface => ({
+  type: surface.type,
+  slug: surface.slug,
+  name: surface.name,
+  ...whenPresent("url", discoveryUrlFor(surface)),
+  ...whenPresent("transports", surface.transports),
+  ...whenPresent("command", surface.command)
+})
+
 const searchSurface = async (
   registryUrl: string,
   domain: string
@@ -58,10 +81,7 @@ const searchSurface = async (
     const parsed = await Schema.decodeUnknownPromise(
       Schema.fromJsonString(RegistrySurfaceResponse)
     )(await response.text())
-    return parsed.surfaces.map((surface) => {
-      const discoveryUrl = discoveryUrlFor(surface)
-      return discoveryUrl === undefined ? surface : { ...surface, discoveryUrl }
-    })
+    return parsed.surfaces.map(toSearchSurface)
   } catch {
     return []
   }

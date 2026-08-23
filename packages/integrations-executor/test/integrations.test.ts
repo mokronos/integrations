@@ -178,9 +178,17 @@ describe("Executor discovery SDK", () => {
     )
     expect(result.query).toBe("linear")
     expect(result.results).toHaveLength(1)
-    expect(result.results[0]?.surfaces.map((surface) => surface.discoveryUrl)).toEqual([
+    expect(result.results[0]?.surfaces.map((surface) => surface.url)).toEqual([
       "https://mcp.linear.app/mcp",
       "https://linear.app/openapi.json"
+    ])
+    // The registry's landing page and its `kinds` restatement of the surface
+    // types are dropped rather than forwarded.
+    expect(Object.keys(result.results[0] ?? {}).toSorted()).toEqual([
+      "description",
+      "domain",
+      "name",
+      "surfaces"
     ])
   })
 

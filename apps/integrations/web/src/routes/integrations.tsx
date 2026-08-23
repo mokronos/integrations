@@ -151,25 +151,19 @@ function RegistrySearchDialog() {
             )
             : results.map((result) => {
               const installable = result.surfaces.filter(
-                (surface) => surface.discoveryUrl !== undefined
+                (surface) => surface.url !== undefined
               )
+              const kinds = [...new Set(result.surfaces.map((surface) => surface.type))]
               return (
                 <div key={result.domain} className="space-y-3 rounded-lg border p-3">
                   <div className="flex items-start gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-medium">{result.name}</span>
-                        {result.kinds.map((value) => <Badge key={value} variant="outline">{value}</Badge>)}
+                        {kinds.map((value) => <Badge key={value} variant="outline">{value}</Badge>)}
                       </div>
                       <p className="text-muted-foreground mt-1 text-sm">{result.description}</p>
-                      <a
-                        className="text-muted-foreground mt-1 inline-flex items-center gap-1 text-xs hover:text-foreground"
-                        href={result.url}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        {result.domain}<ExternalLink className="size-3" />
-                      </a>
+                      <p className="text-muted-foreground mt-1 text-xs">{result.domain}</p>
                     </div>
                   </div>
                   {installable.length === 0
@@ -181,11 +175,11 @@ function RegistrySearchDialog() {
                             key={`${surface.type}-${surface.slug}`}
                             size="sm"
                             variant="outline"
-                            onClick={() => install.mutate(surface.discoveryUrl ?? "")}
+                            onClick={() => install.mutate(surface.url ?? "")}
                             disabled={install.isPending}
                           >
                             <Download className="size-3" />
-                            {installing === surface.discoveryUrl ? "Installing…" : `Install ${surface.name}`}
+                            {installing === surface.url ? "Installing…" : `Install ${surface.name}`}
                           </Button>
                         ))}
                       </div>
