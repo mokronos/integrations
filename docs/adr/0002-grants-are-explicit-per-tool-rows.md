@@ -27,9 +27,8 @@ boundary, and it should not be able to grow without a human.
 - The delegated surface has no address form at all. A caller names an alias and
   a tool, and the gateway builds the Executor address from the grant, so an
   address cannot be forged or guessed past delegation.
-- Invocation by raw address survives only as a *privileged* operation, alongside
-  discovery and connection management. It is not grant-checked, and does not
-  need to be: a client that may mutate grants could grant itself the tool in one
-  extra call, so requiring one would be friction rather than a control. This is
-  what keeps `integrations invoke <address>` usable for testing a tool right
-  after connecting it.
+- Invocation by raw address survives only as an administrative operation. It
+  is not grant-checked because a client that administers grants could grant
+  itself the tool in one extra call; requiring that step would be friction, not
+  a boundary. This keeps `ii execute --direct <address>` useful for testing a
+  tool immediately after connecting it.

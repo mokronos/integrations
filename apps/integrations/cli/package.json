@@ -19,8 +19,7 @@
   ],
   "bin": {
     "i": "src/agent.ts",
-    "ii": "src/main.ts",
-    "integrations": "src/main.ts"
+    "ii": "src/main.ts"
   },
   "exports": {
     "./upgrade": "./src/upgrade.ts"
@@ -40,12 +39,10 @@
     "typecheck": "tsc -p ../../../tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@effect/platform-bun": "4.0.0-beta.59",
+    "@mokronos/integrations": "workspace:*",
     "@mokronos/integrations-client": "workspace:*",
     "@mokronos/integrations-observability": "workspace:*",
     "effect": "4.0.0-beta.59"
-  },
-  "devDependencies": {
-    "@effect/platform-bun": "4.0.0-beta.59",
-    "@mokronos/integrations": "workspace:*"
   }
 }

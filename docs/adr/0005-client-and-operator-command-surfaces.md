@@ -19,3 +19,6 @@ implementation would let the two clients drift.
   `serve`, `install`, `uninstall`, and upgrades.
 - The public TypeScript client matches `i` and exposes no generic request escape
   hatch into control-plane routes.
+- There is no compatibility binary or command vocabulary. The installed names
+  are `i` and `ii`; obsolete aliases would obscure the capability boundary and
+  permanently enlarge the surface agents must reason about.

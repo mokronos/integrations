@@ -345,14 +345,15 @@ describe("gateway store", () => {
     directories.push(directory)
     const databasePath = path.join(directory, "gateway.sqlite")
 
-    // Build the old shape by hand: clients with no tenant column.
+    // Build the pre-tenancy shape by hand: clients with no tenant column.
     const legacy = openLegacyDatabase({ url: `file:${databasePath}` })
     await legacy.execute(`CREATE TABLE gateway_client (
-       id TEXT PRIMARY KEY, name TEXT NOT NULL, may_mutate INTEGER NOT NULL,
+       id TEXT PRIMARY KEY, name TEXT NOT NULL, capabilities TEXT NOT NULL,
        created_at INTEGER NOT NULL, revoked_at INTEGER)`)
     await legacy.execute(`CREATE UNIQUE INDEX gateway_client_name ON gateway_client (name)`)
     await legacy.execute(
-      "INSERT INTO gateway_client (id, name, may_mutate, created_at, revoked_at) VALUES ('c1', 'legacy', 1, 0, NULL)"
+      `INSERT INTO gateway_client (id, name, capabilities, created_at, revoked_at)
+       VALUES ('c1', 'legacy', '["provision_connections","administer_gateway"]', 0, NULL)`
     )
     await legacy.close()
 

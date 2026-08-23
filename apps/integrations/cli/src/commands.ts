@@ -87,10 +87,10 @@ const decodeJsonText = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Jso
  *  a usable value and fall back to empty rather than failing the command: a
  *  listing that renders nothing is easier for a reader to act on than a crash,
  *  and the gateway is the party responsible for its own response shape. */
-const record = (value: typeof Schema.Json.Type | undefined): Record<string, typeof Schema.Json.Type> =>
+const record = <A>(value: A | undefined): Record<string, typeof Schema.Json.Type> =>
   Option.getOrElse(Schema.decodeUnknownOption(JsonObject)(value), () => ({}))
 
-const array = (value: typeof Schema.Json.Type | undefined): ReadonlyArray<Record<string, typeof Schema.Json.Type>> =>
+const array = <A>(value: A | undefined): ReadonlyArray<Record<string, typeof Schema.Json.Type>> =>
   Option.getOrElse(Schema.decodeUnknownOption(JsonArray)(value), () => []).map(record)
 
 const text = (value: Schema.Json | undefined): string => value === undefined || value === null ? "" : String(value)
@@ -231,10 +231,7 @@ const integrationsCommand = (runGateway: GatewayTask) => Command.make(
         })
       })
     )
-).pipe(
-  Command.withAlias("list"),
-  Command.withDescription("List the gateway's persisted integration catalog")
-)
+).pipe(Command.withDescription("List the gateway's persisted integration catalog"))
 
 const toolsCommand = (runGateway: GatewayTask) => Command.make(
   "tools",
@@ -582,7 +579,6 @@ const operatorExecuteCommand = Command.make(
     ))
   }
 ).pipe(
-  Command.withAlias("invoke"),
   Command.withDescription(
     "Invoke a granted tool through an alias, as a delegated caller would. --direct calls an address instead"
   )
@@ -628,10 +624,7 @@ const clientExecuteCommand = Command.make(
           ))
       ))
     ))
-).pipe(
-  Command.withAlias("invoke"),
-  Command.withDescription("Invoke a granted tool through an alias")
-)
+).pipe(Command.withDescription("Invoke a granted tool through an alias"))
 
 const validateCommand = (runGateway: GatewayTask) => Command.make(
   "validate",

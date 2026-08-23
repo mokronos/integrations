@@ -12,8 +12,6 @@ performs invocations:
   every action available in the dashboard plus human authentication and local
   gateway lifecycle commands.
 
-The old `integrations` executable remains an alias of `ii` for compatibility.
-
 ```bash
 i --help
 ii --help
@@ -22,7 +20,7 @@ ii --help
 The command needs Bun on the machine. It ships in
 `@mokronos/integrations-cli`, a dependency of `@mokronos/wf` — not yet published
 to npm, so install it from the repository with `bun run install:local`, which
-puts `wf`, `i`, `ii`, and the legacy `integrations` alias on your `PATH`.
+puts `wf`, `i`, and `ii` on your `PATH`.
 
 ## Vocabulary
 
@@ -329,7 +327,7 @@ accepts either spelling.
 
 ```bash
 i connections            # every connection, no credentials exposed
-i integrations           # the persisted catalog. `list` still works
+i integrations           # the persisted catalog
 i disconnect <integration> [--connection <name>]
 ```
 
@@ -370,8 +368,7 @@ ii execute --direct [flags] <tool-address> [<json>]     # operator
 `i execute` goes through an alias and can only reach what a grant exposes to the
 key. It has no `--direct` flag. `ii execute` supports that same delegated form
 and additionally accepts `--direct`, which names a resolved address and runs
-with operator authority. `invoke` remains an alias. Both accept `--file` to
-read JSON input from a file.
+with operator authority. Both accept `--file` to read JSON input from a file.
 
 Every result is one shape, and it always parses:
 

@@ -109,14 +109,6 @@ describe("i and ii CLI help", () => {
     }
   })
 
-  test("keeps the old names working as aliases", () => {
-    // Renaming a command in a CLI an agent has already been taught is a cost
-    // paid by whoever wrote the prompt, so the previous names keep resolving.
-    const result = runAgent(["--help"])
-    expect(result.stdout).toContain("integrations, list")
-    expect(result.stdout).toContain("execute, invoke")
-  })
-
   test("every listing command windows with --limit and --offset", () => {
     // Listings return everything by default. What they must never do is drop
     // rows silently — so the window is explicit, and it is the same window on

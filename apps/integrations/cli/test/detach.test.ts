@@ -68,8 +68,10 @@ describe("integrations serve --detach", () => {
 
     // The launcher has already exited: the gateway it left behind has to be
     // both alive and credentialed, which is what --detach promises.
-    const listed = await run(["list"], home)
-    expect(`list exit ${listed.exitCode}: ${listed.stderr}`).toBe("list exit 0: ")
+    const listed = await run(["integrations"], home)
+    expect(`integrations exit ${listed.exitCode}: ${listed.stderr}`).toBe(
+      "integrations exit 0: "
+    )
     expect(JSON.parse(listed.stdout)).toMatchObject({ integrations: [] })
 
     const second = await run(["serve", "--detach", "--port", String(port)], home)

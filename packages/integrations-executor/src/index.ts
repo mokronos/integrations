@@ -79,7 +79,6 @@ export {
   createIntegrationOverview,
   createIntegrationProvisioning,
   createIntegrationValidation,
-  discoverIntegration,
   inspectIntegration,
   installIntegration,
   IntegrationDiscovery as IntegrationDiscoverySchema,
@@ -89,6 +88,7 @@ export {
   IntegrationValidationFinding as IntegrationValidationFindingSchema,
   IntegrationValidationReport as IntegrationValidationReportSchema,
   listIntegrationOverviews,
+  provisionIntegration,
   validateIntegrationNode
 } from "./integrations.ts"
 export type {

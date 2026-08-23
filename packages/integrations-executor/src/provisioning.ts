@@ -102,6 +102,4 @@ export const createIntegrationProvisioning = (
 const defaultProvisioning = createIntegrationProvisioning(defaultDependencies)
 
 export const installIntegration = defaultProvisioning.install
-
-/** Compatibility name for the original inspect-install-connect-list operation. */
-export const discoverIntegration = defaultProvisioning.provision
+export const provisionIntegration = defaultProvisioning.provision

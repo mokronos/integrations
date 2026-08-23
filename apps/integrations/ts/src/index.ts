@@ -1,5 +1,16 @@
 import { whenPresent, whenPresentMap } from "./optional.ts"
 import { Predicate, Schema } from "effect"
+import {
+  ExecutorConnection,
+  ExecutorTool,
+  ExecutorToolSummary,
+  IntegrationOverview
+} from "@mokronos/integrations-executor/schemas"
+import {
+  IntegrationDiscovery,
+  IntegrationValidationReport
+} from "@mokronos/integrations-executor/integration-model"
+import { IntegrationSearchResponse } from "@mokronos/integrations-executor/registry"
 
 /** The client is deliberately dumb: authenticate, send, decode. Every decision
  * about whether a call may happen, which connection serves it, and whether a
@@ -59,7 +70,7 @@ export const InvocationOutcome = Schema.Union([
 ])
 export type InvocationOutcome = typeof InvocationOutcome.Type
 
-const ApprovalRecord = Schema.Struct({
+export const ApprovalRecord = Schema.Struct({
   id: Schema.String,
   alias: Schema.String,
   tool: Schema.String,
@@ -76,6 +87,59 @@ const ApprovalRecord = Schema.Struct({
   collectedAt: Schema.NullOr(Schema.String)
 })
 export type ApprovalRecord = typeof ApprovalRecord.Type
+
+/** Public response contracts are schemas, not TypeScript-only promises. The
+ * same Executor schemas used to build gateway responses decode them here at
+ * the client boundary. */
+export const GatewayIntegrationsResponse = Schema.Struct({
+  integrations: Schema.Array(IntegrationOverview),
+  oauthCallbackUrl: Schema.optional(Schema.NullOr(Schema.String))
+})
+export type GatewayIntegrationsResponse = typeof GatewayIntegrationsResponse.Type
+
+export const IntegrationToolsResponse = Schema.Struct({
+  tools: Schema.Array(ExecutorToolSummary)
+})
+export type IntegrationToolsResponse = typeof IntegrationToolsResponse.Type
+
+export const ConnectionCreated = Schema.Struct({
+  connection: ExecutorConnection,
+  tools: Schema.Array(ExecutorToolSummary)
+})
+export type ConnectionCreated = typeof ConnectionCreated.Type
+
+export const OAuthSession = Schema.Struct({
+  id: Schema.String,
+  integration: Schema.String,
+  connection: Schema.String,
+  state: Schema.Union([
+    Schema.Struct({
+      status: Schema.Literal("pending"),
+      authorizationUrl: Schema.String
+    }),
+    Schema.Struct({
+      status: Schema.Literal("connected"),
+      connection: ExecutorConnection
+    }),
+    Schema.Struct({
+      status: Schema.Literal("failed"),
+      message: Schema.String
+    })
+  ])
+})
+export type OAuthSession = typeof OAuthSession.Type
+
+export const ConnectionsResponse = Schema.Struct({
+  connections: Schema.Array(ExecutorConnection)
+})
+export type ConnectionsResponse = typeof ConnectionsResponse.Type
+
+export const DisconnectedConnection = Schema.Struct({
+  removed: Schema.Boolean,
+  integration: Schema.String,
+  connection: Schema.String
+})
+export type DisconnectedConnection = typeof DisconnectedConnection.Type
 
 export const RegistrySearchInput = Schema.Struct({
   query: Schema.String,
@@ -130,22 +194,32 @@ export type ValidateInput = typeof ValidateInput.Type
 const decodeGrantedTools = Schema.decodeUnknownSync(GrantedTools)
 const decodeOutcome = Schema.decodeUnknownSync(InvocationOutcome)
 const decodeApproval = Schema.decodeUnknownSync(ApprovalRecord)
+const decodeSearch = Schema.decodeUnknownSync(IntegrationSearchResponse)
+const decodeDiscovery = Schema.decodeUnknownSync(IntegrationDiscovery)
+const decodeIntegrations = Schema.decodeUnknownSync(GatewayIntegrationsResponse)
+const decodeIntegrationTools = Schema.decodeUnknownSync(IntegrationToolsResponse)
+const decodeIntegrationTool = Schema.decodeUnknownSync(ExecutorTool)
+const decodeConnectionCreated = Schema.decodeUnknownSync(ConnectionCreated)
+const decodeOAuthSession = Schema.decodeUnknownSync(OAuthSession)
+const decodeConnections = Schema.decodeUnknownSync(ConnectionsResponse)
+const decodeDisconnectedConnection = Schema.decodeUnknownSync(DisconnectedConnection)
+const decodeValidation = Schema.decodeUnknownSync(IntegrationValidationReport)
 const isOutcome = Schema.is(InvocationOutcome)
 
 export interface GatewayClient {
   readonly url: string
 
-  search(input: RegistrySearchInput): Promise<Json>
-  discover(input: DiscoverIntegrationInput): Promise<Json>
-  integrations(): Promise<Json>
-  integrationTools(integration: string): Promise<Json>
-  integrationTool(input: IntegrationToolInput): Promise<Json>
-  connect(input: CreateConnectionInput): Promise<Json>
-  startOAuth(input: StartOAuthInput): Promise<Json>
-  oauth(id: string): Promise<Json>
-  connections(): Promise<Json>
-  disconnect(input: DisconnectInput): Promise<Json>
-  validate(input: ValidateInput): Promise<Json>
+  search(input: RegistrySearchInput): Promise<IntegrationSearchResponse>
+  discover(input: DiscoverIntegrationInput): Promise<IntegrationDiscovery>
+  integrations(): Promise<GatewayIntegrationsResponse>
+  integrationTools(integration: string): Promise<IntegrationToolsResponse>
+  integrationTool(input: IntegrationToolInput): Promise<ExecutorTool>
+  connect(input: CreateConnectionInput): Promise<ConnectionCreated>
+  startOAuth(input: StartOAuthInput): Promise<OAuthSession>
+  oauth(id: string): Promise<OAuthSession>
+  connections(): Promise<ConnectionsResponse>
+  disconnect(input: DisconnectInput): Promise<DisconnectedConnection>
+  validate(input: ValidateInput): Promise<IntegrationValidationReport>
 
   /** The tools this key can reach. Grant-scoped, so an ungranted tool is
    *  absent rather than present-and-failing.
@@ -223,50 +297,52 @@ export const createGatewayClient = (options: GatewayClientOptions): GatewayClien
         limit: String(input.limit ?? 5)
       })
       if (input.kind !== undefined) parameters.set("kind", input.kind)
-      return await request("GET", `/v1/registry/search?${parameters.toString()}`)
+      return decodeSearch(await request("GET", `/v1/registry/search?${parameters.toString()}`))
     },
-    discover: async (input) => await request("POST", "/v1/integrations/discover", {
+    discover: async (input) => decodeDiscovery(await request("POST", "/v1/integrations/discover", {
       url: input.url,
       ...whenPresent("connection", input.connection)
-    }),
-    integrations: async () => await request("GET", "/v1/integrations"),
+    })),
+    integrations: async () => decodeIntegrations(await request("GET", "/v1/integrations")),
     integrationTools: async (integration) =>
-      await request("GET", `/v1/integrations/${encodeURIComponent(integration)}/tools`),
+      decodeIntegrationTools(
+        await request("GET", `/v1/integrations/${encodeURIComponent(integration)}/tools`)
+      ),
     integrationTool: async (input) => {
       const parameters = input.connection === undefined
         ? ""
         : `?connection=${encodeURIComponent(input.connection)}`
-      return await request(
+      return decodeIntegrationTool(await request(
         "GET",
         `/v1/integrations/${encodeURIComponent(input.integration)}/tools/${encodeURIComponent(input.tool)}${parameters}`
-      )
+      ))
     },
-    connect: async (input) => await request("POST", "/v1/connections", {
+    connect: async (input) => decodeConnectionCreated(await request("POST", "/v1/connections", {
       integration: input.integration,
       ...whenPresent("connection", input.connection),
       ...whenPresent("template", input.template),
       ...whenPresent("values", input.values)
-    }),
-    startOAuth: async (input) => await request("POST", "/v1/connections/oauth", {
+    })),
+    startOAuth: async (input) => decodeOAuthSession(await request("POST", "/v1/connections/oauth", {
       integration: input.integration,
       ...whenPresent("connection", input.connection),
       ...whenPresent("template", input.template),
       ...whenPresent("clientId", input.clientId),
       ...whenPresent("clientSecret", input.clientSecret),
       ...whenPresent("timeoutSeconds", input.timeoutSeconds)
-    }),
+    })),
     oauth: async (id) =>
-      await request("GET", `/v1/connections/oauth/${encodeURIComponent(id)}`),
-    connections: async () => await request("GET", "/v1/connections"),
+      decodeOAuthSession(await request("GET", `/v1/connections/oauth/${encodeURIComponent(id)}`)),
+    connections: async () => decodeConnections(await request("GET", "/v1/connections")),
     disconnect: async (input) =>
-      await request(
+      decodeDisconnectedConnection(await request(
         "DELETE",
         `/v1/connections/${encodeURIComponent(input.integration)}/${encodeURIComponent(input.connection)}`
-      ),
-    validate: async (input) => await request("POST", "/v1/validate", {
+      )),
+    validate: async (input) => decodeValidation(await request("POST", "/v1/validate", {
       node: input.node,
       ...whenPresent("live", input.live)
-    }),
+    })),
     tools: async (options) =>
       decodeGrantedTools(await request("GET", `/v1/tools${query(options?.schemas)}`)).tools,
     execute: async (input) => {
@@ -305,6 +381,16 @@ export {
   writeGatewayConfig
 } from "./config.ts"
 export type { ClientConnection } from "./config.ts"
+
+export {
+  ExecutorConnection,
+  ExecutorTool,
+  ExecutorToolSummary,
+  IntegrationDiscovery,
+  IntegrationOverview,
+  IntegrationSearchResponse,
+  IntegrationValidationReport
+}
 
 export {
   bindingName,

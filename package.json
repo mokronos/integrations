@@ -23,7 +23,6 @@
     "refresh:control-plane": "bun run build:control-plane && bun run dashboard:control-plane",
     "i": "bun run apps/integrations/cli/src/agent.ts",
     "ii": "bun run apps/integrations/cli/src/main.ts",
-    "cli": "bun run ii",
     "lint": "oxlint",
     "prepare": "effect-language-service patch",
     "typecheck": "tsc --build --noEmit && tsc -p apps/integrations/web && tsc -p apps/integrations/worker",

@@ -54,19 +54,30 @@ createGatewayClient({ url, apiKey, fetch? })
 `fetch` is injectable for tests or to route through a proxy. Requests carry
 `authorization: Bearer <apiKey>`.
 
-| Method | Meaning |
-| --- | --- |
-| `search(input)` / `discover(input)` | Search the registry and register a discovered integration |
-| `integrations()` | List the persisted integration catalog |
-| `integrationTools(integration)` / `integrationTool(input)` | Inspect tool names and schemas |
-| `connect(input)` / `startOAuth(input)` / `oauth(id)` | Create a connection or complete its OAuth flow |
-| `connections()` / `disconnect(input)` | List or remove connections without exposing credentials |
-| `validate(input)` | Validate an integration node or resolved address |
-| `tools({ schemas? })` | The tools this key can reach. Grant-scoped, so an ungranted tool is absent rather than present-and-failing. Schemas are opt-in because they cost a catalog read per grant |
-| `execute({ alias, tool, arguments? })` | Invoke a granted tool through its alias |
-| `approval(id)` | Read one approval record proposed by this client |
-| `health()` | `true` if the gateway answers |
-| `url` | The normalized base URL |
+Every successful JSON response is decoded at runtime with an exported Effect
+Schema. The TypeScript return type is derived from that same schema, so a
+gateway/client contract mismatch fails at the network boundary instead of
+leaking an unvalidated JSON value into the caller.
+
+| Method | Return type / schema | Meaning |
+| --- | --- | --- |
+| `search(input)` / `discover(input)` | `IntegrationSearchResponse` / `IntegrationDiscovery` | Search the registry and register a discovered integration |
+| `integrations()` | `GatewayIntegrationsResponse` | List the persisted integration catalog |
+| `integrationTools(integration)` / `integrationTool(input)` | `IntegrationToolsResponse` / `ExecutorTool` | Inspect tool names and schemas |
+| `connect(input)` | `ConnectionCreated` | Create a connection |
+| `startOAuth(input)` / `oauth(id)` | `OAuthSession` | Start or inspect an OAuth flow |
+| `connections()` / `disconnect(input)` | `ConnectionsResponse` / `DisconnectedConnection` | List or remove connections without exposing credentials |
+| `validate(input)` | `IntegrationValidationReport` | Validate an integration node or resolved address |
+| `tools({ schemas? })` | `ReadonlyArray<GrantedTool>` | The tools this key can reach. Grant-scoped, so an ungranted tool is absent rather than present-and-failing. Schemas are opt-in because they cost a catalog read per grant |
+| `execute({ alias, tool, arguments? })` | `InvocationOutcome` | Invoke a granted tool through its alias |
+| `approval(id)` | `ApprovalRecord` | Read one approval record proposed by this client |
+| `health()` | `boolean` | `true` if the gateway answers |
+| `url` | `string` | The normalized base URL |
+
+The input contracts (`RegistrySearchInput`, `DiscoverIntegrationInput`,
+`CreateConnectionInput`, and the other method inputs) are exported schemas as
+well. Use `typeof SchemaName.Type` only when you need to derive another type;
+the package already exports the corresponding type names for ordinary callers.
 
 API keys carry explicit client capabilities. A normal client gets
 `provision_connections`, which covers catalog discovery, schema inspection,

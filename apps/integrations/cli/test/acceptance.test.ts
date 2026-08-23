@@ -68,6 +68,9 @@ const AuthenticationOutput = Schema.Struct({
   authenticated: Schema.Boolean,
   email: Schema.optional(Schema.String)
 })
+const CatalogOutput = Schema.Struct({
+  oauthCallbackUrl: Schema.optional(Schema.NullOr(Schema.String))
+})
 
 const directories: Array<string> = []
 
@@ -216,6 +219,29 @@ const startGateway = async (registryUrl?: string) => {
   }
 }
 
+const startHostedGateway = async () => {
+  const serverHome = await mkdtemp(path.join(os.tmpdir(), "integrations-hosted-server-"))
+  const clientHome = await mkdtemp(path.join(os.tmpdir(), "integrations-hosted-client-"))
+  directories.push(serverHome, clientHome)
+  const gateway = await serveGateway({
+    home: serverHome,
+    hostname: "0.0.0.0",
+    port: 0,
+    publicUrl: "https://gateway.example"
+  })
+  gateways.push(gateway)
+  return {
+    url: `http://127.0.0.1:${gateway.port}`,
+    environment: {
+      ...process.env,
+      INTEGRATIONS_HOME: clientHome,
+      INTEGRATIONS_URL: `http://127.0.0.1:${gateway.port}`,
+      INTEGRATIONS_API_KEY: undefined,
+      NO_COLOR: "1"
+    }
+  }
+}
+
 const loginOperator = async (
   gateway: Awaited<ReturnType<typeof startGateway>>
 ): Promise<void> => {
@@ -229,6 +255,65 @@ const loginOperator = async (
 }
 
 describe("integrations CLI acceptance", () => {
+  test("hosted ii uses a login session while i uses only its delegated API key", async () => {
+    const gateway = await startHostedGateway()
+    const operator = (args: ReadonlyArray<string>) =>
+      run(operatorCli, args, gateway.environment)
+
+    const signedUp = await operator([
+      "signup",
+      "--password",
+      "correct horse battery",
+      "hosted@example.com"
+    ])
+    expect(signedUp.exitCode, signedUp.stderr).toBe(0)
+
+    const catalog = await operator(["integrations"])
+    expect(catalog.exitCode, catalog.stderr).toBe(0)
+
+    const login = await fetch(`${gateway.url}/v1/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        email: "hosted@example.com",
+        password: "correct horse battery"
+      })
+    })
+    expect(login.status).toBe(200)
+    const setCookie = login.headers.get("set-cookie") ?? ""
+    expect(setCookie).toContain("Secure")
+    const cookie = setCookie.split(";", 1)[0] ?? ""
+    const hostedCatalogResponse = await fetch(`${gateway.url}/v1/integrations`, {
+      headers: { cookie }
+    })
+    expect(hostedCatalogResponse.status).toBe(200)
+    const hostedCatalog = Schema.decodeUnknownSync(CatalogOutput)(
+      await hostedCatalogResponse.json()
+    )
+    expect(hostedCatalog.oauthCallbackUrl).toBe(
+      "https://gateway.example/v1/oauth/callback"
+    )
+
+    const client = parseOutput(IdOutput, (await operator(["client", "remote-agent"])).stdout)
+    const key = parseOutput(SecretOutput, (await operator(["key", client.id])).stdout)
+    const agentEnvironment = {
+      ...gateway.environment,
+      INTEGRATIONS_API_KEY: key.secret
+    }
+    const connections = await run(agentCli, ["connections"], agentEnvironment)
+    expect(connections.exitCode, connections.stderr).toBe(0)
+    expect(parseOutput(ConnectionsOutput, connections.stdout).connections).toEqual([])
+
+    const administrative = await run(agentCli, ["clients"], agentEnvironment)
+    expect(administrative.exitCode).not.toBe(0)
+    expect(administrative.stderr).toContain("Unknown subcommand")
+
+    expect((await operator(["logout"])).exitCode).toBe(0)
+    const afterLogout = await operator(["clients"])
+    expect(afterLogout.exitCode).not.toBe(0)
+    expect(afterLogout.stderr).toContain("No operator credential found")
+  }, 40_000)
+
   test("ii signs a human out and back in without an API key", async () => {
     const gateway = await startGateway()
     await loginOperator(gateway)
@@ -463,15 +548,6 @@ describe("integrations CLI acceptance", () => {
     expect(outcome.status).toBe("succeeded")
     expect(outcome.result.title).toHaveLength(2000)
 
-    // The previous name for the same thing still resolves.
-    const aliased = await operator([
-      "invoke",
-      `tools.${slug}.org.default.tickets.create`,
-      JSON.stringify({ body: { title: "Through the old name" } })
-    ])
-    expect(aliased.exitCode, aliased.stderr).toBe(0)
-    expect(JSON.parse(aliased.stdout)).toHaveProperty("status", "succeeded")
-
     // A refusal is an answer, and it arrives as one: parseable, with a
     // non-zero exit code to say which answer it was.
     const client = parseOutput(IdOutput, (await operator(["client", "sandbox"])).stdout)
@@ -507,8 +583,7 @@ describe("integrations CLI acceptance", () => {
     expect(windowed.showing).toBe(1)
     expect(windowed.count).toBe(whole.count)
 
-    // The old name for the catalog listing still works.
-    const catalog = parseOutput(CountOutput, (await integrations(["list"])).stdout)
+    const catalog = parseOutput(CountOutput, (await integrations(["integrations"])).stdout)
     expect(catalog.count).toBeGreaterThan(0)
   }, 40_000)
 

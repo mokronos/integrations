@@ -13,8 +13,8 @@ import {
 } from "../src/index.ts"
 import {
   createIntegrationDiscovery,
-  discoverIntegration,
   listIntegrationOverviews,
+  provisionIntegration,
   searchIntegrations,
   validateIntegrationNode
 } from "../src/index.ts"
@@ -231,7 +231,7 @@ describe("Executor discovery SDK", () => {
     })
     servers.push(server)
 
-    const discovered = await discoverIntegration(
+    const discovered = await provisionIntegration(
       `http://127.0.0.1:${server.port}/openapi.json`
     )
     expect(discovered.detection.kind).toBe("openapi")
@@ -308,8 +308,8 @@ describe("Executor discovery SDK", () => {
     })
     servers.push(server)
 
-    await discoverIntegration(`http://127.0.0.1:${server.port}/open.json`)
-    const securedDiscovery = await discoverIntegration(
+    await provisionIntegration(`http://127.0.0.1:${server.port}/open.json`)
+    const securedDiscovery = await provisionIntegration(
       `http://127.0.0.1:${server.port}/secured.json`
     )
     expect(securedDiscovery.requiresAuthentication).toBe(true)

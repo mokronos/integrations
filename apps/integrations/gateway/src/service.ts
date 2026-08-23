@@ -246,6 +246,10 @@ export interface ServeOptions {
   readonly home?: string
   /** Overrides integrations.sh for a private or test registry. */
   readonly registryUrl?: string
+  /** Externally reachable HTTPS origin used for OAuth callbacks in hosted
+   *  deployments. The listening socket may still be plain HTTP behind a TLS
+   *  terminating reverse proxy. */
+  readonly publicUrl?: string
   /** Serve the control plane at `/`. On by default; a headless gateway can turn
    *  it off so the only thing on the port is the API. */
   readonly web?: boolean
@@ -275,6 +279,7 @@ export const serveGateway = async (options: ServeOptions = {}): Promise<RunningG
   const service = await createGatewayService({
     ...whenPresent("home", options.home),
     ...whenPresent("registryUrl", options.registryUrl),
+    ...whenPresent("publicUrl", options.publicUrl),
     secureCookies: !boundToLoopback,
     ...whenPresent(
       "localCallbackOrigin",
