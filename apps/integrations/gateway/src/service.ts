@@ -269,7 +269,8 @@ export const ensureLocalCredential = async (
   await writeGatewayConfig(service.home, {
     port,
     url: `http://127.0.0.1:${port}`,
-    apiKey: key.secret
+    apiKey: key.secret,
+    pid: process.pid
   })
   return key.secret
 }

@@ -226,6 +226,24 @@ export const installService = async (options: InstallOptions): Promise<ServiceDe
   throw unsupportedPlatform("install")
 }
 
+/** Stops a registered unit without deregistering it, so the port is free for
+ *  whatever starts next and the service manager will not restart it underneath.
+ *  Not an error when no unit is registered or it was already stopped: the
+ *  postcondition is "this unit is not running". */
+export const stopService = async (verbose = false): Promise<void> => {
+  if (process.platform === "linux") {
+    await command("systemctl", ["--user", "stop", `${serviceLabel}.service`], verbose)
+      .catch(() => undefined)
+    return
+  }
+  if (process.platform === "darwin") {
+    await command("launchctl", ["bootout", `${launchdTarget()}/${serviceLabel}`], verbose)
+      .catch(() => undefined)
+    return
+  }
+  throw unsupportedPlatform("stop")
+}
+
 /** Stops and deregisters the service. The home directory is left alone: it
  *  holds the connections and credentials, and removing a service definition is
  *  not consent to delete those. */
@@ -375,5 +393,119 @@ export const startDetachedGateway = async (options: DetachOptions): Promise<Deta
   }
   throw new Error(
     `The gateway did not become ready within ${readyTimeoutMs / 1_000}s. It is still running as pid ${child.pid}; see ${logPath}`
+  )
+}
+
+export interface StoppedGateway {
+  readonly pid: number
+  readonly url: string
+  /** SIGTERM was ignored and the process had to be killed. Worth reporting: a
+   *  gateway that will not shut down cleanly may have left a connection open. */
+  readonly forced: boolean
+}
+
+const stopTimeoutMs = 10_000
+
+const isAlive = (pid: number): boolean => {
+  try {
+    // Signal 0 asks the kernel whether the pid exists without delivering
+    // anything.
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+const capture = async (
+  program: string,
+  arguments_: ReadonlyArray<string>
+): Promise<string | undefined> => {
+  try {
+    const process_ = Bun.spawn([program, ...arguments_], { stdout: "pipe", stderr: "ignore" })
+    const [exitCode, stdout] = await Promise.all([
+      process_.exited,
+      new Response(process_.stdout).text()
+    ])
+    return exitCode === 0 ? stdout : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Best effort, and read only to refuse a pid that is demonstrably not a
+ *  gateway: an unreadable command line is not evidence either way. */
+const processCommand = async (pid: number): Promise<string | undefined> => {
+  if (process.platform === "linux") {
+    const raw = await Bun.file(`/proc/${pid}/cmdline`).text().catch(() => undefined)
+    return raw === undefined ? undefined : raw.replaceAll("\0", " ").trim()
+  }
+  return (await capture("ps", ["-o", "command=", "-p", String(pid)]))?.trim()
+}
+
+/** For a gateway old enough not to have recorded its own pid. `lsof` covers
+ *  both Linux and macOS; `ss` is the fallback for a Linux box without it. */
+const listeningPid = async (port: number): Promise<number | undefined> => {
+  const fromLsof = await capture("lsof", ["-ti", `tcp:${port}`, "-sTCP:LISTEN"])
+  const firstLine = fromLsof?.trim().split("\n")[0]?.trim()
+  if (firstLine !== undefined && /^\d+$/.test(firstLine)) return Number(firstLine)
+  const fromSs = await capture("ss", ["-tlnpH", `sport = :${port}`])
+  const matched = fromSs?.match(/pid=(\d+)/)?.[1]
+  return matched === undefined ? undefined : Number(matched)
+}
+
+const waitUntilStopped = async (base: string): Promise<boolean> => {
+  for (let waited = 0; waited < stopTimeoutMs; waited += readyIntervalMs) {
+    if (!await responds(base)) return true
+    await Bun.sleep(readyIntervalMs)
+  }
+  return false
+}
+
+/** Stops the gateway the config file points at, so a restart can pick up
+ *  changed sources. Returns `undefined` when nothing was listening, which is
+ *  success for a caller that only wants a fresh gateway afterwards.
+ *
+ *  This signals a process it did not start, so it identifies the target three
+ *  ways first — the recorded url answers, the recorded pid is alive, and that
+ *  pid's command line is a `serve` — rather than trusting a config file that
+ *  may describe a process that exited long ago and a pid the kernel has since
+ *  reused. A service-managed gateway is not stopped this way: restarting the
+ *  unit is `installService`, and killing its process would leave the unit
+ *  looking inactive while an unmanaged gateway held the port. */
+export const stopGateway = async (): Promise<StoppedGateway | undefined> => {
+  const home = integrationsHome()
+  const config = await readGatewayConfig(home)
+  const port = config?.port ?? defaultGatewayPort
+  const base = config?.url ?? probeBase("127.0.0.1", port)
+  if (!await responds(base)) return undefined
+
+  const recorded = config?.pid
+  const pid = recorded !== undefined && isAlive(recorded) ? recorded : await listeningPid(port)
+  if (pid === undefined) {
+    throw new Error(
+      `A gateway is answering at ${base}, but nothing on this machine could say which process it is. Stop it where you started it, then run this again.`
+    )
+  }
+  const command = await processCommand(pid)
+  if (command !== undefined && !command.includes("serve")) {
+    throw new Error(
+      `Refusing to stop pid ${pid}: its command line is not a gateway (${command}).`
+    )
+  }
+
+  try {
+    process.kill(pid, "SIGTERM")
+  } catch (cause) {
+    throw new Error(
+      `Could not signal pid ${pid}: ${cause instanceof Error ? cause.message : String(cause)}`
+    )
+  }
+  if (await waitUntilStopped(base)) return { pid, url: base, forced: false }
+
+  if (isAlive(pid)) process.kill(pid, "SIGKILL")
+  if (await waitUntilStopped(base)) return { pid, url: base, forced: true }
+  throw new Error(
+    `Pid ${pid} was signalled but ${base} is still answering after ${stopTimeoutMs / 1_000}s.`
   )
 }

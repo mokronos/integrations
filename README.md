@@ -39,6 +39,17 @@ bun run apps/integrations/cli/src/agent.ts --help
 bun run apps/integrations/cli/src/main.ts serve
 ```
 
+After changing sources, hand the machine to the working tree in one step:
+
+```bash
+bun run refresh
+```
+
+That reinstalls the `i` and `ii` shims, stops the gateway that is running —
+service unit or a `serve` started by hand — and starts one from these sources on
+the same port. A gateway keeps the modules Bun loaded at startup, so one left
+running across a change serves the older wire shape to newly started clients.
+
 Or install the published command package with Bun:
 
 ```bash

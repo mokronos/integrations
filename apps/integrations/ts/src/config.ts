@@ -22,11 +22,17 @@ export const integrationsHome = (
  * explicit.
  *
  * This lives in the client package because finding the gateway is a client
- * concern; the gateway depends on it only to record where it is listening. */
+ * concern; the gateway depends on it only to record where it is listening.
+ *
+ * `pid` says which process is listening, so a restart can stop the previous one
+ * without hunting the port. It is optional because a config file written by an
+ * older gateway does not have it, and a recorded pid is a claim about the past:
+ * verify the process is alive and is a gateway before signalling it. */
 export const GatewayConfigFile = Schema.Struct({
   port: Schema.Number,
   url: Schema.String,
-  apiKey: Schema.String
+  apiKey: Schema.String,
+  pid: Schema.optional(Schema.Number)
 })
 export type GatewayConfigFile = typeof GatewayConfigFile.Type
 

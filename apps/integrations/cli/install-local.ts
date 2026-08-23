@@ -20,6 +20,17 @@ const installables: ReadonlyArray<Installable> = [
   { name: "ii", entry: path.join(packageDirectory, "src", "main.ts") }
 ]
 
+const entryPoint = (name: Installable["name"]): string => {
+  const installable = installables.find((candidate) => candidate.name === name)
+  if (installable === undefined) throw new Error(`No entry point for ${name}`)
+  return installable.entry
+}
+
+/** The program to run this working tree's `ii`: the checkout's own Bun plus the
+ * operator entry point. `serviceProgram()` cannot answer this for a caller that
+ * is not itself `ii` — it reports whatever script Bun is running. */
+export const operatorProgram = (): ReadonlyArray<string> => [process.execPath, entryPoint("ii")]
+
 export const usage = `Install this working tree's i and ii binaries onto PATH.
 
 Usage:
