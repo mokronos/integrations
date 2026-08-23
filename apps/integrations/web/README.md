@@ -1,7 +1,7 @@
 # The gateway's control plane
 
 The browser UI for the integration gateway. Not a dashboard over it — the whole
-privileged surface: catalog and connections, per-tool grants, clients and keys,
+operator surface: catalog and connections, per-tool grants, clients and keys,
 approvals, executions, drift.
 
 ## Running it
@@ -9,8 +9,8 @@ approvals, executions, drift.
 In normal use the installed gateway serves this at the root of its own port:
 
 ```bash
-integrations serve -d
-integrations dashboard      # opens http://127.0.0.1:4788
+ii serve -d
+ii dashboard      # opens http://127.0.0.1:4788
 ```
 
 A `vite build` is enough to refresh it in a working tree — the gateway resolves

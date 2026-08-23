@@ -47,16 +47,21 @@ function CreateClientDialog() {
   const invalidate = useInvalidate()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState("")
-  const [mayMutate, setMayMutate] = useState(false)
+  const [mayAdminister, setMayAdminister] = useState(false)
 
   const create = useMutation({
-    mutationFn: () => gateway.createClient({ name: name.trim(), mayMutate }),
+    mutationFn: () => gateway.createClient({
+      name: name.trim(),
+      capabilities: mayAdminister
+        ? ["provision_connections", "administer_gateway"]
+        : ["provision_connections"]
+    }),
     onSuccess: (client) => {
       invalidate(keys.clients)
       toast.success(`Created ${client.name}`, { description: "Issue it a key to make it usable." })
       setOpen(false)
       setName("")
-      setMayMutate(false)
+      setMayAdminister(false)
     },
     onError: (error: Error) => toast.error("Could not create client", { description: error.message })
   })
@@ -85,13 +90,17 @@ function CreateClientDialog() {
             />
           </div>
           <div className="flex items-start gap-3 rounded-md border p-3">
-            <Switch id="client-mutate" checked={mayMutate} onCheckedChange={setMayMutate} />
+            <Switch
+              id="client-administer"
+              checked={mayAdminister}
+              onCheckedChange={setMayAdminister}
+            />
             <div className="space-y-1">
-              <Label htmlFor="client-mutate">May change the catalog and grants</Label>
+              <Label htmlFor="client-administer">May administer the gateway</Label>
               <p className="text-muted-foreground text-xs">
-                Leave this off for anything running agent code. A client that can
-                edit grants can grant itself whatever it likes, so a
-                prompt-injected agent with this on has no ceiling.
+                Provisioning connections is available by default. Administration
+                additionally allows managing clients, keys, grants, audit, and
+                policy, so leave it off for anything running agent code.
               </p>
             </div>
           </div>
@@ -183,14 +192,14 @@ function ClientRow({ client }: { readonly client: Client }) {
         <div className="text-muted-foreground font-mono text-xs">{client.id}</div>
       </TableCell>
       <TableCell>
-        {client.mayMutate
+        {client.capabilities.includes("administer_gateway")
           ? (
             <Badge variant="destructive" className="gap-1">
               <ShieldAlert className="size-3" />
-              may mutate
+              administrator
             </Badge>
           )
-          : <Badge variant="secondary">delegated only</Badge>}
+          : <Badge variant="secondary">client</Badge>}
       </TableCell>
       <TableCell className="text-muted-foreground text-sm">{when(client.createdAt)}</TableCell>
       <TableCell>

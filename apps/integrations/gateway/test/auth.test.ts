@@ -94,12 +94,12 @@ const setup = async (options: SetupOptions = {}) => {
   stores.push(store)
 
   // A standing client with a grant, so delegation boundaries are testable
-  // against a real privileged surface.
+  // against a real administrative surface.
   const client = await store.createClient({
     id: newClientId(),
     tenantId: defaultTenantId,
     name: "local",
-    mayMutate: true
+    capabilities: ["provision_connections", "administer_gateway"]
   })
   const apiKey = generateApiKey()
   await store.addApiKey({ id: apiKey.id, clientId: client.id, hash: apiKey.hash })
@@ -273,7 +273,7 @@ describe("login", () => {
 })
 
 describe("what a session may do", () => {
-  test("reads privileged surfaces without holding any API key", async () => {
+  test("reads administrative surfaces without holding any API key", async () => {
     const setup_ = await setup({ signupOpen: true })
     const human = await signupHuman(setup_)
 
@@ -426,7 +426,7 @@ describe("attribution", () => {
       id: newClientId(),
       tenantId: human.tenantId,
       name: "support-agent",
-      mayMutate: false
+      capabilities: ["provision_connections"]
     })
     const key = generateApiKey()
     await setup_.store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })

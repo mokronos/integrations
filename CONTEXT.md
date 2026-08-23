@@ -29,8 +29,16 @@ _Avoid_: Identity, caller, actor
 
 **Client**:
 Anything that calls the gateway — an agent, a workflow runner, a script, a
-person at a terminal. Has no inherent access and is never a subject.
+person at a terminal. Tool access comes only from grants; named client
+capabilities may separately allow provisioning or administration. Never a
+subject.
 _Avoid_: Agent, endpoint, consumer, app
+
+**Client capability**:
+A named non-invocation authority held by a client: provisioning connections or
+administering the gateway. Never grants tool access and never permits deciding
+an approval.
+_Avoid_: Role, permission, scope, may-mutate
 
 **API key**:
 The credential a client presents. Identifies the client and nothing else; the
@@ -56,7 +64,7 @@ _Avoid_: Encryption key (say which), password
 
 **Grant**:
 A delegation: one client may invoke one tool through one connection. The only
-source of a client's access.
+source of a client's tool access.
 _Avoid_: Permission, scope, capability, role
 
 **Alias**:

@@ -4,7 +4,8 @@ import { Data, Effect, Layer } from "effect"
 import { Command, Flag } from "effect/unstable/cli"
 import { defaultGatewayPort } from "@mokronos/integrations-client"
 import { telemetryLayer } from "@mokronos/integrations-observability"
-import { integrationsSubcommands } from "./commands.ts"
+import { controlPlaneSubcommands, operatorClientSubcommands } from "./commands.ts"
+import { authenticationSubcommands } from "./auth-commands.ts"
 import { openBrowser } from "./connection.ts"
 import { writeStdoutLine } from "./output.ts"
 import {
@@ -78,7 +79,7 @@ const serveCommand = Command.make(
         const started = await startDetachedGateway({ program: serviceProgram(), port, host })
         loopbackWarning(host)
         await Effect.runPromise(writeStdoutLine(
-          `integrations gateway listening at ${started.url} (pid ${started.pid})\nlogs: ${started.logPath}\nstop: kill ${started.pid}\nAt login too: integrations install`
+          `integrations gateway listening at ${started.url} (pid ${started.pid})\nlogs: ${started.logPath}\nstop: kill ${started.pid}\nAt login too: ii install`
         ))
       },
       catch: serveError
@@ -103,7 +104,7 @@ const dashboardCommand = Command.make(
         const config = await readGatewayConfig(integrationsHome())
         if (config === undefined) {
           throw new Error(
-            "No gateway found. Start one with `integrations serve`, then try again."
+            "No gateway found. Start one with `ii serve`, then try again."
           )
         }
         const healthy = await fetch(`${config.url}/v1/health`).then((response) => response.ok).catch(
@@ -111,7 +112,7 @@ const dashboardCommand = Command.make(
         )
         if (!healthy) {
           throw new Error(
-            `Nothing is answering at ${config.url}. Start the gateway with \`integrations serve\`.`
+            `Nothing is answering at ${config.url}. Start the gateway with \`ii serve\`.`
           )
         }
         if (!print) openBrowser(config.url)
@@ -144,7 +145,7 @@ const installCommand = Command.make(
       try: async () => {
         const descriptor = await installService({ program: serviceProgram(), port, verbose })
         await Effect.runPromise(writeStdoutLine(
-          `integrations gateway service installed and started as ${serviceLabel} at http://127.0.0.1:${descriptor.port}\nRemove it with: integrations uninstall`
+          `integrations gateway service installed and started as ${serviceLabel} at http://127.0.0.1:${descriptor.port}\nRemove it with: ii uninstall`
         ))
       },
       catch: serveError
@@ -190,12 +191,12 @@ const upgradeCommand = Command.make(
         const result = await upgradeCli({
           packageName: "@mokronos/integrations-cli",
           currentVersion: packageMetadata.version,
-          command: "integrations upgrade",
+          command: "ii upgrade",
           check,
           pull
         })
         const restart = result.changed && await serviceIsRegistered()
-          ? ["The installed service is still running the old version. Restart it with: integrations install"]
+          ? ["The installed service is still running the old version. Restart it with: ii install"]
           : []
         await Effect.runPromise(writeStdoutLine([...result.lines, ...restart].join("\n")))
       },
@@ -203,12 +204,14 @@ const upgradeCommand = Command.make(
     })
 ).pipe(Command.withDescription("Upgrade this CLI to the latest published version"))
 
-const rootCommand = Command.make("integrations").pipe(
+export const rootCommand = Command.make("ii").pipe(
   Command.withDescription(
     "Discover, authorize, delegate, and invoke integrations through the gateway"
   ),
   Command.withSubcommands([
-    ...integrationsSubcommands,
+    ...operatorClientSubcommands,
+    ...controlPlaneSubcommands,
+    ...authenticationSubcommands,
     serveCommand,
     dashboardCommand,
     installCommand,

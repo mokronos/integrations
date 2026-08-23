@@ -26,7 +26,7 @@ export const describeError = (error: unknown): string => {
   if (error instanceof IntegrationsCliError) return error.message
   if (error instanceof GatewayError) {
     return isCapabilityRefusal(error)
-      ? `${error.message} (use a key whose client may mutate)`
+      ? `${error.message} (use a client or human session with the required capability)`
       : error.message
   }
   return error instanceof Error ? error.message : String(error)
@@ -39,7 +39,7 @@ export const connectToGateway = async (): Promise<GatewayClient> => {
   const connection = await resolveClientConnection()
   if (connection === undefined) {
     throw cliError(
-      "No gateway found. Start one with `integrations serve`, or set INTEGRATIONS_URL and INTEGRATIONS_API_KEY."
+      "No gateway found. Start one with `ii serve`, or set INTEGRATIONS_URL and INTEGRATIONS_API_KEY."
     )
   }
   return createGatewayClient(connection)

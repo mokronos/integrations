@@ -2,7 +2,7 @@
   "name": "@mokronos/integrations-cli",
   "version": "0.2.0",
   "type": "module",
-  "description": "The integrations CLI — discover, authorize, inspect, and invoke through the gateway.",
+  "description": "Agent-facing i CLI and its human/operator ii superset for the integration gateway.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -18,8 +18,9 @@
     "agent"
   ],
   "bin": {
-    "integrations": "src/main.ts",
-    "i": "src/main.ts"
+    "i": "src/agent.ts",
+    "ii": "src/main.ts",
+    "integrations": "src/main.ts"
   },
   "exports": {
     "./upgrade": "./src/upgrade.ts"

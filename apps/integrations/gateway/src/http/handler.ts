@@ -1,9 +1,10 @@
 import { Schema } from "effect"
 import type { RequestTracer } from "@mokronos/integrations-observability"
 import { whenPresent } from "../optional.ts"
-import { authenticateClient, authorizeMutation } from "../authorize.ts"
+import { authenticateClient, authorizeClientCapability } from "../authorize.ts"
 import { hashSessionToken } from "../passwords.ts"
 import { SessionTokenHash } from "../domain.ts"
+import type { ClientCapability } from "../domain.ts"
 import type { RateLimiter } from "../ratelimit.ts"
 import type { GatewayStore } from "../store.ts"
 import { matchRoute, pathExists, RequestBodyError } from "./router.ts"
@@ -106,7 +107,7 @@ const refusalMessage = {
   "unknown-key": "This API key is not known to the gateway",
   "key-revoked": "This API key was revoked",
   "client-revoked": "The client this key belongs to was revoked",
-  "not-permitted": "This key may not change the catalog, connections, grants, or policy"
+  "not-permitted": "This credential does not hold the capability required by this route"
 } satisfies Record<RefusalStatus, string>
 
 /** A refusal states both a sentence and a `code`. Clients branch on the code:
@@ -184,7 +185,7 @@ const resolveIdentity = async (
   if (context?.localSecret !== undefined) {
     const authentication = await authenticateClient(dependencies.store, context.localSecret)
     if (authentication.status === "authenticated") {
-      return { kind: "client", client: authentication.client, secret: context.localSecret }
+      return { kind: "local", client: authentication.client }
     }
   }
 
@@ -212,7 +213,7 @@ const cookieRequestIsSameOrigin = (request: Request): boolean => {
  * surface — including every rejection path — is testable directly.
  *
  * Access is enforced here rather than in handlers: a route declares whether it
- * is public, delegated, or privileged, and a new endpoint cannot forget to
+ * is public, delegated, provisioning, administrative, or human-only, and a new endpoint cannot forget to
  * check. */
 export const createGatewayHandler = (
   dependencies: HandlerDependencies
@@ -247,9 +248,9 @@ export const createGatewayHandler = (
 
     if (dependencies.rateLimiter !== undefined &&
       identity.kind !== "anonymous" && identity.kind !== "refused") {
-      const principalKey = identity.kind === "client"
-        ? `client:${identity.client.id}`
-        : `subject:${identity.subjectId}`
+      const principalKey = identity.kind === "session"
+        ? `subject:${identity.subjectId}`
+        : `${identity.kind}:${identity.client.id}`
       const verdict = dependencies.rateLimiter.take(principalKey)
       if (!verdict.allowed) {
         return tooManyRequests(verdict.retryAfterSeconds)
@@ -268,13 +269,13 @@ export const createGatewayHandler = (
       return await dispatch(route, url, identity)
     }
 
-    // Humans administer through the dashboard; machines invoke through keys. A
-    // session never reaches the delegated surface — issuing a client key is how
-    // a human delegates.
-    if (identity.kind === "session") {
-      if (route.access !== "privileged") {
+    // Human sessions and the ambient local control plane may administer, but
+    // neither may invoke through delegated aliases. Issuing a client key is
+    // what turns human authority into a deliberately bounded machine caller.
+    if (identity.kind === "session" || identity.kind === "local") {
+      if (route.access === "delegated") {
         return json(403, {
-          error: "A signed-in session may not invoke tools; issue a client key instead",
+          error: "Human control-plane authority may not invoke delegated tools; issue a client key instead",
           code: "not-permitted"
         })
       }
@@ -287,10 +288,21 @@ export const createGatewayHandler = (
       return json(401, { error: "An API key is required", code: "unknown-key" })
     }
 
-    // Privileged routes ask a different question than delegated ones: not "may
-    // you invoke this" but "may you change what is invocable".
-    if (route.access === "privileged") {
-      const authorization = await authorizeMutation(dependencies.store, identity.secret)
+    if (route.access === "human") {
+      return refusal("not-permitted")
+    }
+
+    const requiredCapability: ClientCapability | undefined = route.access === "provisioning"
+      ? "provision_connections"
+      : route.access === "administrative"
+      ? "administer_gateway"
+      : undefined
+    if (requiredCapability !== undefined) {
+      const authorization = await authorizeClientCapability(
+        dependencies.store,
+        identity.secret,
+        requiredCapability
+      )
       if (authorization.status !== "authorized") return refusal(authorization.status)
     }
 

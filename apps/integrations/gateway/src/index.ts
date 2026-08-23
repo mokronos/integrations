@@ -15,7 +15,9 @@ export {
   AuditRecord,
   Authorization,
   Client,
+  ClientCapability,
   ClientId,
+  clientHasCapability,
   connectionSubject,
   ConnectionName,
   ConnectionRef,
@@ -65,8 +67,12 @@ export type {
   RecordAuditInput
 } from "./store.ts"
 
-export { authenticateClient, authorizeInvocation, authorizeMutation } from "./authorize.ts"
-export type { ClientAuthentication, MutationAuthorization } from "./authorize.ts"
+export {
+  authenticateClient,
+  authorizeClientCapability,
+  authorizeInvocation
+} from "./authorize.ts"
+export type { CapabilityAuthorization, ClientAuthentication } from "./authorize.ts"
 
 export {
   defaultApprovalExpiryHours,

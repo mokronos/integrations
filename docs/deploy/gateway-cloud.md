@@ -7,7 +7,7 @@ behind it are in [ADR 0004](../adr/0004-the-gateway-is-one-product-with-two-depl
 
 ## Modes
 
-- **Local (default).** `integrations serve` binds `127.0.0.1`, bootstraps the
+- **Local (default).** `ii serve` binds `127.0.0.1`, bootstraps the
   local client, and lets the dashboard borrow its credential over loopback. No
   environment variables required.
 - **Hosted.** The gateway binds off loopback behind a TLS proxy, humans sign in
@@ -38,7 +38,7 @@ gw.example.com {
 }
 ```
 
-Then run the gateway on loopback of the same box (`integrations serve --host
+Then run the gateway on loopback of the same box (`ii serve --host
 127.0.0.1`) or bind it privately if proxy and gateway differ. Binding directly
 off loopback without TLS in front publishes every credential it holds.
 
@@ -64,7 +64,7 @@ by provisioned size.
 **A small VPS** (Hetzner, Oracle Cloud's always-free ARM) — install Bun,
 clone and build, then run under systemd with `INTEGRATIONS_HOME` pointed at a
 persistent directory and Caddy on ports 80/443. The CLI can also register a
-user service (`integrations service install`), but on a server a system unit
+user service (`ii install`), but on a server a system unit
 with `Restart=always` is the better shape.
 
 ## First run

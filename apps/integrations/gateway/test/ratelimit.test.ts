@@ -128,7 +128,7 @@ describe("gateway traffic shaping", () => {
       id: newClientId(),
       tenantId: defaultTenantId,
       name: "local",
-      mayMutate: true
+      capabilities: ["provision_connections", "administer_gateway"]
     })
     const key = generateApiKey()
     await store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
@@ -198,7 +198,7 @@ describe("gateway traffic shaping", () => {
       id: newClientId(),
       tenantId: defaultTenantId,
       name: "neighbour",
-      mayMutate: false
+      capabilities: ["provision_connections"]
     })
     const neighbourKey = generateApiKey()
     await otherStore.addApiKey({

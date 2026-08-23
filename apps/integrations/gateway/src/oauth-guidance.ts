@@ -27,7 +27,7 @@ export const oauthSetupGuidance = (input: {
     : [`Scopes to request:\n${scopes.map((scope) => `  - ${scope}`).join("\n")}`]
   const retry =
     `Once the client exists, retry with its credentials:\n` +
-    `  integrations connect ${input.integration} --client-id <client-id> --client-secret-env <ENV_VAR_NAME>`
+    `  i connect ${input.integration} --client-id <client-id> --client-secret-env <ENV_VAR_NAME>`
   const preamble =
     `${input.integration} does not support dynamic client registration, so an ` +
     `OAuth application has to exist at the provider before authorizing.\n\n` +

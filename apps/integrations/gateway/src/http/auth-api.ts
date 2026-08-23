@@ -190,7 +190,15 @@ export const authRoutes = (dependencies: AuthDependencies): ReadonlyArray<Route>
             kind: "client",
             clientId: request.identity.client.id,
             tenantId: request.identity.client.tenantId,
-            mayMutate: request.identity.client.mayMutate
+            capabilities: request.identity.client.capabilities
+          })
+        }
+        if (request.identity.kind === "local") {
+          return ok({
+            authenticated: true,
+            kind: "local",
+            clientId: request.identity.client.id,
+            tenantId: request.identity.client.tenantId
           })
         }
         return ok({ authenticated: false })
@@ -199,7 +207,7 @@ export const authRoutes = (dependencies: AuthDependencies): ReadonlyArray<Route>
     {
       method: "POST",
       path: "/v1/auth/email",
-      access: "privileged",
+      access: "human",
       handle: async (request) => {
         if (request.identity.kind !== "session") {
           return { status: 403, body: { error: "Only a signed-in human may change account details", code: "not-permitted" } }
@@ -228,7 +236,7 @@ export const authRoutes = (dependencies: AuthDependencies): ReadonlyArray<Route>
     {
       method: "POST",
       path: "/v1/auth/password",
-      access: "privileged",
+      access: "human",
       handle: async (request) => {
         if (request.identity.kind !== "session") {
           return { status: 403, body: { error: "Only a signed-in human may change account details", code: "not-permitted" } }
@@ -260,7 +268,7 @@ export const authRoutes = (dependencies: AuthDependencies): ReadonlyArray<Route>
       // the body, and the handler treats DELETE bodies as absent.
       method: "POST",
       path: "/v1/auth/account/delete",
-      access: "privileged",
+      access: "human",
       handle: async (request) => {
         if (request.identity.kind !== "session") {
           return { status: 403, body: { error: "Only a signed-in human may change account details", code: "not-permitted" } }

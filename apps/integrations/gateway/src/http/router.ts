@@ -10,13 +10,16 @@ import type { Client, SessionTokenHash, SubjectId, TenantId } from "../domain.ts
  * boundary, and a route table with Schema-decoded bodies buys that back. */
 export type HttpVerb = "GET" | "POST" | "DELETE"
 
-/** `delegated` needs any live key; `privileged` additionally needs mayMutate —
- * or a human session, since administering the gateway is exactly what the
- * dashboard exists for. `public` needs neither: the login surface cannot
- * require the credential it creates. Classification lives on the route so a
- * new endpoint cannot forget to be guarded — the dispatcher reads this, not
- * the handler. */
-export type RouteAccess = "public" | "delegated" | "privileged"
+/** Authority is declared on every route. `delegated` is grant-scoped client
+ * work, `provisioning` manages the catalog and connections, `administrative`
+ * changes delegation or inspects the control plane, and `human` is reserved
+ * for decisions an automated client must never make for itself. */
+export type RouteAccess =
+  | "public"
+  | "delegated"
+  | "provisioning"
+  | "administrative"
+  | "human"
 
 /** Who the dispatcher decided this request is. Every authenticated request is
  * exactly one of these; there is no blending of a session and a key. `refused`
@@ -29,6 +32,12 @@ export type RouteIdentity =
     readonly reason: "unknown-key" | "key-revoked" | "client-revoked"
   }
   | { readonly kind: "client"; readonly client: Client; readonly secret: string }
+  | {
+    /** Ambient authority granted only to the same-origin control plane on a
+     * loopback deployment. It is not constructible from an HTTP credential. */
+    readonly kind: "local"
+    readonly client: Client
+  }
   | {
     readonly kind: "session"
     readonly tenantId: TenantId
@@ -49,8 +58,8 @@ export type RouteRequest = {
 }
 
 /** The API client behind this request. The dispatcher only hands a route its
- *  declared identity class, so a handler whose route is `delegated` or
- *  `privileged` may assert this; a stray call on a public route is a bug and
+ *  declared identity class, so a handler whose route is `delegated` may assert
+ *  this; a stray call on another route is a bug and
  *  fails loudly instead of authorizing nobody. */
 export const clientOf = (request: RouteRequest): Client => {
   if (request.identity.kind !== "client") {
@@ -73,6 +82,8 @@ export const secretOf = (request: RouteRequest): string => {
 export const tenantOf = (request: RouteRequest): TenantId => {
   switch (request.identity.kind) {
     case "client":
+      return request.identity.client.tenantId
+    case "local":
       return request.identity.client.tenantId
     case "session":
       return request.identity.tenantId

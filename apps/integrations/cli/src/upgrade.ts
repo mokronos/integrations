@@ -9,7 +9,7 @@ import { Schema } from "effect"
  * This lives in the integrations CLI rather than being duplicated into the
  * workflow CLI because `wf` already depends on `@mokronos/integrations-cli` —
  * the dependency direction the repository declares — so shared CLI plumbing
- * belongs in the lower package. `i upgrade` and `wf upgrade` differ only in the
+ * belongs in the lower package. `ii upgrade` and `wf upgrade` differ only in the
  * package name they pass. */
 
 export type PackageManager = "bun" | "npm" | "pnpm" | "yarn"

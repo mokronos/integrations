@@ -4,8 +4,8 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import {
   Alias,
+  authorizeClientCapability,
   authorizeInvocation,
-  authorizeMutation,
   ConnectionName,
   createGatewayStore,
   defaultTenantId,
@@ -50,7 +50,7 @@ const userConnection: ConnectionRef = {
 }
 
 const seed = async (store: GatewayStore, options: {
-  readonly mayMutate?: boolean
+  readonly capabilities?: ReadonlyArray<"provision_connections" | "administer_gateway">
   readonly connection?: ConnectionRef
   readonly decision?: "allow" | "require_approval"
 } = {}) => {
@@ -58,7 +58,7 @@ const seed = async (store: GatewayStore, options: {
     id: newClientId(),
     tenantId: defaultTenantId,
     name: "support-agent",
-    mayMutate: options.mayMutate ?? false
+    capabilities: options.capabilities ?? ["provision_connections"]
   })
   const key = generateApiKey()
   await store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
@@ -208,7 +208,7 @@ describe("gateway authorization", () => {
       id: newClientId(),
       tenantId: defaultTenantId,
       name: "sales-campaign",
-      mayMutate: false
+      capabilities: ["provision_connections"]
     })
     const writerKey = generateApiKey()
     await store.addApiKey({ id: writerKey.id, clientId: writer.id, hash: writerKey.hash })
@@ -273,30 +273,46 @@ describe("gateway authorization", () => {
   })
 })
 
-describe("gateway mutation authorization", () => {
-  test("permits a key whose client may mutate", async () => {
+describe("gateway capability authorization", () => {
+  test("permits a key whose client holds the requested capability", async () => {
     const store = await makeStore()
-    const { key } = await seed(store, { mayMutate: true })
+    const { key } = await seed(store, { capabilities: ["provision_connections", "administer_gateway"] })
 
-    expect((await authorizeMutation(store, key.secret)).status).toBe("authorized")
+    expect((await authorizeClientCapability(
+      store,
+      key.secret,
+      "administer_gateway"
+    )).status).toBe("authorized")
   })
 
   test("refuses a key whose client may not, before any human is asked", async () => {
     const store = await makeStore()
-    const { key } = await seed(store, { mayMutate: false })
+    const { key } = await seed(store, { capabilities: ["provision_connections"] })
 
     // The request is not makeable, so there is no approval prompt to wave
     // through — which is the point of a static capability over a runtime gate.
-    expect((await authorizeMutation(store, key.secret)).status).toBe("not-permitted")
+    expect((await authorizeClientCapability(
+      store,
+      key.secret,
+      "administer_gateway"
+    )).status).toBe("not-permitted")
   })
 
   test("refuses unknown and revoked credentials", async () => {
     const store = await makeStore()
-    const { client, key } = await seed(store, { mayMutate: true })
+    const { client, key } = await seed(store, { capabilities: ["provision_connections", "administer_gateway"] })
 
-    expect((await authorizeMutation(store, "wfi_nope")).status).toBe("unknown-key")
+    expect((await authorizeClientCapability(
+      store,
+      "wfi_nope",
+      "administer_gateway"
+    )).status).toBe("unknown-key")
 
     await store.revokeClient(defaultTenantId, client.id)
-    expect((await authorizeMutation(store, key.secret)).status).toBe("client-revoked")
+    expect((await authorizeClientCapability(
+      store,
+      key.secret,
+      "administer_gateway"
+    )).status).toBe("client-revoked")
   })
 })

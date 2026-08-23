@@ -1,5 +1,11 @@
-import { connectionSubject } from "./domain.ts"
-import type { Alias, Authorization, Client, ToolName } from "./domain.ts"
+import { clientHasCapability, connectionSubject } from "./domain.ts"
+import type {
+  Alias,
+  Authorization,
+  Client,
+  ClientCapability,
+  ToolName
+} from "./domain.ts"
 import { hashApiKey } from "./keys.ts"
 import type { GatewayStore } from "./store.ts"
 
@@ -60,26 +66,25 @@ export const authorizeInvocation = async (
   }
 }
 
-export type MutationAuthorization =
+export type CapabilityAuthorization =
   | { readonly status: "authorized"; readonly client: Client }
   | { readonly status: "unknown-key" }
   | { readonly status: "key-revoked" }
   | { readonly status: "client-revoked" }
   | { readonly status: "not-permitted" }
 
-/** Whether a key may mutate the catalog, connections, grants, or policy.
- *
- * Separate from {@link authorizeInvocation} because it asks a different
- * question: not "may you invoke this tool" but "may you change what is
- * invocable". A runtime approval gate cannot substitute for this — the point is
- * that the request is never makeable, so there is no prompt for a tired human
- * to wave through. */
-export const authorizeMutation = async (
+/** Whether a client holds one named non-invocation capability. Kept separate
+ * from grants: provisioning a connection and deciding what tools may use it
+ * are deliberately different powers. */
+export const authorizeClientCapability = async (
   store: GatewayStore,
-  secret: string
-): Promise<MutationAuthorization> => {
+  secret: string,
+  capability: ClientCapability
+): Promise<CapabilityAuthorization> => {
   const authentication = await authenticateClient(store, secret)
   if (authentication.status !== "authenticated") return { status: authentication.status }
-  if (!authentication.client.mayMutate) return { status: "not-permitted" }
+  if (!clientHasCapability(authentication.client, capability)) {
+    return { status: "not-permitted" }
+  }
   return { status: "authorized", client: authentication.client }
 }

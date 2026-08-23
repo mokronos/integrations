@@ -168,7 +168,7 @@ describe("the encrypted store", () => {
       id: newClientId(),
       tenantId: defaultTenantId,
       name: "agent",
-      mayMutate: false
+      capabilities: ["provision_connections"]
     })
     const grant = await store.createGrant({
       id: newGrantId(),
@@ -315,7 +315,7 @@ describe("the encrypted store", () => {
       id: newClientId(),
       tenantId: defaultTenantId,
       name: "agent",
-      mayMutate: false
+      capabilities: ["provision_connections"]
     })
     const grant = await store.createGrant({
       id: newGrantId(),

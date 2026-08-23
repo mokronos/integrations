@@ -28,6 +28,7 @@ import type {
   AuditRecord,
   AuthSession,
   Client,
+  ClientCapability,
   ConnectionRef,
   Grant,
   GrantDecision,
@@ -85,6 +86,7 @@ const ddl = [
      id TEXT PRIMARY KEY,
      tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
      name TEXT NOT NULL,
+     capabilities TEXT NOT NULL,
      may_mutate INTEGER NOT NULL,
      created_at INTEGER NOT NULL,
      revoked_at INTEGER
@@ -196,6 +198,7 @@ const ClientRow = Schema.Struct({
   id: Schema.String,
   tenant_id: Schema.String,
   name: Schema.String,
+  capabilities: Schema.String,
   may_mutate: Schema.Number,
   created_at: Schema.Number,
   revoked_at: NullableNumber
@@ -293,7 +296,9 @@ const SnapshotRow = Schema.Struct({
   synced_at: Schema.Number
 })
 
-const clientColumns = ["id", "tenant_id", "name", "may_mutate", "created_at", "revoked_at"]
+const clientColumns = [
+  "id", "tenant_id", "name", "capabilities", "may_mutate", "created_at", "revoked_at"
+]
 const tenantColumns = ["id", "name", "created_at"]
 const subjectColumns = ["id", "tenant_id", "created_at"]
 const loginColumns = ["subject_id", "tenant_id", "email", "password_hash", "created_at"]
@@ -326,6 +331,12 @@ const decodeApprovalRow = Schema.decodeUnknownSync(ApprovalRow)
 const decodeAuditRow = Schema.decodeUnknownSync(AuditRow)
 const decodeSnapshotRow = Schema.decodeUnknownSync(SnapshotRow)
 const decodeJsonText = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
+const decodeCapabilities = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Array(Schema.Literals([
+    "provision_connections",
+    "administer_gateway"
+  ])))
+)
 
 const parseJsonColumn = (value: string): typeof Schema.Json.Type =>
   decodeJsonText(value)
@@ -341,7 +352,7 @@ const toClient = (row: Row): Client => {
     id: ClientId.make(decoded.id),
     tenantId: TenantId.make(decoded.tenant_id),
     name: decoded.name,
-    mayMutate: decoded.may_mutate !== 0,
+    capabilities: decodeCapabilities(decoded.capabilities),
     createdAt: date(decoded.created_at),
     revokedAt: nullableDate(decoded.revoked_at)
   }
@@ -513,7 +524,7 @@ export interface CreateClientInput {
   readonly tenantId: TenantId
   readonly id: ClientId
   readonly name: string
-  readonly mayMutate: boolean
+  readonly capabilities: ReadonlyArray<ClientCapability>
 }
 
 export interface CreateGrantInput {
@@ -813,6 +824,29 @@ const migrateTenancy = async (database: LibsqlClient): Promise<void> => {
   }
 }
 
+/** Replaces the historical all-or-nothing `may_mutate` bit with named client
+ * capabilities. Existing administrative clients retain both provisioning and
+ * administration; existing sandbox clients gain provisioning, which is the
+ * remote client surface, but never administration. The old column remains in
+ * SQLite so old binaries fail closed rather than failing to open the store. */
+const migrateClientCapabilities = async (database: LibsqlClient): Promise<void> => {
+  if (!await tableExists(database, "gateway_client")) return
+  const columns = new Set(
+    (await database.execute("PRAGMA table_info(gateway_client)")).rows.map(
+      (row) => String(row["name"])
+    )
+  )
+  if (columns.has("capabilities")) return
+  await database.execute(
+    `ALTER TABLE gateway_client ADD COLUMN capabilities TEXT NOT NULL DEFAULT '["provision_connections"]'`
+  )
+  await database.execute(
+    `UPDATE gateway_client
+        SET capabilities = '["provision_connections","administer_gateway"]'
+      WHERE may_mutate <> 0`
+  )
+}
+
 /** Single-row helper for the migration, which runs before the store's own
  *  query helpers exist. */
 const one_ = async (
@@ -903,6 +937,7 @@ export const createGatewayStore = async (
   // rest of the final shape.
   for (const statement of tenancyTableDdl) await database.execute(statement)
   await migrateTenancy(database)
+  await migrateClientCapabilities(database)
   for (const statement of ddl) await database.execute(statement)
 
   const one = async (sql: string, args: ReadonlyArray<InValue>): Promise<Row | undefined> => {
@@ -1094,8 +1129,15 @@ export const createGatewayStore = async (
 
     createClient: async (input) => {
       await run(
-        "INSERT INTO gateway_client (id, tenant_id, name, may_mutate, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, NULL)",
-        [input.id, input.tenantId, input.name, input.mayMutate ? 1 : 0, now()]
+        "INSERT INTO gateway_client (id, tenant_id, name, capabilities, may_mutate, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, NULL)",
+        [
+          input.id,
+          input.tenantId,
+          input.name,
+          JSON.stringify(input.capabilities),
+          input.capabilities.includes("administer_gateway") ? 1 : 0,
+          now()
+        ]
       )
       return await requireClient(input.id)
     },
@@ -1146,7 +1188,9 @@ export const createGatewayStore = async (
     findApiKeyByHash: async (hash) => {
       const row = await one(
         `SELECT gateway_api_key.*, gateway_client.tenant_id AS client_tenant_id,
-                gateway_client.name AS client_name, gateway_client.may_mutate AS client_may_mutate,
+                gateway_client.name AS client_name,
+                gateway_client.capabilities AS client_capabilities,
+                gateway_client.may_mutate AS client_may_mutate,
                 gateway_client.created_at AS client_created_at, gateway_client.revoked_at AS client_revoked_at
            FROM gateway_api_key JOIN gateway_client ON gateway_client.id = gateway_api_key.client_id
           WHERE gateway_api_key.hash = ?`,
@@ -1162,6 +1206,7 @@ export const createGatewayStore = async (
           id: row["client_id"] ?? "",
           tenant_id: row["client_tenant_id"] ?? "",
           name: row["client_name"] ?? "",
+          capabilities: row["client_capabilities"] ?? "[]",
           may_mutate: row["client_may_mutate"] ?? 0,
           created_at: row["client_created_at"] ?? 0,
           revoked_at: row["client_revoked_at"] ?? null

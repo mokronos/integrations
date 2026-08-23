@@ -268,7 +268,7 @@ export const listGrantedTools = async (
       }
     } catch {
       // A tool that has since disappeared should not fail the whole listing —
-      // that is what `integrations drift` is for.
+      // that is what `ii drift` is for.
       return entry
     }
   }))

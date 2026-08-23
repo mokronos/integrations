@@ -1,10 +1,12 @@
 import { whenPresent, whenPresentMap } from "./optional.ts"
 import { Effect, Option, Predicate, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
-import { generateModule } from "@mokronos/integrations-client"
-import type { GatewayClient, GrantedTool } from "@mokronos/integrations-client"
+import { generateModule, GrantedTool } from "@mokronos/integrations-client"
+import type { GatewayClient } from "@mokronos/integrations-client"
 import { cliError, connectToGateway, describeError, openBrowser } from "./connection.ts"
 import type { IntegrationsCliError } from "./connection.ts"
+import { connectToControlPlane, connectToOperatorGateway } from "./session.ts"
+import type { ControlPlaneClient } from "./session.ts"
 import {
   inline,
   jsonOutput,
@@ -58,8 +60,27 @@ const gatewayTask = <A>(
     catch: (error) => cliError(describeError(error))
   })
 
+const operatorGatewayTask = <A>(
+  task: (client: GatewayClient) => Promise<A>
+): Effect.Effect<A, IntegrationsCliError> =>
+  Effect.tryPromise({
+    try: async () => await task(await connectToOperatorGateway()),
+    catch: (error) => cliError(describeError(error))
+  })
+
+type GatewayTask = typeof gatewayTask
+
+const controlPlaneTask = <A>(
+  task: (client: ControlPlaneClient) => Promise<A>
+): Effect.Effect<A, IntegrationsCliError> =>
+  Effect.tryPromise({
+    try: async () => await task(await connectToControlPlane()),
+    catch: (error) => cliError(describeError(error))
+  })
+
 const JsonObject = Schema.Record(Schema.String, Schema.Json)
 const JsonArray = Schema.Array(Schema.Json)
+const GrantedToolsResponse = Schema.Struct({ tools: Schema.Array(GrantedTool) })
 const decodeJsonText = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
 
 /** The gateway's responses arrive as unparsed JSON. These decode a response into
@@ -124,7 +145,7 @@ const listing = <A>(
 
 // --- catalog ----------------------------------------------------------------
 
-const discoverCommand = Command.make(
+const discoverCommand = (runGateway: GatewayTask) => Command.make(
   "discover",
   {
     url: Argument.string("url").pipe(
@@ -134,7 +155,7 @@ const discoverCommand = Command.make(
     verbose: verboseFlag()
   },
   ({ url, connection, verbose }) =>
-    gatewayTask((client) => client.request("POST", "/v1/integrations/discover", { url, connection }))
+    runGateway((client) => client.discover({ url, connection }))
       .pipe(Effect.flatMap((result) => {
         const body = record(result)
         const integration = record(body["integration"])
@@ -143,14 +164,14 @@ const discoverCommand = Command.make(
         return writeStdoutLine(jsonOutput(
           withNext(
             verbose ? body : { integration, toolCount: tools.length },
-            `integrations connect ${slug}`
+            `i connect ${slug}`
           ),
           verbose
         ))
       }))
 ).pipe(Command.withDescription("Detect and register an integration"))
 
-const searchCommand = Command.make(
+const searchCommand = (runGateway: GatewayTask) => Command.make(
   "search",
   {
     query: Argument.string("query").pipe(
@@ -169,21 +190,21 @@ const searchCommand = Command.make(
     verbose: verboseFlag()
   },
   ({ query, kind, limit, verbose }) =>
-    gatewayTask((client) => {
-      const parameters = new URLSearchParams({ q: query, limit: String(limit) })
-      if (Option.isSome(kind)) parameters.set("kind", kind.value)
-      return client.request("GET", `/v1/registry/search?${parameters.toString()}`)
-    }).pipe(Effect.flatMap((result) => {
+    runGateway((client) => client.search({
+      query,
+      limit,
+      ...whenPresent("kind", Option.getOrUndefined(kind))
+    })).pipe(Effect.flatMap((result) => {
       const body = record(result)
       const results = array(body["results"])
       return writeStdoutLine(jsonOutput(
-        withNext({ ...body, count: results.length }, "integrations discover <url>"),
+        withNext({ ...body, count: results.length }, "i discover <url>"),
         verbose
       ))
     }))
 ).pipe(Command.withDescription("Search integrations.sh for exact integration URLs"))
 
-const integrationsCommand = Command.make(
+const integrationsCommand = (runGateway: GatewayTask) => Command.make(
   "integrations",
   {
     limit: limitFlag(),
@@ -191,7 +212,7 @@ const integrationsCommand = Command.make(
     verbose: verboseFlag()
   },
   ({ limit, offset, verbose }) =>
-    gatewayTask((client) => client.request("GET", "/v1/integrations")).pipe(
+    runGateway((client) => client.integrations()).pipe(
       Effect.flatMap((result) => {
         const all = sortedBy(array(record(result)["integrations"]), (entry) => text(entry["slug"]))
         return listing(page(all, window(limit, offset)), {
@@ -199,7 +220,7 @@ const integrationsCommand = Command.make(
           narrowing: "window with --limit/--offset",
           verbose,
           empty: "No integrations discovered.",
-          next: "integrations tools <integration>",
+          next: "i tools <integration>",
           row: (integration) =>
             verbose ? integration : {
               slug: integration["slug"] ?? null,
@@ -215,7 +236,7 @@ const integrationsCommand = Command.make(
   Command.withDescription("List the gateway's persisted integration catalog")
 )
 
-const toolsCommand = Command.make(
+const toolsCommand = (runGateway: GatewayTask) => Command.make(
   "tools",
   {
     integration: Argument.string("integration"),
@@ -228,9 +249,7 @@ const toolsCommand = Command.make(
     verbose: verboseFlag()
   },
   ({ integration, filter, limit, offset, verbose }) =>
-    gatewayTask((client) =>
-      client.request("GET", `/v1/integrations/${encodeURIComponent(integration)}/tools`)
-    ).pipe(Effect.flatMap((result) => {
+    runGateway((client) => client.integrationTools(integration)).pipe(Effect.flatMap((result) => {
       const term = Option.getOrUndefined(filter)?.toLowerCase()
       const all = array(record(result)["tools"])
       const matching = term === undefined
@@ -246,7 +265,7 @@ const toolsCommand = Command.make(
           narrowing: "narrow with --filter <text>, or window with --limit/--offset",
           verbose,
           empty: term === undefined ? "No tools available." : `No tools match "${term}".`,
-          next: `integrations schema ${integration} <tool>`,
+          next: `i schema ${integration} <tool>`,
           extra: { integration },
           row: (tool) =>
             verbose ? tool : {
@@ -258,7 +277,7 @@ const toolsCommand = Command.make(
     }))
 ).pipe(Command.withDescription("List tool names and descriptions for an integration"))
 
-const schemaCommand = Command.make(
+const schemaCommand = (runGateway: GatewayTask) => Command.make(
   "schema",
   {
     integration: Argument.string("integration"),
@@ -267,14 +286,11 @@ const schemaCommand = Command.make(
     verbose: verboseFlag()
   },
   ({ integration, tool, connection, verbose }) =>
-    gatewayTask((client) =>
-      client.request(
-        "GET",
-        `/v1/integrations/${encodeURIComponent(integration)}/tools/${encodeURIComponent(tool)}?connection=${
-          encodeURIComponent(connection)
-        }`
-      )
-    ).pipe(Effect.flatMap((result) => {
+    runGateway((client) => client.integrationTool({
+      integration,
+      tool,
+      connection
+    })).pipe(Effect.flatMap((result) => {
       const detail = record(result)
       // Schemas stay objects, whole, at both verbosities. They are the reason
       // to run this command, and a schema handed back as a truncated string
@@ -287,7 +303,7 @@ const schemaCommand = Command.make(
       return writeStdoutLine(jsonOutput(
         withNext(
           verbose ? detail : core,
-          `integrations execute --direct ${text(detail["address"])} '<json>'`
+          `ii execute --direct ${text(detail["address"])} '<json>'`
         ),
         verbose
       ))
@@ -320,7 +336,7 @@ const credentialValues = (
   return credentialEnv === undefined ? {} : { token: environmentValue(credentialEnv) }
 }
 
-const connectCommand = Command.make(
+const connectCommand = (runGateway: GatewayTask) => Command.make(
   "connect",
   {
     integration: Argument.string("integration"),
@@ -341,14 +357,14 @@ const connectCommand = Command.make(
     verbose: verboseFlag()
   },
   (options) =>
-    gatewayTask(async (client) => {
-      const catalog = record(await client.request("GET", "/v1/integrations"))
+    runGateway(async (client) => {
+      const catalog = record(await client.integrations())
       const integration = array(catalog["integrations"]).find((candidate) =>
         text(candidate["slug"]) === options.integration
       )
       if (integration === undefined) {
         throw cliError(
-          `Unknown integration ${options.integration}. Run: integrations discover <url>`
+          `Unknown integration ${options.integration}. Run: i discover <url>`
         )
       }
       const methods = array(integration["authMethods"])
@@ -375,7 +391,7 @@ const connectCommand = Command.make(
 
       if (oauthMethod !== undefined) {
         const secretName = Option.getOrUndefined(options.clientSecretEnv)
-        const started = record(await client.request("POST", "/v1/connections/oauth", {
+        const started = record(await client.startOAuth({
           integration: options.integration,
           connection: options.connection,
           ...whenPresent("template", template),
@@ -397,7 +413,7 @@ const connectCommand = Command.make(
         // human may take minutes.
         const deadline = Date.now() + Math.max(1, options.timeout) * 1000
         while (Date.now() < deadline) {
-          const session = record(await client.request("GET", `/v1/connections/oauth/${sessionId}`))
+          const session = record(await client.oauth(sessionId))
           const current = record(session["state"])
           if (text(current["status"]) === "connected") return record(current["connection"])
           if (text(current["status"]) === "failed") {
@@ -412,7 +428,7 @@ const connectCommand = Command.make(
         Option.getOrUndefined(options.credentialEnv),
         Option.getOrUndefined(options.credentialValues)
       )
-      return record(await client.request("POST", "/v1/connections", {
+      return record(await client.connect({
         integration: options.integration,
         connection: options.connection,
         ...whenPresent("template", template),
@@ -432,18 +448,18 @@ const connectCommand = Command.make(
       return writeStdoutLine(jsonOutput(
         withNext(
           options.verbose ? { connection, tools } : { connection, toolCount: tools.length },
-          `integrations tools ${text(connection["integration"])}`
+          `i tools ${text(connection["integration"])}`
         ),
         options.verbose
       ))
     }))
 ).pipe(Command.withDescription("Authorize an integration"))
 
-const connectionsCommand = Command.make(
+const connectionsCommand = (runGateway: GatewayTask) => Command.make(
   "connections",
   { limit: limitFlag(), offset: offsetFlag(), verbose: verboseFlag() },
   ({ limit, offset, verbose }) =>
-    gatewayTask((client) => client.request("GET", "/v1/connections")).pipe(
+    runGateway((client) => client.connections()).pipe(
       Effect.flatMap((result) => {
         const all = sortedBy(
           array(record(result)["connections"]),
@@ -460,16 +476,12 @@ const connectionsCommand = Command.make(
     )
 ).pipe(Command.withDescription("List connections without exposing credentials"))
 
-const disconnectCommand = Command.make(
+const disconnectCommand = (runGateway: GatewayTask) => Command.make(
   "disconnect",
   { integration: Argument.string("integration"), connection: connectionFlag() },
   ({ integration, connection }) =>
-    gatewayTask((client) =>
-      client.request(
-        "DELETE",
-        `/v1/connections/${encodeURIComponent(integration)}/${encodeURIComponent(connection)}`
-      )
-    ).pipe(Effect.flatMap((result) => {
+    runGateway((client) => client.disconnect({ integration, connection })).pipe(
+      Effect.flatMap((result) => {
       // The gateway resolves the name it actually removed, which may differ
       // from the one typed. Report that one.
       const removed = text(record(result)["connection"] ?? connection)
@@ -486,7 +498,7 @@ const disconnectCommand = Command.make(
  *  explicitly and fails if the target is not an address. */
 const looksLikeAddress = (value: string): boolean => value.startsWith("tools.")
 
-const executeCommand = Command.make(
+const operatorExecuteCommand = Command.make(
   "execute",
   {
     target: Argument.string("alias-or-address").pipe(
@@ -513,11 +525,11 @@ const executeCommand = Command.make(
   },
   ({ target, second, third, direct, file, verbose }) => {
     const isDirect = direct || looksLikeAddress(target)
-    return gatewayTask(async (client) => {
-      if (isDirect) {
+    const invocation = isDirect
+      ? controlPlaneTask(async (client) => {
         if (!looksLikeAddress(target)) {
           throw cliError(
-            `--direct expects a tools.<integration>.<owner>.<connection>.<tool> address, got "${target}". Copy one from: integrations schema <integration> <tool>`
+            `--direct expects a tools.<integration>.<owner>.<connection>.<tool> address, got "${target}". Copy one from: i schema <integration> <tool>`
           )
         }
         if (Option.isSome(third)) {
@@ -540,20 +552,22 @@ const executeCommand = Command.make(
           // handles both. The exit code still says it failed.
           return { status: "failed", message: describeError(error) } as const
         }
-      }
-      if (Option.isNone(second)) {
-        throw cliError("Provide an alias and a tool, or a tools.… address with --direct")
-      }
-      const payload = await readJsonArgument(
-        Option.getOrUndefined(third),
-        Option.getOrUndefined(file)
-      )
-      return await client.execute({
-        alias: target,
-        tool: second.value,
-        arguments: Schema.decodeUnknownSync(Schema.Json)(payload)
       })
-    }).pipe(Effect.flatMap((outcome) =>
+      : gatewayTask(async (client) => {
+        if (Option.isNone(second)) {
+          throw cliError("Provide an alias and a tool, or a tools.… address with --direct")
+        }
+        const payload = await readJsonArgument(
+          Option.getOrUndefined(third),
+          Option.getOrUndefined(file)
+        )
+        return await client.execute({
+          alias: target,
+          tool: second.value,
+          arguments: Schema.decodeUnknownSync(Schema.Json)(payload)
+        })
+      })
+    return invocation.pipe(Effect.flatMap((outcome) =>
       // Always whole JSON: this is the machine-facing result, and a document
       // cut mid-token is not a smaller answer, it is an unusable one.
       writeStdoutLine(
@@ -574,7 +588,52 @@ const executeCommand = Command.make(
   )
 )
 
-const validateCommand = Command.make(
+const clientExecuteCommand = Command.make(
+  "execute",
+  {
+    alias: Argument.string("alias").pipe(
+      Argument.withDescription("Granted alias")
+    ),
+    tool: Argument.string("tool").pipe(
+      Argument.withDescription("Granted tool name")
+    ),
+    json: Argument.string("json").pipe(
+      Argument.optional,
+      Argument.withDescription("Arguments as JSON (default: {})")
+    ),
+    file: Flag.string("file").pipe(
+      Flag.optional,
+      Flag.withDescription("Read the JSON input from a file")
+    ),
+    verbose: verboseFlag()
+  },
+  ({ alias, tool, json, file, verbose }) =>
+    gatewayTask(async (client) =>
+      await client.execute({
+        alias,
+        tool,
+        arguments: await readJsonArgument(
+          Option.getOrUndefined(json),
+          Option.getOrUndefined(file)
+        )
+      })
+    ).pipe(Effect.flatMap((outcome) =>
+      writeStdoutLine(
+        jsonOutput(Schema.decodeUnknownSync(Schema.Json)(outcome), verbose)
+      ).pipe(Effect.flatMap(() =>
+        outcome.status === "succeeded" || outcome.status === "pending"
+          ? Effect.void
+          : Effect.fail(cliError(
+            outcome.status === "denied" ? outcome.reason : outcome.message
+          ))
+      ))
+    ))
+).pipe(
+  Command.withAlias("invoke"),
+  Command.withDescription("Invoke a granted tool through an alias")
+)
+
+const validateCommand = (runGateway: GatewayTask) => Command.make(
   "validate",
   {
     config: Argument.string("json-or-tool-address").pipe(Argument.optional),
@@ -585,7 +644,7 @@ const validateCommand = Command.make(
     verbose: verboseFlag()
   },
   ({ config, file, structural, verbose }) =>
-    gatewayTask(async (client) => {
+    runGateway(async (client) => {
       const configText = Option.getOrUndefined(config)
       const filePath = Option.getOrUndefined(file)
       if ((configText === undefined) === (filePath === undefined)) {
@@ -596,7 +655,7 @@ const validateCommand = Command.make(
           ? JSON.stringify({ source: { kind: "executor", address: configText } })
           : configText ?? "{}"
         : await Bun.file(filePath).text()
-      return record(await client.request("POST", "/v1/validate", {
+      return record(await client.validate({
         node: decodeJsonText(source),
         // Whether it resolves is the question worth asking, so it is asked by
         // default, for every input form rather than only for a bare address.
@@ -623,7 +682,7 @@ const clientsCommand = Command.make(
   "clients",
   { limit: limitFlag(), offset: offsetFlag(), verbose: verboseFlag() },
   ({ limit, offset, verbose }) =>
-    gatewayTask((client) => client.request("GET", "/v1/clients")).pipe(
+    controlPlaneTask((client) => client.request("GET", "/v1/clients")).pipe(
       Effect.flatMap((result) => {
         const all = sortedBy(array(record(result)["clients"]), (entry) => text(entry["name"]))
         return listing(page(all, window(limit, offset)), {
@@ -641,16 +700,21 @@ const clientCommand = Command.make(
   "client",
   {
     name: Argument.string("name"),
-    mayMutate: Flag.boolean("may-mutate").pipe(
-      Flag.withDescription("Allow this client to change the catalog, connections, and grants")
+    administer: Flag.boolean("administer").pipe(
+      Flag.withDescription("Allow this client to administer clients, keys, grants, audit, and policy")
     )
   },
-  ({ name, mayMutate }) =>
-    gatewayTask((client) => client.request("POST", "/v1/clients", { name, mayMutate })).pipe(
+  ({ name, administer }) =>
+    controlPlaneTask((client) => client.request("POST", "/v1/clients", {
+      name,
+      capabilities: administer
+        ? ["provision_connections", "administer_gateway"]
+        : ["provision_connections"]
+    })).pipe(
       Effect.flatMap((result) => {
         const created = record(result)
         return writeStdoutLine(jsonOutput(
-          withNext(created, `integrations key ${text(created["id"])}`),
+          withNext(created, `ii key ${text(created["id"])}`),
           false
         ))
       })
@@ -661,7 +725,7 @@ const keyCommand = Command.make(
   "key",
   { clientId: Argument.string("client-id") },
   ({ clientId }) =>
-    gatewayTask((client) =>
+    controlPlaneTask((client) =>
       client.request("POST", `/v1/clients/${encodeURIComponent(clientId)}/keys`, {})
     ).pipe(Effect.flatMap((result) => {
       const issued = record(result)
@@ -680,7 +744,7 @@ const keysCommand = Command.make(
     verbose: verboseFlag()
   },
   ({ clientId, limit, offset, verbose }) =>
-    gatewayTask((client) =>
+    controlPlaneTask((client) =>
       client.request("GET", `/v1/clients/${encodeURIComponent(clientId)}/keys`)
     ).pipe(Effect.flatMap((result) => {
       const all = sortedBy(array(record(result)["keys"]), (key) => text(key["createdAt"]))
@@ -689,7 +753,7 @@ const keysCommand = Command.make(
         narrowing: "window with --limit/--offset",
         verbose,
         empty: "No keys issued.",
-        next: "integrations revoke key <key-id>",
+        next: "ii revoke key <key-id>",
         row: (key) => key
       })
     }))
@@ -710,7 +774,7 @@ const grantCommand = Command.make(
     )
   },
   (options) =>
-    gatewayTask((client) =>
+    controlPlaneTask((client) =>
       client.request("POST", "/v1/grants", {
         clientId: options.clientId,
         alias: options.alias,
@@ -727,51 +791,41 @@ const grantCommand = Command.make(
     ))
 ).pipe(Command.withDescription("Delegate one tool through one connection to one client"))
 
-const grantRow = (tool: GrantedTool) => ({
-  alias: tool.alias,
-  tool: tool.tool,
-  integration: tool.integration,
-  decision: tool.decision
-})
-
-const grantsCommand = Command.make(
+const operatorGrantsCommand = Command.make(
   "grants",
   {
     clientId: Argument.string("client-id").pipe(Argument.optional),
-    mine: Flag.boolean("mine").pipe(
-      Flag.withDescription("List what this key itself can reach, rather than another client's")
-    ),
     limit: limitFlag(),
     offset: offsetFlag(),
     verbose: verboseFlag()
   },
-  ({ clientId, mine, limit, offset, verbose }) =>
-    gatewayTask(async (client) => {
-      if (mine) {
-        if (Option.isSome(clientId)) {
-          throw cliError("--mine lists this key's own grants, so it takes no client id")
-        }
-        return (await client.tools()).map(grantRow)
-      }
-      if (Option.isNone(clientId)) {
-        throw cliError("Provide a client id, or --mine for this key's own grants")
-      }
-      return array(
-        record(
-          await client.request("GET", `/v1/grants?clientId=${encodeURIComponent(clientId.value)}`)
-        )["grants"]
-      )
-    }).pipe(Effect.flatMap((grants) => {
+  ({ clientId, limit, offset, verbose }) =>
+    Effect.gen(function* () {
+      const grants = Option.isNone(clientId)
+        ? yield* gatewayTask(async (client) =>
+          (await client.tools()).map((tool) => record({
+            alias: tool.alias,
+            tool: tool.tool,
+            integration: tool.integration,
+            decision: tool.decision
+          }))
+        )
+        : yield* controlPlaneTask(async (client) =>
+          array(record(await client.request(
+            "GET",
+            `/v1/grants?clientId=${encodeURIComponent(clientId.value)}`
+          ))["grants"])
+        )
       const all = sortedBy(grants, (grant) => `${text(grant["alias"])} ${text(grant["tool"])}`)
-      return listing(page(all, window(limit, offset)), {
+      yield* listing(page(all, window(limit, offset)), {
         key: "grants",
         narrowing: "window with --limit/--offset",
         verbose,
-        empty: mine ? "No granted tools." : "No grants.",
+        empty: "No grants.",
         row: (grant) => grant
       })
-    }))
-).pipe(Command.withDescription("List a client's grants, or this key's own with --mine"))
+    })
+).pipe(Command.withDescription("List this key's grants, or another client's by id"))
 
 const revokeCommand = Command.make(
   "revoke",
@@ -782,7 +836,7 @@ const revokeCommand = Command.make(
     id: Argument.string("id")
   },
   ({ kind, id }) =>
-    gatewayTask((client) =>
+    controlPlaneTask((client) =>
       client.request(
         "POST",
         kind === "grant"
@@ -813,7 +867,7 @@ const approvalsCommand = Command.make(
     verbose: verboseFlag()
   },
   ({ status, limit, offset, verbose }) =>
-    gatewayTask((client) =>
+    controlPlaneTask((client) =>
       client.request(
         "GET",
         Option.isNone(status) ? "/v1/approvals" : `/v1/approvals?status=${status.value}`
@@ -828,7 +882,7 @@ const approvalsCommand = Command.make(
         narrowing: "narrow with --status, or window with --limit/--offset",
         verbose,
         empty: "No approvals.",
-        next: "integrations approve <id>",
+        next: "ii approve <id>",
         row: (approval) => approval
       })
     }))
@@ -839,12 +893,39 @@ const approvalCommand = Command.make(
   { id: Argument.string("approval-id"), verbose: verboseFlag() },
   ({ id, verbose }) =>
     // Deliberately the delegated route: the caller that proposed a frozen call
-    // is the one that needs to watch it, and that caller holds no privileged
+    // is the one that needs to watch it, and that caller holds no administrative
     // key. Without this, `execute` hands back an id nothing can resolve.
     gatewayTask((client) => client.approval(id)).pipe(Effect.flatMap((approval) =>
       writeStdoutLine(jsonOutput(approval, verbose))
     ))
 ).pipe(Command.withDescription("Read one frozen invocation, as the caller that proposed it"))
+
+const ownGrantsCommand = Command.make(
+  "grants",
+  {
+    limit: limitFlag(),
+    offset: offsetFlag(),
+    verbose: verboseFlag()
+  },
+  ({ limit, offset, verbose }) =>
+    gatewayTask(async (client) => await client.tools()).pipe(
+      Effect.flatMap((tools) => {
+        const all = tools.map((tool) => ({
+          alias: tool.alias,
+          tool: tool.tool,
+          integration: tool.integration,
+          decision: tool.decision
+        }))
+        return listing(page(all, window(limit, offset)), {
+          key: "grants",
+          narrowing: "window with --limit/--offset",
+          verbose,
+          empty: "No granted tools.",
+          row: (grant) => grant
+        })
+      })
+    )
+).pipe(Command.withDescription("List the tools granted to this client key"))
 
 const approveCommand = Command.make(
   "approve",
@@ -854,7 +935,7 @@ const approveCommand = Command.make(
     verbose: verboseFlag()
   },
   ({ id, by, verbose }) =>
-    gatewayTask((client) =>
+    controlPlaneTask((client) =>
       client.request("POST", `/v1/approvals/${encodeURIComponent(id)}/approve`, {
         ...Option.match(by, { onNone: () => ({}), onSome: (value) => ({ decidedBy: value }) })
       })
@@ -874,7 +955,7 @@ const denyCommand = Command.make(
     verbose: verboseFlag()
   },
   ({ id, by, verbose }) =>
-    gatewayTask((client) =>
+    controlPlaneTask((client) =>
       client.request("POST", `/v1/approvals/${encodeURIComponent(id)}/deny`, {
         ...Option.match(by, { onNone: () => ({}), onSome: (value) => ({ decidedBy: value }) })
       })
@@ -905,7 +986,7 @@ const auditCommand = Command.make(
     verbose: verboseFlag()
   },
   (options) =>
-    gatewayTask((client) => {
+    controlPlaneTask((client) => {
       // The one listing read through a window rather than whole: the trail is
       // permanent, so "all of it" grows without bound. It is filtered and
       // windowed at the gateway rather than here for the same reason.
@@ -940,7 +1021,7 @@ const driftCommand = Command.make(
     verbose: verboseFlag()
   },
   ({ integration, limit, offset, verbose }) =>
-    gatewayTask((client) =>
+    controlPlaneTask((client) =>
       client.request(
         "POST",
         Option.isNone(integration)
@@ -981,7 +1062,7 @@ const driftCommand = Command.make(
   )
 )
 
-const codegenCommand = Command.make(
+const operatorCodegenCommand = Command.make(
   "codegen",
   {
     target: Flag.choice("target", ["effect", "ts"]).pipe(
@@ -999,21 +1080,70 @@ const codegenCommand = Command.make(
       Flag.withDescription("Write to a file instead of stdout")
     )
   },
-  ({ target, client: clientId, out }) =>
-    gatewayTask(async (client) => {
+  ({ target, client: clientId, out }) => {
       // Generated from grants, so the generated surface is the authorized
       // surface. Adding a tool here means adding a grant — for whichever client
       // is being provisioned, which is usually not the one running this.
       const forClient = Option.getOrUndefined(clientId)
-      const tools = forClient === undefined
-        ? await client.tools({ schemas: true })
-        : await client.clientTools(forClient, { schemas: true })
-      if (tools.length === 0) {
-        throw cliError(
-          forClient === undefined
-            ? "This key holds no grants, so there is nothing to generate. Generate for another client with --client <id>, or run: integrations grant <client-id> <alias> <tool> --integration <slug>"
-            : `Client ${forClient} holds no grants, so there is nothing to generate.`
+      const toolsTask = forClient === undefined
+        ? gatewayTask(async (client) => ({
+          tools: await client.tools({ schemas: true }),
+          url: client.url
+        }))
+        : controlPlaneTask(async (client) => ({
+          tools: Schema.decodeUnknownSync(GrantedToolsResponse)(await client.request(
+            "GET",
+            `/v1/clients/${encodeURIComponent(forClient)}/tools?schemas=true`
+          )).tools,
+          url: client.url
+        }))
+      return Effect.gen(function* () {
+        const resolved = yield* toolsTask
+        if (resolved.tools.length === 0) {
+          return yield* cliError(
+            forClient === undefined
+              ? "This key holds no grants, so there is nothing to generate."
+              : `Client ${forClient} holds no grants, so there is nothing to generate.`
+          )
+        }
+        const module_ = generateModule(
+          Schema.decodeUnknownSync(Schema.Literals(["ts", "effect"]))(target),
+          resolved.tools,
+          resolved.url
         )
+        const destination = Option.getOrUndefined(out)
+        if (destination === undefined) {
+          return yield* writeStdoutLine(module_)
+        }
+        yield* Effect.promise(async () => {
+          await Bun.write(destination, module_)
+        })
+        return yield* writeStdoutLine(
+          `Wrote ${destination} (${resolved.tools.length} tool(s))`
+        )
+      })
+  }
+).pipe(Command.withDescription("Generate typed bindings for the tools a key can reach"))
+
+const clientCodegenCommand = Command.make(
+  "codegen",
+  {
+    target: Flag.choice("target", ["effect", "ts"]).pipe(
+      Flag.withDefault("effect" as const),
+      Flag.withDescription(
+        "effect: Effect Schema plus integration() steps for wf. ts: typed calls over the client"
+      )
+    ),
+    out: Flag.string("out").pipe(
+      Flag.optional,
+      Flag.withDescription("Write to a file instead of stdout")
+    )
+  },
+  ({ target, out }) =>
+    gatewayTask(async (client) => {
+      const tools = await client.tools({ schemas: true })
+      if (tools.length === 0) {
+        throw cliError("This key holds no grants, so there is nothing to generate.")
       }
       const module_ = generateModule(
         Schema.decodeUnknownSync(Schema.Literals(["ts", "effect"]))(target),
@@ -1031,13 +1161,13 @@ const codegenCommand = Command.make(
         ? writeStdoutLine(result.module)
         : writeStdoutLine(`Wrote ${text(result.written)} (${result.tools} tool(s))`)
     ))
-).pipe(Command.withDescription("Generate typed bindings for the tools a key can reach"))
+).pipe(Command.withDescription("Generate typed bindings for this key's granted tools"))
 
 const maintenanceCommand = Command.make(
   "maintenance",
   {},
   () =>
-    gatewayTask((client) => client.request("POST", "/v1/maintenance", {})).pipe(
+    controlPlaneTask((client) => client.request("POST", "/v1/maintenance", {})).pipe(
       Effect.flatMap((result) => {
         const body = record(result)
         return writeStdoutLine(jsonOutput(body, false))
@@ -1049,30 +1179,49 @@ const maintenanceCommand = Command.make(
   )
 )
 
-export const integrationsSubcommands = [
-  discoverCommand,
-  searchCommand,
-  integrationsCommand,
-  toolsCommand,
-  schemaCommand,
-  connectCommand,
-  connectionsCommand,
-  disconnectCommand,
-  executeCommand,
-  validateCommand,
+export const clientSubcommands = [
+  discoverCommand(gatewayTask),
+  searchCommand(gatewayTask),
+  integrationsCommand(gatewayTask),
+  toolsCommand(gatewayTask),
+  schemaCommand(gatewayTask),
+  connectCommand(gatewayTask),
+  connectionsCommand(gatewayTask),
+  disconnectCommand(gatewayTask),
+  clientExecuteCommand,
+  validateCommand(gatewayTask),
+  approvalCommand,
+  ownGrantsCommand,
+  clientCodegenCommand
+] as const
+
+export const operatorClientSubcommands = [
+  discoverCommand(operatorGatewayTask),
+  searchCommand(operatorGatewayTask),
+  integrationsCommand(operatorGatewayTask),
+  toolsCommand(operatorGatewayTask),
+  schemaCommand(operatorGatewayTask),
+  connectCommand(operatorGatewayTask),
+  connectionsCommand(operatorGatewayTask),
+  disconnectCommand(operatorGatewayTask),
+  operatorExecuteCommand,
+  validateCommand(operatorGatewayTask),
+  approvalCommand,
+  operatorCodegenCommand
+] as const
+
+export const controlPlaneSubcommands = [
   clientsCommand,
   clientCommand,
   keyCommand,
   keysCommand,
   grantCommand,
-  grantsCommand,
+  operatorGrantsCommand,
   revokeCommand,
   approvalsCommand,
-  approvalCommand,
   approveCommand,
   denyCommand,
   auditCommand,
   driftCommand,
-  codegenCommand,
   maintenanceCommand
 ] as const

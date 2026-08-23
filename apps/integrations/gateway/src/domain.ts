@@ -134,20 +134,30 @@ export const connectionSubject = (connection: ConnectionRef): SubjectId | undefi
 
 // --- clients and keys -------------------------------------------------------
 
+export const ClientCapability = Schema.Literals([
+  "provision_connections",
+  "administer_gateway"
+])
+export type ClientCapability = typeof ClientCapability.Type
+
 export const Client = Schema.Struct({
   id: ClientId,
   /** The tenant this client belongs to. Every grant, key, and audit record the
    *  client produces resolves inside this partition. */
   tenantId: TenantId,
   name: Schema.String,
-  /** Whether this key may mutate the catalog, connections, grants, and policy.
-   *  A local development client has it; one issued to a sandbox does not, so a
-   *  prompt-injected agent cannot mint itself new capabilities. */
-  mayMutate: Schema.Boolean,
+  /** Non-invocation authority held by this client. Tool authority remains in
+   *  grants; these capabilities only govern provisioning and administration. */
+  capabilities: Schema.Array(ClientCapability),
   createdAt: Schema.Date,
   revokedAt: Schema.NullOr(Schema.Date)
 })
 export type Client = typeof Client.Type
+
+export const clientHasCapability = (
+  client: Client,
+  capability: ClientCapability
+): boolean => client.capabilities.includes(capability)
 
 export const ApiKey = Schema.Struct({
   id: ApiKeyId,

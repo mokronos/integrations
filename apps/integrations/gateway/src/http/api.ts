@@ -12,6 +12,7 @@ import {
   Alias,
   ApiKeyId,
   ApprovalId,
+  ClientCapability,
   ClientId,
   ConnectionName,
   GrantId,
@@ -87,7 +88,7 @@ const ConnectionRefBody = Schema.Union([
 
 const CreateClientBody = Schema.Struct({
   name: Schema.String,
-  mayMutate: Schema.optional(Schema.Boolean)
+  capabilities: Schema.optional(Schema.Array(ClientCapability))
 })
 
 const CreateGrantBody = Schema.Struct({
@@ -198,7 +199,7 @@ const validateGatewayNode = async (
     readonly store: GatewayStore
     readonly executor: Pick<ExecutorServices, "tools">
   },
-  clientId: ClientId,
+  clientId: ClientId | undefined,
   source: { readonly alias: string; readonly tool: string },
   live: boolean
 ): Promise<{
@@ -220,11 +221,19 @@ const validateGatewayNode = async (
   )
 
   if (aliasIsWellFormed && live) {
-    const grants = await dependencies.store.listGrants(clientId)
+    const grants = clientId === undefined
+      ? []
+      : await dependencies.store.listGrants(clientId)
     const grant = grants.find((candidate) =>
       candidate.alias === source.alias && candidate.tool === source.tool
     )
-    if (grant === undefined) {
+    if (clientId === undefined) {
+      findings.push({
+        severity: "error",
+        check: "grant",
+        message: "Gateway aliases are client-specific; validate this node with i and its client key"
+      })
+    } else if (grant === undefined) {
       findings.push({
         severity: "error",
         check: "grant",
@@ -343,11 +352,11 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
       }
     },
 
-    // --- privileged: catalog and connections --------------------------------
+    // --- provisioning: catalog and connections ------------------------------
     {
       method: "GET",
       path: "/v1/integrations",
-      access: "privileged",
+      access: "provisioning",
       handle: async () => ok({
         integrations: await executor.listIntegrationOverviews(),
         oauthCallbackUrl: dependencies.oauthCallbackUrl?.()
@@ -356,7 +365,7 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
     {
       method: "POST",
       path: "/v1/integrations/discover",
-      access: "privileged",
+      access: "provisioning",
       handle: async (request) => {
         const body = decodeBody(DiscoverBody, request.body)
         const result = await executor.provisioning.provision(
@@ -369,7 +378,7 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
     {
       method: "GET",
       path: "/v1/integrations/:slug/tools",
-      access: "privileged",
+      access: "provisioning",
       handle: async (request) => ok({
         tools: await executor.tools.summaries({ integration: request.params["slug"] ?? "" })
       })
@@ -377,7 +386,7 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
     {
       method: "GET",
       path: "/v1/integrations/:slug/tools/:tool",
-      access: "privileged",
+      access: "provisioning",
       handle: async (request) => {
         const connection = request.query.get("connection")
         const tool = await executor.tools.describe({
@@ -391,7 +400,7 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
     {
       method: "GET",
       path: "/v1/registry/search",
-      access: "privileged",
+      access: "provisioning",
       handle: async (request) => {
         const query = request.query.get("q")
         if (query === null) return badRequest("search requires a q query parameter")
@@ -413,10 +422,10 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
     {
       method: "POST",
       path: "/v1/tools/invoke",
-      access: "privileged",
+      access: "administrative",
       handle: async (request) => {
         const body = decodeBody(InvokeAddressBody, request.body)
-        // Privileged, and deliberately not grant-checked: a client that may
+        // Administrative, and deliberately not grant-checked: a client that may
         // mutate grants could grant itself this tool in one extra call, so a
         // check here would be friction rather than a control. The delegated
         // surface has no address form at all. See docs/adr/0002.
@@ -430,13 +439,16 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
     {
       method: "POST",
       path: "/v1/validate",
-      access: "privileged",
+      access: "provisioning",
       handle: async (request) => {
         const body = decodeBody(ValidateBody, request.body)
         if (isGatewayNode(body.node)) {
+          const clientId = request.identity.kind === "client" || request.identity.kind === "local"
+            ? request.identity.client.id
+            : undefined
           return ok(await validateGatewayNode(
             { store, executor },
-            clientOf(request).id,
+            clientId,
             decodeGatewayNode(body.node).source,
             body.live ?? true
           ))
@@ -447,13 +459,13 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
     {
       method: "GET",
       path: "/v1/connections",
-      access: "privileged",
+      access: "provisioning",
       handle: async () => ok({ connections: await executor.connections.list() })
     },
     {
       method: "POST",
       path: "/v1/connections",
-      access: "privileged",
+      access: "provisioning",
       handle: async (request) => {
         const body = decodeBody(ConnectBody, request.body)
         const integration = await executor.catalog.find(body.integration)
@@ -488,7 +500,7 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
     {
       method: "POST",
       path: "/v1/connections/oauth",
-      access: "privileged",
+      access: "provisioning",
       handle: async (request) => {
         const body = decodeBody(OAuthStartBody, request.body)
         const integration = await executor.catalog.find(body.integration)
@@ -517,7 +529,7 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
     {
       method: "GET",
       path: "/v1/connections/oauth/:id",
-      access: "privileged",
+      access: "provisioning",
       handle: async (request) => {
         const session = await oauth.get(request.params["id"] ?? "")
         if (session === undefined) return notFound("Unknown or expired OAuth session")
@@ -590,7 +602,7 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
     {
       method: "DELETE",
       path: "/v1/connections/:integration/:name",
-      access: "privileged",
+      access: "provisioning",
       handle: async (request) => {
         const integration = request.params["integration"] ?? ""
         const requested = request.params["name"] ?? ""
@@ -618,17 +630,17 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
       }
     },
 
-    // --- privileged: clients, keys, grants ----------------------------------
+    // --- administration: clients, keys, grants ------------------------------
     {
       method: "GET",
       path: "/v1/clients",
-      access: "privileged",
+      access: "administrative",
       handle: async (request) => ok({ clients: await store.listClients(tenantOf(request)) })
     },
     {
       method: "POST",
       path: "/v1/clients",
-      access: "privileged",
+      access: "administrative",
       handle: async (request) => {
         const body = decodeBody(CreateClientBody, request.body)
         if (await store.findClientByName(tenantOf(request), body.name) !== undefined) {
@@ -640,7 +652,7 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
           // to provision into another tenant over this surface, by design.
           tenantId: tenantOf(request),
           name: body.name,
-          mayMutate: body.mayMutate ?? false
+          capabilities: body.capabilities ?? ["provision_connections"]
         })
         return created(client)
       }
@@ -648,7 +660,7 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
     {
       method: "POST",
       path: "/v1/clients/:id/keys",
-      access: "privileged",
+      access: "administrative",
       handle: async (request) => {
         const clientId = ClientId.make(request.params["id"] ?? "")
         if (await store.findClientById(tenantOf(request), clientId) === undefined) {
@@ -663,7 +675,7 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
     {
       method: "GET",
       path: "/v1/clients/:id/keys",
-      access: "privileged",
+      access: "administrative",
       handle: async (request) => {
         const clientId = ClientId.make(request.params["id"] ?? "")
         if (await store.findClientById(tenantOf(request), clientId) === undefined) {
@@ -686,7 +698,7 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
     {
       method: "POST",
       path: "/v1/keys/:id/revoke",
-      access: "privileged",
+      access: "administrative",
       handle: async (request) => {
         const keyId = ApiKeyId.make(request.params["id"] ?? "")
         await store.revokeApiKey(keyId)
@@ -699,7 +711,7 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
     {
       method: "GET",
       path: "/v1/clients/:id/tools",
-      access: "privileged",
+      access: "administrative",
       handle: async (request) => {
         const clientId = ClientId.make(request.params["id"] ?? "")
         if (await store.findClientById(tenantOf(request), clientId) === undefined) {
@@ -719,7 +731,7 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
     {
       method: "POST",
       path: "/v1/clients/:id/revoke",
-      access: "privileged",
+      access: "administrative",
       handle: async (request) => {
         const clientId = ClientId.make(request.params["id"] ?? "")
         if (await store.findClientById(tenantOf(request), clientId) === undefined) {
@@ -735,7 +747,7 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
     {
       method: "GET",
       path: "/v1/grants",
-      access: "privileged",
+      access: "administrative",
       handle: async (request) => {
         const clientId = request.query.get("clientId")
         if (clientId === null) return badRequest("grants require a clientId query parameter")
@@ -745,7 +757,7 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
     {
       method: "POST",
       path: "/v1/grants",
-      access: "privileged",
+      access: "administrative",
       handle: async (request) => {
         const body = decodeBody(CreateGrantBody, request.body)
         const clientId = ClientId.make(body.clientId)
@@ -777,18 +789,18 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
     {
       method: "POST",
       path: "/v1/grants/:id/revoke",
-      access: "privileged",
+      access: "administrative",
       handle: async (request) => {
         await store.revokeGrant(tenantOf(request), GrantId.make(request.params["id"] ?? ""))
         return ok({ revoked: true })
       }
     },
 
-    // --- privileged: approvals, audit ---------------------------------------
+    // --- administration and human decisions: approvals, audit ---------------
     {
       method: "GET",
       path: "/v1/approvals",
-      access: "privileged",
+      access: "administrative",
       handle: async (request) => {
         const status = request.query.get("status")
         return ok({
@@ -806,7 +818,7 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
     {
       method: "POST",
       path: "/v1/approvals/:id/approve",
-      access: "privileged",
+      access: "human",
       handle: async (request) => {
         const body = decodeBody(DecideApprovalBody, request.body ?? {})
         const id = ApprovalId.make(request.params["id"] ?? "")
@@ -870,7 +882,7 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
     {
       method: "POST",
       path: "/v1/approvals/:id/deny",
-      access: "privileged",
+      access: "human",
       handle: async (request) => {
         const body = decodeBody(DecideApprovalBody, request.body ?? {})
         const id = ApprovalId.make(request.params["id"] ?? "")
@@ -890,7 +902,7 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
     {
       method: "POST",
       path: "/v1/drift/refresh",
-      access: "privileged",
+      access: "administrative",
       handle: async (request) => {
         const slug = request.query.get("integration")
         const integrations = slug === null
@@ -910,13 +922,13 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
     {
       method: "POST",
       path: "/v1/maintenance",
-      access: "privileged",
+      access: "administrative",
       handle: async () => ok(await runMaintenance(store))
     },
     {
       method: "GET",
       path: "/v1/audit",
-      access: "privileged",
+      access: "administrative",
       handle: async (request) => {
         const since = request.query.get("since")
         const sinceDate = since === null ? undefined : new Date(since)

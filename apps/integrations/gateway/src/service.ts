@@ -30,7 +30,7 @@ import {
 import { Effect, Layer, ManagedRuntime } from "effect"
 import { createRequestTracer } from "@mokronos/integrations-observability"
 
-/** The client the local machine uses. Created on first start with mayMutate so
+/** The client the local machine uses. Created with both client capabilities so
  *  an agent authoring workflows can discover and connect, with the human needed
  *  only for the one auth step. Keys issued to sandboxes do not get this. */
 export const localClientName = "local"
@@ -228,7 +228,7 @@ export const ensureLocalCredential = async (
     id: newClientId(),
     tenantId: defaultTenantId,
     name: localClientName,
-    mayMutate: true
+    capabilities: ["provision_connections", "administer_gateway"]
   })
   const key = generateApiKey()
   await service.store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })

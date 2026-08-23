@@ -249,7 +249,16 @@ export const Me = Schema.Union([
     kind: Schema.Literal("client"),
     clientId: Schema.String,
     tenantId: Schema.String,
-    mayMutate: Schema.Boolean
+    capabilities: Schema.Array(Schema.Literals([
+      "provision_connections",
+      "administer_gateway"
+    ]))
+  }),
+  Schema.Struct({
+    authenticated: Schema.Literal(true),
+    kind: Schema.Literal("local"),
+    clientId: Schema.String,
+    tenantId: Schema.String
   }),
   Schema.Struct({
     authenticated: Schema.Literal(false)

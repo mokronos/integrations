@@ -7,7 +7,8 @@ import { serveGateway } from "@mokronos/integrations"
 import type { RunningGateway } from "@mokronos/integrations"
 
 const repoRoot = path.resolve(import.meta.dir, "../../../..")
-const integrationsCli = path.join(repoRoot, "apps", "integrations", "cli", "src", "main.ts")
+const agentCli = path.join(repoRoot, "apps", "integrations", "cli", "src", "agent.ts")
+const operatorCli = path.join(repoRoot, "apps", "integrations", "cli", "src", "main.ts")
 
 const servers: Array<ReturnType<typeof Bun.serve>> = []
 const gateways: Array<RunningGateway> = []
@@ -62,6 +63,10 @@ const KeysOutput = Schema.Struct({
     id: Schema.String,
     revokedAt: Schema.NullOr(Schema.String)
   }))
+})
+const AuthenticationOutput = Schema.Struct({
+  authenticated: Schema.Boolean,
+  email: Schema.optional(Schema.String)
 })
 
 const directories: Array<string> = []
@@ -211,14 +216,51 @@ const startGateway = async (registryUrl?: string) => {
   }
 }
 
+const loginOperator = async (
+  gateway: Awaited<ReturnType<typeof startGateway>>
+): Promise<void> => {
+  const signedUp = await run(operatorCli, [
+    "signup",
+    "--password",
+    "correct horse battery",
+    "operator@example.com"
+  ], gateway.environment)
+  expect(signedUp.exitCode, signedUp.stderr).toBe(0)
+}
+
 describe("integrations CLI acceptance", () => {
+  test("ii signs a human out and back in without an API key", async () => {
+    const gateway = await startGateway()
+    await loginOperator(gateway)
+    const environment = { ...gateway.environment, INTEGRATIONS_API_KEY: undefined }
+    const operator = (args: ReadonlyArray<string>) => run(operatorCli, args, environment)
+
+    const signedIn = parseOutput(AuthenticationOutput, (await operator(["whoami"])).stdout)
+    expect(signedIn).toEqual({ authenticated: true, email: "operator@example.com" })
+
+    const logout = await operator(["logout"])
+    expect(logout.exitCode, logout.stderr).toBe(0)
+    const signedOut = parseOutput(AuthenticationOutput, (await operator(["whoami"])).stdout)
+    expect(signedOut).toEqual({ authenticated: false })
+
+    const login = await operator([
+      "login",
+      "--password",
+      "correct horse battery",
+      "operator@example.com"
+    ])
+    expect(login.exitCode, login.stderr).toBe(0)
+    const signedInAgain = parseOutput(AuthenticationOutput, (await operator(["whoami"])).stdout)
+    expect(signedInAgain).toEqual({ authenticated: true, email: "operator@example.com" })
+  }, 30_000)
+
   test(
     "an agent searches, discovers, connects, inspects, and invokes a connection — all through the gateway",
     async () => {
       const vendor = startVendor()
       const gateway = await startGateway(vendor.registryUrl)
       const integrations = (args: ReadonlyArray<string>) =>
-        run(integrationsCli, args, gateway.environment)
+        run(agentCli, args, gateway.environment)
 
       const searched = await integrations(["search", "acceptance tickets"])
       expect(searched.exitCode, searched.stderr).toBe(0)
@@ -247,7 +289,7 @@ describe("integrations CLI acceptance", () => {
       )
       const slug = discoveredBody.integration.slug
       // Listings tell an agent what to do next rather than making it guess.
-      expect(discoveredBody.next).toBe(`integrations connect ${slug}`)
+      expect(discoveredBody.next).toBe(`i connect ${slug}`)
 
       const connected = await integrations([
         "connect",
@@ -272,18 +314,10 @@ describe("integrations CLI acceptance", () => {
       const address = listed.connections[0]?.address ?? ""
       expect(address).toStartWith(`tools.${slug}.org.`)
 
-      // invoke is privileged and takes an address: this is how an agent proves a
-      // connection works right after making it.
-      const invoked = await integrations([
-        "invoke",
-        `${address}.tickets.create`,
-        JSON.stringify({ body: { title: "Direct" } })
-      ])
-      expect(invoked.exitCode, invoked.stderr).toBe(0)
-      expect(invoked.stdout).toContain("T-1")
-      expect(vendor.invocations()).toBe(1)
-      // The gateway injected the credential; the caller never saw it.
-      expect(vendor.seenKeys()).toEqual(["acceptance-secret"])
+      // Direct-address invocation is deliberately absent from the agent CLI.
+      const direct = await integrations(["execute", "--direct", `${address}.tickets.create`])
+      expect(direct.exitCode).not.toBe(0)
+      expect(vendor.invocations()).toBe(0)
     },
     30_000
   )
@@ -291,37 +325,41 @@ describe("integrations CLI acceptance", () => {
   test("a delegated key reaches only what it was granted", async () => {
     const vendor = startVendor()
     const gateway = await startGateway()
-    const integrations = (args: ReadonlyArray<string>, environment = gateway.environment) =>
-      run(integrationsCli, args, environment)
+    await loginOperator(gateway)
+    const clientCli = (args: ReadonlyArray<string>, environment = gateway.environment) =>
+      run(agentCli, args, environment)
+    const operator = (args: ReadonlyArray<string>) =>
+      run(operatorCli, args, { ...gateway.environment, INTEGRATIONS_API_KEY: undefined })
 
-    const discovered = parseOutput(DiscoveredOutput, (await integrations(["discover", vendor.specUrl])).stdout)
+    const discovered = parseOutput(DiscoveredOutput, (await clientCli(["discover", vendor.specUrl])).stdout)
     const slug = discovered.integration.slug
-    await integrations(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
+    await clientCli(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
+    const operatorCatalog = await operator(["integrations"])
+    expect(operatorCatalog.exitCode, operatorCatalog.stderr).toBe(0)
 
-    const client = parseOutput(IdOutput, (await integrations(["client", "sandbox"])).stdout)
-    const key = parseOutput(SecretOutput, (await integrations(["key", client.id])).stdout)
+    const client = parseOutput(IdOutput, (await operator(["client", "sandbox"])).stdout)
+    const key = parseOutput(SecretOutput, (await operator(["key", client.id])).stdout)
     const sandbox = {
       ...gateway.environment,
       INTEGRATIONS_API_KEY: key.secret
     }
 
     // Nothing granted yet.
-    const beforeGrant = await integrations(["grants", "--mine"], sandbox)
+    const beforeGrant = await clientCli(["grants"], sandbox)
     expect(beforeGrant.exitCode, beforeGrant.stderr).toBe(0)
     expect(JSON.parse(beforeGrant.stdout)).toEqual({ grants: [], count: 0 })
 
     // A sandbox key cannot mint capabilities for itself.
-    const escalation = await integrations(["client", "escalated"], sandbox)
+    const escalation = await clientCli(["client", "escalated"], sandbox)
     expect(escalation.exitCode).toBe(1)
     // Says what was refused and what would fix it, because a capability
     // refusal is fixed with a different key rather than a different request.
-    expect(escalation.stderr).toContain("may not change")
-    expect(escalation.stderr).toContain("may mutate")
+    expect(escalation.stderr).toContain("Unknown subcommand")
 
-    const discoverAttempt = await integrations(["discover", vendor.specUrl], sandbox)
-    expect(discoverAttempt.exitCode).toBe(1)
+    const discoverAttempt = await clientCli(["discover", vendor.specUrl], sandbox)
+    expect(discoverAttempt.exitCode, discoverAttempt.stderr).toBe(0)
 
-    await integrations([
+    await operator([
       "grant",
       client.id,
       "tickets",
@@ -330,12 +368,12 @@ describe("integrations CLI acceptance", () => {
       slug
     ])
 
-    const afterGrant = parseOutput(GrantsOutput, (await integrations(["grants", "--mine"], sandbox)).stdout)
+    const afterGrant = parseOutput(GrantsOutput, (await clientCli(["grants"], sandbox)).stdout)
     expect(afterGrant.grants).toEqual([
       { alias: "tickets", tool: "tickets.create", integration: slug, decision: "allow" }
     ])
 
-    const executed = await integrations([
+    const executed = await clientCli([
       "execute",
       "tickets",
       "tickets.create",
@@ -346,7 +384,7 @@ describe("integrations CLI acceptance", () => {
     expect(vendor.seenKeys()).toEqual(["acceptance-secret"])
 
     // An ungranted tool on a granted alias is refused.
-    const refused = await integrations([
+    const refused = await clientCli([
       "execute",
       "tickets",
       "tickets.delete",
@@ -358,15 +396,18 @@ describe("integrations CLI acceptance", () => {
   test("a require-approval grant freezes the call until a human decides", async () => {
     const vendor = startVendor()
     const gateway = await startGateway()
-    const integrations = (args: ReadonlyArray<string>, environment = gateway.environment) =>
-      run(integrationsCli, args, environment)
+    await loginOperator(gateway)
+    const clientCli = (args: ReadonlyArray<string>, environment = gateway.environment) =>
+      run(agentCli, args, environment)
+    const operator = (args: ReadonlyArray<string>) =>
+      run(operatorCli, args, { ...gateway.environment, INTEGRATIONS_API_KEY: undefined })
 
-    const discovered = parseOutput(DiscoveredOutput, (await integrations(["discover", vendor.specUrl])).stdout)
+    const discovered = parseOutput(DiscoveredOutput, (await clientCli(["discover", vendor.specUrl])).stdout)
     const slug = discovered.integration.slug
-    await integrations(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
-    const client = parseOutput(IdOutput, (await integrations(["client", "sales"])).stdout)
-    const key = parseOutput(SecretOutput, (await integrations(["key", client.id])).stdout)
-    await integrations([
+    await clientCli(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
+    const client = parseOutput(IdOutput, (await operator(["client", "sales"])).stdout)
+    const key = parseOutput(SecretOutput, (await operator(["key", client.id])).stdout)
+    await operator([
       "grant",
       client.id,
       "tickets",
@@ -376,7 +417,7 @@ describe("integrations CLI acceptance", () => {
       "--require-approval"
     ])
 
-    const frozen = parseOutput(FrozenOutput, (await integrations([
+    const frozen = parseOutput(FrozenOutput, (await clientCli([
       "execute",
       "tickets",
       "tickets.create",
@@ -386,29 +427,32 @@ describe("integrations CLI acceptance", () => {
     expect(frozen.status).toBe("pending")
     expect(vendor.invocations()).toBe(0)
 
-    const approved = await integrations(["approve", frozen.approvalId, "--by", "sebastian"])
+    const approved = await operator(["approve", frozen.approvalId, "--by", "sebastian"])
     expect(approved.exitCode, approved.stderr).toBe(0)
     // The gateway performed the frozen call itself.
     expect(vendor.invocations()).toBe(1)
 
-    const audit = parseOutput(AuditOutput, (await integrations(["audit"])).stdout)
+    const audit = parseOutput(AuditOutput, (await operator(["audit"])).stdout)
     expect(audit.records.map((entry) => entry.outcome)).toContain("succeeded")
   }, 30_000)
 
   test("every result is JSON a reader can parse, whole", async () => {
     const vendor = startVendor()
     const gateway = await startGateway()
-    const integrations = (args: ReadonlyArray<string>, environment = gateway.environment) =>
-      run(integrationsCli, args, environment)
+    await loginOperator(gateway)
+    const clientCli = (args: ReadonlyArray<string>, environment = gateway.environment) =>
+      run(agentCli, args, environment)
+    const operator = (args: ReadonlyArray<string>) =>
+      run(operatorCli, args, { ...gateway.environment, INTEGRATIONS_API_KEY: undefined })
 
-    const discovered = parseOutput(DiscoveredOutput, (await integrations(["discover", vendor.specUrl])).stdout)
+    const discovered = parseOutput(DiscoveredOutput, (await clientCli(["discover", vendor.specUrl])).stdout)
     const slug = discovered.integration.slug
-    await integrations(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
+    await clientCli(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
 
     // A tool result is the machine-facing payload. Cutting the document to
     // save tokens does not make it a smaller answer, it makes it unusable, so
     // the default output has to parse.
-    const direct = await integrations([
+    const direct = await operator([
       "execute",
       "--direct",
       `tools.${slug}.org.default.tickets.create`,
@@ -420,7 +464,7 @@ describe("integrations CLI acceptance", () => {
     expect(outcome.result.title).toHaveLength(2000)
 
     // The previous name for the same thing still resolves.
-    const aliased = await integrations([
+    const aliased = await operator([
       "invoke",
       `tools.${slug}.org.default.tickets.create`,
       JSON.stringify({ body: { title: "Through the old name" } })
@@ -430,9 +474,9 @@ describe("integrations CLI acceptance", () => {
 
     // A refusal is an answer, and it arrives as one: parseable, with a
     // non-zero exit code to say which answer it was.
-    const client = parseOutput(IdOutput, (await integrations(["client", "sandbox"])).stdout)
-    const key = parseOutput(SecretOutput, (await integrations(["key", client.id])).stdout)
-    const refused = await integrations(
+    const client = parseOutput(IdOutput, (await operator(["client", "sandbox"])).stdout)
+    const key = parseOutput(SecretOutput, (await operator(["key", client.id])).stdout)
+    const refused = await clientCli(
       ["execute", "nothing", "tickets.create", "{}"],
       { ...gateway.environment, INTEGRATIONS_API_KEY: key.secret }
     )
@@ -444,7 +488,7 @@ describe("integrations CLI acceptance", () => {
     const vendor = startVendor()
     const gateway = await startGateway()
     const integrations = (args: ReadonlyArray<string>) =>
-      run(integrationsCli, args, gateway.environment)
+      run(agentCli, args, gateway.environment)
 
     const discovered = parseOutput(DiscoveredOutput, (await integrations(["discover", vendor.specUrl])).stdout)
     const slug = discovered.integration.slug
@@ -471,16 +515,19 @@ describe("integrations CLI acceptance", () => {
   test("a grant can be revoked, and a key listed and revoked, from the CLI", async () => {
     const vendor = startVendor()
     const gateway = await startGateway()
-    const integrations = (args: ReadonlyArray<string>, environment = gateway.environment) =>
-      run(integrationsCli, args, environment)
+    await loginOperator(gateway)
+    const clientCli = (args: ReadonlyArray<string>, environment = gateway.environment) =>
+      run(agentCli, args, environment)
+    const operator = (args: ReadonlyArray<string>) =>
+      run(operatorCli, args, { ...gateway.environment, INTEGRATIONS_API_KEY: undefined })
 
-    const discovered = parseOutput(DiscoveredOutput, (await integrations(["discover", vendor.specUrl])).stdout)
+    const discovered = parseOutput(DiscoveredOutput, (await clientCli(["discover", vendor.specUrl])).stdout)
     const slug = discovered.integration.slug
-    await integrations(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
-    const client = parseOutput(IdOutput, (await integrations(["client", "sandbox"])).stdout)
-    const key = parseOutput(KeyOutput, (await integrations(["key", client.id])).stdout)
+    await clientCli(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
+    const client = parseOutput(IdOutput, (await operator(["client", "sandbox"])).stdout)
+    const key = parseOutput(KeyOutput, (await operator(["key", client.id])).stdout)
     const sandbox = { ...gateway.environment, INTEGRATIONS_API_KEY: key.secret }
-    const grant = parseOutput(IdOutput, (await integrations([
+    const grant = parseOutput(IdOutput, (await operator([
       "grant",
       client.id,
       "tickets",
@@ -489,18 +536,18 @@ describe("integrations CLI acceptance", () => {
       slug
     ])).stdout)
 
-    const keys = parseOutput(KeysOutput, (await integrations(["keys", client.id])).stdout)
+    const keys = parseOutput(KeysOutput, (await operator(["keys", client.id])).stdout)
     expect(keys.keys.map((entry) => entry.id)).toEqual([key.id])
 
     // Undoing a delegation was the one thing the CLI could not do.
-    const revokedGrant = await integrations(["revoke", "grant", grant.id])
+    const revokedGrant = await operator(["revoke", "grant", grant.id])
     expect(revokedGrant.exitCode, revokedGrant.stderr).toBe(0)
-    const afterRevoke = parseOutput(GrantCountOutput, (await integrations(["grants", "--mine"], sandbox)).stdout)
+    const afterRevoke = parseOutput(GrantCountOutput, (await clientCli(["grants"], sandbox)).stdout)
     expect(afterRevoke.grants).toEqual([])
 
-    const revokedKey = await integrations(["revoke", "key", key.id])
+    const revokedKey = await operator(["revoke", "key", key.id])
     expect(revokedKey.exitCode, revokedKey.stderr).toBe(0)
-    const withRevokedKey = await integrations(["grants", "--mine"], sandbox)
+    const withRevokedKey = await clientCli(["grants"], sandbox)
     expect(withRevokedKey.exitCode).toBe(1)
   }, 40_000)
 })

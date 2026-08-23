@@ -141,7 +141,7 @@ const stubExecutor = (behaviour: {
 
 const setup = async (options: {
   readonly decision?: "allow" | "require_approval"
-  readonly mayMutate?: boolean
+  readonly capabilities?: ReadonlyArray<"provision_connections" | "administer_gateway">
   readonly fail?: boolean
   readonly connections?: ReadonlyArray<{ readonly integration: string; readonly name: string }>
   readonly tools?: ReadonlyArray<{ readonly address: string; readonly name: string }>
@@ -155,7 +155,7 @@ const setup = async (options: {
     id: newClientId(),
     tenantId: defaultTenantId,
     name: "support-agent",
-    mayMutate: options.mayMutate ?? false
+    capabilities: options.capabilities ?? ["provision_connections"]
   })
   const key = generateApiKey()
   await store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
@@ -193,17 +193,28 @@ const setup = async (options: {
   const call = async (
     method: string,
     pathname: string,
-    init: { readonly body?: unknown; readonly secret?: string | null } = {}
+    init: {
+      readonly body?: unknown
+      readonly secret?: string | null
+      readonly local?: boolean
+    } = {}
   ) => {
-    const secret = init.secret === undefined ? key.secret : init.secret
+    const secret = init.local === true
+      ? null
+      : init.secret === undefined
+      ? key.secret
+      : init.secret
     const headers = secret === null
       ? { "content-type": "application/json" }
       : { "content-type": "application/json", authorization: `Bearer ${secret}` }
-    const response = await handle(new Request(`http://gateway.test${pathname}`, {
-      method,
-      headers,
-      ...whenPresent("body", JSON.stringify(init.body))
-    }))
+    const response = await handle(
+      new Request(`http://gateway.test${pathname}`, {
+        method,
+        headers,
+        ...whenPresent("body", JSON.stringify(init.body))
+      }),
+      init.local === true ? { localSecret: key.secret } : undefined
+    )
     return {
       status: response.status,
       body: Schema.decodeUnknownSync(JsonBody)(await response.json())
@@ -304,13 +315,19 @@ describe("gateway http surface", () => {
     expect(response.status).toBe(400)
   })
 
-  test("refuses privileged routes to a key that may not mutate", async () => {
-    const { call } = await setup({ mayMutate: false })
+  test("provisioning does not imply gateway administration", async () => {
+    const { call } = await setup({ capabilities: ["provision_connections"] })
 
     for (const [method, route] of [
       ["GET", "/v1/integrations"],
       ["POST", "/v1/integrations/discover"],
-      ["GET", "/v1/connections"],
+      ["GET", "/v1/connections"]
+    ] as const) {
+      const response = await call(method, route, { body: {} })
+      expect(`${route} -> ${response.status}`).not.toBe(`${route} -> 403`)
+    }
+
+    for (const [method, route] of [
       ["GET", "/v1/clients"],
       ["POST", "/v1/clients"],
       ["GET", "/v1/grants?clientId=x"],
@@ -323,8 +340,8 @@ describe("gateway http surface", () => {
     }
   })
 
-  test("permits the same routes to a key that may mutate", async () => {
-    const { call } = await setup({ mayMutate: true })
+  test("permits administrative routes to a key with the administration capability", async () => {
+    const { call } = await setup({ capabilities: ["provision_connections", "administer_gateway"] })
     expect((await call("GET", "/v1/integrations")).status).toBe(200)
     expect((await call("GET", "/v1/clients")).status).toBe(200)
     expect((await call("GET", "/v1/audit")).status).toBe(200)
@@ -341,7 +358,7 @@ describe("gateway http surface", () => {
       id: newClientId(),
       tenantId: defaultTenantId,
       name: "someone-else",
-      mayMutate: false
+      capabilities: ["provision_connections"]
     })
     const otherKey = generateApiKey()
     await store.addApiKey({ id: otherKey.id, clientId: other.id, hash: otherKey.hash })
@@ -354,7 +371,7 @@ describe("gateway http surface", () => {
   })
 
   test("issues a key exactly once and never returns it again", async () => {
-    const { call, store } = await setup({ mayMutate: true })
+    const { call, store } = await setup({ capabilities: ["provision_connections", "administer_gateway"] })
     const clientResponse = await call("POST", "/v1/clients", { body: { name: "sandbox" } })
     expect(clientResponse.status).toBe(201)
     const clientId = ClientId.make(String(clientResponse.body["id"]))
@@ -368,14 +385,14 @@ describe("gateway http surface", () => {
     expect(JSON.stringify(stored)).not.toContain(secret)
   })
 
-  test("a new client defaults to not being able to mutate", async () => {
-    const { call } = await setup({ mayMutate: true })
+  test("a new client defaults to provisioning without administration", async () => {
+    const { call } = await setup({ capabilities: ["provision_connections", "administer_gateway"] })
     const response = await call("POST", "/v1/clients", { body: { name: "sandbox" } })
-    expect(response.body["mayMutate"]).toBe(false)
+    expect(response.body["capabilities"]).toEqual(["provision_connections"])
   })
 
   test("revoking a client through the API cancels its frozen calls", async () => {
-    const { call, client } = await setup({ decision: "require_approval", mayMutate: true })
+    const { call, client } = await setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })
     await call("POST", "/v1/execute", { body: { alias: "gmail-work", tool: "sendEmail" } })
 
     const response = await call("POST", `/v1/clients/${client.id}/revoke`, { body: {} })
@@ -386,8 +403,30 @@ describe("gateway http surface", () => {
 })
 
 describe("gateway approval settlement", () => {
+  test("an administrative API key cannot make a human approval decision", async () => {
+    const { call, calls } = await setup({
+      decision: "require_approval",
+      capabilities: ["provision_connections", "administer_gateway"]
+    })
+    const frozen = await call("POST", "/v1/execute", {
+      body: { alias: "gmail-work", tool: "sendEmail" }
+    })
+    const approvalId = String(frozen.body["approvalId"])
+
+    const approved = await call("POST", `/v1/approvals/${approvalId}/approve`, {
+      body: { decidedBy: "api-key" }
+    })
+    const denied = await call("POST", `/v1/approvals/${approvalId}/deny`, {
+      body: { decidedBy: "api-key" }
+    })
+
+    expect(approved.status).toBe(403)
+    expect(denied.status).toBe(403)
+    expect(calls).toHaveLength(0)
+  })
+
   test("the gateway performs the call itself once approved", async () => {
-    const { call, calls } = await setup({ decision: "require_approval", mayMutate: true })
+    const { call, calls } = await setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })
     const frozen = await call("POST", "/v1/execute", {
       body: { alias: "gmail-work", tool: "sendEmail", arguments: { to: "a@b.c" } }
     })
@@ -395,7 +434,8 @@ describe("gateway approval settlement", () => {
     expect(calls).toHaveLength(0)
 
     const approved = await call("POST", `/v1/approvals/${approvalId}/approve`, {
-      body: { decidedBy: "sebastian" }
+      body: { decidedBy: "sebastian" },
+      local: true
     })
 
     expect(approved.status).toBe(200)
@@ -406,20 +446,28 @@ describe("gateway approval settlement", () => {
   })
 
   test("refuses to approve twice", async () => {
-    const { call } = await setup({ decision: "require_approval", mayMutate: true })
+    const { call } = await setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })
     const frozen = await call("POST", "/v1/execute", {
       body: { alias: "gmail-work", tool: "sendEmail" }
     })
     const approvalId = String(frozen.body["approvalId"])
 
-    expect((await call("POST", `/v1/approvals/${approvalId}/approve`, { body: {} })).status).toBe(200)
-    expect((await call("POST", `/v1/approvals/${approvalId}/approve`, { body: {} })).status).toBe(400)
+    expect((await call(
+      "POST",
+      `/v1/approvals/${approvalId}/approve`,
+      { body: {}, local: true }
+    )).status).toBe(200)
+    expect((await call(
+      "POST",
+      `/v1/approvals/${approvalId}/approve`,
+      { body: {}, local: true }
+    )).status).toBe(400)
   })
 
   test("refuses to approve a call whose grant was revoked while frozen", async () => {
     const { call, store, grant, calls } = await setup({
       decision: "require_approval",
-      mayMutate: true
+      capabilities: ["provision_connections", "administer_gateway"]
     })
     const frozen = await call("POST", "/v1/execute", {
       body: { alias: "gmail-work", tool: "sendEmail" }
@@ -427,21 +475,26 @@ describe("gateway approval settlement", () => {
     const approvalId = String(frozen.body["approvalId"])
 
     await store.revokeGrant(defaultTenantId, grant.id)
-    const approved = await call("POST", `/v1/approvals/${approvalId}/approve`, { body: {} })
+    const approved = await call(
+      "POST",
+      `/v1/approvals/${approvalId}/approve`,
+      { body: {}, local: true }
+    )
 
     expect(approved.status).toBe(400)
     expect(calls).toHaveLength(0)
   })
 
   test("denying settles without performing the call", async () => {
-    const { call, calls } = await setup({ decision: "require_approval", mayMutate: true })
+    const { call, calls } = await setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })
     const frozen = await call("POST", "/v1/execute", {
       body: { alias: "gmail-work", tool: "sendEmail" }
     })
     const approvalId = String(frozen.body["approvalId"])
 
     const denied = await call("POST", `/v1/approvals/${approvalId}/deny`, {
-      body: { decidedBy: "sebastian" }
+      body: { decidedBy: "sebastian" },
+      local: true
     })
 
     expect(denied.status).toBe(200)
@@ -458,7 +511,7 @@ describe("frozen calls and retries", () => {
   })
 
   test("a retry meets the frozen call it already proposed", async () => {
-    const { call, store } = await setup({ decision: "require_approval", mayMutate: true })
+    const { call, store } = await setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })
 
     const first = await send(call)
     const second = await send(call)
@@ -475,7 +528,7 @@ describe("frozen calls and retries", () => {
   })
 
   test("different arguments are a different frozen call", async () => {
-    const { call, store } = await setup({ decision: "require_approval", mayMutate: true })
+    const { call, store } = await setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })
 
     const first = await send(call, { to: "a@b.c" })
     const second = await send(call, { to: "someone-else@b.c" })
@@ -485,10 +538,13 @@ describe("frozen calls and retries", () => {
   })
 
   test("the retry after approval collects the result exactly once", async () => {
-    const { call, store, calls } = await setup({ decision: "require_approval", mayMutate: true })
+    const { call, store, calls } = await setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })
     const frozen = await send(call)
     const approvalId = String(frozen.body["approvalId"])
-    await call("POST", `/v1/approvals/${approvalId}/approve`, { body: {} })
+    await call("POST", `/v1/approvals/${approvalId}/approve`, {
+      body: {},
+      local: true
+    })
     // The gateway performed it at approval time, not on the caller's behalf.
     expect(calls).toHaveLength(1)
 
@@ -506,10 +562,13 @@ describe("frozen calls and retries", () => {
   })
 
   test("a denial is delivered to the caller rather than left pending forever", async () => {
-    const { call } = await setup({ decision: "require_approval", mayMutate: true })
+    const { call } = await setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })
     const frozen = await send(call)
     const approvalId = String(frozen.body["approvalId"])
-    await call("POST", `/v1/approvals/${approvalId}/deny`, { body: { decidedBy: "sebastian" } })
+    await call("POST", `/v1/approvals/${approvalId}/deny`, {
+      body: { decidedBy: "sebastian" },
+      local: true
+    })
 
     const collected = await send(call)
 
@@ -518,7 +577,7 @@ describe("frozen calls and retries", () => {
     expect(String(collected.body["reason"])).toContain("sebastian")
   })
 
-  test("the caller can read its own frozen call without a privileged key", async () => {
+  test("the caller can read its own frozen call without an administrative key", async () => {
     const { call } = await setup({ decision: "require_approval" })
     const frozen = await send(call)
 
@@ -533,7 +592,7 @@ describe("frozen calls and retries", () => {
 describe("provisioning surface", () => {
   test("validates the node shape a workflow actually authors", async () => {
     const { call } = await setup({
-      mayMutate: true,
+      capabilities: ["provision_connections", "administer_gateway"],
       tools: [{ address: "tools.gmail.user.work.sendEmail", name: "sendEmail" }]
     })
 
@@ -550,7 +609,7 @@ describe("provisioning surface", () => {
   })
 
   test("reports an alias this key does not hold", async () => {
-    const { call } = await setup({ mayMutate: true })
+    const { call } = await setup({ capabilities: ["provision_connections", "administer_gateway"] })
 
     const report = await call("POST", "/v1/validate", {
       body: { node: { source: { kind: "gateway", alias: "gmail-work", tool: "deleteEverything" } } }
@@ -561,7 +620,7 @@ describe("provisioning surface", () => {
   })
 
   test("refuses a grant against a connection tier that cannot exist", async () => {
-    const { call, client } = await setup({ mayMutate: true })
+    const { call, client } = await setup({ capabilities: ["provision_connections", "administer_gateway"] })
 
     const response = await call("POST", "/v1/grants", {
       body: {
@@ -584,7 +643,7 @@ describe("provisioning surface", () => {
 
   test("removes a connection by the name it was asked for, not the stored one", async () => {
     const { call, removed } = await setup({
-      mayMutate: true,
+      capabilities: ["provision_connections", "administer_gateway"],
       connections: [{ integration: "gmail", name: "docsDemo" }]
     })
 
@@ -597,7 +656,7 @@ describe("provisioning surface", () => {
 
   test("says which connections exist when none matches", async () => {
     const { call } = await setup({
-      mayMutate: true,
+      capabilities: ["provision_connections", "administer_gateway"],
       connections: [{ integration: "gmail", name: "work" }]
     })
 
@@ -608,7 +667,7 @@ describe("provisioning surface", () => {
   })
 
   test("lists a client's keys without their hashes, and revokes one", async () => {
-    const { call, client, key, store } = await setup({ mayMutate: true })
+    const { call, client, key, store } = await setup({ capabilities: ["provision_connections", "administer_gateway"] })
 
     const listed = await call("GET", `/v1/clients/${client.id}/keys`)
     const keys = Schema.decodeUnknownSync(Schema.Array(JsonBody))(listed.body["keys"])
@@ -623,7 +682,7 @@ describe("provisioning surface", () => {
   })
 
   test("reads another client's granted surface, so codegen does not need its key", async () => {
-    const { call, client } = await setup({ mayMutate: true })
+    const { call, client } = await setup({ capabilities: ["provision_connections", "administer_gateway"] })
 
     const response = await call("GET", `/v1/clients/${client.id}/tools`)
 
@@ -634,7 +693,7 @@ describe("provisioning surface", () => {
   })
 
   test("filters and windows the audit trail, and says how much there is", async () => {
-    const { call } = await setup({ mayMutate: true })
+    const { call } = await setup({ capabilities: ["provision_connections", "administer_gateway"] })
     await call("POST", "/v1/execute", { body: { alias: "gmail-work", tool: "sendEmail" } })
     await call("POST", "/v1/execute", { body: { alias: "gmail-work", tool: "nope" } })
 

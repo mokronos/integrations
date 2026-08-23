@@ -42,7 +42,7 @@ describe("gateway service", () => {
     expect(response.status).toBe(200)
   })
 
-  test("bootstraps a local client that may mutate, and records its key", async () => {
+  test("bootstraps a local operator client and records its key", async () => {
     const gateway = await start()
 
     const config = await readGatewayConfig(gateway.service.home)
@@ -52,7 +52,10 @@ describe("gateway service", () => {
     const local = await gateway.service.store.findClientByName(defaultTenantId, localClientName)
     // The local machine's own key is the admin credential: this is what lets an
     // agent discover and connect with the human needed only for auth.
-    expect(local?.mayMutate).toBe(true)
+    expect(local?.capabilities).toEqual([
+      "provision_connections",
+      "administer_gateway"
+    ])
   })
 
   test("writes the config file as a credential, not world-readable", async () => {
@@ -108,7 +111,7 @@ describe("gateway service", () => {
       id: newClientId(),
       tenantId: defaultTenantId,
       name: "sandbox",
-      mayMutate: false
+      capabilities: ["provision_connections"]
     })
     const key = generateApiKey()
     await gateway.service.store.addApiKey({ id: key.id, clientId: sandbox.id, hash: key.hash })

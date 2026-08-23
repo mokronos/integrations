@@ -182,7 +182,7 @@ describe("gateway maintenance", () => {
       id: newClientId(),
       tenantId: defaultTenantId,
       name: "sales",
-      mayMutate: false
+      capabilities: ["provision_connections"]
     })
     const grant = await store.createGrant({
       id: newGrantId(),

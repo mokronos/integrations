@@ -28,7 +28,7 @@ export interface ServiceDescriptor {
 
 /** The arguments the unit runs. Loopback is not configurable here: a service
  *  that starts at login and exposes a credential-unlocking port to the network
- *  should be a deliberate `integrations serve --host` in a terminal, not a
+ *  should be a deliberate `ii serve --host` in a terminal, not a
  *  default someone forgets is running. */
 export const serviceArguments = (descriptor: ServiceDescriptor): ReadonlyArray<string> => [
   ...descriptor.program,
@@ -142,7 +142,7 @@ const launchdTarget = (): string => `gui/${process.getuid?.() ?? userInfo().uid}
 
 const unsupportedPlatform = (verb: string): Error =>
   new Error(
-    `integrations ${verb} currently supports Linux systemd --user and macOS launchd (this is ${process.platform})`
+    `ii ${verb} currently supports Linux systemd --user and macOS launchd (this is ${process.platform})`
   )
 
 /** The service manager reports success once it has spawned the process. What
@@ -332,9 +332,9 @@ export interface DetachedGateway {
   readonly logPath: string
 }
 
-/** `integrations serve --detach` — a background gateway without knowing about
+/** `ii serve --detach` — a background gateway without knowing about
  * `&`. Its lifetime is a plain child process, the same as `&`: it goes away on
- * logout and does not come back after a reboot. `integrations install` is the
+ * logout and does not come back after a reboot. `ii install` is the
  * option for that. */
 export const startDetachedGateway = async (options: DetachOptions): Promise<DetachedGateway> => {
   const home = integrationsHome()

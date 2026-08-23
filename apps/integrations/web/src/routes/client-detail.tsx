@@ -524,25 +524,24 @@ export function ClientDetailRoute() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <code className="font-mono text-sm">{client.id}</code>
-              {client.mayMutate
+              {client.capabilities.includes("administer_gateway")
                 ? (
                   <Badge variant="destructive" className="gap-1">
                     <ShieldAlert className="size-3" />
-                    may mutate
+                    administrator
                   </Badge>
                 )
-                : <Badge variant="secondary">delegated only</Badge>}
+                : <Badge variant="secondary">client</Badge>}
               {client.revokedAt === null
                 ? null
                 : <Badge variant="outline">revoked {when(client.revokedAt)}</Badge>}
             </CardTitle>
           </CardHeader>
-          {client.mayMutate
+          {client.capabilities.includes("administer_gateway")
             ? (
               <CardContent className="text-muted-foreground text-sm">
-                This client can change the catalog, connections and grants — so
-                its grant list is not a ceiling on what it can reach. It can add
-                to it.
+                This client can administer clients, keys, grants, audit, and
+                gateway policy. Tool invocation still resolves through grants.
               </CardContent>
             )
             : null}

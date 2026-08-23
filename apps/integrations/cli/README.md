@@ -1,8 +1,15 @@
 # @mokronos/integrations-cli
 
-The `integrations` command-line client for discovering integrations, connecting
-accounts, managing grants, and inspecting or invoking granted tools through the
-gateway. It also installs as `i`.
+One package installs two deliberate command surfaces:
 
-Use the [Integrations CLI documentation](../../../apps/docs/docs/integrations.md)
+- `i` is the agent/client CLI. It mirrors the public TypeScript client and can
+  discover integrations, manage connections, inspect schemas, invoke granted
+  tools, and poll its own approvals.
+- `ii` is the human/operator CLI. It is a strict superset of `i`, adds every
+  gateway dashboard action, human login and account management, and local
+  gateway lifecycle commands.
+
+The legacy `integrations` binary remains an alias of `ii` for compatibility.
+
+Use the [Integrations CLI documentation](../../../docs/integrations-cli.md)
 for installation, commands, and operational guidance.

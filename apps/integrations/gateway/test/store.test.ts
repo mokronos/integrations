@@ -51,7 +51,7 @@ const seedGrant = async (store: GatewayStore) => {
     id: newClientId(),
     tenantId: defaultTenantId,
     name: `client-${crypto.randomUUID()}`,
-    mayMutate: false
+    capabilities: ["provision_connections"]
   })
   const grant = await store.createGrant({
     id: newGrantId(),
@@ -121,7 +121,7 @@ describe("gateway store", () => {
       id: newClientId(),
       tenantId: defaultTenantId,
       name: "hash-check",
-      mayMutate: false
+      capabilities: ["provision_connections"]
     })
     const key = generateApiKey()
     await store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
@@ -273,13 +273,13 @@ describe("gateway store", () => {
       id: newClientId(),
       tenantId: defaultTenantId,
       name: "agent",
-      mayMutate: true
+      capabilities: ["provision_connections", "administer_gateway"]
     })
     const theirs = await store.createClient({
       id: newClientId(),
       tenantId: other.id,
       name: "agent",
-      mayMutate: true
+      capabilities: ["provision_connections", "administer_gateway"]
     })
     expect(await store.listClients(defaultTenantId)).toHaveLength(1)
     expect((await store.findClientByName(other.id, "agent"))?.id).toBe(theirs.id)
@@ -360,19 +360,23 @@ describe("gateway store", () => {
     stores.push(store)
     const migrated = await store.findClientByName(defaultTenantId, "legacy")
     expect(migrated?.tenantId).toBe(defaultTenantId)
+    expect(migrated?.capabilities).toEqual([
+      "provision_connections",
+      "administer_gateway"
+    ])
     // The old global name index is gone; per-tenant uniqueness replaced it.
     await expect(store.createClient({
       id: newClientId(),
       tenantId: defaultTenantId,
       name: "legacy",
-      mayMutate: false
+      capabilities: ["provision_connections"]
     })).rejects.toThrow()
     const other = await store.createTenant({ name: "Other" })
     await expect(store.createClient({
       id: newClientId(),
       tenantId: other.id,
       name: "legacy",
-      mayMutate: false
+      capabilities: ["provision_connections"]
     })).resolves.toBeDefined()
   })
 })

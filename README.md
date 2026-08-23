@@ -12,7 +12,7 @@ key and invoke logical `{ alias, tool }` addresses through the HTTP API.
 | Path | Purpose |
 | --- | --- |
 | `apps/integrations/gateway/` | Gateway domain, persistence, policy, HTTP API, and local service |
-| `apps/integrations/cli/` | `integrations` and `i` command-line client |
+| `apps/integrations/cli/` | `i` delegated client CLI and `ii` operator CLI |
 | `apps/integrations/ts/` | `@mokronos/integrations-client`, the thin TypeScript gateway client |
 | `apps/integrations/web/` | Browser control plane |
 | `apps/integrations/worker/` | Cloudflare Worker runtime |
@@ -32,12 +32,17 @@ bun run build
 bun run build:control-plane
 ```
 
-Run the CLI from source with:
+Run the CLIs from source with:
 
 ```bash
-bun run cli --help
-bun run cli serve
+bun run apps/integrations/cli/src/agent.ts --help
+bun run apps/integrations/cli/src/main.ts serve
 ```
+
+`i` mirrors the public TypeScript client: agents can discover integrations,
+manage connections, inspect schemas, invoke granted tools, and poll their own
+approvals. `ii` is its strict operator superset, adding every dashboard action,
+human login/account commands, and local gateway lifecycle commands.
 
 State defaults to `~/.integrations`; set `INTEGRATIONS_HOME` to use another
 directory.

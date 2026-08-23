@@ -199,7 +199,7 @@ export const listClients = async () =>
 
 export const createClient = async (input: {
   readonly name: string
-  readonly mayMutate: boolean
+  readonly capabilities: ReadonlyArray<"provision_connections" | "administer_gateway">
 }) => decodeClient(await request("POST", "/v1/clients", input))
 
 export const issueKey = async (clientId: string) =>

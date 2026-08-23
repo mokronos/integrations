@@ -1,19 +1,28 @@
-# Integrations CLI
+# Integrations CLIs
 
-`integrations` is a thin client over the **gateway**: the local service that
-holds every connection and credential, resolves grants, decides authorization
-policy, and performs invocations. Nothing else ever sees a credential. It also
-installs as `i`, so `i tools linear` and `integrations tools linear` are the
-same command.
+One package installs two thin clients over the **gateway**, which holds every
+connection and credential, resolves grants, decides authorization policy, and
+performs invocations:
+
+- `i` is the sandbox-safe agent/client surface. It mirrors the public
+  TypeScript client: discovery, connection management, schema inspection,
+  granted invocation, the client's grants and approvals, validation, and
+  codegen.
+- `ii` is the human/operator surface. It is a strict superset of `i`, with
+  every action available in the dashboard plus human authentication and local
+  gateway lifecycle commands.
+
+The old `integrations` executable remains an alias of `ii` for compatibility.
 
 ```bash
-integrations --help
+i --help
+ii --help
 ```
 
 The command needs Bun on the machine. It ships in
 `@mokronos/integrations-cli`, a dependency of `@mokronos/wf` — not yet published
 to npm, so install it from the repository with `bun run install:local`, which
-puts `wf`, `integrations`, and `i` on your `PATH`.
+puts `wf`, `i`, `ii`, and the legacy `integrations` alias on your `PATH`.
 
 ## Vocabulary
 
@@ -24,8 +33,8 @@ puts `wf`, `integrations`, and `i` on your `PATH`.
 | **Connection** | A stored authorization letting you use an integration. Holds references exchanged for credentials at the moment of use |
 | **Connection name** | The label distinguishing several connections to one integration — three Google accounts as `personal`, `work`, `client-x`. Defaults to `default` |
 | **Owner tier** | Which partition a connection is filed under: `org` (shared by the tenant) or `user` (private to one subject) |
-| **Client** | Anything that calls the gateway — an agent, a workflow runner, a script. Has no inherent access |
-| **API key** | The credential a client presents. Identifies the client and nothing else |
+| **Client** | An agent, workflow runner, or script. Capabilities control provisioning or administration; grants independently control invocation |
+| **API key** | The credential a client presents. Identifies the client and carries its explicit capabilities |
 | **Grant** | A delegation: one client may invoke one tool through one connection. The only source of a client's access |
 | **Alias** | The logical name a grant exposes a tool under. A caller declares it as a requirement; each deployment binds it — an environment variable, not a pointer |
 | **Pending approval** | An invocation frozen awaiting a human decision. Approving discharges that one invocation and confers no capability |
@@ -36,7 +45,7 @@ puts `wf`, `integrations`, and `i` on your `PATH`.
 Every command goes through the gateway; there is no local fallback.
 
 ```bash
-integrations serve
+ii serve
 ```
 
 | Flag | Meaning |
@@ -45,7 +54,7 @@ integrations serve
 | `--host <string>` | Bind address. Defaults to `127.0.0.1` |
 | `--detach`, `-d` | Start in the background and return once the gateway answers |
 
-On start it ensures a local privileged client exists, mints a key for it, and
+On start it ensures a local operator client exists, mints a key for it, and
 writes `~/.integrations/gateway.json` (mode `0600`) with the URL and that key — so the
 local case is zero-configuration. Clients read it automatically; set
 `INTEGRATIONS_URL` and `INTEGRATIONS_API_KEY` to point somewhere else instead.
@@ -54,17 +63,17 @@ local case is zero-configuration. Clients read it automatically; set
 > the client holds. Terminate TLS in front of it and treat it as a deliberate
 > act.
 
-If nothing is running you get: *No gateway found. Start one with `integrations
-serve`, or set INTEGRATIONS_URL and INTEGRATIONS_API_KEY.*
+If nothing is running you get: *No gateway found. Start one with `ii serve`, or
+set INTEGRATIONS_URL and INTEGRATIONS_API_KEY.*
 
 ### Keeping it running
 
 Three lifetimes, in order of how long they last:
 
 ```bash
-integrations serve       # this terminal
-integrations serve -d    # background, until logout
-integrations install     # a per-user service, across reboots
+ii serve       # this terminal
+ii serve -d    # background, until logout
+ii install     # a per-user service, across reboots
 ```
 
 `-d` is what `&` would do, without needing to know that: it spawns the gateway,
@@ -88,19 +97,19 @@ environment variables (`INTEGRATIONS_PUBLIC_URL`, `INTEGRATIONS_ALLOW_SIGNUP`,
 `INTEGRATIONS_MAX_BODY_BYTES`), TLS setup, deployment targets, and operational
 notes.
 
-## integrations dashboard
+## ii dashboard
 
 The gateway serves a browser control plane on the same port it listens on. This
 command finds a running gateway and opens it.
 
 ```bash
-integrations dashboard
-integrations dashboard --print   # print the URL, open nothing
+ii dashboard
+ii dashboard --print   # print the URL, open nothing
 ```
 
 It will not start a gateway for you: a UI that silently launches the process
 holding every credential is not a convenience. If nothing is running you get
-told to run `integrations serve`.
+told to run `ii serve`.
 
 ### What it covers
 
@@ -115,10 +124,16 @@ told to run `integrations serve`.
 
 ### How it authenticates
 
-It does not carry an API key, and there is nowhere to put one. The page is
-served by the gateway itself, so a request from it is same-origin, arrives over
-loopback, and is authenticated as the local client — the key stays in
-`~/.integrations/gateway.json`, mode `0600`, and never reaches the browser.
+Hosted dashboards and `ii` authenticate a human with an HTTP-only session.
+Use `ii signup` to claim a fresh gateway, then `ii login`, `ii logout`, or
+`ii whoami` as needed. The session is stored at
+`~/.integrations/operator-session.json` with mode `0600` and is tied to the
+selected gateway URL.
+
+The local dashboard may instead borrow the gateway's loopback operator context;
+the key in `~/.integrations/gateway.json` never reaches the browser. Human-only
+approval decisions accept a human session or this trusted local context, never
+an API key — even one with `administer_gateway`.
 
 Four things must all hold, or the request gets the same 401 as any stranger:
 
@@ -140,12 +155,12 @@ authenticating exactly as before.
 > headers too. Binding the gateway to loopback already trusts local processes;
 > this does not widen that, but it does not narrow it either.
 
-## integrations install
+## ii install
 
 Register and start the gateway as a per-user service.
 
 ```text
-integrations install [--port <integer>] [--verbose]
+ii install [--port <integer>] [--verbose]
 ```
 
 `systemd --user` on Linux, `launchd` on macOS, under the label
@@ -155,8 +170,8 @@ and has to be able to outlive it. Windows service registration is not
 implemented yet.
 
 The service always binds loopback: a service that starts at login and exposes a
-credential-unlocking port to the network should be a deliberate `integrations
-serve --host` in a terminal. On Linux it also asks for `enable-linger`, so the
+credential-unlocking port to the network should be a deliberate `ii serve
+--host` in a terminal. On Linux it also asks for `enable-linger`, so the
 gateway is up on a machine reached over SSH; that is best effort and needs
 polkit.
 
@@ -165,12 +180,12 @@ onto upgraded sources — the background service keeps running the code it start
 with. The command returns only once the gateway answers, not once the service
 manager accepts the unit.
 
-## integrations upgrade
+## ii upgrade
 
 Upgrade this CLI to the latest published version.
 
 ```text
-integrations upgrade [--check] [--pull]
+ii upgrade [--check] [--pull]
 ```
 
 | Flag | Meaning |
@@ -191,13 +206,13 @@ refuses a dirty tree or a non-fast-forward: the job is to update a CLI, not to
 resolve a merge.
 
 Upgrading never restarts anything. The installed service keeps serving the
-version it started with — the command says so, and `integrations install`
+version it started with — the command says so, and `ii install`
 restarts it when you are ready.
 
-## integrations uninstall
+## ii uninstall
 
 ```text
-integrations uninstall [--verbose]
+ii uninstall [--verbose]
 ```
 
 Stops and deregisters the service. `~/.integrations` is left alone: it holds the
@@ -236,11 +251,11 @@ grows without bound. It says so with `count`, and takes filters.
 **JSON output always parses.** A long *value* may be shortened and marked; the
 document is never cut. That includes tool results from `execute`.
 
-A refusal that is about what your key *may do* reads *this key may not change
-the catalog, connections, grants, or policy (use a key whose client may
-mutate)* — the fix is a different key, not a different request. A refusal about
-what you *asked for* states its own reason, and is never dressed up as the
-former.
+A refusal that is about what your key *may do* names the missing client
+capability. The fix is a differently provisioned key, not an environment flag.
+A refusal about what you *asked for* states its own reason. Approval and denial
+specifically require human authority and cannot be unlocked by any API-key
+capability.
 
 ## Discovery and connections
 
@@ -250,7 +265,7 @@ schemas.
 ### search
 
 ```text
-integrations search [flags] <query>
+i search [flags] <query>
 ```
 
 | Flag | Meaning |
@@ -267,7 +282,7 @@ order — so this is the one listing that is not re-sorted here.
 ### discover
 
 ```text
-integrations discover [flags] <url>
+i discover [flags] <url>
 ```
 
 | Flag | Meaning |
@@ -283,7 +298,7 @@ available auth templates and the integration slug to connect.
 ### connect
 
 ```text
-integrations connect [flags] <integration>
+i connect [flags] <integration>
 ```
 
 | Flag | Meaning |
@@ -313,9 +328,9 @@ accepts either spelling.
 ### connections, disconnect, integrations
 
 ```bash
-integrations connections            # every connection, no credentials exposed
-integrations integrations           # the persisted catalog. `list` still works
-integrations disconnect <integration> [--connection <name>]
+i connections            # every connection, no credentials exposed
+i integrations           # the persisted catalog. `list` still works
+i disconnect <integration> [--connection <name>]
 ```
 
 ## Inspecting tools
@@ -324,8 +339,8 @@ Browse names first, then pull the schema for the one tool you settle on — a
 hundred JSON Schemas is not a useful answer.
 
 ```text
-integrations tools [flags] <integration>
-integrations schema [flags] <integration> <tool>
+i tools [flags] <integration>
+i schema [flags] <integration> <tool>
 ```
 
 | Flag | Meaning |
@@ -348,17 +363,15 @@ string.
 ## Invoking
 
 ```text
-integrations execute [flags] <alias> <tool> [<json>]              # delegated
-integrations execute --direct [flags] <tool-address> [<json>]     # privileged
+i execute [flags] <alias> <tool> [<json>]              # delegated
+ii execute --direct [flags] <tool-address> [<json>]     # operator
 ```
 
-One verb, and a flag that says with whose authority. Without `--direct` the call
-goes through an alias and can only reach what a grant exposes to the key — this
-is what a delegated caller does. With `--direct` it names a resolved address and
-runs with your own authority: how you prove a connection works right after
-making it, not how production calls happen. A `tools.…` target is recognised as
-an address either way. `invoke` still works as an alias for the direct form.
-Both accept `--file` to read the JSON input from a file.
+`i execute` goes through an alias and can only reach what a grant exposes to the
+key. It has no `--direct` flag. `ii execute` supports that same delegated form
+and additionally accepts `--direct`, which names a resolved address and runs
+with operator authority. `invoke` remains an alias. Both accept `--file` to
+read JSON input from a file.
 
 Every result is one shape, and it always parses:
 
@@ -374,7 +387,7 @@ is an answer, not a crash. Nothing is truncated — a JSON document cut mid-toke
 is not a smaller answer, it is an unusable one.
 
 ```text
-integrations validate [flags] [<json-or-tool-address>]
+i validate [flags] [<json-or-tool-address>]
 ```
 
 Validates an integration node. Three input forms, one command:
@@ -393,14 +406,15 @@ A client is created, given a key, and granted specific tools. That is the only
 source of its access.
 
 ```bash
-integrations client "orders-agent" --may-mutate     # omit the flag for read-only access
-integrations key <client-id>                        # shown once
-integrations keys <client-id>                       # which keys exist, and when each was last used
-integrations grant <client-id> <alias> <tool> --integration <slug>
-integrations grants <client-id>
-integrations grants --mine                          # what this key itself can reach
-integrations clients
-integrations revoke grant|client|key <id>
+ii client "orders-agent"                            # provisioning capability by default
+ii client "operator-tool" --administer              # also administer the gateway
+ii key <client-id>                                   # shown once
+ii keys <client-id>                                  # which keys exist, and when each was last used
+ii grant <client-id> <alias> <tool> --integration <slug>
+ii grants <client-id>
+i grants                                             # what this key itself can reach
+ii clients
+ii revoke grant|client|key <id>
 ```
 
 | `grant` flag | Meaning |
@@ -427,10 +441,10 @@ fail when it ran.
 ## Approvals
 
 ```bash
-integrations approvals [--status pending|approved|denied|expired]   # the queue, for a decider
-integrations approval <approval-id>                                 # one call, for the caller that proposed it
-integrations approve <approval-id> [--by <who>]
-integrations deny <approval-id> [--by <who>]
+ii approvals [--status pending|approved|denied|expired]   # the queue, for a decider
+i approval <approval-id>                                  # one call, for its proposing client
+ii approve <approval-id> [--by <who>]
+ii deny <approval-id> [--by <who>]
 ```
 
 A frozen invocation expires if nobody decides it, and expiry means the
@@ -446,15 +460,15 @@ stored result, or the denial — exactly once. After that, an identical call is 
 standing permission.
 
 So a caller has two ways to wait, and both work: retry `execute` until it stops
-saying `pending`, or poll `integrations approval <id>`. `approval` is on the
+saying `pending`, or poll `i approval <id>`. `approval` is on the
 delegated tier, so the caller that proposed the frozen call can read it with its
 own key.
 
 ## Audit and drift
 
 ```bash
-integrations audit [--limit <n>] [--offset <n>] [--client <id>] [--alias <a>] [--tool <t>] [--outcome <o>] [--since <iso>]
-integrations drift [<integration>]
+ii audit [--limit <n>] [--offset <n>] [--client <id>] [--alias <a>] [--tool <t>] [--outcome <o>] [--since <iso>]
+ii drift [<integration>]
 ```
 
 The audit trail records every invocation attempt: client, alias, resolved
@@ -471,7 +485,8 @@ baseline and says so, instead of reporting the entire surface as newly added.
 ## Codegen
 
 ```text
-integrations codegen [--target effect|ts] [--client <id>] [--out <file>]
+i codegen [--target effect|ts] [--out <file>]
+ii codegen [--target effect|ts] [--client <id>] [--out <file>]
 ```
 
 | Target | Emits |
@@ -488,7 +503,7 @@ key. See the [Gateway client](client.md) for what the output looks like.
 ## Maintenance
 
 ```bash
-integrations maintenance
+ii maintenance
 ```
 
 Runs the sweep the gateway already runs on a clock: expire frozen calls nobody
