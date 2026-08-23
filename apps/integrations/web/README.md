@@ -1,8 +1,10 @@
 # The gateway's control plane
 
-The browser UI for the integration gateway. Not a dashboard over it — the whole
-operator surface: catalog and connections, per-tool grants, clients and keys,
-approvals, executions, drift.
+The human control plane for the integration gateway: readiness overview,
+catalog and connections, per-tool grants, clients and keys, approvals, account
+settings, drift checks, and the permanent activity trail. Headless validation,
+direct invocation, and maintenance stay in the API and `ii` CLI instead of
+competing with those workflows in the dashboard.
 
 ## Running it
 
@@ -41,10 +43,11 @@ with `INTEGRATIONS_URL`.
 
 ## How it talks to the gateway
 
-`src/lib/gateway.ts` is the whole API surface, and it has no API key in it.
-There is nowhere to put one: the page is same-origin with the gateway, and that
-is what authenticates it. See `apps/integrations/gateway/src/http/loopback.ts`
-for when that holds and when it stops holding.
+`src/lib/gateway.ts` is the browser's API surface, and it has no API key in it.
+A hosted browser carries its HTTP-only human session; a same-origin loopback
+browser may borrow the local operator context. See
+`apps/integrations/gateway/src/http/loopback.ts` for where the local path holds
+and where it stops holding.
 
 `src/lib/schemas.ts` decodes every response. It does not restate the gateway's
 types — it imports the gateway's own `domain.ts` and derives each JSON codec
