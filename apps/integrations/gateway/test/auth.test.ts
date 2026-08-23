@@ -20,6 +20,7 @@ import {
   ToolName
 } from "../src/index.ts"
 import type { ConnectionRef, GatewayStore } from "../src/index.ts"
+import type { GoogleIdentityOAuth } from "../src/identity-oauth.ts"
 
 const JsonBody = Schema.Record(Schema.String, Schema.Json)
 
@@ -84,7 +85,9 @@ const stubExecutor = (): ExecutorServices => ({
 interface SetupOptions {
   /** Defaults to false: an operator who says nothing gets a closed gateway. */
   readonly signupOpen?: boolean
+  readonly signupOpenOf?: () => Promise<boolean>
   readonly secureCookies?: boolean
+  readonly google?: GoogleIdentityOAuth
 }
 
 const setup = async (options: SetupOptions = {}) => {
@@ -126,8 +129,9 @@ const setup = async (options: SetupOptions = {}) => {
         stop: () => undefined
       },
       sessions: {
-        signupOpen: options.signupOpen ?? false,
-        secureCookies: options.secureCookies ?? false
+        signupOpen: options.signupOpenOf ?? (async () => options.signupOpen ?? false),
+        secureCookies: options.secureCookies ?? false,
+        ...whenPresent("google", options.google)
       }
     })
   })
@@ -161,7 +165,7 @@ const setup = async (options: SetupOptions = {}) => {
     return match[1]
   }
 
-  return { store, client, apiKey, call, cookieValue }
+  return { store, client, apiKey, call, cookieValue, handle }
 }
 
 /** A signed-up human with their cookie, ready to act as the dashboard does. */
@@ -185,6 +189,37 @@ const signupHuman = async (
   }
 }
 
+const googleIdentity = (): GoogleIdentityOAuth => ({
+  clientId: "google-client",
+  clientSecret: "google-secret",
+  publicUrlOf: () => "http://gateway.test",
+  fetch: Object.assign(
+    async (input: Parameters<typeof globalThis.fetch>[0]): Promise<Response> => {
+      const url = String(input)
+      if (url === "https://oauth2.googleapis.com/token") {
+        return Response.json({ access_token: "google-access-token" })
+      }
+      if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
+        return Response.json({
+          sub: "google-subject-1",
+          email: "google@example.com",
+          email_verified: true
+        })
+      }
+      throw new Error(`Unexpected Google request: ${url}`)
+    },
+    { preconnect: globalThis.fetch.preconnect }
+  )
+})
+
+const oauthStateFrom = (response: Response): string => {
+  const location = response.headers.get("location")
+  if (location === null) throw new Error("Google redirect did not contain a location")
+  const state = new URL(location).searchParams.get("state")
+  if (state === null) throw new Error("Google redirect did not contain state")
+  return state
+}
+
 describe("signup", () => {
   test("the first human claims a fresh tenant and a live session", async () => {
     const setup_ = await setup({ signupOpen: true })
@@ -206,6 +241,23 @@ describe("signup", () => {
     expect(me.body["email"]).toBe(human.email)
     expect(me.body["tenantId"]).toBe(human.tenantId)
     expect(me.body["subjectId"]).toBe(subjects[0]?.id)
+  })
+
+  test("rechecks whether signup is open for every account creation", async () => {
+    let open = true
+    const setup_ = await setup({ signupOpenOf: async () => open })
+    await signupHuman(setup_)
+    open = false
+
+    const response = await setup_.call("POST", "/v1/auth/signup", {
+      body: { email: "second@example.com", password: "correct horse battery" },
+      headers: { origin: "http://gateway.test", "sec-fetch-site": "same-origin" }
+    })
+
+    expect(response.status).toBe(403)
+    expect(response.body["code"]).toBe("signup-closed")
+    const providers = await setup_.call("GET", "/v1/auth/providers")
+    expect(providers.body["signupOpen"]).toBe(false)
   })
 
   test("is closed unless asked otherwise", async () => {
@@ -269,6 +321,80 @@ describe("login", () => {
     expect(unknownEmail.status).toBe(401)
     expect(wrongPassword.body["error"]).toBe(unknownEmail.body["error"])
     expect(wrongPassword.body["code"]).toBe("invalid-credentials")
+  })
+})
+
+describe("Google identity and CLI handoff", () => {
+  test("signs ii in through a one-time browser handoff", async () => {
+    const setup_ = await setup({ signupOpen: true, google: googleIdentity() })
+    const providers = await setup_.call("GET", "/v1/auth/providers")
+    expect(providers.body["google"]).toEqual({
+      enabled: true,
+      startUrl: "/v1/auth/google/start",
+      callbackUrl: "http://gateway.test/v1/auth/google/callback"
+    })
+    expect(providers.body["signupOpen"]).toBe(true)
+
+    const handoff = await setup_.call("POST", "/v1/auth/cli/start")
+    expect(handoff.status).toBe(201)
+    const requestId = String(handoff.body["requestId"])
+    expect(requestId).toStartWith("wfl_")
+
+    const start = await setup_.handle(new Request(String(handoff.body["authorizationUrl"])))
+    expect(start.status).toBe(302)
+    const callback = await setup_.handle(new Request(
+      `http://gateway.test/v1/auth/google/callback?state=${encodeURIComponent(oauthStateFrom(start))}&code=code-1`
+    ))
+    expect(callback.status).toBe(200)
+    expect(await callback.text()).toContain("The terminal is authenticated")
+
+    const collected = await setup_.call("GET", `/v1/auth/cli/${encodeURIComponent(requestId)}`)
+    expect(collected.body["status"]).toBe("authenticated")
+    expect(collected.body["email"]).toBe("google@example.com")
+    const token = String(collected.body["token"])
+    expect(token).toStartWith("wfs_")
+    const replay = await setup_.call("GET", `/v1/auth/cli/${encodeURIComponent(requestId)}`)
+    expect(replay.status).toBe(410)
+
+    const me = await setup_.call("GET", "/v1/auth/me", { cookie: token })
+    expect(me.body["hasPassword"]).toBe(false)
+    expect(me.body["identityProviders"]).toEqual(["google"])
+    const passwordLogin = await setup_.call("POST", "/v1/auth/login", {
+      body: { email: "google@example.com", password: "not configured" }
+    })
+    expect(passwordLogin.status).toBe(401)
+
+    const added = await setup_.call("POST", "/v1/auth/password", {
+      body: { newPassword: "new correct horse battery" },
+      cookie: token,
+      headers: { origin: "http://gateway.test", "sec-fetch-site": "same-origin" }
+    })
+    expect(added.status).toBe(200)
+    const after = await setup_.call("POST", "/v1/auth/login", {
+      body: { email: "google@example.com", password: "new correct horse battery" }
+    })
+    expect(after.status).toBe(200)
+  })
+
+  test("returns a dashboard sign-in to a safe local path", async () => {
+    const setup_ = await setup({ signupOpen: true, google: googleIdentity() })
+    const start = await setup_.handle(new Request(
+      "http://gateway.test/v1/auth/google/start?returnTo=%2Fapprovals%3Fapproval%3Dap_1"
+    ))
+    const callback = await setup_.handle(new Request(
+      `http://gateway.test/v1/auth/google/callback?state=${encodeURIComponent(oauthStateFrom(start))}&code=code-2`
+    ))
+    expect(callback.status).toBe(302)
+    expect(callback.headers.get("location")).toBe("/approvals?approval=ap_1")
+    expect(callback.headers.get("set-cookie")).toContain("wf_session=wfs_")
+
+    const unsafeStart = await setup_.handle(new Request(
+      "http://gateway.test/v1/auth/google/start?returnTo=%2F%2Fevil.example"
+    ))
+    const unsafeCallback = await setup_.handle(new Request(
+      `http://gateway.test/v1/auth/google/callback?state=${encodeURIComponent(oauthStateFrom(unsafeStart))}&code=code-3`
+    ))
+    expect(unsafeCallback.headers.get("location")).toBe("/")
   })
 })
 
@@ -449,7 +575,7 @@ describe("attribution", () => {
 
     // ...and deny it from the dashboard, where the human is known.
     const denied = await setup_.call("POST", `/v1/approvals/${approvalId}/deny`, {
-      body: {},
+      body: { decidedBy: "spoofed@example.com" },
       cookie: human.cookie,
       headers: { origin: "http://gateway.test", "sec-fetch-site": "same-origin" }
     })

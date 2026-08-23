@@ -2,7 +2,7 @@
 
 An integration is defined by a URL that leads to some sort of API.
 
-- actions
+- tools
   - name
   - description
   - input schema
@@ -19,8 +19,13 @@ An integration is defined by a URL that leads to some sort of API.
   - search integrations
   - discover integration auth and schemas
   - trigger auth
-  - list actions
-  - execute action
+  - list tools
+  - execute a granted tool
+
+Client authority has two independent layers: explicit per-tool grants for
+invocation, and named capabilities for provisioning connections or
+administering the gateway. A newly-created runtime client starts with neither
+control-plane capability.
 
 ```text
 agent harness -> sandbox -> client -> API-key-injecting proxy -> gateway -> integration
@@ -44,13 +49,19 @@ Applications with their own human-in-the-loop UI can handle approval-required
 responses in the proxy surrounding the sandbox. That proxy already selects the
 gateway and injects the client's API key.
 
-The gateway should let each client configure one or more approval delivery
+The gateway lets each client configure one or more approval delivery
 mechanisms. A client can handle the request outside the sandbox or return a safe
-approval link for the model to present to the user.
+approval link for the model to present to the user. Links still require a human
+session; webhook notifications carry review metadata but no call arguments or
+credentials.
 
-By default, mutating requests should require approval while read requests are
-allowed. The gateway UI should allow changing that policy per tool or per
+By default, tools explicitly marked safe may run directly; mutating or
+unclassified tools require approval. The gateway UI allows changing that policy per tool or per
 integration for each client.
+
+Humans may sign into the dashboard with a password or an identity provider.
+The `ii` operator CLI starts that same provider flow in a browser and collects a
+short-lived one-use handoff, rather than asking the human to copy a token.
 
 Clients may include:
 

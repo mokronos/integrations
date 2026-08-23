@@ -30,6 +30,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Table,
   TableBody,
@@ -47,21 +48,39 @@ function CreateClientDialog() {
   const invalidate = useInvalidate()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState("")
+  const [mayProvision, setMayProvision] = useState(false)
   const [mayAdminister, setMayAdminister] = useState(false)
+  const [returnLink, setReturnLink] = useState(true)
+  const [webhooks, setWebhooks] = useState("")
+  const parsedWebhooks = webhooks.split("\n")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0)
+  const validWebhooks = parsedWebhooks.length <= 10 &&
+    parsedWebhooks.every((url) => /^https?:\/\/[^\s]+$/.test(url))
 
   const create = useMutation({
-    mutationFn: () => gateway.createClient({
-      name: name.trim(),
-      capabilities: mayAdminister
-        ? ["provision_connections", "administer_gateway"]
-        : ["provision_connections"]
-    }),
+    mutationFn: () => {
+      const capabilities: Array<"provision_connections" | "administer_gateway"> = []
+      if (mayProvision) capabilities.push("provision_connections")
+      if (mayAdminister) capabilities.push("administer_gateway")
+      return gateway.createClient({
+        name: name.trim(),
+        capabilities,
+        approvalDelivery: {
+          returnLink,
+          webhooks: parsedWebhooks
+        }
+      })
+    },
     onSuccess: (client) => {
       invalidate(keys.clients)
       toast.success(`Created ${client.name}`, { description: "Issue it a key to make it usable." })
       setOpen(false)
       setName("")
+      setMayProvision(false)
       setMayAdminister(false)
+      setReturnLink(true)
+      setWebhooks("")
     },
     onError: (error: Error) => toast.error("Could not create client", { description: error.message })
   })
@@ -91,6 +110,20 @@ function CreateClientDialog() {
           </div>
           <div className="flex items-start gap-3 rounded-md border p-3">
             <Switch
+              id="client-provision"
+              checked={mayProvision}
+              onCheckedChange={setMayProvision}
+            />
+            <div className="space-y-1">
+              <Label htmlFor="client-provision">May provision connections</Label>
+              <p className="text-muted-foreground text-xs">
+                Allows catalog discovery and connection setup. Ordinary runtime
+                clients generally need only tool grants, so this starts off.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-start gap-3 rounded-md border p-3">
+            <Switch
               id="client-administer"
               checked={mayAdminister}
               onCheckedChange={setMayAdminister}
@@ -98,9 +131,31 @@ function CreateClientDialog() {
             <div className="space-y-1">
               <Label htmlFor="client-administer">May administer the gateway</Label>
               <p className="text-muted-foreground text-xs">
-                Provisioning connections is available by default. Administration
-                additionally allows managing clients, keys, grants, audit, and
-                policy, so leave it off for anything running agent code.
+                Allows managing clients, keys, grants, audit, and policy. Leave
+                it off for anything running agent code.
+              </p>
+            </div>
+          </div>
+          <div className="space-y-3 rounded-md border p-3">
+            <div className="flex items-start gap-3">
+              <Switch id="client-return-link" checked={returnLink} onCheckedChange={setReturnLink} />
+              <div className="space-y-1">
+                <Label htmlFor="client-return-link">Return an approval link</Label>
+                <p className="text-muted-foreground text-xs">
+                  Pending calls receive a dashboard URL. The URL still requires a human sign-in.
+                </p>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="client-webhooks">Approval notification webhooks</Label>
+              <Textarea
+                id="client-webhooks"
+                value={webhooks}
+                onChange={(event) => setWebhooks(event.target.value)}
+                placeholder="https://automation.example/hooks/approvals"
+              />
+              <p className={validWebhooks ? "text-muted-foreground text-xs" : "text-destructive text-xs"}>
+                One HTTP(S) URL per line, up to 10. Notifications omit arguments and credentials.
               </p>
             </div>
           </div>
@@ -108,7 +163,7 @@ function CreateClientDialog() {
         <DialogFooter>
           <Button
             onClick={() => create.mutate()}
-            disabled={name.trim().length === 0 || create.isPending}
+            disabled={name.trim().length === 0 || !validWebhooks || create.isPending}
           >
             {create.isPending ? "Creating…" : "Create"}
           </Button>

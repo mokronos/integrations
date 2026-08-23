@@ -46,10 +46,20 @@ tenant and the humans acted for are derived from the client's grants.
 _Avoid_: Token, session token, secret
 
 **Login**:
-The email-and-password credential by which a subject signs in. Held beside the
-subject — the subject itself stays opaque — so removing a login never disturbs
-what the subject is referenced by.
+The sign-in record beside a subject: its display email and, optionally, a
+password credential. The subject itself stays opaque, so changing a sign-in
+method never disturbs what the subject is referenced by.
 _Avoid_: Account, user, identity
+
+**Identity provider**:
+An external system such as Google that proves a human subject for control-plane
+sign-in. Distinct from integration authorization, even when both use OAuth.
+_Avoid_: Integration, connection, provider (without “identity”)
+
+**Login handoff**:
+A short-lived, one-use browser sign-in started by `ii` and collected by that
+same CLI. It yields a human session; it is not an API key.
+_Avoid_: Device code, client login, API key
 
 **Session**:
 A signed-in human's bearer token, held in a cookie and stored only as its
@@ -114,6 +124,12 @@ An invocation frozen awaiting a human decision. On approval the gateway
 performs it, so approving discharges one specific invocation and confers no
 capability. Expires, and expiry means the invocation does not happen.
 _Avoid_: Pending action, approval request, hold
+
+**Approval delivery**:
+How a client is told that an invocation is pending: a dashboard link in the
+response and/or webhook notifications. Delivery announces an approval but
+never authorizes deciding it.
+_Avoid_: Approval, notification policy, callback
 
 **Audit record**:
 What the gateway writes for every invocation attempt: client, alias, resolved

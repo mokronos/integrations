@@ -1,7 +1,7 @@
 import { whenPresent, whenPresentMap } from "@/lib/optional"
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router"
-import { Copy, Download, ExternalLink, Plug, Search, Unplug } from "lucide-react"
+import { Copy, Download, ExternalLink, Plug, RefreshCcw, Search, Unplug } from "lucide-react"
 import { toast } from "sonner"
 
 import { JsonView } from "@/components/json-view"
@@ -641,12 +641,14 @@ function IntegrationDetail({ integration }: { readonly integration: IntegrationO
   return (
     <div className="min-w-0 space-y-4">
       <Card>
-        <CardHeader className="flex-row flex-wrap items-center gap-2 space-y-0">
-          <Plug className="size-4" />
-          <CardTitle className="min-w-0 break-words">{integration.name}</CardTitle>
-          <ConnectionBadge integration={integration} />
-          <div className="ml-auto">
-            <ConnectDialog integration={integration} />
+        <CardHeader>
+          <div className="flex flex-wrap items-center gap-2">
+            <Plug className="size-4" />
+            <CardTitle className="min-w-0 break-words">{integration.name}</CardTitle>
+            <ConnectionBadge integration={integration} />
+            <div className="ml-auto">
+              <ConnectDialog integration={integration} />
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -725,16 +727,18 @@ function IntegrationDetail({ integration }: { readonly integration: IntegrationO
       </Card>
 
       <Card>
-        <CardHeader className="flex-row flex-wrap items-center justify-between gap-2 space-y-0">
-          <CardTitle>Tools</CardTitle>
-          <div className="relative w-full sm:w-64">
-            <Search className="text-muted-foreground absolute left-2 top-1/2 size-3.5 -translate-y-1/2" />
-            <Input
-              className="pl-7"
-              value={filter}
-              onChange={(event) => setFilter(event.target.value)}
-              placeholder="Filter tools"
-            />
+        <CardHeader>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CardTitle>Tools</CardTitle>
+            <div className="relative w-full sm:w-64">
+              <Search className="text-muted-foreground absolute left-2 top-1/2 size-3.5 -translate-y-1/2" />
+              <Input
+                className="pl-7"
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+                placeholder="Filter tools"
+              />
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-2">
@@ -766,6 +770,18 @@ export function IntegrationsRoute() {
 
   const all = useMemo(() => integrations.data ?? [], [integrations.data])
   const selected = all.find((integration) => integration.slug === slug) ?? all[0]
+  const drift = useMutation({
+    mutationFn: () => gateway.refreshDrift(selected?.slug),
+    onSuccess: (reports) => {
+      const changes = reports.reduce((total, report) => total + report.entries.length, 0)
+      toast.success(changes === 0 ? "Tool contract is current" : `${changes} contract change(s) found`, {
+        description: changes === 0 ? undefined : "Run `ii drift` for the complete machine-readable report."
+      })
+    },
+    onError: (error: Error) => toast.error("Could not check contract drift", {
+      description: error.message
+    })
+  })
 
   const listed = useMemo(() => {
     const needle = filter.trim().toLowerCase()
@@ -783,6 +799,14 @@ export function IntegrationsRoute() {
         <>
           <RegistrySearchDialog />
           <DiscoverDialog />
+          <Button
+            variant="outline"
+            onClick={() => drift.mutate()}
+            disabled={selected === undefined || drift.isPending}
+          >
+            <RefreshCcw className={drift.isPending ? "size-4 animate-spin" : "size-4"} />
+            Check drift
+          </Button>
           <ReloadButton
             onClick={() => void integrations.refetch()}
             busy={integrations.isFetching}

@@ -7,6 +7,7 @@ export {
   ApiKey,
   ApiKeyHash,
   ApiKeyId,
+  ApprovalDelivery,
   ApprovalId,
   ApprovalStatus,
   AuditArguments,
@@ -21,14 +22,19 @@ export {
   connectionSubject,
   ConnectionName,
   ConnectionRef,
+  defaultApprovalDelivery,
   defaultTenantId,
   describeAuthorization,
   DriftEntry,
   DriftKind,
+  ExternalIdentity,
   Grant,
   GrantDecision,
   GrantId,
   IntegrationSlug,
+  IdentityProvider,
+  Login,
+  LoginHandoff,
   OwnerTier,
   PendingApproval,
   Subject,
@@ -39,9 +45,14 @@ export {
   ToolSnapshot
 } from "./domain.ts"
 
+export { ApprovalNotification, deliverApprovalNotification } from "./approval-delivery.ts"
+export type { ApprovalDeliveryInput } from "./approval-delivery.ts"
+
 export {
   generateApiKey,
+  generateLoginHandoff,
   hashApiKey,
+  hashLoginHandoff,
   newApprovalId,
   newAuditId,
   newClientId,
@@ -49,7 +60,7 @@ export {
   newSubjectId,
   newTenantId
 } from "./keys.ts"
-export type { IssuedApiKey } from "./keys.ts"
+export type { IssuedApiKey, IssuedLoginHandoff } from "./keys.ts"
 
 export {
   createGatewayStore,
@@ -63,6 +74,7 @@ export type {
   CreateSubjectInput,
   CreateTenantInput,
   GatewayStore,
+  GatewayOverviewCounts,
   GatewayStoreOptions,
   RecordAuditInput
 } from "./store.ts"

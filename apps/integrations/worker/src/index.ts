@@ -48,6 +48,12 @@ export interface Env {
   /** The origin callers reach, e.g. https://integrations-gateway.example.workers.dev.
    *  Drives OAuth callback URLs; set it before running authorization flows. */
   readonly INTEGRATIONS_PUBLIC_URL?: string
+  /** OAuth credentials for human Google sign-in. The secret should be set
+   * with `wrangler secret put INTEGRATIONS_GOOGLE_CLIENT_SECRET`. */
+  readonly INTEGRATIONS_GOOGLE_CLIENT_ID?: string
+  readonly INTEGRATIONS_GOOGLE_CLIENT_SECRET?: string
+  /** `1` keeps self-service account creation open after the first claim. */
+  readonly INTEGRATIONS_ALLOW_SIGNUP?: string
   /** OTLP/HTTP base URL traces export to (e.g. a hosted collector). Unset
    *  keeps the worker untraced — nothing is built, nothing is exported. */
   readonly INTEGRATIONS_OTLP_ENDPOINT?: string
@@ -74,6 +80,29 @@ const telemetryHeadersOption = (
     ? {}
     : { telemetryHeaders: { authorization: value } }
 
+const googleIdentityOption = (
+  clientIdValue: string | undefined,
+  clientSecretValue: string | undefined
+): {
+  readonly googleIdentity?: {
+    readonly clientId: string
+    readonly clientSecret: string
+  }
+} => {
+  const clientId = clientIdValue?.trim()
+  const clientSecret = clientSecretValue?.trim()
+  const hasClientId = clientId !== undefined && clientId.length > 0
+  const hasClientSecret = clientSecret !== undefined && clientSecret.length > 0
+  if (hasClientId !== hasClientSecret) {
+    throw new Error(
+      "Google sign-in requires both INTEGRATIONS_GOOGLE_CLIENT_ID and INTEGRATIONS_GOOGLE_CLIENT_SECRET"
+    )
+  }
+  return hasClientId && hasClientSecret
+    ? { googleIdentity: { clientId, clientSecret } }
+    : {}
+}
+
 const getService = (env: Env): Promise<GatewayService> => {
   servicePromise ??= (async () => {
     const { key, encryption } = await resolveMasterKey(env.INTEGRATIONS_MASTER_KEY)
@@ -91,6 +120,11 @@ const getService = (env: Env): Promise<GatewayService> => {
       oauthStore: new D1OAuthSessionStore(database),
       externalMaintenance: true,
       secureCookies: true,
+      allowSignup: env.INTEGRATIONS_ALLOW_SIGNUP === "1",
+      ...googleIdentityOption(
+        env.INTEGRATIONS_GOOGLE_CLIENT_ID,
+        env.INTEGRATIONS_GOOGLE_CLIENT_SECRET
+      ),
       ...publicUrlOption(env.INTEGRATIONS_PUBLIC_URL),
       ...telemetryEndpointOption(env.INTEGRATIONS_OTLP_ENDPOINT),
       ...telemetryHeadersOption(env.INTEGRATIONS_OTLP_AUTHORIZATION)

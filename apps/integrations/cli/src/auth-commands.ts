@@ -6,6 +6,7 @@ import { whenPresent } from "./optional.ts"
 import {
   connectToControlPlane,
   loginOperator,
+  loginOperatorInBrowser,
   logoutOperator,
   readOperatorSession,
   signupOperator
@@ -40,16 +41,42 @@ const controlPlaneTask = (
 export const loginCommand = Command.make(
   "login",
   {
-    email: Argument.string("email"),
-    password: passwordFlag()
+    email: Argument.string("email").pipe(Argument.optional),
+    password: passwordFlag(),
+    noOpen: Flag.boolean("no-open").pipe(
+      Flag.withDescription("Print the sign-in URL instead of opening a browser")
+    ),
+    timeout: Flag.integer("timeout").pipe(
+      Flag.withDefault(300),
+      Flag.withDescription("Seconds to wait for browser sign-in")
+    )
   },
-  ({ email, password: provided }) =>
+  ({ email, password: provided, noOpen, timeout }) =>
     Effect.gen(function* () {
-      const secret = yield* password(provided)
-      const session = yield* authTask(() => loginOperator({ email, password: secret }))
+      const explicitEmail = Option.getOrUndefined(email)
+      const session = explicitEmail === undefined
+        ? yield* authTask(() => loginOperatorInBrowser({
+          noOpen,
+          timeoutSeconds: timeout,
+          onAuthorization: async (url) => await new Promise<void>((resolve, reject) => {
+            process.stdout.write(
+              `${noOpen ? "Open" : "If the browser does not open, visit"}: ${url}\n`,
+              (error) => error === null || error === undefined ? resolve() : reject(error)
+            )
+          })
+        }))
+        : yield* Effect.gen(function* () {
+          const secret = yield* password(provided)
+          return yield* authTask(() => loginOperator({ email: explicitEmail, password: secret }))
+        })
       yield* writeStdoutLine(jsonOutput({ authenticated: true, email: session.email }, false))
     })
-).pipe(Command.withDescription("Sign in as a human operator and save the session locally"))
+).pipe(
+  Command.withAlias("auth"),
+  Command.withDescription(
+    "Sign in through the browser, or pass an email to use a password"
+  )
+)
 
 export const signupCommand = Command.make(
   "signup",
@@ -118,14 +145,22 @@ const changePasswordCommand = Command.make(
     next: Flag.redacted("new").pipe(
       Flag.optional,
       Flag.withDescription("New password. Omit to enter it without terminal echo")
+    ),
+    initial: Flag.boolean("initial").pipe(
+      Flag.withDescription("Set the first password on an OAuth-only account")
     )
   },
-  ({ current, next }) =>
+  ({ current, next, initial }) =>
     Effect.gen(function* () {
-      const currentPassword = yield* password(current, "Current password")
+      const currentPassword = initial
+        ? undefined
+        : yield* password(current, "Current password")
       const newPassword = yield* password(next, "New password")
       const result = yield* controlPlaneTask((client) =>
-        client.request("POST", "/v1/auth/password", { currentPassword, newPassword })
+        client.request("POST", "/v1/auth/password", {
+          ...whenPresent("currentPassword", currentPassword),
+          newPassword
+        })
       )
       yield* writeStdoutLine(jsonOutput(result, false))
     })

@@ -1,6 +1,7 @@
 import { Schema } from "effect"
 import { generateSessionToken, hashPassword, verifyPassword } from "../passwords.ts"
 import { newSubjectId, newTenantId } from "../keys.ts"
+import { generateLoginHandoff, hashLoginHandoff } from "../keys.ts"
 import type { SessionTokenHash } from "../domain.ts"
 import type { GatewayStore } from "../store.ts"
 import { badRequest, created, decodeBody, ok } from "./router.ts"
@@ -9,6 +10,13 @@ import {
   clearedSessionCookieHeader,
   sessionCookieHeader
 } from "./handler.ts"
+import {
+  googleIdentityAuthorizationUrl,
+  googleIdentityCallbackUrl,
+  resolveGoogleIdentity
+} from "../identity-oauth.ts"
+import type { GoogleIdentityOAuth } from "../identity-oauth.ts"
+import { oauthBrowserPage } from "../oauth.ts"
 
 const Email = Schema.String.check(
   Schema.isPattern(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)
@@ -35,12 +43,12 @@ const ChangeEmailBody = Schema.Struct({
 })
 
 const ChangePasswordBody = Schema.Struct({
-  currentPassword: Schema.String,
+  currentPassword: Schema.optional(Schema.String),
   newPassword: Schema.String.check(Schema.isMinLength(8))
 })
 
 const DeleteAccountBody = Schema.Struct({
-  password: Schema.String
+  password: Schema.optional(Schema.String)
 })
 
 export interface AuthDependencies {
@@ -48,13 +56,25 @@ export interface AuthDependencies {
   /** Whether POST /v1/auth/signup may create a new tenant. True while the
    *  gateway has no logins at all (so its first human can claim it) and after
    *  that only when an operator opts in. */
-  readonly signupOpen: boolean
+  readonly signupOpen: () => Promise<boolean>
   /** Set on session cookies when the gateway is served over TLS. */
   readonly secureCookies: boolean
   readonly sessionTtlHours?: number
+  /** Human sign-in through Google. Deliberately separate from integration
+   * OAuth, which authorizes tools rather than operators. */
+  readonly google?: GoogleIdentityOAuth
 }
 
 const defaultSessionTtlHours = 24 * 30
+
+const safeReturnPath = (candidate: string | null): string | null => {
+  if (candidate === null || !candidate.startsWith("/")) return null
+  const base = "https://gateway.invalid"
+  const resolved = new URL(candidate, base)
+  return resolved.origin === base
+    ? `${resolved.pathname}${resolved.search}${resolved.hash}`
+    : null
+}
 
 /** The login surface. Public by necessity — these routes are how a credential
  *  comes to exist — and deliberately small.
@@ -65,10 +85,10 @@ const defaultSessionTtlHours = 24 * 30
 export const authRoutes = (dependencies: AuthDependencies): ReadonlyArray<Route> => {
   const ttlHours = dependencies.sessionTtlHours ?? defaultSessionTtlHours
 
-  const startSession = async (
+  const issueSession = async (
     subjectId: Parameters<GatewayStore["createSession"]>[0]["subjectId"],
     tenantId: Parameters<GatewayStore["createSession"]>[0]["tenantId"]
-  ): Promise<string> => {
+  ): Promise<{ readonly token: string; readonly cookie: string }> => {
     const token = generateSessionToken()
     await dependencies.store.createSession({
       tokenHash: token.hash,
@@ -76,19 +96,233 @@ export const authRoutes = (dependencies: AuthDependencies): ReadonlyArray<Route>
       tenantId,
       expiresAt: new Date(Date.now() + ttlHours * 60 * 60 * 1000)
     })
-    return sessionCookieHeader(token.secret, {
-      maxAgeSeconds: Math.round(ttlHours * 60 * 60),
-      secure: dependencies.secureCookies
-    })
+    return {
+      token: token.secret,
+      cookie: sessionCookieHeader(token.secret, {
+        maxAgeSeconds: Math.round(ttlHours * 60 * 60),
+        secure: dependencies.secureCookies
+      })
+    }
   }
 
+  const startSession = async (
+    subjectId: Parameters<GatewayStore["createSession"]>[0]["subjectId"],
+    tenantId: Parameters<GatewayStore["createSession"]>[0]["tenantId"]
+  ): Promise<string> => (await issueSession(subjectId, tenantId)).cookie
+
+  const browserPage = (title: string, message: string, status = 200) => ({
+    status,
+    body: {},
+    html: oauthBrowserPage({ title, message })
+  })
+
   return [
+    {
+      method: "GET",
+      path: "/v1/auth/providers",
+      access: "public",
+      handle: async () => ok({
+        signupOpen: await dependencies.signupOpen(),
+        google: dependencies.google === undefined
+          ? { enabled: false }
+          : {
+            enabled: true,
+            startUrl: "/v1/auth/google/start",
+            callbackUrl: googleIdentityCallbackUrl(dependencies.google)
+          }
+      })
+    },
+    {
+      method: "POST",
+      path: "/v1/auth/cli/start",
+      access: "public",
+      handle: async () => {
+        if (dependencies.google === undefined) {
+          return {
+            status: 501,
+            body: {
+              error: "Browser sign-in is not configured on this gateway",
+              code: "identity-provider-unavailable"
+            }
+          }
+        }
+        const request = generateLoginHandoff()
+        const expiresAt = new Date(Date.now() + 10 * 60 * 1000)
+        await dependencies.store.createLoginHandoff({ requestHash: request.hash, expiresAt })
+        const start = new URL("/v1/auth/google/start", googleIdentityCallbackUrl(dependencies.google))
+        start.searchParams.set("handoff", request.secret)
+        return created({
+          requestId: request.secret,
+          authorizationUrl: start.toString(),
+          expiresAt,
+          intervalMs: 1_000
+        })
+      }
+    },
+    {
+      method: "GET",
+      path: "/v1/auth/cli/:id",
+      access: "public",
+      handle: async (request) => {
+        const requestHash = hashLoginHandoff(request.params["id"] ?? "")
+        const handoff = await dependencies.store.getLoginHandoff(requestHash)
+        if (handoff === undefined) {
+          return { status: 404, body: { error: "Unknown login handoff", code: "login-handoff-unknown" } }
+        }
+        if (handoff.expiresAt.getTime() <= Date.now()) {
+          return { status: 410, body: { error: "Login handoff expired", code: "login-handoff-expired" } }
+        }
+        if (handoff.collectedAt !== null) {
+          return { status: 410, body: { error: "Login handoff was already collected", code: "login-handoff-collected" } }
+        }
+        if (handoff.subjectId === null || handoff.tenantId === null || handoff.email === null) {
+          return ok({ status: "pending", expiresAt: handoff.expiresAt })
+        }
+        if (!await dependencies.store.collectLoginHandoff(requestHash)) {
+          return { status: 409, body: { error: "Login handoff was collected concurrently", code: "login-handoff-collected" } }
+        }
+        const session = await issueSession(handoff.subjectId, handoff.tenantId)
+        return ok({ status: "authenticated", token: session.token, email: handoff.email })
+      }
+    },
+    {
+      method: "GET",
+      path: "/v1/auth/google/start",
+      access: "public",
+      handle: async (request) => {
+        if (dependencies.google === undefined) {
+          return browserPage("Google sign-in unavailable", "This gateway has not configured Google sign-in.", 501)
+        }
+        const handoffSecret = request.query.get("handoff")
+        const handoffHash = handoffSecret === null ? null : hashLoginHandoff(handoffSecret)
+        if (handoffHash !== null) {
+          const handoff = await dependencies.store.getLoginHandoff(handoffHash)
+          if (handoff === undefined || handoff.expiresAt.getTime() <= Date.now() || handoff.collectedAt !== null) {
+            return browserPage("Sign-in link expired", "Return to the terminal and run `ii login` again.", 410)
+          }
+        }
+        const state = generateLoginHandoff()
+        const returnPath = safeReturnPath(request.query.get("returnTo"))
+        await dependencies.store.createIdentityOAuthState({
+          stateHash: state.hash,
+          provider: "google",
+          handoffHash,
+          returnPath,
+          expiresAt: new Date(Date.now() + 10 * 60 * 1000)
+        })
+        return {
+          status: 302,
+          body: { redirecting: true },
+          headers: {
+            location: googleIdentityAuthorizationUrl(dependencies.google, state.secret),
+            "cache-control": "no-store"
+          }
+        }
+      }
+    },
+    {
+      method: "GET",
+      path: "/v1/auth/google/callback",
+      access: "public",
+      handle: async (request) => {
+        if (dependencies.google === undefined) {
+          return browserPage("Google sign-in unavailable", "This gateway has not configured Google sign-in.", 501)
+        }
+        const stateSecret = request.query.get("state")
+        const code = request.query.get("code")
+        if (stateSecret === null || code === null) {
+          return browserPage("Sign-in failed", "Google did not return a complete sign-in response.", 400)
+        }
+        const state = await dependencies.store.consumeIdentityOAuthState(hashLoginHandoff(stateSecret))
+        if (state === undefined) {
+          return browserPage("Sign-in expired", "This sign-in could not be verified. Start again.", 400)
+        }
+        try {
+          const identity = await resolveGoogleIdentity(dependencies.google, code)
+          const existingIdentity = await dependencies.store.findExternalIdentity(
+            "google",
+            identity.providerSubject
+          )
+          let login = existingIdentity === undefined
+            ? await dependencies.store.findLoginByEmail(identity.email)
+            : await dependencies.store.findLoginBySubject(existingIdentity.subjectId)
+
+          if (login === undefined) {
+            if (!(await dependencies.signupOpen())) {
+              return browserPage(
+                "Account not found",
+                "This gateway does not allow new accounts. Ask an operator to invite or create yours.",
+                403
+              )
+            }
+            const tenant = await dependencies.store.createTenant({
+              id: newTenantId(),
+              name: identity.email.split("@")[0] ?? identity.email
+            })
+            const subject = await dependencies.store.createSubject({
+              id: newSubjectId(),
+              tenantId: tenant.id
+            })
+            login = await dependencies.store.createLogin({
+              subjectId: subject.id,
+              tenantId: tenant.id,
+              email: identity.email,
+              passwordHash: null
+            })
+          }
+
+          await dependencies.store.createExternalIdentity({
+            provider: "google",
+            providerSubject: identity.providerSubject,
+            subjectId: login.subjectId,
+            tenantId: login.tenantId,
+            email: identity.email
+          })
+          if (state.handoffHash !== null) {
+            const completed = await dependencies.store.completeLoginHandoff({
+              requestHash: state.handoffHash,
+              subjectId: login.subjectId,
+              tenantId: login.tenantId,
+              email: login.email
+            })
+            if (!completed) {
+              return browserPage(
+                "Terminal sign-in expired",
+                "Return to the terminal and run `ii login` again.",
+                410
+              )
+            }
+          }
+          const cookie = await startSession(login.subjectId, login.tenantId)
+          if (state.handoffHash !== null) {
+            return {
+              ...browserPage(
+                "Signed in",
+                "The terminal is authenticated. You can close this window and return to ii."
+              ),
+              headers: { "set-cookie": cookie }
+            }
+          }
+          return {
+            status: 302,
+            body: { authenticated: true },
+            headers: {
+              location: state.returnPath ?? "/",
+              "set-cookie": cookie,
+              "cache-control": "no-store"
+            }
+          }
+        } catch {
+          return browserPage("Sign-in failed", "Google sign-in could not be verified. Start again.", 400)
+        }
+      }
+    },
     {
       method: "POST",
       path: "/v1/auth/signup",
       access: "public",
       handle: async (request) => {
-        if (!dependencies.signupOpen) {
+        if (!(await dependencies.signupOpen())) {
           return {
             status: 403,
             body: { error: "Signup is closed on this gateway", code: "signup-closed" }
@@ -136,7 +370,7 @@ export const authRoutes = (dependencies: AuthDependencies): ReadonlyArray<Route>
       handle: async (request) => {
         const body = decodeBody(LoginBody, request.body)
         const login = await dependencies.store.findLoginByEmail(body.email)
-        const accepted = login !== undefined &&
+        const accepted = login?.passwordHash !== null && login?.passwordHash !== undefined &&
           await verifyPassword(body.password, login.passwordHash)
         if (login === undefined || !accepted) {
           return {
@@ -176,12 +410,16 @@ export const authRoutes = (dependencies: AuthDependencies): ReadonlyArray<Route>
       access: "public",
       handle: async (request) => {
         if (request.identity.kind === "session") {
+          const login = await dependencies.store.findLoginBySubject(request.identity.subjectId)
+          const identities = await dependencies.store.listExternalIdentities(request.identity.subjectId)
           return ok({
             authenticated: true,
             kind: "session",
             email: request.identity.email,
             tenantId: request.identity.tenantId,
-            subjectId: request.identity.subjectId
+            subjectId: request.identity.subjectId,
+            hasPassword: login?.passwordHash !== null && login?.passwordHash !== undefined,
+            identityProviders: identities.map((identity) => identity.provider)
           })
         }
         if (request.identity.kind === "client") {
@@ -215,7 +453,8 @@ export const authRoutes = (dependencies: AuthDependencies): ReadonlyArray<Route>
         const session = request.identity
         const body = decodeBody(ChangeEmailBody, request.body)
         const login = await dependencies.store.findLoginByEmail(session.email)
-        if (login === undefined || !(await verifyPassword(body.password, login.passwordHash))) {
+        if (login === undefined || login.passwordHash === null ||
+          !(await verifyPassword(body.password, login.passwordHash))) {
           return {
             status: 401,
             body: { error: "Email or password is not correct", code: "invalid-credentials" }
@@ -244,7 +483,13 @@ export const authRoutes = (dependencies: AuthDependencies): ReadonlyArray<Route>
         const session = request.identity
         const body = decodeBody(ChangePasswordBody, request.body)
         const login = await dependencies.store.findLoginByEmail(session.email)
-        if (login === undefined || !(await verifyPassword(body.currentPassword, login.passwordHash))) {
+        const accepted = login !== undefined && (
+          login.passwordHash === null
+            ? body.currentPassword === undefined
+            : body.currentPassword !== undefined &&
+              await verifyPassword(body.currentPassword, login.passwordHash)
+        )
+        if (login === undefined || !accepted) {
           return {
             status: 401,
             body: { error: "Email or password is not correct", code: "invalid-credentials" }
@@ -276,7 +521,18 @@ export const authRoutes = (dependencies: AuthDependencies): ReadonlyArray<Route>
         const session = request.identity
         const body = decodeBody(DeleteAccountBody, request.body)
         const login = await dependencies.store.findLoginByEmail(session.email)
-        if (login === undefined || !(await verifyPassword(body.password, login.passwordHash))) {
+        if (login?.passwordHash === null) {
+          return {
+            status: 409,
+            body: {
+              error: "Set a password before deleting an OAuth-only account",
+              code: "password-required"
+            }
+          }
+        }
+        const accepted = login !== undefined && body.password !== undefined &&
+          await verifyPassword(body.password, login.passwordHash)
+        if (login === undefined || !accepted) {
           return {
             status: 401,
             body: { error: "Email or password is not correct", code: "invalid-credentials" }

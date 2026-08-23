@@ -1,9 +1,9 @@
-import { useState } from "react"
+import { Suspense, useState } from "react"
 import { NavLink, Outlet, useNavigate } from "react-router"
 import {
   Activity,
-  Braces,
   KeyRound,
+  LayoutDashboard,
   LogOut,
   Moon,
   PanelLeftClose,
@@ -11,8 +11,7 @@ import {
   Plug,
   UserRound,
   ShieldCheck,
-  Sun,
-  Wrench
+  Sun
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -22,14 +21,14 @@ import { Switch } from "@/components/ui/switch"
 import { logOut } from "@/lib/gateway"
 import { useApprovals } from "@/lib/queries"
 import { cn } from "@/lib/utils"
+import { useSession } from "@/components/auth-gate"
 
 const navigation = [
+  { to: "/", label: "Overview", icon: LayoutDashboard },
   { to: "/integrations", label: "Integrations", icon: Plug },
   { to: "/clients", label: "Clients", icon: KeyRound },
   { to: "/approvals", label: "Approvals", icon: ShieldCheck },
-  { to: "/executions", label: "Executions", icon: Activity },
-  { to: "/workbench", label: "Workbench", icon: Braces },
-  { to: "/system", label: "System", icon: Wrench },
+  { to: "/activity", label: "Activity", icon: Activity },
   { to: "/account", label: "Account", icon: UserRound }
 ] as const
 
@@ -79,7 +78,8 @@ export function AppShell({
   readonly dark: boolean
   readonly onDarkChange: (dark: boolean) => void
 }) {
-  const [expanded, setExpanded] = useState(false)
+  const session = useSession()
+  const [expanded, setExpanded] = useState(() => window.innerWidth >= 1024)
 
   return (
     <div className="bg-background flex h-svh overflow-hidden">
@@ -112,6 +112,7 @@ export function AppShell({
             <NavLink
               key={item.to}
               to={item.to}
+              end={item.to === "/"}
               aria-label={expanded ? undefined : item.label}
               title={expanded ? undefined : item.label}
               className={({ isActive }) =>
@@ -143,7 +144,9 @@ export function AppShell({
                     onCheckedChange={onDarkChange}
                   />
                 </label>
-                <SignOutButton />
+                {session?.authenticated === true && session.kind === "session"
+                  ? <SignOutButton />
+                  : null}
                 <p className="text-sidebar-foreground/50 text-xs leading-relaxed">
                   Served by the gateway. Actions run with your signed-in session,
                   or the local client's key on loopback.
@@ -165,7 +168,9 @@ export function AppShell({
         </div>
       </aside>
       <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
-        <Outlet />
+        <Suspense fallback={<p className="text-muted-foreground p-6 text-sm">Loading view…</p>}>
+          <Outlet />
+        </Suspense>
       </main>
     </div>
   )

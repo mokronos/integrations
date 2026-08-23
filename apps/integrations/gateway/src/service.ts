@@ -29,6 +29,7 @@ import {
 } from "@mokronos/integrations-executor"
 import { Effect, Layer, ManagedRuntime } from "effect"
 import { createRequestTracer } from "@mokronos/integrations-observability"
+import type { GoogleIdentityOAuth } from "./identity-oauth.ts"
 
 /** The client the local machine uses. Created with both client capabilities so
  *  an agent authoring workflows can discover and connect, with the human needed
@@ -52,6 +53,9 @@ export interface GatewayServiceOptions {
    *  Set on a hosted deployment so OAuth callbacks arrive at the gateway's own
    *  public URL instead of an ephemeral loopback listener. */
   readonly publicUrl?: string
+  /** OAuth client used for human control-plane sign-in. This is deliberately
+   * separate from vendor integration OAuth credentials. */
+  readonly googleIdentity?: Pick<GoogleIdentityOAuth, "clientId" | "clientSecret" | "fetch">
   /** Loopback origin of this very process, e.g. http://127.0.0.1:4788. Used as
    *  the OAuth callback origin when no publicUrl is configured, so the redirect
    *  URI is stable enough to pre-register at providers that demand an exact one
@@ -60,6 +64,9 @@ export interface GatewayServiceOptions {
   /** Set when the socket is bound off loopback, so session cookies carry
    *  `Secure` and a stolen cookie is worth less on the wire. */
   readonly secureCookies?: boolean
+  /** Keeps account creation open after the first human has claimed the
+   * instance. Defaults to INTEGRATIONS_ALLOW_SIGNUP=1. */
+  readonly allowSignup?: boolean
   /** Per-principal request budget per minute; falls back to
    *  INTEGRATIONS_RATE_LIMIT, then {@link defaultRateLimitPerMinute}. */
   readonly rateLimitPerMinute?: number
@@ -98,9 +105,14 @@ export interface GatewayServiceOptions {
  *  login claims the instance — or when an operator opts in explicitly. */
 const signupOpen = async (
   store: GatewayStore,
-  environment: NodeJS.ProcessEnv = process.env
+  explicitlyAllowed = process.env["INTEGRATIONS_ALLOW_SIGNUP"] === "1"
 ): Promise<boolean> =>
-  environment["INTEGRATIONS_ALLOW_SIGNUP"] === "1" || await store.countLogins() === 0
+  explicitlyAllowed || await store.countLogins() === 0
+
+const nonBlank = (value: string | undefined): string | undefined => {
+  const trimmed = value?.trim()
+  return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed
+}
 
 /** Requests per minute one client or signed-in human may make. The address
  *  bucket that guards unauthenticated traffic is a fraction of this, since a
@@ -142,6 +154,26 @@ export const createGatewayService = async (
     const resolvePublicUrl = (): string | undefined =>
       options.publicUrl ?? process.env["INTEGRATIONS_PUBLIC_URL"] ??
         options.localCallbackOrigin
+    const googleClientId = nonBlank(
+      options.googleIdentity?.clientId ?? process.env["INTEGRATIONS_GOOGLE_CLIENT_ID"]
+    )
+    const googleClientSecret = nonBlank(
+      options.googleIdentity?.clientSecret ?? process.env["INTEGRATIONS_GOOGLE_CLIENT_SECRET"]
+    )
+    if ((googleClientId === undefined) !== (googleClientSecret === undefined)) {
+      throw new Error(
+        "Google sign-in requires both INTEGRATIONS_GOOGLE_CLIENT_ID and INTEGRATIONS_GOOGLE_CLIENT_SECRET"
+      )
+    }
+    const googleIdentity: GoogleIdentityOAuth | undefined =
+      googleClientId === undefined || googleClientSecret === undefined
+        ? undefined
+        : {
+          clientId: googleClientId,
+          clientSecret: googleClientSecret,
+          publicUrlOf: resolvePublicUrl,
+          ...whenPresent("fetch", options.googleIdentity?.fetch)
+        }
     const oauth = createOAuthSessions(gateway.executor, {
       publicUrlOf: resolvePublicUrl,
       ...whenPresent("store", options.oauthStore)
@@ -157,9 +189,11 @@ export const createGatewayService = async (
         const origin = resolvePublicUrl()
         return origin === undefined ? undefined : `${origin.replace(/\/+$/, "")}/v1/oauth/callback`
       },
+      dashboardUrl: resolvePublicUrl,
       sessions: {
-        signupOpen: await signupOpen(resources.store),
-        secureCookies: options.secureCookies ?? false
+        signupOpen: () => signupOpen(resources.store, options.allowSignup),
+        secureCookies: options.secureCookies ?? false,
+        ...whenPresent("google", googleIdentity)
       },
       ...whenPresent("registryUrl", options.registryUrl)
     })

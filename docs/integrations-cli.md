@@ -17,10 +17,15 @@ i --help
 ii --help
 ```
 
-The command needs Bun on the machine. It ships in
-`@mokronos/integrations-cli`, a dependency of `@mokronos/wf` — not yet published
-to npm, so install it from the repository with `bun run install:local`, which
-puts `wf`, `i`, and `ii` on your `PATH`.
+The command needs Bun on the machine. Install the package from npm:
+
+```bash
+bun add --global @mokronos/integrations-cli
+ii login
+```
+
+For repository development, `bun run install:local` writes source-backed `i`
+and `ii` shims instead, so edits take effect without republishing.
 
 ## Vocabulary
 
@@ -113,18 +118,20 @@ told to run `ii serve`.
 
 | View | What you can do |
 | --- | --- |
-| Integrations | Discover an endpoint, connect and disconnect, browse every tool with its input and output schema |
-| Clients | Create a client, issue and revoke keys, revoke the client |
+| Overview | Connection and delegation readiness, pending approvals, and recent activity |
+| Integrations | Discover an endpoint, connect and disconnect, browse tool schemas, check contract drift |
+| Clients | Create clients, edit provisioning/admin capabilities and approval delivery, rotate keys |
 | Clients → grants | Grant one tool through one connection under an alias, switch a grant between *allow* and *ask a human*, revoke it |
 | Approvals | See frozen calls with their exact arguments, approve (the gateway performs the call) or deny |
-| Executions | The audit trail: every attempt, its outcome, and which grant decided it |
-| System | Refresh a catalog snapshot and read the drift report; run maintenance now |
+| Activity | The audit trail: every attempt, its outcome, and which grant decided it |
 
 ### How it authenticates
 
 Hosted dashboards and `ii` authenticate a human with an HTTP-only session.
-Use `ii signup` to claim a fresh gateway, then `ii login`, `ii logout`, or
-`ii whoami` as needed. The session is stored at
+With Google configured, `ii login` (also `ii auth`) opens the provider in a
+browser and waits for a one-use handoff. `ii login <email>` remains the explicit
+password form; `--no-open` prints the browser URL. Use `ii signup` to claim a
+password-only gateway, and `ii logout` or `ii whoami` as needed. The session is stored at
 `~/.integrations/operator-session.json` with mode `0600` and is tied to the
 selected gateway URL.
 
@@ -374,7 +381,7 @@ Every result is one shape, and it always parses:
 
 ```json
 {"status":"succeeded","result":{…}}
-{"status":"pending","approvalId":"…","expiresAt":"…"}
+{"status":"pending","approvalId":"…","expiresAt":"…","approvalUrl":"…"}
 {"status":"denied","reason":"…"}
 {"status":"failed","message":"…"}
 ```
@@ -403,8 +410,9 @@ A client is created, given a key, and granted specific tools. That is the only
 source of its access.
 
 ```bash
-ii client "orders-agent"                            # provisioning capability by default
-ii client "operator-tool" --administer              # also administer the gateway
+ii client "orders-agent"                            # invocation-only; grants still required
+ii client "setup-agent" --provision                 # may manage connections
+ii client "operator-tool" --administer              # may administer the gateway
 ii key <client-id>                                   # shown once
 ii keys <client-id>                                  # which keys exist, and when each was last used
 ii grant <client-id> <alias> <tool> --integration <slug>
@@ -418,7 +426,12 @@ ii revoke grant|client|key <id>
 | --- | --- |
 | `--integration <slug>` | The integration the alias resolves to |
 | `--connection <name>` | Connection name. Default `default` |
-| `--require-approval` | Freeze this tool's calls for a human instead of running them |
+| `--require-approval` | Explicitly freeze this tool's calls for a human |
+| `--allow` | Explicitly run directly, overriding the tool's suggested policy |
+
+With neither decision flag, the gateway uses the tool's suggested policy.
+Tools explicitly marked safe may default to direct execution; mutating or
+unclassified tools default to human approval.
 
 The alias is what a workflow declares. Binding it here is what lets one
 definition run for different people against their own accounts, without editing
@@ -440,8 +453,8 @@ fail when it ran.
 ```bash
 ii approvals [--status pending|approved|denied|expired]   # the queue, for a decider
 i approval <approval-id>                                  # one call, for its proposing client
-ii approve <approval-id> [--by <who>]
-ii deny <approval-id> [--by <who>]
+ii approve <approval-id>
+ii deny <approval-id>
 ```
 
 A frozen invocation expires if nobody decides it, and expiry means the

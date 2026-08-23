@@ -693,16 +693,20 @@ const clientCommand = Command.make(
   "client",
   {
     name: Argument.string("name"),
+    provision: Flag.boolean("provision").pipe(
+      Flag.withDescription("Allow this client to discover and connect integrations")
+    ),
     administer: Flag.boolean("administer").pipe(
       Flag.withDescription("Allow this client to administer clients, keys, grants, audit, and policy")
     )
   },
-  ({ name, administer }) =>
+  ({ name, provision, administer }) =>
     controlPlaneTask((client) => client.request("POST", "/v1/clients", {
       name,
-      capabilities: administer
-        ? ["provision_connections", "administer_gateway"]
-        : ["provision_connections"]
+      capabilities: [
+        ...(provision ? ["provision_connections"] : []),
+        ...(administer ? ["administer_gateway"] : [])
+      ]
     })).pipe(
       Effect.flatMap((result) => {
         const created = record(result)
@@ -764,10 +768,21 @@ const grantCommand = Command.make(
     connection: connectionFlag(),
     requireApproval: Flag.boolean("require-approval").pipe(
       Flag.withDescription("Freeze this tool's calls for a human instead of running them")
+    ),
+    allow: Flag.boolean("allow").pipe(
+      Flag.withDescription("Explicitly allow direct calls, overriding the tool's suggested policy")
     )
   },
-  (options) =>
-    controlPlaneTask((client) =>
+  (options) => {
+    if (options.requireApproval && options.allow) {
+      return Effect.fail(cliError("Choose either --allow or --require-approval, not both"))
+    }
+    const decision = options.requireApproval
+      ? "require_approval"
+      : options.allow
+      ? "allow"
+      : undefined
+    return controlPlaneTask((client) =>
       client.request("POST", "/v1/grants", {
         clientId: options.clientId,
         alias: options.alias,
@@ -777,11 +792,12 @@ const grantCommand = Command.make(
           integration: options.integration,
           name: options.connection
         },
-        decision: options.requireApproval ? "require_approval" : "allow"
+        ...whenPresent("decision", decision)
       })
     ).pipe(Effect.flatMap((result) =>
       writeStdoutLine(jsonOutput(record(result), false))
     ))
+  }
 ).pipe(Command.withDescription("Delegate one tool through one connection to one client"))
 
 const operatorGrantsCommand = Command.make(
@@ -924,14 +940,11 @@ const approveCommand = Command.make(
   "approve",
   {
     id: Argument.string("approval-id"),
-    by: Flag.string("by").pipe(Flag.optional, Flag.withDescription("Record who approved")),
     verbose: verboseFlag()
   },
-  ({ id, by, verbose }) =>
+  ({ id, verbose }) =>
     controlPlaneTask((client) =>
-      client.request("POST", `/v1/approvals/${encodeURIComponent(id)}/approve`, {
-        ...Option.match(by, { onNone: () => ({}), onSome: (value) => ({ decidedBy: value }) })
-      })
+      client.request("POST", `/v1/approvals/${encodeURIComponent(id)}/approve`, {})
     ).pipe(Effect.flatMap((result) => {
       const body = record(result)
       // The gateway performed the call. Approving discharged one frozen
@@ -944,14 +957,11 @@ const denyCommand = Command.make(
   "deny",
   {
     id: Argument.string("approval-id"),
-    by: Flag.string("by").pipe(Flag.optional),
     verbose: verboseFlag()
   },
-  ({ id, by, verbose }) =>
+  ({ id, verbose }) =>
     controlPlaneTask((client) =>
-      client.request("POST", `/v1/approvals/${encodeURIComponent(id)}/deny`, {
-        ...Option.match(by, { onNone: () => ({}), onSome: (value) => ({ decidedBy: value }) })
-      })
+      client.request("POST", `/v1/approvals/${encodeURIComponent(id)}/deny`, {})
     ).pipe(Effect.flatMap((result) =>
       writeStdoutLine(jsonOutput(record(result), verbose))
     ))

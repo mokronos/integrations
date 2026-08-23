@@ -123,7 +123,11 @@ export const ExecutorToolSummary = Schema.Struct({
   description: Schema.String,
   integration: Schema.String,
   owner: ExecutorOwner,
-  connection: Schema.String
+  connection: Schema.String,
+  /** Conservative policy hint for a newly-created gateway grant. An operator
+   * may override it, but an omitted choice never silently makes a mutating or
+   * unclassified tool run without review. */
+  defaultDecision: Schema.Literals(["allow", "require_approval"])
 })
 export type ExecutorToolSummary = typeof ExecutorToolSummary.Type
 

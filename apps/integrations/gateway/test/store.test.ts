@@ -20,6 +20,8 @@ import {
   ToolName
 } from "../src/index.ts"
 import type { ConnectionRef, GatewayStore } from "../src/index.ts"
+import { generateLoginHandoff } from "../src/keys.ts"
+import { PasswordHash } from "../src/passwords.ts"
 
 const directories: Array<string> = []
 const stores: Array<GatewayStore> = []
@@ -129,6 +131,70 @@ describe("gateway store", () => {
     const stored = await store.listApiKeys(client.id)
     expect(stored[0]?.hash).toBe(hashApiKey(key.secret))
     expect(JSON.stringify(stored)).not.toContain(key.secret)
+  })
+
+  test("updates client authority and approval delivery together", async () => {
+    const store = await makeStore()
+    const client = await store.createClient({
+      id: newClientId(),
+      tenantId: defaultTenantId,
+      name: "policy-check",
+      capabilities: []
+    })
+    expect(client.approvalDelivery).toEqual({ returnLink: true, webhooks: [] })
+
+    const updated = await store.updateClientSettings({
+      tenantId: defaultTenantId,
+      id: client.id,
+      capabilities: ["provision_connections"],
+      approvalDelivery: {
+        returnLink: false,
+        webhooks: ["https://automation.example/approval"]
+      }
+    })
+    expect(updated.capabilities).toEqual(["provision_connections"])
+    expect(updated.approvalDelivery).toEqual({
+      returnLink: false,
+      webhooks: ["https://automation.example/approval"]
+    })
+  })
+
+  test("completes and consumes login handoffs and OAuth state once", async () => {
+    const store = await makeStore()
+    const tenant = await store.createTenant({ name: "OAuth workspace" })
+    const subject = await store.createSubject({ id: newSubjectId(), tenantId: tenant.id })
+    await store.createLogin({
+      subjectId: subject.id,
+      tenantId: tenant.id,
+      email: "oauth@example.com",
+      passwordHash: null
+    })
+    const handoff = generateLoginHandoff()
+    await store.createLoginHandoff({
+      requestHash: handoff.hash,
+      expiresAt: new Date(Date.now() + 60_000)
+    })
+    expect(await store.completeLoginHandoff({
+      requestHash: handoff.hash,
+      subjectId: subject.id,
+      tenantId: tenant.id,
+      email: "oauth@example.com"
+    })).toBe(true)
+    expect(await store.collectLoginHandoff(handoff.hash)).toBe(true)
+    expect(await store.collectLoginHandoff(handoff.hash)).toBe(false)
+
+    const state = generateLoginHandoff()
+    await store.createIdentityOAuthState({
+      stateHash: state.hash,
+      provider: "google",
+      handoffHash: handoff.hash,
+      returnPath: "/approvals?approval=ap_1",
+      expiresAt: new Date(Date.now() + 60_000)
+    })
+    expect((await store.consumeIdentityOAuthState(state.hash))?.returnPath).toBe(
+      "/approvals?approval=ap_1"
+    )
+    expect(await store.consumeIdentityOAuthState(state.hash)).toBeUndefined()
   })
 
   test("freezes approval arguments and settles them once", async () => {
@@ -378,6 +444,44 @@ describe("gateway store", () => {
       tenantId: other.id,
       name: "legacy",
       capabilities: ["provision_connections"]
+    })).resolves.toBeDefined()
+  })
+
+  test("migrates password-required logins without inventing OAuth passwords", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "wf-gateway-login-migrate-"))
+    directories.push(directory)
+    const databasePath = path.join(directory, "gateway.sqlite")
+    const legacy = openLegacyDatabase({ url: `file:${databasePath}` })
+    await legacy.execute(`CREATE TABLE gateway_tenant (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL)`)
+    await legacy.execute(`CREATE TABLE gateway_subject (
+      id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, created_at INTEGER NOT NULL)`)
+    await legacy.execute(`CREATE TABLE gateway_login (
+      subject_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL, created_at INTEGER NOT NULL)`)
+    await legacy.execute(
+      "INSERT INTO gateway_tenant VALUES ('default', 'Default', 0)"
+    )
+    await legacy.execute(
+      "INSERT INTO gateway_subject VALUES ('legacy-subject', 'default', 0)"
+    )
+    await legacy.execute(
+      "INSERT INTO gateway_login VALUES ('legacy-subject', 'default', 'legacy@example.com', 'scrypt$c2FsdA==$aGFzaA==', 0)"
+    )
+    await legacy.close()
+
+    const store = await createGatewayStore(databasePath)
+    stores.push(store)
+    expect((await store.findLoginByEmail("legacy@example.com"))?.passwordHash).toBe(
+      PasswordHash.make("scrypt$c2FsdA==$aGFzaA==")
+    )
+    const tenant = await store.createTenant({ name: "OAuth tenant" })
+    const subject = await store.createSubject({ id: newSubjectId(), tenantId: tenant.id })
+    await expect(store.createLogin({
+      subjectId: subject.id,
+      tenantId: tenant.id,
+      email: "passwordless@example.com",
+      passwordHash: null
     })).resolves.toBeDefined()
   })
 })

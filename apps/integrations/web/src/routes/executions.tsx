@@ -60,17 +60,17 @@ export function ExecutionsRoute() {
 
   return (
     <Page
-      title="Executions"
+      title="Activity"
       description="Every attempt to call through this gateway, allowed or not. Filtered and paged at the gateway so the permanent trail stays useful as it grows."
-      actions={<><Select value={String(limit)} onValueChange={(value) => { setLimit(Number.parseInt(value, 10)); setOffset(0) }}><SelectTrigger className="w-28"><SelectValue /></SelectTrigger><SelectContent>{limits.map((candidate) => <SelectItem key={candidate} value={String(candidate)}>{candidate} / page</SelectItem>)}</SelectContent></Select><ReloadButton onClick={() => void audit.refetch()} busy={audit.isFetching} /></>}
+      actions={<ReloadButton onClick={() => void audit.refetch()} busy={audit.isFetching} />}
     >
       <QueryError error={audit.error} />
       <Card>
         <CardContent className="grid gap-2 p-3 md:grid-cols-2 xl:grid-cols-[1.2fr_1fr_1fr_0.8fr_1.1fr_auto]">
-          <Input value={draft.clientId} onChange={(event) => setDraft({ ...draft, clientId: event.target.value })} placeholder="Client ID" />
-          <Input value={draft.alias} onChange={(event) => setDraft({ ...draft, alias: event.target.value })} placeholder="Alias" />
-          <Input value={draft.tool} onChange={(event) => setDraft({ ...draft, tool: event.target.value })} placeholder="Tool" />
-          <Select value={draft.outcome} onValueChange={(value) => setDraft({ ...draft, outcome: decodeAuditOutcomeFilter(value) })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value={ALL}>Any outcome</SelectItem><SelectItem value="succeeded">Succeeded</SelectItem><SelectItem value="failed">Failed</SelectItem><SelectItem value="denied">Denied</SelectItem><SelectItem value="pending">Pending</SelectItem></SelectContent></Select>
+          <Input aria-label="Client ID" value={draft.clientId} onChange={(event) => setDraft({ ...draft, clientId: event.target.value })} placeholder="Client ID" />
+          <Input aria-label="Alias" value={draft.alias} onChange={(event) => setDraft({ ...draft, alias: event.target.value })} placeholder="Alias" />
+          <Input aria-label="Tool" value={draft.tool} onChange={(event) => setDraft({ ...draft, tool: event.target.value })} placeholder="Tool" />
+          <Select value={draft.outcome} onValueChange={(value) => setDraft({ ...draft, outcome: decodeAuditOutcomeFilter(value) })}><SelectTrigger aria-label="Outcome"><SelectValue /></SelectTrigger><SelectContent><SelectItem value={ALL}>Any outcome</SelectItem><SelectItem value="succeeded">Succeeded</SelectItem><SelectItem value="failed">Failed</SelectItem><SelectItem value="denied">Denied</SelectItem><SelectItem value="pending">Pending</SelectItem></SelectContent></Select>
           <Input type="datetime-local" value={draft.since} onChange={(event) => setDraft({ ...draft, since: event.target.value })} aria-label="Since" />
           <div className="flex gap-1">
             <Button onClick={() => { setFilters(draft); setOffset(0) }}><Filter className="size-3" /> Apply</Button>
@@ -95,7 +95,18 @@ export function ExecutionsRoute() {
                 <TableCell className="text-muted-foreground max-w-xs truncate text-sm">{record.message ?? "—"}</TableCell>
               </TableRow>)}</TableBody>
           </Table>
-          <div className="flex items-center justify-between border-t px-3 py-2"><span className="text-muted-foreground text-xs">{total === 0 ? "No records" : `${start}–${end} of ${total}`}</span><div className="flex gap-1"><Button variant="outline" size="sm" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - limit))}><ChevronLeft className="size-3" /> Previous</Button><Button variant="outline" size="sm" disabled={offset + records.length >= total} onClick={() => setOffset(offset + limit)}>Next <ChevronRight className="size-3" /></Button></div></div>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2">
+            <span className="text-muted-foreground text-xs">{total === 0 ? "No records" : `${start}–${end} of ${total}`}</span>
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground text-xs">Rows per page</span>
+              <Select value={String(limit)} onValueChange={(value) => { setLimit(Number.parseInt(value, 10)); setOffset(0) }}>
+                <SelectTrigger aria-label="Rows per page" className="w-20"><SelectValue /></SelectTrigger>
+                <SelectContent>{limits.map((candidate) => <SelectItem key={candidate} value={String(candidate)}>{candidate}</SelectItem>)}</SelectContent>
+              </Select>
+              <Button variant="outline" size="sm" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - limit))}><ChevronLeft className="size-3" /> Previous</Button>
+              <Button variant="outline" size="sm" disabled={offset + records.length >= total} onClick={() => setOffset(offset + limit)}>Next <ChevronRight className="size-3" /></Button>
+            </div>
+          </div>
         </CardContent></Card>
       )}
     </Page>

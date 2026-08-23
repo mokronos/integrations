@@ -5,6 +5,8 @@ export type MaintenanceResult = {
   readonly expiredAuditArguments: number
   /** Signed-in humans whose session simply ran out. */
   readonly deletedSessions: number
+  /** Abandoned Google redirects and one-time CLI login handoffs. */
+  readonly expiredIdentityFlows: number
 }
 
 /** The things that must happen on a clock rather than on a request.
@@ -19,7 +21,8 @@ export const runMaintenance = async (
 ): Promise<MaintenanceResult> => ({
   expiredApprovals: await store.expireApprovals(at),
   expiredAuditArguments: await store.expireAuditArguments(at),
-  deletedSessions: await store.deleteExpiredSessions(at)
+  deletedSessions: await store.deleteExpiredSessions(at),
+  expiredIdentityFlows: await store.deleteExpiredIdentityFlows(at)
 })
 
 export interface MaintenanceLoop {

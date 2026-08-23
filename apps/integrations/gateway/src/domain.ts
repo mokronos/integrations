@@ -56,6 +56,11 @@ export type ApiKeyHash = typeof ApiKeyHash.Type
 export const SessionTokenHash = Schema.String.pipe(Schema.brand("SessionTokenHash"))
 export type SessionTokenHash = typeof SessionTokenHash.Type
 
+/** Hashes of short-lived browser handoff secrets. The plaintext is held only
+ * by the browser or CLI that started the sign-in. */
+export const LoginHandoffHash = Schema.String.pipe(Schema.brand("LoginHandoffHash"))
+export type LoginHandoffHash = typeof LoginHandoffHash.Type
+
 // --- tenants ----------------------------------------------------------------
 
 /** The well-known tenant every pre-existing deployment belongs to. A gateway
@@ -103,6 +108,33 @@ export const AuthSession = Schema.Struct({
 })
 export type AuthSession = typeof AuthSession.Type
 
+/** Human authentication through an external identity system. This is not an
+ * integration connection: a Google identity signs into the control plane; a
+ * Google integration authorization lets a tool call Google APIs. */
+export const IdentityProvider = Schema.Literal("google")
+export type IdentityProvider = typeof IdentityProvider.Type
+
+export const ExternalIdentity = Schema.Struct({
+  provider: IdentityProvider,
+  providerSubject: Schema.String,
+  tenantId: TenantId,
+  subjectId: SubjectId,
+  email: Schema.String,
+  createdAt: Schema.Date
+})
+export type ExternalIdentity = typeof ExternalIdentity.Type
+
+export const LoginHandoff = Schema.Struct({
+  requestHash: LoginHandoffHash,
+  subjectId: Schema.NullOr(SubjectId),
+  tenantId: Schema.NullOr(TenantId),
+  email: Schema.NullOr(Schema.String),
+  createdAt: Schema.Date,
+  expiresAt: Schema.Date,
+  collectedAt: Schema.NullOr(Schema.Date)
+})
+export type LoginHandoff = typeof LoginHandoff.Type
+
 // --- connections ------------------------------------------------------------
 
 /** Which partition a connection is filed under. Not an entity. */
@@ -140,6 +172,22 @@ export const ClientCapability = Schema.Literals([
 ])
 export type ClientCapability = typeof ClientCapability.Type
 
+/** How a client learns that one of its invocations needs a human. Delivery
+ * announces the pending approval; it never carries authority to decide it.
+ * Approval links still require a signed-in human at the dashboard. */
+export const ApprovalDelivery = Schema.Struct({
+  returnLink: Schema.Boolean,
+  webhooks: Schema.Array(
+    Schema.String.check(Schema.isPattern(/^https?:\/\/[^\s]+$/))
+  ).check(Schema.isMaxLength(10))
+})
+export type ApprovalDelivery = typeof ApprovalDelivery.Type
+
+export const defaultApprovalDelivery: ApprovalDelivery = {
+  returnLink: true,
+  webhooks: []
+}
+
 export const Client = Schema.Struct({
   id: ClientId,
   /** The tenant this client belongs to. Every grant, key, and audit record the
@@ -149,6 +197,7 @@ export const Client = Schema.Struct({
   /** Non-invocation authority held by this client. Tool authority remains in
    *  grants; these capabilities only govern provisioning and administration. */
   capabilities: Schema.Array(ClientCapability),
+  approvalDelivery: ApprovalDelivery,
   createdAt: Schema.Date,
   revokedAt: Schema.NullOr(Schema.Date)
 })

@@ -6,6 +6,7 @@ import {
   AuditId,
   ClientId,
   GrantId,
+  LoginHandoffHash,
   SubjectId,
   TenantId
 } from "./domain.ts"
@@ -34,6 +35,19 @@ export const generateApiKey = (): IssuedApiKey => {
 
 export const hashApiKey = (secret: string): ApiKeyHash =>
   ApiKeyHash.make(createHash("sha256").update(secret, "utf8").digest("hex"))
+
+export interface IssuedLoginHandoff {
+  readonly secret: string
+  readonly hash: LoginHandoffHash
+}
+
+export const generateLoginHandoff = (): IssuedLoginHandoff => {
+  const secret = `wfl_${randomBytes(32).toString("base64url")}`
+  return { secret, hash: hashLoginHandoff(secret) }
+}
+
+export const hashLoginHandoff = (secret: string): LoginHandoffHash =>
+  LoginHandoffHash.make(createHash("sha256").update(secret, "utf8").digest("hex"))
 
 export const newClientId = (): ClientId => ClientId.make(randomUUID())
 export const newGrantId = (): GrantId => GrantId.make(randomUUID())

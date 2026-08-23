@@ -9,5 +9,10 @@ One package installs two deliberate command surfaces:
   gateway dashboard action, human login and account management, and local
   gateway lifecycle commands.
 
+```bash
+bun add --global @mokronos/integrations-cli
+ii login
+```
+
 Use the [Integrations CLI documentation](../../../docs/integrations-cli.md)
 for installation, commands, and operational guidance.

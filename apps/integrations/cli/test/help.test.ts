@@ -145,6 +145,20 @@ describe("i and ii CLI help", () => {
     expect(upgrade.stdout).toContain("--pull")
   })
 
+  test("offers browser authentication as both ii login and ii auth", () => {
+    const root = runOperator(["--help"])
+    const login = runOperator(["login", "--help"])
+    const auth = runOperator(["auth", "--help"])
+
+    expect(root.stdout).toContain("login, auth")
+    for (const help of [login, auth]) {
+      expect(help.exitCode).toBe(0)
+      expect(help.stdout).toContain("[<email>]")
+      expect(help.stdout).toContain("--no-open")
+      expect(help.stdout).toContain("--timeout")
+    }
+  })
+
   test("shows arguments and flags for a specific command", () => {
     const help = runAgent(["search", "--help"])
 

@@ -39,6 +39,13 @@ bun run apps/integrations/cli/src/agent.ts --help
 bun run apps/integrations/cli/src/main.ts serve
 ```
 
+Or install the published command package with Bun:
+
+```bash
+bun add --global @mokronos/integrations-cli
+ii login
+```
+
 `i` mirrors the public TypeScript client: agents can discover integrations,
 manage connections, inspect schemas, invoke granted tools, and poll their own
 approvals. `ii` is its strict operator superset, adding every dashboard action,

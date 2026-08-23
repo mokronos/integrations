@@ -10,6 +10,7 @@ import {
   createGatewayStore,
   defaultTenantId,
   diffSnapshots,
+  generateLoginHandoff,
   IntegrationSlug,
   newApprovalId,
   newAuditId,
@@ -63,6 +64,7 @@ const executorWithTools = (
         integration: "tickets",
         owner: "org",
         connection: "default",
+        defaultDecision: "require_approval",
         inputSchema: tool.input
       }))
   }
@@ -249,7 +251,27 @@ describe("gateway maintenance", () => {
     expect(await runMaintenance(store)).toEqual({
       expiredApprovals: 0,
       expiredAuditArguments: 0,
-      deletedSessions: 0
+      deletedSessions: 0,
+      expiredIdentityFlows: 0
     })
+  })
+
+  test("deletes abandoned identity and terminal login flows", async () => {
+    const store = await makeStore()
+    const handoff = generateLoginHandoff()
+    const state = generateLoginHandoff()
+    const expiredAt = new Date(Date.now() - 1_000)
+    await store.createLoginHandoff({ requestHash: handoff.hash, expiresAt: expiredAt })
+    await store.createIdentityOAuthState({
+      stateHash: state.hash,
+      provider: "google",
+      handoffHash: handoff.hash,
+      returnPath: null,
+      expiresAt: expiredAt
+    })
+
+    expect((await runMaintenance(store)).expiredIdentityFlows).toBe(2)
+    expect(await store.getLoginHandoff(handoff.hash)).toBeUndefined()
+    expect(await store.consumeIdentityOAuthState(state.hash)).toBeUndefined()
   })
 })

@@ -73,14 +73,20 @@ const stubConnection = (
 
 /** Fills in a tool's descriptive fields, which these tests never assert on. */
 const stubTool = (
-  tool: { readonly address: string; readonly name: string }
+  tool: {
+    readonly address: string
+    readonly name: string
+    readonly owner?: "org" | "user"
+    readonly defaultDecision?: "allow" | "require_approval"
+  }
 ): ExecutorTool => ({
   address: ExecutorToolAddress.make(tool.address),
   name: tool.name,
   description: "",
   integration: "gmail",
-  owner: "user",
-  connection: "work"
+  owner: tool.owner ?? "user",
+  connection: "work",
+  defaultDecision: tool.defaultDecision ?? "require_approval"
 })
 
 /** A stand-in for the Executor tool surface. The gateway's job is deciding
@@ -89,7 +95,12 @@ const stubTool = (
 const stubExecutor = (behaviour: {
   readonly fail?: boolean
   readonly connections?: ReadonlyArray<{ readonly integration: string; readonly name: string }>
-  readonly tools?: ReadonlyArray<{ readonly address: string; readonly name: string }>
+  readonly tools?: ReadonlyArray<{
+    readonly address: string
+    readonly name: string
+    readonly owner?: "org" | "user"
+    readonly defaultDecision?: "allow" | "require_approval"
+  }>
 } = {}) => {
   const calls: Array<ExecutedCall> = []
   const removed: Array<{ readonly integration: string; readonly name: string }> = []
@@ -100,7 +111,7 @@ const stubExecutor = (behaviour: {
         if (behaviour.fail === true) throw new Error("vendor exploded")
         return { ok: true }
       },
-      summaries: async () => [],
+      summaries: async () => (behaviour.tools ?? []).map(stubTool),
       describe: notStubbed("tools.describe"),
       list: async () => (behaviour.tools ?? []).map(stubTool)
     },
@@ -144,7 +155,13 @@ const setup = async (options: {
   readonly capabilities?: ReadonlyArray<"provision_connections" | "administer_gateway">
   readonly fail?: boolean
   readonly connections?: ReadonlyArray<{ readonly integration: string; readonly name: string }>
-  readonly tools?: ReadonlyArray<{ readonly address: string; readonly name: string }>
+  readonly tools?: ReadonlyArray<{
+    readonly address: string
+    readonly name: string
+    readonly owner?: "org" | "user"
+    readonly defaultDecision?: "allow" | "require_approval"
+  }>
+  readonly dashboardUrl?: string
 } = {}) => {
   const directory = await mkdtemp(path.join(tmpdir(), "wf-gateway-http-"))
   directories.push(directory)
@@ -186,7 +203,10 @@ const setup = async (options: {
         get: async () => undefined,
         completeByState: async () => undefined,
         stop: () => undefined
-      }
+      },
+      ...whenPresent("dashboardUrl", options.dashboardUrl === undefined
+        ? undefined
+        : () => options.dashboardUrl)
     })
   })
 
@@ -347,6 +367,22 @@ describe("gateway http surface", () => {
     expect((await call("GET", "/v1/audit")).status).toBe(200)
   })
 
+  test("summarizes dashboard readiness without per-client requests", async () => {
+    const { call } = await setup({
+      capabilities: ["provision_connections", "administer_gateway"]
+    })
+    const response = await call("GET", "/v1/overview")
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({
+      connections: 0,
+      clients: 1,
+      grants: 1,
+      keys: 1,
+      pendingApprovals: 0,
+      recentActivity: []
+    })
+  })
+
   test("does not let one client read another's frozen call", async () => {
     const { call, store, client } = await setup({ decision: "require_approval" })
     const frozen = await call("POST", "/v1/execute", {
@@ -385,10 +421,69 @@ describe("gateway http surface", () => {
     expect(JSON.stringify(stored)).not.toContain(secret)
   })
 
-  test("a new client defaults to provisioning without administration", async () => {
+  test("a new client defaults to invocation-only authority", async () => {
     const { call } = await setup({ capabilities: ["provision_connections", "administer_gateway"] })
     const response = await call("POST", "/v1/clients", { body: { name: "sandbox" } })
+    expect(response.body["capabilities"]).toEqual([])
+  })
+
+  test("updates client capabilities and approval delivery", async () => {
+    const { call } = await setup({
+      capabilities: ["provision_connections", "administer_gateway"]
+    })
+    const created = await call("POST", "/v1/clients", { body: { name: "sandbox" } })
+    const clientId = String(created.body["id"])
+    const response = await call("POST", `/v1/clients/${clientId}/settings`, {
+      body: {
+        capabilities: ["provision_connections"],
+        approvalDelivery: {
+          returnLink: false,
+          webhooks: ["https://automation.example/approvals"]
+        }
+      }
+    })
+    expect(response.status).toBe(200)
     expect(response.body["capabilities"]).toEqual(["provision_connections"])
+    expect(response.body["approvalDelivery"]).toEqual({
+      returnLink: false,
+      webhooks: ["https://automation.example/approvals"]
+    })
+  })
+
+  test("uses a tool's conservative policy hint when a grant omits its decision", async () => {
+    const { call } = await setup({
+      capabilities: ["provision_connections", "administer_gateway"],
+      tools: [{
+        address: "tools.gmail.org.work.sendEmail",
+        name: "sendEmail",
+        owner: "org",
+        defaultDecision: "require_approval"
+      }]
+    })
+    const created = await call("POST", "/v1/clients", { body: { name: "sandbox" } })
+    const response = await call("POST", "/v1/grants", {
+      body: {
+        clientId: String(created.body["id"]),
+        alias: "mail",
+        tool: "sendEmail",
+        connection: { owner: "org", integration: "gmail", name: "work" }
+      }
+    })
+    expect(response.status).toBe(201)
+    expect(response.body["decision"]).toBe("require_approval")
+  })
+
+  test("returns an authenticated dashboard link with a pending invocation", async () => {
+    const { call } = await setup({
+      decision: "require_approval",
+      dashboardUrl: "https://gateway.example"
+    })
+    const response = await call("POST", "/v1/execute", {
+      body: { alias: "gmail-work", tool: "sendEmail" }
+    })
+    expect(response.body["approvalUrl"]).toBe(
+      `https://gateway.example/approvals?approval=${String(response.body["approvalId"])}`
+    )
   })
 
   test("revoking a client through the API cancels its frozen calls", async () => {
@@ -574,7 +669,8 @@ describe("frozen calls and retries", () => {
 
     expect(collected.status).toBe(403)
     expect(collected.body["status"]).toBe("denied")
-    expect(String(collected.body["reason"])).toContain("sebastian")
+    expect(String(collected.body["reason"])).toContain("local:support-agent")
+    expect(String(collected.body["reason"])).not.toContain("sebastian")
   })
 
   test("the caller can read its own frozen call without an administrative key", async () => {

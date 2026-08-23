@@ -294,7 +294,10 @@ describe("integrations CLI acceptance", () => {
       "https://gateway.example/v1/oauth/callback"
     )
 
-    const client = parseOutput(IdOutput, (await operator(["client", "remote-agent"])).stdout)
+    const client = parseOutput(
+      IdOutput,
+      (await operator(["client", "remote-agent", "--provision"])).stdout
+    )
     const key = parseOutput(SecretOutput, (await operator(["key", client.id])).stdout)
     const agentEnvironment = {
       ...gateway.environment,
@@ -442,7 +445,8 @@ describe("integrations CLI acceptance", () => {
     expect(escalation.stderr).toContain("Unknown subcommand")
 
     const discoverAttempt = await clientCli(["discover", vendor.specUrl], sandbox)
-    expect(discoverAttempt.exitCode, discoverAttempt.stderr).toBe(0)
+    expect(discoverAttempt.exitCode).toBe(1)
+    expect(discoverAttempt.stderr).toContain("required capability")
 
     await operator([
       "grant",
@@ -450,7 +454,8 @@ describe("integrations CLI acceptance", () => {
       "tickets",
       "tickets.create",
       "--integration",
-      slug
+      slug,
+      "--allow"
     ])
 
     const afterGrant = parseOutput(GrantsOutput, (await clientCli(["grants"], sandbox)).stdout)
@@ -512,7 +517,7 @@ describe("integrations CLI acceptance", () => {
     expect(frozen.status).toBe("pending")
     expect(vendor.invocations()).toBe(0)
 
-    const approved = await operator(["approve", frozen.approvalId, "--by", "sebastian"])
+    const approved = await operator(["approve", frozen.approvalId])
     expect(approved.exitCode, approved.stderr).toBe(0)
     // The gateway performed the frozen call itself.
     expect(vendor.invocations()).toBe(1)

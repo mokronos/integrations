@@ -126,7 +126,10 @@ export const createExecutorTools = (runner: ExecutorRunner): ExecutorTools => {
         description: tool.description,
         integration: String(tool.integration),
         owner: tool.owner,
-        connection: String(tool.connection)
+        connection: String(tool.connection),
+        defaultDecision: tool.annotations?.requiresApproval === false
+          ? "allow"
+          : "require_approval"
       }))
     )
   }

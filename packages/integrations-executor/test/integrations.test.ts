@@ -323,6 +323,7 @@ describe("Executor discovery SDK", () => {
     expect(open?.requiresAuthentication).toBe(false)
     expect(open?.tools.map((tool) => tool.name)).toEqual(["docs.get"])
     expect(open?.tools[0]?.connection).toBe("default")
+    expect(open?.tools[0]?.defaultDecision).toBe("require_approval")
     expect(open?.tools[0]?.inputSchema).toBeDefined()
     expect(open?.tools[0]?.outputSchema).toBeDefined()
     expect(open?.toolError).toBeUndefined()

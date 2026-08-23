@@ -11,7 +11,7 @@ behind it are in [ADR 0004](../adr/0004-the-gateway-is-one-product-with-two-depl
   local client, and lets the dashboard borrow its credential over loopback. No
   environment variables required.
 - **Hosted.** The gateway binds off loopback behind a TLS proxy, humans sign in
-  at `/` with email and password, and clients authenticate with issued API
+  at `/` with a password or Google, and clients authenticate with issued API
   keys from anywhere.
 
 ## Environment variables
@@ -19,6 +19,8 @@ behind it are in [ADR 0004](../adr/0004-the-gateway-is-one-product-with-two-depl
 | Variable | Meaning | Default |
 | --- | --- | --- |
 | `INTEGRATIONS_PUBLIC_URL` | Origin callers reach, e.g. `https://gw.example.com`. Enables hosted OAuth callbacks at `/v1/oauth/callback`. | unset — OAuth uses loopback listeners |
+| `INTEGRATIONS_GOOGLE_CLIENT_ID` | OAuth client id for human dashboard/`ii` sign-in. Configure its redirect as `<PUBLIC_URL>/v1/auth/google/callback`. | unset — Google sign-in hidden |
+| `INTEGRATIONS_GOOGLE_CLIENT_SECRET` | Secret paired with the human sign-in OAuth client. Keep it in the deployment secret store. | unset |
 | `INTEGRATIONS_ALLOW_SIGNUP` | `1` opens signup after the first human has claimed the instance. The first signup is always allowed while no login exists. | closed |
 | `INTEGRATIONS_MASTER_KEY` | Base64url of 32 bytes; seals approval/audit payloads at rest. Omitted, a `gateway.key` file is minted inside the home directory on first start. | unset |
 | `INTEGRATIONS_RATE_LIMIT` | Per-principal requests per minute; per-address limit is a fifth of this, floored at 20. | `600` |
@@ -76,7 +78,9 @@ with `Restart=always` is the better shape.
 3. Register your OAuth redirect with vendors whose apps require fixed URIs:
    `<PUBLIC_URL>/v1/oauth/callback`. Dynamic-client-registration providers need
    nothing.
-4. Create clients and keys from the dashboard, then point each agent at the
+4. To enable human Google sign-in, create a Web OAuth client with the redirect
+   `<PUBLIC_URL>/v1/auth/google/callback`, then set both Google variables above.
+5. Create clients and keys from the dashboard, then point each agent at the
    gateway: `INTEGRATIONS_URL=https://… INTEGRATIONS_API_KEY=wfi_…`.
 
 ## Operational notes

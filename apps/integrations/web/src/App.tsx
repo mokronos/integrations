@@ -1,17 +1,17 @@
-import { useEffect, useState } from "react"
+import { lazy, useEffect, useState } from "react"
 import { Navigate, Route, Routes } from "react-router"
 
 import { AppShell } from "@/components/app-shell"
-import { AccountRoute } from "@/routes/account"
 import { AuthGate } from "@/components/auth-gate"
 import { Toaster } from "@/components/ui/sonner"
-import { ApprovalsRoute } from "@/routes/approvals"
-import { ClientDetailRoute } from "@/routes/client-detail"
-import { ClientsRoute } from "@/routes/clients"
-import { ExecutionsRoute } from "@/routes/executions"
-import { IntegrationsRoute } from "@/routes/integrations"
-import { SystemRoute } from "@/routes/system"
-import { WorkbenchRoute } from "@/routes/workbench"
+
+const AccountRoute = lazy(() => import("@/routes/account").then((route) => ({ default: route.AccountRoute })))
+const ApprovalsRoute = lazy(() => import("@/routes/approvals").then((route) => ({ default: route.ApprovalsRoute })))
+const ClientDetailRoute = lazy(() => import("@/routes/client-detail").then((route) => ({ default: route.ClientDetailRoute })))
+const ClientsRoute = lazy(() => import("@/routes/clients").then((route) => ({ default: route.ClientsRoute })))
+const ExecutionsRoute = lazy(() => import("@/routes/executions").then((route) => ({ default: route.ExecutionsRoute })))
+const IntegrationsRoute = lazy(() => import("@/routes/integrations").then((route) => ({ default: route.IntegrationsRoute })))
+const OverviewRoute = lazy(() => import("@/routes/overview").then((route) => ({ default: route.OverviewRoute })))
 
 export default function App() {
   const [dark, setDark] = useState(() => localStorage.getItem("gateway-theme") !== "light")
@@ -27,17 +27,18 @@ export default function App() {
       <AuthGate>
         <Routes>
           <Route element={<AppShell dark={dark} onDarkChange={setDark} />}>
-            <Route index element={<Navigate to="/integrations" replace />} />
+            <Route index element={<OverviewRoute />} />
             <Route path="/integrations" element={<IntegrationsRoute />} />
             <Route path="/integrations/:slug" element={<IntegrationsRoute />} />
             <Route path="/clients" element={<ClientsRoute />} />
             <Route path="/clients/:clientId" element={<ClientDetailRoute />} />
             <Route path="/approvals" element={<ApprovalsRoute />} />
-            <Route path="/executions" element={<ExecutionsRoute />} />
-            <Route path="/workbench" element={<WorkbenchRoute />} />
-            <Route path="/system" element={<SystemRoute />} />
+            <Route path="/activity" element={<ExecutionsRoute />} />
+            <Route path="/executions" element={<Navigate to="/activity" replace />} />
+            <Route path="/workbench" element={<Navigate to="/" replace />} />
+            <Route path="/system" element={<Navigate to="/" replace />} />
             <Route path="/account" element={<AccountRoute />} />
-            <Route path="*" element={<Navigate to="/integrations" replace />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
       </AuthGate>

@@ -10,10 +10,7 @@ import {
   GrantDecision as GrantDecisionSchema,
   PendingApproval
 } from "@mokronos/integrations/domain"
-import {
-  IntegrationDiscovery,
-  IntegrationValidationReport
-} from "@mokronos/integrations-executor/integration-model"
+import { IntegrationDiscovery } from "@mokronos/integrations-executor/integration-model"
 import {
   IntegrationSearchKind,
   IntegrationSearchResponse
@@ -52,6 +49,7 @@ export type {
 export { ApprovalStatusSchema, GrantDecisionSchema }
 export type {
   ApprovalStatus,
+  ApprovalDelivery,
   ClientId,
   ConnectionRef,
   GrantDecision,
@@ -105,6 +103,16 @@ export const AuditResponse = Schema.Struct({
   offset: Schema.optional(Schema.Number)
 })
 export type AuditResponse = typeof AuditResponse.Type
+
+export const OverviewResponse = Schema.Struct({
+  connections: Schema.Number,
+  clients: Schema.Number,
+  grants: Schema.Number,
+  keys: Schema.Number,
+  pendingApprovals: Schema.Number,
+  recentActivity: Schema.Array(AuditRecord)
+})
+export type OverviewResponse = typeof OverviewResponse.Type
 
 export const ApiKeySummary = Schema.Struct({
   id: ApiKey.fields.id,
@@ -168,12 +176,6 @@ export const DriftResponse = Schema.Struct({
   reports: Schema.Array(DriftReport)
 })
 
-export const MaintenanceResult = Schema.Struct({
-  expiredApprovals: Schema.Number,
-  expiredAuditArguments: Schema.Number
-})
-export type MaintenanceResult = typeof MaintenanceResult.Type
-
 export const Revoked = Schema.Struct({
   revoked: Schema.Boolean,
   cancelledApprovals: Schema.optional(Schema.Number)
@@ -182,10 +184,6 @@ export type Revoked = typeof Revoked.Type
 
 export const Removed = Schema.Struct({ removed: Schema.Boolean })
 
-/** The result of an invocation is whatever the tool returned — the gateway does
- *  not own its shape, so neither does this. */
-export const InvocationResult = Schema.Json
-
 export const decodeIntegrations = json(IntegrationsResponse)
 export const decodeConnections = json(ConnectionsResponse)
 export const decodeClients = json(ClientsResponse)
@@ -193,6 +191,7 @@ export const decodeGrants = json(GrantsResponse)
 export const decodeGrantedTools = json(GrantedToolsResponse)
 export const decodeApprovals = json(ApprovalsResponse)
 export const decodeAudit = json(AuditResponse)
+export const decodeOverview = json(OverviewResponse)
 export const decodeKeys = json(KeysResponse)
 export const decodeTools = json(ToolsResponse)
 export const decodeTool = json(ExecutorTool)
@@ -201,14 +200,11 @@ export const decodeConnectionCreated = json(ConnectionCreated)
 export const decodeOAuthSession = json(OAuthSession)
 export const decodeDiscovery = json(IntegrationDiscovery)
 export const decodeDrift = json(DriftResponse)
-export const decodeMaintenance = json(MaintenanceResult)
 export const decodeRevoked = json(Revoked)
 export const decodeRemoved = json(Removed)
 export const decodeClient = json(Client)
 export const decodeGrant = json(Grant)
-export const decodeInvocation = json(InvocationResult)
 export const decodeRegistrySearch = json(IntegrationSearchResponse)
-export const decodeValidation = json(IntegrationValidationReport)
 
 /** Values arriving from a widget are strings; these turn them back into the
  * domain's own types rather than asserting them. A Select that somehow yields
@@ -242,7 +238,9 @@ export const Me = Schema.Union([
     kind: Schema.Literal("session"),
     email: Schema.String,
     tenantId: Schema.String,
-    subjectId: Schema.String
+    subjectId: Schema.String,
+    hasPassword: Schema.Boolean,
+    identityProviders: Schema.Array(Schema.Literal("google"))
   }),
   Schema.Struct({
     authenticated: Schema.Literal(true),
@@ -267,6 +265,20 @@ export const Me = Schema.Union([
 export type Me = typeof Me.Type
 
 export const decodeMe = json(Me)
+
+export const AuthProviders = Schema.Struct({
+  signupOpen: Schema.Boolean,
+  google: Schema.Union([
+    Schema.Struct({ enabled: Schema.Literal(false) }),
+    Schema.Struct({
+      enabled: Schema.Literal(true),
+      startUrl: Schema.String,
+      callbackUrl: Schema.String
+    })
+  ])
+})
+export type AuthProviders = typeof AuthProviders.Type
+export const decodeAuthProviders = json(AuthProviders)
 
 export const EmailChanged = Schema.Struct({ email: Schema.String })
 export const PasswordChanged = Schema.Struct({

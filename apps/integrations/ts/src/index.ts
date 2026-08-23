@@ -106,7 +106,8 @@ export const InvocationOutcome = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("pending"),
     approvalId: Schema.String,
-    expiresAt: Schema.String
+    expiresAt: Schema.String,
+    approvalUrl: Schema.optional(Schema.String)
   }),
   Schema.Struct({ status: Schema.Literal("denied"), reason: Schema.String }),
   Schema.Struct({ status: Schema.Literal("failed"), message: Schema.String })

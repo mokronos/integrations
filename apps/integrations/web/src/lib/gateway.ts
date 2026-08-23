@@ -4,6 +4,7 @@ import type { JsonEncodable } from "./optional.ts"
 import { Predicate } from "effect"
 import {
   decodeApprovalDecided,
+  decodeAuthProviders,
   decodeApprovals,
   decodeAudit,
   decodeClient,
@@ -16,22 +17,20 @@ import {
   decodeGrantedTools,
   decodeGrants,
   decodeIntegrations,
-  decodeInvocation,
   decodeIssuedKey,
   decodeEmailChanged,
   decodeMe,
   decodePasswordChanged,
   decodeKeys,
-  decodeMaintenance,
   decodeOAuthSession,
+  decodeOverview,
   decodeRemoved,
   decodeRegistrySearch,
   decodeRevoked,
   decodeTool,
-  decodeTools,
-  decodeValidation
+  decodeTools
 } from "@/lib/schemas"
-import type { ApprovalStatus, GrantDecision } from "@/lib/schemas"
+import type { ApprovalDelivery, ApprovalStatus, GrantDecision } from "@/lib/schemas"
 
 /** The gateway's API, as the control plane uses it.
  *
@@ -187,20 +186,29 @@ export const removeConnection = async (input: {
     `/v1/connections/${segment(input.integration)}/${segment(input.name)}`
   ))
 
-export const invokeTool = async (input: {
-  readonly address: string
-  readonly arguments: JsonEncodable
-}) => decodeInvocation(await request("POST", "/v1/tools/invoke", input))
-
 // --- clients, keys, grants --------------------------------------------------
 
 export const listClients = async () =>
   decodeClients(await request("GET", "/v1/clients")).clients
 
+export const fetchOverview = async () =>
+  decodeOverview(await request("GET", "/v1/overview"))
+
 export const createClient = async (input: {
   readonly name: string
   readonly capabilities: ReadonlyArray<"provision_connections" | "administer_gateway">
+  readonly approvalDelivery: ApprovalDelivery
 }) => decodeClient(await request("POST", "/v1/clients", input))
+
+export const updateClientSettings = async (input: {
+  readonly clientId: string
+  readonly capabilities: ReadonlyArray<"provision_connections" | "administer_gateway">
+  readonly approvalDelivery: ApprovalDelivery
+}) => decodeClient(await request(
+  "POST",
+  `/v1/clients/${segment(input.clientId)}/settings`,
+  { capabilities: input.capabilities, approvalDelivery: input.approvalDelivery }
+))
 
 export const issueKey = async (clientId: string) =>
   decodeIssuedKey(await request("POST", `/v1/clients/${segment(clientId)}/keys`))
@@ -241,22 +249,20 @@ export const listApprovals = async (status?: ApprovalStatus) =>
 
 export const approveApproval = async (input: {
   readonly id: string
-  readonly decidedBy?: string
 }) =>
   decodeApprovalDecided(await request(
     "POST",
     `/v1/approvals/${segment(input.id)}/approve`,
-    { decidedBy: input.decidedBy }
+    {}
   ))
 
 export const denyApproval = async (input: {
   readonly id: string
-  readonly decidedBy?: string
 }) =>
   decodeApprovalDecided(await request(
     "POST",
     `/v1/approvals/${segment(input.id)}/deny`,
-    { decidedBy: input.decidedBy }
+    {}
   ))
 
 export type AuditQuery = {
@@ -287,22 +293,17 @@ export const listAudit = async (input: AuditQuery) => {
   }
 }
 
-export const validateNode = async (input: {
-  readonly node: JsonEncodable
-  readonly live: boolean
-}) => decodeValidation(await request("POST", "/v1/validate", input))
-
 export const refreshDrift = async (integration?: string) =>
   decodeDrift(await request("POST", `/v1/drift/refresh${query({ integration })}`)).reports
-
-export const runMaintenance = async () =>
-  decodeMaintenance(await request("POST", "/v1/maintenance"))
 
 // --- who is asking -----------------------------------------------------------
 
 export type Me = ReturnType<typeof decodeMe>
 
 export const fetchMe = async (): Promise<Me> => decodeMe(await request("GET", "/v1/auth/me"))
+
+export const fetchAuthProviders = async () =>
+  decodeAuthProviders(await request("GET", "/v1/auth/providers"))
 
 export const signUp = async (input: {
   readonly email: string
@@ -333,7 +334,7 @@ export const changeEmail = async (input: {
   decodeEmailChanged(await request("POST", "/v1/auth/email", input)).email
 
 export const changePassword = async (input: {
-  readonly currentPassword: string
+  readonly currentPassword?: string
   readonly newPassword: string
 }): Promise<number> =>
   decodePasswordChanged(await request("POST", "/v1/auth/password", input)).revokedSessions
@@ -342,7 +343,7 @@ export const changePassword = async (input: {
  *  rather than DELETE because the confirmation password rides the body and
  *  the gateway ignores DELETE bodies. */
 export const deleteAccount = async (input: {
-  readonly password: string
+  readonly password?: string
 }): Promise<void> => {
   await request("POST", "/v1/auth/account/delete", input)
 }

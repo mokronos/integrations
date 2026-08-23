@@ -41,6 +41,9 @@
   "vars": {
     // OAuth callbacks land here; matches the deployed workers.dev origin.
     "INTEGRATIONS_PUBLIC_URL": "https://integrations-gateway.games-97f.workers.dev",
+    // Public half of the Google OAuth client used for dashboard/ii sign-in.
+    // Set its secret separately with `wrangler secret put INTEGRATIONS_GOOGLE_CLIENT_SECRET`.
+    "INTEGRATIONS_GOOGLE_CLIENT_ID": "",
     // Open registration: each signup mints its own isolated tenant partition.
     "INTEGRATIONS_ALLOW_SIGNUP": "1"
   },
@@ -56,6 +59,7 @@
       ],
       "vars": {
         "INTEGRATIONS_PUBLIC_URL": "https://integrations-gateway-staging.games-97f.workers.dev",
+        "INTEGRATIONS_GOOGLE_CLIENT_ID": "",
         "INTEGRATIONS_ALLOW_SIGNUP": "1"
       }
     }

@@ -18,6 +18,7 @@ export const keys = {
   integrations: ["integrations"] as const,
   integrationTools: (slug: string) => ["integrations", slug, "tools"] as const,
   connections: ["connections"] as const,
+  overview: ["overview"] as const,
   clients: ["clients"] as const,
   grants: (clientId: string) => ["grants", clientId] as const,
   approvals: (status: ApprovalStatus | "all") => ["approvals", status] as const,
@@ -50,6 +51,9 @@ export const useConnections = () =>
 
 export const useClients = () =>
   useQuery({ queryKey: keys.clients, queryFn: gateway.listClients })
+
+export const useOverview = () =>
+  useQuery({ queryKey: keys.overview, queryFn: gateway.fetchOverview, refetchInterval: 5_000 })
 
 export const useGrants = (clientId: string | undefined) =>
   useQuery({

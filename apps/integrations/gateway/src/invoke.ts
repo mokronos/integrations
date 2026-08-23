@@ -28,7 +28,12 @@ export const grantToolAddress = (connection: ConnectionRef, tool: ToolName): Exe
 
 export type InvocationOutcome =
   | { readonly status: "succeeded"; readonly result: Json }
-  | { readonly status: "pending"; readonly approvalId: ApprovalId; readonly expiresAt: Date }
+  | {
+    readonly status: "pending"
+    readonly approvalId: ApprovalId
+    readonly expiresAt: Date
+    readonly approvalUrl?: string
+  }
   | { readonly status: "denied"; readonly reason: string }
   | { readonly status: "failed"; readonly message: string }
 
@@ -37,6 +42,13 @@ export interface InvokeDependencies {
   readonly executor: Pick<ExecutorServices, "tools">
   readonly argumentRetentionDays?: number
   readonly approvalExpiryHours?: number
+  readonly approvalUrlOf?: (approvalId: ApprovalId) => string | undefined
+  readonly onApprovalCreated?: (input: {
+    readonly authorization: Extract<Authorization, { status: "authorized" }>
+    readonly approvalId: ApprovalId
+    readonly expiresAt: Date
+    readonly approvalUrl?: string
+  }) => Promise<void>
 }
 
 const auditFor = (
@@ -78,18 +90,31 @@ const freezeOrCollect = async (
     readonly store: GatewayStore
     readonly retentionDays: number
     readonly expiryHours: number
+    readonly approvalUrlOf?: InvokeDependencies["approvalUrlOf"]
+    readonly onApprovalCreated?: InvokeDependencies["onApprovalCreated"]
   },
   authorization: Extract<Authorization, { status: "authorized" }>,
   argumentsValue: Json
 ): Promise<InvocationOutcome> => {
   const { store, retentionDays } = dependencies
+  const pending = (approvalId: ApprovalId, expiresAt: Date): InvocationOutcome => {
+    const approvalUrl = authorization.client.approvalDelivery.returnLink
+      ? dependencies.approvalUrlOf?.(approvalId)
+      : undefined
+    return {
+      status: "pending",
+      approvalId,
+      expiresAt,
+      ...whenPresent("approvalUrl", approvalUrl)
+    }
+  }
   const existing = await store.findUncollectedApproval(authorization.grant.id, argumentsValue)
 
   if (existing !== undefined && existing.status === "pending") {
     // Deliberately not audited: the frozen call was recorded when it was
     // proposed, and one decision pending is one event, however many times a
     // retry loop looks at it.
-    return { status: "pending", approvalId: existing.id, expiresAt: existing.expiresAt }
+    return pending(existing.id, existing.expiresAt)
   }
 
   if (existing !== undefined && await store.collectApproval(authorization.client.tenantId, existing.id)) {
@@ -131,7 +156,17 @@ const freezeOrCollect = async (
   await store.recordAudit(
     auditFor(authorization, "pending", `approval ${approval.id}`, argumentsValue, retentionDays)
   )
-  return { status: "pending", approvalId: approval.id, expiresAt: approval.expiresAt }
+  const outcome = pending(approval.id, approval.expiresAt)
+  await dependencies.onApprovalCreated?.({
+    authorization,
+    approvalId: approval.id,
+    expiresAt: approval.expiresAt,
+    ...whenPresent(
+      "approvalUrl",
+      outcome.status === "pending" ? outcome.approvalUrl : undefined
+    )
+  })
+  return outcome
 }
 
 /** Performs one delegated invocation: authorize, then either execute with
@@ -179,7 +214,13 @@ export const invokeThroughGateway = async (
 
   if (authorization.grant.decision === "require_approval") {
     return await freezeOrCollect(
-      { store, retentionDays, expiryHours },
+      {
+        store,
+        retentionDays,
+        expiryHours,
+        ...whenPresent("approvalUrlOf", dependencies.approvalUrlOf),
+        ...whenPresent("onApprovalCreated", dependencies.onApprovalCreated)
+      },
       authorization,
       input.arguments
     )

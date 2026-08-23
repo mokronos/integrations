@@ -5,22 +5,23 @@ import { searchIntegrations } from "@mokronos/integrations-executor"
 import { ExecutorToolAddress } from "@mokronos/integrations-executor/schemas"
 import { refreshIntegrationSnapshot } from "../drift.ts"
 import { runMaintenance } from "../maintenance.ts"
+import { deliverApprovalNotification } from "../approval-delivery.ts"
 import { oauthBrowserPage } from "../oauth.ts"
 import type { OAuthSessions } from "../oauth-sessions.ts"
+import type { GoogleIdentityOAuth } from "../identity-oauth.ts"
 import { authRoutes } from "./auth-api.ts"
 import {
   Alias,
   ApiKeyId,
+  ApprovalDelivery,
   ApprovalId,
   ClientCapability,
   ClientId,
   ConnectionName,
   GrantId,
   IntegrationSlug,
-  SubjectId,
   ToolName
 } from "../domain.ts"
-import type { ConnectionRef } from "../domain.ts"
 import {
   executeAuthorized,
   grantToolAddress,
@@ -37,7 +38,6 @@ import {
   notFound,
   ok,
   secretOf,
-  sessionOf,
   tenantOf
 } from "./router.ts"
 import type { Route } from "./router.ts"
@@ -52,15 +52,19 @@ export interface ApiDependencies {
    *  this exact URI registered in their consoles up front. `undefined` when no
    *  callback origin applies (headless, no publicUrl). */
   readonly oauthCallbackUrl?: () => string | undefined
+  /** Origin of the authenticated control plane, used only to point a human at
+   * a pending approval. */
+  readonly dashboardUrl?: () => string | undefined
   /** Overrides the public registry for an isolated deployment or acceptance test. */
   readonly registryUrl?: string
   /** Login-surface configuration; defaults close signup and serve insecure
    *  cookies, which is right for a loopback deployment and wrong for a hosted
    *  one — see `service.ts`, which derives both from how the socket is bound. */
   readonly sessions?: {
-    readonly signupOpen?: boolean
+    readonly signupOpen?: () => Promise<boolean>
     readonly secureCookies?: boolean
     readonly sessionTtlHours?: number
+    readonly google?: GoogleIdentityOAuth
   }
 }
 
@@ -88,7 +92,13 @@ const ConnectionRefBody = Schema.Union([
 
 const CreateClientBody = Schema.Struct({
   name: Schema.String,
-  capabilities: Schema.optional(Schema.Array(ClientCapability))
+  capabilities: Schema.optional(Schema.Array(ClientCapability)),
+  approvalDelivery: Schema.optional(ApprovalDelivery)
+})
+
+const UpdateClientSettingsBody = Schema.Struct({
+  capabilities: Schema.Array(ClientCapability),
+  approvalDelivery: ApprovalDelivery
 })
 
 const CreateGrantBody = Schema.Struct({
@@ -97,10 +107,6 @@ const CreateGrantBody = Schema.Struct({
   tool: Schema.String,
   connection: ConnectionRefBody,
   decision: Schema.optional(Schema.Literals(["allow", "require_approval"]))
-})
-
-const DecideApprovalBody = Schema.Struct({
-  decidedBy: Schema.optional(Schema.String)
 })
 
 const DiscoverBody = Schema.Struct({
@@ -150,20 +156,6 @@ const GatewayNodeSource = Schema.Struct({
 
 const isGatewayNode = Schema.is(GatewayNodeSource)
 const decodeGatewayNode = Schema.decodeUnknownSync(GatewayNodeSource)
-
-const toConnectionRef = (value: typeof ConnectionRefBody.Type): ConnectionRef =>
-  value.owner === "org"
-    ? {
-      owner: "org",
-      integration: IntegrationSlug.make(value.integration),
-      name: ConnectionName.make(value.name)
-    }
-    : {
-      owner: "user",
-      subject: SubjectId.make(value.subject),
-      integration: IntegrationSlug.make(value.integration),
-      name: ConnectionName.make(value.name)
-    }
 
 const parseAlias = (value: string): Alias => {
   if (!/^[a-z][a-z0-9-]*$/.test(value)) {
@@ -295,13 +287,14 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
   return [
     ...authRoutes({
       store,
-      signupOpen: dependencies.sessions?.signupOpen ?? false,
+      signupOpen: dependencies.sessions?.signupOpen ?? (async () => false),
       secureCookies: dependencies.sessions?.secureCookies ?? false,
       ...whenPresentMap(
         "sessionTtlHours",
         dependencies.sessions?.sessionTtlHours,
         (hours) => hours
-      )
+      ),
+      ...whenPresent("google", dependencies.sessions?.google)
     }),
     // --- delegated: any live key -------------------------------------------
     {
@@ -322,7 +315,25 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
       handle: async (request) => {
         const body = decodeBody(ExecuteBody, request.body)
         const outcome = await invokeThroughGateway(
-          { store, executor, argumentRetentionDays: retentionDays },
+          {
+            store,
+            executor,
+            argumentRetentionDays: retentionDays,
+            approvalUrlOf: (approvalId) => {
+              const origin = dependencies.dashboardUrl?.()
+              return origin === undefined
+                ? undefined
+                : `${origin.replace(/\/+$/, "")}/approvals?approval=${encodeURIComponent(approvalId)}`
+            },
+            onApprovalCreated: async (input) => await deliverApprovalNotification({
+              client: input.authorization.client,
+              approvalId: input.approvalId,
+              alias: input.authorization.grant.alias,
+              tool: input.authorization.grant.tool,
+              expiresAt: input.expiresAt,
+              ...whenPresent("approvalUrl", input.approvalUrl)
+            })
+          },
           {
             secret: secretOf(request),
             alias: parseAlias(body.alias),
@@ -633,6 +644,24 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
     // --- administration: clients, keys, grants ------------------------------
     {
       method: "GET",
+      path: "/v1/overview",
+      access: "administrative",
+      handle: async (request) => {
+        const tenantId = tenantOf(request)
+        const [counts, connections, recentActivity] = await Promise.all([
+          store.overviewCounts(tenantId),
+          executor.connections.list(),
+          store.listAudit(tenantId, { limit: 5, offset: 0 })
+        ])
+        return ok({
+          ...counts,
+          connections: connections.length,
+          recentActivity
+        })
+      }
+    },
+    {
+      method: "GET",
       path: "/v1/clients",
       access: "administrative",
       handle: async (request) => ok({ clients: await store.listClients(tenantOf(request)) })
@@ -652,9 +681,28 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
           // to provision into another tenant over this surface, by design.
           tenantId: tenantOf(request),
           name: body.name,
-          capabilities: body.capabilities ?? ["provision_connections"]
+          capabilities: body.capabilities ?? [],
+          ...whenPresent("approvalDelivery", body.approvalDelivery)
         })
         return created(client)
+      }
+    },
+    {
+      method: "POST",
+      path: "/v1/clients/:id/settings",
+      access: "administrative",
+      handle: async (request) => {
+        const clientId = ClientId.make(request.params["id"] ?? "")
+        const existing = await store.findClientById(tenantOf(request), clientId)
+        if (existing === undefined) return notFound(`Unknown client ${clientId}`)
+        if (existing.revokedAt !== null) return badRequest(`Client ${clientId} is revoked`)
+        const body = decodeBody(UpdateClientSettingsBody, request.body)
+        return ok(await store.updateClientSettings({
+          tenantId: tenantOf(request),
+          id: clientId,
+          capabilities: body.capabilities,
+          approvalDelivery: body.approvalDelivery
+        }))
       }
     },
     {
@@ -774,14 +822,29 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
             "User-tier connections do not exist yet, so a user-tier grant cannot resolve. Grant against an org connection."
           )
         }
+        const tool = (await executor.tools.summaries({ integration: body.connection.integration }))
+          .find((candidate) =>
+            candidate.name === body.tool &&
+            candidate.owner === "org" &&
+            normalizeName(candidate.connection) === normalizeName(body.connection.name)
+          )
+        if (tool === undefined) {
+          return notFound(
+            `Unknown connected tool ${body.connection.integration}/${body.connection.name}/${body.tool}`
+          )
+        }
         const grant = await store.createGrant({
           id: newGrantId(),
           tenantId: tenantOf(request),
           clientId,
           alias: parseAlias(body.alias),
           tool: ToolName.make(body.tool),
-          connection: toConnectionRef(body.connection),
-          decision: body.decision ?? "allow"
+          connection: {
+            owner: "org",
+            integration: IntegrationSlug.make(tool.integration),
+            name: ConnectionName.make(tool.connection)
+          },
+          decision: body.decision ?? tool.defaultDecision
         })
         return created(grant)
       }
@@ -820,8 +883,12 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
       path: "/v1/approvals/:id/approve",
       access: "human",
       handle: async (request) => {
-        const body = decodeBody(DecideApprovalBody, request.body ?? {})
         const id = ApprovalId.make(request.params["id"] ?? "")
+        const decidedBy = request.identity.kind === "session"
+          ? request.identity.email
+          : request.identity.kind === "local"
+          ? `local:${request.identity.client.name}`
+          : null
         const approval = await store.getApproval(tenantOf(request), id)
         if (approval === undefined) return notFound(`Unknown approval ${id}`)
         if (approval.status !== "pending") {
@@ -848,7 +915,7 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
             tenantId: tenantOf(request),
             id,
             status: "denied",
-            decidedBy: body.decidedBy ?? sessionOf(request)?.email ?? null,
+            decidedBy,
             result: null,
             error: "the client or grant was revoked while this call was frozen"
           })
@@ -872,7 +939,7 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
           tenantId: tenantOf(request),
           id,
           status: "approved",
-          decidedBy: body.decidedBy ?? sessionOf(request)?.email ?? null,
+          decidedBy,
           result: outcome.status === "succeeded" ? outcome.result : null,
           error: outcome.status === "failed" ? outcome.message : null
         })
@@ -884,15 +951,19 @@ export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Rout
       path: "/v1/approvals/:id/deny",
       access: "human",
       handle: async (request) => {
-        const body = decodeBody(DecideApprovalBody, request.body ?? {})
         const id = ApprovalId.make(request.params["id"] ?? "")
+        const decidedBy = request.identity.kind === "session"
+          ? request.identity.email
+          : request.identity.kind === "local"
+          ? `local:${request.identity.client.name}`
+          : null
         const approval = await store.getApproval(tenantOf(request), id)
         if (approval === undefined) return notFound(`Unknown approval ${id}`)
         await store.settleApproval({
           tenantId: tenantOf(request),
           id,
           status: "denied",
-          decidedBy: body.decidedBy ?? sessionOf(request)?.email ?? null,
+          decidedBy,
           result: null,
           error: null
         })

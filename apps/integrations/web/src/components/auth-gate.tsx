@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react"
+import { LogIn } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -12,7 +13,15 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { fetchMe, GatewayError, logIn, signUp, type Me } from "@/lib/gateway"
+import {
+  fetchAuthProviders,
+  fetchMe,
+  GatewayError,
+  logIn,
+  signUp,
+  type Me
+} from "@/lib/gateway"
+import type { AuthProviders } from "@/lib/schemas"
 
 const SessionContext = createContext<Me | undefined>(undefined)
 
@@ -63,6 +72,22 @@ export function AuthGate({ children }: { readonly children: ReactNode }) {
 
 function AuthCard({ onAuthenticated }: { readonly onAuthenticated: () => Promise<void> }) {
   const [tab, setTab] = useState<"signin" | "signup">("signin")
+  const [providers, setProviders] = useState<AuthProviders | undefined>()
+
+  useEffect(() => {
+    void fetchAuthProviders().then(setProviders).catch(() => setProviders(undefined))
+  }, [])
+
+  const google = providers?.google
+  const continueWithGoogle = () => {
+    if (google?.enabled !== true) return
+    const destination = new URL(google.startUrl, window.location.origin)
+    destination.searchParams.set(
+      "returnTo",
+      `${window.location.pathname}${window.location.search}${window.location.hash}`
+    )
+    window.location.assign(destination)
+  }
 
   return (
     <div className="flex min-h-svh items-center justify-center p-4">
@@ -75,24 +100,41 @@ function AuthCard({ onAuthenticated }: { readonly onAuthenticated: () => Promise
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Tabs value={tab} onValueChange={(value) => setTab(value === "signup" ? "signup" : "signin")}>
-            <TabsList className="w-full">
-              <TabsTrigger value="signin" className="flex-1">Sign in</TabsTrigger>
-              <TabsTrigger value="signup" className="flex-1">Create account</TabsTrigger>
-            </TabsList>
-            <TabsContent value="signin">
-              <SignInForm onAuthenticated={onAuthenticated} />
-            </TabsContent>
-            <TabsContent value="signup">
-              <SignUpForm
-                onAuthenticated={onAuthenticated}
-                onClosed={() => {
-                  toast.error("Signup is closed on this gateway")
-                  setTab("signin")
-                }}
-              />
-            </TabsContent>
-          </Tabs>
+          {google?.enabled === true
+            ? (
+              <>
+                <Button type="button" variant="outline" className="w-full" onClick={continueWithGoogle}>
+                  <LogIn className="size-4" /> Continue with Google
+                </Button>
+                <div className="text-muted-foreground my-4 flex items-center gap-3 text-xs">
+                  <span className="h-px flex-1 bg-border" /> or use a password
+                  <span className="h-px flex-1 bg-border" />
+                </div>
+              </>
+            )
+            : null}
+          {providers?.signupOpen === true
+            ? (
+              <Tabs value={tab} onValueChange={(value) => setTab(value === "signup" ? "signup" : "signin")}>
+                <TabsList className="w-full">
+                  <TabsTrigger value="signin" className="flex-1">Sign in</TabsTrigger>
+                  <TabsTrigger value="signup" className="flex-1">Create account</TabsTrigger>
+                </TabsList>
+                <TabsContent value="signin">
+                  <SignInForm onAuthenticated={onAuthenticated} />
+                </TabsContent>
+                <TabsContent value="signup">
+                  <SignUpForm
+                    onAuthenticated={onAuthenticated}
+                    onClosed={() => {
+                      toast.error("Signup is closed on this gateway")
+                      setTab("signin")
+                    }}
+                  />
+                </TabsContent>
+              </Tabs>
+            )
+            : <SignInForm onAuthenticated={onAuthenticated} />}
         </CardContent>
       </Card>
     </div>

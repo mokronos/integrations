@@ -8,14 +8,17 @@ import {
   Alias,
   ApiKeyHash,
   ApiKeyId,
+  ApprovalDelivery,
   ApprovalId,
   AuditId,
   canonicalArguments,
   ClientId,
   ConnectionName,
+  defaultApprovalDelivery,
   defaultTenantId,
   GrantId,
   IntegrationSlug,
+  LoginHandoffHash,
   SessionTokenHash,
   SubjectId,
   TenantId,
@@ -30,14 +33,18 @@ import type {
   Client,
   ClientCapability,
   ConnectionRef,
+  ExternalIdentity,
   Grant,
   GrantDecision,
   Login,
+  LoginHandoff,
+  IdentityProvider,
   PendingApproval,
   Subject,
   Tenant,
   ToolSnapshot
 } from "./domain.ts"
+import { PasswordHash } from "./passwords.ts"
 
 // Everything the gateway owns lives here, above Executor's own database.
 // Resolving a grant is what determines which subject an Executor instance must
@@ -68,7 +75,7 @@ const tenancyTableDdl = [
      subject_id TEXT PRIMARY KEY REFERENCES gateway_subject (id) ON DELETE CASCADE,
      tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
      email TEXT NOT NULL UNIQUE,
-     password_hash TEXT NOT NULL,
+     password_hash TEXT,
      created_at INTEGER NOT NULL
    )`,
   `CREATE TABLE IF NOT EXISTS gateway_session (
@@ -87,8 +94,34 @@ const ddl = [
      tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
      name TEXT NOT NULL,
      capabilities TEXT NOT NULL,
+     approval_delivery TEXT NOT NULL,
      created_at INTEGER NOT NULL,
      revoked_at INTEGER
+   )`,
+  `CREATE TABLE IF NOT EXISTS gateway_external_identity (
+     provider TEXT NOT NULL,
+     provider_subject TEXT NOT NULL,
+     subject_id TEXT NOT NULL REFERENCES gateway_subject (id) ON DELETE CASCADE,
+     tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
+     email TEXT NOT NULL,
+     created_at INTEGER NOT NULL,
+     PRIMARY KEY (provider, provider_subject)
+   )`,
+  `CREATE TABLE IF NOT EXISTS gateway_login_handoff (
+     request_hash TEXT PRIMARY KEY,
+     subject_id TEXT REFERENCES gateway_subject (id) ON DELETE CASCADE,
+     tenant_id TEXT REFERENCES gateway_tenant (id) ON DELETE CASCADE,
+     email TEXT,
+     created_at INTEGER NOT NULL,
+     expires_at INTEGER NOT NULL,
+     collected_at INTEGER
+   )`,
+  `CREATE TABLE IF NOT EXISTS gateway_identity_oauth_state (
+     state_hash TEXT PRIMARY KEY,
+     provider TEXT NOT NULL,
+     handoff_hash TEXT,
+     return_path TEXT,
+     expires_at INTEGER NOT NULL
    )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS gateway_client_name_tenant
      ON gateway_client (tenant_id, name)`,
@@ -198,6 +231,7 @@ const ClientRow = Schema.Struct({
   tenant_id: Schema.String,
   name: Schema.String,
   capabilities: Schema.String,
+  approval_delivery: Schema.String,
   created_at: Schema.Number,
   revoked_at: NullableNumber
 })
@@ -218,7 +252,7 @@ const LoginRow = Schema.Struct({
   subject_id: Schema.String,
   tenant_id: Schema.String,
   email: Schema.String,
-  password_hash: Schema.String,
+  password_hash: NullableString,
   created_at: Schema.Number
 })
 
@@ -227,6 +261,33 @@ const SessionRow = Schema.Struct({
   subject_id: Schema.String,
   tenant_id: Schema.String,
   created_at: Schema.Number,
+  expires_at: Schema.Number
+})
+
+const ExternalIdentityRow = Schema.Struct({
+  provider: Schema.Literal("google"),
+  provider_subject: Schema.String,
+  subject_id: Schema.String,
+  tenant_id: Schema.String,
+  email: Schema.String,
+  created_at: Schema.Number
+})
+
+const LoginHandoffRow = Schema.Struct({
+  request_hash: Schema.String,
+  subject_id: NullableString,
+  tenant_id: NullableString,
+  email: NullableString,
+  created_at: Schema.Number,
+  expires_at: Schema.Number,
+  collected_at: NullableNumber
+})
+
+const IdentityOAuthStateRow = Schema.Struct({
+  state_hash: Schema.String,
+  provider: Schema.Literal("google"),
+  handoff_hash: NullableString,
+  return_path: NullableString,
   expires_at: Schema.Number
 })
 
@@ -295,12 +356,21 @@ const SnapshotRow = Schema.Struct({
 })
 
 const clientColumns = [
-  "id", "tenant_id", "name", "capabilities", "created_at", "revoked_at"
+  "id", "tenant_id", "name", "capabilities", "approval_delivery", "created_at", "revoked_at"
 ]
 const tenantColumns = ["id", "name", "created_at"]
 const subjectColumns = ["id", "tenant_id", "created_at"]
 const loginColumns = ["subject_id", "tenant_id", "email", "password_hash", "created_at"]
 const sessionColumns = ["token_hash", "subject_id", "tenant_id", "created_at", "expires_at"]
+const externalIdentityColumns = [
+  "provider", "provider_subject", "subject_id", "tenant_id", "email", "created_at"
+]
+const loginHandoffColumns = [
+  "request_hash", "subject_id", "tenant_id", "email", "created_at", "expires_at", "collected_at"
+]
+const identityOAuthStateColumns = [
+  "state_hash", "provider", "handoff_hash", "return_path", "expires_at"
+]
 const apiKeyColumns = ["id", "client_id", "hash", "created_at", "last_used_at", "revoked_at"]
 const grantColumns = [
   "id", "client_id", "alias", "tool", "owner", "subject",
@@ -323,6 +393,9 @@ const decodeTenantRow = Schema.decodeUnknownSync(TenantRow)
 const decodeSubjectRow = Schema.decodeUnknownSync(SubjectRow)
 const decodeLoginRow = Schema.decodeUnknownSync(LoginRow)
 const decodeSessionRow = Schema.decodeUnknownSync(SessionRow)
+const decodeExternalIdentityRow = Schema.decodeUnknownSync(ExternalIdentityRow)
+const decodeLoginHandoffRow = Schema.decodeUnknownSync(LoginHandoffRow)
+const decodeIdentityOAuthStateRow = Schema.decodeUnknownSync(IdentityOAuthStateRow)
 const decodeApiKeyRow = Schema.decodeUnknownSync(ApiKeyRow)
 const decodeGrantRow = Schema.decodeUnknownSync(GrantRow)
 const decodeApprovalRow = Schema.decodeUnknownSync(ApprovalRow)
@@ -335,6 +408,7 @@ const decodeCapabilities = Schema.decodeUnknownSync(
     "administer_gateway"
   ])))
 )
+const decodeApprovalDelivery = Schema.decodeUnknownSync(Schema.fromJsonString(ApprovalDelivery))
 
 const parseJsonColumn = (value: string): typeof Schema.Json.Type =>
   decodeJsonText(value)
@@ -351,6 +425,7 @@ const toClient = (row: Row): Client => {
     tenantId: TenantId.make(decoded.tenant_id),
     name: decoded.name,
     capabilities: decodeCapabilities(decoded.capabilities),
+    approvalDelivery: decodeApprovalDelivery(decoded.approval_delivery),
     createdAt: date(decoded.created_at),
     revokedAt: nullableDate(decoded.revoked_at)
   }
@@ -380,8 +455,46 @@ const toLoginRecord = (row: Row): LoginRecord => {
     subjectId: SubjectId.make(decoded.subject_id),
     tenantId: TenantId.make(decoded.tenant_id),
     email: decoded.email,
-    passwordHash: decoded.password_hash,
+    passwordHash: decoded.password_hash === null ? null : PasswordHash.make(decoded.password_hash),
     createdAt: date(decoded.created_at)
+  }
+}
+
+const toExternalIdentity = (row: Row): ExternalIdentity => {
+  const decoded = decodeExternalIdentityRow(pick(row, externalIdentityColumns))
+  return {
+    provider: decoded.provider,
+    providerSubject: decoded.provider_subject,
+    subjectId: SubjectId.make(decoded.subject_id),
+    tenantId: TenantId.make(decoded.tenant_id),
+    email: decoded.email,
+    createdAt: date(decoded.created_at)
+  }
+}
+
+const toLoginHandoff = (row: Row): LoginHandoff => {
+  const decoded = decodeLoginHandoffRow(pick(row, loginHandoffColumns))
+  return {
+    requestHash: LoginHandoffHash.make(decoded.request_hash),
+    subjectId: decoded.subject_id === null ? null : SubjectId.make(decoded.subject_id),
+    tenantId: decoded.tenant_id === null ? null : TenantId.make(decoded.tenant_id),
+    email: decoded.email,
+    createdAt: date(decoded.created_at),
+    expiresAt: date(decoded.expires_at),
+    collectedAt: nullableDate(decoded.collected_at)
+  }
+}
+
+const toIdentityOAuthState = (row: Row): IdentityOAuthStateRecord => {
+  const decoded = decodeIdentityOAuthStateRow(pick(row, identityOAuthStateColumns))
+  return {
+    stateHash: LoginHandoffHash.make(decoded.state_hash),
+    provider: decoded.provider,
+    handoffHash: decoded.handoff_hash === null
+      ? null
+      : LoginHandoffHash.make(decoded.handoff_hash),
+    returnPath: decoded.return_path,
+    expiresAt: date(decoded.expires_at)
   }
 }
 
@@ -515,7 +628,15 @@ export interface CreateSubjectInput {
  *  The hash never leaves the store boundary — verification happens through
  *  `findLoginByEmail` returning it, and nothing serialises this type. */
 export interface LoginRecord extends Login {
-  readonly passwordHash: string
+  readonly passwordHash: PasswordHash | null
+}
+
+export interface IdentityOAuthStateRecord {
+  readonly stateHash: LoginHandoffHash
+  readonly provider: IdentityProvider
+  readonly handoffHash: LoginHandoffHash | null
+  readonly returnPath: string | null
+  readonly expiresAt: Date
 }
 
 export interface CreateClientInput {
@@ -523,6 +644,7 @@ export interface CreateClientInput {
   readonly id: ClientId
   readonly name: string
   readonly capabilities: ReadonlyArray<ClientCapability>
+  readonly approvalDelivery?: ApprovalDelivery
 }
 
 export interface CreateGrantInput {
@@ -574,6 +696,13 @@ export interface RecordAuditInput {
   }
 }
 
+export interface GatewayOverviewCounts {
+  readonly clients: number
+  readonly grants: number
+  readonly keys: number
+  readonly pendingApprovals: number
+}
+
 export interface GatewayStore {
   readonly databasePath: string
 
@@ -591,9 +720,10 @@ export interface GatewayStore {
     readonly subjectId: SubjectId
     readonly tenantId: TenantId
     readonly email: string
-    readonly passwordHash: string
+    readonly passwordHash: PasswordHash | null
   }): Promise<LoginRecord>
   findLoginByEmail(email: string): Promise<LoginRecord | undefined>
+  findLoginBySubject(subjectId: SubjectId): Promise<LoginRecord | undefined>
   countLogins(): Promise<number>
   /** Rewrites the login's email. Uniqueness is enforced by the schema; the
    *  route checks for a friendly message first. */
@@ -620,10 +750,50 @@ export interface GatewayStore {
   revokeSession(tokenHash: SessionTokenHash): Promise<void>
   deleteExpiredSessions(now: Date): Promise<number>
 
+  createExternalIdentity(input: {
+    readonly provider: IdentityProvider
+    readonly providerSubject: string
+    readonly subjectId: SubjectId
+    readonly tenantId: TenantId
+    readonly email: string
+  }): Promise<ExternalIdentity>
+  findExternalIdentity(
+    provider: IdentityProvider,
+    providerSubject: string
+  ): Promise<ExternalIdentity | undefined>
+  listExternalIdentities(subjectId: SubjectId): Promise<ReadonlyArray<ExternalIdentity>>
+
+  createLoginHandoff(input: {
+    readonly requestHash: LoginHandoffHash
+    readonly expiresAt: Date
+  }): Promise<LoginHandoff>
+  getLoginHandoff(requestHash: LoginHandoffHash): Promise<LoginHandoff | undefined>
+  completeLoginHandoff(input: {
+    readonly requestHash: LoginHandoffHash
+    readonly subjectId: SubjectId
+    readonly tenantId: TenantId
+    readonly email: string
+  }): Promise<boolean>
+  collectLoginHandoff(requestHash: LoginHandoffHash): Promise<boolean>
+  createIdentityOAuthState(input: IdentityOAuthStateRecord): Promise<void>
+  consumeIdentityOAuthState(
+    stateHash: LoginHandoffHash
+  ): Promise<IdentityOAuthStateRecord | undefined>
+  /** Removes expired browser-login state and terminal handoffs. These values
+   * are intentionally short lived, but abandoned flows must not accumulate. */
+  deleteExpiredIdentityFlows(now: Date): Promise<number>
+
   createClient(input: CreateClientInput): Promise<Client>
   listClients(tenantId: TenantId): Promise<ReadonlyArray<Client>>
+  overviewCounts(tenantId: TenantId): Promise<GatewayOverviewCounts>
   findClientById(tenantId: TenantId, id: ClientId): Promise<Client | undefined>
   findClientByName(tenantId: TenantId, name: string): Promise<Client | undefined>
+  updateClientSettings(input: {
+    readonly tenantId: TenantId
+    readonly id: ClientId
+    readonly capabilities: ReadonlyArray<ClientCapability>
+    readonly approvalDelivery: ApprovalDelivery
+  }): Promise<Client>
   revokeClient(tenantId: TenantId, id: ClientId): Promise<void>
 
   addApiKey(input: { readonly id: ApiKeyId; readonly clientId: ClientId; readonly hash: ApiKeyHash }): Promise<ApiKey>
@@ -834,6 +1004,30 @@ const one_ = async (
 const tableExists = async (database: LibsqlClient, name: string): Promise<boolean> =>
   await one_(database, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", [name]) !== undefined
 
+/** OAuth-only subjects have no password credential. Older databases declared
+ * the column NOT NULL, so rebuild this small identity table once to make that
+ * absence representable instead of inventing an unrecoverable fake password. */
+const migrateNullableLoginPasswords = async (database: LibsqlClient): Promise<void> => {
+  if (!await tableExists(database, "gateway_login")) return
+  const passwordColumn = (await database.execute("PRAGMA table_info(gateway_login)"))
+    .rows.find((row) => String(row["name"] ?? "") === "password_hash")
+  if (Number(passwordColumn?.["notnull"] ?? 0) === 0) return
+
+  await database.execute("ALTER TABLE gateway_login RENAME TO gateway_login_password_required")
+  await database.execute(`CREATE TABLE gateway_login (
+     subject_id TEXT PRIMARY KEY REFERENCES gateway_subject (id) ON DELETE CASCADE,
+     tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
+     email TEXT NOT NULL UNIQUE,
+     password_hash TEXT,
+     created_at INTEGER NOT NULL
+   )`)
+  await database.execute(`INSERT INTO gateway_login
+     (subject_id, tenant_id, email, password_hash, created_at)
+     SELECT subject_id, tenant_id, email, password_hash, created_at
+       FROM gateway_login_password_required`)
+  await database.execute("DROP TABLE gateway_login_password_required")
+}
+
 /** One filter builder for both the page and its total, so a listing can never
  *  report a count that belongs to a different question than the rows. */
 /** A composed SQL fragment and the values it binds, kept together so a caller
@@ -911,7 +1105,14 @@ export const createGatewayStore = async (
   // Tenancy tables first, then the backfill that references them, then the
   // rest of the final shape.
   for (const statement of tenancyTableDdl) await database.execute(statement)
+  await migrateNullableLoginPasswords(database)
   await migrateTenancy(database)
+  await addMissingColumns(database, "gateway_client", {
+    approval_delivery: `TEXT NOT NULL DEFAULT '${JSON.stringify(defaultApprovalDelivery)}'`
+  })
+  await addMissingColumns(database, "gateway_identity_oauth_state", {
+    return_path: "TEXT"
+  })
   for (const statement of ddl) await database.execute(statement)
 
   const one = async (sql: string, args: ReadonlyArray<InValue>): Promise<Row | undefined> => {
@@ -1028,6 +1229,11 @@ export const createGatewayStore = async (
       return row === undefined ? undefined : toLoginRecord(row)
     },
 
+    findLoginBySubject: async (subjectId) => {
+      const row = await one("SELECT * FROM gateway_login WHERE subject_id = ?", [subjectId])
+      return row === undefined ? undefined : toLoginRecord(row)
+    },
+
     countLogins: async () => {
       const row = await one("SELECT COUNT(*) AS total FROM gateway_login", [])
       return row === undefined ? 0 : Number(row["total"] ?? 0)
@@ -1101,14 +1307,137 @@ export const createGatewayStore = async (
       return Number(result.rowsAffected)
     },
 
+    createExternalIdentity: async (input) => {
+      await run(
+        `INSERT INTO gateway_external_identity
+           (provider, provider_subject, subject_id, tenant_id, email, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (provider, provider_subject) DO UPDATE SET email = excluded.email`,
+        [
+          input.provider,
+          input.providerSubject,
+          input.subjectId,
+          input.tenantId,
+          input.email,
+          now()
+        ]
+      )
+      const row = await one(
+        "SELECT * FROM gateway_external_identity WHERE provider = ? AND provider_subject = ?",
+        [input.provider, input.providerSubject]
+      )
+      if (row === undefined) throw new Error(`Failed to store ${input.provider} identity`)
+      return toExternalIdentity(row)
+    },
+
+    findExternalIdentity: async (provider, providerSubject) => {
+      const row = await one(
+        "SELECT * FROM gateway_external_identity WHERE provider = ? AND provider_subject = ?",
+        [provider, providerSubject]
+      )
+      return row === undefined ? undefined : toExternalIdentity(row)
+    },
+
+    listExternalIdentities: async (subjectId) =>
+      (await all(
+        "SELECT * FROM gateway_external_identity WHERE subject_id = ? ORDER BY created_at",
+        [subjectId]
+      )).map(toExternalIdentity),
+
+    createLoginHandoff: async (input) => {
+      await run(
+        `INSERT INTO gateway_login_handoff
+           (request_hash, subject_id, tenant_id, email, created_at, expires_at, collected_at)
+         VALUES (?, NULL, NULL, NULL, ?, ?, NULL)`,
+        [input.requestHash, now(), millis(input.expiresAt)]
+      )
+      const row = await one(
+        "SELECT * FROM gateway_login_handoff WHERE request_hash = ?",
+        [input.requestHash]
+      )
+      if (row === undefined) throw new Error("Failed to store login handoff")
+      return toLoginHandoff(row)
+    },
+
+    getLoginHandoff: async (requestHash) => {
+      const row = await one(
+        "SELECT * FROM gateway_login_handoff WHERE request_hash = ?",
+        [requestHash]
+      )
+      return row === undefined ? undefined : toLoginHandoff(row)
+    },
+
+    completeLoginHandoff: async (input) => {
+      const result = await database.execute({
+        sql: `UPDATE gateway_login_handoff
+                SET subject_id = ?, tenant_id = ?, email = ?
+              WHERE request_hash = ? AND collected_at IS NULL AND expires_at > ?`,
+        args: [input.subjectId, input.tenantId, input.email, input.requestHash, now()]
+      })
+      return Number(result.rowsAffected) > 0
+    },
+
+    collectLoginHandoff: async (requestHash) => {
+      const result = await database.execute({
+        sql: `UPDATE gateway_login_handoff SET collected_at = ?
+               WHERE request_hash = ? AND subject_id IS NOT NULL
+                 AND collected_at IS NULL AND expires_at > ?`,
+        args: [now(), requestHash, now()]
+      })
+      return Number(result.rowsAffected) > 0
+    },
+
+    createIdentityOAuthState: async (input) => {
+      await run(
+        `INSERT INTO gateway_identity_oauth_state
+           (state_hash, provider, handoff_hash, return_path, expires_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        [
+          input.stateHash,
+          input.provider,
+          input.handoffHash,
+          input.returnPath,
+          millis(input.expiresAt)
+        ]
+      )
+    },
+
+    consumeIdentityOAuthState: async (stateHash) => {
+      const result = await database.execute({
+        sql: `DELETE FROM gateway_identity_oauth_state
+               WHERE state_hash = ? AND expires_at > ?
+               RETURNING *`,
+        args: [stateHash, now()]
+      })
+      const row = result.rows[0]
+      if (row === undefined) {
+        await run("DELETE FROM gateway_identity_oauth_state WHERE state_hash = ?", [stateHash])
+      }
+      return row === undefined ? undefined : toIdentityOAuthState(row)
+    },
+
+    deleteExpiredIdentityFlows: async (at) => {
+      const expiresAt = millis(at)
+      const states = await database.execute({
+        sql: "DELETE FROM gateway_identity_oauth_state WHERE expires_at <= ?",
+        args: [expiresAt]
+      })
+      const handoffs = await database.execute({
+        sql: "DELETE FROM gateway_login_handoff WHERE expires_at <= ?",
+        args: [expiresAt]
+      })
+      return Number(states.rowsAffected) + Number(handoffs.rowsAffected)
+    },
+
     createClient: async (input) => {
       await run(
-        "INSERT INTO gateway_client (id, tenant_id, name, capabilities, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, NULL)",
+        "INSERT INTO gateway_client (id, tenant_id, name, capabilities, approval_delivery, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, NULL)",
         [
           input.id,
           input.tenantId,
           input.name,
           JSON.stringify(input.capabilities),
+          JSON.stringify(input.approvalDelivery ?? defaultApprovalDelivery),
           now()
         ]
       )
@@ -1120,6 +1449,29 @@ export const createGatewayStore = async (
         "SELECT * FROM gateway_client WHERE tenant_id = ? ORDER BY created_at",
         [tenantId]
       )).map(toClient),
+
+    overviewCounts: async (tenantId) => {
+      const row = await one(
+        `SELECT
+          (SELECT COUNT(*) FROM gateway_client
+            WHERE tenant_id = ? AND revoked_at IS NULL) AS clients,
+          (SELECT COUNT(*) FROM gateway_grant
+            WHERE tenant_id = ? AND revoked_at IS NULL) AS grants,
+          (SELECT COUNT(*) FROM gateway_api_key AS api_key
+            JOIN gateway_client AS client ON client.id = api_key.client_id
+            WHERE client.tenant_id = ? AND client.revoked_at IS NULL
+              AND api_key.revoked_at IS NULL) AS keys,
+          (SELECT COUNT(*) FROM gateway_pending_approval
+            WHERE tenant_id = ? AND status = 'pending' AND expires_at > ?) AS pending_approvals`,
+        [tenantId, tenantId, tenantId, tenantId, now()]
+      )
+      return {
+        clients: Number(row?.["clients"] ?? 0),
+        grants: Number(row?.["grants"] ?? 0),
+        keys: Number(row?.["keys"] ?? 0),
+        pendingApprovals: Number(row?.["pending_approvals"] ?? 0)
+      }
+    },
 
     findClientById: async (tenantId, id) => {
       const row = await one(
@@ -1135,6 +1487,20 @@ export const createGatewayStore = async (
         [tenantId, name]
       )
       return row === undefined ? undefined : toClient(row)
+    },
+
+    updateClientSettings: async (input) => {
+      await run(
+        `UPDATE gateway_client SET capabilities = ?, approval_delivery = ?
+          WHERE tenant_id = ? AND id = ? AND revoked_at IS NULL`,
+        [
+          JSON.stringify(input.capabilities),
+          JSON.stringify(input.approvalDelivery),
+          input.tenantId,
+          input.id
+        ]
+      )
+      return await requireClient(input.id)
     },
 
     revokeClient: async (tenantId, id) => {
@@ -1163,6 +1529,7 @@ export const createGatewayStore = async (
         `SELECT gateway_api_key.*, gateway_client.tenant_id AS client_tenant_id,
                 gateway_client.name AS client_name,
                 gateway_client.capabilities AS client_capabilities,
+                gateway_client.approval_delivery AS client_approval_delivery,
                 gateway_client.created_at AS client_created_at, gateway_client.revoked_at AS client_revoked_at
            FROM gateway_api_key JOIN gateway_client ON gateway_client.id = gateway_api_key.client_id
           WHERE gateway_api_key.hash = ?`,
@@ -1179,6 +1546,7 @@ export const createGatewayStore = async (
           tenant_id: row["client_tenant_id"] ?? "",
           name: row["client_name"] ?? "",
           capabilities: row["client_capabilities"] ?? "[]",
+          approval_delivery: row["client_approval_delivery"] ?? JSON.stringify(defaultApprovalDelivery),
           created_at: row["client_created_at"] ?? 0,
           revoked_at: row["client_revoked_at"] ?? null
         })

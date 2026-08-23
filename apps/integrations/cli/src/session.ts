@@ -10,6 +10,7 @@ import {
 } from "@mokronos/integrations-client"
 import type { GatewayClient } from "@mokronos/integrations-client"
 import { cliError } from "./connection.ts"
+import { openBrowser } from "./connection.ts"
 import { whenPresentMap } from "./optional.ts"
 
 const OperatorSession = Schema.Struct({
@@ -81,6 +82,22 @@ const responseJson = async (response: Response): Promise<typeof Schema.Json.Type
   return source.trim().length === 0 ? {} : decodeJsonText(source)
 }
 
+const CliLoginStart = Schema.Struct({
+  requestId: Schema.String,
+  authorizationUrl: Schema.String,
+  expiresAt: Schema.String,
+  intervalMs: Schema.Number
+})
+
+const CliLoginPoll = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("pending"), expiresAt: Schema.String }),
+  Schema.Struct({
+    status: Schema.Literal("authenticated"),
+    token: Schema.String,
+    email: Schema.String
+  })
+])
+
 const sessionToken = (header: string | null): string => {
   const match = /(?:^|;\s*)wf_session=([^;]+)/.exec(header ?? "")
   if (match?.[1] === undefined) {
@@ -111,6 +128,52 @@ export const loginOperator = async (input: {
   })
   await writeOperatorSession(session)
   return session
+}
+
+/** Starts an OAuth flow in the system browser and trades its one-time handoff
+ * secret for a normal operator session. The browser never learns the CLI's
+ * stored session token, and polling a completed handoff consumes it once. */
+export const loginOperatorInBrowser = async (options: {
+  readonly noOpen?: boolean
+  readonly timeoutSeconds?: number
+  readonly onAuthorization?: (url: string) => Promise<void>
+} = {}): Promise<OperatorSession> => {
+  const url = await resolveGatewayUrl()
+  await readGatewayMetadata(url)
+  const startResponse = await fetch(`${url}/v1/auth/cli/start`, { method: "POST" })
+  const startPayload = await responseJson(startResponse)
+  if (!startResponse.ok) {
+    throw cliError(messageFrom(startPayload, `Browser login failed with ${startResponse.status}`))
+  }
+  const start = Schema.decodeUnknownSync(CliLoginStart)(startPayload)
+  await options.onAuthorization?.(start.authorizationUrl)
+  if (options.noOpen !== true) openBrowser(start.authorizationUrl)
+
+  const deadline = Math.min(
+    Date.parse(start.expiresAt),
+    Date.now() + (options.timeoutSeconds ?? 300) * 1_000
+  )
+  while (Date.now() < deadline) {
+    const pollResponse = await fetch(
+      `${url}/v1/auth/cli/${encodeURIComponent(start.requestId)}`
+    )
+    const pollPayload = await responseJson(pollResponse)
+    if (!pollResponse.ok) {
+      throw cliError(messageFrom(pollPayload, `Browser login failed with ${pollResponse.status}`))
+    }
+    const poll = Schema.decodeUnknownSync(CliLoginPoll)(pollPayload)
+    if (poll.status === "authenticated") {
+      const session = Schema.decodeUnknownSync(OperatorSession)({
+        url,
+        token: poll.token,
+        email: poll.email
+      })
+      await writeOperatorSession(session)
+      return session
+    }
+    await Bun.sleep(Math.max(250, start.intervalMs))
+  }
+  throw cliError("Browser login timed out. Run `ii login` to start a fresh sign-in.")
 }
 
 export const signupOperator = async (input: {
@@ -153,7 +216,7 @@ export const connectToControlPlane = async (): Promise<ControlPlaneClient> => {
     const connection = await resolveClientConnection()
     if (connection === undefined) {
       throw cliError(
-        "No operator credential found. Sign in with `ii login <email>`, or configure an administrative API key."
+        "No operator credential found. Sign in with `ii login`, or configure an administrative API key."
       )
     }
     await readGatewayMetadata(connection.url)
@@ -213,7 +276,7 @@ export const connectToOperatorGateway = async (): Promise<GatewayClient> => {
     const connection = await resolveClientConnection()
     if (connection === undefined) {
       throw cliError(
-        "No operator credential found. Sign in with `ii login <email>`, or configure an administrative API key."
+        "No operator credential found. Sign in with `ii login`, or configure an administrative API key."
       )
     }
     return createGatewayClient(connection)

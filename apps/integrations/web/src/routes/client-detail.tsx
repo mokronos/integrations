@@ -19,7 +19,15 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle
+} from "@/components/ui/card"
 import {
   Dialog,
   DialogContent,
@@ -31,6 +39,8 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Select,
   SelectContent,
@@ -59,7 +69,7 @@ import {
 } from "@/lib/queries"
 import type { ConnectionRefInput } from "@/lib/gateway"
 import { decodeGrantDecision } from "@/lib/schemas"
-import type { ApiKeySummary, Grant, GrantDecision } from "@/lib/schemas"
+import type { ApiKeySummary, Client, Grant, GrantDecision } from "@/lib/schemas"
 
 const decisionLabel = {
   allow: "Allow",
@@ -180,12 +190,12 @@ function ClientKeys({ clientId, disabled }: { readonly clientId: string; readonl
 
   return (
     <Card>
-      <CardHeader className="flex-row items-center justify-between space-y-0">
-        <div>
-          <CardTitle className="flex items-center gap-2"><KeyRound className="size-4" /> API keys</CardTitle>
-          <p className="text-muted-foreground mt-1 text-sm">Rotate one credential without revoking the whole client.</p>
-        </div>
-        <Button size="sm" onClick={() => issue.mutate()} disabled={disabled || issue.isPending}>Issue key</Button>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2"><KeyRound className="size-4" /> API keys</CardTitle>
+        <CardDescription>Rotate one credential without revoking the whole client.</CardDescription>
+        <CardAction>
+          <Button size="sm" onClick={() => issue.mutate()} disabled={disabled || issue.isPending}>Issue key</Button>
+        </CardAction>
       </CardHeader>
       <CardContent className="p-0">
         <Table>
@@ -211,6 +221,117 @@ function ClientKeys({ clientId, disabled }: { readonly clientId: string; readonl
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </Card>
+  )
+}
+
+const webhookLines = (source: string): ReadonlyArray<string> =>
+  source.split("\n").map((value) => value.trim()).filter((value) => value.length > 0)
+
+function ClientSettings({ client }: { readonly client: Client }) {
+  const invalidate = useInvalidate()
+  const [mayProvision, setMayProvision] = useState(
+    client.capabilities.includes("provision_connections")
+  )
+  const [mayAdminister, setMayAdminister] = useState(
+    client.capabilities.includes("administer_gateway")
+  )
+  const [returnLink, setReturnLink] = useState(client.approvalDelivery.returnLink)
+  const [webhooks, setWebhooks] = useState(client.approvalDelivery.webhooks.join("\n"))
+  const parsedWebhooks = webhookLines(webhooks)
+  const validWebhooks = parsedWebhooks.length <= 10 &&
+    parsedWebhooks.every((url) => /^https?:\/\/[^\s]+$/.test(url))
+
+  const save = useMutation({
+    mutationFn: () => {
+      const capabilities: Array<"provision_connections" | "administer_gateway"> = []
+      if (mayProvision) capabilities.push("provision_connections")
+      if (mayAdminister) capabilities.push("administer_gateway")
+      return gateway.updateClientSettings({
+        clientId: client.id,
+        capabilities,
+        approvalDelivery: { returnLink, webhooks: parsedWebhooks }
+      })
+    },
+    onSuccess: () => {
+      invalidate(keys.clients)
+      toast.success("Client settings saved")
+    },
+    onError: (error: Error) => toast.error("Could not save client settings", {
+      description: error.message
+    })
+  })
+
+  const disabled = client.revokedAt !== null
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Authority and approval delivery</CardTitle>
+        <CardDescription>
+          Tool access comes from grants below. These switches control the wider
+          control-plane actions this credential may perform.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4 lg:grid-cols-2">
+        <div className="space-y-3">
+          <div className="flex items-start gap-3 rounded-md border p-3">
+            <Switch
+              id="settings-provision"
+              checked={mayProvision}
+              onCheckedChange={setMayProvision}
+              disabled={disabled}
+            />
+            <div className="space-y-1">
+              <Label htmlFor="settings-provision">Provision connections</Label>
+              <p className="text-muted-foreground text-xs">Discover integrations and create or remove connections.</p>
+            </div>
+          </div>
+          <div className="flex items-start gap-3 rounded-md border p-3">
+            <Switch
+              id="settings-administer"
+              checked={mayAdminister}
+              onCheckedChange={setMayAdminister}
+              disabled={disabled}
+            />
+            <div className="space-y-1">
+              <Label htmlFor="settings-administer">Administer gateway</Label>
+              <p className="text-muted-foreground text-xs">Manage clients, grants, approvals, policy, and audit data.</p>
+            </div>
+          </div>
+        </div>
+        <div className="space-y-3 rounded-md border p-3">
+          <div className="flex items-start gap-3">
+            <Switch
+              id="settings-return-link"
+              checked={returnLink}
+              onCheckedChange={setReturnLink}
+              disabled={disabled}
+            />
+            <div className="space-y-1">
+              <Label htmlFor="settings-return-link">Return approval link</Label>
+              <p className="text-muted-foreground text-xs">Include a signed-in dashboard destination in pending outcomes.</p>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="settings-webhooks">Notification webhooks</Label>
+            <Textarea
+              id="settings-webhooks"
+              value={webhooks}
+              onChange={(event) => setWebhooks(event.target.value)}
+              disabled={disabled}
+              placeholder="https://automation.example/hooks/approvals"
+            />
+            <p className={validWebhooks ? "text-muted-foreground text-xs" : "text-destructive text-xs"}>
+              One HTTP(S) URL per line, up to 10. Payloads omit call arguments and credentials.
+            </p>
+          </div>
+        </div>
+      </CardContent>
+      <CardFooter>
+        <Button onClick={() => save.mutate()} disabled={disabled || !validWebhooks || save.isPending}>
+          {save.isPending ? "Saving…" : "Save settings"}
+        </Button>
+      </CardFooter>
     </Card>
   )
 }
@@ -322,7 +443,15 @@ function GrantDialog({ clientId }: { readonly clientId: string }) {
 
           <div className="space-y-1.5">
             <Label>Tool</Label>
-            <Select value={address} onValueChange={setAddress} disabled={integration === undefined}>
+            <Select
+              value={address}
+              onValueChange={(value) => {
+                setAddress(value)
+                const selected = integration?.tools.find((candidate) => candidate.address === value)
+                if (selected !== undefined) setDecision(selected.defaultDecision)
+              }}
+              disabled={integration === undefined}
+            >
               <SelectTrigger><SelectValue placeholder="Pick a tool" /></SelectTrigger>
               <SelectContent>
                 {(integration?.tools ?? []).map((candidate) => (
@@ -380,6 +509,12 @@ function GrantDialog({ clientId }: { readonly clientId: string }) {
                 </SelectItem>
               </SelectContent>
             </Select>
+            {tool === undefined ? null : (
+              <p className="text-muted-foreground text-xs">
+                Suggested default: {decisionLabel[tool.defaultDecision].toLowerCase()}.
+                You can override it for this client.
+              </p>
+            )}
           </div>
         </div>
 
@@ -546,6 +681,7 @@ export function ClientDetailRoute() {
             )
             : null}
         </Card>
+        <ClientSettings key={`${client.id}:${client.capabilities.join(",")}:${JSON.stringify(client.approvalDelivery)}`} client={client} />
         <ClientKeys clientId={clientId} disabled={client.revokedAt !== null} />
         </>
       )}

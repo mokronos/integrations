@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { Check, ShieldCheck, X } from "lucide-react"
+import { useSearchParams } from "react-router"
 import { toast } from "sonner"
 
 import { JsonView } from "@/components/json-view"
@@ -7,11 +8,9 @@ import { LoadingRows, Page, QueryError, ReloadButton } from "@/components/page"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { until, when } from "@/lib/format"
 import * as gateway from "@/lib/gateway"
-import { whenPresent } from "@/lib/optional"
 import { useApprovals, useInvalidate, useMutation } from "@/lib/queries"
 import { decodeApprovalFilter } from "@/lib/schemas"
 import type { ApprovalStatus, PendingApproval } from "@/lib/schemas"
@@ -25,10 +24,15 @@ const statusVariant = {
   Record<ApprovalStatus, "default" | "secondary" | "destructive" | "outline">
 >
 
-function ApprovalCard({ approval }: { readonly approval: PendingApproval }) {
+function ApprovalCard({
+  approval,
+  selected
+}: {
+  readonly approval: PendingApproval
+  readonly selected: boolean
+}) {
   const invalidate = useInvalidate()
   const [expired, setExpired] = useState(false)
-  const [decidedBy, setDecidedBy] = useState("")
 
   useEffect(() => {
     if (approval.status !== "pending") return
@@ -40,14 +44,8 @@ function ApprovalCard({ approval }: { readonly approval: PendingApproval }) {
   const decide = useMutation({
     mutationFn: (verdict: "approve" | "deny") =>
       verdict === "approve"
-        ? gateway.approveApproval({
-          id: approval.id,
-          ...whenPresent("decidedBy", decidedBy.trim() || undefined)
-        })
-        : gateway.denyApproval({
-          id: approval.id,
-          ...whenPresent("decidedBy", decidedBy.trim() || undefined)
-        }),
+        ? gateway.approveApproval({ id: approval.id })
+        : gateway.denyApproval({ id: approval.id }),
     onSuccess: (_, verdict) => {
       invalidate(["approvals"], ["audit"])
       toast.success(verdict === "approve" ? "Approved and performed" : "Denied")
@@ -56,7 +54,10 @@ function ApprovalCard({ approval }: { readonly approval: PendingApproval }) {
   })
 
   return (
-    <Card>
+    <Card
+      id={`approval-${approval.id}`}
+      className={selected ? "ring-2 ring-primary" : undefined}
+    >
       <CardContent className="space-y-3 p-4">
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={statusVariant[approval.status]}>{approval.status}</Badge>
@@ -89,13 +90,6 @@ function ApprovalCard({ approval }: { readonly approval: PendingApproval }) {
         {approval.status === "pending"
           ? (
             <div className="flex flex-wrap gap-2">
-              <Input
-                className="h-8 max-w-48"
-                value={decidedBy}
-                onChange={(event) => setDecidedBy(event.target.value)}
-                placeholder="Decided by (optional)"
-                aria-label="Decided by"
-              />
               <Button
                 size="sm"
                 onClick={() => decide.mutate("approve")}
@@ -135,8 +129,18 @@ function ApprovalCard({ approval }: { readonly approval: PendingApproval }) {
 }
 
 export function ApprovalsRoute() {
+  const [searchParams] = useSearchParams()
+  const selected = searchParams.get("approval")
   const [filter, setFilter] = useState<ApprovalStatus | "all">("pending")
   const approvals = useApprovals(filter)
+
+  useEffect(() => {
+    if (selected === null || approvals.isPending) return
+    document.getElementById(`approval-${selected}`)?.scrollIntoView({
+      behavior: "smooth",
+      block: "center"
+    })
+  }, [approvals.isPending, selected])
 
   return (
     <Page
@@ -170,7 +174,7 @@ export function ApprovalsRoute() {
         : (
           <div className="space-y-3">
             {(approvals.data ?? []).map((approval) => (
-              <ApprovalCard key={approval.id} approval={approval} />
+              <ApprovalCard key={approval.id} approval={approval} selected={approval.id === selected} />
             ))}
           </div>
         )}
