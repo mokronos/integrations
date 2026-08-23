@@ -5,12 +5,16 @@ import {
   ExecutorTool,
   ExecutorToolSummary,
   IntegrationOverview
-} from "@mokronos/integrations-executor/schemas"
+} from "@mokronos/integrations-protocol/schemas"
 import {
   IntegrationDiscovery,
   IntegrationValidationReport
-} from "@mokronos/integrations-executor/integration-model"
-import { IntegrationSearchResponse } from "@mokronos/integrations-executor/registry"
+} from "@mokronos/integrations-protocol/integration-model"
+import { IntegrationSearchResponse } from "@mokronos/integrations-protocol/registry"
+import {
+  GatewayMetadata,
+  gatewayProtocolVersion
+} from "@mokronos/integrations-protocol/version"
 
 /** The client is deliberately dumb: authenticate, send, decode. Every decision
  * about whether a call may happen, which connection serves it, and whether a
@@ -38,8 +42,47 @@ export class GatewayError extends Error {
   }
 }
 
+export class GatewayProtocolError extends Error {
+  readonly expected: number
+  readonly received: number | undefined
+
+  constructor(received: number | undefined, detail?: string) {
+    const actual = received === undefined ? "missing" : String(received)
+    super(
+      `Incompatible gateway protocol: client requires ${gatewayProtocolVersion}, gateway reported ${actual}` +
+        (detail === undefined ? "" : ` (${detail})`)
+    )
+    this.name = "GatewayProtocolError"
+    this.expected = gatewayProtocolVersion
+    this.received = received
+  }
+}
+
 type Json = typeof Schema.Json.Type
 const decodeJsonText = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
+const decodeGatewayMetadataText = Schema.decodeUnknownSync(
+  Schema.fromJsonString(GatewayMetadata)
+)
+
+export const readGatewayMetadata = async (
+  url: string,
+  doFetch: typeof globalThis.fetch = globalThis.fetch
+): Promise<GatewayMetadata> => {
+  const response = await doFetch(`${url.replace(/\/+$/, "")}/v1/metadata`)
+  if (!response.ok) {
+    throw new GatewayProtocolError(undefined, `metadata returned HTTP ${response.status}`)
+  }
+  let metadata: GatewayMetadata
+  try {
+    metadata = decodeGatewayMetadataText(await response.text())
+  } catch {
+    throw new GatewayProtocolError(undefined, "gateway metadata is malformed")
+  }
+  if (metadata.protocolVersion !== gatewayProtocolVersion) {
+    throw new GatewayProtocolError(metadata.protocolVersion, `gateway ${metadata.gatewayVersion}`)
+  }
+  return metadata
+}
 
 export const GrantedTool = Schema.Struct({
   alias: Schema.String,
@@ -209,6 +252,8 @@ const isOutcome = Schema.is(InvocationOutcome)
 export interface GatewayClient {
   readonly url: string
 
+  metadata(): Promise<GatewayMetadata>
+
   search(input: RegistrySearchInput): Promise<IntegrationSearchResponse>
   discover(input: DiscoverIntegrationInput): Promise<IntegrationDiscovery>
   integrations(): Promise<GatewayIntegrationsResponse>
@@ -245,12 +290,18 @@ export interface GatewayClient {
 export const createGatewayClient = (options: GatewayClientOptions): GatewayClient => {
   const doFetch = options.fetch ?? globalThis.fetch
   const base = options.url.replace(/\/+$/, "")
+  let metadataRequest: Promise<GatewayMetadata> | undefined
+  const metadata = (): Promise<GatewayMetadata> => {
+    metadataRequest ??= readGatewayMetadata(base, doFetch)
+    return metadataRequest
+  }
 
   const send = async (
     method: string,
     path: string,
     body?: Json
   ): Promise<{ readonly ok: boolean; readonly status: number; readonly parsed: Json }> => {
+    await metadata()
     const response = await doFetch(`${base}${path}`, {
       method,
       headers: {
@@ -291,6 +342,7 @@ export const createGatewayClient = (options: GatewayClientOptions): GatewayClien
 
   return {
     url: base,
+    metadata,
     search: async (input) => {
       const parameters = new URLSearchParams({
         q: input.query,
@@ -362,7 +414,7 @@ export const createGatewayClient = (options: GatewayClientOptions): GatewayClien
     approval: async (id) => decodeApproval(await request("GET", `/v1/approvals/${id}`)),
     health: async () => {
       try {
-        await request("GET", "/v1/health")
+        await metadata()
         return true
       } catch {
         return false
@@ -386,6 +438,8 @@ export {
   ExecutorConnection,
   ExecutorTool,
   ExecutorToolSummary,
+  GatewayMetadata,
+  gatewayProtocolVersion,
   IntegrationDiscovery,
   IntegrationOverview,
   IntegrationSearchResponse,

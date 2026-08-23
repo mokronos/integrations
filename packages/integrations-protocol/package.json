@@ -1,34 +1,20 @@
 {
-  "name": "@mokronos/integrations-executor",
+  "name": "@mokronos/integrations-protocol",
   "version": "0.2.0",
   "type": "module",
-  "description": "The gateway's internal Executor-backed integration host.",
+  "description": "Effect Schema contracts shared by the integrations gateway, client, and executor.",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/mokronos/integrations.git",
-    "directory": "packages/integrations-executor"
+    "directory": "packages/integrations-protocol"
   },
   "homepage": "https://github.com/mokronos/integrations#readme",
-  "keywords": [
-    "gateway",
-    "integration",
-    "executor",
-    "mcp",
-    "openapi"
-  ],
-  "engines": {
-    "bun": ">=1.2"
-  },
-  "publishConfig": {
-    "access": "public",
-    "registry": "https://registry.npmjs.org"
-  },
-  "files": [
-    "src",
-    "dist",
-    "README.md"
-  ],
+  "bugs": "https://github.com/mokronos/integrations/issues",
+  "keywords": ["integrations", "protocol", "effect", "schema"],
+  "engines": { "bun": ">=1.2" },
+  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org" },
+  "files": ["src", "dist", "README.md"],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -53,20 +39,17 @@
       "bun": "./src/registry.ts",
       "development": "./src/registry.ts",
       "default": "./dist/registry.js"
+    },
+    "./version": {
+      "types": "./dist/version.d.ts",
+      "bun": "./src/version.ts",
+      "development": "./src/version.ts",
+      "default": "./dist/version.js"
     }
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "prepublishOnly": "bun run build"
   },
-  "dependencies": {
-    "@executor-js/fumadb": "1.5.7",
-    "@executor-js/plugin-mcp": "1.5.37",
-    "@executor-js/plugin-openapi": "1.5.37",
-    "@executor-js/sdk": "1.5.37",
-    "@libsql/client": "0.17.3",
-    "@mokronos/integrations-protocol": "workspace:*",
-    "drizzle-orm": "0.45.2",
-    "effect": "4.0.0-beta.59"
-  }
+  "dependencies": { "effect": "4.0.0-beta.59" }
 }

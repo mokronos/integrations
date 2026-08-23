@@ -68,6 +68,10 @@ describe("published CLI package", () => {
       path.join(repoRoot, "packages", "integrations-executor"),
       tarballs
     )
+    const protocol = await pack(
+      path.join(repoRoot, "packages", "integrations-protocol"),
+      tarballs
+    )
     const client = await pack(path.join(repoRoot, "apps", "integrations", "ts"), tarballs)
     const observability = await pack(path.join(repoRoot, "packages", "observability"), tarballs)
     const gateway = await pack(path.join(repoRoot, "apps", "integrations", "gateway"), tarballs)
@@ -77,7 +81,8 @@ describe("published CLI package", () => {
       "@mokronos/integrations": `file:${gateway}`,
       "@mokronos/integrations-client": `file:${client}`,
       "@mokronos/integrations-executor": `file:${executor}`,
-      "@mokronos/integrations-observability": `file:${observability}`
+      "@mokronos/integrations-observability": `file:${observability}`,
+      "@mokronos/integrations-protocol": `file:${protocol}`
     }
     await Bun.write(path.join(project, "package.json"), `${encodeSmokeManifest({
       name: "integrations-package-smoke",

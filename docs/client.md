@@ -71,6 +71,7 @@ leaking an unvalidated JSON value into the caller.
 | `tools({ schemas? })` | `ReadonlyArray<GrantedTool>` | The tools this key can reach. Grant-scoped, so an ungranted tool is absent rather than present-and-failing. Schemas are opt-in because they cost a catalog read per grant |
 | `execute({ alias, tool, arguments? })` | `InvocationOutcome` | Invoke a granted tool through its alias |
 | `approval(id)` | `ApprovalRecord` | Read one approval record proposed by this client |
+| `metadata()` | `GatewayMetadata` | Read the compatible gateway and protocol versions |
 | `health()` | `boolean` | `true` if the gateway answers |
 | `url` | `string` | The normalized base URL |
 
@@ -78,6 +79,12 @@ The input contracts (`RegistrySearchInput`, `DiscoverIntegrationInput`,
 `CreateConnectionInput`, and the other method inputs) are exported schemas as
 well. Use `typeof SchemaName.Type` only when you need to derive another type;
 the package already exports the corresponding type names for ordinary callers.
+
+Before its first credentialed request, each client reads `/v1/metadata` and
+compares `protocolVersion` with `gatewayProtocolVersion`. The result is cached
+for that client instance. An old, malformed, or incompatible gateway throws
+`GatewayProtocolError` with the expected and received versions before the API
+key is sent.
 
 API keys carry explicit client capabilities. A normal client gets
 `provision_connections`, which covers catalog discovery, schema inspection,

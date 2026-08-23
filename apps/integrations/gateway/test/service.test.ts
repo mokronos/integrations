@@ -13,6 +13,8 @@ import {
   serveGateway
 } from "../src/index.ts"
 import type { RunningGateway } from "../src/index.ts"
+import { GatewayMetadata } from "@mokronos/integrations-protocol/version"
+import { Schema } from "effect"
 
 const directories: Array<string> = []
 const running: Array<RunningGateway> = []
@@ -40,6 +42,10 @@ describe("gateway service", () => {
     expect(gateway.url).toStartWith("http://127.0.0.1:")
     const response = await fetch(`${gateway.url}/v1/health`)
     expect(response.status).toBe(200)
+    const metadataResponse = await fetch(`${gateway.url}/v1/metadata`)
+    const metadata = Schema.decodeUnknownSync(GatewayMetadata)(await metadataResponse.json())
+    expect(metadata.gatewayVersion).toBe("0.2.0")
+    expect(metadataResponse.headers.get("cache-control")).toBe("no-store")
   })
 
   test("bootstraps a local operator client and records its key", async () => {

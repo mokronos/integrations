@@ -13,6 +13,11 @@
       "@mokronos/integrations": ["../gateway/src/index.ts"],
       "@mokronos/integrations/domain": ["../gateway/src/domain.ts"],
       "@mokronos/integrations-observability": ["../../../packages/observability/src/index.ts"],
+      "@mokronos/integrations-protocol": ["../../../packages/integrations-protocol/src/index.ts"],
+      "@mokronos/integrations-protocol/schemas": ["../../../packages/integrations-protocol/src/schemas.ts"],
+      "@mokronos/integrations-protocol/integration-model": ["../../../packages/integrations-protocol/src/integration-model.ts"],
+      "@mokronos/integrations-protocol/registry": ["../../../packages/integrations-protocol/src/registry.ts"],
+      "@mokronos/integrations-protocol/version": ["../../../packages/integrations-protocol/src/version.ts"],
       "@mokronos/integrations-client": ["../ts/src/index.ts"],
       "@mokronos/integrations-executor": ["../../../packages/integrations-executor/src/index.ts"],
       "@mokronos/integrations-executor/schemas": ["../../../packages/integrations-executor/src/schemas.ts"]

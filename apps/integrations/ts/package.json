@@ -34,7 +34,7 @@
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
-    "@mokronos/integrations-executor": "workspace:*",
+    "@mokronos/integrations-protocol": "workspace:*",
     "effect": "4.0.0-beta.59"
   }
 }

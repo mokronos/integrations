@@ -4,6 +4,7 @@ import { Predicate, Schema } from "effect"
 import {
   createGatewayClient,
   integrationsHome,
+  readGatewayMetadata,
   readGatewayConfig,
   resolveClientConnection
 } from "@mokronos/integrations-client"
@@ -93,6 +94,7 @@ export const loginOperator = async (input: {
   readonly password: string
 }): Promise<OperatorSession> => {
   const url = await resolveGatewayUrl()
+  await readGatewayMetadata(url)
   const response = await fetch(`${url}/v1/auth/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -117,6 +119,7 @@ export const signupOperator = async (input: {
   readonly tenantName?: string
 }): Promise<OperatorSession> => {
   const url = await resolveGatewayUrl()
+  await readGatewayMetadata(url)
   const response = await fetch(`${url}/v1/auth/signup`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -153,6 +156,7 @@ export const connectToControlPlane = async (): Promise<ControlPlaneClient> => {
         "No operator credential found. Sign in with `ii login <email>`, or configure an administrative API key."
       )
     }
+    await readGatewayMetadata(connection.url)
     return {
       url: connection.url,
       request: async (method, route, body) => {
@@ -178,6 +182,7 @@ export const connectToControlPlane = async (): Promise<ControlPlaneClient> => {
       `The saved session belongs to ${session.url}, but the selected gateway is ${selectedUrl}. Run \`ii login\` again.`
     )
   }
+  await readGatewayMetadata(session.url)
   return {
     url: session.url,
     request: async (method, route, body) => {

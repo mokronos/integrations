@@ -53,6 +53,7 @@
   "dependencies": {
     "@libsql/client": "0.17.3",
     "@mokronos/integrations-observability": "workspace:*",
+    "@mokronos/integrations-protocol": "workspace:*",
     "@mokronos/integrations-executor": "workspace:*",
     "effect": "4.0.0-beta.59",
     "@mokronos/integrations-client": "workspace:*"

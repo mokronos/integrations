@@ -12,9 +12,10 @@
   },
   "scripts": {
     "build:observability": "bun run --cwd packages/observability build",
+    "build:protocol": "bun run --cwd packages/integrations-protocol build",
     "build:executor": "bun run --cwd packages/integrations-executor build",
     "build:client": "bun run --cwd apps/integrations/ts build",
-    "build:gateway": "bun run build:observability && bun run build:executor && bun run build:client && bun run --cwd apps/integrations/gateway build",
+    "build:gateway": "bun run build:observability && bun run build:protocol && bun run build:executor && bun run build:client && bun run --cwd apps/integrations/gateway build",
     "build": "bun run build:gateway",
     "dev:control-plane": "bun run --cwd apps/integrations/web dev",
     "build:control-plane": "bun run --cwd apps/integrations/web build",

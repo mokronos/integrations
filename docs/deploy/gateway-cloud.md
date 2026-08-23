@@ -95,12 +95,21 @@ with `Restart=always` is the better shape.
   sessions expire — all on the internal minute loop. No cron needed while the
   process runs.
 
-## Porting to serverless later
+## Cloudflare staging
 
-The codebase deliberately keeps this cheap: HTTP handling is Request→Response,
-storage is SQL over libsql (Turso accepts the same client remotely), static UI
-is separate, and clock-driven work is isolated in `maintenance.ts`. A
-Cloudflare Workers port would map D1 or Turso to storage, Cron Triggers to the
-maintenance loop, Workers Static Assets to the dashboard, and `nodejs_compat`
-to the crypto usage — a port of boundaries, not a rewrite of behaviour. Do it
-when economics demand it, not before.
+The Worker deployment uses D1, Workers Static Assets, and a Cron Trigger. Its
+isolated staging environment is configured in
+`apps/integrations/worker/wrangler.jsonc`:
+
+```bash
+cd apps/integrations/worker
+bun run deploy:staging
+INTEGRATIONS_STAGING_URL=https://integrations-gateway-staging.games-97f.workers.dev \
+  bun run --cwd ../cli test:hosted
+```
+
+The hosted acceptance signs up an ephemeral tenant over real TLS, verifies
+session and delegated-key boundaries, starts OAuth dynamic registration against
+Linear's real remote MCP provider, and then removes the tenant. It deliberately
+does not authorize a Linear account; completing that consent screen is a human
+acceptance step.

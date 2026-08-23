@@ -36,6 +36,7 @@
         "@mokronos/integrations-client": "workspace:*",
         "@mokronos/integrations-executor": "workspace:*",
         "@mokronos/integrations-observability": "workspace:*",
+        "@mokronos/integrations-protocol": "workspace:*",
         "effect": "4.0.0-beta.59",
       },
     },
@@ -43,7 +44,7 @@
       "name": "@mokronos/integrations-client",
       "version": "0.2.0",
       "dependencies": {
-        "@mokronos/integrations-executor": "workspace:*",
+        "@mokronos/integrations-protocol": "workspace:*",
         "effect": "4.0.0-beta.59",
       },
     },
@@ -107,7 +108,15 @@
         "@executor-js/plugin-openapi": "1.5.37",
         "@executor-js/sdk": "1.5.37",
         "@libsql/client": "0.17.3",
+        "@mokronos/integrations-protocol": "workspace:*",
         "drizzle-orm": "0.45.2",
+        "effect": "4.0.0-beta.59",
+      },
+    },
+    "packages/integrations-protocol": {
+      "name": "@mokronos/integrations-protocol",
+      "version": "0.2.0",
+      "dependencies": {
         "effect": "4.0.0-beta.59",
       },
     },
@@ -401,6 +410,8 @@
     "@mokronos/integrations-executor": ["@mokronos/integrations-executor@workspace:packages/integrations-executor"],
 
     "@mokronos/integrations-observability": ["@mokronos/integrations-observability@workspace:packages/observability"],
+
+    "@mokronos/integrations-protocol": ["@mokronos/integrations-protocol@workspace:packages/integrations-protocol"],
 
     "@mokronos/integrations-worker": ["@mokronos/integrations-worker@workspace:apps/integrations/worker"],
 

@@ -9,6 +9,7 @@
     "typecheck": "tsc -p tsconfig.json",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "deploy:staging": "bun run --cwd ../web build && wrangler deploy --env staging",
     "tail": "wrangler tail"
   },
   "dependencies": {

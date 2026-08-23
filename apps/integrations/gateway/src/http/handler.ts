@@ -10,6 +10,8 @@ import type { GatewayStore } from "../store.ts"
 import { matchRoute, pathExists, RequestBodyError } from "./router.ts"
 import type { JsonEncodable, RouteIdentity } from "./router.ts"
 import type { Route } from "./router.ts"
+import { gatewayProtocolVersion } from "@mokronos/integrations-protocol/version"
+import { gatewayVersion } from "../version.ts"
 
 const sessionCookieName = "wf_session"
 
@@ -224,6 +226,13 @@ export const createGatewayHandler = (
     if (url.pathname === "/v1/health") {
       return json(200, { ok: true })
     }
+    if (url.pathname === "/v1/metadata") {
+      return json(
+        200,
+        { ok: true, protocolVersion: gatewayProtocolVersion, gatewayVersion },
+        { "cache-control": "no-store" }
+      )
+    }
 
     if (dependencies.addressRateLimiter !== undefined) {
       // Before authentication, so guessing credentials costs a bucket slot per
@@ -344,7 +353,7 @@ export const createGatewayHandler = (
   const telemetry = dependencies.telemetry
   // Health checks are liveness noise; tracing them only fills the backend.
   return (request, context) =>
-    new URL(request.url).pathname === "/v1/health"
+    ["/v1/health", "/v1/metadata"].includes(new URL(request.url).pathname)
       ? handle(request, context)
       : telemetry.run(request, () => handle(request, context))
 }

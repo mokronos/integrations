@@ -43,5 +43,21 @@
     "INTEGRATIONS_PUBLIC_URL": "https://integrations-gateway.games-97f.workers.dev",
     // Open registration: each signup mints its own isolated tenant partition.
     "INTEGRATIONS_ALLOW_SIGNUP": "1"
+  },
+  "env": {
+    "staging": {
+      "name": "integrations-gateway-staging",
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "integrations-gateway-staging",
+          "database_id": "89a63ead-5bfc-4120-9211-96e58fc2fb42"
+        }
+      ],
+      "vars": {
+        "INTEGRATIONS_PUBLIC_URL": "https://integrations-gateway-staging.games-97f.workers.dev",
+        "INTEGRATIONS_ALLOW_SIGNUP": "1"
+      }
+    }
   }
 }
