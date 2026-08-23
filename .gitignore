@@ -29,11 +29,10 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .eslintcache
 .cache
 *.tsbuildinfo
-.wf/*.sqlite
-.wf/*.sqlite-*
-.wf/*.sqlite.tmp
-.wf/*.key
-examples/*/.wf/
+.integrations/*.sqlite
+.integrations/*.sqlite-*
+.integrations/*.sqlite.tmp
+.integrations/*.key
 .tmp/
 
 # reference repos (pulled via `scripts/pull-references.ts`)

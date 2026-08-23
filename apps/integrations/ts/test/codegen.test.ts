@@ -1,9 +1,4 @@
-import { Schema } from "effect"
 import { describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import path from "node:path"
-import { pathToFileURL } from "node:url"
 import {
   bindingName,
   generateEffectModule,
@@ -123,44 +118,5 @@ describe("ts target", () => {
       "http://gateway"
     )
     expect(module_).toContain('"open" | "closed"')
-  })
-})
-
-describe("generated effect modules are real modules", () => {
-  test("a generated module type-checks and produces a usable step", async () => {
-    const module_ = generateEffectModule([ticketTool], "http://gateway")
-    const directory = await mkdtemp(path.join(tmpdir(), "wf-codegen-"))
-    const file = path.join(directory, "generated.ts")
-    // Written outside the workspace, so the bare specifier is repointed at the
-    // real source. What is under test is the emitted code, not where a user
-    // happens to put it.
-    const wfkit = pathToFileURL(
-      path.resolve(import.meta.dir, "../../../../packages/wf/src/index.ts")
-    ).href
-    await Bun.write(file, module_.replace('"@mokronos/wfkit"', JSON.stringify(wfkit)))
-    try {
-      // The point of the effect target is removing hand-transcription, so the
-      // output has to actually load and behave like a hand-written step.
-      // An ES module namespace from a dynamic import holds arbitrary exports; this is
-      // what TypeScript itself infers for `await import()`.
-      // oxlint-disable-next-line anti-slop/no-unsafe-dictionary-type
-      const loaded: Record<string, unknown> = await import(pathToFileURL(file).href)
-      const step = Schema.decodeUnknownSync(Schema.Struct({
-        kind: Schema.String,
-        source: Schema.Struct({
-          kind: Schema.String,
-          alias: Schema.String,
-          tool: Schema.String
-        })
-      }))(loaded["ticketsTicketsCreate"])
-      expect(step.kind).toBe("integration")
-      expect(step.source).toEqual({
-        kind: "gateway",
-        alias: "tickets",
-        tool: "tickets.create"
-      })
-    } finally {
-      await rm(directory, { recursive: true, force: true })
-    }
   })
 })

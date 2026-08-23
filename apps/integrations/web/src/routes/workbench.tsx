@@ -19,7 +19,7 @@ import {
 import { Switch } from "@/components/ui/switch"
 import * as gateway from "@/lib/gateway"
 import { useIntegrations, useMutation } from "@/lib/queries"
-import type { IntegrationValidationReport } from "@mokronos/wfkit-executor/integration-model"
+import type { IntegrationValidationReport } from "@mokronos/integrations-executor/integration-model"
 
 const JsonText = Schema.fromJsonString(Schema.Json)
 const decodeJsonText = Schema.decodeUnknownSync(JsonText)

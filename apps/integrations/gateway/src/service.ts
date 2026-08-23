@@ -3,7 +3,7 @@ import {
   defaultGatewayPort,
   writeGatewayConfig
 } from "./config.ts"
-import { whenPresent } from "@mokronos/wfkit/optional"
+import { whenPresent } from "./optional.ts"
 import { defaultTenantId } from "./domain.ts"
 import { resolveEncryption } from "./crypto.ts"
 import type { Gateway } from "./host.ts"
@@ -18,7 +18,7 @@ import type { OAuthSessionStore } from "./oauth-sessions.ts"
 import { createRateLimiter } from "./ratelimit.ts"
 import { generateApiKey, newClientId } from "./keys.ts"
 import { integrationsHome } from "./paths.ts"
-import type { ExecutorHostStorage } from "@mokronos/wfkit-executor"
+import type { ExecutorHostStorage } from "@mokronos/integrations-executor"
 import type { GatewayStoreInitializationError, GatewayStoreOptions } from "./store.ts"
 import type { GatewayStore } from "./store.ts"
 import { GatewayStoreService } from "./store.ts"
@@ -26,9 +26,9 @@ import { createWebAssets } from "./web-assets.ts"
 import {
   ExecutorHostService,
   ExecutorServicesService
-} from "@mokronos/wfkit-executor"
+} from "@mokronos/integrations-executor"
 import { Effect, Layer, ManagedRuntime } from "effect"
-import { createRequestTracer } from "@mokronos/observability"
+import { createRequestTracer } from "@mokronos/integrations-observability"
 
 /** The client the local machine uses. Created on first start with mayMutate so
  *  an agent authoring workflows can discover and connect, with the human needed
@@ -86,11 +86,11 @@ export interface GatewayServiceOptions {
    *  interval runs. */
   readonly externalMaintenance?: boolean
   /** OTLP/HTTP base URL for request tracing (e.g. motel's
-   *  http://127.0.0.1:27686). Defaults to WF_OTLP_ENDPOINT; unset keeps the
+   *  http://127.0.0.1:27686). Defaults to INTEGRATIONS_OTLP_ENDPOINT; unset keeps the
    *  gateway untraced with no exporter built. */
   readonly telemetryEndpoint?: string
   /** Extra export headers, e.g. hosted-endpoint auth (`authorization: Basic …`).
-   *  Merged over WF_OTLP_AUTHORIZATION. */
+   *  Merged over INTEGRATIONS_OTLP_AUTHORIZATION. */
   readonly telemetryHeaders?: Record<string, string>
 }
 
@@ -179,7 +179,7 @@ export const createGatewayService = async (
         : defaultRateLimitPerMinute) / 5)),
       windowMs: 60_000
     })
-    // Undefined unless an endpoint is configured (option or WF_OTLP_ENDPOINT);
+    // Undefined unless an endpoint is configured (option or INTEGRATIONS_OTLP_ENDPOINT);
     // the handler then skips wrapping entirely.
     const requestTracer = await createRequestTracer({
       serviceName: "integrations-gateway",

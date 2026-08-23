@@ -144,8 +144,8 @@ export {
   createExecutorServices,
   ExecutorHostService,
   ExecutorServicesService
-} from "@mokronos/wfkit-executor"
+} from "@mokronos/integrations-executor"
 export type {
   ExecutorHost,
   ExecutorServices
-} from "@mokronos/wfkit-executor"
+} from "@mokronos/integrations-executor"

@@ -1,20 +1,21 @@
 {
-  "name": "@mokronos/observability",
+  "name": "@mokronos/integrations-observability",
+  "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "OTLP tracing and logging for the wf platform — one telemetry layer, off unless WF_OTLP_ENDPOINT is set.",
+  "description": "Internal OTLP tracing and logging for the integrations gateway.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mokronos/wf.git",
+    "url": "git+https://github.com/mokronos/integrations.git",
     "directory": "packages/observability"
   },
-  "homepage": "https://github.com/mokronos/wf#readme",
+  "homepage": "https://github.com/mokronos/integrations#readme",
   "bugs": {
-    "url": "https://github.com/mokronos/wf/issues"
+    "url": "https://github.com/mokronos/integrations/issues"
   },
   "keywords": [
-    "workflow",
+    "integrations",
     "observability",
     "opentelemetry",
     "otlp",
@@ -22,10 +23,6 @@
   ],
   "engines": {
     "bun": ">=1.2"
-  },
-  "publishConfig": {
-    "access": "public",
-    "registry": "https://registry.npmjs.org"
   },
   "files": [
     "src",

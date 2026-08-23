@@ -23,7 +23,7 @@ behind it are in [ADR 0004](../adr/0004-the-gateway-is-one-product-with-two-depl
 | `INTEGRATIONS_MASTER_KEY` | Base64url of 32 bytes; seals approval/audit payloads at rest. Omitted, a `gateway.key` file is minted inside the home directory on first start. | unset |
 | `INTEGRATIONS_RATE_LIMIT` | Per-principal requests per minute; per-address limit is a fifth of this, floored at 20. | `600` |
 | `INTEGRATIONS_MAX_BODY_BYTES` | Largest accepted JSON body. | `1048576` (1 MiB) |
-| `INTEGRATIONS_HOME` / `WF_HOME` | Data directory. | `~/.wf` |
+| `INTEGRATIONS_HOME` | Data directory. | `~/.integrations` |
 
 Session cookies gain their `Secure` flag automatically when the socket is bound
 off loopback — no variable for that, because it follows from how you serve.

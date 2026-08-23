@@ -13,18 +13,18 @@ import {
 import {
   IntegrationDiscovery,
   IntegrationValidationReport
-} from "@mokronos/wfkit-executor/integration-model"
+} from "@mokronos/integrations-executor/integration-model"
 import {
   IntegrationSearchKind,
   IntegrationSearchResponse
-} from "@mokronos/wfkit-executor/registry"
+} from "@mokronos/integrations-executor/registry"
 import {
   ExecutorAuthMethod,
   ExecutorConnection,
   ExecutorTool,
   ExecutorToolSummary,
   IntegrationOverview
-} from "@mokronos/wfkit-executor/schemas"
+} from "@mokronos/integrations-executor/schemas"
 
 /** What the gateway's responses decode to.
  *

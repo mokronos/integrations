@@ -3,8 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { Schema } from "effect"
-import { whenPresent } from "@mokronos/wfkit"
-import type { ExecutorServices } from "@mokronos/wfkit-executor"
+import { whenPresent } from "../src/optional.ts"
+import type { ExecutorServices } from "@mokronos/integrations-executor"
 import {
   Alias,
   ConnectionName,

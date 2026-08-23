@@ -6,7 +6,7 @@ import {
   createDrizzleRuntimeSchemaSqlFromTables
 } from "@executor-js/fumadb/adapters/drizzle"
 import { createExecutorFumaDb } from "@executor-js/sdk/host-internal"
-import type { ExecutorHostStorage } from "@mokronos/wfkit-executor"
+import type { ExecutorHostStorage } from "@mokronos/integrations-executor"
 import { Effect, Schema } from "effect"
 import { drizzle } from "drizzle-orm/d1"
 import { sql } from "drizzle-orm"
@@ -23,7 +23,7 @@ import type { D1DatabaseLike } from "./cloudflare.ts"
 
 const executorNamespace = "wf_executor"
 // Identical to the file provider's AAD: same format, different storage.
-const credentialAdditionalData = Buffer.from("@mokronos/wfkit/executor-credentials/v1")
+const credentialAdditionalData = Buffer.from("@mokronos/integrations/executor-credentials/v1")
 
 /** Derives the 32-byte credential key from the gateway master key. There is
  *  no keyfile to mint on Workers, and a second secret to provision would be

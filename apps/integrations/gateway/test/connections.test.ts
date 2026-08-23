@@ -12,7 +12,7 @@ import {
   listExecutorIntegrations,
   listExecutorTools,
   setExecutorStorageDirectory
-} from "@mokronos/wfkit-executor"
+} from "@mokronos/integrations-executor"
 import { authorizeExecutorInBrowser } from "../src/oauth.ts"
 
 const servers: Array<ReturnType<typeof Bun.serve>> = []

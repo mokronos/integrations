@@ -1,4 +1,4 @@
-import { whenPresent } from "@mokronos/wfkit/optional"
+import { whenPresent } from "./optional.ts"
 import { Schema } from "effect"
 import {
   completeExecutorOAuth,
@@ -9,7 +9,7 @@ import {
   probeExecutorOAuth,
   registerExecutorOAuthClient,
   startExecutorOAuth
-} from "@mokronos/wfkit-executor"
+} from "@mokronos/integrations-executor"
 import { oauthSetupGuidance } from "./oauth-guidance.ts"
 
 // Opening a browser is the client's job — the gateway may be running headless

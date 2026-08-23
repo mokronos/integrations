@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import type { ExecutorAuth, ExecutorConnection, ExecutorServices } from "@mokronos/wfkit-executor"
+import type { ExecutorAuth, ExecutorConnection, ExecutorServices } from "@mokronos/integrations-executor"
 import {
   createGatewayHandler,
   createOAuthSessions,

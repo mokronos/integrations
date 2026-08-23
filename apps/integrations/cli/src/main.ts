@@ -3,7 +3,7 @@ import { BunServices } from "@effect/platform-bun"
 import { Data, Effect, Layer } from "effect"
 import { Command, Flag } from "effect/unstable/cli"
 import { defaultGatewayPort } from "@mokronos/integrations-client"
-import { telemetryLayer } from "@mokronos/observability"
+import { telemetryLayer } from "@mokronos/integrations-observability"
 import { integrationsSubcommands } from "./commands.ts"
 import { openBrowser } from "./connection.ts"
 import { writeStdoutLine } from "./output.ts"
@@ -226,7 +226,7 @@ export const main = async (argv: ReadonlyArray<string>): Promise<void> => {
           : Effect.sync(() => {
             process.exitCode = 1
           })),
-      // No-op unless WF_OTLP_ENDPOINT points somewhere.
+      // No-op unless INTEGRATIONS_OTLP_ENDPOINT points somewhere.
       Effect.provide(Layer.merge(
         BunServices.layer,
         telemetryLayer({ serviceName: "integrations-cli" })

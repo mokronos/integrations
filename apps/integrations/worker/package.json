@@ -16,7 +16,7 @@
     "@executor-js/sdk": "1.5.37",
     "@libsql/client": "0.17.3",
     "@mokronos/integrations": "workspace:*",
-    "@mokronos/wfkit-executor": "workspace:*",
+    "@mokronos/integrations-executor": "workspace:*",
     "drizzle-orm": "0.45.2",
     "effect": "4.0.0-beta.59"
   },

@@ -1,9 +1,63 @@
-# Vision
+# Integrations Vision
 
-We are building an agent-first workflow platform where the agent is not the runtime, but the workflow designer. The agent should be able to discover available connectors, inspect their schemas and auth requirements, compose them into durable workflows, test those workflows against fixtures or sandbox systems, inspect failures, repair the definition, and deploy validated workflows. The result should be a repeatable workflow artifact, not an expensive LLM execution trace.
+An integration is defined by a URL that leads to some sort of API.
 
-The core design principle is: **structured orchestration, typed integrations, code for computation**. Workflow semantics such as triggers, steps, branches, loops, waits, retries, timeouts, human tasks, sub-workflows, error handling, deployment, and observability must be first-class because the runtime needs to understand them. Local data manipulation such as mapping, filtering, aggregation, formatting, deduplication, date handling, and small business rules should usually live in simple TypeScript transform steps rather than becoming dozens of specialized nodes.
+- actions
+  - name
+  - description
+  - input schema
+  - output schema
 
-The platform should expose a small but powerful workflow DSL over a durable execution engine such as `@effect/workflow`. Agents should not have to generate low-level workflow plumbing or choose from a huge catalog of UI-oriented nodes. Instead, they should work with a small set of stable primitives and a connector registry. This keeps the system easy for agents to use, easy for humans to review, and small enough to reason about while still allowing arbitrary business logic through typed TypeScript islands.
+## Auth
 
-The long-term goal is to combine the durability and reliability of code-based workflow engines with the accessibility and observability of visual automation tools. Every workflow should be testable, replayable, inspectable, and deployable through explicit tools. LLMs are used where they provide leverage: designing workflows, handling ambiguity, generating transformations, creating tests, and repairing failures. The deployed workflow itself should run deterministically wherever possible.
+- OAuth
+- bearer
+
+## Gateway
+
+- client
+  - search integrations
+  - discover integration auth and schemas
+  - trigger auth
+  - list actions
+  - execute action
+
+```text
+agent harness -> sandbox -> client -> API-key-injecting proxy -> gateway -> integration
+                                                              -> human
+```
+
+When human in the loop happens in the gateway, for example when a tool needs to
+POST to Gmail to write an email, the gateway returns an input-required or
+approval-required response. Per client, the gateway should support:
+
+- sending an approval link back to the original client
+- sending approval notifications to a phone or webhook
+- showing the approval in the gateway dashboard
+
+The model must not be able to approve its own request. A surrounding application
+may expose the approval link to its user, but the sandbox must be unable to call
+the approval endpoint. The invocation therefore needs an execution identifier
+that lets the client resume or collect the result after a decision.
+
+Applications with their own human-in-the-loop UI can handle approval-required
+responses in the proxy surrounding the sandbox. That proxy already selects the
+gateway and injects the client's API key.
+
+The gateway should let each client configure one or more approval delivery
+mechanisms. A client can handle the request outside the sandbox or return a safe
+approval link for the model to present to the user.
+
+By default, mutating requests should require approval while read requests are
+allowed. The gateway UI should allow changing that policy per tool or per
+integration for each client.
+
+Clients may include:
+
+- a CLI
+- a TypeScript library
+- a Python library
+- an MCP server exposing the same gateway capabilities
+
+These clients are peers in the architecture: each is a way to consume the same
+gateway API.

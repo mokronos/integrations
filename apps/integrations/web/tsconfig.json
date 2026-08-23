@@ -9,11 +9,15 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
+      "@mokronos/integrations": ["../gateway/src/index.ts"],
       "@mokronos/integrations/domain": ["../gateway/src/domain.ts"],
+      "@mokronos/integrations-observability": ["../../../packages/observability/src/index.ts"],
+      "@mokronos/integrations-client": ["../ts/src/index.ts"],
       "@mokronos/integrations-client/codegen": ["../ts/src/codegen.ts"],
-      "@mokronos/wfkit-executor/schemas": ["../../../packages/wfkit-executor/src/schemas.ts"],
-      "@mokronos/wfkit-executor/integration-model": ["../../../packages/wfkit-executor/src/integration-model.ts"],
-      "@mokronos/wfkit-executor/registry": ["../../../packages/wfkit-executor/src/registry.ts"]
+      "@mokronos/integrations-executor": ["../../../packages/integrations-executor/src/index.ts"],
+      "@mokronos/integrations-executor/schemas": ["../../../packages/integrations-executor/src/schemas.ts"],
+      "@mokronos/integrations-executor/integration-model": ["../../../packages/integrations-executor/src/integration-model.ts"],
+      "@mokronos/integrations-executor/registry": ["../../../packages/integrations-executor/src/registry.ts"]
     },
     "allowArbitraryExtensions": true,
     "erasableSyntaxOnly": true

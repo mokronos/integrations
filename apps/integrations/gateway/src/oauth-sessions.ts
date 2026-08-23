@@ -1,6 +1,6 @@
-import { whenPresent } from "@mokronos/wfkit/optional"
+import { whenPresent } from "./optional.ts"
 import { randomUUID } from "node:crypto"
-import type { ExecutorAuthMethod, ExecutorConnection, ExecutorServices } from "@mokronos/wfkit-executor"
+import type { ExecutorAuthMethod, ExecutorConnection, ExecutorServices } from "@mokronos/integrations-executor"
 import {
   authorizeExecutorInBrowser,
   startHostedExecutorOAuth

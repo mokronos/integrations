@@ -37,7 +37,7 @@ import {
   type ExecutorTool,
   type IntegrationOverview
 } from "@/lib/schemas"
-import type { IntegrationSearchKind, IntegrationSearchMatch } from "@mokronos/wfkit-executor/registry"
+import type { IntegrationSearchKind, IntegrationSearchMatch } from "@mokronos/integrations-executor/registry"
 import { when } from "@/lib/format"
 import { cn } from "@/lib/utils"
 

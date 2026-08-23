@@ -6,7 +6,7 @@ import path from "node:path"
 const repoRoot = path.resolve(import.meta.dir, "../../../..")
 const cliPath = path.join(repoRoot, "apps", "integrations", "cli", "src", "main.ts")
 const decoder = new TextDecoder()
-// A throwaway home, so spawning the CLI can never read the real ~/.wf.
+// A throwaway home, so spawning the CLI can never read the real ~/.integrations.
 const testHome = mkdtempSync(path.join(tmpdir(), "integrations-help-"))
 
 const runCli = (args: ReadonlyArray<string>) => {

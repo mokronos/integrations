@@ -12,8 +12,10 @@
     "paths": {
       "@mokronos/integrations": ["../gateway/src/index.ts"],
       "@mokronos/integrations/domain": ["../gateway/src/domain.ts"],
-      "@mokronos/wfkit-executor": ["../../../packages/wfkit-executor/src/index.ts"],
-      "@mokronos/wfkit/optional": ["../../../packages/wf/src/optional.ts"]
+      "@mokronos/integrations-observability": ["../../../packages/observability/src/index.ts"],
+      "@mokronos/integrations-client": ["../ts/src/index.ts"],
+      "@mokronos/integrations-executor": ["../../../packages/integrations-executor/src/index.ts"],
+      "@mokronos/integrations-executor/schemas": ["../../../packages/integrations-executor/src/schemas.ts"]
     }
   },
   "include": ["src"],

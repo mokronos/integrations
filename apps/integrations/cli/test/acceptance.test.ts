@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises"
+import { mkdtemp, readFile, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, test } from "bun:test"
@@ -8,7 +8,6 @@ import type { RunningGateway } from "@mokronos/integrations"
 
 const repoRoot = path.resolve(import.meta.dir, "../../../..")
 const integrationsCli = path.join(repoRoot, "apps", "integrations", "cli", "src", "main.ts")
-const wfCli = path.join(repoRoot, "apps", "cli", "src", "main.ts")
 
 const servers: Array<ReturnType<typeof Bun.serve>> = []
 const gateways: Array<RunningGateway> = []
@@ -42,9 +41,6 @@ const GrantCountOutput = Schema.Struct({ grants: Schema.Array(Schema.Json) })
 const FrozenOutput = Schema.Struct({ status: Schema.String, approvalId: Schema.String })
 const AuditOutput = Schema.Struct({
   records: Schema.Array(Schema.Struct({ outcome: Schema.String }))
-})
-const ClientsOutput = Schema.Struct({
-  clients: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String }))
 })
 const DirectOutcome = Schema.Struct({
   status: Schema.String,
@@ -192,7 +188,7 @@ const startVendor = () => {
 }
 
 const startGateway = async (registryUrl?: string) => {
-  const home = await mkdtemp(path.join(os.tmpdir(), "wf-acceptance-"))
+  const home = await mkdtemp(path.join(os.tmpdir(), "integrations-acceptance-"))
   directories.push(home)
   const gateway = registryUrl === undefined
     ? await serveGateway({ home, port: 0 })
@@ -206,7 +202,6 @@ const startGateway = async (registryUrl?: string) => {
     apiKey,
     environment: {
       ...process.env,
-      WF_HOME: home,
       INTEGRATIONS_HOME: home,
       INTEGRATIONS_URL: gateway.url,
       INTEGRATIONS_API_KEY: apiKey,
@@ -399,81 +394,6 @@ describe("integrations CLI acceptance", () => {
     const audit = parseOutput(AuditOutput, (await integrations(["audit"])).stdout)
     expect(audit.records.map((entry) => entry.outcome)).toContain("succeeded")
   }, 30_000)
-
-  test("a workflow authored against the catalog runs and keeps secrets out of its source", async () => {
-    const vendor = startVendor()
-    const gateway = await startGateway()
-    const integrations = (args: ReadonlyArray<string>) =>
-      run(integrationsCli, args, gateway.environment)
-
-    const discovered = parseOutput(DiscoveredOutput, (await integrations(["discover", vendor.specUrl])).stdout)
-    const slug = discovered.integration.slug
-    await integrations(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
-
-    // The workflow names an alias, so the local client needs a grant binding
-    // that alias to the connection just made. This is the deployment-time
-    // binding from ADR 0003: the definition is portable, the grant is not.
-    const clients = parseOutput(ClientsOutput, (await integrations(["clients"])).stdout)
-    const local = clients.clients.find((entry) => entry.name === "local")
-    expect(local).toBeDefined()
-    const granted = await integrations([
-      "grant",
-      local?.id ?? "",
-      "tickets",
-      "tickets.create",
-      "--integration",
-      slug
-    ])
-    expect(granted.exitCode, granted.stderr).toBe(0)
-
-    const source = `import { defineWorkflow, integration, t } from "@mokronos/wfkit"
-const Output = t.struct({ id: t.string, title: t.string })
-const createTicket = integration({
-  source: { kind: "gateway", alias: "tickets", tool: "tickets.create" },
-  input: t.struct({ body: t.struct({ title: t.string }) }),
-  output: Output
-})
-export const Acceptance = defineWorkflow({
-  name: "Acceptance",
-  input: t.struct({ title: t.string }),
-  output: Output,
-  run: function* (input, ctx) {
-    return yield* ctx.run(createTicket, { body: input })
-  }
-})`
-    const created = await run(wfCli, ["create", "acceptance", "--source", source], gateway.environment)
-    expect(created.exitCode, created.stderr).toBe(0)
-
-    const validated = await run(wfCli, ["validate", "acceptance"], gateway.environment)
-    expect(validated.exitCode, validated.stderr).toBe(0)
-    expect(validated.stdout).toContain("ready")
-
-    const ran = await run(
-      wfCli,
-      ["run", "acceptance", JSON.stringify({ title: "From a workflow" })],
-      gateway.environment
-    )
-    expect(ran.exitCode, ran.stderr).toBe(0)
-    expect(ran.stdout).toContain("T-1")
-    expect(vendor.invocations()).toBe(1)
-
-    const stored = await readFile(path.join(gateway.home, "workflows", "acceptance.ts"), "utf8")
-    expect(stored).toContain("tickets.create")
-    // The definition names an alias and a tool. Not the integration slug, not
-    // the connection that served it, not the credential behind it — so handing
-    // this file to someone else needs only a grant on their side.
-    expect(stored).not.toContain(slug)
-    expect(stored).not.toContain("acceptance-secret")
-    expect(stored).not.toContain(vendor.specUrl)
-
-    const files = (await readdir(gateway.home, { recursive: true, withFileTypes: true }))
-      .filter((entry) => entry.isFile() && entry.name !== "executor-auth.json")
-      .map((entry) => path.join(entry.parentPath, entry.name))
-    const persisted = Buffer.concat(
-      await Promise.all(files.map((file) => readFile(file)))
-    ).toString("utf8")
-    expect(persisted).not.toContain("acceptance-secret")
-  }, 40_000)
 
   test("every result is JSON a reader can parse, whole", async () => {
     const vendor = startVendor()

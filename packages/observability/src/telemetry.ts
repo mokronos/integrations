@@ -21,13 +21,13 @@ const whenPresent = <K extends string, V>(
  *  e.g. motel's `http://127.0.0.1:27686`. Unset or blank means telemetry is
  *  off: every layer and tracer below degrades to a no-op so callers never
  *  branch on whether tracing is enabled. */
-export const telemetryEndpointEnvVar = "WF_OTLP_ENDPOINT"
+export const telemetryEndpointEnvVar = "INTEGRATIONS_OTLP_ENDPOINT"
 
 /** The environment variable holding the raw value of the `authorization`
  *  header sent on every export request, e.g. Grafana Cloud's
  *  `Basic <base64(instance-id:token)>`. Ignored when {@link TelemetryOptions.headers}
  *  already carries its own `authorization`. */
-export const telemetryAuthorizationEnvVar = "WF_OTLP_AUTHORIZATION"
+export const telemetryAuthorizationEnvVar = "INTEGRATIONS_OTLP_AUTHORIZATION"
 
 export interface TelemetryOptions {
   /** `service.name` reported with every span and log record. */

@@ -20,10 +20,5 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun test
-        env:
-          X_ENGAGEMENT_REAL_X: "0"
-      - run: bun run example:order-saga
-      - run: bun run example:approval
       - run: bun run build
-      - run: bun run build:marketing
-      - run: bun run build:cli
+      - run: bun run build:control-plane

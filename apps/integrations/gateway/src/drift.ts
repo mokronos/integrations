@@ -1,4 +1,4 @@
-import type { ExecutorServices } from "@mokronos/wfkit-executor"
+import type { ExecutorServices } from "@mokronos/integrations-executor"
 import { ConnectionName, IntegrationSlug, TenantId, ToolName } from "./domain.ts"
 import type { DriftEntry, ToolSnapshot } from "./domain.ts"
 import type { GatewayStore } from "./store.ts"

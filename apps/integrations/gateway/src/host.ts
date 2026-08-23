@@ -1,8 +1,8 @@
 import {
   createExecutorHost,
   createExecutorServices
-} from "@mokronos/wfkit-executor"
-import type { ExecutorHost, ExecutorServices } from "@mokronos/wfkit-executor"
+} from "@mokronos/integrations-executor"
+import type { ExecutorHost, ExecutorServices } from "@mokronos/integrations-executor"
 import { integrationsHome } from "./paths.ts"
 
 export interface Gateway {

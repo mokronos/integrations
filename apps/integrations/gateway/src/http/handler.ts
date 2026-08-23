@@ -1,6 +1,6 @@
 import { Schema } from "effect"
-import type { RequestTracer } from "@mokronos/observability"
-import { whenPresent } from "@mokronos/wfkit/optional"
+import type { RequestTracer } from "@mokronos/integrations-observability"
+import { whenPresent } from "../optional.ts"
 import { authenticateClient, authorizeMutation } from "../authorize.ts"
 import { hashSessionToken } from "../passwords.ts"
 import { SessionTokenHash } from "../domain.ts"

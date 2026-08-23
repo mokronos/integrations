@@ -1,4 +1,4 @@
-import type { ExecutorAuthMethod } from "@mokronos/wfkit-executor"
+import type { ExecutorAuthMethod } from "@mokronos/integrations-executor"
 
 const hostOf = (url: string | undefined): string | undefined => {
   try {

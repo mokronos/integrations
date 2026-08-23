@@ -1,5 +1,5 @@
 import type { OAuthSession, OAuthSessionStore } from "@mokronos/integrations"
-import { ExecutorConnection } from "@mokronos/wfkit-executor"
+import { ExecutorConnection } from "@mokronos/integrations-executor"
 import { Schema } from "effect"
 import type { D1DatabaseLike } from "./cloudflare.ts"
 

@@ -53,7 +53,7 @@ frozen call rather than asking again, and collects the decision once it lands.
   every schema.
 - Never put a secret on the command line: `--credential-env NAME` names the env
   var holding it.
-- Credentials live only in the gateway (`~/.wf/`). Don't copy them anywhere.
+- Credentials live only in the gateway (`~/.integrations/`). Don't copy them anywhere.
 
 ## Everything else
 

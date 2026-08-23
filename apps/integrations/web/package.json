@@ -14,7 +14,7 @@
     "@fontsource-variable/geist": "^5.2.9",
     "@mokronos/integrations": "workspace:*",
     "@mokronos/integrations-client": "workspace:*",
-    "@mokronos/wfkit-executor": "workspace:*",
+    "@mokronos/integrations-executor": "workspace:*",
     "@tailwindcss/vite": "^4.3.2",
     "@tanstack/react-query": "^5.90.2",
     "@vitejs/plugin-react": "^6.0.3",

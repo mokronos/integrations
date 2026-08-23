@@ -7,16 +7,13 @@ import { Schema } from "effect"
 /** The dashboard already owns 4787. */
 export const defaultGatewayPort = 4788
 
-/** Where the gateway keeps credentials, the catalog, and its own store.
- *
- * `WF_HOME` is still honoured because the directory has not moved on disk —
- * the gateway took ownership of resolving it, not of relocating it. */
+/** Where the gateway keeps credentials, the catalog, and its own store. */
 export const integrationsHome = (
   environment: NodeJS.ProcessEnv = process.env
 ): string => {
-  const configured = environment["INTEGRATIONS_HOME"] ?? environment["WF_HOME"]
+  const configured = environment["INTEGRATIONS_HOME"]
   return configured === undefined || configured.length === 0
-    ? path.join(homedir(), ".wf")
+    ? path.join(homedir(), ".integrations")
     : path.resolve(configured)
 }
 

@@ -6,11 +6,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mokronos/wf.git",
+    "url": "git+https://github.com/mokronos/integrations.git",
     "directory": "apps/integrations/cli"
   },
-  "homepage": "https://github.com/mokronos/wf#readme",
-  "bugs": "https://github.com/mokronos/wf/issues",
+  "homepage": "https://github.com/mokronos/integrations#readme",
+  "bugs": "https://github.com/mokronos/integrations/issues",
   "keywords": [
     "integrations",
     "gateway",
@@ -40,7 +40,7 @@
   },
   "dependencies": {
     "@mokronos/integrations-client": "workspace:*",
-    "@mokronos/observability": "workspace:*",
+    "@mokronos/integrations-observability": "workspace:*",
     "effect": "4.0.0-beta.59"
   },
   "devDependencies": {

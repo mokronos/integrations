@@ -6,11 +6,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mokronos/wf.git",
+    "url": "git+https://github.com/mokronos/integrations.git",
     "directory": "apps/integrations/ts"
   },
-  "homepage": "https://github.com/mokronos/wf#readme",
-  "bugs": "https://github.com/mokronos/wf/issues",
+  "homepage": "https://github.com/mokronos/integrations#readme",
+  "bugs": "https://github.com/mokronos/integrations/issues",
   "keywords": ["integrations", "gateway", "client", "agent"],
   "engines": { "bun": ">=1.2" },
   "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org" },

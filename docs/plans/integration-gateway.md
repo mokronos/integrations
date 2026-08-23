@@ -60,10 +60,10 @@ Grouped by product rather than by kind:
 
 | Path | Name | Contents |
 |---|---|---|
-| `apps/integrations/gateway` (new) | `@mokronos/integrations` | Gateway: domain, store, policy, approvals, audit, HTTP server. Depends on `@mokronos/wfkit-executor`. |
+| `apps/integrations/gateway` (new) | `@mokronos/integrations` | Gateway: domain, store, policy, approvals, audit, HTTP server. Depends on `@mokronos/integrations-executor`. |
 | `apps/integrations/ts` (new) | `@mokronos/integrations-client` | TS thin client + codegen. No dependency on the gateway package. |
 | `apps/integrations/cli` (new) | `@mokronos/integrations-cli` | The `integrations` binary. Depends only on the client. |
-| `packages/wfkit-executor` | unchanged | Becomes internal to the gateway. Nothing else imports it. |
+| `packages/integrations-executor` | unchanged | Becomes internal to the gateway. Nothing else imports it. |
 | `packages/wf` | `@mokronos/wfkit` | Integration node speaks to the gateway via the client. |
 | `apps/cli` | `@mokronos/wf` | Depends on `@mokronos/integrations-cli` so both binaries install together. |
 
@@ -105,15 +105,15 @@ Each phase is independently shippable and leaves the repo green.
 
 ### Phase 0 — Scaffold, no behaviour change
 
-Create `apps/integrations/gateway` depending on `@mokronos/wfkit-executor`, and
+Create `apps/integrations/gateway` depending on `@mokronos/integrations-executor`, and
 give it ownership of storage-directory resolution and host composition.
 `apps/cli` imports the new package instead of `wfkit-executor` directly.
 
 - New: `apps/integrations/gateway/src/{index,paths,host}.ts`
 - Changed: root `workspaces` gains `apps/*/*`; root tsconfig `paths` gains the
   new package; `apps/cli/src/main.ts` imports
-- Storage dir: the gateway owns resolution and reads `INTEGRATIONS_HOME` first,
-  falling back to `WF_HOME` and then `~/.wf`, so nothing moves on disk
+- Storage dir: the gateway owns resolution and reads `INTEGRATIONS_HOME`, then
+  defaults to `~/.integrations`
 
 `default-host.ts` stays where it is — `auth`, `catalog`, `tools`,
 `connections`, and `invoker` all import `runExecutor` from it, so moving it is

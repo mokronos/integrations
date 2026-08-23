@@ -2,8 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { ExecutorToolAddress } from "@mokronos/wfkit-executor"
-import type { ExecutorTool } from "@mokronos/wfkit-executor"
+import { ExecutorToolAddress } from "@mokronos/integrations-executor"
+import type { ExecutorTool } from "@mokronos/integrations-executor"
 import {
   Alias,
   ConnectionName,
