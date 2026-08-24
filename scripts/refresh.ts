@@ -13,7 +13,7 @@ import {
   installLocal,
   operatorProgram,
   parseInstallOptions
-} from "../apps/integrations/cli/install-local.ts"
+} from "../apps/cli/install-local.ts"
 import {
   installService,
   serviceIsRegistered,
@@ -21,7 +21,7 @@ import {
   startDetachedGateway,
   stopGateway,
   stopService
-} from "../apps/integrations/cli/src/service.ts"
+} from "../apps/cli/src/service.ts"
 
 const refresh = async (): Promise<void> => {
   await installLocal(await parseInstallOptions([]))

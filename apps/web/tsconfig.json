@@ -1,0 +1,27 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "composite": false,
+    "incremental": false,
+    "declaration": false,
+    "declarationMap": false,
+    "types": ["vite/client", "node", "bun"],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@mokronos/observability": ["../../packages/observability/src/index.ts"],
+      "@mokronos/contracts": ["../../packages/contracts/src/index.ts"],
+      "@mokronos/integration-host": ["../../packages/integration-host/src/index.ts"],
+      "@mokronos/integrations": ["../../apps/gateway/src/index.ts"],
+      "@mokronos/integrations/domain": ["../../apps/gateway/src/domain.ts"],
+      "@mokronos/integrations-client": ["../../apps/ts/src/index.ts"],
+      "@mokronos/integrations-client/codegen": ["../../apps/ts/src/codegen.ts"]
+    },
+    "allowArbitraryExtensions": true,
+    "erasableSyntaxOnly": true
+  },
+  "include": ["src", "vite.config.ts"],
+  // The root config excludes this directory so its `@/*` alias cannot collide
+  // with the workflow dashboard's. Reset it here — this project *is* it.
+  "exclude": ["dist", "node_modules"]
+}

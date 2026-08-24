@@ -1,0 +1,25 @@
+{
+  "name": "@mokronos/integrations-worker",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "description": "The integrations gateway deployed as a Cloudflare Worker: D1 storage, cron-driven maintenance, static dashboard assets.",
+  "license": "MIT",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:staging": "bun run --cwd ../web build && wrangler deploy --env staging",
+    "tail": "wrangler tail"
+  },
+  "dependencies": {
+    "@libsql/client": "0.17.3",
+    "@mokronos/integration-host": "workspace:*",
+    "@mokronos/integrations": "workspace:*",
+    "effect": "4.0.0-beta.59"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260822.1",
+    "wrangler": "4.125.0"
+  }
+}

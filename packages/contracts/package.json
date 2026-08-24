@@ -1,23 +1,20 @@
 {
-  "name": "@mokronos/observability",
-  "version": "0.1.0",
+  "name": "@mokronos/contracts",
+  "version": "0.2.0",
   "type": "module",
-  "description": "Shared OTLP tracing and logging for the integrations gateway and CLIs.",
+  "description": "The shared vocabulary and wire contracts every component agrees on.",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/mokronos/integrations.git",
-    "directory": "packages/observability"
+    "directory": "packages/contracts"
   },
   "homepage": "https://github.com/mokronos/integrations#readme",
-  "bugs": {
-    "url": "https://github.com/mokronos/integrations/issues"
-  },
+  "bugs": "https://github.com/mokronos/integrations/issues",
   "keywords": [
     "integrations",
-    "observability",
-    "opentelemetry",
-    "otlp",
+    "contracts",
+    "schema",
     "effect"
   ],
   "engines": {
@@ -41,7 +38,8 @@
     }
   },
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json"
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "prepublishOnly": "bun run build"
   },
   "dependencies": {
     "effect": "4.0.0-beta.59"

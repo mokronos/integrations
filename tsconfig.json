@@ -15,20 +15,13 @@
     "moduleResolution": "bundler",
     "baseUrl": ".",
     "paths": {
-      "@mokronos/integrations-observability": ["packages/observability/src/index.ts"],
-      "@mokronos/integrations-protocol": ["packages/integrations-protocol/src/index.ts"],
-      "@mokronos/integrations-protocol/schemas": ["packages/integrations-protocol/src/schemas.ts"],
-      "@mokronos/integrations-protocol/integration-model": ["packages/integrations-protocol/src/integration-model.ts"],
-      "@mokronos/integrations-protocol/registry": ["packages/integrations-protocol/src/registry.ts"],
-      "@mokronos/integrations-protocol/version": ["packages/integrations-protocol/src/version.ts"],
-      "@mokronos/integrations-executor": ["packages/integrations-executor/src/index.ts"],
-      "@mokronos/integrations-executor/schemas": ["packages/integrations-executor/src/schemas.ts"],
-      "@mokronos/integrations-executor/integration-model": ["packages/integrations-executor/src/integration-model.ts"],
-      "@mokronos/integrations-executor/registry": ["packages/integrations-executor/src/registry.ts"],
-      "@mokronos/integrations": ["apps/integrations/gateway/src/index.ts"],
-      "@mokronos/integrations/domain": ["apps/integrations/gateway/src/domain.ts"],
-      "@mokronos/integrations-client": ["apps/integrations/ts/src/index.ts"],
-      "@mokronos/integrations-client/codegen": ["apps/integrations/ts/src/codegen.ts"]
+      "@mokronos/observability": ["packages/observability/src/index.ts"],
+      "@mokronos/contracts": ["packages/contracts/src/index.ts"],
+      "@mokronos/integration-host": ["packages/integration-host/src/index.ts"],
+      "@mokronos/integrations": ["apps/gateway/src/index.ts"],
+      "@mokronos/integrations/domain": ["apps/gateway/src/domain.ts"],
+      "@mokronos/integrations-client": ["apps/ts/src/index.ts"],
+      "@mokronos/integrations-client/codegen": ["apps/ts/src/codegen.ts"]
     },
     "allowImportingTsExtensions": true,
     "rewriteRelativeImportExtensions": true,
@@ -67,8 +60,8 @@
     "**/dist",
     "node_modules",
     "**/.tmp/**",
-    "apps/integrations/web",
-    "apps/integrations/worker",
+    "apps/web",
+    "apps/worker",
     "tools/oxlint/anti-slop"
   ]
 }

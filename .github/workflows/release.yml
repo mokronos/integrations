@@ -36,16 +36,16 @@ jobs:
           set -euo pipefail
           version="${RELEASE_TAG#v}"
           for manifest in \
-            packages/integrations-executor/package.json \
-            packages/integrations-protocol/package.json \
+            packages/integration-host/package.json \
+            packages/contracts/package.json \
             packages/observability/package.json \
-            apps/integrations/ts/package.json \
-            apps/integrations/gateway/package.json \
-            apps/integrations/cli/package.json
+            apps/ts/package.json \
+            apps/gateway/package.json \
+            apps/cli/package.json
           do
             jq -er --arg version "$version" '.version == $version' "$manifest" >/dev/null
           done
-          grep -F "gatewayVersion = \"$version\"" apps/integrations/gateway/src/version.ts >/dev/null
+          grep -F "gatewayVersion = \"$version\"" apps/gateway/src/version.ts >/dev/null
 
   publish:
     needs: verify
@@ -69,17 +69,17 @@ jobs:
       - run: bun run build
       - run: mkdir -p ${{ runner.temp }}/release
       - run: bun pm pack --ignore-scripts --destination ${{ runner.temp }}/release --filename protocol.tgz
-        working-directory: packages/integrations-protocol
+        working-directory: packages/contracts
       - run: bun pm pack --ignore-scripts --destination ${{ runner.temp }}/release --filename executor.tgz
-        working-directory: packages/integrations-executor
+        working-directory: packages/integration-host
       - run: bun pm pack --ignore-scripts --destination ${{ runner.temp }}/release --filename observability.tgz
         working-directory: packages/observability
       - run: bun pm pack --ignore-scripts --destination ${{ runner.temp }}/release --filename client.tgz
-        working-directory: apps/integrations/ts
+        working-directory: apps/ts
       - run: bun pm pack --ignore-scripts --destination ${{ runner.temp }}/release --filename gateway.tgz
-        working-directory: apps/integrations/gateway
+        working-directory: apps/gateway
       - run: bun pm pack --ignore-scripts --destination ${{ runner.temp }}/release --filename cli.tgz
-        working-directory: apps/integrations/cli
+        working-directory: apps/cli
       - run: npm publish ${{ runner.temp }}/release/protocol.tgz --provenance --access public
       - run: npm publish ${{ runner.temp }}/release/executor.tgz --provenance --access public
       - run: npm publish ${{ runner.temp }}/release/observability.tgz --provenance --access public

@@ -11,12 +11,13 @@ key and invoke logical `{ alias, tool }` addresses through the HTTP API.
 
 | Path | Purpose |
 | --- | --- |
-| `apps/integrations/gateway/` | Gateway domain, persistence, policy, HTTP API, and local service |
-| `apps/integrations/cli/` | `i` delegated client CLI and `ii` operator CLI |
-| `apps/integrations/ts/` | `@mokronos/integrations-client`, the thin TypeScript gateway client |
-| `apps/integrations/web/` | Browser control plane |
-| `apps/integrations/worker/` | Cloudflare Worker runtime |
-| `packages/integrations-executor/` | The integration host: MCP and OpenAPI catalog, connections, tools |
+| `apps/gateway/` | Gateway domain, persistence, policy, HTTP API, and local service |
+| `apps/cli/` | `i` delegated client CLI and `ii` operator CLI |
+| `apps/ts/` | `@mokronos/integrations-client`, the thin TypeScript gateway client |
+| `apps/web/` | Browser control plane |
+| `apps/worker/` | Cloudflare Worker runtime |
+| `packages/integration-host/` | The integration host: MCP and OpenAPI catalog, connections, tools |
+| `packages/contracts/` | Shared vocabulary and wire contracts |
 | `docs/` | Gateway decisions, deployment notes, and client references |
 
 `CONTEXT.md` defines the gateway's domain language. `VISION.md` records product
@@ -35,8 +36,8 @@ bun run build:control-plane
 Run the CLIs from source with:
 
 ```bash
-bun run apps/integrations/cli/src/agent.ts --help
-bun run apps/integrations/cli/src/main.ts serve
+bun run apps/cli/src/agent.ts --help
+bun run apps/cli/src/main.ts serve
 ```
 
 After changing sources, hand the machine to the working tree in one step:

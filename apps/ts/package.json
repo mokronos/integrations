@@ -1,24 +1,21 @@
 {
-  "name": "@mokronos/observability",
-  "version": "0.1.0",
+  "name": "@mokronos/integrations-client",
+  "version": "0.2.0",
   "type": "module",
-  "description": "Shared OTLP tracing and logging for the integrations gateway and CLIs.",
+  "description": "Thin client for the integration gateway. Auth, HTTP, decode \u2014 no integration logic.",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/mokronos/integrations.git",
-    "directory": "packages/observability"
+    "directory": "apps/integrations/ts"
   },
   "homepage": "https://github.com/mokronos/integrations#readme",
-  "bugs": {
-    "url": "https://github.com/mokronos/integrations/issues"
-  },
+  "bugs": "https://github.com/mokronos/integrations/issues",
   "keywords": [
     "integrations",
-    "observability",
-    "opentelemetry",
-    "otlp",
-    "effect"
+    "gateway",
+    "client",
+    "agent"
   ],
   "engines": {
     "bun": ">=1.2"
@@ -38,12 +35,20 @@
       "bun": "./src/index.ts",
       "development": "./src/index.ts",
       "default": "./dist/index.js"
+    },
+    "./codegen": {
+      "types": "./dist/codegen.d.ts",
+      "bun": "./src/codegen.ts",
+      "development": "./src/codegen.ts",
+      "default": "./dist/codegen.js"
     }
   },
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json"
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "prepublishOnly": "bun run build"
   },
   "dependencies": {
+    "@mokronos/contracts": "workspace:*",
     "effect": "4.0.0-beta.59"
   }
 }
