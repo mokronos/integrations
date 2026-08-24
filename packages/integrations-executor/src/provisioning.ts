@@ -1,39 +1,24 @@
 import { whenPresent } from "./optional.ts"
 import { Schema } from "effect"
-import {
-  addExecutorMcp,
-  addExecutorOpenApi,
-  findExecutorIntegration
-} from "./catalog.ts"
-import type { ExecutorCatalog } from "./catalog.ts"
-import { ensureExecutorConnection } from "./connections.ts"
-import type { ExecutorConnections } from "./connections.ts"
-import { createIntegrationDiscovery, inspectIntegration } from "./discovery.ts"
+import { requiresAuthentication } from "./auth-templates.ts"
+import type { createIntegrationDiscovery } from "./discovery.ts"
+import type {
+  ExecutorCatalog,
+  ExecutorConnections,
+  ExecutorTools
+} from "./executor-services.ts"
 import {
   IntegrationInspection,
   type DiscoverIntegrationsOptions,
   type IntegrationDiscovery
 } from "./integration-model.ts"
 import type { ExecutorIntegration } from "./schemas.ts"
-import { listExecutorTools } from "./tools.ts"
-import type { ExecutorTools } from "./tools.ts"
 
 export interface IntegrationProvisioningDependencies {
   readonly discovery: ReturnType<typeof createIntegrationDiscovery>
   readonly catalog: Pick<ExecutorCatalog, "addMcp" | "addOpenApi" | "find">
   readonly connections: Pick<ExecutorConnections, "ensure">
   readonly tools: Pick<ExecutorTools, "list">
-}
-
-const defaultDependencies: IntegrationProvisioningDependencies = {
-  discovery: { inspect: inspectIntegration },
-  catalog: {
-    addMcp: addExecutorMcp,
-    addOpenApi: addExecutorOpenApi,
-    find: findExecutorIntegration
-  },
-  connections: { ensure: ensureExecutorConnection },
-  tools: { list: listExecutorTools }
 }
 
 const installWith = async (
@@ -46,11 +31,13 @@ const installWith = async (
 
   if ("probe" in decoded) {
     const probe = decoded.probe
+    // The auth method is no longer passed in: installing re-probes the
+    // endpoint and derives it from how the server actually refuses, so a caller
+    // cannot record a method the server does not offer.
     await dependencies.catalog.addMcp({
       endpoint: decoded.detection.endpoint,
       name: probe.name,
-      slug: decoded.detection.slug,
-      auth: probe.requiresOAuth ? "oauth2" : probe.requiresAuthentication ? "bearer" : "none"
+      slug: decoded.detection.slug
     })
   } else {
     const preview = decoded.preview
@@ -64,7 +51,7 @@ const installWith = async (
 
   const installed = await dependencies.catalog.find(decoded.detection.slug)
   if (installed === undefined) {
-    throw new Error(`Executor did not persist integration ${decoded.detection.slug}`)
+    throw new Error(`The catalog did not persist integration ${decoded.detection.slug}`)
   }
   return installed
 }
@@ -81,9 +68,7 @@ const provisionWith = async (
   return {
     ...inspection,
     integration,
-    requiresAuthentication:
-      integration.authMethods.length > 0 &&
-      !integration.authMethods.some((method) => method.kind === "none"),
+    requiresAuthentication: requiresAuthentication(integration.authMethods),
     authMethods: integration.authMethods,
     tools: connected
       ? await dependencies.tools.list({ integration: integration.slug, connection: connectionName })
@@ -99,7 +84,3 @@ export const createIntegrationProvisioning = (
     provisionWith(url, options, dependencies)
 })
 
-const defaultProvisioning = createIntegrationProvisioning(defaultDependencies)
-
-export const installIntegration = defaultProvisioning.install
-export const provisionIntegration = defaultProvisioning.provision

@@ -319,8 +319,8 @@ i connect [flags] <integration>
 OAuth discovers authorization metadata, registers a client dynamically when
 supported, and runs authorization code + PKCE against a loopback callback.
 Never put a secret value on the command line — name the environment variable
-holding it. Credentials are AES-GCM encrypted in `~/.integrations/executor-auth.json`
-under the user-only key `~/.integrations/executor-auth.key`.
+holding it. Credentials are AES-GCM encrypted in `~/.integrations/credentials.json`
+under the user-only key `~/.integrations/credentials.key`.
 
 If an integration offers both OAuth and a key, naming a credential without
 `--template` is an error rather than a silent browser launch: opening a browser

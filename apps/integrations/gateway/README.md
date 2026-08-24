@@ -15,7 +15,7 @@ the build sequence in
 ## Storage
 
 `INTEGRATIONS_HOME`, falling back to `~/.integrations`. The directory
-holds Executor's catalog, sealed credentials, and the gateway's own store
+holds the integration catalog, sealed credentials, and the gateway's own store
 (`gateway.sqlite`).
 
 ## The control plane

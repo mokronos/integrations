@@ -1,9 +1,10 @@
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 import {
   IntegrationSearchQuery,
   IntegrationSearchResponse,
   IntegrationSearchSurface
 } from "@mokronos/integrations-protocol/registry"
+import { describeCause, InvocationError } from "./errors.ts"
 import { whenPresent } from "./optional.ts"
 
 export {
@@ -14,15 +15,22 @@ export {
   IntegrationSearchSurface
 } from "@mokronos/integrations-protocol/registry"
 
+/** Searching the public integrations.sh registry.
+ *
+ *  The one host capability that touches neither the catalog nor a credential: it
+ *  asks a public index what exists. Nothing is installed and nothing is stored,
+ *  so it needs no service of its own — there is no state to inject and no
+ *  alternative implementation to swap in beyond the registry's address. */
+
 export interface SearchIntegrationsOptions {
   readonly registryUrl?: string
 }
 
 const integrationsRegistryUrl = "https://integrations.sh"
 
-/** integrations.sh returns a registry landing page and a redundant `kinds`
- * summary of the surfaces it is about to list. Neither is actionable, so
- * neither is decoded. */
+/** integrations.sh returns a landing page and a redundant `kinds` summary of
+ *  the surfaces it is about to list. Neither is actionable, so neither is
+ *  decoded. */
 const RegistrySearchResponse = Schema.Struct({
   results: Schema.Array(Schema.Struct({
     domain: Schema.String,
@@ -46,8 +54,16 @@ const RegistrySurfaceResponse = Schema.Struct({
   surfaces: Schema.Array(RegistrySurface)
 })
 
-/** The registry spreads a surface's address over `url` and `spec`; discover
- * takes exactly one. */
+const decodeSearch = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(RegistrySearchResponse)
+)
+const decodeSurfaces = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(RegistrySurfaceResponse)
+)
+const decodeQuery = Schema.decodeUnknownEffect(IntegrationSearchQuery)
+
+/** The registry spreads a surface's address over `url` and `spec`; discovery
+ *  takes exactly one. */
 const discoveryUrlFor = (surface: RegistrySurface): string | undefined => {
   switch (surface.type) {
     case "mcp":
@@ -70,48 +86,73 @@ const toSearchSurface = (surface: RegistrySurface): IntegrationSearchSurface => 
   ...whenPresent("command", surface.command)
 })
 
-const searchSurface = async (
-  registryUrl: string,
-  domain: string
-): Promise<ReadonlyArray<IntegrationSearchSurface>> => {
-  try {
-    const url = new URL(`/api/${encodeURIComponent(domain)}/surface`, registryUrl)
-    const response = await fetch(url)
-    if (!response.ok) return []
-    const parsed = await Schema.decodeUnknownPromise(
-      Schema.fromJsonString(RegistrySurfaceResponse)
-    )(await response.text())
-    return parsed.surfaces.map(toSearchSurface)
-  } catch {
-    return []
-  }
-}
+const fetchText = (url: URL) =>
+  Effect.tryPromise({
+    try: async () => {
+      const response = await fetch(url)
+      if (!response.ok) {
+        throw new Error(`${response.status} ${response.statusText}`)
+      }
+      return await response.text()
+    },
+    catch: (cause) => new InvocationError({
+      code: "registry_error",
+      detail: describeCause(cause)
+    })
+  })
 
-/** Searches the public integrations.sh registry without touching Executor's
- * persisted catalog, connections, or credentials. */
-export const searchIntegrations = async (
+/** A domain's surfaces. A domain the registry cannot describe contributes no
+ *  surfaces rather than failing the whole search: a partial answer is still
+ *  useful, and the caller can see which entries have nothing to connect to. */
+const surfacesFor = (registryUrl: string, domain: string) =>
+  fetchText(new URL(`/api/${encodeURIComponent(domain)}/surface`, registryUrl)).pipe(
+    Effect.flatMap(decodeSurfaces),
+    Effect.map((parsed) => parsed.surfaces.map(toSearchSurface)),
+    Effect.orElseSucceed((): ReadonlyArray<IntegrationSearchSurface> => [])
+  )
+
+/** Searches the registry without touching the persisted catalog, connections,
+ *  or credentials. */
+export const search = Effect.fn("registry.search")(function* (
   query: IntegrationSearchQuery,
   options: SearchIntegrationsOptions = {}
-): Promise<IntegrationSearchResponse> => {
-  const decodedQuery = Schema.decodeUnknownSync(IntegrationSearchQuery)(query)
-  const text = decodedQuery.q.trim()
-
+) {
+  const decoded = yield* decodeQuery(query).pipe(
+    Effect.mapError((cause) => new InvocationError({
+      code: "invalid_query",
+      detail: describeCause(cause)
+    }))
+  )
+  const text = decoded.q.trim()
   const registryUrl = options.registryUrl ?? integrationsRegistryUrl
+
   const url = new URL("/api/search", registryUrl)
   url.searchParams.set("q", text)
-  if (decodedQuery.kind !== undefined) url.searchParams.set("kind", decodedQuery.kind)
-  if (decodedQuery.limit !== undefined) url.searchParams.set("limit", String(decodedQuery.limit))
+  if (decoded.kind !== undefined) url.searchParams.set("kind", decoded.kind)
+  if (decoded.limit !== undefined) url.searchParams.set("limit", String(decoded.limit))
 
-  const response = await fetch(url)
-  if (!response.ok) {
-    throw new Error(`Integration search failed: ${response.status} ${response.statusText}`)
-  }
-  const parsed = await Schema.decodeUnknownPromise(
-    Schema.fromJsonString(RegistrySearchResponse)
-  )(await response.text())
-  const results = await Promise.all(parsed.results.map(async (result) => ({
-    ...result,
-    surfaces: await searchSurface(registryUrl, result.domain)
-  })))
-  return { query: text, results }
-}
+  const body = yield* fetchText(url)
+  const parsed = yield* decodeSearch(body).pipe(
+    Effect.mapError((cause) => new InvocationError({
+      code: "registry_error",
+      detail: `The registry's response was unreadable: ${describeCause(cause)}`
+    }))
+  )
+
+  const results = yield* Effect.forEach(
+    parsed.results,
+    (result) =>
+      Effect.map(surfacesFor(registryUrl, result.domain), (surfaces) => ({
+        ...result,
+        surfaces
+      })),
+    { concurrency: 8 }
+  )
+  return { query: text, results } satisfies IntegrationSearchResponse
+})
+
+/** The Promise-facing form, for the gateway's HTTP layer. */
+export const searchIntegrations = (
+  query: IntegrationSearchQuery,
+  options: SearchIntegrationsOptions = {}
+): Promise<IntegrationSearchResponse> => Effect.runPromise(search(query, options))

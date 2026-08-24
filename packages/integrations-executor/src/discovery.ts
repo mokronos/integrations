@@ -1,25 +1,18 @@
-import {
-  detectExecutorIntegration,
-  previewExecutorOpenApi,
-  probeExecutorMcp
-} from "./catalog.ts"
-import type { ExecutorCatalog } from "./catalog.ts"
+import type { ExecutorCatalog } from "./executor-services.ts"
 import type { IntegrationInspection } from "./integration-model.ts"
 import type { ExecutorDetection } from "./schemas.ts"
+
+/** Reading an endpoint without committing to it.
+ *
+ *  Inspection installs nothing, stores no credential, and opens no connection.
+ *  It exists so a human — or an agent — can see what a URL is before deciding
+ *  whether to add it. */
 
 export interface IntegrationDiscoveryDependencies {
   readonly catalog: Pick<
     ExecutorCatalog,
     "detectIntegration" | "probeMcp" | "previewOpenApi"
   >
-}
-
-const defaultDependencies: IntegrationDiscoveryDependencies = {
-  catalog: {
-    detectIntegration: detectExecutorIntegration,
-    probeMcp: probeExecutorMcp,
-    previewOpenApi: previewExecutorOpenApi
-  }
 }
 
 const confidenceRank = (confidence: ExecutorDetection["confidence"]): number => {
@@ -30,13 +23,16 @@ const confidenceRank = (confidence: ExecutorDetection["confidence"]): number => 
   }
 }
 
-const bestDetection = (detections: ReadonlyArray<ExecutorDetection>): ExecutorDetection | undefined =>
+const bestDetection = (
+  detections: ReadonlyArray<ExecutorDetection>
+): ExecutorDetection | undefined =>
   detections
     .filter((detection) => detection.kind === "mcp" || detection.kind === "openapi")
-    .toSorted((left, right) =>
-      confidenceRank(right.confidence) - confidenceRank(left.confidence)
-    )[0]
+    .toSorted((left, right) => confidenceRank(right.confidence) - confidenceRank(left.confidence))[0]
 
+/** Detection is a ranking, not a verdict, so a URL that classifies as neither is
+ *  probed directly before giving up: an MCP handshake first, then a
+ *  specification preview. */
 const detectWithFallback = async (
   url: string,
   dependencies: IntegrationDiscoveryDependencies
@@ -65,7 +61,6 @@ const detectWithFallback = async (
   }
 }
 
-/** Detects and probes an endpoint without changing persisted Executor state. */
 const inspectWith = async (
   url: string,
   dependencies: IntegrationDiscoveryDependencies
@@ -90,7 +85,7 @@ const inspectWith = async (
       preview: await dependencies.catalog.previewOpenApi(detection.endpoint)
     }
   }
-  throw new Error(`Executor detected unsupported integration kind: ${detection.kind}`)
+  throw new Error(`Unsupported integration kind: ${detection.kind}`)
 }
 
 export const createIntegrationDiscovery = (
@@ -98,8 +93,3 @@ export const createIntegrationDiscovery = (
 ) => ({
   inspect: (url: string) => inspectWith(url, dependencies)
 })
-
-const defaultDiscovery = createIntegrationDiscovery(defaultDependencies)
-
-/** Detects and probes an endpoint without changing persisted Executor state. */
-export const inspectIntegration = defaultDiscovery.inspect

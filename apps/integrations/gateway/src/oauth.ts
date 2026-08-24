@@ -1,14 +1,9 @@
 import { whenPresent } from "./optional.ts"
 import { Schema } from "effect"
 import {
-  completeExecutorOAuth,
-  createExecutorOAuthClient,
   ExecutorAuthMethod,
   ExecutorConnection,
-  type ExecutorAuth,
-  probeExecutorOAuth,
-  registerExecutorOAuthClient,
-  startExecutorOAuth
+  type ExecutorAuth
 } from "@mokronos/integrations-executor"
 import { oauthSetupGuidance } from "./oauth-guidance.ts"
 
@@ -30,14 +25,6 @@ type ExecutorOAuthOperations = Pick<
   ExecutorAuth,
   "probe" | "registerClient" | "createClient" | "start" | "complete"
 >
-
-const defaultExecutorAuth: ExecutorOAuthOperations = {
-  probe: probeExecutorOAuth,
-  registerClient: registerExecutorOAuthClient,
-  createClient: createExecutorOAuthClient,
-  start: startExecutorOAuth,
-  complete: completeExecutorOAuth
-}
 
 export const oauthBrowserPage = (options: {
   readonly title: string
@@ -165,7 +152,7 @@ export type HostedAuthorization =
  *  not something we can do. */
 export const startHostedExecutorOAuth = async (
   input: AuthorizeExecutorOptions & { readonly publicUrl: string },
-  auth: ExecutorOAuthOperations = defaultExecutorAuth
+  auth: ExecutorOAuthOperations
 ): Promise<HostedAuthorization> => {
   const options = Schema.decodeUnknownSync(AuthorizeExecutorOptions)(input)
   const prepared = await prepareFlow(options, `${input.publicUrl}/v1/oauth/callback`, auth)
@@ -191,7 +178,7 @@ export const authorizeExecutorInBrowser = async (
     readonly open?: (url: string) => void | Promise<void>
     readonly onAuthorizationUrl?: (url: string) => void
   },
-  auth: ExecutorOAuthOperations = defaultExecutorAuth
+  auth: ExecutorOAuthOperations
 ): Promise<ExecutorConnection> => {
   const completion = Promise.withResolvers<ExecutorConnection>()
   let callbackStarted = false

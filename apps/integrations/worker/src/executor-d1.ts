@@ -1,216 +1,213 @@
-import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:crypto"
-import type { CredentialProvider, ExecutorDbFactory, ProviderItemId } from "@executor-js/sdk/core"
-import { ProviderKey, StorageError } from "@executor-js/sdk/core"
+import { createHmac } from "node:crypto"
 import {
-  createDrizzleRuntimeSchemaFromTables,
-  createDrizzleRuntimeSchemaSqlFromTables
-} from "@executor-js/fumadb/adapters/drizzle"
-import { createExecutorFumaDb } from "@executor-js/sdk/host-internal"
-import type { ExecutorHostStorage } from "@mokronos/integrations-executor"
-import { Effect, Schema } from "effect"
-import { drizzle } from "drizzle-orm/d1"
-import { sql } from "drizzle-orm"
-import type { D1DatabaseLike } from "./cloudflare.ts"
+  applySchema,
+  CredentialStore,
+  Database,
+  openValue,
+  sealValue,
+  SqlValue,
+  StorageError,
+  type ExecutorHostStorage,
+  type SqlRow,
+  type SqlStatement
+} from "@mokronos/integrations-executor"
+import { Effect, Layer, Option, Predicate, Schema } from "effect"
+import type { D1Cell, D1DatabaseLike } from "./cloudflare.ts"
 
 /**
- * Executor storage on a Cloudflare D1 binding, replacing the file-backed
- * default (a JSON credential file plus a per-directory SQLite database).
+ * The integration host's storage on Cloudflare, replacing the local pair of a
+ * SQLite file and a sealed credential file.
  *
- * Sealing is byte-for-byte the file provider's scheme — AES-256-GCM with an
- * additional-data tag, envelope `v1.<iv>.<tag>.<ciphertext>` in base64url —
- * so values sealed locally stay readable after a move to D1.
+ * The host exposes exactly two storage seams — {@link Database} for rows and
+ * {@link CredentialStore} for secrets — so this file is the whole of the
+ * Cloudflare port. Nothing above those two seams changes, and there is no ORM
+ * runtime-schema layer to reproduce: the host speaks parameterised SQL, which
+ * D1 accepts directly.
  */
 
-const executorNamespace = "wf_executor"
-// Identical to the file provider's AAD: same format, different storage.
-const credentialAdditionalData = Buffer.from("@mokronos/integrations/executor-credentials/v1")
+const decodeRows = Schema.decodeUnknownEffect(Schema.Array(Schema.Record(Schema.String, SqlValue)))
 
-/** Derives the 32-byte credential key from the gateway master key. There is
- *  no keyfile to mint on Workers, and a second secret to provision would be
- *  one more thing to lose: HMAC domain separation keeps this key distinct
- *  from every other use of INTEGRATIONS_MASTER_KEY while remaining fully
- *  determined by it. */
-export const deriveCredentialKey = (masterKey: Buffer): Buffer =>
-  createHmac("sha256", masterKey).update("executor-auth/v1").digest()
-
-const sealCredential = (key: Buffer, value: string): string => {
-  const initializationVector = randomBytes(12)
-  const cipher = createCipheriv("aes-256-gcm", key, initializationVector)
-  cipher.setAAD(credentialAdditionalData)
-  const ciphertext = Buffer.concat([cipher.update(value, "utf8"), cipher.final()])
-  return [
-    "v1",
-    initializationVector.toString("base64url"),
-    cipher.getAuthTag().toString("base64url"),
-    ciphertext.toString("base64url")
-  ].join(".")
+/** D1 returns `ArrayBuffer` for blob columns. The host stores only text,
+ *  numbers and nulls, so anything else is a column it did not write and is
+ *  rendered rather than dropped. */
+const toSqlValue = (cell: D1Cell | undefined): SqlValue => {
+  if (Predicate.isNullish(cell)) return null
+  if (Predicate.isString(cell) || Predicate.isNumber(cell)) return cell
+  return new TextDecoder().decode(new Uint8Array(cell))
 }
 
-const openCredential = (key: Buffer, sealed: string): string => {
-  const [version, encodedInitializationVector, encodedTag, encodedCiphertext, extra] =
-    sealed.split(".")
-  if (
-    version !== "v1" ||
-    encodedInitializationVector === undefined ||
-    encodedTag === undefined ||
-    encodedCiphertext === undefined ||
-    extra !== undefined
-  ) {
-    throw new Error("Unsupported Executor credential format")
-  }
-  const decipher = createDecipheriv(
-    "aes-256-gcm",
-    key,
-    Buffer.from(encodedInitializationVector, "base64url")
+const bind = (statement: SqlStatement, database: D1DatabaseLike) => {
+  const prepared = database.prepare(statement.sql)
+  const params = statement.params ?? []
+  return params.length === 0 ? prepared : prepared.bind(...params)
+}
+
+const d1Database = (database: D1DatabaseLike): Database["Service"] => {
+  const query = Effect.fn("D1Database.query")((statement: SqlStatement) =>
+    Effect.tryPromise({
+      try: async (): Promise<ReadonlyArray<Record<string, SqlValue>>> => {
+        const bound = bind(statement, database)
+        // A parameterless statement has no `all`; DDL runs through `run`.
+        const result = "all" in bound ? await bound.all() : await bound.run()
+        return (result.results ?? []).map((row) =>
+          Object.fromEntries(
+            Object.entries(row).map(([column, cell]) => [column, toSqlValue(cell)])
+          )
+        )
+      },
+      catch: (cause) => new StorageError({
+        message: `D1 statement failed: ${statement.sql.trim().split("\n")[0] ?? statement.sql}`,
+        cause
+      })
+    }).pipe(
+      Effect.flatMap((rows) =>
+        decodeRows(rows).pipe(Effect.mapError((cause) =>
+          new StorageError({
+            message: `Unexpected column shape from: ${statement.sql}`,
+            cause
+          })
+        ))
+      )
+    )
   )
-  decipher.setAAD(credentialAdditionalData)
-  decipher.setAuthTag(Buffer.from(encodedTag, "base64url"))
-  return Buffer.concat([
-    decipher.update(Buffer.from(encodedCiphertext, "base64url")),
-    decipher.final()
-  ]).toString("utf8")
+
+  /**
+   * Statements run in order but not atomically.
+   *
+   * D1 rejects a raw `BEGIN`, and its batch API is not exposed through the
+   * structural binding this Worker compiles against. The host issues a batch in
+   * exactly two places — removing an integration with its connections, and
+   * nothing else — so a partial failure leaves an orphaned row rather than a
+   * corrupt catalog, and re-running the removal cleans it up.
+   */
+  const batch = Effect.fn("D1Database.batch")((statements: ReadonlyArray<SqlStatement>) =>
+    Effect.forEach(statements, query, { discard: true })
+  )
+
+  return { query, batch }
 }
 
-const credentialTableDdl =
-  `CREATE TABLE IF NOT EXISTS executor_credential (
-     id TEXT PRIMARY KEY,
+/** Rows on a D1 binding. The schema is applied on first construction, exactly
+ *  as the local layer does. */
+export const d1DatabaseLayer = (
+  database: D1DatabaseLike
+): Layer.Layer<Database, StorageError> =>
+  Layer.effect(
+    Database,
+    Effect.suspend(() => {
+      const service = d1Database(database)
+      return Effect.as(applySchema(service), service)
+    })
+  )
+
+/**
+ * Derives the credential key from the gateway's master key.
+ *
+ * There is no keyfile to mint on Workers, and a second secret to provision
+ * would be one more thing to lose. HMAC domain separation keeps this key
+ * distinct from every other use of the master key while remaining fully
+ * determined by it.
+ */
+export const deriveCredentialKey = (masterKey: Buffer): Buffer =>
+  createHmac("sha256", masterKey).update("integrations-credentials/v1").digest()
+
+const credentialTable = `CREATE TABLE IF NOT EXISTS credential (
+     key    TEXT PRIMARY KEY NOT NULL,
      sealed TEXT NOT NULL
    )`
 
 const SealedRow = Schema.Struct({ sealed: Schema.String })
-const decodeSealedRow = Schema.decodeUnknownSync(SealedRow)
+const decodeSealed = Schema.decodeUnknownOption(SealedRow)
 
-export class D1CredentialProvider implements CredentialProvider {
-  readonly key = ProviderKey.make("wf-d1")
-  readonly writable = true
-  readonly #database: D1DatabaseLike
-  readonly #key: Buffer
-  #ready: Promise<void> | undefined
+/** Secrets on the same D1 binding, sealed with the derived key.
+ *
+ *  The envelope format is the local store's — AES-256-GCM with the same
+ *  additional data, so there is one sealing implementation rather than two — but
+ *  the *keys* differ: the local store mints a keyfile, and this one derives from
+ *  the gateway's master key. A value sealed by one deployment is therefore not
+ *  readable by the other, and moving between them means reconnecting. */
+export const d1CredentialLayer = (
+  database: D1DatabaseLike,
+  masterKey: Buffer
+): Layer.Layer<CredentialStore, StorageError> =>
+  Layer.effect(
+    CredentialStore,
+    Effect.gen(function* () {
+      const key = deriveCredentialKey(masterKey)
 
-  constructor(database: D1DatabaseLike, masterKey: Buffer) {
-    this.#database = database
-    this.#key = deriveCredentialKey(masterKey)
-  }
-
-  /** The table appears on first use rather than at construction, because the
-   *  provider object exists before the Worker has a request to spend on I/O. */
-  ensureReady(): Promise<void> {
-    const ready = this.#ready ??= this.#database
-      .prepare(credentialTableDdl)
-      .run()
-      .then(() => undefined)
-    return ready
-  }
-
-  readonly get: (id: ProviderItemId) => Effect.Effect<string | null, StorageError> = (id) =>
-    Effect.tryPromise({
-      try: async () => {
-        await this.ensureReady()
-        const row = await this.#database
-          .prepare("SELECT sealed FROM executor_credential WHERE id = ?")
-          .bind(String(id))
-          .first()
-        if (row === null) return null
-        return openCredential(this.#key, decodeSealedRow(row).sealed)
-      },
-      catch: (cause) => new StorageError({
-        message: `Failed to load Executor credential ${String(id)} from D1`,
-        cause
-      })
-    })
-
-  readonly set: (id: ProviderItemId, value: string) => Effect.Effect<void, StorageError> = (
-    id,
-    value
-  ) =>
-    Effect.try({
-      try: () => sealCredential(this.#key, value),
-      catch: (cause) => new StorageError({
-        message: `Failed to seal Executor credential ${String(id)}`,
-        cause
-      })
-    }).pipe(
-      Effect.flatMap((sealed) => Effect.tryPromise({
-        try: async () => {
-          await this.ensureReady()
-          await this.#database
-            .prepare(
-              `INSERT INTO executor_credential (id, sealed) VALUES (?, ?)
-                 ON CONFLICT (id) DO UPDATE SET sealed = excluded.sealed`
-            )
-            .bind(String(id), sealed)
-            .run()
-        },
+      // The table is created once, when the layer is built, rather than lazily
+      // per call: the layer is constructed inside a request that already has
+      // I/O to spend.
+      yield* Effect.tryPromise({
+        try: () => database.prepare(credentialTable).run(),
         catch: (cause) => new StorageError({
-          message: `Failed to store Executor credential ${String(id)} in D1`,
+          message: "Could not create the D1 credential table",
           cause
         })
-      }))
-    )
-
-  readonly delete: (id: ProviderItemId) => Effect.Effect<void, StorageError> = (id) =>
-    Effect.tryPromise({
-      try: async () => {
-        await this.ensureReady()
-        await this.#database
-          .prepare("DELETE FROM executor_credential WHERE id = ?")
-          .bind(String(id))
-          .run()
-      },
-      catch: (cause) => new StorageError({
-        message: `Failed to remove Executor credential ${String(id)} from D1`,
-        cause
       })
-    })
-}
 
-/**
- * Builds the Executor's FumaDb over D1 instead of a per-directory SQLite
- * file. Two deliberate departures from the file path, both forced by D1:
- *
- * - Schema creation runs the generated DDL statement by statement. The shared
- *   helper wraps them in `db.transaction`, and drizzle's D1 driver implements
- *   that with a raw `BEGIN`, which D1 rejects.
- * - `interactiveTransactions: false` tells the FumaDB adapter that its
- *   transaction combinator may not use `BEGIN` either: bodies run
- *   sequentially without atomicity. The executor issues transactions rarely;
- *   a single-operator control plane accepts the narrower guarantee.
- */
-export const d1ExecutorDatabase = (database: D1DatabaseLike): ExecutorDbFactory =>
-  ({ tables }) => Effect.promise(async () => {
-    const schema = createDrizzleRuntimeSchemaFromTables({
-      tables,
-      namespace: executorNamespace,
-      version: "1.0.0",
-      provider: "sqlite"
+      const failure = (action: string, name: string) => (cause: unknown): StorageError =>
+        new StorageError({ message: `Could not ${action} credential ${name} in D1`, cause })
+
+      return {
+        get: (name) =>
+          Effect.tryPromise({
+            try: () => database
+              .prepare("SELECT sealed FROM credential WHERE key = ?")
+              .bind(name)
+              .first(),
+            catch: failure("load", name)
+          }).pipe(
+            Effect.flatMap((row) =>
+              Option.match(decodeSealed(row), {
+                onNone: () => Effect.succeed(Option.none<string>()),
+                onSome: (sealed) => Effect.try({
+                  try: () => Option.some(openValue(key, sealed.sealed)),
+                  catch: failure("open", name)
+                })
+              })
+            )
+          ),
+
+        set: (name, value) =>
+          Effect.try({
+            try: () => sealValue(key, value),
+            catch: failure("seal", name)
+          }).pipe(
+            Effect.flatMap((sealed) => Effect.tryPromise({
+              try: () => database
+                .prepare(
+                  `INSERT INTO credential (key, sealed) VALUES (?, ?)
+                     ON CONFLICT (key) DO UPDATE SET sealed = excluded.sealed`
+                )
+                .bind(name, sealed)
+                .run(),
+              catch: failure("store", name)
+            })),
+            Effect.asVoid
+          ),
+
+        remove: (name) =>
+          Effect.tryPromise({
+            try: () => database
+              .prepare("DELETE FROM credential WHERE key = ?")
+              .bind(name)
+              .run(),
+            catch: failure("remove", name)
+          }).pipe(Effect.asVoid)
+      }
     })
-    const drizzleDatabase = drizzle(database, { schema })
-    for (const statement of createDrizzleRuntimeSchemaSqlFromTables({
-      tables,
-      namespace: executorNamespace,
-      version: "1.0.0",
-      provider: "sqlite"
-    })) {
-      await drizzleDatabase.run(sql.raw(statement))
-    }
-    const handle = createExecutorFumaDb(drizzleDatabase, {
-      tables,
-      namespace: executorNamespace,
-      version: "1.0.0",
-      provider: "sqlite",
-      interactiveTransactions: false
-    })
-    return {
-      db: handle.db,
-      close: async () => undefined
-    }
-  })
+  )
 
 /** The complete {@link ExecutorHostStorage} for a D1 deployment. */
 export const d1ExecutorStorage = (
   database: D1DatabaseLike,
   masterKey: Buffer
 ): ExecutorHostStorage => ({
-  providers: [new D1CredentialProvider(database, masterKey)],
-  buildDatabase: d1ExecutorDatabase(database)
+  storage: Layer.mergeAll(
+    d1DatabaseLayer(database),
+    d1CredentialLayer(database, masterKey)
+  )
 })
+
+export type { SqlRow }

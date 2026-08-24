@@ -1,12 +1,11 @@
 import { Schema } from "effect"
+import type { ExecutorTools } from "./executor-services.ts"
 import {
   IntegrationNodeConfig,
   type IntegrationNodeSource,
   type IntegrationValidationFinding,
   type IntegrationValidationReport
 } from "./integration-model.ts"
-import { listExecutorTools, listExecutorToolSummaries } from "./tools.ts"
-import type { ExecutorTools } from "./tools.ts"
 
 export interface IntegrationValidationDependencies {
   readonly tools: Pick<ExecutorTools, "list" | "summaries">
@@ -24,8 +23,8 @@ const isAddressForm = (
 
 /** The live half: does this node point at something callable right now?
  *
- * This checks the catalog only. Whether a *caller* may reach it is a different
- * question, answered by the gateway against that caller's grants. */
+ *  This checks the catalog only. Whether a *caller* may reach it is a different
+ *  question, answered by the gateway against that caller's grants. */
 const liveFindings = async (
   source: IntegrationNodeSource,
   tools: Pick<ExecutorTools, "list" | "summaries">
@@ -33,7 +32,7 @@ const liveFindings = async (
   if (isAddressForm(source)) {
     const tool = (await tools.list()).find((candidate) => candidate.address === source.address)
     return tool === undefined
-      ? [finding("error", "catalog", `Executor tool not found: ${source.address}`)]
+      ? [finding("error", "catalog", `Tool not found: ${source.address}`)]
       : [finding("info", "catalog", `${tool.name} is available`)]
   }
   const matches = (await tools.summaries({ integration: source.integration }))
@@ -55,9 +54,9 @@ const liveFindings = async (
 export const createIntegrationValidation = (
   dependencies: IntegrationValidationDependencies
 ) => async (
-    config: typeof Schema.Json.Type,
-    options: { readonly live?: boolean } = {}
-  ): Promise<IntegrationValidationReport> => {
+  config: typeof Schema.Json.Type,
+  options: { readonly live?: boolean } = {}
+): Promise<IntegrationValidationReport> => {
   let node: typeof IntegrationNodeConfig.Type
   try {
     node = await Schema.decodeUnknownPromise(IntegrationNodeConfig)(config)
@@ -72,7 +71,7 @@ export const createIntegrationValidation = (
       "info",
       "structural",
       isAddressForm(node.source)
-        ? "Executor tool address is valid"
+        ? "Tool address is valid"
         : "Integration reference is valid"
     )
   ]
@@ -84,7 +83,3 @@ export const createIntegrationValidation = (
     findings
   }
 }
-
-export const validateIntegrationNode = createIntegrationValidation({
-  tools: { list: listExecutorTools, summaries: listExecutorToolSummaries }
-})

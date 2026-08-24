@@ -2,7 +2,7 @@
   "name": "@mokronos/integrations-executor",
   "version": "0.2.0",
   "type": "module",
-  "description": "The gateway's internal Executor-backed integration host.",
+  "description": "The gateway's integration host: MCP and OpenAPI catalog, connections, and tool invocation.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -13,9 +13,10 @@
   "keywords": [
     "gateway",
     "integration",
-    "executor",
     "mcp",
-    "openapi"
+    "openapi",
+    "oauth",
+    "agent"
   ],
   "engines": {
     "bun": ">=1.2"
@@ -60,13 +61,11 @@
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
-    "@executor-js/fumadb": "1.5.7",
-    "@executor-js/plugin-mcp": "1.5.37",
-    "@executor-js/plugin-openapi": "1.5.37",
-    "@executor-js/sdk": "1.5.37",
     "@libsql/client": "0.17.3",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@mokronos/integrations-protocol": "workspace:*",
-    "drizzle-orm": "0.45.2",
-    "effect": "4.0.0-beta.59"
+    "effect": "4.0.0-beta.59",
+    "oas": "^38.3.0",
+    "oas-normalize": "^17.0.1"
   }
 }

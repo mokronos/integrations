@@ -1,11 +1,7 @@
 import { whenPresent } from "./optional.ts"
-import { listExecutorIntegrations } from "./catalog.ts"
-import type { ExecutorCatalog } from "./catalog.ts"
-import { listExecutorConnections } from "./connections.ts"
-import type { ExecutorConnections } from "./connections.ts"
+import { requiresAuthentication } from "./auth-templates.ts"
+import type { ExecutorCatalog, ExecutorConnections, ExecutorTools } from "./executor-services.ts"
 import type { ExecutorTool, IntegrationOverview } from "./schemas.ts"
-import { listExecutorTools } from "./tools.ts"
-import type { ExecutorTools } from "./tools.ts"
 
 export interface IntegrationOverviewDependencies {
   readonly catalog: Pick<ExecutorCatalog, "list">
@@ -29,9 +25,10 @@ const toolsForConnection = async (
 }
 
 /** The full picture of what is connected: every catalog integration with its
- * connections and the tools each connection exposes. Listing tools reaches the
- * live endpoint, so a failing integration reports `toolError` instead of
- * failing the whole overview. */
+ *  connections and the tools each connection exposes.
+ *
+ *  Listing tools reaches the live endpoint, so one failing integration reports
+ *  a `toolError` rather than failing the whole page. */
 export const createIntegrationOverview = (
   dependencies: IntegrationOverviewDependencies
 ) => async (): Promise<ReadonlyArray<IntegrationOverview>> => {
@@ -54,8 +51,7 @@ export const createIntegrationOverview = (
       description: integration.description,
       kind: integration.kind,
       ...whenPresent("displayUrl", integration.displayUrl),
-      requiresAuthentication: integration.authMethods.length > 0 &&
-        !integration.authMethods.some((method) => method.kind === "none"),
+      requiresAuthentication: requiresAuthentication(integration.authMethods),
       authMethods: integration.authMethods,
       connections: owned,
       tools,
@@ -64,9 +60,3 @@ export const createIntegrationOverview = (
   }))
   return overviews.toSorted((left, right) => left.name.localeCompare(right.name))
 }
-
-export const listIntegrationOverviews = createIntegrationOverview({
-  catalog: { list: listExecutorIntegrations },
-  connections: { list: listExecutorConnections },
-  tools: { list: listExecutorTools }
-})

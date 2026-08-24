@@ -88,7 +88,7 @@ with `Restart=always` is the better shape.
 - **Back up `gateway.key` together with `gateway.sqlite`.** Sealed payloads are
   authenticated with that key; a database restored without it loses those
   columns' contents (records survive, arguments and results do not).
-- **Vendor credentials live in Executor's own storage** inside the same home
+- **Vendor credentials live in the integration host's own storage** inside the same home
   directory. This gateway seals its own payloads but not those files; give the
   volume full-disk encryption (LUKS, or an encrypted block device) so a leaked
   disk image alone yields no tokens.
