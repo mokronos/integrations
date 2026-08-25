@@ -1,57 +1,57 @@
-import { whenPresent } from "@mokronos/contracts"
 import { Schema } from "effect"
 import { requiresAuthentication } from "../catalog/auth-methods.ts"
-import type { createIntegrationDiscovery } from "./discovery.ts"
 import type {
   CatalogApi,
   ConnectionsApi,
   ToolsApi
 } from "./api.ts"
 import {
-  IntegrationInspection,
+  EndpointClassification,
   type DiscoverIntegrationsOptions,
   type IntegrationDiscovery
 } from "@mokronos/contracts"
 import type { Integration } from "@mokronos/contracts"
 
+/** Turning a URL into an installed integration.
+ *
+ *  Classification says what the endpoint is; this makes it permanent: install
+ *  it in the catalog, make sure a connection exists, and list what that
+ *  connection exposes. */
+
 export interface IntegrationProvisioningDependencies {
-  readonly discovery: ReturnType<typeof createIntegrationDiscovery>
-  readonly catalog: Pick<CatalogApi, "addMcp" | "addOpenApi" | "find">
+  readonly catalog: Pick<CatalogApi, "classify" | "addMcp" | "addOpenApi" | "find">
   readonly connections: Pick<ConnectionsApi, "ensure">
   readonly tools: Pick<ToolsApi, "list">
 }
 
 const installWith = async (
-  inspection: IntegrationInspection,
+  classification: EndpointClassification,
   dependencies: IntegrationProvisioningDependencies
 ): Promise<Integration> => {
-  const decoded = Schema.decodeUnknownSync(IntegrationInspection)(inspection)
-  const existing = await dependencies.catalog.find(decoded.detection.slug)
+  const decoded = Schema.decodeUnknownSync(EndpointClassification)(classification)
+  const existing = await dependencies.catalog.find(decoded.slug)
   if (existing !== undefined) return existing
 
-  if ("probe" in decoded) {
-    const probe = decoded.probe
-    // The auth method is no longer passed in: installing re-probes the
-    // endpoint and derives it from how the server actually refuses, so a caller
-    // cannot record a method the server does not offer.
+  // The auth method is never passed in: installing re-probes the endpoint and
+  // derives it from how the server actually refuses, so a caller cannot record
+  // a method the server does not offer.
+  if (decoded.kind === "mcp") {
     await dependencies.catalog.addMcp({
-      endpoint: decoded.detection.endpoint,
-      name: probe.name,
-      slug: decoded.detection.slug
+      endpoint: decoded.endpoint,
+      name: decoded.name,
+      slug: decoded.slug
     })
   } else {
-    const preview = decoded.preview
     await dependencies.catalog.addOpenApi({
-      spec: decoded.detection.endpoint,
-      slug: decoded.detection.slug,
-      name: decoded.detection.name,
-      ...whenPresent("description", preview.description)
+      spec: decoded.endpoint,
+      slug: decoded.slug,
+      name: decoded.name
     })
   }
 
-  const installed = await dependencies.catalog.find(decoded.detection.slug)
+  const installed = await dependencies.catalog.find(decoded.slug)
   if (installed === undefined) {
-    throw new Error(`The catalog did not persist integration ${decoded.detection.slug}`)
+    throw new Error(`The catalog did not persist integration ${decoded.slug}`)
   }
   return installed
 }
@@ -61,12 +61,13 @@ const provisionWith = async (
   options: DiscoverIntegrationsOptions,
   dependencies: IntegrationProvisioningDependencies
 ): Promise<IntegrationDiscovery> => {
-  const inspection = await dependencies.discovery.inspect(url)
-  const integration = await installWith(inspection, dependencies)
+  const classification = await dependencies.catalog.classify(url)
+  const integration = await installWith(classification, dependencies)
   const connectionName = options.connection ?? "default"
   const connected = await dependencies.connections.ensure(integration, connectionName)
   return {
-    ...inspection,
+    url,
+    classification,
     integration,
     requiresAuthentication: requiresAuthentication(integration.authMethods),
     authMethods: integration.authMethods,
@@ -79,8 +80,8 @@ const provisionWith = async (
 export const createIntegrationProvisioning = (
   dependencies: IntegrationProvisioningDependencies
 ) => ({
-  install: (inspection: IntegrationInspection) => installWith(inspection, dependencies),
+  install: (classification: EndpointClassification) =>
+    installWith(classification, dependencies),
   provision: (url: string, options: DiscoverIntegrationsOptions = {}) =>
     provisionWith(url, options, dependencies)
 })
-

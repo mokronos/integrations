@@ -1,60 +1,31 @@
 import { Schema } from "effect"
 
-/** Discovery and validation contracts: what inspecting an endpoint returns, and
- *  what `integrations validate` accepts. */
-import { AuthMethod, EndpointDetection, Integration, McpProbe, OpenApiPreview } from "./integration.ts"
+/** Discovery and validation contracts: what classifying an endpoint returns,
+ *  and what `integrations validate` accepts. */
+import { AuthMethod, Integration } from "./integration.ts"
 import { Tool } from "./tool.ts"
 
 export const IntegrationKind = Schema.Literals(["mcp", "openapi"])
 export type IntegrationKind = typeof IntegrationKind.Type
 
-const McpDetection = Schema.Struct({
-  ...EndpointDetection.fields,
-  kind: Schema.Literal("mcp")
+/** What a URL turned out to be. Classification is a yes or a no: an endpoint
+ *  that is neither kind is an error, not a hedged answer. */
+export const EndpointClassification = Schema.Struct({
+  kind: IntegrationKind,
+  endpoint: Schema.String,
+  name: Schema.String,
+  slug: Schema.String
 })
+export type EndpointClassification = typeof EndpointClassification.Type
 
-const OpenApiDetection = Schema.Struct({
-  ...EndpointDetection.fields,
-  kind: Schema.Literal("openapi")
-})
-
-/** A read-only description of an endpoint. Inspection never installs catalog
- * state, creates credentials, or opens a connection. */
-export const IntegrationInspection = Schema.Union([
-  Schema.Struct({
-    url: Schema.String,
-    detection: McpDetection,
-    probe: McpProbe
-  }),
-  Schema.Struct({
-    url: Schema.String,
-    detection: OpenApiDetection,
-    preview: OpenApiPreview
-  })
-])
-export type IntegrationInspection = typeof IntegrationInspection.Type
-
-const DiscoveryFields = {
+export const IntegrationDiscovery = Schema.Struct({
+  url: Schema.String,
+  classification: EndpointClassification,
   integration: Integration,
   requiresAuthentication: Schema.Boolean,
   authMethods: Schema.Array(AuthMethod),
   tools: Schema.Array(Tool)
-}
-
-export const IntegrationDiscovery = Schema.Union([
-  Schema.Struct({
-    url: Schema.String,
-    detection: McpDetection,
-    probe: McpProbe,
-    ...DiscoveryFields
-  }),
-  Schema.Struct({
-    url: Schema.String,
-    detection: OpenApiDetection,
-    preview: OpenApiPreview,
-    ...DiscoveryFields
-  })
-])
+})
 export type IntegrationDiscovery = typeof IntegrationDiscovery.Type
 
 export interface DiscoverIntegrationsOptions {

@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { Schema } from "effect"
-import { whenPresent } from "../src/optional.ts"
+import { whenPresent } from "@mokronos/contracts"
 import type { IntegrationsApi } from "@mokronos/integration-host"
 import {
   createGatewayHandler,
@@ -11,8 +11,7 @@ import {
   createRateLimiter,
   defaultTenantId,
   generateApiKey,
-  gatewayRoutes,
-  newClientId
+    newClientId
 } from "../src/index.ts"
 import type { GatewayStore } from "../src/index.ts"
 
@@ -89,9 +88,7 @@ describe("gateway traffic shaping", () => {
       ensure: notStubbed("connections.ensure")
     },
     catalog: {
-      detectIntegration: notStubbed("catalog.detectIntegration"),
-      probeMcp: notStubbed("catalog.probeMcp"),
-      previewOpenApi: notStubbed("catalog.previewOpenApi"),
+      classify: notStubbed("catalog.classify"),
       list: notStubbed("catalog.list"),
       find: notStubbed("catalog.find"),
       addMcp: notStubbed("catalog.addMcp"),
@@ -104,7 +101,6 @@ describe("gateway traffic shaping", () => {
       start: notStubbed("auth.start"),
       complete: notStubbed("auth.complete")
     },
-    discovery: { inspect: notStubbed("discovery.inspect") },
     provisioning: {
       install: notStubbed("provisioning.install"),
       provision: notStubbed("provisioning.provision")
@@ -133,19 +129,16 @@ describe("gateway traffic shaping", () => {
     const key = generateApiKey()
     await store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
 
-    const handle = createGatewayHandler({
+    const { handle } = createGatewayHandler({
       store,
-      routes: gatewayRoutes({
-        store,
-        integrations: stubIntegrations(),
-        retentionDays: 30,
-        oauth: {
-          start: async () => { throw new Error("not used") },
-          get: async () => undefined,
-          completeByState: async () => undefined,
-          stop: () => undefined
-        }
-      }),
+      integrations: stubIntegrations(),
+      retentionDays: 30,
+      oauth: {
+        start: async () => { throw new Error("not used") },
+        get: async () => undefined,
+        completeByState: async () => undefined,
+        stop: () => undefined
+      },
       addressRateLimiter: createRateLimiter({
         limit: options.addressLimit ?? 3,
         windowMs: 60_000

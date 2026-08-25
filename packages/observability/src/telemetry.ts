@@ -1,21 +1,7 @@
 import { FetchHttpClient } from "effect/unstable/http"
 import { OtlpLogger, OtlpSerialization, OtlpTracer } from "effect/unstable/observability"
-import { Effect, Layer, ManagedRuntime, Option, Tracer } from "effect"
-
-/** The spread form of "include this field only when the value is there", kept
- *  beside the telemetry code that uses it rather than reaching into wfkit. */
-const whenPresent = <K extends string, V>(
-  key: K,
-  value: V | null | undefined
-): { readonly [P in K]?: V } =>
-  Option.match(Option.fromNullishOr(value), {
-    onNone: () => ({}),
-    onSome: (present) => {
-      const field: { [P in K]?: V } = {}
-      field[key] = present
-      return field
-    }
-  })
+import { Effect, Layer, ManagedRuntime, Tracer } from "effect"
+import { whenPresent } from "@mokronos/contracts"
 
 /** The environment variable holding the OTLP/HTTP base URL an app exports to,
  *  e.g. motel's `http://127.0.0.1:27686`. Unset or blank means telemetry is

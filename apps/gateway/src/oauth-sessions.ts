@@ -1,4 +1,4 @@
-import { whenPresent } from "./optional.ts"
+import { whenPresent } from "@mokronos/contracts"
 import { randomUUID } from "node:crypto"
 import type { IntegrationsApi } from "@mokronos/integration-host"
 import type { AuthMethod, Connection } from "@mokronos/contracts"

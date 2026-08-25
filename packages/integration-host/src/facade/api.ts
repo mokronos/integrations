@@ -4,28 +4,22 @@ import { InvalidInputError } from "../errors.ts"
 import type { HostHandle } from "./lifecycle.ts"
 import { HostHandleService } from "./lifecycle.ts"
 import { AuthTemplateSlug, OAuthClientSlug, OAuthState } from "../catalog/ids.ts"
-import { connectionAddress, ConnectionName, IntegrationSlug } from "@mokronos/contracts"
+import { connectionAddress, ConnectionName, EndpointClassification, IntegrationSlug } from "@mokronos/contracts"
 import { IntegrationHost } from "../host.ts"
 import type { ToolFilter } from "../host.ts"
-import { McpHost } from "../mcp/client.ts"
 import { OAuthFlows } from "../oauth/flows.ts"
-import { previewOf } from "../openapi/compile.ts"
 import { whenPresent } from "@mokronos/contracts"
 import {
   Connection,
-  EndpointDetection,
   Integration,
-  McpProbe,
   OAuthServerProbe,
   OAuthStart,
-  OpenApiPreview,
   OwnerTier,
   Tool,
   ToolAddress,
   ToolSummary
 } from "@mokronos/contracts"
-import { SpecCache } from "../openapi/cache.ts"
-import { createIntegrationDiscovery } from "./discovery.ts"
+import { classify } from "../classify.ts"
 import { createIntegrationOverview } from "./overview.ts"
 import { createIntegrationProvisioning } from "./provisioning.ts"
 import { createIntegrationValidation } from "./validation.ts"
@@ -66,9 +60,7 @@ const decodeOwner = (value: string): Effect.Effect<OwnerTier, InvalidInputError>
   )
 
 export interface CatalogApi {
-  readonly detectIntegration: (url: string) => Promise<ReadonlyArray<EndpointDetection>>
-  readonly probeMcp: (url: string) => Promise<McpProbe>
-  readonly previewOpenApi: (spec: string) => Promise<OpenApiPreview>
+  readonly classify: (url: string) => Promise<EndpointClassification>
   readonly addMcp: (options: {
     readonly endpoint: string
     readonly name: string
@@ -191,19 +183,7 @@ const decodeToolQuery = (
 const defaultOwner: OwnerTier = "org"
 
 const buildCatalog = (host: HostHandle): CatalogApi => ({
-  detectIntegration: (url) => host.run(Effect.gen(function* () {
-    const integrations = yield* IntegrationHost
-    return yield* integrations.detect(url)
-  })),
-  probeMcp: (url) => host.run(Effect.gen(function* () {
-    const mcp = yield* McpHost
-    return yield* mcp.probe(url)
-  })),
-  previewOpenApi: (spec) => host.run(Effect.gen(function* () {
-    const specs = yield* SpecCache
-    const compiled = yield* specs.compileUrl(spec)
-    return yield* previewOf(compiled)
-  })),
+  classify: (url) => host.run(classify(url)),
   addMcp: (options) => host.run(Effect.gen(function* () {
     const integrations = yield* IntegrationHost
     const slug = yield* decodeId(IntegrationSlug, "slug", options.slug)
@@ -434,7 +414,6 @@ export interface IntegrationsApi {
   readonly connections: ConnectionsApi
   readonly auth: AuthApi
   readonly tools: ToolsApi
-  readonly discovery: ReturnType<typeof createIntegrationDiscovery>
   readonly provisioning: ReturnType<typeof createIntegrationProvisioning>
   readonly validateIntegrationNode: ReturnType<typeof createIntegrationValidation>
   readonly listIntegrationOverviews: ReturnType<typeof createIntegrationOverview>
@@ -447,15 +426,12 @@ export const createIntegrationsApi = (host: HostHandle): IntegrationsApi => {
   const tools = buildTools(host)
   const auth = buildAuth(host)
 
-  const discovery = createIntegrationDiscovery({ catalog })
   return {
     catalog,
     connections,
     auth,
     tools,
-    discovery,
     provisioning: createIntegrationProvisioning({
-      discovery,
       catalog,
       connections,
       tools

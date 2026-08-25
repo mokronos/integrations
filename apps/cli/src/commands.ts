@@ -1,8 +1,8 @@
-import { whenPresent, whenPresentMap } from "./optional.ts"
 import { Effect, Option, Predicate, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
-import { generateModule, GrantedTool } from "@mokronos/integrations-client"
+import { generateTypeScriptModule, GrantedTool } from "@mokronos/integrations-client"
 import type { GatewayClient } from "@mokronos/integrations-client"
+import { whenPresent, whenPresentMap } from "@mokronos/contracts"
 import { cliError, connectToGateway, describeError, openBrowser } from "./connection.ts"
 import type { IntegrationsCliError } from "./connection.ts"
 import { connectToControlPlane, connectToOperatorGateway } from "./session.ts"
@@ -1068,12 +1068,6 @@ const driftCommand = Command.make(
 const operatorCodegenCommand = Command.make(
   "codegen",
   {
-    target: Flag.choice("target", ["effect", "ts"]).pipe(
-      Flag.withDefault("effect" as const),
-      Flag.withDescription(
-        "effect: Effect Schema plus integration() steps for wf. ts: typed calls over the client"
-      )
-    ),
     client: Flag.string("client").pipe(
       Flag.optional,
       Flag.withDescription("Generate the surface of another client's grants, by id")
@@ -1083,7 +1077,7 @@ const operatorCodegenCommand = Command.make(
       Flag.withDescription("Write to a file instead of stdout")
     )
   },
-  ({ target, client: clientId, out }) => {
+  ({ client: clientId, out }) => {
       // Generated from grants, so the generated surface is the authorized
       // surface. Adding a tool here means adding a grant — for whichever client
       // is being provisioned, which is usually not the one running this.
@@ -1109,11 +1103,7 @@ const operatorCodegenCommand = Command.make(
               : `Client ${forClient} holds no grants, so there is nothing to generate.`
           )
         }
-        const module_ = generateModule(
-          Schema.decodeUnknownSync(Schema.Literals(["ts", "effect"]))(target),
-          resolved.tools,
-          resolved.url
-        )
+        const module_ = generateTypeScriptModule(resolved.tools, resolved.url)
         const destination = Option.getOrUndefined(out)
         if (destination === undefined) {
           return yield* writeStdoutLine(module_)
@@ -1131,28 +1121,18 @@ const operatorCodegenCommand = Command.make(
 const clientCodegenCommand = Command.make(
   "codegen",
   {
-    target: Flag.choice("target", ["effect", "ts"]).pipe(
-      Flag.withDefault("effect" as const),
-      Flag.withDescription(
-        "effect: Effect Schema plus integration() steps for wf. ts: typed calls over the client"
-      )
-    ),
     out: Flag.string("out").pipe(
       Flag.optional,
       Flag.withDescription("Write to a file instead of stdout")
     )
   },
-  ({ target, out }) =>
+  ({ out }) =>
     gatewayTask(async (client) => {
       const tools = await client.tools({ schemas: true })
       if (tools.length === 0) {
         throw cliError("This key holds no grants, so there is nothing to generate.")
       }
-      const module_ = generateModule(
-        Schema.decodeUnknownSync(Schema.Literals(["ts", "effect"]))(target),
-        tools,
-        client.url
-      )
+      const module_ = generateTypeScriptModule(tools, client.url)
       const destination = Option.getOrUndefined(out)
       if (destination !== undefined) {
         await Bun.write(destination, module_)

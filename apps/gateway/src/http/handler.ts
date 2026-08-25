@@ -1,359 +1,198 @@
-import { Schema } from "effect"
-import type { RequestTracer } from "@mokronos/observability"
-import { whenPresent } from "../optional.ts"
-import { authenticateClient, authorizeClientCapability } from "../authorize.ts"
-import { hashSessionToken } from "../passwords.ts"
-import { SessionTokenHash } from "../domain.ts"
-import type { ClientCapability } from "../domain.ts"
+import { Cause, Context, Effect, Layer, Result } from "effect"
+import { FileSystem, Path } from "effect"
+import {
+  Etag,
+  HttpEffect,
+  HttpPlatform,
+  HttpRouter,
+  HttpServerRequest,
+  HttpServerResponse
+} from "effect/unstable/http"
+import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { HttpApiSchemaError } from "effect/unstable/httpapi/HttpApiError"
+import { GatewayApi } from "./api.ts"
+import {
+  Authority,
+  CurrentRequestContext
+} from "./authority.ts"
+import {
+  AdministrativeLayer,
+  AuthLayer,
+  DelegatedLayer,
+  FallbackLayer,
+  ProvisioningLayer,
+  SystemLayer,
+  type GatewayDependencies
+} from "./handlers.ts"
+import { whenPresent, whenPresentMap } from "@mokronos/contracts"
+import type { WebAssets } from "../web-assets.ts"
 import type { RateLimiter } from "../ratelimit.ts"
-import type { GatewayStore } from "../store.ts"
-import { matchRoute, pathExists, RequestBodyError } from "./router.ts"
-import type { JsonEncodable, RouteIdentity } from "./router.ts"
-import type { Route } from "./router.ts"
-import { gatewayProtocolVersion } from "@mokronos/contracts"
-import { gatewayVersion } from "../version.ts"
 
-const sessionCookieName = "wf_session"
-
-/** Reads one cookie out of the `Cookie` header, if present. */
-export const readSessionCookie = (request: Request): string | undefined => {
-  const header = request.headers.get("cookie")
-  if (header === null) return undefined
-  for (const part of header.split(";")) {
-    const equals = part.indexOf("=")
-    if (equals === -1) continue
-    if (part.slice(0, equals).trim() === sessionCookieName) {
-      const value = part.slice(equals + 1).trim()
-      return value.length === 0 ? undefined : value
-    }
-  }
-  return undefined
-}
-
-export const sessionCookieHeader = (token: string, options: {
-  readonly maxAgeSeconds: number
-  readonly secure: boolean
-}): string =>
-  `${sessionCookieName}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${options.maxAgeSeconds}${options.secure ? "; Secure" : ""}`
-
-export const clearedSessionCookieHeader = (options: { readonly secure: boolean }): string =>
-  `${sessionCookieName}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${options.secure ? "; Secure" : ""}`
-
-const json = (
-  status: number,
-  body: JsonEncodable,
-  headers?: Readonly<Record<string, string>>
-): Response =>
-  new Response(`${JSON.stringify(body)}\n`, {
-    status,
-    headers: { "content-type": "application/json; charset=utf-8", ...headers }
-  })
-
-const tooManyRequests = (retryAfterSeconds: number): Response =>
-  json(429, {
-    error: `Too many requests; retry in ${retryAfterSeconds} seconds`,
-    code: "rate-limited"
-  }, { "retry-after": String(retryAfterSeconds) })
-
-/** `Authorization: Bearer <key>`, or the `x-api-key` header. Nothing reads a
- *  key from the query string, where it would land in access logs. */
-const presentedSecret = (request: Request): string | undefined => {
-  const header = request.headers.get("authorization")
-  if (header !== null) {
-    const match = /^Bearer\s+(.+)$/i.exec(header.trim())
-    if (match?.[1] !== undefined) return match[1]
-  }
-  const apiKey = request.headers.get("x-api-key")
-  return apiKey === null || apiKey.length === 0 ? undefined : apiKey
-}
-
-const readBody = async (request: Request, maxBytes: number): Promise<Schema.Json> => {
-  if (request.method === "GET" || request.method === "DELETE") return {}
-  const declared = request.headers.get("content-length")
-  // Refuse before reading when the size is declared; otherwise the read below
-  // is bounded by a post-read check.
-  if (declared !== null && Number.parseInt(declared, 10) > maxBytes) {
-    throw new RequestBodyError(`Request body exceeds ${maxBytes} bytes`, 413)
-  }
-  const text = await request.text()
-  if (text.length > maxBytes) {
-    throw new RequestBodyError(`Request body exceeds ${maxBytes} bytes`, 413)
-  }
-  if (text.trim().length === 0) return {}
-  try {
-    return Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(text)
-  } catch {
-    throw new RequestBodyError("Request body is not valid JSON")
-  }
-}
-
-export const defaultMaxBodyBytes = 1024 * 1024
-
-/** Every way a credential can be refused. Naming the union instead of keying
- *  these tables by `string` makes both of them total, so a new refusal reason
- *  cannot be introduced without also giving it a status code and a sentence. */
-type RefusalStatus =
-  | "unknown-key"
-  | "key-revoked"
-  | "client-revoked"
-  | "not-permitted"
-
-const refusalStatus = {
-  "unknown-key": 401,
-  "key-revoked": 401,
-  "client-revoked": 403,
-  "not-permitted": 403
-} satisfies Record<RefusalStatus, number>
-
-const refusalMessage = {
-  "unknown-key": "This API key is not known to the gateway",
-  "key-revoked": "This API key was revoked",
-  "client-revoked": "The client this key belongs to was revoked",
-  "not-permitted": "This credential does not hold the capability required by this route"
-} satisfies Record<RefusalStatus, string>
-
-/** A refusal states both a sentence and a `code`. Clients branch on the code:
- *  matching on prose is how "not granted" ends up being explained to a user as
- *  a permissions-tier problem. */
-const refusal = (status: RefusalStatus): Response =>
-  json(refusalStatus[status], { error: refusalMessage[status], code: status })
-
-export interface HandlerDependencies {
-  readonly store: GatewayStore
-  readonly routes: ReadonlyArray<Route>
-  /** Optional traffic shaping, in two buckets with distinct key spaces: a
-   *  per-address limit before authentication protects the credential machinery
-   *  itself, and a per-principal limit after it keeps one misbehaving client
-   *  from starving its neighbours. */
-  readonly addressRateLimiter?: RateLimiter
-  readonly rateLimiter?: RateLimiter
-  readonly maxBodyBytes?: number
-  /** Per-request OTLP tracing. Absent — the default, when no telemetry
-   *  endpoint is configured — leaves the handler untouched. */
-  readonly telemetry?: RequestTracer
-}
+export type { GatewayDependencies }
 
 /** What the server knows about a request that the request itself cannot say.
- *
- * `localSecret` is the local client's key, and is set only by a server that has
- * already decided this request may borrow it — see `http/loopback.ts`. The
- * handler does not re-derive that decision, so a caller cannot reach it by
- * setting a header. `remoteAddress` feeds the pre-authentication rate bucket;
- * without it those requests share one anonymous key. */
+ *  Carried per request through the web-handler seam; the served gateway
+ *  derives it instead — see {@link deriveRequestContext}. */
 export interface GatewayRequestContext {
   readonly localSecret?: string
   readonly remoteAddress?: string
 }
 
-/** Decides who a request is, from at most one credential source.
- *
- * Precedence is by trust, not by header order: an explicitly presented key
- * always speaks for itself; the session cookie is consulted only when no key
- * was presented, since a dashboard page holds a cookie and never a key; the
- * borrowed local credential is last, and only arrives here pre-approved.
- * Anything presented but not accepted becomes a `refused` identity carrying
- * *why*, so protected routes can give the exact refusal and public routes can
- * ignore credentials entirely. */
-const resolveIdentity = async (
-  dependencies: HandlerDependencies,
-  request: Request,
-  context: GatewayRequestContext | undefined
-): Promise<RouteIdentity> => {
-  const secret = presentedSecret(request)
-  if (secret !== undefined) {
-    const authentication = await authenticateClient(dependencies.store, secret)
-    return authentication.status === "authenticated"
-      ? { kind: "client", client: authentication.client, secret }
-      : { kind: "refused", reason: authentication.status }
-  }
-
-  const token = readSessionCookie(request)
-  if (token !== undefined) {
-    const session = await dependencies.store.findLiveSession(
-      SessionTokenHash.make(hashSessionToken(token))
-    )
-    if (session !== undefined) {
-      return {
-        kind: "session",
-        tenantId: session.tenantId,
-        subjectId: session.subjectId,
-        email: session.email,
-        tokenHash: session.tokenHash
-      }
-    }
-    return { kind: "anonymous" }
-  }
-
-  if (context?.localSecret !== undefined) {
-    const authentication = await authenticateClient(dependencies.store, context.localSecret)
-    if (authentication.status === "authenticated") {
-      return { kind: "local", client: authentication.client }
-    }
-  }
-
-  return { kind: "anonymous" }
+export interface GatewayHandlerOptions extends GatewayDependencies {
+  /** Two buckets with distinct key spaces: a per-address limit before
+   *  authentication protects the credential machinery itself, and a
+   *  per-principal limit after it keeps one misbehaving client from starving
+   *  its neighbours. */
+  readonly addressRateLimiter?: RateLimiter
+  readonly rateLimiter?: RateLimiter
+  /** Largest accepted JSON body in bytes. Declared sizes are refused before a
+   *  byte is read; defaults to one mebibyte. */
+  readonly maxBodyBytes?: number
+  /** Serves the control plane's own files for unmatched non-`/v1` paths. */
+  readonly webAssets?: WebAssets
 }
 
-/** Cookie-carried credentials need the browser's own attestation that this
- *  request came from our origin; that is what stops another site from making
- *  the browser spend the session. A key in a header needs nothing here — cross-
- *  site script cannot read it out of another origin's storage to begin with. */
-const cookieRequestIsSameOrigin = (request: Request): boolean => {
-  const fetchSite = request.headers.get("sec-fetch-site")?.trim().toLowerCase()
-  if (fetchSite === "same-origin" || fetchSite === "none") return true
-  const origin = request.headers.get("origin")
-  const host = request.headers.get("host")
-  if (origin === null || host === null) return false
-  try {
-    return new URL(origin).host === host.trim().toLowerCase()
-  } catch {
-    return false
-  }
+/** Refuses oversized declared bodies before any handler or authority work.
+ *  Chunked bodies without a declared length are not bounded here — every real
+ *  client (browsers, fetch, the worker runtime) declares one. */
+const bodyLimitLayer = (maxBytes: number) =>
+  HttpRouter.use((router) =>
+    router.addGlobalMiddleware((httpEffect) =>
+      Effect.flatMap(HttpServerRequest.HttpServerRequest.asEffect(), (request) => {
+        const declared = request.headers["content-length"]
+        return declared !== undefined && Number.parseInt(declared, 10) > maxBytes
+          ? Effect.succeed(HttpServerResponse.jsonUnsafe(
+            { error: `Request body exceeds ${maxBytes} bytes` },
+            { status: 413 }
+          ))
+          : httpEffect
+      })))
+
+/** Turns request-shape refusals (malformed JSON, payloads that miss their
+ *  schema, bad path parameters) into the gateway's ordinary `{error}` dialect
+ *  instead of an empty 400. */
+const schemaErrorsLayer = () =>
+  HttpRouter.use((router) =>
+    router.addGlobalMiddleware((httpEffect) =>
+      Effect.catchCauseIf(
+        httpEffect,
+        (cause) => {
+          const defect = Cause.findDefect(cause)
+          return Result.isSuccess(defect) && HttpApiSchemaError.is(defect.success)
+        },
+        (cause) => {
+          const defect = Cause.findDefect(cause)
+          // The predicate guarantees this is a schema error.
+          const schemaError = Result.isSuccess(defect) && HttpApiSchemaError.is(defect.success)
+            ? defect.success
+            : undefined
+          return Effect.succeed(HttpServerResponse.jsonUnsafe(
+            {
+              error: schemaError?.cause instanceof Error
+                ? schemaError.cause.message
+                : "Request body did not match the expected shape"
+            },
+            { status: 400 }
+          ))
+        }
+      )))
+
+/** The one place that decides what an unmatched non-`/v1` path means: on a
+ *  deployment with a control plane it is a file, otherwise a JSON 404/405 that
+ *  says which paths do exist.
+ *
+ *  Composition order matters twice over: platform services come before the
+ *  groups so group requirements are subtracted against them, and the authority
+ *  layer exists before any group builds, because middleware services are
+ *  captured from the context a group layer builds in. */
+export const defaultMaxBodyBytes = 1024 * 1024
+
+export const gatewayAppLayer = (options: GatewayHandlerOptions) => {
+  const optional = <Key extends string, T>(key: Key, value: T | undefined) =>
+    whenPresent(key, value)
+  const dashboardUrl = optional("dashboardUrl", options.dashboardUrl)
+  const oauthCallbackUrl = optional("oauthCallbackUrl", options.oauthCallbackUrl)
+  const registryUrl = optional("registryUrl", options.registryUrl)
+
+  const groups = Layer.mergeAll(
+    SystemLayer,
+    FallbackLayer(whenPresentMap("webAssets", options.webAssets, (assets) => assets)),
+    DelegatedLayer({
+      store: options.store,
+      integrations: options.integrations,
+      retentionDays: options.retentionDays,
+      ...dashboardUrl
+    }),
+    ProvisioningLayer({
+      store: options.store,
+      integrations: options.integrations,
+      oauth: options.oauth,
+      ...oauthCallbackUrl,
+      ...registryUrl
+    }),
+    AdministrativeLayer({
+      store: options.store,
+      integrations: options.integrations,
+      retentionDays: options.retentionDays
+    }),
+    AuthLayer({
+      store: options.store,
+      sessions: options.sessions ?? {
+        signupOpen: async () => false,
+        secureCookies: false
+      }
+    })
+  )
+  // The FileSystem stays in the outputs as well: the API builder requires one
+  // even though every response here is JSON.
+  const platform = Layer.mergeAll(
+    FileSystem.layerNoop({}),
+    HttpPlatform.layer.pipe(Layer.provide(FileSystem.layerNoop({}))),
+    HttpRouter.layer,
+    Etag.layerWeak,
+    Path.layer
+  )
+  const base = schemaErrorsLayer()
+    .pipe(Layer.provideMerge(bodyLimitLayer(options.maxBodyBytes ?? defaultMaxBodyBytes)))
+    .pipe(Layer.provideMerge(platform))
+  return base
+    .pipe(Layer.provideMerge(groups))
+    .pipe(Layer.provideMerge(Authority.layer({
+      store: options.store,
+      ...whenPresentMap("addressRateLimiter", options.addressRateLimiter, (l) => l),
+      ...whenPresentMap("rateLimiter", options.rateLimiter, (l) => l)
+    })))
 }
 
-/** Turns a Request into a Response with no socket involved, so the whole
- * surface — including every rejection path — is testable directly.
- *
- * Access is enforced here rather than in handlers: a route declares whether it
- * is public, delegated, provisioning, administrative, or human-only, and a new endpoint cannot forget to
- * check. */
-export const createGatewayHandler = (
-  dependencies: HandlerDependencies
-): ((request: Request, context?: GatewayRequestContext) => Promise<Response>) => {
-  const handle = async (request: Request, context?: GatewayRequestContext): Promise<Response> => {
-    const url = new URL(request.url)
 
-    if (url.pathname === "/v1/health") {
-      return json(200, { ok: true })
-    }
-    if (url.pathname === "/v1/metadata") {
-      return json(
-        200,
-        { ok: true, protocolVersion: gatewayProtocolVersion, gatewayVersion },
-        { "cache-control": "no-store" }
+
+export interface GatewayHandle {
+  handle(request: Request, context?: GatewayRequestContext): Promise<Response>
+  dispose(): Promise<void>
+}
+
+/** Builds the API once and answers requests against it without owning a
+ *  socket — the seam the Cloudflare Worker, acceptance tests, and any embedded
+ *  consumer drive directly. */
+export const createGatewayHandler = (options: GatewayHandlerOptions): GatewayHandle => {
+  // The API builder's requirements (groups, router, platform services) are all
+  // satisfied by the app layer's outputs, and its outputs keep them.
+  const app = HttpApiBuilder.layer(GatewayApi).pipe(
+    Layer.provideMerge(gatewayAppLayer(options))
+  )
+  const web = HttpEffect.toWebHandlerLayerWith(app, {
+    toHandler: (context) =>
+      Effect.succeed(
+        Context.getUnsafe(HttpRouter.HttpRouter)(context).asHttpEffect()
       )
-    }
-
-    if (dependencies.addressRateLimiter !== undefined) {
-      // Before authentication, so guessing credentials costs a bucket slot per
-      // attempt rather than a key lookup.
-      const addressVerdict = dependencies.addressRateLimiter.take(
-        `addr:${context?.remoteAddress ?? "unknown"}`
-      )
-      if (!addressVerdict.allowed) {
-        return tooManyRequests(addressVerdict.retryAfterSeconds)
-      }
-    }
-
-    const matched = matchRoute(dependencies.routes, request.method, url.pathname)
-    if (matched === undefined) {
-      return pathExists(dependencies.routes, url.pathname)
-        ? json(405, { error: `${request.method} is not allowed on ${url.pathname}` })
-        : json(404, { error: `No route for ${request.method} ${url.pathname}` })
-    }
-    const { route, params } = matched
-
-    const identity = await resolveIdentity(dependencies, request, context)
-
-    if (dependencies.rateLimiter !== undefined &&
-      identity.kind !== "anonymous" && identity.kind !== "refused") {
-      const principalKey = identity.kind === "session"
-        ? `subject:${identity.subjectId}`
-        : `${identity.kind}:${identity.client.id}`
-      const verdict = dependencies.rateLimiter.take(principalKey)
-      if (!verdict.allowed) {
-        return tooManyRequests(verdict.retryAfterSeconds)
-      }
-    }
-
-    // A session riding a cookie must prove same-origin for anything but a read,
-    // whatever route it is headed for.
-    if (identity.kind === "session" && request.method !== "GET" && !cookieRequestIsSameOrigin(request)) {
-      return json(403, { error: "Cross-site requests are not permitted", code: "cross-site" })
-    }
-
-    if (route.access === "public") {
-      // Public routes decide for themselves what an absent identity means; the
-      // login surface cannot require the credential it creates.
-      return await dispatch(route, url, identity)
-    }
-
-    // Human sessions and the ambient local control plane may administer, but
-    // neither may invoke through delegated aliases. Issuing a client key is
-    // what turns human authority into a deliberately bounded machine caller.
-    if (identity.kind === "session" || identity.kind === "local") {
-      if (route.access === "delegated") {
-        return json(403, {
-          error: "Human control-plane authority may not invoke delegated tools; issue a client key instead",
-          code: "not-permitted"
-        })
-      }
-      return await dispatch(route, url, identity)
-    }
-
-    if (identity.kind === "refused") return refusal(identity.reason)
-
-    if (identity.kind === "anonymous") {
-      return json(401, { error: "An API key is required", code: "unknown-key" })
-    }
-
-    if (route.access === "human") {
-      return refusal("not-permitted")
-    }
-
-    const requiredCapability: ClientCapability | undefined = route.access === "provisioning"
-      ? "provision_connections"
-      : route.access === "administrative"
-      ? "administer_gateway"
-      : undefined
-    if (requiredCapability !== undefined) {
-      const authorization = await authorizeClientCapability(
-        dependencies.store,
-        identity.secret,
-        requiredCapability
-      )
-      if (authorization.status !== "authorized") return refusal(authorization.status)
-    }
-
-    return await dispatch(route, url, identity)
-
-    async function dispatch(
-      route: Route,
-      location: URL,
-      identity: RouteIdentity
-    ): Promise<Response> {
-      try {
-        const result = await route.handle({
-          params,
-          query: location.searchParams,
-          body: await readBody(request, dependencies.maxBodyBytes ?? defaultMaxBodyBytes),
-          identity
-        })
-        if (result.html !== undefined) {
-          return new Response(result.html, {
-            status: result.status,
-            headers: {
-              "content-type": "text/html; charset=utf-8",
-              ...whenPresent("content-type", result.headers?.["content-type"])
-            }
-          })
-        }
-        return json(result.status, result.body, result.headers)
-      } catch (error) {
-        if (error instanceof RequestBodyError) {
-          return json(error.status, { error: error.message })
-        }
-        return json(500, {
-          error: error instanceof Error ? error.message : "Gateway request failed"
-        })
-      }
-    }
+  })
+  const contextFor = (requestContext: GatewayRequestContext | undefined) =>
+    requestContext === undefined
+      ? undefined
+      : Context.makeUnsafe(new Map([[String(CurrentRequestContext.key), requestContext]]))
+  return {
+    handle: (request, requestContext) =>
+      web.handler(request, contextFor(requestContext) ?? Context.empty()),
+    dispose: () => web.dispose()
   }
-  if (dependencies.telemetry === undefined) return handle
-  const telemetry = dependencies.telemetry
-  // Health checks are liveness noise; tracing them only fills the backend.
-  return (request, context) =>
-    ["/v1/health", "/v1/metadata"].includes(new URL(request.url).pathname)
-      ? handle(request, context)
-      : telemetry.run(request, () => handle(request, context))
 }

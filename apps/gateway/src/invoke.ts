@@ -1,4 +1,4 @@
-import { whenPresent } from "./optional.ts"
+import { whenPresent } from "@mokronos/contracts"
 import { Schema } from "effect"
 import type { IntegrationsApi } from "@mokronos/integration-host"
 import { ToolAddress } from "@mokronos/contracts"

@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { gatewayConfigPath } from "@mokronos/integrations-client"
-import { whenPresent } from "../src/optional.ts"
+import { whenPresent } from "@mokronos/contracts"
 import { stopGateway } from "../src/service.ts"
 
 /** `stopGateway` signals a process it did not start, so what matters most is

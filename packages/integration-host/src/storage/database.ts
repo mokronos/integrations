@@ -147,6 +147,27 @@ const schemaStatements: ReadonlyArray<string> = [
      PRIMARY KEY (owner, integration, name),
      FOREIGN KEY (integration) REFERENCES integration(slug) ON DELETE CASCADE
    )`,
+  // Tools are captured, not re-derived. An MCP server has to be connected to
+  // before it will list them and an OpenAPI document has to be compiled, so
+  // doing either on every read turns opening a dashboard into one network round
+  // trip per connection. Capturing on connect and refresh makes a listing a
+  // single query, and makes "what changed upstream" a comparison rather than a
+  // guess.
+  `CREATE TABLE IF NOT EXISTS tool (
+     address          TEXT PRIMARY KEY NOT NULL,
+     owner            TEXT NOT NULL,
+     integration      TEXT NOT NULL,
+     connection       TEXT NOT NULL,
+     name             TEXT NOT NULL,
+     description      TEXT NOT NULL DEFAULT '',
+     read_only        INTEGER NOT NULL DEFAULT 0,
+     input_schema     TEXT,
+     output_schema    TEXT,
+     call             TEXT NOT NULL,
+     captured_at      INTEGER NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS tool_by_connection
+     ON tool (integration, owner, connection)`,
   `CREATE TABLE IF NOT EXISTS oauth_client (
      owner                        TEXT NOT NULL,
      slug                         TEXT NOT NULL,

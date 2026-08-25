@@ -1,8 +1,8 @@
 import { Effect, Option, Redacted, Schema } from "effect"
 import { Argument, Command, Flag, Prompt } from "effect/unstable/cli"
+import { whenPresent } from "@mokronos/contracts"
 import { cliError, describeError } from "./connection.ts"
 import { jsonOutput, writeStdoutLine } from "./output.ts"
-import { whenPresent } from "./optional.ts"
 import {
   connectToControlPlane,
   loginOperator,

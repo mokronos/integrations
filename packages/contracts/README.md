@@ -8,15 +8,15 @@ decode a gateway response without acquiring the host's dependency graph.
 | --- | --- |
 | `vocabulary.ts` | The branded identifiers: `IntegrationSlug`, `ConnectionName`, `ToolName`, `OwnerTier`, `Alias` |
 | `address.ts` | `ToolAddress`, `ConnectionAddress`, and the functions that build and parse them |
-| `integration.ts` | `Integration`, `AuthMethod`, `AuthPlacement`, `EndpointDetection`, `McpProbe`, `OpenApiPreview` |
+| `integration.ts` | `Integration`, `AuthMethod`, `AuthPlacement`, `McpProbe`, `OpenApiPreview` |
 | `connection.ts` | `Connection` |
 | `tool.ts` | `Tool`, `ToolSummary` |
 | `oauth.ts` | `OAuthServerProbe`, `OAuthStart` |
 | `overview.ts` | The dashboard aggregates |
-| `discovery.ts` | What inspecting an endpoint returns, and what `integrations validate` accepts |
+| `discovery.ts` | What classifying an endpoint returns, and what `integrations validate` accepts |
 | `registry.ts` | integrations.sh search shapes |
 | `version.ts` | The negotiated protocol version |
-| `json.ts`, `optional.ts` | The two helpers every boundary uses |
+| `json.ts`, `optional.ts` | The helpers every boundary uses |
 
 ## Why the vocabulary lives here
 

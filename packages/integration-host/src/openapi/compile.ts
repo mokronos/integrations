@@ -566,65 +566,6 @@ export const previewOf = (
     })
   ))
 
-/** Splits a caller's flat input back into the shapes the request builder wants.
- *  The inverse of {@link flattenParameters}, driven by the same location map. */
-export interface SplitInput {
-  readonly parameters: Record<string, Json>
-  readonly requestBody: Option.Option<Json>
-  /** Properties the operation does not declare.
-   *
-   *  These are reported rather than forwarded. Routing an unrecognised property
-   *  to the query string — the obvious default, since most parameters live
-   *  there — means a caller that invents an argument silently sends it upstream,
-   *  which is how a typo becomes a filter nobody asked for. */
-  readonly unknown: ReadonlyArray<string>
-}
-
-export const splitInput = (
-  operation: CompiledOperation,
-  input: Json
-): SplitInput => {
-  if (!isJsonObject(input)) {
-    return {
-      parameters: {},
-      requestBody: Option.fromNullishOr(input),
-      unknown: []
-    }
-  }
-
-  const parameters: Record<string, Json> = {}
-  const bodyProperties: Record<string, Json> = {}
-  const unknown: Array<string> = []
-  let wholeBody = Option.none<Json>()
-
-  for (const [name, value] of Object.entries(input)) {
-    const location = operation.locations[name]
-    if (location === undefined) {
-      unknown.push(name)
-      continue
-    }
-    if (location !== "body") {
-      parameters[name] = value
-      continue
-    }
-    if (Option.exists(operation.bodyProperty, (property) => property === name)) {
-      wholeBody = Option.some(value)
-      continue
-    }
-    bodyProperties[name] = value
-  }
-
-  if (Option.isSome(wholeBody)) {
-    return { parameters, requestBody: wholeBody, unknown }
-  }
-  return {
-    parameters,
-    requestBody: Object.keys(bodyProperties).length === 0
-      ? Option.none()
-      : Option.some(bodyProperties),
-    unknown
-  }
-}
 
 /** Where the request should go, given the document's servers and any override
  *  recorded when the integration was installed.
@@ -640,8 +581,15 @@ export const resolveServer = (
   }
 ): Option.Option<string> => {
   if (Option.isSome(options.baseUrl)) return options.baseUrl
-  const declared = compiled.servers[0]?.url
-  if (declared === undefined) return options.specSource
+  const server = compiled.servers[0]
+  if (server === undefined) return options.specSource
+  // A server may template its own host or version — `https://api/{ver}` — and
+  // the declared defaults are the only values we have for them. Filled in here
+  // because this result is stored, and nothing downstream keeps the document.
+  const declared = server.url.replace(
+    /\{([^{}]+)\}/g,
+    (whole, name: string) => server.variables[name] ?? whole
+  )
   if (/^https?:\/\//.test(declared)) return Option.some(declared)
   return Option.map(options.specSource, (source) => new URL(declared, source).toString())
 }

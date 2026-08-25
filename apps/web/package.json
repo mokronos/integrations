@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.2.9",
+    "@mokronos/contracts": "workspace:*",
     "@mokronos/integration-host": "workspace:*",
     "@mokronos/integrations": "workspace:*",
     "@mokronos/integrations-client": "workspace:*",

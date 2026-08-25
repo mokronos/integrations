@@ -1,10 +1,9 @@
-import { whenPresent } from "../src/optional.ts"
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { Schema } from "effect"
-import { ToolAddress } from "@mokronos/contracts"
+import { ToolAddress, whenPresent } from "@mokronos/contracts"
 import type { IntegrationsApi } from "@mokronos/integration-host"
 import type { Connection, Tool } from "@mokronos/contracts"
 import {
@@ -16,7 +15,6 @@ import {
   defaultTenantId,
   generateApiKey,
   IntegrationSlug,
-  gatewayRoutes,
   newClientId,
   newGrantId,
   SubjectId,
@@ -121,9 +119,7 @@ const stubIntegrations = (behaviour: {
       ensure: notStubbed("connections.ensure")
     },
     catalog: {
-      detectIntegration: notStubbed("catalog.detectIntegration"),
-      probeMcp: notStubbed("catalog.probeMcp"),
-      previewOpenApi: notStubbed("catalog.previewOpenApi"),
+      classify: notStubbed("catalog.classify"),
       list: notStubbed("catalog.list"),
       find: notStubbed("catalog.find"),
       addMcp: notStubbed("catalog.addMcp"),
@@ -136,7 +132,6 @@ const stubIntegrations = (behaviour: {
       start: notStubbed("auth.start"),
       complete: notStubbed("auth.complete")
     },
-    discovery: { inspect: notStubbed("discovery.inspect") },
     provisioning: {
       install: notStubbed("provisioning.install"),
       provision: notStubbed("provisioning.provision")
@@ -188,23 +183,20 @@ const setup = async (options: {
     ...whenPresent("connections", options.connections),
     ...whenPresent("tools", options.tools)
   })
-  const handle = createGatewayHandler({
+  const { handle } = createGatewayHandler({
     store,
-    routes: gatewayRoutes({
-      store,
-      integrations: stub.integrations,
-      retentionDays: 30,
-      // No OAuth flow is exercised here; these tests are about authority.
-      oauth: {
-        start: async () => { throw new Error("not used") },
-        get: async () => undefined,
-        completeByState: async () => undefined,
-        stop: () => undefined
-      },
-      ...whenPresent("dashboardUrl", options.dashboardUrl === undefined
-        ? undefined
-        : () => options.dashboardUrl)
-    })
+    integrations: stub.integrations,
+    retentionDays: 30,
+    // No OAuth flow is exercised here; these tests are about authority.
+    oauth: {
+      start: async () => { throw new Error("not used") },
+      get: async () => undefined,
+      completeByState: async () => undefined,
+      stop: () => undefined
+    },
+    ...whenPresent("dashboardUrl", options.dashboardUrl === undefined
+      ? undefined
+      : () => options.dashboardUrl)
   })
 
   const call = async (

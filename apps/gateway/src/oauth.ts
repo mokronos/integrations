@@ -1,7 +1,6 @@
-import { whenPresent } from "./optional.ts"
 import { Schema } from "effect"
 import { type AuthApi } from "@mokronos/integration-host"
-import { AuthMethod, Connection } from "@mokronos/contracts"
+import { AuthMethod, Connection, whenPresent } from "@mokronos/contracts"
 import { oauthSetupGuidance } from "./oauth-guidance.ts"
 
 // Opening a browser is the client's job — the gateway may be running headless

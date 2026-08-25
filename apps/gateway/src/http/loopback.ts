@@ -70,24 +70,56 @@ export interface LoopbackBootstrap {
   readonly remoteAddress: string | undefined
 }
 
+interface BorrowHeaders {
+  readonly host: string | null
+  readonly origin: string | null
+  readonly secFetchSite: string | null
+}
+
+const headersOf = (get: (name: string) => string | null): BorrowHeaders => ({
+  host: get("host"),
+  origin: get("origin"),
+  secFetchSite: get("sec-fetch-site")
+})
+
 /** Whether this request may be authenticated as the local client. */
 export const mayBorrowLocalCredential = (
   request: Request,
   bootstrap: LoopbackBootstrap
 ): boolean => {
+  const headers = headersOf((name) => request.headers.get(name))
+  return mayBorrow(headers, bootstrap)
+}
+
+/** The same decision for a server that reads headers out of the platform
+ *  request rather than a web `Request`. */
+export const mayBorrowLocalCredentialHeaders = (
+  headers: Readonly<Record<string, string | undefined>>,
+  bootstrap: LoopbackBootstrap
+): boolean =>
+  mayBorrow({
+    host: headers["host"] ?? null,
+    origin: headers["origin"] ?? null,
+    secFetchSite: headers["sec-fetch-site"] ?? null
+  }, bootstrap)
+
+const mayBorrow = (
+  headers: ReturnType<typeof headersOf>,
+  bootstrap: LoopbackBootstrap
+): boolean => {
   if (!bootstrap.boundToLoopback) return false
   if (!isLoopbackAddress(bootstrap.remoteAddress)) return false
-  if (!isLoopbackHostHeader(request.headers.get("host"))) return false
+  if (!isLoopbackHostHeader(headers.host)) return false
 
   // Set by the browser on every request it makes, and unforgeable from script.
   // Its absence means the caller is not a page, and non-pages bring their own
   // key — this path exists only because a page cannot.
-  if (request.headers.get("sec-fetch-site")?.trim().toLowerCase() !== "same-origin") {
+  if (headers.secFetchSite?.trim().toLowerCase() !== "same-origin") {
     return false
   }
 
   // Same-origin GETs carry no Origin at all; same-origin writes carry ours.
-  const origin = request.headers.get("origin")
+  const origin = headers.origin
   if (origin === null) return true
   return originsFor(bootstrap.port).includes(origin.trim().toLowerCase())
 }

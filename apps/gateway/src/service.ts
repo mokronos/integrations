@@ -3,14 +3,14 @@ import {
   defaultGatewayPort,
   writeGatewayConfig
 } from "./config.ts"
-import { whenPresent } from "./optional.ts"
+import { whenPresent } from "@mokronos/contracts"
 import { defaultTenantId } from "./domain.ts"
 import { resolveEncryption } from "./crypto.ts"
 import type { Gateway } from "./host.ts"
-import { createGatewayHandler } from "./http/handler.ts"
-import type { GatewayRequestContext } from "./http/handler.ts"
+import { Effect, Layer, ManagedRuntime } from "effect"
 import { isLoopbackAddress, mayBorrowLocalCredential } from "./http/loopback.ts"
-import { gatewayRoutes } from "./http/api.ts"
+import { createGatewayHandler } from "./http/handler.ts"
+import type { GatewayHandle, GatewayRequestContext } from "./http/handler.ts"
 import { startMaintenanceLoop } from "./maintenance.ts"
 import type { MaintenanceLoop } from "./maintenance.ts"
 import { createOAuthSessions } from "./oauth-sessions.ts"
@@ -19,13 +19,13 @@ import { createRateLimiter } from "./ratelimit.ts"
 import { generateApiKey, newClientId } from "./keys.ts"
 import { integrationsHome } from "./paths.ts"
 import type { HostStorage } from "@mokronos/integration-host"
+import { HostHandleService, IntegrationsApiService } from "@mokronos/integration-host"
 import type { GatewayStoreInitializationError, GatewayStoreOptions } from "./store.ts"
 import type { GatewayStore } from "./store.ts"
 import { GatewayStoreService } from "./store.ts"
 import { createWebAssets } from "./web-assets.ts"
-import { HostHandleService, IntegrationsApiService } from "@mokronos/integration-host"
-import { Effect, Layer, ManagedRuntime } from "effect"
 import { createRequestTracer } from "@mokronos/observability"
+import type { RequestTracer } from "@mokronos/observability"
 import type { GoogleIdentityOAuth } from "./identity-oauth.ts"
 
 /** The client the local machine uses. Created with both client capabilities so
@@ -98,6 +98,17 @@ export interface GatewayServiceOptions {
   readonly telemetryHeaders?: Record<string, string>
 }
 
+interface GatewayCore {
+  readonly home: string
+  readonly store: GatewayStore
+  readonly gateway: Gateway
+  readonly oauth: ReturnType<typeof createOAuthSessions>
+  readonly maintenance: MaintenanceLoop | undefined
+  readonly requestTracer: RequestTracer | undefined
+  readonly handlerOptions: Parameters<typeof createGatewayHandler>[0]
+  readonly disposeCore: () => Promise<void>
+}
+
 /** Signup is open exactly while the gateway has no humans at all — its first
  *  login claims the instance — or when an operator opts in explicitly. */
 const signupOpen = async (
@@ -116,9 +127,11 @@ const nonBlank = (value: string | undefined): string | undefined => {
  *  credential guesser has no principal to be generous to. */
 export const defaultRateLimitPerMinute = 600
 
-export const createGatewayService = async (
-  options: GatewayServiceOptions = {}
-): Promise<GatewayService> => {
+/** Boots storage and the host, and derives every plain value the HTTP surface
+ *  closes over. Both serving modes start here, so neither duplicates state. */
+const buildCore = async (
+  options: GatewayServiceOptions
+): Promise<GatewayCore> => {
   const home = options.home ?? integrationsHome()
   // Payloads at rest are sealed when a master key is available: from the
   // environment, or a keyfile created inside `home` on first start. An
@@ -132,146 +145,171 @@ export const createGatewayService = async (
       GatewayStoreService.layer(`${home}/gateway.sqlite`, encryption, options.storeOptions),
     IntegrationsApiService.layerWithHost(home, options.hostStorage)
   ))
+  let resources: Awaited<ReturnType<typeof bootResources>>
   try {
-    const resources = await dependencies.runPromise(Effect.gen(function* () {
+    resources = await bootResources()
+  } catch (error) {
+    await dependencies.dispose()
+    throw error
+  }
+
+  async function bootResources() {
+    const loaded = await dependencies.runPromise(Effect.gen(function* () {
       const store = yield* GatewayStoreService
       const host = yield* HostHandleService
       const integrations = yield* IntegrationsApiService
       return { store, host, integrations }
     }))
-    const gateway: Gateway = {
-      directory: resources.host.directory,
-      host: resources.host,
-      integrations: resources.integrations,
-      close: () => resources.host.close()
-    }
-    // Read at flow-start time, not construction time: the local origin is only
-    // known once serveGateway has decided how the socket is bound. The callback
-    // route is GET /v1/oauth/callback either way.
-    const resolvePublicUrl = (): string | undefined =>
-      options.publicUrl ?? process.env["INTEGRATIONS_PUBLIC_URL"] ??
-        options.localCallbackOrigin
-    const googleClientId = nonBlank(
-      options.googleIdentity?.clientId ?? process.env["INTEGRATIONS_GOOGLE_CLIENT_ID"]
+    return loaded
+  }
+
+  const gateway: Gateway = {
+    directory: resources.host.directory,
+    host: resources.host,
+    integrations: resources.integrations,
+    close: () => resources.host.close()
+  }
+  // Read at flow-start time, not construction time: the local origin is only
+  // known once the caller has decided how the socket is bound. The callback
+  // route is GET /v1/oauth/callback either way.
+  const resolvePublicUrl = (): string | undefined =>
+    options.publicUrl ?? process.env["INTEGRATIONS_PUBLIC_URL"] ??
+      options.localCallbackOrigin
+  const googleClientId = nonBlank(
+    options.googleIdentity?.clientId ?? process.env["INTEGRATIONS_GOOGLE_CLIENT_ID"]
+  )
+  const googleClientSecret = nonBlank(
+    options.googleIdentity?.clientSecret ?? process.env["INTEGRATIONS_GOOGLE_CLIENT_SECRET"]
+  )
+  if ((googleClientId === undefined) !== (googleClientSecret === undefined)) {
+    await dependencies.dispose()
+    throw new Error(
+      "Google sign-in requires both INTEGRATIONS_GOOGLE_CLIENT_ID and INTEGRATIONS_GOOGLE_CLIENT_SECRET"
     )
-    const googleClientSecret = nonBlank(
-      options.googleIdentity?.clientSecret ?? process.env["INTEGRATIONS_GOOGLE_CLIENT_SECRET"]
-    )
-    if ((googleClientId === undefined) !== (googleClientSecret === undefined)) {
-      throw new Error(
-        "Google sign-in requires both INTEGRATIONS_GOOGLE_CLIENT_ID and INTEGRATIONS_GOOGLE_CLIENT_SECRET"
-      )
-    }
-    const googleIdentity: GoogleIdentityOAuth | undefined =
-      googleClientId === undefined || googleClientSecret === undefined
-        ? undefined
-        : {
-          clientId: googleClientId,
-          clientSecret: googleClientSecret,
-          publicUrlOf: resolvePublicUrl,
-          ...whenPresent("fetch", options.googleIdentity?.fetch)
-        }
-    const oauth = createOAuthSessions(gateway.integrations, {
-      publicUrlOf: resolvePublicUrl,
-      ...whenPresent("store", options.oauthStore)
-    })
-    const maintenance: MaintenanceLoop | undefined =
-      options.externalMaintenance === true ? undefined : startMaintenanceLoop(resources.store)
-    const routes = gatewayRoutes({
+  }
+  const googleIdentity: GoogleIdentityOAuth | undefined =
+    googleClientId === undefined || googleClientSecret === undefined
+      ? undefined
+      : {
+        clientId: googleClientId,
+        clientSecret: googleClientSecret,
+        publicUrlOf: resolvePublicUrl,
+        ...whenPresent("fetch", options.googleIdentity?.fetch)
+      }
+  const oauth = createOAuthSessions(gateway.integrations, {
+    publicUrlOf: resolvePublicUrl,
+    ...whenPresent("store", options.oauthStore)
+  })
+  const maintenance: MaintenanceLoop | undefined =
+    options.externalMaintenance === true ? undefined : startMaintenanceLoop(resources.store)
+
+  const perMinute = options.rateLimitPerMinute ??
+    Number.parseInt(process.env["INTEGRATIONS_RATE_LIMIT"] ?? "", 10)
+  const rateLimiter = createRateLimiter({
+    // The principal bucket is the configured budget; the address bucket that
+    // guards unauthenticated traffic is a fifth of it, floored so a tiny
+    // configured limit still leaves credential guessing meaningfully bounded.
+    limit: Number.isFinite(perMinute) && perMinute > 0 ? perMinute : defaultRateLimitPerMinute,
+    windowMs: 60_000
+  })
+  const addressRateLimiter = createRateLimiter({
+    limit: Math.max(20, Math.floor((Number.isFinite(perMinute) && perMinute > 0
+      ? perMinute
+      : defaultRateLimitPerMinute) / 5)),
+    windowMs: 60_000
+  })
+
+  // Undefined unless an endpoint is configured (option or INTEGRATIONS_OTLP_ENDPOINT);
+  // the handler then skips wrapping entirely.
+  const requestTracer = await createRequestTracer({
+    serviceName: "integrations-gateway",
+    spanName: "gateway.request",
+    ...whenPresent("endpoint", options.telemetryEndpoint),
+    ...whenPresent("headers", options.telemetryHeaders)
+  })
+
+  const disposeCore = async () => {
+    maintenance?.stop()
+    oauth.stop()
+    await requestTracer?.dispose()
+    await dependencies.dispose()
+  }
+
+  void defaultTenantId
+
+  return {
+    home,
+    store: resources.store,
+    gateway,
+    oauth,
+    maintenance,
+    requestTracer,
+    disposeCore,
+    handlerOptions: {
       store: resources.store,
       integrations: gateway.integrations,
       retentionDays: options.retentionDays ?? defaultArgumentRetentionDays,
       oauth,
       oauthCallbackUrl: () => {
         const origin = resolvePublicUrl()
-        return origin === undefined ? undefined : `${origin.replace(/\/+$/, "")}/v1/oauth/callback`
+        return origin === undefined
+          ? undefined
+          : `${origin.replace(/\/+$/, "")}/v1/oauth/callback`
       },
       dashboardUrl: resolvePublicUrl,
+      rateLimiter,
+      addressRateLimiter,
+      ...whenPresent("maxBodyBytes", options.maxBodyBytes),
       sessions: {
         signupOpen: () => signupOpen(resources.store, options.allowSignup),
         secureCookies: options.secureCookies ?? false,
         ...whenPresent("google", googleIdentity)
       },
       ...whenPresent("registryUrl", options.registryUrl)
-    })
-    let closed = false
-    const perMinute = options.rateLimitPerMinute ??
-      Number.parseInt(process.env["INTEGRATIONS_RATE_LIMIT"] ?? "", 10)
-    const rateLimiter = createRateLimiter({
-      // The principal bucket is the configured budget; the address bucket that
-      // guards unauthenticated traffic is a fifth of it, floored so a tiny
-      // configured limit still leaves credential guessing meaningfully bounded.
-      limit: Number.isFinite(perMinute) && perMinute > 0 ? perMinute : defaultRateLimitPerMinute,
-      windowMs: 60_000
-    })
-    const addressLimiter = createRateLimiter({
-      limit: Math.max(20, Math.floor((Number.isFinite(perMinute) && perMinute > 0
-        ? perMinute
-        : defaultRateLimitPerMinute) / 5)),
-      windowMs: 60_000
-    })
-    // Undefined unless an endpoint is configured (option or INTEGRATIONS_OTLP_ENDPOINT);
-    // the handler then skips wrapping entirely.
-    const requestTracer = await createRequestTracer({
-      serviceName: "integrations-gateway",
-      spanName: "gateway.request",
-      ...whenPresent("endpoint", options.telemetryEndpoint),
-      ...whenPresent("headers", options.telemetryHeaders)
-    })
-    return {
-      home,
-      store: resources.store,
-      gateway,
-      handle: createGatewayHandler({
-        store: resources.store,
-        routes,
-        rateLimiter,
-        addressRateLimiter: addressLimiter,
-        ...whenPresent("maxBodyBytes", options.maxBodyBytes),
-        ...whenPresent("telemetry", requestTracer)
-      }),
-      close: async () => {
-        if (closed) return
-        closed = true
-        maintenance?.stop()
-        oauth.stop()
-        // Flush pending trace batches before the runtime underneath goes away.
-        await requestTracer?.dispose()
-        await dependencies.dispose()
-      }
     }
-  } catch (error) {
-    await dependencies.dispose()
-    throw error
   }
 }
 
-/** Ensures the local client exists and has a live key, then records where the
- * gateway is listening. Idempotent apart from key issue: a fresh key is minted
- * whenever the recorded one is missing, so losing the config file is
- * recoverable without losing the client's grants. */
-export const ensureLocalCredential = async (
-  service: GatewayService,
-  port: number
-): Promise<string> => {
-  const existing = await service.store.findClientByName(defaultTenantId, localClientName)
-  const client = existing ?? await service.store.createClient({
-    id: newClientId(),
-    tenantId: defaultTenantId,
-    name: localClientName,
-    capabilities: ["provision_connections", "administer_gateway"]
-  })
-  const key = generateApiKey()
-  await service.store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
-  await writeGatewayConfig(service.home, {
-    port,
-    url: `http://127.0.0.1:${port}`,
-    apiKey: key.secret,
-    pid: process.pid
-  })
-  return key.secret
+export const createGatewayService = async (
+  options: GatewayServiceOptions = {}
+): Promise<GatewayService> => {
+  const core = await buildCore(options)
+
+  // Built eagerly as an object but lazily in substance: the API stack compiles
+  // on the first answered request, so a service that never serves HTTP — the
+  // Worker's scheduled trigger, tests poking the store — pays nothing for it.
+  const handle = createGatewayHandler(core.handlerOptions)
+  const dispatch = async (request: Request, context?: GatewayRequestContext): Promise<Response> => {
+    const response = await handle.handle(request, context)
+    return response
+  }
+
+  let closed = false
+  return {
+    home: core.home,
+    store: core.store,
+    gateway: core.gateway,
+    handle: (request, context) => {
+      const run = () => dispatch(request, context)
+      // Health checks are liveness noise; tracing them only fills the backend.
+      if (core.requestTracer === undefined ||
+        ["/v1/health", "/v1/metadata"].includes(new URL(request.url).pathname)) {
+        return run()
+      }
+      return core.requestTracer.run(request, run)
+    },
+    close: async () => {
+      if (closed) return
+      closed = true
+      await handle.dispose()
+      await core.disposeCore()
+    }
+  }
 }
 
+/** Binds to 127.0.0.1 unless told otherwise. What crosses this wire is a
+ *  credential that unlocks every connection a client holds, so exposing it
+ *  externally has to be a deliberate act rather than a default. */
 export interface ServeOptions {
   readonly port?: number
   readonly hostname?: string
@@ -297,21 +335,16 @@ export interface RunningGateway {
   stop(): Promise<void>
 }
 
-/** Binds to 127.0.0.1 unless told otherwise. What crosses this wire is a
- * credential that unlocks every connection a client holds, so exposing it
- * externally has to be a deliberate act rather than a default. */
 export const serveGateway = async (options: ServeOptions = {}): Promise<RunningGateway> => {
   const hostname = options.hostname ?? "127.0.0.1"
   const boundToLoopback = isLoopbackAddress(hostname)
-  // The port is deterministic — Bun.serve would fail rather than relocate a
+  // The port is deterministic — the listener fails rather than relocates a
   // busy port — so the OAuth redirect URI can be computed before binding.
   // Port 0 means the OS picks, which is unregistrable at providers that want
   // an exact redirect URI, so no local callback origin applies there.
   const requestedPort = options.port ?? defaultGatewayPort
-  const service = await createGatewayService({
-    ...whenPresent("home", options.home),
-    ...whenPresent("registryUrl", options.registryUrl),
-    ...whenPresent("publicUrl", options.publicUrl),
+  const core = await buildCore({
+    ...options,
     secureCookies: !boundToLoopback,
     ...whenPresent(
       "localCallbackOrigin",
@@ -320,13 +353,43 @@ export const serveGateway = async (options: ServeOptions = {}): Promise<RunningG
         : undefined
     )
   })
-  let server: ReturnType<typeof Bun.serve> | undefined
+
   try {
     const web = options.web === false ? undefined : await createWebAssets()
 
-    // The local key is minted below, once the port is known. Until then there is
-    // nothing to borrow and a browser gets the same 401 as anyone else.
+    // The local key is minted below, once the port is known. Until then there
+    // is nothing to borrow and a browser gets the same 401 as anyone else.
     let localSecret: string | undefined
+
+    const handle: GatewayHandle = createGatewayHandler({
+      ...core.handlerOptions,
+      ...whenPresent("webAssets", web)
+    })
+
+    let server: ReturnType<typeof Bun.serve> | undefined
+    let stopped = false
+
+    const service: GatewayService = {
+      home: core.home,
+      store: core.store,
+      gateway: core.gateway,
+      handle: (request, context) => {
+        const run = () => handle.handle(request, context)
+        // Health checks are liveness noise; tracing them only fills the backend.
+        if (core.requestTracer === undefined ||
+          ["/v1/health", "/v1/metadata"].includes(new URL(request.url).pathname)) {
+          return run()
+        }
+        return core.requestTracer.run(request, run)
+      },
+      close: async () => {
+        if (stopped) return
+        stopped = true
+        server?.stop(true)
+        await handle.dispose()
+        await core.disposeCore()
+      }
+    }
 
     server = Bun.serve({
       hostname,
@@ -337,38 +400,62 @@ export const serveGateway = async (options: ServeOptions = {}): Promise<RunningG
           const asset = await web.respond(pathname)
           if (asset !== undefined) return asset
         }
-        const local = localSecret
-        const borrow = local !== undefined && mayBorrowLocalCredential(request, {
+        const remoteAddress = running.requestIP(request)?.address
+        const borrow = localSecret !== undefined && mayBorrowLocalCredential(request, {
           boundToLoopback,
           port: Number(running.port),
-          remoteAddress: running.requestIP(request)?.address
+          remoteAddress
         })
         const requestContext: GatewayRequestContext = {
-          ...whenPresent("remoteAddress", running.requestIP(request)?.address),
-          ...whenPresent("localSecret", borrow && local !== undefined ? local : undefined)
+          ...whenPresent("remoteAddress", remoteAddress),
+          ...whenPresent(
+            "localSecret",
+            borrow && localSecret !== undefined ? localSecret : undefined
+          )
         }
         return await service.handle(request, requestContext)
       }
     })
+
     const boundPort = Number(server.port)
-    localSecret = await ensureLocalCredential(service, boundPort)
-    let stopped = false
+    localSecret = await ensureLocalCredential(core.store, core.home, boundPort)
+
     return {
       port: boundPort,
       url: `http://${hostname}:${boundPort}`,
       service,
       web: web?.directory,
-      stop: async () => {
-        if (stopped) return
-        stopped = true
-        server?.stop(true)
-        await service.close()
-      }
+      stop: () => service.close()
     }
-
   } catch (error) {
-    server?.stop(true)
-    await service.close()
+    await core.disposeCore()
     throw error
   }
+}
+
+/** Ensures the local client exists and has a live key, then records where the
+ *  gateway is listening. Idempotent apart from key issue: a fresh key is minted
+ *  whenever the recorded one is missing, so losing the config file is
+ *  recoverable without losing the client's grants. */
+export const ensureLocalCredential = async (
+  store: GatewayStore,
+  home: string,
+  port: number
+): Promise<string> => {
+  const existing = await store.findClientByName(defaultTenantId, localClientName)
+  const client = existing ?? await store.createClient({
+    id: newClientId(),
+    tenantId: defaultTenantId,
+    name: localClientName,
+    capabilities: ["provision_connections", "administer_gateway"]
+  })
+  const key = generateApiKey()
+  await store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
+  await writeGatewayConfig(home, {
+    port,
+    url: `http://127.0.0.1:${port}`,
+    apiKey: key.secret,
+    pid: process.pid
+  })
+  return key.secret
 }

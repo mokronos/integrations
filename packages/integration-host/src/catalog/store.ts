@@ -3,10 +3,16 @@ import { Database } from "../storage/database.ts"
 import type { SqlRow, SqlStatement, SqlValue } from "../storage/database.ts"
 import { StorageError } from "../errors.ts"
 import { AuthTemplateSlug, OAuthClientSlug, OAuthState } from "./ids.ts"
-import { ConnectionName, IntegrationSlug } from "@mokronos/contracts"
-import { whenPresent } from "@mokronos/contracts"
-import { AuthMethod, OwnerTier } from "@mokronos/contracts"
-import { IntegrationKind } from "@mokronos/contracts"
+import {
+  AuthMethod,
+  ConnectionName,
+  IntegrationKind,
+  IntegrationSlug,
+  OwnerTier,
+  ToolAddress,
+  whenPresent
+} from "@mokronos/contracts"
+import { ToolCall } from "./tool-call.ts"
 
 /** The catalog's row layer: every persisted shape the host owns, decoded on the
  *  way out and parameterised on the way in.
@@ -182,6 +188,45 @@ const decodeOAuthClientRow = (row: SqlRow) =>
     ))
   })
 
+const decodeJsonColumn = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))
+const decodeCall = Schema.decodeUnknownEffect(Schema.fromJsonString(ToolCall))
+
+const decodeToolRow = (row: SqlRow) =>
+  Effect.gen(function* () {
+    const call = yield* decodeCall(text(row, "call")).pipe(
+      Effect.mapError((cause) =>
+        new StorageError({ message: `Malformed call for ${text(row, "address")}`, cause })
+      )
+    )
+    const optionalJson = (column: string) =>
+      Effect.gen(function* () {
+        const raw = optionalText(row, column)
+        if (raw === undefined) return undefined
+        return yield* decodeJsonColumn(raw).pipe(
+          Effect.mapError((cause) =>
+            new StorageError({ message: `Malformed ${column} for ${text(row, "address")}`, cause })
+          )
+        )
+      })
+    const inputSchema = yield* optionalJson("input_schema")
+    const outputSchema = yield* optionalJson("output_schema")
+    return yield* Schema.decodeUnknownEffect(ToolRecord)({
+      address: text(row, "address"),
+      owner: text(row, "owner"),
+      integration: text(row, "integration"),
+      connection: text(row, "connection"),
+      name: text(row, "name"),
+      description: text(row, "description"),
+      readOnly: number(row, "read_only") === 1,
+      ...whenPresent("inputSchema", inputSchema),
+      ...whenPresent("outputSchema", outputSchema),
+      call,
+      capturedAt: number(row, "captured_at")
+    }).pipe(Effect.mapError((cause) =>
+      new StorageError({ message: `Malformed tool row ${text(row, "address")}`, cause })
+    ))
+  })
+
 const decodeOAuthFlowRow = (row: SqlRow) =>
   Effect.gen(function* () {
     const scopes = yield* decodeStrings(text(row, "scopes"), "scopes")
@@ -201,6 +246,31 @@ const decodeOAuthFlowRow = (row: SqlRow) =>
       new StorageError({ message: "Malformed oauth_flow row", cause })
     ))
   })
+
+/** A captured tool: the normalised shape every integration is converted into,
+ *  plus the descriptor saying how to perform it. */
+export const ToolRecord = Schema.Struct({
+  address: ToolAddress,
+  owner: OwnerTier,
+  integration: IntegrationSlug,
+  connection: ConnectionName,
+  name: Schema.String,
+  description: Schema.String,
+  /** Whether the tool's own source declares it read-only — MCP's
+   *  `readOnlyHint`, or a safe HTTP method. Drives the starting grant policy. */
+  readOnly: Schema.Boolean,
+  inputSchema: Schema.optional(Schema.Json),
+  outputSchema: Schema.optional(Schema.Json),
+  call: ToolCall,
+  capturedAt: Schema.Number
+})
+export type ToolRecord = typeof ToolRecord.Type
+
+export interface ToolFilter {
+  readonly integration?: IntegrationSlug
+  readonly owner?: OwnerTier
+  readonly connection?: ConnectionName
+}
 
 export interface ConnectionFilter {
   readonly integration?: IntegrationSlug
@@ -243,6 +313,25 @@ export class CatalogStore extends Context.Service<
     readonly takeOAuthFlow: (
       state: OAuthState
     ) => Effect.Effect<Option.Option<OAuthFlowRecord>, StorageError>
+
+    /** Every captured tool a filter selects. A listing is one query. */
+    readonly listTools: (
+      filter?: ToolFilter
+    ) => Effect.Effect<ReadonlyArray<ToolRecord>, StorageError>
+    readonly findTool: (
+      address: ToolAddress
+    ) => Effect.Effect<Option.Option<ToolRecord>, StorageError>
+    /** Replaces everything captured for one connection, in one transaction.
+     *  Replacing rather than merging is what makes a tool the upstream dropped
+     *  disappear here too. */
+    readonly replaceTools: (
+      connection: {
+        readonly owner: OwnerTier
+        readonly integration: IntegrationSlug
+        readonly name: ConnectionName
+      },
+      tools: ReadonlyArray<ToolRecord>
+    ) => Effect.Effect<void, StorageError>
 
     /** The cached text of a fetched specification document. */
     readonly findSpecDocument: (
@@ -485,6 +574,80 @@ export class CatalogStore extends Context.Service<
         }
       )
 
+      const listTools = Effect.fn("CatalogStore.listTools")(
+        function* (filter: ToolFilter = {}) {
+          const clauses: Array<string> = []
+          const params: Array<SqlValue> = []
+          if (filter.integration !== undefined) {
+            clauses.push("integration = ?")
+            params.push(filter.integration)
+          }
+          if (filter.owner !== undefined) {
+            clauses.push("owner = ?")
+            params.push(filter.owner)
+          }
+          if (filter.connection !== undefined) {
+            clauses.push("connection = ?")
+            params.push(filter.connection)
+          }
+          const where = clauses.length === 0 ? "" : ` WHERE ${clauses.join(" AND ")}`
+          const rows = yield* database.query({
+            sql: `SELECT * FROM tool${where} ORDER BY integration, owner, connection, name`,
+            params
+          })
+          return yield* Effect.forEach(rows, decodeToolRow)
+        }
+      )
+
+      const findTool = Effect.fn("CatalogStore.findTool")(function* (address: ToolAddress) {
+        const rows = yield* database.query({
+          sql: "SELECT * FROM tool WHERE address = ?",
+          params: [address]
+        })
+        const row = rows[0]
+        if (row === undefined) return Option.none()
+        return Option.some(yield* decodeToolRow(row))
+      })
+
+      const replaceTools = Effect.fn("CatalogStore.replaceTools")((
+        connection: {
+          readonly owner: OwnerTier
+          readonly integration: IntegrationSlug
+          readonly name: ConnectionName
+        },
+        tools: ReadonlyArray<ToolRecord>
+      ) =>
+        database.batch([
+          {
+            sql: "DELETE FROM tool WHERE owner = ? AND integration = ? AND connection = ?",
+            params: [connection.owner, connection.integration, connection.name]
+          },
+          ...tools.map((tool) => ({
+            sql: `INSERT INTO tool
+                    (address, owner, integration, connection, name, description,
+                     read_only, input_schema, output_schema, call, captured_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            params: [
+              tool.address,
+              tool.owner,
+              tool.integration,
+              tool.connection,
+              tool.name,
+              tool.description,
+              tool.readOnly ? 1 : 0,
+              nullable(tool.inputSchema === undefined
+                ? undefined
+                : JSON.stringify(tool.inputSchema)),
+              nullable(tool.outputSchema === undefined
+                ? undefined
+                : JSON.stringify(tool.outputSchema)),
+              JSON.stringify(tool.call),
+              tool.capturedAt
+            ] satisfies ReadonlyArray<SqlValue>
+          }))
+        ])
+      )
+
       const findSpecDocument = Effect.fn("CatalogStore.findSpecDocument")(
         function* (source: string) {
           const rows = yield* database.query({
@@ -520,6 +683,9 @@ export class CatalogStore extends Context.Service<
         putOAuthClient,
         putOAuthFlow,
         takeOAuthFlow,
+        listTools,
+        findTool,
+        replaceTools,
         findSpecDocument,
         putSpecDocument
       }

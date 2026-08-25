@@ -1,8 +1,8 @@
 import { buildRequest } from "./request.ts"
 import { Context, Effect, Layer, Option } from "effect"
 import { describeCause, InvocationError, SpecError } from "../errors.ts"
-import type { CompiledOperation, CompiledSpec } from "./compile.ts"
-import { resolveServer, splitInput } from "./compile.ts"
+import type { HttpCall } from "../catalog/tool-call.ts"
+import { missingArguments, splitArguments } from "./arguments.ts"
 import { whenPresent } from "@mokronos/contracts"
 import { AuthPlacement } from "@mokronos/contracts"
 import { parseJsonString, type Json } from "@mokronos/contracts"
@@ -99,16 +99,13 @@ const errorDetail = (body: string): string => {
 }
 
 export interface OpenApiCall {
-  readonly spec: CompiledSpec
-  readonly operation: CompiledOperation
+  /** The tool being performed, as captured. */
+  readonly call: HttpCall
+  /** Name for error messages; the call itself carries no identity. */
+  readonly tool: string
+  /** The absolute server, resolved at capture. */
+  readonly server: string
   readonly input: Json
-  /** Where the document was fetched from. A document may declare a relative
-   *  server — Swagger's own petstore says `/api/v3` — which is only resolvable
-   *  against this, so it is what makes such a document callable at all. */
-  readonly specSource: Option.Option<string>
-  /** Replaces the document's server entirely, for a deployment that hosts the
-   *  same API somewhere else. */
-  readonly baseUrl: Option.Option<string>
   readonly credential: Option.Option<ResolvedCredential>
   readonly timeoutMillis?: number
 }
@@ -127,50 +124,30 @@ export class OpenApiInvoker extends Context.Service<
     OpenApiInvoker,
     Effect.sync(() => ({
       call: Effect.fn("OpenApiInvoker.call")(function* (call: OpenApiCall) {
-        const split = splitInput(call.operation, call.input)
+        const split = splitArguments(call.call, call.input)
         if (split.unknown.length > 0) {
           return yield* new InvocationError({
             code: "unknown_argument",
-            detail: `${call.operation.name} does not accept: ${split.unknown.join(", ")}`
+            detail: `${call.tool} does not accept: ${split.unknown.join(", ")}`
           })
         }
-
-        // A missing required parameter would otherwise leave its `{placeholder}`
-        // in the path, or silently drop a required filter — a request the
-        // upstream rejects for reasons that do not name the real problem.
-        const missing = call.operation.parameters
-          .filter((parameter) =>
-            parameter.required && split.parameters[parameter.name] === undefined
-          )
-          .map((parameter) => parameter.name)
+        const missing = missingArguments(call.call, split.parameters)
         if (missing.length > 0) {
           return yield* new InvocationError({
             code: "missing_argument",
-            detail: `${call.operation.name} requires: ${missing.join(", ")}`
-          })
-        }
-
-        const server = resolveServer(call.spec, {
-          baseUrl: call.baseUrl,
-          specSource: call.specSource
-        })
-        if (Option.isNone(server)) {
-          return yield* new SpecError({
-            source: call.operation.name,
-            detail: "The document declares no server, and none was configured"
+            detail: `${call.tool} requires: ${missing.join(", ")}`
           })
         }
 
         const built = yield* Effect.try({
           try: () => buildRequest({
-            spec: call.spec,
-            operation: call.operation,
-            server: server.value,
+            call: call.call,
+            server: call.server,
             parameters: split.parameters,
             requestBody: split.requestBody
           }),
           catch: (cause) => new SpecError({
-            source: call.operation.name,
+            source: call.tool,
             detail: `Could not build the request: ${describeCause(cause)}`,
             cause
           })
@@ -196,7 +173,7 @@ export class OpenApiInvoker extends Context.Service<
             duration: call.timeoutMillis ?? defaultTimeoutMillis,
             orElse: () => Effect.fail(new InvocationError({
               code: "timeout",
-              detail: `${call.operation.name} did not answer in time`
+              detail: `${call.tool} did not answer in time`
             }))
           })
         )

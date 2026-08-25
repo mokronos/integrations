@@ -1,7 +1,7 @@
-import { whenPresent } from "./optional.ts"
 import { stat } from "node:fs/promises"
 import path from "node:path"
 import { Schema } from "effect"
+import { whenPresent } from "@mokronos/contracts"
 
 /** Upgrading a CLI: work out how this copy was installed, then use the thing
  * that installed it.

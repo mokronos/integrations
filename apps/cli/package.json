@@ -41,6 +41,7 @@
   },
   "dependencies": {
     "@effect/platform-bun": "4.0.0-beta.59",
+    "@mokronos/contracts": "workspace:*",
     "@mokronos/integrations": "workspace:*",
     "@mokronos/integrations-client": "workspace:*",
     "@mokronos/observability": "workspace:*",

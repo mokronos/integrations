@@ -1,4 +1,4 @@
-import { whenTrue } from "./optional.ts"
+import { whenTrue } from "@mokronos/contracts"
 import { Effect, Schema } from "effect"
 
 /** How results are shaped for the reader.

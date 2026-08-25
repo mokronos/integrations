@@ -17,6 +17,7 @@ import { ToolAddress } from "@mokronos/contracts"
 const stubMcp = (options: {
   readonly readOnly?: boolean
   readonly onCall?: (tool: string, credential: Option.Option<string>) => void
+  readonly onList?: () => void
 } = {}): Layer.Layer<McpHost> =>
   Layer.effect(
     McpHost,
@@ -32,7 +33,9 @@ const stubMcp = (options: {
         serverName: "Notes",
         instructions: "A notebook."
       }),
-      listTools: () => Effect.succeed([
+      listTools: () => {
+        options.onList?.()
+        return Effect.succeed([
         {
           name: "search_notes",
           description: "Search the notebook.",
@@ -45,7 +48,8 @@ const stubMcp = (options: {
           inputSchema: { type: "object", properties: { body: { type: "string" } } },
           annotations: { readOnlyHint: false }
         }
-      ]),
+      ])
+      },
       callTool: (_endpoint, credential, tool) => {
         options.onCall?.(tool, Option.map(credential, (value) => value.headerValue))
         return Effect.succeed({ content: [{ type: "text", text: `${tool} ran` }] })
@@ -173,6 +177,78 @@ describe("connections", () => {
 })
 
 describe("tools", () => {
+  it("captures once, so listing never reaches the endpoint again", async () => {
+    // This is the point of storing tools: opening a dashboard used to be one
+    // `tools/list` round trip per connection.
+    let listings = 0
+    const counted = stubMcp({ onList: () => { listings += 1 } })
+    const seen = await run(
+      Effect.gen(function* () {
+        const host = yield* IntegrationHost
+        yield* install()
+        const afterConnect = listings
+        yield* host.listTools({ integration: notes })
+        yield* host.listTools({ integration: notes })
+        yield* host.toolSummaries({ integration: notes })
+        yield* host.describeTool({ integration: notes, name: "search_notes" })
+        return { afterConnect, afterReads: listings }
+      }),
+      counted
+    )
+    expect(seen.afterConnect).toBe(1)
+    expect(seen.afterReads).toBe(1)
+  })
+
+  it("re-reads the endpoint only when asked to refresh", async () => {
+    let listings = 0
+    const counted = stubMcp({ onList: () => { listings += 1 } })
+    const seen = await run(
+      Effect.gen(function* () {
+        const host = yield* IntegrationHost
+        yield* install()
+        yield* host.refreshConnection({ owner: "org", integration: notes, name: primary })
+        return listings
+      }),
+      counted
+    )
+    expect(seen).toBe(2)
+  })
+
+  it("drops a tool the upstream stopped exposing", async () => {
+    // Replacing rather than merging is what makes a withdrawn tool disappear.
+    let shrunk = false
+    const shrinking = Layer.effect(
+      McpHost,
+      Effect.sync(() => ({
+        probe: () => Effect.succeed({
+          connected: true, requiresAuthentication: false, requiresOAuth: false,
+          supportsDynamicRegistration: false, name: "Notes", slug: "notes",
+          toolCount: 2, serverName: "Notes", instructions: null
+        }),
+        listTools: () => Effect.succeed(shrunk
+          ? [{ name: "search_notes", description: "", annotations: { readOnlyHint: true } }]
+          : [
+            { name: "search_notes", description: "", annotations: { readOnlyHint: true } },
+            { name: "write_note", description: "", annotations: { readOnlyHint: false } }
+          ]),
+        callTool: () => Effect.succeed({ content: [] })
+      }))
+    )
+    const names = await run(
+      Effect.gen(function* () {
+        const host = yield* IntegrationHost
+        yield* install()
+        const before = (yield* host.toolSummaries({ integration: notes })).length
+        shrunk = true
+        yield* host.refreshConnection({ owner: "org", integration: notes, name: primary })
+        const after = yield* host.toolSummaries({ integration: notes })
+        return { before, after: after.map((tool) => tool.name) }
+      }),
+      shrinking
+    )
+    expect(names).toEqual({ before: 2, after: ["search_notes"] })
+  })
+
   it("addresses every tool a connection exposes", async () => {
     const tools = await run(Effect.gen(function* () {
       const host = yield* IntegrationHost
@@ -225,7 +301,7 @@ describe("tools", () => {
     expect(both.byName).toBe(both.byAddress)
   })
 
-  it("rejects an address that names no connection it holds", async () => {
+  it("rejects an address it holds no tool for", async () => {
     const outcome = await run(Effect.result(Effect.gen(function* () {
       const host = yield* IntegrationHost
       yield* install()
@@ -236,7 +312,9 @@ describe("tools", () => {
     })))
     expect(outcome._tag).toBe("Failure")
     if (outcome._tag === "Failure") {
-      expect(outcome.failure._tag).toBe("ConnectionNotFoundError")
+      // Tools are captured, so an address that was never captured is unknown
+      // here rather than being forwarded to an endpoint to reject.
+      expect(outcome.failure._tag).toBe("ToolNotFoundError")
     }
   })
 
@@ -248,9 +326,8 @@ describe("tools", () => {
   })
 
   it("surfaces a server-reported tool error as a failure", async () => {
-    // An unknown MCP tool is the server's call to reject, not ours: it is
-    // authoritative about what it exposes. What matters here is that its
-    // refusal becomes a failure rather than a successful result.
+    // A server that refuses a call it does expose must produce a failure, not a
+    // successful result carrying an error payload.
     const failing = Layer.effect(
       McpHost,
       Effect.sync(() => ({
@@ -265,9 +342,13 @@ describe("tools", () => {
           serverName: "Notes",
           instructions: null
         }),
-        listTools: () => Effect.succeed([]),
+        listTools: () => Effect.succeed([{
+          name: "search_notes",
+          description: "Search the notebook.",
+          annotations: { readOnlyHint: true }
+        }]),
         callTool: () => Effect.succeed({
-          content: [{ type: "text", text: "Unknown tool: absent" }],
+          content: [{ type: "text", text: "the notebook is locked" }],
           isError: true
         })
       }))
@@ -277,7 +358,7 @@ describe("tools", () => {
         const host = yield* IntegrationHost
         yield* install()
         return yield* host.execute(
-          ToolAddress.make("tools.notes.org.primary.absent"),
+          ToolAddress.make("tools.notes.org.primary.search_notes"),
           {}
         )
       })),
@@ -287,7 +368,7 @@ describe("tools", () => {
     if (outcome._tag === "Failure") {
       expect(outcome.failure._tag).toBe("InvocationError")
       // The server's own words reach the caller, not a generic message.
-      expect(outcome.failure.message).toContain("Unknown tool: absent")
+      expect(outcome.failure.message).toContain("the notebook is locked")
     }
   })
 

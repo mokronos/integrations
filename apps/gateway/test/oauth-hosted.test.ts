@@ -4,12 +4,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import type { AuthApi, IntegrationsApi } from "@mokronos/integration-host"
 import type { Connection } from "@mokronos/contracts"
-import {
-  createGatewayHandler,
-  createOAuthSessions,
-  gatewayRoutes,
-  createGatewayStore
-} from "../src/index.ts"
+import { createGatewayHandler, createOAuthSessions, createGatewayStore } from "../src/index.ts"
 import type { GatewayStore } from "../src/index.ts"
 
 const directories: Array<string> = []
@@ -189,9 +184,7 @@ const stubIntegrations = (): IntegrationsApi => ({
     ensure: notStubbed("connections.ensure")
   },
   catalog: {
-    detectIntegration: notStubbed("catalog.detectIntegration"),
-    probeMcp: notStubbed("catalog.probeMcp"),
-    previewOpenApi: notStubbed("catalog.previewOpenApi"),
+    classify: notStubbed("catalog.classify"),
     list: notStubbed("catalog.list"),
     find: notStubbed("catalog.find"),
     addMcp: notStubbed("catalog.addMcp"),
@@ -204,7 +197,6 @@ const stubIntegrations = (): IntegrationsApi => ({
     start: notStubbed("auth.start"),
     complete: notStubbed("auth.complete")
   },
-  discovery: { inspect: notStubbed("discovery.inspect") },
   provisioning: {
     install: notStubbed("provisioning.install"),
     provision: notStubbed("provisioning.provision")
@@ -216,17 +208,14 @@ const stubIntegrations = (): IntegrationsApi => ({
 describe("the hosted callback route", () => {
 
   const setup = async (
-    oauthSessions: Parameters<typeof gatewayRoutes>[0]["oauth"]
+    oauthSessions: Parameters<typeof createGatewayHandler>[0]["oauth"]
   ) => {
     const store = await makeStore()
-    const handle = createGatewayHandler({
+    const { handle } = createGatewayHandler({
       store,
-      routes: gatewayRoutes({
-        store,
-        integrations: stubIntegrations(),
-        retentionDays: 30,
-        oauth: oauthSessions
-      })
+      integrations: stubIntegrations(),
+      retentionDays: 30,
+      oauth: oauthSessions
     })
     return async (pathname: string) => {
       const response = await handle(new Request(`http://gateway.test${pathname}`))

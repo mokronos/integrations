@@ -25,6 +25,7 @@ export { McpHost } from "./mcp/client.ts"
 export { OAuthFlows } from "./oauth/flows.ts"
 export { OpenApiInvoker } from "./openapi/invoke.ts"
 export { SpecCache } from "./openapi/cache.ts"
+export { classify } from "./classify.ts"
 
 /** The two storage seams, and the layers that satisfy them. */
 export { applySchema, Database, libsqlLayer, memoryLayer, SqlValue } from "./storage/database.ts"
@@ -67,13 +68,11 @@ export {
 } from "./catalog/auth-methods.ts"
 
 /** Specification handling. */
-export { compileSpec, previewOf, resolveServer, splitInput } from "./openapi/compile.ts"
-export type {
-  CompiledOperation,
-  CompiledParameter,
-  CompiledSecurityScheme,
-  CompiledSpec
-} from "./openapi/compile.ts"
+export { compileSpec, previewOf, resolveServer } from "./openapi/compile.ts"
+export type { CompiledSpec } from "./openapi/compile.ts"
+export { splitArguments } from "./openapi/arguments.ts"
+export { ToolCall } from "./catalog/tool-call.ts"
+export type { ToolRecord } from "./catalog/store.ts"
 export { buildRequest } from "./openapi/request.ts"
 export { convertGoogleDiscovery, isGoogleDiscoveryUrl } from "./openapi/google-discovery.ts"
 export { normalizeOutputSchema, normalizeToolResult } from "./mcp/result.ts"
@@ -97,7 +96,6 @@ export type {
 } from "./facade/api.ts"
 export { createHostHandle, HostClosedError, HostHandleService } from "./facade/lifecycle.ts"
 export type { HostHandle, HostServices, HostStorage } from "./facade/lifecycle.ts"
-export { createIntegrationDiscovery } from "./facade/discovery.ts"
 export { createIntegrationOverview } from "./facade/overview.ts"
 export { createIntegrationProvisioning } from "./facade/provisioning.ts"
 export { createIntegrationValidation } from "./facade/validation.ts"

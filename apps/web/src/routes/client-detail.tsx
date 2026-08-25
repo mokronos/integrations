@@ -1,8 +1,7 @@
 import { useMemo, useState } from "react"
 import { Link, useParams } from "react-router"
 import { ArrowLeft, Code2, Copy, KeyRound, ShieldAlert, Trash2 } from "lucide-react"
-import { generateModule } from "@mokronos/integrations-client/codegen"
-import { Schema } from "effect"
+import { generateTypeScriptModule } from "@mokronos/integrations-client/codegen"
 import { toast } from "sonner"
 
 import { LoadingRows, Page, QueryError, ReloadButton } from "@/components/page"
@@ -76,20 +75,15 @@ const decisionLabel = {
   require_approval: "Ask a human"
 } satisfies Readonly<Record<GrantDecision, string>>
 
-const CodegenTarget = Schema.Literals(["effect", "ts"])
-type CodegenTarget = typeof CodegenTarget.Type
-const decodeCodegenTarget = Schema.decodeUnknownSync(CodegenTarget)
-
 function CodegenDialog({ clientId }: { readonly clientId: string }) {
   const [open, setOpen] = useState(false)
-  const [target, setTarget] = useState<CodegenTarget>("effect")
   const [module, setModule] = useState<string | undefined>()
 
   const generate = useMutation({
     mutationFn: async () => {
       const tools = await gateway.listClientTools(clientId, true)
       if (tools.length === 0) throw new Error("Grant at least one tool before generating bindings")
-      return generateModule(target, tools, window.location.origin)
+      return generateTypeScriptModule(tools, window.location.origin)
     },
     onSuccess: setModule,
     onError: (error: Error) => toast.error("Could not generate bindings", { description: error.message })
@@ -108,14 +102,6 @@ function CodegenDialog({ clientId }: { readonly clientId: string }) {
           </DialogDescription>
         </DialogHeader>
         <div className="flex items-center gap-2">
-          <Label>Target</Label>
-          <Select value={target} onValueChange={(value) => setTarget(decodeCodegenTarget(value))}>
-            <SelectTrigger className="w-52"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="effect">Effect workflow steps</SelectItem>
-              <SelectItem value="ts">TypeScript client calls</SelectItem>
-            </SelectContent>
-          </Select>
           <Button onClick={() => generate.mutate()} disabled={generate.isPending}>
             {generate.isPending ? "Generating…" : "Generate"}
           </Button>

@@ -1,6 +1,6 @@
 import { Option } from "effect"
 import { isJsonObject, isJsonString, type Json } from "@mokronos/contracts"
-import type { CompiledOperation, CompiledParameter, CompiledSpec } from "./compile.ts"
+import type { CallParameter, HttpCall } from "../catalog/tool-call.ts"
 
 /** Turning an operation and a caller's arguments into an HTTP request.
  *
@@ -48,7 +48,7 @@ const delimiter = (style: string): string => {
  *  Returning pairs rather than a string is what lets `URLSearchParams` do the
  *  percent-encoding: encoding by hand is where this kind of code goes wrong. */
 const queryPairs = (
-  parameter: CompiledParameter,
+  parameter: CallParameter,
   value: Json
 ): ReadonlyArray<readonly [string, string]> => {
   const { name, style, explode } = parameter
@@ -79,7 +79,7 @@ const queryPairs = (
 /** One path parameter's replacement text. Percent-encoded here rather than by
  *  the URL parser, because a `/` inside a value must not become a segment
  *  boundary. */
-const pathSegment = (parameter: CompiledParameter, value: Json): string => {
+const pathSegment = (parameter: CallParameter, value: Json): string => {
   const encode = (entry: Json): string => encodeURIComponent(scalar(entry))
 
   if (Array.isArray(value)) {
@@ -121,23 +121,14 @@ const pathSegment = (parameter: CompiledParameter, value: Json): string => {
   }
 }
 
-/** Fills in a server URL's own `{variable}` placeholders from its declared
- *  defaults. A server that leaves one without a default is unusable, so the
- *  placeholder is left in place for the failure to name it. */
-const applyServerVariables = (
-  server: string,
-  variables: Readonly<Record<string, string>>
-): string =>
-  server.replace(/\{([^{}]+)\}/g, (whole, name: string) => variables[name] ?? whole)
-
 const jsonContentType = /^application\/(?:[\w.+-]+\+)?json\b/i
 
 /** Encodes the request body in the media type the operation declares. */
 const encodeBody = (
-  operation: CompiledOperation,
+  call: HttpCall,
   body: Json
 ): Option.Option<string> => {
-  const contentType = Option.getOrElse(operation.contentType, () => "application/json")
+  const contentType = call.contentType ?? "application/json"
   if (/^application\/x-www-form-urlencoded\b/i.test(contentType)) {
     const encoded = new URLSearchParams()
     for (const [key, value] of entriesOf(body)) encoded.append(key, scalar(value))
@@ -150,27 +141,24 @@ const encodeBody = (
 }
 
 export interface BuildRequestOptions {
-  readonly spec: CompiledSpec
-  readonly operation: CompiledOperation
-  /** The absolute origin (and any base path) the request goes to. */
+  /** How to perform this tool, as captured. */
+  readonly call: HttpCall
+  /** The absolute origin, and any base path, the request goes to. Server
+   *  variables were resolved at capture, so this needs no further filling in. */
   readonly server: string
   readonly parameters: Readonly<Record<string, Json>>
   readonly requestBody: Option.Option<Json>
 }
 
 export const buildRequest = (options: BuildRequestOptions): BuiltRequest => {
-  const { operation } = options
-  const declared = new Map(
-    operation.parameters.map((parameter) => [parameter.name, parameter])
-  )
-
-  const serverVariables = options.spec.servers[0]?.variables ?? {}
-  const base = applyServerVariables(options.server, serverVariables).replace(/\/+$/, "")
+  const call = options.call
+  const declared = new Map(call.parameters.map((parameter) => [parameter.name, parameter]))
+  const base = options.server.replace(/\/+$/, "")
 
   // Path parameters are substituted into the template, so an unsupplied one
   // leaves its placeholder visible in the failing URL rather than silently
   // collapsing two segments together.
-  const path = operation.path.replace(/\{([^{}]+)\}/g, (whole, name: string) => {
+  const path = call.path.replace(/\{([^{}]+)\}/g, (whole, name: string) => {
     const parameter = declared.get(name)
     const value = options.parameters[name]
     if (parameter === undefined || value === undefined) return whole
@@ -206,18 +194,15 @@ export const buildRequest = (options: BuildRequestOptions): BuiltRequest => {
     }
   }
 
-  const body = Option.flatMap(options.requestBody, (value) => encodeBody(operation, value))
+  const body = Option.flatMap(options.requestBody, (value) => encodeBody(call, value))
   if (Option.isSome(body)) {
-    headers["content-type"] = Option.getOrElse(
-      operation.contentType,
-      () => "application/json"
-    )
+    headers["content-type"] = call.contentType ?? "application/json"
   }
 
   const search = query.toString()
   return {
     url: `${base}${path.startsWith("/") ? path : `/${path}`}${search.length === 0 ? "" : `?${search}`}`,
-    method: operation.method.toUpperCase(),
+    method: call.method.toUpperCase(),
     headers,
     body
   }

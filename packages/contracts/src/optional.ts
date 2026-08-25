@@ -1,3 +1,7 @@
+/** Spread-form helpers for building object literals under
+ *  `exactOptionalPropertyTypes`: each returns a fragment that only carries the
+ *  keys whose value is actually there, so an absent value never shows up as a
+ *  key set to `undefined`. */
 import { Option } from "effect"
 
 /** Spread form for including an exact optional property only when present. */
@@ -14,7 +18,9 @@ export const whenPresent = <K extends string, V>(
     }
   })
 
-/** As {@link whenPresent}, converting a present value before including it. */
+/** As {@link whenPresent}, but converts the value on the way in. The conversion
+ *  never runs for an absent value, which is what lets a branded constructor be
+ *  passed here directly. */
 export const whenPresentMap = <K extends string, V, W>(
   key: K,
   value: V | null | undefined,
@@ -27,4 +33,23 @@ export const whenPresentMap = <K extends string, V, W>(
       field[key] = present
       return field
     }
+  })
+
+/** Spread form for a group of fields derived from one possibly-absent value.
+ *  Use when presence controls more than one key at once. */
+export const whenPresentFields = <V, T extends object>(
+  value: V | null | undefined,
+  fields: (present: V) => T
+) =>
+  Option.match(Option.fromNullishOr(value), {
+    onNone: () => ({}),
+    onSome: fields
+  })
+
+/** Spread form for a group of fields governed by a plain condition rather than
+ *  by a value being present. */
+export const whenTrue = <T extends object>(condition: boolean, fields: () => T) =>
+  Option.match(condition ? Option.some(undefined) : Option.none(), {
+    onNone: () => ({}),
+    onSome: fields
   })

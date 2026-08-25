@@ -54,3 +54,14 @@ export const objectEntries = (value: Json): Record<string, Json> =>
 export const parseJsonString = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.Json)
 )
+
+/** A value on its way out through JSON.stringify: JSON plus what stringify
+ *  converts or drops, namely Dates and optional properties typed
+ *  `| undefined`. Request bodies are often built from optional fields, so
+ *  {@link Json} alone is too narrow for them. */
+export type JsonEncodable =
+  | Json
+  | undefined
+  | Date
+  | ReadonlyArray<JsonEncodable>
+  | { readonly [key: string]: JsonEncodable }

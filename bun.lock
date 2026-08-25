@@ -4,6 +4,9 @@
   "workspaces": {
     "": {
       "name": "integrations-monorepo",
+      "dependencies": {
+        "effect": "4.0.0-beta.59",
+      },
       "devDependencies": {
         "@effect/language-service": "^0.86.4",
         "@oxlint/plugins": "1.79.0",
@@ -22,6 +25,7 @@
       },
       "dependencies": {
         "@effect/platform-bun": "4.0.0-beta.59",
+        "@mokronos/contracts": "workspace:*",
         "@mokronos/integrations": "workspace:*",
         "@mokronos/integrations-client": "workspace:*",
         "@mokronos/observability": "workspace:*",
@@ -32,6 +36,7 @@
       "name": "@mokronos/integrations",
       "version": "0.2.0",
       "dependencies": {
+        "@effect/platform-bun": "4.0.0-beta.59",
         "@libsql/client": "0.17.3",
         "@mokronos/contracts": "workspace:*",
         "@mokronos/integration-host": "workspace:*",
@@ -53,6 +58,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@fontsource-variable/geist": "^5.2.9",
+        "@mokronos/contracts": "workspace:*",
         "@mokronos/integration-host": "workspace:*",
         "@mokronos/integrations": "workspace:*",
         "@mokronos/integrations-client": "workspace:*",
@@ -119,6 +125,7 @@
       "name": "@mokronos/observability",
       "version": "0.1.0",
       "dependencies": {
+        "@mokronos/contracts": "workspace:*",
         "effect": "4.0.0-beta.59",
       },
     },

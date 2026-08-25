@@ -1,4 +1,4 @@
-import { whenPresent, whenPresentMap } from "@/lib/optional"
+import { whenPresent, whenPresentMap } from "@mokronos/contracts"
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router"
 import { Copy, Download, ExternalLink, Plug, RefreshCcw, Search, Unplug } from "lucide-react"

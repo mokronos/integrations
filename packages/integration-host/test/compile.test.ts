@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import { Effect, Option } from "effect"
-import { compileSpec, previewOf, resolveServer, splitInput } from "../src/openapi/compile.ts"
+import { compileSpec, previewOf, resolveServer } from "../src/openapi/compile.ts"
 import { convertGoogleDiscovery, isGoogleDiscoveryUrl } from "../src/openapi/google-discovery.ts"
 import { isJsonObject, property, type Json } from "@mokronos/contracts"
 
@@ -139,35 +139,6 @@ describe("resolving the server", () => {
   })
 })
 
-describe("splitting a caller's input", () => {
-  it("routes each property to the location the operation declared", async () => {
-    const compiled = await run(compileSpec("https://example.com/openapi.json", spec))
-    const list = compiled.operations.find((operation) => operation.name === "listNodes")!
-    const split = splitInput(list, { treeId: "t1", depth: 3, "X-Trace": "abc" })
-    expect(split.parameters).toEqual({ treeId: "t1", depth: 3, "X-Trace": "abc" })
-    expect(Option.isNone(split.requestBody)).toBe(true)
-    expect(split.unknown).toEqual([])
-  })
-
-  it("reports a property the operation does not declare instead of forwarding it", async () => {
-    const compiled = await run(compileSpec("https://example.com/openapi.json", spec))
-    const list = compiled.operations.find((operation) => operation.name === "listNodes")!
-    const split = splitInput(list, { treeId: "t1", invented: "x" })
-    // Forwarding it would default to the query string, turning a caller's typo
-    // into a filter nobody asked for.
-    expect(split.unknown).toEqual(["invented"])
-    expect(split.parameters).toEqual({ treeId: "t1" })
-  })
-
-  it("separates the body from the parameters", async () => {
-    const compiled = await run(compileSpec("https://example.com/openapi.json", spec))
-    const add = compiled.operations.find((operation) => operation.name === "addNode")!
-    const split = splitInput(add, { treeId: "t1", body: { label: "root" } })
-    expect(split.parameters).toEqual({ treeId: "t1" })
-    expect(Option.getOrNull(split.requestBody)).toEqual({ label: "root" })
-  })
-})
-
 describe("previewing a specification", () => {
   it("summarises without installing anything", async () => {
     const compiled = await run(compileSpec("https://example.com/openapi.json", spec))
@@ -276,9 +247,10 @@ describe("Google Discovery", () => {
     const defs: Json = property(send.inputSchema, "$defs")
     expect(Object.keys(isJsonObject(defs) ? defs : {}).toSorted())
       .toEqual(["Message", "MessagePart"])
-    const split = splitInput(send, { userId: "me", body: { raw: "UkFX" } })
-    expect(split.parameters).toEqual({ userId: "me" })
-    expect(Option.getOrNull(split.requestBody)).toEqual({ raw: "UkFX" })
+    // Splitting a caller's arguments is exercised against the captured
+    // descriptor in arguments.test.ts; what matters here is that the operation
+    // carries a body location at all.
+    expect(Option.getOrNull(send.bodyProperty)).toBe("body")
   })
 
   it("derives OAuth with the scopes the method declares", async () => {

@@ -1,7 +1,11 @@
 import { describe, expect, it } from "bun:test"
 import { Effect, Option } from "effect"
-import { compileSpec, splitInput } from "../src/openapi/compile.ts"
+import { compileSpec, resolveServer } from "../src/openapi/compile.ts"
+import { splitArguments } from "../src/openapi/arguments.ts"
 import { buildRequest } from "../src/openapi/request.ts"
+import { captureOpenApiTools } from "../src/catalog/capture.ts"
+import type { HttpCall } from "../src/catalog/tool-call.ts"
+import { ConnectionName, IntegrationSlug } from "@mokronos/contracts"
 import type { CompiledSpec } from "../src/openapi/compile.ts"
 import type { Json } from "@mokronos/contracts"
 
@@ -94,22 +98,39 @@ const spec: CompiledSpec = await Effect.runPromise(
   compileSpec("https://api.example.com/openapi.json", document)
 )
 
-const operation = (name: string) => {
-  const found = spec.operations.find((candidate) => candidate.name === name)
-  if (found === undefined) throw new Error(`no operation ${name}`)
-  return found
+/** Captured exactly as installing would, so the tests exercise the stored
+ *  descriptor rather than the compiled operation it came from. */
+const captured = await Effect.runPromise(captureOpenApiTools(
+  {
+    owner: "org",
+    integration: IntegrationSlug.make("styles"),
+    connection: ConnectionName.make("default")
+  },
+  spec,
+  0
+))
+
+const httpCall = (name: string): HttpCall => {
+  const found = captured.find((candidate) => candidate.name === name)
+  if (found === undefined) throw new Error(`no tool ${name}`)
+  if (found.call.kind !== "http") throw new Error(`${name} is not an HTTP call`)
+  return found.call
 }
+
+const defaultServer = Option.getOrThrow(resolveServer(spec, {
+  baseUrl: Option.none(),
+  specSource: Option.some("https://api.example.com/openapi.json")
+}))
 
 const build = (
   name: string,
   input: Record<string, Json>,
-  server = "https://api.example.com/{ver}"
+  server = defaultServer
 ) => {
-  const op = operation(name)
-  const split = splitInput(op, input)
+  const call = httpCall(name)
+  const split = splitArguments(call, input)
   return buildRequest({
-    spec,
-    operation: op,
+    call,
     server,
     parameters: split.parameters,
     requestBody: split.requestBody

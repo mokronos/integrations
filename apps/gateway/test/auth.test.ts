@@ -3,8 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { Schema } from "effect"
-import { whenPresent } from "../src/optional.ts"
 import type { IntegrationsApi } from "@mokronos/integration-host"
+import { whenPresent } from "@mokronos/contracts"
 import {
   Alias,
   ConnectionName,
@@ -13,7 +13,6 @@ import {
   defaultTenantId,
   generateApiKey,
   IntegrationSlug,
-  gatewayRoutes,
   newClientId,
   newGrantId,
   TenantId,
@@ -58,9 +57,7 @@ const stubIntegrations = (): IntegrationsApi => ({
     ensure: notStubbed("connections.ensure")
   },
   catalog: {
-    detectIntegration: notStubbed("catalog.detectIntegration"),
-    probeMcp: notStubbed("catalog.probeMcp"),
-    previewOpenApi: notStubbed("catalog.previewOpenApi"),
+    classify: notStubbed("catalog.classify"),
     list: notStubbed("catalog.list"),
     find: notStubbed("catalog.find"),
     addMcp: notStubbed("catalog.addMcp"),
@@ -73,7 +70,6 @@ const stubIntegrations = (): IntegrationsApi => ({
     start: notStubbed("auth.start"),
     complete: notStubbed("auth.complete")
   },
-  discovery: { inspect: notStubbed("discovery.inspect") },
   provisioning: {
     install: notStubbed("provisioning.install"),
     provision: notStubbed("provisioning.provision")
@@ -116,24 +112,21 @@ const setup = async (options: SetupOptions = {}) => {
     decision: "allow"
   })
 
-  const handle = createGatewayHandler({
+  const { handle } = createGatewayHandler({
     store,
-    routes: gatewayRoutes({
-      store,
-      integrations: stubIntegrations(),
-      retentionDays: 30,
-      oauth: {
-        start: async () => { throw new Error("not used") },
-        get: async () => undefined,
-        completeByState: async () => undefined,
-        stop: () => undefined
-      },
-      sessions: {
-        signupOpen: options.signupOpenOf ?? (async () => options.signupOpen ?? false),
-        secureCookies: options.secureCookies ?? false,
-        ...whenPresent("google", options.google)
-      }
-    })
+    integrations: stubIntegrations(),
+    retentionDays: 30,
+    oauth: {
+      start: async () => { throw new Error("not used") },
+      get: async () => undefined,
+      completeByState: async () => undefined,
+      stop: () => undefined
+    },
+    sessions: {
+      signupOpen: options.signupOpenOf ?? (async () => options.signupOpen ?? false),
+      secureCookies: options.secureCookies ?? false,
+      ...whenPresent("google", options.google)
+    }
   })
 
   interface CallInit {

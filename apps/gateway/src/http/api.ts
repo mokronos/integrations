@@ -1,79 +1,53 @@
-import { whenPresent, whenPresentMap } from "../optional.ts"
 import { Schema } from "effect"
-import type { IntegrationsApi } from "@mokronos/integration-host"
-import { searchIntegrations } from "@mokronos/integration-host"
-import { ToolAddress } from "@mokronos/contracts"
-import { refreshIntegrationSnapshot } from "../drift.ts"
-import { runMaintenance } from "../maintenance.ts"
-import { deliverApprovalNotification } from "../approval-delivery.ts"
-import { oauthBrowserPage } from "../oauth.ts"
-import type { OAuthSessions } from "../oauth-sessions.ts"
-import type { GoogleIdentityOAuth } from "../identity-oauth.ts"
-import { authRoutes } from "./auth-api.ts"
 import {
-  Alias,
-  ApiKeyId,
+  HttpApi,
+  HttpApiEndpoint,
+  HttpApiGroup,
+  HttpApiSchema
+} from "effect/unstable/httpapi"
+import {
   ApprovalDelivery,
   ApprovalId,
+  ApprovalStatus,
+  AuditOutcome,
+  AuditRecord,
+  Client,
   ClientCapability,
   ClientId,
-  ConnectionName,
+  Alias,
+  ApiKeyId,
+  Grant,
   GrantId,
-  IntegrationSlug,
-  ToolName
+  GrantDecision,
+  PendingApproval,
+  SubjectId
 } from "../domain.ts"
 import {
-  executeAuthorized,
-  grantToolAddress,
-  invokeThroughGateway,
-  listGrantedTools
-} from "../invoke.ts"
-import { generateApiKey, newClientId, newGrantId } from "../keys.ts"
-import type { GatewayStore } from "../store.ts"
-import {
-  badRequest,
-  clientOf,
-  created,
-  decodeBody,
-  notFound,
-  ok,
-  secretOf,
-  tenantOf
-} from "./router.ts"
-import type { Route } from "./router.ts"
+  Connection,
+  IntegrationDiscovery,
+  IntegrationSearchKind,
+  IntegrationSearchResponse,
+  IntegrationValidationReport,
+  IntegrationOverview,
+  Tool,
+  ToolAddress,
+  ToolSummary
+} from "@mokronos/contracts"
+import { Authority } from "./authority.ts"
+import { ForbiddenError, RequiredAccess, Unmetered } from "./identity.ts"
 
-export interface ApiDependencies {
-  readonly store: GatewayStore
-  readonly integrations: IntegrationsApi
-  readonly retentionDays: number
-  readonly oauth: OAuthSessions
-  /** Where a provider must redirect after the human approves, so clients can
-   *  show it before a flow starts — providers like Google and Microsoft want
-   *  this exact URI registered in their consoles up front. `undefined` when no
-   *  callback origin applies (headless, no publicUrl). */
-  readonly oauthCallbackUrl?: () => string | undefined
-  /** Origin of the authenticated control plane, used only to point a human at
-   * a pending approval. */
-  readonly dashboardUrl?: () => string | undefined
-  /** Overrides the public registry for an isolated deployment or acceptance test. */
-  readonly registryUrl?: string
-  /** Login-surface configuration; defaults close signup and serve insecure
-   *  cookies, which is right for a loopback deployment and wrong for a hosted
-   *  one — see `service.ts`, which derives both from how the socket is bound. */
-  readonly sessions?: {
-    readonly signupOpen?: () => Promise<boolean>
-    readonly secureCookies?: boolean
-    readonly sessionTtlHours?: number
-    readonly google?: GoogleIdentityOAuth
-  }
-}
+// --- shared wire shapes -----------------------------------------------------
 
-// --- wire schemas -----------------------------------------------------------
+const Json = Schema.Json
+
+/** An alias arrives on the wire as prose-typed JSON; validating its shape here
+ *  turns a malformed one into an automatic 400 instead of a handler defect. */
+const WireAlias = Alias
 
 const ExecuteBody = Schema.Struct({
-  alias: Schema.String,
+  alias: WireAlias,
   tool: Schema.String,
-  arguments: Schema.optional(Schema.Json)
+  arguments: Schema.optional(Json)
 })
 
 const ConnectionRefBody = Schema.Union([
@@ -102,8 +76,8 @@ const UpdateClientSettingsBody = Schema.Struct({
 })
 
 const CreateGrantBody = Schema.Struct({
-  clientId: Schema.String,
-  alias: Schema.String,
+  clientId: ClientId,
+  alias: WireAlias,
   tool: Schema.String,
   connection: ConnectionRefBody,
   decision: Schema.optional(Schema.Literals(["allow", "require_approval"]))
@@ -133,905 +107,608 @@ const OAuthStartBody = Schema.Struct({
 })
 
 const InvokeAddressBody = Schema.Struct({
-  address: Schema.String,
-  arguments: Schema.optional(Schema.Json)
+  address: ToolAddress,
+  arguments: Schema.optional(Json)
 })
 
 const ValidateBody = Schema.Struct({
-  node: Schema.Json,
+  node: Json,
   live: Schema.optional(Schema.Boolean)
 })
 
-/** The source form a workflow actually authors: an alias bound by a grant, not
- *  a catalog address. Validating it is a question about *this caller's* grants,
- *  which is why it is answered here rather than in the integrations — the integrations
- *  knows the catalog and nothing about delegation. */
-const GatewayNodeSource = Schema.Struct({
-  source: Schema.Struct({
-    kind: Schema.Literal("gateway"),
-    alias: Schema.String,
-    tool: Schema.String
-  })
+const Email = Schema.String.check(
+  Schema.isPattern(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)
+)
+
+export const SignupBody = Schema.Struct({
+  email: Email,
+  /** The one strength rule enforced structurally; scrypt compensates for
+   *  complexity, never for length. */
+  password: Schema.String.check(Schema.isMinLength(8)),
+  tenantName: Schema.optional(Schema.String)
 })
 
-const isGatewayNode = Schema.is(GatewayNodeSource)
-const decodeGatewayNode = Schema.decodeUnknownSync(GatewayNodeSource)
+export const LoginBody = Schema.Struct({
+  email: Email,
+  password: Schema.String
+})
 
-const parseAlias = (value: string): Alias => {
-  if (!/^[a-z][a-z0-9-]*$/.test(value)) {
-    throw new Error(`Alias "${value}" must be lowercase letters, digits, and dashes`)
-  }
-  return Alias.make(value)
-}
+export const ChangeEmailBody = Schema.Struct({
+  email: Email,
+  /** Re-authentication on the way in: whoever can type the current password
+   *  may redirect the account, and a hijacked tab cannot. */
+  password: Schema.String
+})
 
-const positiveInt = (value: string | null, fallback: number): number => {
-  if (value === null) return fallback
-  const parsed = Number.parseInt(value, 10)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
-}
+export const ChangePasswordBody = Schema.Struct({
+  currentPassword: Schema.optional(Schema.String),
+  newPassword: Schema.String.check(Schema.isMinLength(8))
+})
 
-/** Compares connection names the way a human means them. The integrations stores a
- *  normalised name (`docs-demo` becomes `docsDemo`), and rather than reproduce
- *  that transformation — which belongs to the integrations and may change — this
- *  compares the parts a separator convention cannot alter. */
-const normalizeName = (value: string): string => value.toLowerCase().replace(/[^a-z0-9]/g, "")
+export const DeleteAccountBody = Schema.Struct({
+  password: Schema.optional(Schema.String)
+})
 
-const nonNegativeInt = (value: string | null, fallback: number): number => {
-  if (value === null) return fallback
-  const parsed = Number.parseInt(value, 10)
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback
-}
+/** A granted tool as `/v1/tools` reports it. Schemas are opt-in because
+ *  fetching them costs a catalog read per grant. */
+const GrantedTool = Schema.Struct({
+  alias: Alias,
+  tool: Schema.String,
+  integration: Schema.String,
+  decision: GrantDecision,
+  inputSchema: Schema.optional(Json),
+  outputSchema: Schema.optional(Json)
+})
 
-/** Answers the question a workflow author is actually asking: will this step
- *  resolve when it runs, as *this* caller? An alias is not a name in the
- *  catalog — it is a binding held by a grant — so structural validity and
- *  reachability are separate findings. */
-const validateGatewayNode = async (
-  dependencies: {
-    readonly store: GatewayStore
-    readonly integrations: Pick<IntegrationsApi, "tools">
-  },
-  clientId: ClientId | undefined,
-  source: { readonly alias: string; readonly tool: string },
-  live: boolean
-): Promise<{
-  readonly ok: boolean
-  readonly findings: ReadonlyArray<
-    { readonly severity: string; readonly check: string; readonly message: string }
-  >
-}> => {
-  const findings: Array<{ severity: string; check: string; message: string }> = []
-  const aliasIsWellFormed = /^[a-z][a-z0-9-]*$/.test(source.alias)
-  findings.push(
-    aliasIsWellFormed
-      ? { severity: "info", check: "structural", message: "Gateway integration reference is valid" }
-      : {
-        severity: "error",
-        check: "structural",
-        message: `Alias "${source.alias}" must be lowercase letters, digits, and dashes`
-      }
-  )
+/** One invocation, three endings. A frozen call is not an error: the caller
+ *  gets an identifier to poll and suspends rather than failing. The statuses
+ *  are part of the answer, declared here so the encoded response cannot drift
+ *  from what a caller branches on. */
+const InvokedOk = Schema.Union([
+  Schema.Struct({
+    status: Schema.Literal("succeeded"),
+    result: Json
+  }),
+  Schema.Struct({
+    status: Schema.Literal("pending"),
+    approvalId: ApprovalId,
+    expiresAt: Schema.Date,
+    approvalUrl: Schema.optional(Schema.String)
+  })
+])
+const InvokedDenied = Schema.Struct({
+  status: Schema.Literal("denied"),
+  reason: Schema.String
+}).pipe(HttpApiSchema.status(403))
+const InvokedFailed = Schema.Struct({
+  status: Schema.Literal("failed"),
+  message: Schema.String
+}).pipe(HttpApiSchema.status(502))
 
-  if (aliasIsWellFormed && live) {
-    const grants = clientId === undefined
-      ? []
-      : await dependencies.store.listGrants(clientId)
-    const grant = grants.find((candidate) =>
-      candidate.alias === source.alias && candidate.tool === source.tool
-    )
-    if (clientId === undefined) {
-      findings.push({
-        severity: "error",
-        check: "grant",
-        message: "Gateway aliases are client-specific; validate this node with i and its client key"
-      })
-    } else if (grant === undefined) {
-      findings.push({
-        severity: "error",
-        check: "grant",
-        // Naming the alias but not what else it exposes: a validation report is
-        // not a place to enumerate a caller's other capabilities.
-        message: `${source.alias}.${source.tool} is not granted to this key`
-      })
-    } else {
-      findings.push({
-        severity: "info",
-        check: "grant",
-        message: `${source.alias}.${source.tool} resolves to ${grant.connection.integration}/${grant.connection.name}${
-          grant.decision === "require_approval" ? " and is frozen for a human" : ""
-        }`
-      })
-      const address = grantToolAddress(grant.connection, grant.tool)
-      const tools = await dependencies.integrations.tools.list()
-      findings.push(
-        tools.some((candidate) => candidate.address === address)
-          ? { severity: "info", check: "catalog", message: `${grant.tool} is available` }
-          : {
-            severity: "error",
-            check: "catalog",
-            message: `${grant.tool} is granted but no longer in the catalog: ${address}`
-          }
-      )
-    }
-  }
+const SettledOutcome = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("succeeded"), result: Json }),
+  Schema.Struct({ status: Schema.Literal("failed"), message: Schema.String })
+])
 
-  return { ok: !findings.some((finding) => finding.severity === "error"), findings }
-}
+const ValidationFinding = Schema.Struct({
+  severity: Schema.String,
+  check: Schema.String,
+  message: Schema.String
+})
+const ValidationReport = Schema.Struct({
+  ok: Schema.Boolean,
+  findings: Schema.Array(ValidationFinding)
+})
 
-// --- routes -----------------------------------------------------------------
+const DriftReport = Schema.Struct({
+  integration: Schema.String,
+  entries: Schema.Array(Schema.Struct({
+    kind: Schema.Literals(["added", "removed", "changed"]),
+    integration: Schema.String,
+    connection: Schema.String,
+    tool: Schema.String
+  })),
+  checkedAt: Schema.Date,
+  baseline: Schema.Boolean,
+  tools: Schema.Number
+})
 
-/** Picks the auth method a connect request should use, preferring an explicit
- *  template and otherwise the integration's only sensible option. */
-const selectAuthMethod = (
-  methods: ReadonlyArray<{ readonly id: string; readonly template: string; readonly kind: string }>,
-  template: string | undefined
-) => {
-  if (template !== undefined) {
-    const chosen = methods.find((method) => method.template === template || method.id === template)
-    if (chosen === undefined) {
-      throw new Error(
-        `Unknown auth template "${template}". Available: ${methods.map((m) => m.template).join(", ")}`
-      )
-    }
-    return chosen
-  }
-  if (methods.length === 0) return { id: "none", template: "none", kind: "none" }
-  if (methods.length === 1) return methods[0]!
-  const single = methods.find((method) => method.kind === "oauth") ?? methods[0]!
-  return single
-}
+const MaintenanceReport = Schema.Struct({
+  expiredApprovals: Schema.Number,
+  expiredAuditArguments: Schema.Number,
+  deletedSessions: Schema.Number,
+  expiredIdentityFlows: Schema.Number
+})
 
-export const gatewayRoutes = (dependencies: ApiDependencies): ReadonlyArray<Route> => {
-  const { store, integrations, retentionDays, oauth } = dependencies
+const OAuthSessionState = Schema.Union([
+  Schema.Struct({
+    status: Schema.Literal("pending"),
+    authorizationUrl: Schema.String
+  }),
+  Schema.Struct({
+    status: Schema.Literal("connected"),
+    connection: Connection
+  }),
+  Schema.Struct({
+    status: Schema.Literal("failed"),
+    message: Schema.String
+  })
+])
+const OAuthSessionView = Schema.Struct({
+  id: Schema.String,
+  integration: Schema.String,
+  connection: Schema.String,
+  state: OAuthSessionState
+})
 
-  return [
-    ...authRoutes({
-      store,
-      signupOpen: dependencies.sessions?.signupOpen ?? (async () => false),
-      secureCookies: dependencies.sessions?.secureCookies ?? false,
-      ...whenPresentMap(
-        "sessionTtlHours",
-        dependencies.sessions?.sessionTtlHours,
-        (hours) => hours
-      ),
-      ...whenPresent("google", dependencies.sessions?.google)
+// --- shared errors ----------------------------------------------------------
+
+/** Endpoint-level refusals. Each carries its status as an annotation, so the
+ *  encoded response and the documented API cannot disagree. */
+class ApiBadRequest extends Schema.TaggedErrorClass<ApiBadRequest>()(
+  "ApiBadRequest",
+  { error: Schema.String }
+) {}
+const ApiBadRequestError = ApiBadRequest.pipe(HttpApiSchema.status(400))
+
+class ApiNotFound extends Schema.TaggedErrorClass<ApiNotFound>()(
+  "ApiNotFound",
+  { error: Schema.String }
+) {}
+const ApiNotFoundError = ApiNotFound.pipe(HttpApiSchema.status(404))
+
+class ApiNotImplemented extends Schema.TaggedErrorClass<ApiNotImplemented>()(
+  "ApiNotImplemented",
+  { error: Schema.String, code: Schema.String }
+) {}
+const ApiNotImplementedError = ApiNotImplemented.pipe(HttpApiSchema.status(501))
+
+class SignupClosed extends Schema.TaggedErrorClass<SignupClosed>()(
+  "SignupClosed",
+  { error: Schema.String, code: Schema.Literal("signup-closed") }
+) {}
+const SignupClosedError = SignupClosed.pipe(HttpApiSchema.status(403))
+
+class InvalidCredentials extends Schema.TaggedErrorClass<InvalidCredentials>()(
+  "InvalidCredentials",
+  { error: Schema.String, code: Schema.Literal("invalid-credentials") }
+) {}
+const InvalidCredentialsError = InvalidCredentials.pipe(HttpApiSchema.status(401))
+
+class PasswordRequired extends Schema.TaggedErrorClass<PasswordRequired>()(
+  "PasswordRequired",
+  { error: Schema.String, code: Schema.Literal("password-required") }
+) {}
+const PasswordRequiredError = PasswordRequired.pipe(HttpApiSchema.status(409))
+
+class HandoffUnknown extends Schema.TaggedErrorClass<HandoffUnknown>()(
+  "HandoffUnknown",
+  { error: Schema.String, code: Schema.Literal("login-handoff-unknown") }
+) {}
+const HandoffUnknownError = HandoffUnknown.pipe(HttpApiSchema.status(404))
+
+class HandoffExpired extends Schema.TaggedErrorClass<HandoffExpired>()(
+  "HandoffExpired",
+  { error: Schema.String, code: Schema.Literal("login-handoff-expired") }
+) {}
+const HandoffExpiredError = HandoffExpired.pipe(HttpApiSchema.status(410))
+
+class HandoffCollected extends Schema.TaggedErrorClass<HandoffCollected>()(
+  "HandoffCollected",
+  { error: Schema.String, code: Schema.Literal("login-handoff-collected") }
+) {}
+const HandoffCollectedError = HandoffCollected.pipe(HttpApiSchema.status(410))
+
+const HandoffRaceError = HandoffCollected.pipe(HttpApiSchema.status(409))
+
+/** Every endpoint can refuse a caller, so the authority's errors ride on the
+ *  groups through its middleware rather than being named endpoint by endpoint. */
+
+// --- system -----------------------------------------------------------------
+
+const SystemGroup = HttpApiGroup.make("system")
+  .add(HttpApiEndpoint.get("health", "/v1/health", {
+    success: Schema.Struct({ ok: Schema.Literal(true) })
+  }).annotate(Unmetered, true).annotate(RequiredAccess, "public"))
+  .add(HttpApiEndpoint.get("metadata", "/v1/metadata", {
+    success: Schema.Struct({
+      ok: Schema.Literal(true),
+      protocolVersion: Schema.String,
+      gatewayVersion: Schema.String
+    })
+  }).annotate(Unmetered, true).annotate(RequiredAccess, "public"))
+  .middleware(Authority)
+
+/** Unmatched requests land here instead of the router's bare empty 404, so a
+ *  wrong method still says which paths exist and an unknown path answers in
+ *  the same JSON dialect as everything else. */
+const FallbackGroup = HttpApiGroup.make("fallback")
+  .add(HttpApiEndpoint.make("GET")("unmatchedGet", "/*", {
+    params: { "*": Schema.String },
+    success: Schema.Never.pipe(HttpApiSchema.status(404))
+  }).annotate(Unmetered, true).annotate(RequiredAccess, "public"))
+  .add(HttpApiEndpoint.make("POST")("unmatchedPost", "/*", {
+    params: { "*": Schema.String },
+    success: Schema.Never.pipe(HttpApiSchema.status(404))
+  }).annotate(Unmetered, true).annotate(RequiredAccess, "public"))
+  .add(HttpApiEndpoint.make("DELETE")("unmatchedDelete", "/*", {
+    params: { "*": Schema.String },
+    success: Schema.Never.pipe(HttpApiSchema.status(404))
+  }).annotate(Unmetered, true).annotate(RequiredAccess, "public"))
+  .middleware(Authority)// --- delegated --------------------------------------------------------------
+
+const DelegatedGroup = HttpApiGroup.make("delegated")
+  .add(HttpApiEndpoint.get("listTools", "/v1/tools", {
+    query: {
+      schemas: Schema.optional(Schema.Literals(["true", "false"]))
+    },
+    success: Schema.Struct({ tools: Schema.Array(GrantedTool) })
+  }).annotate(RequiredAccess, "delegated"))
+  .add(HttpApiEndpoint.post("execute", "/v1/execute", {
+    payload: ExecuteBody,
+    success: [InvokedOk, InvokedDenied, InvokedFailed]
+  }).annotate(RequiredAccess, "delegated"))
+  .add(HttpApiEndpoint.get("approval", "/v1/approvals/:id", {
+    params: { id: ApprovalId },
+    success: PendingApproval,
+    error: ApiNotFoundError
+  }).annotate(RequiredAccess, "delegated"))
+  .middleware(Authority)
+
+// --- provisioning -----------------------------------------------------------
+
+const ProvisioningGroup = HttpApiGroup.make("provisioning")
+  .add(HttpApiEndpoint.get("listIntegrations", "/v1/integrations", {
+    success: Schema.Struct({
+      integrations: Schema.Array(IntegrationOverview),
+      oauthCallbackUrl: Schema.optional(Schema.NullOr(Schema.String))
+    })
+  }).annotate(RequiredAccess, "provisioning"))
+  .add(HttpApiEndpoint.post("discover", "/v1/integrations/discover", {
+    payload: DiscoverBody,
+    success: HttpApiSchema.status(201)(IntegrationDiscovery)
+  }).annotate(RequiredAccess, "provisioning"))
+  .add(HttpApiEndpoint.get("integrationTools", "/v1/integrations/:slug/tools", {
+    params: { slug: Schema.String },
+    success: Schema.Struct({ tools: Schema.Array(ToolSummary) })
+  }).annotate(RequiredAccess, "provisioning"))
+  .add(HttpApiEndpoint.get("describeTool", "/v1/integrations/:slug/tools/:tool", {
+    params: { slug: Schema.String, tool: Schema.String },
+    query: { connection: Schema.optional(Schema.String) },
+    success: Tool
+  }).annotate(RequiredAccess, "provisioning"))
+  .add(HttpApiEndpoint.get("registrySearch", "/v1/registry/search", {
+    query: {
+      q: Schema.String,
+      limit: Schema.optional(Schema.String),
+      kind: Schema.optional(IntegrationSearchKind)
+    },
+    success: IntegrationSearchResponse
+  }).annotate(RequiredAccess, "provisioning"))
+  .add(HttpApiEndpoint.post("invokeTool", "/v1/tools/invoke", {
+    payload: InvokeAddressBody,
+    success: Json
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.post("validate", "/v1/validate", {
+    payload: ValidateBody,
+    success: Schema.Union([ValidationReport, IntegrationValidationReport])
+  }).annotate(RequiredAccess, "provisioning"))
+  .add(HttpApiEndpoint.get("listConnections", "/v1/connections", {
+    success: Schema.Struct({ connections: Schema.Array(Connection) })
+  }).annotate(RequiredAccess, "provisioning"))
+  .add(HttpApiEndpoint.post("connect", "/v1/connections", {
+    payload: ConnectBody,
+    success: HttpApiSchema.status(201)(Schema.Struct({
+      connection: Connection,
+      tools: Schema.Array(ToolSummary)
+    })),
+    error: [ApiNotFoundError, ApiBadRequestError]
+  }).annotate(RequiredAccess, "provisioning"))
+  .add(HttpApiEndpoint.post("startOAuth", "/v1/connections/oauth", {
+    payload: OAuthStartBody,
+    success: HttpApiSchema.status(201)(OAuthSessionView),
+    error: [ApiNotFoundError, ApiBadRequestError]
+  }).annotate(RequiredAccess, "provisioning"))
+  .add(HttpApiEndpoint.get("oauthSession", "/v1/connections/oauth/:id", {
+    params: { id: Schema.String },
+    success: OAuthSessionView,
+    error: ApiNotFoundError
+  }).annotate(RequiredAccess, "provisioning"))
+  .add(HttpApiEndpoint.get("oauthCallback", "/v1/oauth/callback", {
+    query: {
+      state: Schema.optional(Schema.String),
+      code: Schema.optional(Schema.String),
+      error_description: Schema.optional(Schema.String),
+      error: Schema.optional(Schema.String),
+      domain: Schema.optional(Schema.String),
+      site: Schema.optional(Schema.String)
+    },
+    // The provider's redirect lands here; every answer is a page for a human.
+    success: Schema.Struct({ rendered: Schema.Literal(true) })
+  }).annotate(RequiredAccess, "public"))
+  .add(HttpApiEndpoint.delete("removeConnection", "/v1/connections/:integration/:name", {
+    params: { integration: Schema.String, name: Schema.String },
+    success: Schema.Struct({
+      removed: Schema.Literal(true),
+      integration: Schema.String,
+      connection: Schema.String
     }),
-    // --- delegated: any live key -------------------------------------------
-    {
-      method: "GET",
-      path: "/v1/tools",
-      access: "delegated",
-      handle: async (request) => ok({
-        tools: await listGrantedTools(store, clientOf(request).id, {
-          schemas: request.query.get("schemas") === "true",
-          integrations
-        })
-      })
-    },
-    {
-      method: "POST",
-      path: "/v1/execute",
-      access: "delegated",
-      handle: async (request) => {
-        const body = decodeBody(ExecuteBody, request.body)
-        const outcome = await invokeThroughGateway(
-          {
-            store,
-            integrations,
-            argumentRetentionDays: retentionDays,
-            approvalUrlOf: (approvalId) => {
-              const origin = dependencies.dashboardUrl?.()
-              return origin === undefined
-                ? undefined
-                : `${origin.replace(/\/+$/, "")}/approvals?approval=${encodeURIComponent(approvalId)}`
-            },
-            onApprovalCreated: async (input) => await deliverApprovalNotification({
-              client: input.authorization.client,
-              approvalId: input.approvalId,
-              alias: input.authorization.grant.alias,
-              tool: input.authorization.grant.tool,
-              expiresAt: input.expiresAt,
-              ...whenPresent("approvalUrl", input.approvalUrl)
-            })
-          },
-          {
-            secret: secretOf(request),
-            alias: parseAlias(body.alias),
-            tool: ToolName.make(body.tool),
-            arguments: body.arguments ?? {}
-          }
-        )
-        // A frozen call is not an error: the caller gets an identifier to poll,
-        // and its branch of work suspends rather than failing.
-        if (outcome.status === "denied") return { status: 403, body: outcome }
-        if (outcome.status === "failed") return { status: 502, body: outcome }
-        return ok(outcome)
-      }
-    },
-    {
-      method: "GET",
-      path: "/v1/approvals/:id",
-      access: "delegated",
-      handle: async (request) => {
-        const id = ApprovalId.make(request.params["id"] ?? "")
-        const client = clientOf(request)
-        const approval = await store.getApproval(client.tenantId, id)
-        if (approval === undefined) return notFound(`Unknown approval ${id}`)
-        // Scoped to the caller: one client must not read another's frozen call.
-        if (approval.clientId !== client.id) return notFound(`Unknown approval ${id}`)
-        return ok(approval)
-      }
-    },
+    error: ApiNotFoundError
+  }).annotate(RequiredAccess, "provisioning"))
+  .middleware(Authority)
 
-    // --- provisioning: catalog and connections ------------------------------
-    {
-      method: "GET",
-      path: "/v1/integrations",
-      access: "provisioning",
-      handle: async () => ok({
-        integrations: await integrations.listIntegrationOverviews(),
-        oauthCallbackUrl: dependencies.oauthCallbackUrl?.()
-      })
-    },
-    {
-      method: "POST",
-      path: "/v1/integrations/discover",
-      access: "provisioning",
-      handle: async (request) => {
-        const body = decodeBody(DiscoverBody, request.body)
-        const result = await integrations.provisioning.provision(
-          body.url,
-          body.connection === undefined ? {} : { connection: body.connection }
-        )
-        return created(result)
-      }
-    },
-    {
-      method: "GET",
-      path: "/v1/integrations/:slug/tools",
-      access: "provisioning",
-      handle: async (request) => ok({
-        tools: await integrations.tools.summaries({ integration: request.params["slug"] ?? "" })
-      })
-    },
-    {
-      method: "GET",
-      path: "/v1/integrations/:slug/tools/:tool",
-      access: "provisioning",
-      handle: async (request) => {
-        const connection = request.query.get("connection")
-        const tool = await integrations.tools.describe({
-          integration: request.params["slug"] ?? "",
-          name: request.params["tool"] ?? "",
-          ...whenPresent("connection", connection)
-        })
-        return ok(tool)
-      }
-    },
-    {
-      method: "GET",
-      path: "/v1/registry/search",
-      access: "provisioning",
-      handle: async (request) => {
-        const query = request.query.get("q")
-        if (query === null) return badRequest("search requires a q query parameter")
-        const kind = request.query.get("kind")
-        return ok(await searchIntegrations(
-          {
-            q: query,
-            limit: positiveInt(request.query.get("limit"), 5),
-            ...whenPresentMap(
-              "kind",
-              kind,
-              Schema.decodeUnknownSync(Schema.Literals(["mcp", "openapi", "graphql", "cli"]))
-            )
-          },
-          whenPresent("registryUrl", dependencies.registryUrl)
-        ))
-      }
-    },
-    {
-      method: "POST",
-      path: "/v1/tools/invoke",
-      access: "administrative",
-      handle: async (request) => {
-        const body = decodeBody(InvokeAddressBody, request.body)
-        // Administrative, and deliberately not grant-checked: a client that may
-        // mutate grants could grant itself this tool in one extra call, so a
-        // check here would be friction rather than a control. The delegated
-        // surface has no address form at all. See docs/adr/0002.
-        const result = await integrations.tools.execute(
-          ToolAddress.make(body.address),
-          body.arguments ?? {}
-        )
-        return ok(result)
-      }
-    },
-    {
-      method: "POST",
-      path: "/v1/validate",
-      access: "provisioning",
-      handle: async (request) => {
-        const body = decodeBody(ValidateBody, request.body)
-        if (isGatewayNode(body.node)) {
-          const clientId = request.identity.kind === "client" || request.identity.kind === "local"
-            ? request.identity.client.id
-            : undefined
-          return ok(await validateGatewayNode(
-            { store, integrations },
-            clientId,
-            decodeGatewayNode(body.node).source,
-            body.live ?? true
-          ))
-        }
-        return ok(await integrations.validateIntegrationNode(body.node, { live: body.live ?? true }))
-      }
-    },
-    {
-      method: "GET",
-      path: "/v1/connections",
-      access: "provisioning",
-      handle: async () => ok({ connections: await integrations.connections.list() })
-    },
-    {
-      method: "POST",
-      path: "/v1/connections",
-      access: "provisioning",
-      handle: async (request) => {
-        const body = decodeBody(ConnectBody, request.body)
-        const integration = await integrations.catalog.find(body.integration)
-        if (integration === undefined) return notFound(`Unknown integration ${body.integration}`)
-        const method = selectAuthMethod(integration.authMethods, body.template)
-        if (method.kind === "oauth") {
-          return badRequest(
-            `${integration.slug} uses OAuth; start it at POST /v1/connections/oauth`
-          )
-        }
-        const values = body.values ?? {}
-        const names = Object.keys(values)
-        const connection = await integrations.connections.create({
-          integration: integration.slug,
-          name: body.connection ?? "default",
-          template: method.template,
-          ...(names.length === 0
-            ? { value: "" }
-            : names.length === 1 && values["token"] !== undefined
-            ? { value: values["token"] }
-            : { values })
-        })
-        return created({
-          connection,
-          tools: await integrations.tools.summaries({
-            integration: integration.slug,
-            connection: connection.name
-          })
-        })
-      }
-    },
-    {
-      method: "POST",
-      path: "/v1/connections/oauth",
-      access: "provisioning",
-      handle: async (request) => {
-        const body = decodeBody(OAuthStartBody, request.body)
-        const integration = await integrations.catalog.find(body.integration)
-        if (integration === undefined) return notFound(`Unknown integration ${body.integration}`)
-        const method = integration.authMethods.find((candidate) =>
-          body.template === undefined
-            ? candidate.kind === "oauth"
-            : candidate.template === body.template || candidate.id === body.template
-        )
-        if (method === undefined || method.kind !== "oauth") {
-          return badRequest(`${integration.slug} has no OAuth auth method`)
-        }
-        // The gateway drives the flow and hosts the callback, because it is
-        // what holds credentials. The caller opens a browser and polls.
-        const session = await oauth.start({
-          integration: integration.slug,
-          connection: body.connection ?? "default",
-          authMethod: method,
-          ...whenPresent("clientId", body.clientId),
-          ...whenPresent("clientSecret", body.clientSecret),
-          ...whenPresentMap("timeoutMs", body.timeoutSeconds, (seconds) => Math.max(1, seconds) * 1000)
-        })
-        return created(session)
-      }
-    },
-    {
-      method: "GET",
-      path: "/v1/connections/oauth/:id",
-      access: "provisioning",
-      handle: async (request) => {
-        const session = await oauth.get(request.params["id"] ?? "")
-        if (session === undefined) return notFound("Unknown or expired OAuth session")
-        return ok(session)
-      }
-    },
-    {
-      // The provider's browser redirect lands here. Public by necessity: no
-      // gateway credential rides a vendor's redirect, and the state parameter
-      // is the proof the flow is ours. Only meaningful when the gateway runs
-      // hosted — locally, callbacks arrive on the flow's private loopback
-      // listener and this route answers "not found" for any state, which is
-      // exactly what an unknown callback deserves.
-      method: "GET",
-      path: "/v1/oauth/callback",
-      access: "public",
-      handle: async (request) => {
-        const state = request.query.get("state")
-        const code = request.query.get("code")
-        const errorDescription = request.query.get("error_description") ?? request.query.get("error")
-        if (state === null || code === null || errorDescription !== null) {
-          return {
-            status: 400,
-            body: undefined,
-            html: oauthBrowserPage({
-              title: "Authorization failed",
-              message: errorDescription ?? "The provider did not return a usable authorization code."
-            })
-          }
-        }
-        const completed = await oauth.completeByState(state, {
-          code,
-          ...whenPresentMap(
-            "callbackDomain",
-            request.query.get("domain") ?? request.query.get("site"),
-            (domain) => domain
-          )
-        })
-        if (completed === undefined) {
-          return {
-            status: 400,
-            body: undefined,
-            html: oauthBrowserPage({
-              title: "Unknown authorization",
-              message:
-                "This callback does not match any authorization in progress. Return to the terminal or dashboard and start again."
-            })
-          }
-        }
-        if (completed.state.status === "failed") {
-          return {
-            status: 400,
-            body: undefined,
-            html: oauthBrowserPage({
-              title: "Authorization failed",
-              message: completed.state.message
-            })
-          }
-        }
-        return {
-          status: 200,
-          body: undefined,
-          html: oauthBrowserPage({
-            title: "Account connected",
-            message: `${completed.integration} was connected. You can close this window.`
-          })
-        }
-      }
-    },
-    {
-      method: "DELETE",
-      path: "/v1/connections/:integration/:name",
-      access: "provisioning",
-      handle: async (request) => {
-        const integration = request.params["integration"] ?? ""
-        const requested = request.params["name"] ?? ""
-        // Connection names are normalised on the way in (`docs-demo` is stored
-        // as `docsDemo`), so removing one by the name you typed has to resolve
-        // through the same normalisation. Otherwise a connection you just made
-        // cannot be deleted by the name you made it with.
-        const connections = await integrations.connections.list()
-        const match = connections.find((connection) =>
-          connection.integration === integration &&
-          (connection.name === requested || normalizeName(connection.name) === normalizeName(requested))
-        )
-        if (match === undefined) {
-          const known = connections
-            .filter((connection) => connection.integration === integration)
-            .map((connection) => connection.name)
-          return notFound(
-            known.length === 0
-              ? `${integration} has no connections`
-              : `${integration} has no connection ${requested}. Known: ${known.join(", ")}`
-          )
-        }
-        await integrations.connections.remove({ integration, name: match.name })
-        return ok({ removed: true, integration, connection: match.name })
-      }
-    },
+// --- administrative ---------------------------------------------------------
 
-    // --- administration: clients, keys, grants ------------------------------
-    {
-      method: "GET",
-      path: "/v1/overview",
-      access: "administrative",
-      handle: async (request) => {
-        const tenantId = tenantOf(request)
-        const [counts, connections, recentActivity] = await Promise.all([
-          store.overviewCounts(tenantId),
-          integrations.connections.list(),
-          store.listAudit(tenantId, { limit: 5, offset: 0 })
-        ])
-        return ok({
-          ...counts,
-          connections: connections.length,
-          recentActivity
-        })
-      }
-    },
-    {
-      method: "GET",
-      path: "/v1/clients",
-      access: "administrative",
-      handle: async (request) => ok({ clients: await store.listClients(tenantOf(request)) })
-    },
-    {
-      method: "POST",
-      path: "/v1/clients",
-      access: "administrative",
-      handle: async (request) => {
-        const body = decodeBody(CreateClientBody, request.body)
-        if (await store.findClientByName(tenantOf(request), body.name) !== undefined) {
-          return badRequest(`A client named ${body.name} already exists`)
-        }
-        const client = await store.createClient({
-          id: newClientId(),
-          // Clients are created inside the caller's partition. There is no way
-          // to provision into another tenant over this surface, by design.
-          tenantId: tenantOf(request),
-          name: body.name,
-          capabilities: body.capabilities ?? [],
-          ...whenPresent("approvalDelivery", body.approvalDelivery)
-        })
-        return created(client)
-      }
-    },
-    {
-      method: "POST",
-      path: "/v1/clients/:id/settings",
-      access: "administrative",
-      handle: async (request) => {
-        const clientId = ClientId.make(request.params["id"] ?? "")
-        const existing = await store.findClientById(tenantOf(request), clientId)
-        if (existing === undefined) return notFound(`Unknown client ${clientId}`)
-        if (existing.revokedAt !== null) return badRequest(`Client ${clientId} is revoked`)
-        const body = decodeBody(UpdateClientSettingsBody, request.body)
-        return ok(await store.updateClientSettings({
-          tenantId: tenantOf(request),
-          id: clientId,
-          capabilities: body.capabilities,
-          approvalDelivery: body.approvalDelivery
-        }))
-      }
-    },
-    {
-      method: "POST",
-      path: "/v1/clients/:id/keys",
-      access: "administrative",
-      handle: async (request) => {
-        const clientId = ClientId.make(request.params["id"] ?? "")
-        if (await store.findClientById(tenantOf(request), clientId) === undefined) {
-          return notFound(`Unknown client ${clientId}`)
-        }
-        const key = generateApiKey()
-        await store.addApiKey({ id: key.id, clientId, hash: key.hash })
-        // The only time the plaintext exists outside the caller's hands.
-        return created({ id: key.id, clientId, secret: key.secret })
-      }
-    },
-    {
-      method: "GET",
-      path: "/v1/clients/:id/keys",
-      access: "administrative",
-      handle: async (request) => {
-        const clientId = ClientId.make(request.params["id"] ?? "")
-        if (await store.findClientById(tenantOf(request), clientId) === undefined) {
-          return notFound(`Unknown client ${clientId}`)
-        }
-        // Hashes stay behind the gateway. What an operator needs is which keys
-        // exist, when each was last used, and which are still live.
-        const keys = await store.listApiKeys(clientId)
-        return ok({
-          keys: keys.map((key) => ({
-            id: key.id,
-            clientId: key.clientId,
-            createdAt: key.createdAt,
-            lastUsedAt: key.lastUsedAt,
-            revokedAt: key.revokedAt
-          }))
-        })
-      }
-    },
-    {
-      method: "POST",
-      path: "/v1/keys/:id/revoke",
-      access: "administrative",
-      handle: async (request) => {
-        const keyId = ApiKeyId.make(request.params["id"] ?? "")
-        await store.revokeApiKey(keyId)
-        // Rotation, not containment: a revoked key's frozen calls stay armed
-        // because the client behind them is still trusted. Revoking the client
-        // is what cancels those.
-        return ok({ revoked: true, key: keyId })
-      }
-    },
-    {
-      method: "GET",
-      path: "/v1/clients/:id/tools",
-      access: "administrative",
-      handle: async (request) => {
-        const clientId = ClientId.make(request.params["id"] ?? "")
-        if (await store.findClientById(tenantOf(request), clientId) === undefined) {
-          return notFound(`Unknown client ${clientId}`)
-        }
-        // The same listing `/v1/tools` gives a key about itself, asked about
-        // someone else. Generating bindings for the client you are
-        // provisioning should not require holding its key.
-        return ok({
-          tools: await listGrantedTools(store, clientId, {
-            schemas: request.query.get("schemas") === "true",
-            integrations
-          })
-        })
-      }
-    },
-    {
-      method: "POST",
-      path: "/v1/clients/:id/revoke",
-      access: "administrative",
-      handle: async (request) => {
-        const clientId = ClientId.make(request.params["id"] ?? "")
-        if (await store.findClientById(tenantOf(request), clientId) === undefined) {
-          return notFound(`Unknown client ${clientId}`)
-        }
-        await store.revokeClient(tenantOf(request), clientId)
-        // Revoking a client is done because something is wrong, so its frozen
-        // actions must not stay armed. Revoking a single key does not do this.
-        const cancelled = await store.cancelApprovalsForClient(clientId)
-        return ok({ revoked: true, cancelledApprovals: cancelled })
-      }
-    },
-    {
-      method: "GET",
-      path: "/v1/grants",
-      access: "administrative",
-      handle: async (request) => {
-        const clientId = request.query.get("clientId")
-        if (clientId === null) return badRequest("grants require a clientId query parameter")
-        return ok({ grants: await store.listGrants(ClientId.make(clientId)) })
-      }
-    },
-    {
-      method: "POST",
-      path: "/v1/grants",
-      access: "administrative",
-      handle: async (request) => {
-        const body = decodeBody(CreateGrantBody, request.body)
-        const clientId = ClientId.make(body.clientId)
-        if (await store.findClientById(tenantOf(request), clientId) === undefined) {
-          return notFound(`Unknown client ${clientId}`)
-        }
-        if (body.connection.owner === "user") {
-          // The wire contract keeps the user tier because that is where the
-          // design is going, but nothing can create a user-tier *connection*
-          // yet, so such a grant resolves to an address that does not exist. A
-          // grant that can only fail at invoke time is worse than a refusal
-          // here.
-          return badRequest(
-            "User-tier connections do not exist yet, so a user-tier grant cannot resolve. Grant against an org connection."
-          )
-        }
-        const tool = (await integrations.tools.summaries({ integration: body.connection.integration }))
-          .find((candidate) =>
-            candidate.name === body.tool &&
-            candidate.owner === "org" &&
-            normalizeName(candidate.connection) === normalizeName(body.connection.name)
-          )
-        if (tool === undefined) {
-          return notFound(
-            `Unknown connected tool ${body.connection.integration}/${body.connection.name}/${body.tool}`
-          )
-        }
-        const grant = await store.createGrant({
-          id: newGrantId(),
-          tenantId: tenantOf(request),
-          clientId,
-          alias: parseAlias(body.alias),
-          tool: ToolName.make(body.tool),
-          connection: {
-            owner: "org",
-            integration: IntegrationSlug.make(tool.integration),
-            name: ConnectionName.make(tool.connection)
-          },
-          decision: body.decision ?? tool.defaultDecision
-        })
-        return created(grant)
-      }
-    },
-    {
-      method: "POST",
-      path: "/v1/grants/:id/revoke",
-      access: "administrative",
-      handle: async (request) => {
-        await store.revokeGrant(tenantOf(request), GrantId.make(request.params["id"] ?? ""))
-        return ok({ revoked: true })
-      }
-    },
+const KeyView = Schema.Struct({
+  id: ApiKeyId,
+  clientId: ClientId,
+  createdAt: Schema.Date,
+  lastUsedAt: Schema.NullOr(Schema.Date),
+  revokedAt: Schema.NullOr(Schema.Date)
+})
 
-    // --- administration and human decisions: approvals, audit ---------------
-    {
-      method: "GET",
-      path: "/v1/approvals",
-      access: "administrative",
-      handle: async (request) => {
-        const status = request.query.get("status")
-        return ok({
-          approvals: status === null
-            ? await store.listApprovals(tenantOf(request))
-            : await store.listApprovals(
-              tenantOf(request),
-              Schema.decodeUnknownSync(
-                Schema.Literals(["pending", "approved", "denied", "expired"])
-              )(status)
-            )
-        })
-      }
+const AdministrativeGroup = HttpApiGroup.make("administrative")
+  .add(HttpApiEndpoint.get("overview", "/v1/overview", {
+    success: Schema.Struct({
+      clients: Schema.Number,
+      grants: Schema.Number,
+      keys: Schema.Number,
+      pendingApprovals: Schema.Number,
+      connections: Schema.Number,
+      recentActivity: Schema.Array(AuditRecord)
+    })
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.get("listClients", "/v1/clients", {
+    success: Schema.Struct({ clients: Schema.Array(Client) })
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.post("createClient", "/v1/clients", {
+    payload: CreateClientBody,
+    success: HttpApiSchema.status(201)(Client),
+    error: ApiBadRequest
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.post("updateClientSettings", "/v1/clients/:id/settings", {
+    params: { id: ClientId },
+    payload: UpdateClientSettingsBody,
+    success: Client,
+    error: [ApiNotFoundError, ApiBadRequestError]
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.post("issueKey", "/v1/clients/:id/keys", {
+    params: { id: ClientId },
+    success: HttpApiSchema.status(201)(Schema.Struct({
+      id: ApiKeyId,
+      clientId: ClientId,
+      secret: Schema.String
+    })),
+    error: ApiNotFoundError
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.get("listKeys", "/v1/clients/:id/keys", {
+    params: { id: ClientId },
+    success: Schema.Struct({ keys: Schema.Array(KeyView) }),
+    error: ApiNotFoundError
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.post("revokeKey", "/v1/keys/:id/revoke", {
+    params: { id: ApiKeyId },
+    success: Schema.Struct({ revoked: Schema.Literal(true), key: ApiKeyId })
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.get("clientTools", "/v1/clients/:id/tools", {
+    params: { id: ClientId },
+    query: {
+      schemas: Schema.optional(Schema.Literals(["true", "false"]))
     },
-    {
-      method: "POST",
-      path: "/v1/approvals/:id/approve",
-      access: "human",
-      handle: async (request) => {
-        const id = ApprovalId.make(request.params["id"] ?? "")
-        const decidedBy = request.identity.kind === "session"
-          ? request.identity.email
-          : request.identity.kind === "local"
-          ? `local:${request.identity.client.name}`
-          : null
-        const approval = await store.getApproval(tenantOf(request), id)
-        if (approval === undefined) return notFound(`Unknown approval ${id}`)
-        if (approval.status !== "pending") {
-          return badRequest(`Approval ${id} is already ${approval.status}`)
-        }
-        if (approval.expiresAt.getTime() <= Date.now()) {
-          await store.settleApproval({
-            tenantId: tenantOf(request),
-            id,
-            status: "expired",
-            decidedBy: null,
-            result: null,
-            error: "expired before a decision was recorded"
-          })
-          // Expiry is a decision, not an absence of one.
-          return badRequest(`Approval ${id} expired`)
-        }
+    success: Schema.Struct({ tools: Schema.Array(GrantedTool) }),
+    error: ApiNotFoundError
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.post("revokeClient", "/v1/clients/:id/revoke", {
+    params: { id: ClientId },
+    success: Schema.Struct({
+      revoked: Schema.Literal(true),
+      cancelledApprovals: Schema.Number
+    }),
+    error: ApiNotFoundError
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.get("listGrants", "/v1/grants", {
+    query: { clientId: ClientId },
+    success: Schema.Struct({ grants: Schema.Array(Grant) })
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.post("createGrant", "/v1/grants", {
+    payload: CreateGrantBody,
+    success: HttpApiSchema.status(201)(Grant),
+    error: [ApiNotFoundError, ApiBadRequestError]
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.post("revokeGrant", "/v1/grants/:id/revoke", {
+    params: { id: GrantId },
+    success: Schema.Struct({ revoked: Schema.Literal(true) })
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.get("listApprovals", "/v1/approvals", {
+    query: { status: Schema.optional(ApprovalStatus) },
+    success: Schema.Struct({ approvals: Schema.Array(PendingApproval) })
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.post("approve", "/v1/approvals/:id/approve", {
+    params: { id: ApprovalId },
+    success: Schema.Struct({
+      approval: PendingApproval,
+      outcome: SettledOutcome
+    }),
+    error: [ApiNotFoundError, ApiBadRequestError]
+  }).annotate(RequiredAccess, "human"))
+  .add(HttpApiEndpoint.post("deny", "/v1/approvals/:id/deny", {
+    params: { id: ApprovalId },
+    success: Schema.Struct({ approval: PendingApproval }),
+    error: ApiNotFoundError
+  }).annotate(RequiredAccess, "human"))
+  .add(HttpApiEndpoint.post("refreshDrift", "/v1/drift/refresh", {
+    query: { integration: Schema.optional(Schema.String) },
+    success: Schema.Struct({ reports: Schema.Array(DriftReport) })
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.post("maintenance", "/v1/maintenance", {
+    success: MaintenanceReport
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.get("audit", "/v1/audit", {
+    query: {
+      since: Schema.optional(Schema.String),
+      outcome: Schema.optional(AuditOutcome),
+      clientId: Schema.optional(ClientId),
+      alias: Schema.optional(Alias),
+      tool: Schema.optional(Schema.String),
+      limit: Schema.optional(Schema.String),
+      offset: Schema.optional(Schema.String)
+    },
+    success: Schema.Struct({
+      records: Schema.Array(AuditRecord),
+      total: Schema.Number,
+      limit: Schema.Number,
+      offset: Schema.Number
+    }),
+    error: ApiBadRequestError
+  }).annotate(RequiredAccess, "administrative"))
+  .middleware(Authority)
 
-        const client = await store.findClientById(tenantOf(request), approval.clientId)
-        const grants = await store.listGrants(approval.clientId)
-        const grant = grants.find((candidate) => candidate.id === approval.grantId)
-        if (client === undefined || client.revokedAt !== null || grant === undefined) {
-          await store.settleApproval({
-            tenantId: tenantOf(request),
-            id,
-            status: "denied",
-            decidedBy,
-            result: null,
-            error: "the client or grant was revoked while this call was frozen"
-          })
-          return badRequest(`Approval ${id} is no longer authorized`)
-        }
+// --- auth -------------------------------------------------------------------
 
-        // The gateway performs the call. The caller is never handed the ability
-        // to perform it, so approving confers no capability.
-        const outcome = await executeAuthorized(
-          { store, integrations, retentionDays },
-          {
-            status: "authorized",
-            client,
-            grant,
-            connection: grant.connection,
-            subject: grant.connection.owner === "user" ? grant.connection.subject : null
-          },
-          approval.arguments
-        )
-        await store.settleApproval({
-          tenantId: tenantOf(request),
-          id,
-          status: "approved",
-          decidedBy,
-          result: outcome.status === "succeeded" ? outcome.result : null,
-          error: outcome.status === "failed" ? outcome.message : null
-        })
-        return ok({ approval: await store.getApproval(tenantOf(request), id), outcome })
-      }
+const ProvidersView = Schema.Struct({
+  signupOpen: Schema.Boolean,
+  google: Schema.Union([
+    Schema.Struct({ enabled: Schema.Literal(false) }),
+    Schema.Struct({
+      enabled: Schema.Literal(true),
+      startUrl: Schema.String,
+      callbackUrl: Schema.String
+    })
+  ])
+})
+
+const CliStartView = Schema.Struct({
+  requestId: Schema.String,
+  authorizationUrl: Schema.String,
+  expiresAt: Schema.Date,
+  intervalMs: Schema.Number
+})
+
+const CliPollView = Schema.Union([
+  Schema.Struct({
+    status: Schema.Literal("pending"),
+    expiresAt: Schema.Date
+  }),
+  Schema.Struct({
+    status: Schema.Literal("authenticated"),
+    token: Schema.String,
+    email: Schema.String
+  })
+])
+
+const MeView = Schema.Union([
+  Schema.Struct({
+    authenticated: Schema.Literal(true),
+    kind: Schema.Literal("session"),
+    email: Schema.String,
+    tenantId: Schema.String,
+    subjectId: SubjectId,
+    hasPassword: Schema.Boolean,
+    identityProviders: Schema.Array(Schema.String)
+  }),
+  Schema.Struct({
+    authenticated: Schema.Literal(true),
+    kind: Schema.Literal("client"),
+    clientId: ClientId,
+    tenantId: Schema.String,
+    capabilities: Schema.Array(ClientCapability)
+  }),
+  Schema.Struct({
+    authenticated: Schema.Literal(true),
+    kind: Schema.Literal("local"),
+    clientId: ClientId,
+    tenantId: Schema.String
+  }),
+  Schema.Struct({ authenticated: Schema.Literal(false) })
+])
+
+/** The browser-facing session surface answers with cookies alongside JSON, so
+ *  several of these handlers build raw responses; their schemas remain honest
+ *  declarations of the shape a successful body carries. */
+const AuthGroup = HttpApiGroup.make("auth")
+  .add(HttpApiEndpoint.get("providers", "/v1/auth/providers", {
+    success: ProvidersView
+  }).annotate(RequiredAccess, "public"))
+  .add(HttpApiEndpoint.post("cliStart", "/v1/auth/cli/start", {
+    success: HttpApiSchema.status(201)(CliStartView),
+    error: ApiNotImplementedError
+  }).annotate(RequiredAccess, "public"))
+  .add(HttpApiEndpoint.get("cliPoll", "/v1/auth/cli/:id", {
+    params: { id: Schema.String },
+    success: CliPollView,
+    error: [HandoffUnknownError, HandoffExpiredError, HandoffCollectedError, HandoffRaceError]
+  }).annotate(RequiredAccess, "public"))
+  .add(HttpApiEndpoint.get("googleStart", "/v1/auth/google/start", {
+    query: {
+      handoff: Schema.optional(Schema.String),
+      returnTo: Schema.optional(Schema.String)
     },
-    {
-      method: "POST",
-      path: "/v1/approvals/:id/deny",
-      access: "human",
-      handle: async (request) => {
-        const id = ApprovalId.make(request.params["id"] ?? "")
-        const decidedBy = request.identity.kind === "session"
-          ? request.identity.email
-          : request.identity.kind === "local"
-          ? `local:${request.identity.client.name}`
-          : null
-        const approval = await store.getApproval(tenantOf(request), id)
-        if (approval === undefined) return notFound(`Unknown approval ${id}`)
-        await store.settleApproval({
-          tenantId: tenantOf(request),
-          id,
-          status: "denied",
-          decidedBy,
-          result: null,
-          error: null
-        })
-        return ok({ approval: await store.getApproval(tenantOf(request), id) })
-      }
+    success: Schema.Struct({ redirected: Schema.Literal(true) })
+  }).annotate(RequiredAccess, "public"))
+  .add(HttpApiEndpoint.get("googleCallback", "/v1/auth/google/callback", {
+    query: {
+      state: Schema.optional(Schema.String),
+      code: Schema.optional(Schema.String)
     },
-    {
-      method: "POST",
-      path: "/v1/drift/refresh",
-      access: "administrative",
-      handle: async (request) => {
-        const slug = request.query.get("integration")
-        const slugs = slug === null
-          ? (await integrations.catalog.list()).map((entry) => entry.slug)
-          : [slug]
-        const reports = []
-        for (const integration of slugs) {
-          reports.push(await refreshIntegrationSnapshot(
-            { store, integrations },
-            integration,
-            tenantOf(request)
-          ))
-        }
-        return ok({ reports })
-      }
-    },
-    {
-      method: "POST",
-      path: "/v1/maintenance",
-      access: "administrative",
-      handle: async () => ok(await runMaintenance(store))
-    },
-    {
-      method: "GET",
-      path: "/v1/audit",
-      access: "administrative",
-      handle: async (request) => {
-        const since = request.query.get("since")
-        const sinceDate = since === null ? undefined : new Date(since)
-        if (sinceDate !== undefined && Number.isNaN(sinceDate.getTime())) {
-          return badRequest(`since is not a date: ${since}`)
-        }
-        const outcome = request.query.get("outcome")
-        const clientId = request.query.get("clientId")
-        const alias = request.query.get("alias")
-        const tool = request.query.get("tool")
-        const filter = {
-          ...whenPresentMap("clientId", clientId, ClientId.make),
-          ...whenPresentMap("alias", alias, Alias.make),
-          ...whenPresentMap("tool", tool, ToolName.make),
-          ...whenPresentMap(
-            "outcome",
-            outcome,
-            Schema.decodeUnknownSync(Schema.Literals(["succeeded", "failed", "denied", "pending"]))
-          ),
-          ...whenPresent("since", sinceDate)
-        }
-        const limit = positiveInt(request.query.get("limit"), 50)
-        const offset = nonNegativeInt(request.query.get("offset"), 0)
-        // The trail is permanent, so the count is what tells a reader whether
-        // the window they asked for is the whole answer.
-        return ok({
-          records: await store.listAudit(tenantOf(request), { ...filter, limit, offset }),
-          total: await store.countAudit(tenantOf(request), filter),
-          limit,
-          offset
-        })
-      }
-    }
-  ]
+    success: Schema.Struct({ rendered: Schema.Literal(true) })
+  }).annotate(RequiredAccess, "public"))
+  .add(HttpApiEndpoint.post("signup", "/v1/auth/signup", {
+    payload: SignupBody,
+    success: HttpApiSchema.status(201)(Schema.Struct({
+      tenant: Schema.Struct({ id: Schema.String, name: Schema.String }),
+      subjectId: SubjectId,
+      email: Schema.String
+    })),
+    error: [SignupClosedError, ApiBadRequestError]
+  }).annotate(RequiredAccess, "public"))
+  .add(HttpApiEndpoint.post("login", "/v1/auth/login", {
+    payload: LoginBody,
+    success: Schema.Struct({ email: Schema.String, subjectId: SubjectId }),
+    error: InvalidCredentialsError
+  }).annotate(RequiredAccess, "public"))
+  .add(HttpApiEndpoint.post("logout", "/v1/auth/logout", {
+    success: Schema.Struct({ loggedOut: Schema.Literal(true) })
+  }).annotate(RequiredAccess, "public"))
+  .add(HttpApiEndpoint.get("whoami", "/v1/auth/me", {
+    success: MeView
+  }).annotate(RequiredAccess, "public"))
+  .add(HttpApiEndpoint.post("changeEmail", "/v1/auth/email", {
+    payload: ChangeEmailBody,
+    success: Schema.Struct({ email: Schema.String }),
+    error: [ForbiddenError, ApiBadRequestError, InvalidCredentialsError]
+  }).annotate(RequiredAccess, "human"))
+  .add(HttpApiEndpoint.post("changePassword", "/v1/auth/password", {
+    payload: ChangePasswordBody,
+    success: Schema.Struct({
+      updated: Schema.Literal(true),
+      revokedSessions: Schema.Number
+    }),
+    error: [ForbiddenError, InvalidCredentialsError]
+  }).annotate(RequiredAccess, "human"))
+  .add(HttpApiEndpoint.post("deleteAccount", "/v1/auth/account/delete", {
+    payload: DeleteAccountBody,
+    success: Schema.Struct({ deleted: Schema.Literal(true) }),
+    error: [ForbiddenError, PasswordRequiredError, InvalidCredentialsError]
+  }).annotate(RequiredAccess, "human"))
+  .middleware(Authority)
+
+/** The whole gateway surface, as data. */
+export const GatewayApi = HttpApi.make("@mokronos/integrations/gateway")
+  .add(SystemGroup)
+  .add(FallbackGroup)
+  .add(DelegatedGroup)
+  .add(ProvisioningGroup)
+  .add(AdministrativeGroup)
+  .add(AuthGroup)
+
+export {
+  ApiBadRequest,
+  ApiNotFound,
+  ApiNotImplemented,
+  HandoffCollected,
+  HandoffExpired,
+  HandoffUnknown,
+  InvalidCredentials,
+  PasswordRequired,
+  SignupClosed
 }

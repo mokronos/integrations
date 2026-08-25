@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 import type { ApprovalId, Client } from "./domain.ts"
-import { whenPresent } from "./optional.ts"
+import { whenPresent } from "@mokronos/contracts"
 
 /** The intentionally sparse outbound contract. Invocation arguments, results,
  * credentials, and human identities never leave through a notification hook. */

@@ -4,12 +4,12 @@ import {
   mcpAuthMethods,
   openApiAuthMethods
 } from "./catalog/auth-methods.ts"
+import { captureMcpTools, captureOpenApiTools } from "./catalog/capture.ts"
 import { CatalogStore } from "./catalog/store.ts"
-import type { ConnectionRecord, IntegrationRecord } from "./catalog/store.ts"
+import type { ConnectionRecord, IntegrationRecord, ToolRecord } from "./catalog/store.ts"
 import { connectionCredentialKey, CredentialStore } from "./storage/credentials.ts"
 import {
   ConnectionNotFoundError,
-  DetectionError,
   IntegrationNotFoundError,
   InvalidInputError,
   InvocationError,
@@ -20,18 +20,17 @@ import {
   ToolNotFoundError
 } from "./errors.ts"
 import { OAuthClientSlug } from "./catalog/ids.ts"
-import { connectionAddress, ConnectionName, IntegrationSlug, parseToolAddress, slugify, toolAddress, ToolName } from "@mokronos/contracts"
+import { connectionAddress, ConnectionName, IntegrationSlug } from "@mokronos/contracts"
 import { AuthTemplateSlug } from "./catalog/ids.ts"
 import { McpHost } from "./mcp/client.ts"
 import type { McpCredential } from "./mcp/client.ts"
 import { OAuthFlows } from "./oauth/flows.ts"
+import { resolveServer } from "./openapi/compile.ts"
 import { OpenApiInvoker } from "./openapi/invoke.ts"
 import type { ResolvedCredential } from "./openapi/invoke.ts"
-import type { CompiledOperation } from "./openapi/compile.ts"
 import { whenPresent } from "@mokronos/contracts"
 import {
   Connection,
-  EndpointDetection,
   Integration,
   OwnerTier,
   Tool,
@@ -39,7 +38,7 @@ import {
   ToolSummary
 } from "@mokronos/contracts"
 import { SpecCache } from "./openapi/cache.ts"
-import { normalizeOutputSchema, normalizeToolResult } from "./mcp/result.ts"
+import { normalizeToolResult } from "./mcp/result.ts"
 
 /** The one place both halves of the host meet.
  *
@@ -60,7 +59,6 @@ export type HostFailure =
   | SpecError
   | McpError
   | OAuthError
-  | DetectionError
   | InvalidInputError
 
 export interface ToolFilter {
@@ -145,6 +143,34 @@ const toConnection = (
     new StorageError({ message: `Could not describe connection ${record.name}`, cause })
   ))
 
+/** The wire shape of a captured tool. `defaultDecision` is derived here rather
+ *  than stored, because it is policy rather than fact: what was captured is
+ *  whether the source declares the tool read-only. */
+const toToolSummary = (
+  record: ToolRecord
+): Effect.Effect<ToolSummary, StorageError> =>
+  Schema.decodeUnknownEffect(ToolSummary)({
+    address: record.address,
+    name: record.name,
+    description: record.description,
+    integration: record.integration,
+    owner: record.owner,
+    connection: record.connection,
+    defaultDecision: defaultDecision(record.readOnly)
+  }).pipe(Effect.mapError((cause) =>
+    new StorageError({ message: `Could not describe tool ${record.name}`, cause })
+  ))
+
+const toTool = (record: ToolRecord): Effect.Effect<Tool, StorageError> =>
+  Effect.flatMap(toToolSummary(record), (summary) =>
+    Schema.decodeUnknownEffect(Tool)({
+      ...summary,
+      ...whenPresent("inputSchema", record.inputSchema),
+      ...whenPresent("outputSchema", record.outputSchema)
+    }).pipe(Effect.mapError((cause) =>
+      new StorageError({ message: `Could not describe tool ${record.name}`, cause })
+    )))
+
 /** A newly-created grant's starting policy.
  *
  *  `allow` is reserved for a tool whose own source declares it read-only. For
@@ -169,9 +195,6 @@ export class IntegrationHost extends Context.Service<
     readonly findIntegration: (
       slug: IntegrationSlug
     ) => Effect.Effect<Option.Option<Integration>, StorageError>
-    readonly detect: (
-      url: string
-    ) => Effect.Effect<ReadonlyArray<EndpointDetection>, never>
     readonly addMcp: (options: AddMcpOptions) => Effect.Effect<IntegrationSlug, HostFailure>
     readonly addOpenApi: (
       options: AddOpenApiOptions
@@ -191,6 +214,13 @@ export class IntegrationHost extends Context.Service<
       readonly integration: IntegrationSlug
       readonly name: ConnectionName
     }) => Effect.Effect<void, StorageError>
+    /** Re-reads what a connection exposes and replaces what was stored for it.
+     *  The only thing that reaches a live endpoint. */
+    readonly refreshConnection: (reference: {
+      readonly owner: OwnerTier
+      readonly integration: IntegrationSlug
+      readonly name: ConnectionName
+    }) => Effect.Effect<ReadonlyArray<Tool>, HostFailure>
 
     readonly toolSummaries: (
       filter?: ToolFilter
@@ -228,6 +258,18 @@ export class IntegrationHost extends Context.Service<
             onNone: () => Effect.fail(new IntegrationNotFoundError({ integration: slug })),
             onSome: Effect.succeed
           })
+        }
+      )
+
+      const requireEndpoint = Effect.fn("IntegrationHost.requireEndpoint")(
+        function* (integration: IntegrationRecord) {
+          if (integration.endpoint === undefined) {
+            return yield* new InvalidInputError({
+              field: "integration",
+              detail: `${integration.slug} records no MCP endpoint`
+            })
+          }
+          return integration.endpoint
         }
       )
 
@@ -319,280 +361,124 @@ export class IntegrationHost extends Context.Service<
             }
         })
 
-      const summaryOf = (options: {
-        readonly integration: IntegrationSlug
-        readonly owner: OwnerTier
-        readonly connection: ConnectionName
-        readonly name: string
-        readonly description: string
-        readonly readOnly: boolean
-      }) =>
-        Schema.decodeUnknownEffect(ToolSummary)({
-          address: toolAddress({
-            integration: options.integration,
-            owner: options.owner,
-            connection: options.connection,
-            tool: ToolName.make(options.name)
-          }),
-          name: options.name,
-          description: options.description,
-          integration: options.integration,
-          owner: options.owner,
-          connection: options.connection,
-          defaultDecision: defaultDecision(options.readOnly)
-        }).pipe(Effect.mapError((cause) =>
-          new StorageError({
-            message: `Could not describe tool ${options.name}`,
-            cause
-          })
-        ))
-
-      /** Every tool one connection exposes, with schemas. */
-      const toolsForConnection = Effect.fn("IntegrationHost.toolsForConnection")(
-        function* (
-          integration: IntegrationRecord,
-          connection: ConnectionRecord
-        ) {
+      /** Captures everything one connection exposes, and replaces what was
+       *  stored for it.
+       *
+       *  Both protocols end up in the same shape here; after this point nothing
+       *  downstream knows which one it was. */
+      const captureConnection = Effect.fn("IntegrationHost.captureConnection")(
+        function* (integration: IntegrationRecord, connection: ConnectionRecord) {
           const credential = yield* resolveCredential(integration, connection)
-
-          if (integration.kind === "mcp") {
-            const endpoint = integration.endpoint
-            if (endpoint === undefined) {
-              return yield* new InvalidInputError({
-                field: "integration",
-                detail: `${integration.slug} records no MCP endpoint`
-              })
-            }
-            const definitions = yield* mcp.listTools(endpoint, mcpCredential(credential))
-            return yield* Effect.forEach(definitions, (definition) =>
-              Effect.gen(function* () {
-                const summary = yield* summaryOf({
-                  integration: integration.slug,
-                  owner: connection.owner,
-                  connection: connection.name,
-                  name: definition.name,
-                  description: definition.description ?? definition.title ?? "",
-                  readOnly: definition.annotations?.readOnlyHint === true
-                })
-                return yield* Schema.decodeUnknownEffect(Tool)({
-                  ...summary,
-                  ...whenPresent("inputSchema", definition.inputSchema),
-                  ...whenPresent(
-                    "outputSchema",
-                    definition.outputSchema === undefined
-                      ? undefined
-                      : normalizeOutputSchema(definition.outputSchema)
-                  )
-                }).pipe(Effect.mapError((cause) =>
-                  new StorageError({
-                    message: `Could not describe tool ${definition.name}`,
-                    cause
-                  })
-                ))
-              }))
+          const capturedAt = yield* Clock.currentTimeMillis
+          const target = {
+            owner: connection.owner,
+            integration: integration.slug,
+            connection: connection.name
           }
 
-          const spec = yield* specs.load(integration)
-          return yield* Effect.forEach(spec.operations, (operation) =>
-            Effect.gen(function* () {
-              const summary = yield* summaryOf({
-                integration: integration.slug,
-                owner: connection.owner,
-                connection: connection.name,
-                name: operation.name,
-                description: Option.getOrElse(
-                  operation.summary,
-                  () => Option.getOrElse(operation.description, () => "")
-                ),
-                readOnly: operation.readOnly
-              })
-              return yield* Schema.decodeUnknownEffect(Tool)({
-                ...summary,
-                inputSchema: operation.inputSchema,
-                ...whenPresent(
-                  "outputSchema",
-                  Option.getOrUndefined(operation.outputSchema)
-                ),
-                ...whenPresent(
-                  "schemaDefinitions",
-                  Object.keys(operation.schemaDefinitions).length === 0
-                    ? undefined
-                    : operation.schemaDefinitions
-                )
-              }).pipe(Effect.mapError((cause) =>
-                new StorageError({
-                  message: `Could not describe tool ${operation.name}`,
-                  cause
-                })
-              ))
-            }))
-        }
-      )
+          const captured = integration.kind === "mcp"
+            ? yield* captureMcpTools(
+              target,
+              yield* mcp.listTools(
+                yield* requireEndpoint(integration),
+                mcpCredential(credential)
+              ),
+              capturedAt
+            )
+            : yield* captureOpenApiTools(
+              target,
+              yield* specs.load(integration),
+              capturedAt
+            )
 
-      /** The connections a tool filter selects. */
-      const matchingConnections = Effect.fn("IntegrationHost.matchingConnections")(
-        function* (filter: ToolFilter) {
-          return yield* store.listConnections({
-            ...whenPresent("integration", filter.integration),
-            ...whenPresent("owner", filter.owner),
-            ...whenPresent("name", filter.connection)
-          })
+          yield* store.replaceTools(
+            { owner: connection.owner, integration: integration.slug, name: connection.name },
+            captured
+          )
+          return captured
         }
       )
 
       const listTools = Effect.fn("IntegrationHost.listTools")(
         function* (filter: ToolFilter = {}) {
-          const connections = yield* matchingConnections(filter)
-          const grouped = yield* Effect.forEach(connections, (connection) =>
-            Effect.gen(function* () {
-              const integration = yield* requireIntegration(connection.integration)
-              return yield* toolsForConnection(integration, connection)
-            }))
-          return grouped.flat()
+          const records = yield* store.listTools(filter)
+          return yield* Effect.forEach(records, toTool)
         }
       )
 
       const toolSummaries = Effect.fn("IntegrationHost.toolSummaries")(
         function* (filter: ToolFilter = {}) {
-          const tools = yield* listTools(filter)
-          return tools.map((tool): ToolSummary => ({
-            address: tool.address,
-            name: tool.name,
-            description: tool.description,
-            integration: tool.integration,
-            owner: tool.owner,
-            connection: tool.connection,
-            defaultDecision: tool.defaultDecision
-          }))
+          const records = yield* store.listTools(filter)
+          return yield* Effect.forEach(records, toToolSummary)
         }
       )
 
       const describeTool = Effect.fn("IntegrationHost.describeTool")(
         function* (target: ToolAddress | ToolTarget) {
           if (Predicate.isString(target)) {
-            const parsed = parseToolAddress(target)
-            if (Option.isNone(parsed)) {
+            const found = yield* store.findTool(target)
+            if (Option.isNone(found)) {
               return yield* new ToolNotFoundError({ tool: target })
             }
-            const parts = parsed.value
-            const tools = yield* listTools({
-              integration: parts.integration,
-              owner: parts.owner,
-              connection: parts.connection
-            })
-            const match = tools.find((tool) => tool.address === target)
-            if (match === undefined) {
-              return yield* new ToolNotFoundError({ tool: target })
-            }
-            return match
+            return yield* toTool(found.value)
           }
-
-          const tools = yield* listTools({
+          const candidates = yield* store.listTools({
             integration: target.integration,
             ...whenPresent("connection", target.connection)
           })
-          const match = tools.find((tool) => tool.name === target.name)
+          const match = candidates.find((candidate) => candidate.name === target.name)
           if (match === undefined) {
             return yield* new ToolNotFoundError({
               tool: `${target.integration}/${target.name}`
             })
           }
-          return match
+          return yield* toTool(match)
         }
       )
 
       const execute = Effect.fn("IntegrationHost.execute")(
         function* (address: ToolAddress, input: Json) {
-          const parsed = parseToolAddress(address)
-          if (Option.isNone(parsed)) {
+          const found = yield* store.findTool(address)
+          if (Option.isNone(found)) {
             return yield* new ToolNotFoundError({ tool: address })
           }
-          const parts = parsed.value
-          const integration = yield* requireIntegration(parts.integration)
+          const tool = found.value
+          const integration = yield* requireIntegration(tool.integration)
           const connection = yield* requireConnection({
-            owner: parts.owner,
-            integration: parts.integration,
-            name: parts.connection
+            owner: tool.owner,
+            integration: tool.integration,
+            name: tool.connection
           })
           const credential = yield* resolveCredential(integration, connection)
 
-          if (integration.kind === "mcp") {
-            const endpoint = integration.endpoint
-            if (endpoint === undefined) {
-              return yield* new InvalidInputError({
-                field: "integration",
-                detail: `${integration.slug} records no MCP endpoint`
-              })
-            }
-            // The tool name is not checked against a listing first. The
-            // server is authoritative about what it exposes and answers an
-            // unknown name with an error, which surfaces as a failure below —
-            // whereas pre-checking would spend a `tools/list` round trip on
-            // every single call to re-learn something that can change between
-            // the check and the call anyway. The OpenAPI path does check,
-            // because there the specification is already in hand.
+          // The only place a protocol is still visible, on a value read from
+          // the database rather than re-derived from a live endpoint.
+          if (tool.call.kind === "mcp") {
             const raw = yield* mcp.callTool(
-              endpoint,
+              yield* requireEndpoint(integration),
               mcpCredential(credential),
-              parts.tool,
+              tool.call.tool,
               input
             )
-            return yield* normalizeToolResult(parts.tool, raw)
+            return yield* normalizeToolResult(tool.name, raw)
           }
 
-          const spec = yield* specs.load(integration)
-          const operation: CompiledOperation | undefined = spec.operations.find(
-            (candidate) => candidate.name === parts.tool
-          )
-          if (operation === undefined) {
-            return yield* new ToolNotFoundError({ tool: address })
+          const server = integration.baseUrl
+          if (server === undefined) {
+            return yield* new InvalidInputError({
+              field: "integration",
+              detail: `${integration.slug} records no server to call`
+            })
           }
           return yield* invoker.call({
-            spec,
-            operation,
+            call: tool.call,
+            tool: tool.name,
+            server,
             input,
-            specSource: Option.fromNullishOr(integration.specSource),
-            baseUrl: Option.fromNullishOr(integration.baseUrl),
             credential
           })
         }
       )
-
-      /** Classifies an endpoint without changing any stored state.
-       *
-       *  An MCP handshake is tried first because it is decisive: a server that
-       *  answers `initialize` is an MCP server. Anything else is offered as a
-       *  possible specification document, which the caller confirms by asking
-       *  for a preview. */
-      const detect = Effect.fn("IntegrationHost.detect")(function* (url: string) {
-        const probed = yield* Effect.result(mcp.probe(url))
-        const detections: Array<EndpointDetection> = []
-        if (probed._tag === "Success") {
-          const probe = probed.success
-          if (probe.connected || probe.requiresAuthentication) {
-            detections.push({
-              kind: "mcp",
-              confidence: probe.connected ? "high" : "medium",
-              endpoint: url,
-              name: probe.name,
-              slug: probe.slug
-            })
-          }
-        }
-        const compiled = yield* Effect.result(specs.compileUrl(url))
-        if (compiled._tag === "Success") {
-          const spec = compiled.success
-          const name = Option.getOrElse(spec.title, () => new URL(url).hostname)
-          detections.push({
-            kind: "openapi",
-            confidence: spec.operations.length > 0 ? "high" : "low",
-            endpoint: url,
-            name,
-            slug: Option.getOrElse(slugify(name), () => "api")
-          })
-        }
-        return detections
-      })
 
       const addMcp = Effect.fn("IntegrationHost.addMcp")(function* (options: AddMcpOptions) {
         const probe = yield* mcp.probe(options.endpoint)
@@ -616,6 +502,20 @@ export class IntegrationHost extends Context.Service<
           const now = yield* Clock.currentTimeMillis
           const name = options.name ??
             Option.getOrElse(spec.title, () => new URL(options.spec).hostname)
+          // Resolved once, here, so a call never needs the document again: a
+          // relative server is only meaningful against where the document was
+          // fetched from, and that is knowledge this moment has and later
+          // moments do not.
+          const server = resolveServer(spec, {
+            baseUrl: Option.fromNullishOr(options.baseUrl),
+            specSource: Option.some(options.spec)
+          })
+          if (Option.isNone(server)) {
+            return yield* new SpecError({
+              source: options.spec,
+              detail: "The document declares no server, and none was configured"
+            })
+          }
           yield* store.putIntegration({
             slug: options.slug,
             name,
@@ -624,7 +524,7 @@ export class IntegrationHost extends Context.Service<
             kind: "openapi",
             specSource: options.spec,
             specFormat: "openapi",
-            ...whenPresent("baseUrl", options.baseUrl),
+            baseUrl: server.value,
             displayUrl: options.spec,
             authMethods: openApiAuthMethods(spec.securitySchemes),
             createdAt: now
@@ -669,7 +569,23 @@ export class IntegrationHost extends Context.Service<
             createdAt: now
           }
           yield* store.putConnection(record)
+          // Capture now: a connection whose tools have not been read yet is
+          // indistinguishable from one that exposes none.
+          yield* captureConnection(integration, record)
           return yield* toConnection(record)
+        }
+      )
+
+      const refreshConnection = Effect.fn("IntegrationHost.refreshConnection")(
+        function* (reference: {
+          readonly owner: OwnerTier
+          readonly integration: IntegrationSlug
+          readonly name: ConnectionName
+        }) {
+          const integration = yield* requireIntegration(reference.integration)
+          const connection = yield* requireConnection(reference)
+          const captured = yield* captureConnection(integration, connection)
+          return yield* Effect.forEach(captured, toTool)
         }
       )
 
@@ -704,7 +620,6 @@ export class IntegrationHost extends Context.Service<
             })
           }
         ),
-        detect,
         addMcp,
         addOpenApi,
         removeIntegration: store.removeIntegration,
@@ -719,6 +634,7 @@ export class IntegrationHost extends Context.Service<
           }
         ),
         removeConnection,
+        refreshConnection,
         toolSummaries,
         listTools,
         describeTool,

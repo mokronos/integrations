@@ -51,16 +51,6 @@ export const Integration = Schema.Struct({
 })
 export type Integration = typeof Integration.Type
 
-/** What kind of thing an endpoint turned out to be, and how sure we are. */
-export const EndpointDetection = Schema.Struct({
-  kind: Schema.String,
-  confidence: Schema.Literals(["high", "medium", "low"]),
-  endpoint: Schema.String,
-  name: Schema.String,
-  slug: Schema.String
-})
-export type EndpointDetection = typeof EndpointDetection.Type
-
 /** What an unauthenticated request to an MCP endpoint revealed. */
 export const McpProbe = Schema.Struct({
   connected: Schema.Boolean,

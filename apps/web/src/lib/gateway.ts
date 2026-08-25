@@ -1,6 +1,5 @@
 import { Schema } from "effect"
-import { whenPresent, whenPresentFields } from "./optional.ts"
-import type { JsonEncodable } from "./optional.ts"
+import { type JsonEncodable, whenPresent, whenPresentFields } from "@mokronos/contracts"
 import { Predicate } from "effect"
 import {
   decodeApprovalDecided,

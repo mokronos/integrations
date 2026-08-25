@@ -11,7 +11,7 @@ import {
 import type { GatewayClient } from "@mokronos/integrations-client"
 import { cliError } from "./connection.ts"
 import { openBrowser } from "./connection.ts"
-import { whenPresentMap } from "./optional.ts"
+import { whenPresentMap } from "@mokronos/contracts"
 
 const OperatorSession = Schema.Struct({
   url: Schema.String,

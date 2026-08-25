@@ -56,6 +56,7 @@
     "@mokronos/integration-host": "workspace:*",
     "@mokronos/integrations-client": "workspace:*",
     "@mokronos/observability": "workspace:*",
-    "effect": "4.0.0-beta.59"
+    "effect": "4.0.0-beta.59",
+    "@effect/platform-bun": "4.0.0-beta.59"
   }
 }
