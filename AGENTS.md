@@ -1,3 +1,5 @@
+# AGENTS.md
+
 When im using these words im talking about the following:
 - "you": i mean you, the coding agent helping me implement and design this system
 - "agent": i'm talking about the agent that is using this library/system to create workflows, etc.
@@ -6,6 +8,11 @@ When im using these words im talking about the following:
 ## Type Discipline
 
 - Never use `any` or `unknown`. Model every compile-time-known shape with Effect Schema (the schema is the single source of truth; derive TS types via `typeof X.Type`), brand identifiers where mix-ups are possible, and parse external/dynamic data at the boundary with `Schema.decodeUnknown*` instead of casting. No `as` casts to silence the compiler.
+
+
+## Comments
+
+Don't do any unnecessary comments describing what the code does.
 
 <!-- effect-solutions:start -->
 ## Effect Best Practices
