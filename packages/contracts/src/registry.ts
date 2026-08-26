@@ -4,13 +4,11 @@ export const IntegrationSearchKind = Schema.Literals(["mcp", "openapi", "graphql
 export type IntegrationSearchKind = typeof IntegrationSearchKind.Type
 
 export const IntegrationSearchQuery = Schema.Struct({
-  q: Schema.String.pipe(
-    Schema.refine((value): value is string => value.trim().length > 0)
-  ),
+  q: Schema.String.check(Schema.isMinLength(1), Schema.isTrimmed()),
   kind: Schema.optional(IntegrationSearchKind),
-  limit: Schema.optional(Schema.Int.pipe(
-    Schema.refine((value): value is number => value >= 1 && value <= 100)
-  ))
+  limit: Schema.optional(
+    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))
+  )
 })
 export type IntegrationSearchQuery = typeof IntegrationSearchQuery.Type
 

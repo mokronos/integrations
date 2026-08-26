@@ -794,4 +794,11 @@ describe("provisioning surface", () => {
     expect(windowed.body["offset"]).toBe(1)
     expect(Schema.decodeUnknownSync(Schema.Array(Schema.Json))(windowed.body["records"])).toHaveLength(1)
   })
+
+  test("refuses a window it cannot read rather than quietly serving another one", async () => {
+    const { call } = await setup({ capabilities: ["provision_connections", "administer_gateway"] })
+    for (const query of ["limit=abc", "limit=0", "limit=1.5", "offset=-1", "since=nope"]) {
+      expect((await call("GET", `/v1/audit?${query}`)).status).toBe(400)
+    }
+  })
 })

@@ -1,13 +1,16 @@
-import { Effect, Schema } from "effect"
-import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
+import { Clock, Effect, Predicate, Schema } from "effect"
+import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import type { IntegrationsApi } from "@mokronos/integration-host"
-import { searchIntegrations } from "@mokronos/integration-host"
+import { IntegrationsApiService, searchIntegrations } from "@mokronos/integration-host"
 import {
   gatewayProtocolVersion,
+  NonNegativeInt,
+  PositiveInt,
   whenPresent,
   whenPresentMap
 } from "@mokronos/contracts"
+import type { JsonObject } from "@mokronos/contracts"
 import {
   Alias,
   ApprovalId,
@@ -33,7 +36,6 @@ import {
   newTenantId
 } from "../keys.ts"
 import { generateSessionToken, hashPassword, verifyPassword } from "../passwords.ts"
-import type { OAuthSessions } from "../oauth-sessions.ts"
 import type { GoogleIdentityOAuth } from "../identity-oauth.ts"
 import {
   googleIdentityAuthorizationUrl,
@@ -42,18 +44,26 @@ import {
 } from "../identity-oauth.ts"
 import { oauthBrowserPage } from "../oauth.ts"
 import type { GatewayStore } from "../store.ts"
+import { GatewayStoreService } from "../store.ts"
 import type { WebAssets } from "../web-assets.ts"
 import { gatewayVersion } from "../version.ts"
 import {
-  clearedSessionCookieHeaderValue,
+  clearSessionCookie,
   decidedBy,
   Forbidden,
   Identity,
   requireClient,
   requireSecret,
   requireTenant,
-  sessionCookieHeaderValue
+  setSessionCookie
 } from "./authority.ts"
+import {
+  ControlPlaneAssets,
+  GatewayConfig,
+  OAuthFlowSessions,
+  SessionPolicy
+} from "./services.ts"
+import type { SignInPolicy } from "./services.ts"
 import {
   ApiBadRequest,
   ApiNotFound,
@@ -67,63 +77,49 @@ import {
   GatewayApi
 } from "./api.ts"
 
-/** Handlers for every endpoint in {@link GatewayApi}. Each group layer closes
- *  over plain dependency values and bridges to the existing async domain code;
- *  those bridges shrink as the domain and store become Effects themselves. */
+/** Handlers for every endpoint in {@link GatewayApi}.
+ *
+ *  Each group layer asks the context for what it needs and bridges to the
+ *  existing async domain code; those bridges shrink as the domain and store
+ *  become Effects themselves. */
 
-export interface SessionDependencies {
-  /** Whether POST /v1/auth/signup may create a new tenant. True while the
-   *  gateway has no logins at all (so its first human can claim it) and after
-   *  that only when an operator opts in. */
-  readonly signupOpen: () => Promise<boolean>
-  /** Set on session cookies when the gateway is served over TLS. */
-  readonly secureCookies: boolean
-  readonly sessionTtlHours?: number
-  /** Human sign-in through Google. Deliberately separate from integration
-   *  OAuth, which authorizes tools rather than operators. */
-  readonly google?: GoogleIdentityOAuth
-}
+const json = (status: number, body: JsonObject): HttpServerResponse.HttpServerResponse =>
+  HttpServerResponse.jsonUnsafe(body, { status })
 
-export interface GatewayDependencies {
-  readonly store: GatewayStore
-  readonly integrations: IntegrationsApi
-  readonly retentionDays: number
-  readonly oauth: OAuthSessions
-  /** Where a provider must redirect after the human approves, so clients can
-   *  show it before a flow starts — providers like Google and Microsoft want
-   *  this exact URI registered in their consoles up front. */
-  readonly oauthCallbackUrl?: () => string | undefined
-  /** Origin of the authenticated control plane, used only to point a human at
-   *  a pending approval. */
-  readonly dashboardUrl?: () => string | undefined
-  /** Overrides the public registry for an isolated deployment or acceptance test. */
-  readonly registryUrl?: string
-  readonly sessions?: SessionDependencies
-}
-
-const json = (
-  status: number,
-  body: JsonValue,
-  headers?: Readonly<Record<string, string>>
-): HttpServerResponse.HttpServerResponse =>
-  HttpServerResponse.jsonUnsafe(body, {
-    status,
-    ...whenPresentMap("headers", headers, (h) => h)
+/** A call that leaves this process — the caller's own URL, the public registry,
+ *  a vendor API, an identity provider.
+ *
+ *  Failure out there is routine and almost always the caller's to act on: an
+ *  unreachable host, a document that is not an OpenAPI spec, a provider saying
+ *  no. Wrapping it in `Effect.promise` made every one of those an undeclared
+ *  defect and a 500 that named nothing. This declares it instead, and says what
+ *  the far end said. */
+const reachOut = <A>(what: string, call: () => Promise<A>): Effect.Effect<A, ApiBadRequest> =>
+  Effect.tryPromise({
+    try: call,
+    catch: (cause) =>
+      new ApiBadRequest({
+        error: `${what}: ${Predicate.isError(cause) ? cause.message : String(cause)}`
+      })
   })
 
-type JsonValue = { readonly [key: string]: JsonScalar | ReadonlyArray<JsonValue> | JsonValue }
+/** Sets a response header without giving up the endpoint's declared schema:
+ *  the handler still returns its typed value and the API still encodes it. */
+const withResponseHeader = (name: string, value: string) =>
+  HttpEffect.appendPreResponseHandler((_request, response) =>
+    Effect.succeed(HttpServerResponse.setHeader(response, name, value)))
 
-type JsonScalar = string | number | boolean | null
-
+/** An HTML page for the OAuth browser flow — one of the few responses here
+ *  that really is low-level HTTP rather than a typed endpoint's success value.
+ *  It no longer carries headers: a cookie set alongside a page goes through
+ *  {@link setSessionCookie} like every other cookie does. */
 const page = (
   status: number,
-  content: { readonly title: string; readonly message: string },
-  headers?: Readonly<Record<string, string>>
+  content: { readonly title: string; readonly message: string }
 ): HttpServerResponse.HttpServerResponse =>
   HttpServerResponse.text(oauthBrowserPage(content), {
     status,
-    contentType: "text/html; charset=utf-8",
-    ...whenPresentMap("headers", headers, (h) => h)
+    contentType: "text/html; charset=utf-8"
   })
 
 /** Compares connection names the way a human means them. The host stores a
@@ -131,18 +127,6 @@ const page = (
  *  that transformation — which belongs to the host and may change — this
  *  compares the parts a separator convention cannot alter. */
 const normalizeName = (value: string): string => value.toLowerCase().replace(/[^a-z0-9]/g, "")
-
-const positiveInt = (value: string | undefined, fallback: number): number => {
-  if (value === undefined) return fallback
-  const parsed = Number.parseInt(value, 10)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
-}
-
-const nonNegativeInt = (value: string | undefined, fallback: number): number => {
-  if (value === undefined) return fallback
-  const parsed = Number.parseInt(value, 10)
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback
-}
 
 /** The login surface's failures do not distinguish "unknown email" from "wrong
  *  password". The difference is an enumeration oracle for anyone harvesting
@@ -184,11 +168,10 @@ export const SystemLayer = HttpApiBuilder.group(GatewayApi, "system", (handlers)
     .handle("metadata", () =>
       // Health checks are liveness noise; this one response is the only place
       // a no-store cache policy still matters on the read path.
-      Effect.succeed(json(
-        200,
-        { ok: true, protocolVersion: gatewayProtocolVersion, gatewayVersion },
-        { "cache-control": "no-store" }
-      ))))
+      Effect.gen(function*() {
+        yield* withResponseHeader("cache-control", "no-store")
+        return { ok: true as const, protocolVersion: gatewayProtocolVersion, gatewayVersion }
+      })))
 
 // --- fallback ---------------------------------------------------------------
 
@@ -240,33 +223,34 @@ const unmatched = (webAssets: WebAssets | undefined) =>
 
 /** Serves the control plane's own files for any unmatched non-`/v1` path.
  *  Absent on headless deployments, where such paths answer 404 JSON. */
-export const FallbackLayer = (options: {
-  readonly webAssets?: WebAssets
-}) =>
-  HttpApiBuilder.group(GatewayApi, "fallback", (handlers) =>
-    handlers
-      .handle("unmatchedGet", () => unmatched(options.webAssets))
+export const FallbackLayer = HttpApiBuilder.group(GatewayApi, "fallback", (handlers) =>
+  Effect.gen(function*() {
+    const { assets } = yield* ControlPlaneAssets
+    return handlers
+      .handle("unmatchedGet", () => unmatched(assets))
+      // Only GET can mean "a page"; a POST to an unknown path is a mistake in
+      // the caller, not a request for the control plane.
       .handle("unmatchedPost", () => unmatched(undefined))
-      .handle("unmatchedDelete", () => unmatched(undefined)))
+      .handle("unmatchedDelete", () => unmatched(undefined))
+  }))
+
 
 // --- delegated --------------------------------------------------------------
 
-export const DelegatedLayer = (dependencies: {
-  readonly store: GatewayStore
-  readonly integrations: IntegrationsApi
-  readonly retentionDays: number
-  readonly dashboardUrl?: () => string | undefined
-}) =>
-  HttpApiBuilder.group(GatewayApi, "delegated", (handlers) =>
-    handlers
+export const DelegatedLayer = HttpApiBuilder.group(GatewayApi, "delegated", (handlers) =>
+  Effect.gen(function*() {
+    const store = yield* GatewayStoreService
+    const integrationsApi = yield* IntegrationsApiService
+    const config = yield* GatewayConfig
+    return handlers
       .handle("listTools", (request) =>
         Effect.gen(function*() {
           const client = yield* requireClient
           return {
             tools: yield* Effect.promise(() =>
-              listGrantedTools(dependencies.store, client.id, {
-                schemas: request.query["schemas"] === "true",
-                integrations: dependencies.integrations
+              listGrantedTools(store, client.id, {
+                schemas: request.query["schemas"],
+                integrations: integrationsApi
               }))
           }
         }))
@@ -276,11 +260,11 @@ export const DelegatedLayer = (dependencies: {
           return yield* Effect.promise(() =>
             invokeThroughGateway(
               {
-                store: dependencies.store,
-                integrations: dependencies.integrations,
-                argumentRetentionDays: dependencies.retentionDays,
+                store,
+                integrations: integrationsApi,
+                argumentRetentionDays: config.retentionDays,
                 approvalUrlOf: (approvalId) => {
-                  const origin = dependencies.dashboardUrl?.()
+                  const origin = config.dashboardUrl?.()
                   return origin === undefined
                     ? undefined
                     : `${origin.replace(/\/+$/, "")}/approvals?approval=${encodeURIComponent(approvalId)}`
@@ -307,13 +291,14 @@ export const DelegatedLayer = (dependencies: {
           const id = ApprovalId.make(request.params["id"])
           const client = yield* requireClient
           const approval = yield* Effect.promise(() =>
-            dependencies.store.getApproval(client.tenantId, id))
+            store.getApproval(client.tenantId, id))
           // Scoped to the caller: one client must not read another's frozen call.
           if (approval === undefined || approval.clientId !== client.id) {
             return yield* new ApiNotFound({ error: `Unknown approval ${id}` })
           }
           return approval
-        })))
+        }))
+  }))
 
 // --- provisioning -----------------------------------------------------------
 
@@ -331,27 +316,25 @@ const selectAuthMethod = (
   return methods.find((method) => method.kind === "oauth") ?? methods[0]
 }
 
-export const ProvisioningLayer = (dependencies: {
-  readonly store: GatewayStore
-  readonly integrations: IntegrationsApi
-  readonly oauth: OAuthSessions
-  readonly oauthCallbackUrl?: () => string | undefined
-  readonly registryUrl?: string
-}) =>
-  HttpApiBuilder.group(GatewayApi, "provisioning", (handlers) =>
-    handlers
+export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning", (handlers) =>
+  Effect.gen(function*() {
+    const store = yield* GatewayStoreService
+    const integrationsApi = yield* IntegrationsApiService
+    const oauth = yield* OAuthFlowSessions
+    const config = yield* GatewayConfig
+    return handlers
       .handle("listIntegrations", () =>
         Effect.gen(function*() {
           const integrations = yield* Effect.promise(() =>
-            dependencies.integrations.listIntegrationOverviews())
+            integrationsApi.listIntegrationOverviews())
           return {
             integrations,
-            ...whenPresentMap("oauthCallbackUrl", dependencies.oauthCallbackUrl?.(), (url) => url)
+            ...whenPresentMap("oauthCallbackUrl", config.oauthCallbackUrl?.(), (url) => url)
           }
         }))
       .handle("discover", (request) =>
-        Effect.promise(() =>
-          dependencies.integrations.provisioning.provision(
+        reachOut(`Could not read an integration from ${request.payload.url}`, () =>
+          integrationsApi.provisioning.provision(
             request.payload.url,
             request.payload.connection === undefined
               ? {}
@@ -360,33 +343,33 @@ export const ProvisioningLayer = (dependencies: {
       .handle("integrationTools", (request) =>
         Effect.map(
           Effect.promise(() =>
-            dependencies.integrations.tools.summaries({ integration: request.params["slug"] })),
+            integrationsApi.tools.summaries({ integration: request.params["slug"] })),
           (tools) => ({ tools })
         ))
       .handle("describeTool", (request) =>
         Effect.promise(() =>
-          dependencies.integrations.tools.describe({
+          integrationsApi.tools.describe({
             integration: request.params["slug"],
             name: request.params["tool"],
             ...whenPresentMap("connection", request.query["connection"], (c) => c)
           })))
       .handle("registrySearch", (request) =>
-        Effect.promise(() =>
+        reachOut("The integration registry could not be searched", () =>
           searchIntegrations(
             {
               q: request.query["q"],
-              limit: positiveInt(request.query["limit"], 5),
+              limit: request.query["limit"],
               ...whenPresentMap("kind", request.query["kind"], (k) => k)
             },
-            whenPresent("registryUrl", dependencies.registryUrl)
+            whenPresent("registryUrl", config.registryUrl)
           )))
       .handle("invokeTool", (request) =>
         // Administrative, and deliberately not grant-checked: a client that may
         // mutate grants could grant itself this tool in one extra call, so a
         // check here would be friction rather than a control. The delegated
         // surface has no address form at all. See docs/adr/0002.
-        Effect.promise(() =>
-          dependencies.integrations.tools.execute(
+        reachOut(`${request.payload.address} failed`, () =>
+          integrationsApi.tools.execute(
             request.payload.address,
             request.payload.arguments ?? {}
           )))
@@ -400,27 +383,26 @@ export const ProvisioningLayer = (dependencies: {
               ? caller.client.id
               : undefined
             const source = Schema.decodeUnknownSync(GatewayNodeSource)(body.node).source
-            return yield* Effect.promise(() =>
-              validateGatewayNode(
-                { store: dependencies.store, integrations: dependencies.integrations },
-                clientId,
-                source,
-                body.live ?? true
-              ))
+            return yield* validateGatewayNode(
+              { store: store, integrations: integrationsApi },
+              clientId,
+              source,
+              body.live ?? true
+            )
           }
           return yield* Effect.promise(() =>
-            dependencies.integrations.validateIntegrationNode(body.node, { live: body.live ?? true }))
+            integrationsApi.validateIntegrationNode(body.node, { live: body.live ?? true }))
         }))
       .handle("listConnections", () =>
         Effect.map(
-          Effect.promise(() => dependencies.integrations.connections.list()),
+          Effect.promise(() => integrationsApi.connections.list()),
           (connections) => ({ connections })
         ))
       .handle("connect", (request) =>
         Effect.gen(function*() {
           const body = request.payload
           const integration = yield* Effect.promise(() =>
-            dependencies.integrations.catalog.find(body.integration))
+            integrationsApi.catalog.find(body.integration))
           if (integration === undefined) {
             return yield* new ApiNotFound({ error: `Unknown integration ${body.integration}` })
           }
@@ -440,7 +422,7 @@ export const ProvisioningLayer = (dependencies: {
           const values = body.values ?? {}
           const names = Object.keys(values)
           const connection = yield* Effect.promise(() =>
-            dependencies.integrations.connections.create({
+            integrationsApi.connections.create({
               integration: integration.slug,
               name: body.connection ?? "default",
               template: method.template,
@@ -453,7 +435,7 @@ export const ProvisioningLayer = (dependencies: {
           return {
             connection,
             tools: yield* Effect.promise(() =>
-              dependencies.integrations.tools.summaries({
+              integrationsApi.tools.summaries({
                 integration: integration.slug,
                 connection: connection.name
               }))
@@ -463,7 +445,7 @@ export const ProvisioningLayer = (dependencies: {
         Effect.gen(function*() {
           const body = request.payload
           const integration = yield* Effect.promise(() =>
-            dependencies.integrations.catalog.find(body.integration))
+            integrationsApi.catalog.find(body.integration))
           if (integration === undefined) {
             return yield* new ApiNotFound({ error: `Unknown integration ${body.integration}` })
           }
@@ -477,8 +459,8 @@ export const ProvisioningLayer = (dependencies: {
           }
           // The gateway drives the flow and hosts the callback, because it is
           // what holds credentials. The caller opens a browser and polls.
-          return yield* Effect.promise(() =>
-            dependencies.oauth.start({
+          return yield* reachOut(`${body.integration} could not start an OAuth flow`, () =>
+            oauth.start({
               integration: integration.slug,
               connection: body.connection ?? "default",
               authMethod: method,
@@ -495,7 +477,7 @@ export const ProvisioningLayer = (dependencies: {
         }))
       .handle("oauthSession", (request) =>
         Effect.gen(function*() {
-          const session = yield* Effect.promise(() => dependencies.oauth.get(request.params["id"]))
+          const session = yield* Effect.promise(() => oauth.get(request.params["id"]))
           if (session === undefined) {
             return yield* new ApiNotFound({ error: "Unknown or expired OAuth session" })
           }
@@ -512,11 +494,21 @@ export const ProvisioningLayer = (dependencies: {
               message: errorDescription ?? "The provider did not return a usable authorization code."
             })
           }
-          const completed = yield* Effect.promise(() =>
-            dependencies.oauth.completeByState(state, {
-              code,
-              ...whenPresentMap("callbackDomain", request.query["domain"] ?? request.query["site"], (d) => d)
-            }))
+          // A browser is reading this, so a failure out at the provider becomes
+          // a page rather than the JSON refusal every other surface gets.
+          const completed = yield* Effect.catch(
+            reachOut("Authorization could not be completed", () =>
+              oauth.completeByState(state, {
+                code,
+                ...whenPresentMap("callbackDomain", request.query["domain"] ?? request.query["site"], (d) => d)
+              })),
+            (refusal) =>
+              Effect.succeed(page(502, {
+                title: "Authorization failed",
+                message: refusal.error
+              }))
+          )
+          if (HttpServerResponse.isHttpServerResponse(completed)) return completed
           if (completed === undefined) {
             return page(400, {
               title: "Unknown authorization",
@@ -544,7 +536,7 @@ export const ProvisioningLayer = (dependencies: {
           // to resolve through the same normalisation. Otherwise a connection
           // you just made cannot be deleted by the name you made it with.
           const connections = yield* Effect.promise(() =>
-            dependencies.integrations.connections.list())
+            integrationsApi.connections.list())
           const match = connections.find((connection) =>
             connection.integration === integration &&
             (connection.name === requested ||
@@ -561,9 +553,10 @@ export const ProvisioningLayer = (dependencies: {
             })
           }
           yield* Effect.promise(() =>
-            dependencies.integrations.connections.remove({ integration, name: match.name }))
+            integrationsApi.connections.remove({ integration, name: match.name }))
           return { removed: true as const, integration, connection: match.name }
-        })))
+      }))
+  }))
 
 const GatewayNodeSource = Schema.Struct({
   source: Schema.Struct({
@@ -585,15 +578,12 @@ const validateGatewayNode = (
   clientId: ClientId | undefined,
   source: { readonly alias: string; readonly tool: string },
   live: boolean
-): Promise<{
-  readonly ok: boolean
-  readonly findings: ReadonlyArray<
-    { readonly severity: string; readonly check: string; readonly message: string }
-  >
-}> =>
-  Effect.runPromise(Effect.gen(function*() {
+) =>
+  Effect.gen(function*() {
     const findings: Array<{ severity: string; check: string; message: string }> = []
-    const aliasIsWellFormed = /^[a-z][a-z0-9-]*$/.test(source.alias)
+    // The same rule `Alias` already carries, asked rather than restated: a
+    // second copy of the pattern is a second thing to keep in step.
+    const aliasIsWellFormed = Schema.is(Alias)(source.alias)
     findings.push(
       aliasIsWellFormed
         ? { severity: "info", check: "structural", message: "Gateway integration reference is valid" }
@@ -648,24 +638,26 @@ const validateGatewayNode = (
     }
 
     return { ok: !findings.some((finding) => finding.severity === "error"), findings }
-  }))
+  })
 
 // --- administrative ---------------------------------------------------------
 
-export const AdministrativeLayer = (dependencies: {
-  readonly store: GatewayStore
-  readonly integrations: IntegrationsApi
-  readonly retentionDays: number
-}) =>
-  HttpApiBuilder.group(GatewayApi, "administrative", (handlers) =>
-    handlers
+export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrative", (handlers) =>
+  Effect.gen(function*() {
+    const store = yield* GatewayStoreService
+    const integrationsApi = yield* IntegrationsApiService
+    const config = yield* GatewayConfig
+    return handlers
       .handle("overview", () =>
         Effect.gen(function*() {
           const tenantId = yield* requireTenant
           const [counts, connections, recentActivity] = yield* Effect.all([
-            Effect.promise(() => dependencies.store.overviewCounts(tenantId)),
-            Effect.promise(() => dependencies.integrations.connections.list()),
-            Effect.promise(() => dependencies.store.listAudit(tenantId, { limit: 5, offset: 0 }))
+            Effect.promise(() => store.overviewCounts(tenantId)),
+            Effect.promise(() => integrationsApi.connections.list()),
+            Effect.promise(() => store.listAudit(tenantId, {
+              limit: PositiveInt.make(5),
+              offset: NonNegativeInt.make(0)
+            }))
           ])
           return { ...counts, connections: connections.length, recentActivity }
         }))
@@ -673,7 +665,7 @@ export const AdministrativeLayer = (dependencies: {
         Effect.gen(function*() {
           const tenantId = yield* requireTenant
           return {
-            clients: yield* Effect.promise(() => dependencies.store.listClients(tenantId))
+            clients: yield* Effect.promise(() => store.listClients(tenantId))
           }
         }))
       .handle("createClient", (request) =>
@@ -681,13 +673,13 @@ export const AdministrativeLayer = (dependencies: {
           const tenantId = yield* requireTenant
           const body = request.payload
           if ((yield* Effect.promise(() =>
-            dependencies.store.findClientByName(tenantId, body.name))) !== undefined) {
+            store.findClientByName(tenantId, body.name))) !== undefined) {
             return yield* new ApiBadRequest({ error: `A client named ${body.name} already exists` })
           }
           // Clients are created inside the caller's partition. There is no way
           // to provision into another tenant over this surface, by design.
           return yield* Effect.promise(() =>
-            dependencies.store.createClient({
+            store.createClient({
               id: newClientId(),
               tenantId,
               name: body.name,
@@ -700,7 +692,7 @@ export const AdministrativeLayer = (dependencies: {
           const tenantId = yield* requireTenant
           const clientId = request.params["id"]
           const existing = yield* Effect.promise(() =>
-            dependencies.store.findClientById(tenantId, clientId))
+            store.findClientById(tenantId, clientId))
           if (existing === undefined) {
             return yield* new ApiNotFound({ error: `Unknown client ${clientId}` })
           }
@@ -708,7 +700,7 @@ export const AdministrativeLayer = (dependencies: {
             return yield* new ApiBadRequest({ error: `Client ${clientId} is revoked` })
           }
           return yield* Effect.promise(() =>
-            dependencies.store.updateClientSettings({
+            store.updateClientSettings({
               tenantId,
               id: clientId,
               capabilities: request.payload.capabilities,
@@ -720,12 +712,12 @@ export const AdministrativeLayer = (dependencies: {
           const tenantId = yield* requireTenant
           const clientId = request.params["id"]
           if ((yield* Effect.promise(() =>
-            dependencies.store.findClientById(tenantId, clientId))) === undefined) {
+            store.findClientById(tenantId, clientId))) === undefined) {
             return yield* new ApiNotFound({ error: `Unknown client ${clientId}` })
           }
           const key = generateApiKey()
           yield* Effect.promise(() =>
-            dependencies.store.addApiKey({ id: key.id, clientId, hash: key.hash }))
+            store.addApiKey({ id: key.id, clientId, hash: key.hash }))
           // The only time the plaintext exists outside the caller's hands.
           return { id: key.id, clientId, secret: key.secret }
         }))
@@ -734,12 +726,12 @@ export const AdministrativeLayer = (dependencies: {
           const tenantId = yield* requireTenant
           const clientId = request.params["id"]
           if ((yield* Effect.promise(() =>
-            dependencies.store.findClientById(tenantId, clientId))) === undefined) {
+            store.findClientById(tenantId, clientId))) === undefined) {
             return yield* new ApiNotFound({ error: `Unknown client ${clientId}` })
           }
           // Hashes stay behind the gateway. What an operator needs is which keys
           // exist, when each was last used, and which are still live.
-          const keys = yield* Effect.promise(() => dependencies.store.listApiKeys(clientId))
+          const keys = yield* Effect.promise(() => store.listApiKeys(clientId))
           return {
             keys: keys.map((key) => ({
               id: key.id,
@@ -753,7 +745,7 @@ export const AdministrativeLayer = (dependencies: {
       .handle("revokeKey", (request) =>
         Effect.gen(function*() {
           const keyId = request.params["id"]
-          yield* Effect.promise(() => dependencies.store.revokeApiKey(keyId))
+          yield* Effect.promise(() => store.revokeApiKey(keyId))
           // Rotation, not containment: a revoked key's frozen calls stay armed
           // because the client behind them is still trusted. Revoking the
           // client is what cancels those.
@@ -764,7 +756,7 @@ export const AdministrativeLayer = (dependencies: {
           const tenantId = yield* requireTenant
           const clientId = request.params["id"]
           if ((yield* Effect.promise(() =>
-            dependencies.store.findClientById(tenantId, clientId))) === undefined) {
+            store.findClientById(tenantId, clientId))) === undefined) {
             return yield* new ApiNotFound({ error: `Unknown client ${clientId}` })
           }
           // The same listing `/v1/tools` gives a key about itself, asked about
@@ -772,9 +764,9 @@ export const AdministrativeLayer = (dependencies: {
           // provisioning should not require holding its key.
           return {
             tools: yield* Effect.promise(() =>
-              listGrantedTools(dependencies.store, clientId, {
-                schemas: request.query["schemas"] === "true",
-                integrations: dependencies.integrations
+              listGrantedTools(store, clientId, {
+                schemas: request.query["schemas"],
+                integrations: integrationsApi
               }))
           }
         }))
@@ -783,19 +775,19 @@ export const AdministrativeLayer = (dependencies: {
           const tenantId = yield* requireTenant
           const clientId = request.params["id"]
           if ((yield* Effect.promise(() =>
-            dependencies.store.findClientById(tenantId, clientId))) === undefined) {
+            store.findClientById(tenantId, clientId))) === undefined) {
             return yield* new ApiNotFound({ error: `Unknown client ${clientId}` })
           }
-          yield* Effect.promise(() => dependencies.store.revokeClient(tenantId, clientId))
+          yield* Effect.promise(() => store.revokeClient(tenantId, clientId))
           // Revoking a client is done because something is wrong, so its frozen
           // actions must not stay armed. Revoking a single key does not do this.
           const cancelled = yield* Effect.promise(() =>
-            dependencies.store.cancelApprovalsForClient(clientId))
+            store.cancelApprovalsForClient(clientId))
           return { revoked: true as const, cancelledApprovals: cancelled }
         }))
       .handle("listGrants", (request) =>
         Effect.map(
-          Effect.promise(() => dependencies.store.listGrants(request.query["clientId"])),
+          Effect.promise(() => store.listGrants(request.query["clientId"])),
           (grants) => ({ grants })
         ))
       .handle("createGrant", (request) =>
@@ -804,7 +796,7 @@ export const AdministrativeLayer = (dependencies: {
           const body = request.payload
           const clientId = body.clientId
           if ((yield* Effect.promise(() =>
-            dependencies.store.findClientById(tenantId, clientId))) === undefined) {
+            store.findClientById(tenantId, clientId))) === undefined) {
             return yield* new ApiNotFound({ error: `Unknown client ${clientId}` })
           }
           if (body.connection.owner === "user") {
@@ -819,7 +811,7 @@ export const AdministrativeLayer = (dependencies: {
             })
           }
           const summaries = yield* Effect.promise(() =>
-            dependencies.integrations.tools.summaries({ integration: body.connection.integration }))
+            integrationsApi.tools.summaries({ integration: body.connection.integration }))
           const tool = summaries.find((candidate) =>
             candidate.name === body.tool &&
             candidate.owner === "org" &&
@@ -831,7 +823,7 @@ export const AdministrativeLayer = (dependencies: {
             })
           }
           return yield* Effect.promise(() =>
-            dependencies.store.createGrant({
+            store.createGrant({
               id: newGrantId(),
               tenantId,
               clientId,
@@ -849,7 +841,7 @@ export const AdministrativeLayer = (dependencies: {
         Effect.gen(function*() {
           const tenantId = yield* requireTenant
           yield* Effect.promise(() =>
-            dependencies.store.revokeGrant(tenantId, request.params["id"]))
+            store.revokeGrant(tenantId, request.params["id"]))
           return { revoked: true as const }
         }))
       .handle("listApprovals", (request) =>
@@ -859,8 +851,8 @@ export const AdministrativeLayer = (dependencies: {
           return {
             approvals: yield* Effect.promise(() =>
               status === undefined
-                ? dependencies.store.listApprovals(tenantId)
-                : dependencies.store.listApprovals(tenantId, status))
+                ? store.listApprovals(tenantId)
+                : store.listApprovals(tenantId, status))
           }
         }))
       .handle("approve", (request) =>
@@ -868,7 +860,6 @@ export const AdministrativeLayer = (dependencies: {
           const tenantId = yield* requireTenant
           const id = request.params["id"]
           const by = yield* decidedBy
-          const store = dependencies.store
           const approval = yield* Effect.promise(() => store.getApproval(tenantId, id))
           if (approval === undefined) {
             return yield* new ApiNotFound({ error: `Unknown approval ${id}` })
@@ -876,7 +867,8 @@ export const AdministrativeLayer = (dependencies: {
           if (approval.status !== "pending") {
             return yield* new ApiBadRequest({ error: `Approval ${id} is already ${approval.status}` })
           }
-          if (approval.expiresAt.getTime() <= Date.now()) {
+          const now = yield* Clock.currentTimeMillis
+          if (approval.expiresAt.getTime() <= now) {
             yield* Effect.promise(() =>
               store.settleApproval({
                 tenantId,
@@ -912,8 +904,8 @@ export const AdministrativeLayer = (dependencies: {
             executeAuthorized(
               {
                 store,
-                integrations: dependencies.integrations,
-                retentionDays: dependencies.retentionDays
+                integrations: integrationsApi,
+                retentionDays: config.retentionDays
               },
               {
                 status: "authorized",
@@ -960,7 +952,6 @@ export const AdministrativeLayer = (dependencies: {
           const tenantId = yield* requireTenant
           const id = request.params["id"]
           const by = yield* decidedBy
-          const store = dependencies.store
           const approval = yield* Effect.promise(() => store.getApproval(tenantId, id))
           if (approval === undefined) {
             return yield* new ApiNotFound({ error: `Unknown approval ${id}` })
@@ -985,32 +976,25 @@ export const AdministrativeLayer = (dependencies: {
           const tenantId = yield* requireTenant
           const slug = request.query["integration"]
           const slugs = slug === undefined
-            ? (yield* Effect.promise(() => dependencies.integrations.catalog.list()))
+            ? (yield* Effect.promise(() => integrationsApi.catalog.list()))
               .map((entry) => entry.slug)
             : [slug]
           const reports: Array<Awaited<ReturnType<typeof refreshIntegrationSnapshot>>> = []
           for (const integration of slugs) {
             reports.push(yield* Effect.promise(() =>
               refreshIntegrationSnapshot(
-                { store: dependencies.store, integrations: dependencies.integrations },
+                { store: store, integrations: integrationsApi },
                 integration,
                 tenantId
               )))
           }
           return { reports }
         }))
-      .handle("maintenance", () => Effect.promise(() => runMaintenance(dependencies.store)))
+      .handle("maintenance", () => Effect.promise(() => runMaintenance(store)))
       .handle("audit", (request) =>
         Effect.gen(function*() {
           const tenantId = yield* requireTenant
           const query = request.query
-          let sinceDate: Date | undefined
-          if (query["since"] !== undefined) {
-            sinceDate = new Date(query["since"])
-            if (Number.isNaN(sinceDate.getTime())) {
-              return yield* new ApiBadRequest({ error: `since is not a date: ${query["since"]}` })
-            }
-          }
           const filter = {
             ...whenPresentMap("clientId", query["clientId"], ClientId.make),
             ...whenPresentMap("alias", query["alias"], Alias.make),
@@ -1020,57 +1004,52 @@ export const AdministrativeLayer = (dependencies: {
               (tool) => tool
             ),
             ...whenPresentMap("outcome", query["outcome"], (o) => o),
-            ...whenPresentMap("since", sinceDate, (d) => d)
+            ...whenPresentMap("since", query["since"], (since) => since)
           }
-          const limit = positiveInt(query["limit"], 50)
-          const offset = nonNegativeInt(query["offset"], 0)
+          const limit = query["limit"]
+          const offset = query["offset"]
           // The trail is permanent, so the count is what tells a reader whether
           // the window they asked for is the whole answer.
           return {
             records: yield* Effect.promise(() =>
-              dependencies.store.listAudit(tenantId, { ...filter, limit, offset })),
-            total: yield* Effect.promise(() => dependencies.store.countAudit(tenantId, filter)),
+              store.listAudit(tenantId, { ...filter, limit, offset })),
+            total: yield* Effect.promise(() => store.countAudit(tenantId, filter)),
             limit,
             offset
           }
-        })))
+        }))
+  }))
 
 // --- auth -------------------------------------------------------------------
 
-export const AuthLayer = (dependencies: {
-  readonly store: GatewayStore
-  readonly sessions: SessionDependencies
-}) => {
-  const ttlHours = dependencies.sessions.sessionTtlHours ?? defaultSessionTtlHours
-  const secureCookies = dependencies.sessions.secureCookies
-  const store = dependencies.store
+export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
+  Effect.gen(function*() {
+    const store = yield* GatewayStoreService
+    const sessions = yield* SessionPolicy
+    const ttlHours = sessions.sessionTtlHours ?? defaultSessionTtlHours
+    const secureCookies = sessions.secureCookies
 
-  const issueSession = async (
-    subjectId: SubjectId,
-    tenantId: TenantId
-  ): Promise<{ readonly token: string; readonly cookie: string }> => {
-    const token = generateSessionToken()
-    await store.createSession({
-      tokenHash: token.hash,
-      subjectId,
-      tenantId,
-      expiresAt: new Date(Date.now() + ttlHours * 60 * 60 * 1000)
-    })
-    return {
-      token: token.secret,
-      cookie: sessionCookieHeaderValue(token.secret, {
+    const issueSession = (subjectId: SubjectId, tenantId: TenantId) =>
+      Effect.gen(function*() {
+        const token = generateSessionToken()
+        const expiresAt = new Date((yield* Clock.currentTimeMillis) + ttlHours * 60 * 60 * 1000)
+        yield* Effect.promise(() =>
+          store.createSession({ tokenHash: token.hash, subjectId, tenantId, expiresAt }))
+        return { token: token.secret }
+      })
+
+    /** The cookie every sign-in path ends with, whatever shape its response takes. */
+    const startSession = (token: string) =>
+      setSessionCookie(token, {
         maxAgeSeconds: Math.round(ttlHours * 60 * 60),
         secure: secureCookies
       })
-    }
-  }
 
-  return HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
-    handlers
+    return handlers
       .handle("providers", () =>
         Effect.gen(function*() {
-          const signupOpen = yield* Effect.promise(() => dependencies.sessions.signupOpen())
-          const google = dependencies.sessions.google
+          const signupOpen = yield* Effect.promise(() => sessions.signupOpen())
+          const google = sessions.google
           return {
             signupOpen,
             google: google === undefined
@@ -1084,7 +1063,7 @@ export const AuthLayer = (dependencies: {
         }))
       .handle("cliStart", () =>
         Effect.gen(function*() {
-          const google = dependencies.sessions.google
+          const google = sessions.google
           if (google === undefined) {
             return yield* new ApiNotImplemented({
               error: "Browser sign-in is not configured on this gateway",
@@ -1092,7 +1071,7 @@ export const AuthLayer = (dependencies: {
             })
           }
           const request = generateLoginHandoff()
-          const expiresAt = new Date(Date.now() + 10 * 60 * 1000)
+          const expiresAt = new Date((yield* Clock.currentTimeMillis) + handoffTtlMs)
           yield* Effect.promise(() =>
             store.createLoginHandoff({ requestHash: request.hash, expiresAt }))
           const start = new URL("/v1/auth/google/start", googleIdentityCallbackUrl(google))
@@ -1114,7 +1093,7 @@ export const AuthLayer = (dependencies: {
               code: "login-handoff-unknown" as const
             })
           }
-          if (handoff.expiresAt.getTime() <= Date.now()) {
+          if (handoff.expiresAt.getTime() <= (yield* Clock.currentTimeMillis)) {
             return yield* new HandoffExpired({
               error: "Login handoff expired",
               code: "login-handoff-expired" as const
@@ -1138,7 +1117,7 @@ export const AuthLayer = (dependencies: {
               code: "login-handoff-collected" as const
             })
           }
-          const session = yield* Effect.promise(() => issueSession(subjectId, tenantId))
+          const session = yield* issueSession(subjectId, tenantId)
           return {
             status: "authenticated" as const,
             token: session.token,
@@ -1147,7 +1126,7 @@ export const AuthLayer = (dependencies: {
         }))
       .handle("googleStart", (request) =>
         Effect.gen(function*() {
-          const google = dependencies.sessions.google
+          const google = sessions.google
           if (google === undefined) {
             return page(501, {
               title: "Google sign-in unavailable",
@@ -1158,7 +1137,8 @@ export const AuthLayer = (dependencies: {
           const handoffHash = handoffSecret === undefined ? null : hashLoginHandoff(handoffSecret)
           if (handoffHash !== null) {
             const handoff = yield* Effect.promise(() => store.getLoginHandoff(handoffHash))
-            if (handoff === undefined || handoff.expiresAt.getTime() <= Date.now() ||
+            const now = yield* Clock.currentTimeMillis
+            if (handoff === undefined || handoff.expiresAt.getTime() <= now ||
               handoff.collectedAt !== null) {
               return page(410, {
                 title: "Sign-in link expired",
@@ -1168,13 +1148,14 @@ export const AuthLayer = (dependencies: {
           }
           const state = generateLoginHandoff()
           const returnPath = safeReturnPath(request.query["returnTo"])
+          const stateExpiresAtMs = (yield* Clock.currentTimeMillis) + handoffTtlMs
           yield* Effect.promise(() =>
             store.createIdentityOAuthState({
               stateHash: state.hash,
               provider: "google",
               handoffHash,
               returnPath,
-              expiresAt: new Date(Date.now() + 10 * 60 * 1000)
+              expiresAt: new Date(stateExpiresAtMs)
             }))
           return HttpServerResponse.redirect(
             googleIdentityAuthorizationUrl(google, state.secret),
@@ -1183,7 +1164,7 @@ export const AuthLayer = (dependencies: {
         }))
       .handle("googleCallback", (request) =>
         Effect.gen(function*() {
-          const google = dependencies.sessions.google
+          const google = sessions.google
           if (google === undefined) {
             return page(501, {
               title: "Google sign-in unavailable",
@@ -1206,25 +1187,31 @@ export const AuthLayer = (dependencies: {
               message: "This sign-in could not be verified. Start again."
             })
           }
-          const outcome = yield* Effect.promise(() =>
-            completeGoogleSignIn(dependencies, google, code, state, issueSession))
+          const outcome = yield* completeGoogleSignIn(
+            { store, sessions },
+            google,
+            code,
+            state,
+            issueSession
+          )
           if (outcome._tag === "page") {
             return page(outcome.status, { title: outcome.title, message: outcome.message })
           }
+          yield* startSession(outcome.token)
           if (outcome.handoffHash !== null) {
             return page(200, {
               title: "Signed in",
               message: "The terminal is authenticated. You can close this window and return to ii."
-            }, { "set-cookie": outcome.cookie })
+            })
           }
           return HttpServerResponse.redirect(outcome.returnPath ?? "/", {
             status: 302,
-            headers: { "set-cookie": outcome.cookie, "cache-control": "no-store" }
+            headers: { "cache-control": "no-store" }
           })
         }))
       .handle("signup", (request) =>
         Effect.gen(function*() {
-          if (!(yield* Effect.promise(() => dependencies.sessions.signupOpen()))) {
+          if (!(yield* Effect.promise(() => sessions.signupOpen()))) {
             return yield* new SignupClosed({
               error: "Signup is closed on this gateway",
               code: "signup-closed" as const
@@ -1255,12 +1242,13 @@ export const AuthLayer = (dependencies: {
               passwordHash
             }))
           // Signing up is signing in: the first session starts immediately.
-          const session = yield* Effect.promise(() => issueSession(subject.id, tenant.id))
-          return json(201, {
+          const session = yield* issueSession(subject.id, tenant.id)
+          yield* startSession(session.token)
+          return {
             tenant: { id: tenant.id, name: tenant.name },
             subjectId: subject.id,
             email: body.email
-          }, { "set-cookie": session.cookie })
+          }
         }))
       .handle("login", (request) =>
         Effect.gen(function*() {
@@ -1272,12 +1260,12 @@ export const AuthLayer = (dependencies: {
               code: "invalid-credentials" as const
             })
           }
-          const session = yield* Effect.promise(() =>
-            issueSession(checked.login.subjectId, checked.login.tenantId))
-          return json(200, {
+          const session = yield* issueSession(checked.login.subjectId, checked.login.tenantId)
+          yield* startSession(session.token)
+          return {
             email: checked.login.email,
             subjectId: checked.login.subjectId
-          }, { "set-cookie": session.cookie })
+          }
         }))
       .handle("logout", () =>
         Effect.gen(function*() {
@@ -1287,9 +1275,8 @@ export const AuthLayer = (dependencies: {
           if (caller.kind === "session") {
             yield* Effect.promise(() => store.revokeSession(caller.tokenHash))
           }
-          return json(200, { loggedOut: true }, {
-            "set-cookie": clearedSessionCookieHeaderValue({ secure: secureCookies })
-          })
+          yield* clearSessionCookie({ secure: secureCookies })
+          return { loggedOut: true }
         }))
       .handle("whoami", () =>
         Effect.gen(function*() {
@@ -1432,13 +1419,16 @@ export const AuthLayer = (dependencies: {
           }
           // Vendor connections live in the host's own storage keyed by address,
           // outside this store; they are not reclaimed here.
-          return json(200, { deleted: true }, {
-            "set-cookie": clearedSessionCookieHeaderValue({ secure: secureCookies })
-          })
-        })))
-}
+          yield* clearSessionCookie({ secure: secureCookies })
+          return { deleted: true }
+        }))
+  }))
 
 const defaultSessionTtlHours = 24 * 30
+
+/** How long a browser sign-in link and its OAuth state stay usable. Short on
+ *  purpose: the human is standing there. */
+const handoffTtlMs = 10 * 60 * 1000
 
 type GoogleCallbackOutcome = {
   readonly _tag: "page"
@@ -1449,77 +1439,100 @@ type GoogleCallbackOutcome = {
   readonly _tag: "signedIn"
   readonly handoffHash: string | null
   readonly returnPath: string | null
-  readonly cookie: string
+  readonly token: string
 }
 
-const completeGoogleSignIn = async (
+const completeGoogleSignIn = (
   dependencies: {
     readonly store: GatewayStore
-    readonly sessions: SessionDependencies
+    readonly sessions: SignInPolicy
   },
   google: GoogleIdentityOAuth,
   code: string,
   state: { readonly handoffHash: string | null; readonly returnPath: string | null },
-  issueSession: (subjectId: SubjectId, tenantId: TenantId) => Promise<{ readonly token: string; readonly cookie: string }>
-): Promise<GoogleCallbackOutcome> => {
-  const store = dependencies.store
-  const identity = await resolveGoogleIdentity(google, code)
-  const existingIdentity = await store.findExternalIdentity("google", identity.providerSubject)
-  let login = existingIdentity === undefined
-    ? await store.findLoginByEmail(identity.email)
-    : await store.findLoginBySubject(existingIdentity.subjectId)
-
-  if (login === undefined) {
-    if (!(await dependencies.sessions.signupOpen())) {
+  issueSession: (
+    subjectId: SubjectId,
+    tenantId: TenantId
+  ) => Effect.Effect<{ readonly token: string }>
+): Effect.Effect<GoogleCallbackOutcome> =>
+  Effect.gen(function*() {
+    const store = dependencies.store
+    // Google is the far end here. It being unreachable is not this gateway
+    // breaking, and the human staring at the browser deserves to be told which.
+    const identity = yield* Effect.result(
+      Effect.tryPromise(() => resolveGoogleIdentity(google, code))
+    )
+    if (identity._tag === "Failure") {
       return {
         _tag: "page",
-        status: 403,
-        title: "Account not found",
-        message: "This gateway does not allow new accounts. Ask an operator to invite or create yours."
+        status: 502,
+        title: "Sign-in failed",
+        message: "Google could not be reached to confirm this sign-in. Try again."
+      } as const
+    }
+    const existingIdentity = yield* Effect.promise(() =>
+      store.findExternalIdentity("google", identity.success.providerSubject))
+    let login = yield* Effect.promise(() =>
+      existingIdentity === undefined
+        ? store.findLoginByEmail(identity.success.email)
+        : store.findLoginBySubject(existingIdentity.subjectId))
+
+    if (login === undefined) {
+      if (!(yield* Effect.promise(() => dependencies.sessions.signupOpen()))) {
+        return {
+          _tag: "page",
+          status: 403,
+          title: "Account not found",
+          message: "This gateway does not allow new accounts. Ask an operator to invite or create yours."
+        } as const
+      }
+      const tenant = yield* Effect.promise(() =>
+        store.createTenant({
+          id: newTenantId(),
+          name: identity.success.email.split("@")[0] ?? identity.success.email
+        }))
+      const subject = yield* Effect.promise(() =>
+        store.createSubject({ id: newSubjectId(), tenantId: tenant.id }))
+      login = yield* Effect.promise(() =>
+        store.createLogin({
+          subjectId: subject.id,
+          tenantId: tenant.id,
+          email: identity.success.email,
+          passwordHash: null
+        }))
+    }
+
+    yield* Effect.promise(() =>
+      store.createExternalIdentity({
+        provider: "google",
+        providerSubject: identity.success.providerSubject,
+        subjectId: login.subjectId,
+        tenantId: login.tenantId,
+        email: identity.success.email
+      }))
+    const handoffHash = state.handoffHash
+    if (handoffHash !== null) {
+      const completed = yield* Effect.promise(() =>
+        store.completeLoginHandoff({
+          requestHash: LoginHandoffHash.make(handoffHash),
+          subjectId: login.subjectId,
+          tenantId: login.tenantId,
+          email: login.email
+        }))
+      if (!completed) {
+        return {
+          _tag: "page",
+          status: 410,
+          title: "Terminal sign-in expired",
+          message: "Return to the terminal and run `ii login` again."
+        } as const
       }
     }
-    const tenant = await store.createTenant({
-      id: newTenantId(),
-      name: identity.email.split("@")[0] ?? identity.email
-    })
-    const subject = await store.createSubject({ id: newSubjectId(), tenantId: tenant.id })
-    login = await store.createLogin({
-      subjectId: subject.id,
-      tenantId: tenant.id,
-      email: identity.email,
-      passwordHash: null
-    })
-  }
-
-  await store.createExternalIdentity({
-    provider: "google",
-    providerSubject: identity.providerSubject,
-    subjectId: login.subjectId,
-    tenantId: login.tenantId,
-    email: identity.email
+    const session = yield* issueSession(login.subjectId, login.tenantId)
+    return {
+      _tag: "signedIn",
+      handoffHash: state.handoffHash,
+      returnPath: state.returnPath,
+      token: session.token
+    } as const
   })
-  const handoffHash = state.handoffHash
-  if (handoffHash !== null) {
-    const completed = await store.completeLoginHandoff({
-      requestHash: LoginHandoffHash.make(handoffHash),
-      subjectId: login.subjectId,
-      tenantId: login.tenantId,
-      email: login.email
-    })
-    if (!completed) {
-      return {
-        _tag: "page",
-        status: 410,
-        title: "Terminal sign-in expired",
-        message: "Return to the terminal and run `ii login` again."
-      }
-    }
-  }
-  const session = await issueSession(login.subjectId, login.tenantId)
-  return {
-    _tag: "signedIn",
-    handoffHash: state.handoffHash,
-    returnPath: state.returnPath,
-    cookie: session.cookie
-  }
-}

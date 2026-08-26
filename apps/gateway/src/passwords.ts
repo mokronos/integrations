@@ -19,9 +19,7 @@ const scrypt = (password: string, salt: Buffer, keylen: number): Promise<Buffer>
 
 /** Password hashes are stored in the form this module verifies, so the cost
  *  parameters can move without invalidating stored logins. */
-export const PasswordHash = Schema.String.pipe(
-  Schema.refine((value): value is string => value.startsWith("scrypt$"))
-)
+export const PasswordHash = Schema.String.check(Schema.isStartsWith("scrypt$"))
 export type PasswordHash = typeof PasswordHash.Type
 
 const keyLength = 64

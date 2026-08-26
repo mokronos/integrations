@@ -9,22 +9,19 @@ import { Schema } from "effect"
 
 /** Which auth shape a connection was created against: `none`, `bearer`, or an
  *  OpenAPI security scheme's name. */
-export const AuthTemplateSlug = Schema.String.pipe(
-  Schema.refine((value): value is string => value.length > 0),
+export const AuthTemplateSlug = Schema.String.check(Schema.isMinLength(1)).pipe(
   Schema.brand("AuthTemplateSlug")
 )
 export type AuthTemplateSlug = typeof AuthTemplateSlug.Type
 
-export const OAuthClientSlug = Schema.String.pipe(
-  Schema.refine((value): value is string => value.length > 0),
+export const OAuthClientSlug = Schema.String.check(Schema.isMinLength(1)).pipe(
   Schema.brand("OAuthClientSlug")
 )
 export type OAuthClientSlug = typeof OAuthClientSlug.Type
 
 /** The opaque CSRF value tying an authorization redirect back to the pending
  *  flow that started it. Single-use: reading it deletes it. */
-export const OAuthState = Schema.String.pipe(
-  Schema.refine((value): value is string => value.length > 0),
+export const OAuthState = Schema.String.check(Schema.isMinLength(1)).pipe(
   Schema.brand("OAuthState")
 )
 export type OAuthState = typeof OAuthState.Type

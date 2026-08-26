@@ -15,16 +15,14 @@ import { Schema } from "effect"
 const slugPattern = /^[a-z0-9][a-z0-9_-]*$/
 
 /** An integration's stable key in a tenant's catalog. */
-export const IntegrationSlug = Schema.String.pipe(
-  Schema.refine((value): value is string => slugPattern.test(value)),
+export const IntegrationSlug = Schema.String.check(Schema.isPattern(slugPattern)).pipe(
   Schema.brand("IntegrationSlug")
 )
 export type IntegrationSlug = typeof IntegrationSlug.Type
 
 /** The label distinguishing several connections to one integration under one
  *  owner tier — three Google accounts as `personal`, `work`, `client-x`. */
-export const ConnectionName = Schema.String.pipe(
-  Schema.refine((value): value is string => slugPattern.test(value)),
+export const ConnectionName = Schema.String.check(Schema.isPattern(slugPattern)).pipe(
   Schema.brand("ConnectionName")
 )
 export type ConnectionName = typeof ConnectionName.Type
@@ -32,8 +30,7 @@ export type ConnectionName = typeof ConnectionName.Type
 /** A tool's name as its own source spells it. Unlike every other address
  *  segment this one may contain dots — an OpenAPI `aliases.deleteAlias` is one
  *  name, not two segments. */
-export const ToolName = Schema.String.pipe(
-  Schema.refine((value): value is string => value.length > 0),
+export const ToolName = Schema.String.check(Schema.isMinLength(1)).pipe(
   Schema.brand("ToolName")
 )
 export type ToolName = typeof ToolName.Type
@@ -47,8 +44,7 @@ export type OwnerTier = typeof OwnerTier.Type
 
 /** The logical name a grant exposes a tool under. Declared as a requirement by
  *  the caller and bound to a connection per deployment. */
-export const Alias = Schema.String.pipe(
-  Schema.refine((value): value is string => /^[a-z][a-z0-9-]*$/.test(value)),
+export const Alias = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9-]*$/)).pipe(
   Schema.brand("Alias")
 )
 export type Alias = typeof Alias.Type

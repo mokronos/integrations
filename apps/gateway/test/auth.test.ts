@@ -3,7 +3,6 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { Schema } from "effect"
-import type { IntegrationsApi } from "@mokronos/integration-host"
 import { whenPresent } from "@mokronos/contracts"
 import {
   Alias,
@@ -19,6 +18,7 @@ import {
   ToolName
 } from "../src/index.ts"
 import type { ConnectionRef, GatewayStore } from "../src/index.ts"
+import { stubIntegrations } from "./stubs.ts"
 import type { GoogleIdentityOAuth } from "../src/identity-oauth.ts"
 
 const JsonBody = Schema.Record(Schema.String, Schema.Json)
@@ -39,44 +39,6 @@ const connection: ConnectionRef = {
   name: ConnectionName.make("work")
 }
 
-const notStubbed = (member: string) => () => {
-  throw new Error(`stubIntegrations: ${member} is not stubbed for these tests`)
-}
-
-const stubIntegrations = (): IntegrationsApi => ({
-  tools: {
-    execute: notStubbed("tools.execute"),
-    summaries: async () => [],
-    describe: notStubbed("tools.describe"),
-    list: async () => []
-  },
-  connections: {
-    list: async () => [],
-    remove: notStubbed("connections.remove"),
-    create: notStubbed("connections.create"),
-    ensure: notStubbed("connections.ensure")
-  },
-  catalog: {
-    classify: notStubbed("catalog.classify"),
-    list: notStubbed("catalog.list"),
-    find: notStubbed("catalog.find"),
-    addMcp: notStubbed("catalog.addMcp"),
-    addOpenApi: notStubbed("catalog.addOpenApi")
-  },
-  auth: {
-    probe: notStubbed("auth.probe"),
-    registerClient: notStubbed("auth.registerClient"),
-    createClient: notStubbed("auth.createClient"),
-    start: notStubbed("auth.start"),
-    complete: notStubbed("auth.complete")
-  },
-  provisioning: {
-    install: notStubbed("provisioning.install"),
-    provision: notStubbed("provisioning.provision")
-  },
-  validateIntegrationNode: notStubbed("validateIntegrationNode"),
-  listIntegrationOverviews: async () => []
-})
 
 interface SetupOptions {
   /** Defaults to false: an operator who says nothing gets a closed gateway. */

@@ -3,11 +3,11 @@ import {
   defaultGatewayPort,
   writeGatewayConfig
 } from "./config.ts"
-import { whenPresent } from "@mokronos/contracts"
+import { PositiveInt, PositiveIntFromString, whenPresent } from "@mokronos/contracts"
 import { defaultTenantId } from "./domain.ts"
 import { resolveEncryption } from "./crypto.ts"
 import type { Gateway } from "./host.ts"
-import { Effect, Layer, ManagedRuntime } from "effect"
+import { Effect, Layer, ManagedRuntime, Option, Schema } from "effect"
 import { isLoopbackAddress, mayBorrowLocalCredential } from "./http/loopback.ts"
 import { createGatewayHandler } from "./http/handler.ts"
 import type { GatewayHandle, GatewayRequestContext } from "./http/handler.ts"
@@ -153,14 +153,19 @@ const buildCore = async (
     throw error
   }
 
+  /** The one place a service becomes a plain value.
+   *
+   *  `Gateway` is an async object the CLI and the dashboard hold and close, so
+   *  something has to leave Effect here. Everything below this line takes
+   *  values; everything above it takes layers, and the HTTP handlers ask the
+   *  context for what they need rather than being handed a bag of these. */
   async function bootResources() {
-    const loaded = await dependencies.runPromise(Effect.gen(function* () {
+    return await dependencies.runPromise(Effect.gen(function* () {
       const store = yield* GatewayStoreService
       const host = yield* HostHandleService
       const integrations = yield* IntegrationsApiService
       return { store, host, integrations }
     }))
-    return loaded
   }
 
   const gateway: Gateway = {
@@ -203,19 +208,24 @@ const buildCore = async (
   const maintenance: MaintenanceLoop | undefined =
     options.externalMaintenance === true ? undefined : startMaintenanceLoop(resources.store)
 
-  const perMinute = options.rateLimitPerMinute ??
-    Number.parseInt(process.env["INTEGRATIONS_RATE_LIMIT"] ?? "", 10)
+  // The option carries a number and the environment carries text; a budget is
+  // a positive whole number either way. Anything else — absent, empty, a typo —
+  // is not a budget, and the default stands.
+  const perMinute = Option.getOrElse(
+    Schema.decodeUnknownOption(Schema.Union([PositiveInt, PositiveIntFromString]))(
+      options.rateLimitPerMinute ?? process.env["INTEGRATIONS_RATE_LIMIT"]
+    ),
+    () => defaultRateLimitPerMinute
+  )
   const rateLimiter = createRateLimiter({
     // The principal bucket is the configured budget; the address bucket that
     // guards unauthenticated traffic is a fifth of it, floored so a tiny
     // configured limit still leaves credential guessing meaningfully bounded.
-    limit: Number.isFinite(perMinute) && perMinute > 0 ? perMinute : defaultRateLimitPerMinute,
+    limit: perMinute,
     windowMs: 60_000
   })
   const addressRateLimiter = createRateLimiter({
-    limit: Math.max(20, Math.floor((Number.isFinite(perMinute) && perMinute > 0
-      ? perMinute
-      : defaultRateLimitPerMinute) / 5)),
+    limit: Math.max(20, Math.floor(perMinute / 5)),
     windowMs: 60_000
   })
 

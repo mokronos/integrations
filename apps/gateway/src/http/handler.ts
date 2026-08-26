@@ -1,4 +1,4 @@
-import { Cause, Context, Effect, Layer, Result } from "effect"
+import { Cause, Context, Effect, Layer, Option, Result, Schema } from "effect"
 import { FileSystem, Path } from "effect"
 import {
   Etag,
@@ -21,14 +21,23 @@ import {
   DelegatedLayer,
   FallbackLayer,
   ProvisioningLayer,
-  SystemLayer,
-  type GatewayDependencies
+  SystemLayer
 } from "./handlers.ts"
-import { whenPresent, whenPresentMap } from "@mokronos/contracts"
+import {
+  ControlPlaneAssets,
+  GatewayConfig,
+  OAuthFlowSessions,
+  SessionPolicy
+} from "./services.ts"
+import type { GatewaySettings, SignInPolicy } from "./services.ts"
+import { NonNegativeIntFromString, whenPresent, whenPresentMap } from "@mokronos/contracts"
+import { IntegrationsApiService } from "@mokronos/integration-host"
+import type { IntegrationsApi } from "@mokronos/integration-host"
+import { GatewayStoreService } from "../store.ts"
+import type { GatewayStore } from "../store.ts"
+import type { OAuthSessions } from "../oauth-sessions.ts"
 import type { WebAssets } from "../web-assets.ts"
 import type { RateLimiter } from "../ratelimit.ts"
-
-export type { GatewayDependencies }
 
 /** What the server knows about a request that the request itself cannot say.
  *  Carried per request through the web-handler seam; the served gateway
@@ -38,7 +47,15 @@ export interface GatewayRequestContext {
   readonly remoteAddress?: string
 }
 
-export interface GatewayHandlerOptions extends GatewayDependencies {
+/** The seam every embedding takes: the worker, the served gateway, and the
+ *  tests all hand over plain values here and this module turns them into the
+ *  layers the handlers ask for. Callers should not have to know that the HTTP
+ *  layer runs on Effect services. */
+export interface GatewayHandlerOptions extends GatewaySettings {
+  readonly store: GatewayStore
+  readonly integrations: IntegrationsApi
+  readonly oauth: OAuthSessions
+  readonly sessions?: SignInPolicy
   /** Two buckets with distinct key spaces: a per-address limit before
    *  authentication protects the credential machinery itself, and a
    *  per-principal limit after it keeps one misbehaving client from starving
@@ -59,8 +76,12 @@ const bodyLimitLayer = (maxBytes: number) =>
   HttpRouter.use((router) =>
     router.addGlobalMiddleware((httpEffect) =>
       Effect.flatMap(HttpServerRequest.HttpServerRequest.asEffect(), (request) => {
-        const declared = request.headers["content-length"]
-        return declared !== undefined && Number.parseInt(declared, 10) > maxBytes
+        // A length that is absent or unreadable is not a length over the limit,
+        // so it falls through to the handler like any undeclared body.
+        const declared = Schema.decodeUnknownOption(NonNegativeIntFromString)(
+          request.headers["content-length"]
+        )
+        return Option.getOrElse(declared, () => 0) > maxBytes
           ? Effect.succeed(HttpServerResponse.jsonUnsafe(
             { error: `Request body exceeds ${maxBytes} bytes` },
             { status: 413 }
@@ -68,32 +89,48 @@ const bodyLimitLayer = (maxBytes: number) =>
           : httpEffect
       })))
 
-/** Turns request-shape refusals (malformed JSON, payloads that miss their
- *  schema, bad path parameters) into the gateway's ordinary `{error}` dialect
- *  instead of an empty 400. */
-const schemaErrorsLayer = () =>
+/** The single answer to a request that failed rather than returned.
+ *
+ *  Two kinds arrive here, and telling them apart is the whole job. A schema
+ *  refusal is the caller's — a malformed body, a bad path parameter — and
+ *  saying which field is wrong is the useful thing to do. Anything else is
+ *  ours: a rejected driver call, a bug. That one is logged and answered
+ *  incuriously, because a libsql error carries the database path and a stack
+ *  trace carries the layout of the deployment.
+ *
+ *  Both were previously invisible: an undeclared failure reached the router as
+ *  a defect and became a 500 with an empty body, which is the one failure shape
+ *  no client can read. */
+const failureLayer = () =>
   HttpRouter.use((router) =>
     router.addGlobalMiddleware((httpEffect) =>
       Effect.catchCauseIf(
         httpEffect,
+        // Interruption is the server shutting down or a client hanging up.
+        // Neither is a failure to report.
+        (cause) => Cause.hasDies(cause) || Cause.hasFails(cause),
         (cause) => {
           const defect = Cause.findDefect(cause)
-          return Result.isSuccess(defect) && HttpApiSchemaError.is(defect.success)
-        },
-        (cause) => {
-          const defect = Cause.findDefect(cause)
-          // The predicate guarantees this is a schema error.
           const schemaError = Result.isSuccess(defect) && HttpApiSchemaError.is(defect.success)
             ? defect.success
             : undefined
-          return Effect.succeed(HttpServerResponse.jsonUnsafe(
-            {
-              error: schemaError?.cause instanceof Error
-                ? schemaError.cause.message
-                : "Request body did not match the expected shape"
-            },
-            { status: 400 }
-          ))
+          if (schemaError !== undefined) {
+            return Effect.succeed(HttpServerResponse.jsonUnsafe(
+              {
+                error: schemaError.cause instanceof Error
+                  ? schemaError.cause.message
+                  : "Request body did not match the expected shape"
+              },
+              { status: 400 }
+            ))
+          }
+          return Effect.as(
+            Effect.logError("Unhandled gateway failure", cause),
+            HttpServerResponse.jsonUnsafe(
+              { error: "The gateway could not complete this request" },
+              { status: 500 }
+            )
+          )
         }
       )))
 
@@ -110,39 +147,34 @@ export const defaultMaxBodyBytes = 1024 * 1024
 export const gatewayAppLayer = (options: GatewayHandlerOptions) => {
   const optional = <Key extends string, T>(key: Key, value: T | undefined) =>
     whenPresent(key, value)
-  const dashboardUrl = optional("dashboardUrl", options.dashboardUrl)
-  const oauthCallbackUrl = optional("oauthCallbackUrl", options.oauthCallbackUrl)
-  const registryUrl = optional("registryUrl", options.registryUrl)
+
+  // Everything the handlers ask for, provided once here rather than threaded
+  // through six factory calls.
+  const dependencies = Layer.mergeAll(
+    Layer.succeed(GatewayStoreService, options.store),
+    Layer.succeed(IntegrationsApiService, options.integrations),
+    Layer.succeed(OAuthFlowSessions, options.oauth),
+    Layer.succeed(GatewayConfig, {
+      retentionDays: options.retentionDays,
+      ...optional("dashboardUrl", options.dashboardUrl),
+      ...optional("oauthCallbackUrl", options.oauthCallbackUrl),
+      ...optional("registryUrl", options.registryUrl)
+    }),
+    options.sessions === undefined
+      ? SessionPolicy.closed
+      : Layer.succeed(SessionPolicy, options.sessions),
+    ControlPlaneAssets.layerOf(options.webAssets)
+  )
 
   const groups = Layer.mergeAll(
     SystemLayer,
-    FallbackLayer(whenPresentMap("webAssets", options.webAssets, (assets) => assets)),
-    DelegatedLayer({
-      store: options.store,
-      integrations: options.integrations,
-      retentionDays: options.retentionDays,
-      ...dashboardUrl
-    }),
-    ProvisioningLayer({
-      store: options.store,
-      integrations: options.integrations,
-      oauth: options.oauth,
-      ...oauthCallbackUrl,
-      ...registryUrl
-    }),
-    AdministrativeLayer({
-      store: options.store,
-      integrations: options.integrations,
-      retentionDays: options.retentionDays
-    }),
-    AuthLayer({
-      store: options.store,
-      sessions: options.sessions ?? {
-        signupOpen: async () => false,
-        secureCookies: false
-      }
-    })
-  )
+    FallbackLayer,
+    DelegatedLayer,
+    ProvisioningLayer,
+    AdministrativeLayer,
+    AuthLayer
+  ).pipe(Layer.provide(dependencies))
+
   // The FileSystem stays in the outputs as well: the API builder requires one
   // even though every response here is JSON.
   const platform = Layer.mergeAll(
@@ -152,7 +184,7 @@ export const gatewayAppLayer = (options: GatewayHandlerOptions) => {
     Etag.layerWeak,
     Path.layer
   )
-  const base = schemaErrorsLayer()
+  const base = failureLayer()
     .pipe(Layer.provideMerge(bodyLimitLayer(options.maxBodyBytes ?? defaultMaxBodyBytes)))
     .pipe(Layer.provideMerge(platform))
   return base

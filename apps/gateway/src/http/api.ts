@@ -1,4 +1,4 @@
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 import {
   HttpApi,
   HttpApiEndpoint,
@@ -23,12 +23,18 @@ import {
   SubjectId
 } from "../domain.ts"
 import {
+  BooleanFromString,
   Connection,
+  GatewayMetadata,
   IntegrationDiscovery,
   IntegrationSearchKind,
   IntegrationSearchResponse,
   IntegrationValidationReport,
   IntegrationOverview,
+  NonNegativeInt,
+  NonNegativeIntFromString,
+  PositiveInt,
+  PositiveIntFromString,
   Tool,
   ToolAddress,
   ToolSummary
@@ -311,11 +317,7 @@ const SystemGroup = HttpApiGroup.make("system")
     success: Schema.Struct({ ok: Schema.Literal(true) })
   }).annotate(Unmetered, true).annotate(RequiredAccess, "public"))
   .add(HttpApiEndpoint.get("metadata", "/v1/metadata", {
-    success: Schema.Struct({
-      ok: Schema.Literal(true),
-      protocolVersion: Schema.String,
-      gatewayVersion: Schema.String
-    })
+    success: GatewayMetadata
   }).annotate(Unmetered, true).annotate(RequiredAccess, "public"))
   .middleware(Authority)
 
@@ -340,7 +342,9 @@ const FallbackGroup = HttpApiGroup.make("fallback")
 const DelegatedGroup = HttpApiGroup.make("delegated")
   .add(HttpApiEndpoint.get("listTools", "/v1/tools", {
     query: {
-      schemas: Schema.optional(Schema.Literals(["true", "false"]))
+      schemas: BooleanFromString.pipe(
+        Schema.withDecodingDefaultTypeKey(Effect.succeed(false))
+      )
     },
     success: Schema.Struct({ tools: Schema.Array(GrantedTool) })
   }).annotate(RequiredAccess, "delegated"))
@@ -366,7 +370,10 @@ const ProvisioningGroup = HttpApiGroup.make("provisioning")
   }).annotate(RequiredAccess, "provisioning"))
   .add(HttpApiEndpoint.post("discover", "/v1/integrations/discover", {
     payload: DiscoverBody,
-    success: HttpApiSchema.status(201)(IntegrationDiscovery)
+    success: HttpApiSchema.status(201)(IntegrationDiscovery),
+    // The URL is the caller's, and so is an unreachable host or a document that
+    // is not a spec. Declared here so it answers rather than breaks.
+    error: ApiBadRequestError
   }).annotate(RequiredAccess, "provisioning"))
   .add(HttpApiEndpoint.get("integrationTools", "/v1/integrations/:slug/tools", {
     params: { slug: Schema.String },
@@ -380,14 +387,18 @@ const ProvisioningGroup = HttpApiGroup.make("provisioning")
   .add(HttpApiEndpoint.get("registrySearch", "/v1/registry/search", {
     query: {
       q: Schema.String,
-      limit: Schema.optional(Schema.String),
+      limit: PositiveIntFromString.pipe(
+        Schema.withDecodingDefaultTypeKey(Effect.succeed(PositiveInt.make(5)))
+      ),
       kind: Schema.optional(IntegrationSearchKind)
     },
-    success: IntegrationSearchResponse
+    success: IntegrationSearchResponse,
+    error: ApiBadRequestError
   }).annotate(RequiredAccess, "provisioning"))
   .add(HttpApiEndpoint.post("invokeTool", "/v1/tools/invoke", {
     payload: InvokeAddressBody,
-    success: Json
+    success: Json,
+    error: ApiBadRequestError
   }).annotate(RequiredAccess, "administrative"))
   .add(HttpApiEndpoint.post("validate", "/v1/validate", {
     payload: ValidateBody,
@@ -493,7 +504,9 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
   .add(HttpApiEndpoint.get("clientTools", "/v1/clients/:id/tools", {
     params: { id: ClientId },
     query: {
-      schemas: Schema.optional(Schema.Literals(["true", "false"]))
+      schemas: BooleanFromString.pipe(
+        Schema.withDecodingDefaultTypeKey(Effect.succeed(false))
+      )
     },
     success: Schema.Struct({ tools: Schema.Array(GrantedTool) }),
     error: ApiNotFoundError
@@ -545,21 +558,24 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
   }).annotate(RequiredAccess, "administrative"))
   .add(HttpApiEndpoint.get("audit", "/v1/audit", {
     query: {
-      since: Schema.optional(Schema.String),
+      since: Schema.optional(Schema.DateFromString.check(Schema.isDateValid())),
       outcome: Schema.optional(AuditOutcome),
       clientId: Schema.optional(ClientId),
       alias: Schema.optional(Alias),
       tool: Schema.optional(Schema.String),
-      limit: Schema.optional(Schema.String),
-      offset: Schema.optional(Schema.String)
+      limit: PositiveIntFromString.pipe(
+        Schema.withDecodingDefaultTypeKey(Effect.succeed(PositiveInt.make(50)))
+      ),
+      offset: NonNegativeIntFromString.pipe(
+        Schema.withDecodingDefaultTypeKey(Effect.succeed(NonNegativeInt.make(0)))
+      )
     },
     success: Schema.Struct({
       records: Schema.Array(AuditRecord),
       total: Schema.Number,
-      limit: Schema.Number,
-      offset: Schema.Number
-    }),
-    error: ApiBadRequestError
+      limit: PositiveInt,
+      offset: NonNegativeInt
+    })
   }).annotate(RequiredAccess, "administrative"))
   .middleware(Authority)
 

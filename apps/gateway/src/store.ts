@@ -3,6 +3,7 @@ import path from "node:path"
 import { createClient } from "@libsql/client"
 import type { Client as LibsqlClient, InValue, Row } from "@libsql/client"
 import { Context, Effect, Layer, Schema } from "effect"
+import type { NonNegativeInt, PositiveInt } from "@mokronos/contracts"
 import type { Encryption } from "./crypto.ts"
 import {
   Alias,
@@ -671,8 +672,8 @@ export interface CreateApprovalInput {
 /** Which slice of the trail to read. Every field narrows; none of them is
  *  required, and `limit`/`offset` window whatever is left. */
 export interface AuditQuery {
-  readonly limit?: number
-  readonly offset?: number
+  readonly limit?: PositiveInt
+  readonly offset?: NonNegativeInt
   readonly clientId?: ClientId
   readonly alias?: Alias
   readonly tool?: ToolName

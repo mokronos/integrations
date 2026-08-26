@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { ToolAddress } from "@mokronos/contracts"
+import { PositiveInt, ToolAddress } from "@mokronos/contracts"
 import type { Tool } from "@mokronos/contracts"
 import {
   Alias,
@@ -243,7 +243,7 @@ describe("gateway maintenance", () => {
     const result = await runMaintenance(store)
 
     expect(result.expiredAuditArguments).toBe(1)
-    expect(await store.listAudit(defaultTenantId, { limit: 10 })).toHaveLength(1)
+    expect(await store.listAudit(defaultTenantId, { limit: PositiveInt.make(10) })).toHaveLength(1)
   })
 
   test("is safe to run when there is nothing to do", async () => {

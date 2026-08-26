@@ -20,8 +20,7 @@ import { describeCause, StorageError } from "../errors.ts"
 
 /** The address a secret is filed under — a connection address for a token, or
  *  `oauth-client:<owner>:<slug>` for a registered client's secret. */
-export const CredentialKey = Schema.String.pipe(
-  Schema.refine((value): value is string => value.length > 0),
+export const CredentialKey = Schema.String.check(Schema.isMinLength(1)).pipe(
   Schema.brand("CredentialKey")
 )
 export type CredentialKey = typeof CredentialKey.Type

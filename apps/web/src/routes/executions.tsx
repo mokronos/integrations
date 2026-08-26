@@ -12,7 +12,7 @@ import { connectionLabel, when } from "@/lib/format"
 import type { AuditQuery } from "@/lib/gateway"
 import { whenPresent } from "@mokronos/contracts"
 import { useAudit } from "@/lib/queries"
-import { decodeAuditOutcomeFilter } from "@/lib/schemas"
+import { decodeAuditOutcomeFilter, instantFilter } from "@/lib/schemas"
 import type { AuditOutcome, AuditRecord } from "@/lib/schemas"
 
 const outcomeVariant = {
@@ -49,7 +49,7 @@ export function ExecutionsRoute() {
     ...whenPresent("alias", optionalText(filters.alias)),
     ...whenPresent("tool", optionalText(filters.tool)),
     ...whenPresent("outcome", filters.outcome === ALL ? undefined : filters.outcome),
-    ...whenPresent("since", filters.since.length === 0 ? undefined : new Date(filters.since).toISOString())
+    ...whenPresent("since", instantFilter(filters.since))
   }), [filters, limit, offset])
   const audit = useAudit(query)
   const records = audit.data?.records ?? []

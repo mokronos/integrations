@@ -27,24 +27,16 @@ export type ApprovalId = typeof ApprovalId.Type
 export const AuditId = Schema.String.pipe(Schema.brand("AuditId"))
 export type AuditId = typeof AuditId.Type
 
-/** The logical name a grant exposes a connection under. Callers name this;
- *  each deployment binds it to whatever connection is right there. */
-export const Alias = Schema.String.pipe(
-  Schema.refine((value): value is string => /^[a-z][a-z0-9-]*$/.test(value)),
-  Schema.brand("Alias")
-)
-export type Alias = typeof Alias.Type
+/** The shared vocabulary, re-exported rather than restated.
+ *
+ *  These four used to be defined again here, and three of them had lost their
+ *  validation on the way: `Schema.brand` keys the brand on the name, so a
+ *  second definition produces the *same* TypeScript type while checking
+ *  something different. The gateway was minting `IntegrationSlug`s that the
+ *  host's own schema would have rejected, and nothing could say so. */
+import { Alias, ConnectionName, IntegrationSlug, ToolName } from "@mokronos/contracts"
 
-export const IntegrationSlug = Schema.String.pipe(Schema.brand("IntegrationSlug"))
-export type IntegrationSlug = typeof IntegrationSlug.Type
-
-export const ToolName = Schema.String.pipe(Schema.brand("ToolName"))
-export type ToolName = typeof ToolName.Type
-
-/** The label distinguishing several connections to one integration under one
- *  owner tier — three Google accounts as `personal`, `work`, `client-x`. */
-export const ConnectionName = Schema.String.pipe(Schema.brand("ConnectionName"))
-export type ConnectionName = typeof ConnectionName.Type
+export { Alias, ConnectionName, IntegrationSlug, ToolName }
 
 /** The SHA-256 of an API key. The key itself is shown once at issue and never
  *  stored, so a leaked database yields no usable credential. */

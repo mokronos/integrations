@@ -8,22 +8,18 @@ import { ConnectionName, IntegrationSlug, OwnerTier, ToolName } from "./vocabula
  *  off a listing. All three have to agree, so the format lives here with the
  *  functions that build and parse it. */
 
-export const ToolAddress = Schema.String.pipe(
-  Schema.refine(
-    (value): value is string => /^tools\.[^.]+\.(org|user)\.[^.]+\..+$/.test(value)
-  ),
-  Schema.brand("ToolAddress")
-)
+export const ToolAddress = Schema.String
+  .check(Schema.isPattern(/^tools\.[^.]+\.(org|user)\.[^.]+\..+$/))
+  .pipe(Schema.brand("ToolAddress"))
 export type ToolAddress = typeof ToolAddress.Type
 
 /** `tools.<integration>.<owner>.<connection>` — a connection's address.
  *
  *  Deliberately the exact prefix of every tool address it carries, so a reader
  *  who has one can see which connection a tool runs under. */
-export const ConnectionAddress = Schema.String.pipe(
-  Schema.refine((value): value is string => /^tools\.[^.]+\.(org|user)\.[^.]+$/.test(value)),
-  Schema.brand("ConnectionAddress")
-)
+export const ConnectionAddress = Schema.String
+  .check(Schema.isPattern(/^tools\.[^.]+\.(org|user)\.[^.]+$/))
+  .pipe(Schema.brand("ConnectionAddress"))
 export type ConnectionAddress = typeof ConnectionAddress.Type
 
 export interface ParsedToolAddress {

@@ -1,6 +1,6 @@
-import { Context, Effect, Layer, Option } from "effect"
+import { Context, Duration, Effect, Layer, Option } from "effect"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
-import { HttpServerRequest } from "effect/unstable/http"
+import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { authenticateClient, authorizeClientCapability } from "../authorize.ts"
 import { SessionTokenHash } from "../domain.ts"
 import { hashSessionToken } from "../passwords.ts"
@@ -56,14 +56,51 @@ export const readSessionCookieValue = (header: string | undefined): Option.Optio
   return Option.none()
 }
 
-export const sessionCookieHeaderValue = (token: string, options: {
+/** `HttpOnly` so script cannot read it, `SameSite=Lax` so another origin cannot
+ *  spend it on a state-changing request, `Secure` wherever TLS is actually in
+ *  play. */
+const sessionCookieOptions = (options: {
   readonly maxAgeSeconds: number
   readonly secure: boolean
-}): string =>
-  `${sessionCookieName}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${options.maxAgeSeconds}${options.secure ? "; Secure" : ""}`
+}) => ({
+  path: "/",
+  httpOnly: true,
+  sameSite: "lax",
+  secure: options.secure,
+  maxAge: Duration.seconds(options.maxAgeSeconds)
+} as const)
 
-export const clearedSessionCookieHeaderValue = (options: { readonly secure: boolean }): string =>
-  `${sessionCookieName}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${options.secure ? "; Secure" : ""}`
+/** Attaches the session cookie to whatever response the handler produces.
+ *
+ *  Setting it here rather than building a response by hand is what lets a
+ *  handler return its declared success value: a typed endpoint should not have
+ *  to drop to a raw response merely to carry one header. It works the same for
+ *  the OAuth flow's HTML pages and redirects, which are raw for their own
+ *  reasons. */
+export const setSessionCookie = (token: string, options: {
+  readonly maxAgeSeconds: number
+  readonly secure: boolean
+}): Effect.Effect<void, never, HttpServerRequest.HttpServerRequest> =>
+  HttpEffect.appendPreResponseHandler((_request, response) =>
+    Effect.succeed(HttpServerResponse.setCookieUnsafe(
+      response,
+      sessionCookieName,
+      token,
+      sessionCookieOptions(options)
+    )))
+
+/** Expires the session cookie. The empty value is incidental; `Max-Age=0` is
+ *  what removes it. */
+export const clearSessionCookie = (
+  options: { readonly secure: boolean }
+): Effect.Effect<void, never, HttpServerRequest.HttpServerRequest> =>
+  HttpEffect.appendPreResponseHandler((_request, response) =>
+    Effect.succeed(HttpServerResponse.setCookieUnsafe(
+      response,
+      sessionCookieName,
+      "",
+      sessionCookieOptions({ maxAgeSeconds: 0, secure: options.secure })
+    )))
 
 /** `Authorization: Bearer <key>`, or the `x-api-key` header. Nothing reads a key
  *  from the query string, where it would land in access logs. */

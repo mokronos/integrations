@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { createClient as openLegacyDatabase } from "@libsql/client"
+import { PositiveInt } from "@mokronos/contracts"
 import {
   Alias,
   ConnectionName,
@@ -283,7 +284,7 @@ describe("gateway store", () => {
     const removed = await store.expireAuditArguments(new Date())
 
     expect(removed).toBe(1)
-    const records = await store.listAudit(defaultTenantId, { limit: 10 })
+    const records = await store.listAudit(defaultTenantId, { limit: PositiveInt.make(10) })
     expect(records).toHaveLength(1)
     // The compliance half survives: who acted for whom, and what was decided.
     expect(records[0]?.subject).toBe(SubjectId.make("sebastian"))
@@ -305,7 +306,7 @@ describe("gateway store", () => {
       message: "unknown-key"
     })
 
-    const records = await store.listAudit(defaultTenantId, { limit: 10 })
+    const records = await store.listAudit(defaultTenantId, { limit: PositiveInt.make(10) })
     expect(records[0]?.outcome).toBe("denied")
     expect(records[0]?.connection).toBeNull()
   })
@@ -390,7 +391,7 @@ describe("gateway store", () => {
       outcome: "succeeded",
       message: null
     })
-    expect(await store.listAudit(other.id, { limit: 10 })).toEqual([])
+    expect(await store.listAudit(other.id, { limit: PositiveInt.make(10) })).toEqual([])
     expect(await store.countAudit(other.id, {})).toBe(0)
 
     await store.putToolSnapshots(defaultTenantId, [{

@@ -1,4 +1,4 @@
-import { Schema } from "effect"
+import { Option, Schema } from "effect"
 import {
   ApiKey,
   ApprovalStatus as ApprovalStatusSchema,
@@ -290,3 +290,15 @@ export const AccountDeleted = Schema.Struct({ deleted: Schema.Literal(true) })
 export const decodeEmailChanged = json(EmailChanged)
 export const decodePasswordChanged = json(PasswordChanged)
 export const decodeAccountDeleted = json(AccountDeleted)
+
+/** A `datetime-local` field's value as an instant, or nothing.
+ *
+ *  The browser constrains the input, but not enough: a partial or impossible
+ *  value still reaches here as a string, and `new Date(...).toISOString()` on
+ *  one throws mid-render. Asking the schema turns that into an absent filter. */
+const decodeInstant = Schema.decodeUnknownOption(
+  Schema.DateFromString.check(Schema.isDateValid())
+)
+
+export const instantFilter = (value: string): string | undefined =>
+  Option.getOrUndefined(Option.map(decodeInstant(value), (date) => date.toISOString()))
