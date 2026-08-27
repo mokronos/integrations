@@ -1,3 +1,4 @@
+import { run, runAll } from "./effect.ts"
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -26,16 +27,16 @@ const directories: Array<string> = []
 const stores: Array<GatewayStore> = []
 
 afterEach(async () => {
-  await Promise.all(stores.splice(0).map((store) => store.close()))
-  await Promise.all(
+  await runAll(stores.splice(0).map((store) => store.close()))
+  await run(Promise.all(
     directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
-  )
+  ))
 })
 
 const makeStore = async (): Promise<GatewayStore> => {
-  const directory = await mkdtemp(path.join(tmpdir(), "wf-gateway-drift-"))
+  const directory = await run(mkdtemp(path.join(tmpdir(), "wf-gateway-drift-")))
   directories.push(directory)
-  const store = await createGatewayStore(path.join(directory, "gateway.sqlite"))
+  const store = await run(createGatewayStore(path.join(directory, "gateway.sqlite")))
   stores.push(store)
   return store
 }
@@ -105,19 +106,19 @@ describe("catalog drift", () => {
   })
 
   test("surfaces new tools, which explicit grants otherwise make invisible", async () => {
-    const store = await makeStore()
+    const store = await run(makeStore())
     // The first sync has nothing to compare against, so it records the shape
     // and reports a baseline. Calling an integration's entire surface "added"
     // would bury the one real change in the run that matters.
-    const first = await refreshIntegrationSnapshot(
+    const first = await run(refreshIntegrationSnapshot(
       { store, integrations: hostWithTools([{ name: "create", input: null }]) },
       "tickets",
       defaultTenantId
-    )
+    ))
     expect(first.baseline).toBe(true)
     expect(first.entries).toEqual([])
 
-    const second = await refreshIntegrationSnapshot(
+    const second = await run(refreshIntegrationSnapshot(
       {
         store,
         integrations: hostWithTools([
@@ -127,7 +128,7 @@ describe("catalog drift", () => {
       },
       "tickets",
       defaultTenantId
-    )
+    ))
 
     // Unreachable until someone grants it — which is exactly why it has to be
     // reported rather than left to be noticed.
@@ -142,8 +143,8 @@ describe("catalog drift", () => {
   })
 
   test("does not report the same removal on every later refresh", async () => {
-    const store = await makeStore()
-    await refreshIntegrationSnapshot(
+    const store = await run(makeStore())
+    await run(refreshIntegrationSnapshot(
       {
         store,
         integrations: hostWithTools([
@@ -153,18 +154,18 @@ describe("catalog drift", () => {
       },
       "tickets",
       defaultTenantId
-    )
+    ))
 
-    const removal = await refreshIntegrationSnapshot(
+    const removal = await run(refreshIntegrationSnapshot(
       { store, integrations: hostWithTools([{ name: "create", input: null }]) },
       "tickets",
       defaultTenantId
-    )
-    const afterwards = await refreshIntegrationSnapshot(
+    ))
+    const afterwards = await run(refreshIntegrationSnapshot(
       { store, integrations: hostWithTools([{ name: "create", input: null }]) },
       "tickets",
       defaultTenantId
-    )
+    ))
 
     expect(removal.entries.map((entry) => entry.kind)).toEqual(["removed"])
     expect(afterwards.entries).toEqual([])
@@ -179,14 +180,14 @@ describe("gateway maintenance", () => {
   }
 
   test("turns an undecided approval into an expired one", async () => {
-    const store = await makeStore()
-    const client = await store.createClient({
+    const store = await run(makeStore())
+    const client = await run(store.createClient({
       id: newClientId(),
       tenantId: defaultTenantId,
       name: "sales",
       capabilities: ["provision_connections"]
-    })
-    const grant = await store.createGrant({
+    }))
+    const grant = await run(store.createGrant({
       id: newGrantId(),
       tenantId: defaultTenantId,
       clientId: client.id,
@@ -194,8 +195,8 @@ describe("gateway maintenance", () => {
       tool: ToolName.make("create"),
       connection,
       decision: "require_approval"
-    })
-    const stale = await store.createApproval({
+    }))
+    const stale = await run(store.createApproval({
       id: newApprovalId(),
       tenantId: defaultTenantId,
       clientId: client.id,
@@ -204,8 +205,8 @@ describe("gateway maintenance", () => {
       tool: grant.tool,
       arguments: {},
       expiresAt: new Date(Date.now() - 1_000)
-    })
-    const fresh = await store.createApproval({
+    }))
+    const fresh = await run(store.createApproval({
       id: newApprovalId(),
       tenantId: defaultTenantId,
       clientId: client.id,
@@ -214,20 +215,20 @@ describe("gateway maintenance", () => {
       tool: ToolName.make("close"),
       arguments: {},
       expiresAt: new Date(Date.now() + 60_000)
-    })
+    }))
 
-    const result = await runMaintenance(store)
+    const result = await run(runMaintenance(store))
 
     expect(result.expiredApprovals).toBe(1)
     // Expiry is a decision: the invocation does not happen.
-    expect((await store.getApproval(defaultTenantId, stale.id))?.status).toBe("expired")
-    expect((await store.getApproval(defaultTenantId, fresh.id))?.status).toBe("pending")
+    expect((await run(store.getApproval(defaultTenantId, stale.id)))?.status).toBe("expired")
+    expect((await run(store.getApproval(defaultTenantId, fresh.id)))?.status).toBe("pending")
   })
 
   test("ages out audit arguments while keeping the record", async () => {
-    const store = await makeStore()
+    const store = await run(makeStore())
     const id = newAuditId()
-    await store.recordAudit({
+    await run(store.recordAudit({
       tenantId: defaultTenantId,
       id,
       clientId: null,
@@ -238,17 +239,17 @@ describe("gateway maintenance", () => {
       outcome: "succeeded",
       message: null,
       arguments: { value: { body: "PII" }, expiresAt: new Date(Date.now() - 1_000) }
-    })
+    }))
 
-    const result = await runMaintenance(store)
+    const result = await run(runMaintenance(store))
 
     expect(result.expiredAuditArguments).toBe(1)
-    expect(await store.listAudit(defaultTenantId, { limit: PositiveInt.make(10) })).toHaveLength(1)
+    expect(await run(store.listAudit(defaultTenantId, { limit: PositiveInt.make(10) }))).toHaveLength(1)
   })
 
   test("is safe to run when there is nothing to do", async () => {
-    const store = await makeStore()
-    expect(await runMaintenance(store)).toEqual({
+    const store = await run(makeStore())
+    expect(await run(runMaintenance(store))).toEqual({
       expiredApprovals: 0,
       expiredAuditArguments: 0,
       deletedSessions: 0,
@@ -257,21 +258,21 @@ describe("gateway maintenance", () => {
   })
 
   test("deletes abandoned identity and terminal login flows", async () => {
-    const store = await makeStore()
+    const store = await run(makeStore())
     const handoff = generateLoginHandoff()
     const state = generateLoginHandoff()
     const expiredAt = new Date(Date.now() - 1_000)
-    await store.createLoginHandoff({ requestHash: handoff.hash, expiresAt: expiredAt })
-    await store.createIdentityOAuthState({
+    await run(store.createLoginHandoff({ requestHash: handoff.hash, expiresAt: expiredAt }))
+    await run(store.createIdentityOAuthState({
       stateHash: state.hash,
       provider: "google",
       handoffHash: handoff.hash,
       returnPath: null,
       expiresAt: expiredAt
-    })
+    }))
 
-    expect((await runMaintenance(store)).expiredIdentityFlows).toBe(2)
-    expect(await store.getLoginHandoff(handoff.hash)).toBeUndefined()
-    expect(await store.consumeIdentityOAuthState(state.hash)).toBeUndefined()
+    expect((await run(runMaintenance(store))).expiredIdentityFlows).toBe(2)
+    expect(await run(store.getLoginHandoff(handoff.hash))).toBeUndefined()
+    expect(await run(store.consumeIdentityOAuthState(state.hash))).toBeUndefined()
   })
 })

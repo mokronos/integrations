@@ -1,3 +1,5 @@
+import { run, runAll } from "./effect.ts"
+import { Effect } from "effect"
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -11,16 +13,16 @@ const directories: Array<string> = []
 const stores: Array<GatewayStore> = []
 
 afterEach(async () => {
-  await Promise.all(stores.splice(0).map((store) => store.close()))
-  await Promise.all(
+  await runAll(stores.splice(0).map((store) => store.close()))
+  await run(Promise.all(
     directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
-  )
+  ))
 })
 
 const makeStore = async (): Promise<GatewayStore> => {
-  const directory = await mkdtemp(path.join(tmpdir(), "wf-gateway-oauth-"))
+  const directory = await run(mkdtemp(path.join(tmpdir(), "wf-gateway-oauth-")))
   directories.push(directory)
-  const store = await createGatewayStore(path.join(directory, "gateway.sqlite"))
+  const store = await run(createGatewayStore(path.join(directory, "gateway.sqlite")))
   stores.push(store)
   return store
 }
@@ -97,11 +99,11 @@ describe("hosted oauth flows", () => {
       publicUrl: "https://gw.example.com"
     })
 
-    const session = await sessions.start({
+    const session = await run(sessions.start({
       integration: "google",
       connection: "default",
       authMethod: oauthMethod
-    })
+    }))
 
     expect(fake.record.redirectUri).toBe("https://gw.example.com/v1/oauth/callback")
     expect(session.state.status).toBe("pending")
@@ -114,20 +116,20 @@ describe("hosted oauth flows", () => {
     const sessions = createOAuthSessions({ auth: fake.auth }, {
       publicUrl: "https://gw.example.com"
     })
-    await sessions.start({
+    await run(sessions.start({
       integration: "google",
       connection: "default",
       authMethod: oauthMethod
-    })
+    }))
 
-    const done = await sessions.completeByState("provider-state-1", { code: "abc" })
+    const done = await run(sessions.completeByState("provider-state-1", { code: "abc" }))
     expect(done?.state.status).toBe("connected")
     expect(fake.record.completedState).toBe("provider-state-1")
     expect(fake.record.completedCode).toBe("abc")
 
     // A replayed callback is consumed, not a second connection.
-    expect(await sessions.completeByState("provider-state-1", { code: "abc" })).toBeUndefined()
-    expect(await sessions.completeByState("never-seen", { code: "abc" })).toBeUndefined()
+    expect(await run(sessions.completeByState("provider-state-1", { code: "abc" }))).toBeUndefined()
+    expect(await run(sessions.completeByState("never-seen", { code: "abc" }))).toBeUndefined()
   })
 
   test("records the failure on the session when the exchange is refused", async () => {
@@ -135,13 +137,13 @@ describe("hosted oauth flows", () => {
     const sessions = createOAuthSessions({ auth: fake.auth }, {
       publicUrl: "https://gw.example.com"
     })
-    await sessions.start({
+    await run(sessions.start({
       integration: "google",
       connection: "default",
       authMethod: oauthMethod
-    })
+    }))
 
-    const failed = await sessions.completeByState("provider-state-1", { code: "bad" })
+    const failed = await run(sessions.completeByState("provider-state-1", { code: "bad" }))
     expect(failed?.state.status).toBe("failed")
     if (failed?.state.status !== "failed") return
     expect(failed.state.message).toContain("token exchange rejected")
@@ -150,15 +152,15 @@ describe("hosted oauth flows", () => {
   test("local mode still owns an ephemeral listener and needs no public URL", async () => {
     const fake = fakeAuth()
     const sessions = createOAuthSessions({ auth: fake.auth })
-    const session = await sessions.start({
+    const session = await run(sessions.start({
       integration: "google",
       connection: "default",
       authMethod: oauthMethod
-    })
+    }))
     // The flow was registered against some 127.0.0.1 port this process bound.
     expect(fake.record.redirectUri).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/oauth\/callback$/)
     expect(session.state.status).toBe("pending")
-    sessions.stop()
+    await run(sessions.stop())
   })
 })
 
@@ -210,7 +212,7 @@ describe("the hosted callback route", () => {
   const setup = async (
     oauthSessions: Parameters<typeof createGatewayHandler>[0]["oauth"]
   ) => {
-    const store = await makeStore()
+    const store = await run(makeStore())
     const { handle } = createGatewayHandler({
       store,
       integrations: stubIntegrations(),
@@ -218,19 +220,19 @@ describe("the hosted callback route", () => {
       oauth: oauthSessions
     })
     return async (pathname: string) => {
-      const response = await handle(new Request(`http://gateway.test${pathname}`))
-      const text = await response.text()
+      const response = await run(handle(new Request(`http://gateway.test${pathname}`)))
+      const text = await run(response.text())
       return { status: response.status, text }
     }
   }
 
   test("connects when the state is known and shows the human a page", async () => {
     let completed: { state?: string; code?: string } | undefined
-    const call = await setup({
-      start: async () => { throw new Error("not used") },
-      get: async () => undefined,
-      stop: () => undefined,
-      completeByState: async (state, input) => {
+    const call = await run(setup({
+      start: () => Effect.die(new Error("not used")),
+      get: () => Effect.sync((): undefined => undefined),
+      stop: () => Effect.void,
+      completeByState: (state, input) => Effect.sync(() => {
         completed = { state, code: input.code }
         return {
           id: "s1",
@@ -238,52 +240,52 @@ describe("the hosted callback route", () => {
           connection: "default",
           state: { status: "connected", connection: connection("default") }
         }
-      }
-    })
+      })
+    }))
 
-    const response = await call("/v1/oauth/callback?state=provider-state-1&code=abc")
+    const response = await run(call("/v1/oauth/callback?state=provider-state-1&code=abc"))
     expect(response.status).toBe(200)
     expect(response.text).toContain("Account connected")
     expect(completed?.code).toBe("abc")
   })
 
   test("answers an unknown or error callback with a readable page, not JSON", async () => {
-    const unknownCall = await setup({
-      start: async () => { throw new Error("not used") },
-      get: async () => undefined,
-      stop: () => undefined,
-      completeByState: async () => undefined
-    })
-    const unknown = await unknownCall("/v1/oauth/callback?state=stale&code=abc")
+    const unknownCall = await run(setup({
+      start: () => Effect.die(new Error("not used")),
+      get: () => Effect.sync((): undefined => undefined),
+      stop: () => Effect.void,
+      completeByState: () => Effect.sync((): undefined => undefined)
+    }))
+    const unknown = await run(unknownCall("/v1/oauth/callback?state=stale&code=abc"))
     expect(unknown.status).toBe(400)
     expect(unknown.text).toContain("Unknown authorization")
 
-    const erroredCall = await setup({
-      start: async () => { throw new Error("not used") },
-      get: async () => undefined,
-      stop: () => undefined,
-      completeByState: async () => undefined
-    })
-    const errored = await erroredCall(
+    const erroredCall = await run(setup({
+      start: () => Effect.die(new Error("not used")),
+      get: () => Effect.sync((): undefined => undefined),
+      stop: () => Effect.void,
+      completeByState: () => Effect.sync((): undefined => undefined)
+    }))
+    const errored = await run(erroredCall(
       "/v1/oauth/callback?state=provider-state-1&error=access_denied&error_description=User%20declined"
-    )
+    ))
     expect(errored.status).toBe(400)
     expect(errored.text).toContain("User declined")
   })
 
   test("reports a flow that failed during completion", async () => {
-    const call = await setup({
-      start: async () => { throw new Error("not used") },
-      get: async () => undefined,
-      stop: () => undefined,
-      completeByState: async () => ({
+    const call = await run(setup({
+      start: () => Effect.die(new Error("not used")),
+      get: () => Effect.sync((): undefined => undefined),
+      stop: () => Effect.void,
+      completeByState: () => Effect.succeed({
         id: "s1",
         integration: "google",
         connection: "default",
         state: { status: "failed", message: "token exchange rejected" }
       })
-    })
-    const response = await call("/v1/oauth/callback?state=provider-state-1&code=abc")
+    }))
+    const response = await run(call("/v1/oauth/callback?state=provider-state-1&code=abc"))
     expect(response.status).toBe(400)
     expect(response.text).toContain("token exchange rejected")
   })

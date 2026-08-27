@@ -1,3 +1,4 @@
+import { run, runAll } from "./effect.ts"
 import { afterEach, describe, expect, test } from "bun:test"
 import { statSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
@@ -26,14 +27,14 @@ const directories: Array<string> = []
 const stores: Array<GatewayStore> = []
 
 afterEach(async () => {
-  await Promise.all(stores.splice(0).map((store) => store.close()))
-  await Promise.all(
+  await runAll(stores.splice(0).map((store) => store.close()))
+  await run(Promise.all(
     directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
-  )
+  ))
 })
 
 const tempDir = async (): Promise<string> => {
-  const directory = await mkdtemp(path.join(tmpdir(), "wf-gateway-crypto-"))
+  const directory = await run(mkdtemp(path.join(tmpdir(), "wf-gateway-crypto-")))
   directories.push(directory)
   return directory
 }
@@ -87,12 +88,12 @@ describe("payload sealing", () => {
 
 describe("master key resolution", () => {
   test("is absent when nothing is configured", async () => {
-    expect(await resolveEncryption({})).toBeUndefined()
+    expect(await run(resolveEncryption({}))).toBeUndefined()
   })
 
   test("uses an environment key of exactly 32 bytes", async () => {
     const key = randomBytes(32).toString("base64url")
-    const encryption = await resolveEncryption({ envValue: key })
+    const encryption = await run(resolveEncryption({ envValue: key }))
     if (encryption === undefined) throw new Error("expected an encryption instance")
     expect(encryption.open(encryption.seal("round trip"))).toBe("round trip")
   })
@@ -102,9 +103,9 @@ describe("master key resolution", () => {
   })
 
   test("mints a private keyfile when only a path is given", async () => {
-    const directory = await tempDir()
+    const directory = await run(tempDir())
     const keyFile = path.join(directory, "nested", "gateway.key")
-    const encryption = await resolveEncryption({ keyFile })
+    const encryption = await run(resolveEncryption({ keyFile }))
     expect(encryption).toBeDefined()
     const info = statSync(keyFile)
     expect(info.mode & 0o777).toBe(0o600)
@@ -112,10 +113,10 @@ describe("master key resolution", () => {
   })
 
   test("reuses an existing keyfile across starts", async () => {
-    const directory = await tempDir()
+    const directory = await run(tempDir())
     const keyFile = path.join(directory, "gateway.key")
-    const first = await resolveEncryption({ keyFile })
-    const second = await resolveEncryption({ keyFile })
+    const first = await run(resolveEncryption({ keyFile }))
+    const second = await run(resolveEncryption({ keyFile }))
     if (first === undefined || second === undefined) {
       throw new Error("expected both resolutions to produce instances")
     }
@@ -124,19 +125,19 @@ describe("master key resolution", () => {
   })
 
   test("the environment wins over an existing keyfile", async () => {
-    const directory = await tempDir()
+    const directory = await run(tempDir())
     const keyFile = path.join(directory, "gateway.key")
-    await resolveEncryption({ keyFile })
+    await run(resolveEncryption({ keyFile }))
     const environmentKey = randomBytes(32).toString("base64url")
 
-    const encryption = await resolveEncryption({ envValue: environmentKey, keyFile })
+    const encryption = await run(resolveEncryption({ envValue: environmentKey, keyFile }))
     if (encryption === undefined) throw new Error("expected an encryption instance")
     const sealed = encryption.seal("decides")
 
     // Opens under the environment key...
     expect(createEncryption(Buffer.from(environmentKey, "base64url")).open(sealed)).toBe("decides")
     // ...and not under the file key it superseded.
-    const fileKey = createEncryption((await import("node:fs")).readFileSync(keyFile))
+    const fileKey = createEncryption((await run(import("node:fs"))).readFileSync(keyFile))
     expect(() => fileKey.open(sealed)).toThrow()
   })
 })
@@ -154,23 +155,23 @@ describe("the encrypted store", () => {
     databasePath: string
     encryption: Encryption
   }> => {
-    const directory = await tempDir()
+    const directory = await run(tempDir())
     const databasePath = path.join(directory, "gateway.sqlite")
     const encryption = createEncryption(randomBytes(32))
-    const store = await createGatewayStore(databasePath, encryption)
+    const store = await run(createGatewayStore(databasePath, encryption))
     stores.push(store)
     const raw = openRawDatabase({ url: `file:${databasePath}` })
     return { store, raw, databasePath, encryption }
   }
 
   const seedClient = async (store: GatewayStore) => {
-    const client = await store.createClient({
+    const client = await run(store.createClient({
       id: newClientId(),
       tenantId: defaultTenantId,
       name: "agent",
       capabilities: ["provision_connections"]
-    })
-    const grant = await store.createGrant({
+    }))
+    const grant = await run(store.createGrant({
       id: newGrantId(),
       tenantId: defaultTenantId,
       clientId: client.id,
@@ -178,47 +179,47 @@ describe("the encrypted store", () => {
       tool: ToolName.make("sendEmail"),
       connection,
       decision: "require_approval"
-    })
+    }))
     return { client, grant }
   }
 
   test("stores frozen-call arguments sealed, yet retries still meet them", async () => {
-    const { store, raw } = await makeEncryptedStore()
-    const { grant } = await seedClient(store)
+    const { store, raw } = await run(makeEncryptedStore())
+    const { grant } = await run(seedClient(store))
     const argumentsValue = { to: "customer@example.com", subject: "Private" }
 
-    const approval = await store.createApproval({
+    const approval = await run(store.createApproval({
       id: newApprovalId(),
       tenantId: defaultTenantId,
-      clientId: (await store.listClients(defaultTenantId))[0]?.id ?? newClientId(),
+      clientId: (await run(store.listClients(defaultTenantId)))[0]?.id ?? newClientId(),
       grantId: grant.id,
       alias: grant.alias,
       tool: grant.tool,
       arguments: argumentsValue,
       expiresAt: new Date(Date.now() + 60_000)
-    })
+    }))
 
     const storedArguments = String(
-      (await raw.execute(
+      (await run(raw.execute(
         "SELECT arguments FROM gateway_pending_approval WHERE id = ?",
         [approval.id]
-      )).rows[0]?.["arguments"]
+      ))).rows[0]?.["arguments"]
     )
     // Nothing readable where the PII lives...
     expect(storedArguments).toContain("enc.v1$")
     expect(storedArguments).not.toContain("customer@example.com")
 
     // ...and the retry still finds its frozen call.
-    const metAgain = await store.findUncollectedApproval(grant.id, argumentsValue)
+    const metAgain = await run(store.findUncollectedApproval(grant.id, argumentsValue))
     expect(metAgain === undefined ? "" : metAgain.id).toBe(approval.id)
     expect(metAgain?.arguments).toEqual(argumentsValue)
   })
 
   test("seals a settled result while reading it back intact", async () => {
-    const { store, raw } = await makeEncryptedStore()
-    const { client, grant } = await seedClient(store)
+    const { store, raw } = await run(makeEncryptedStore())
+    const { client, grant } = await run(seedClient(store))
     const id = newApprovalId()
-    await store.createApproval({
+    await run(store.createApproval({
       id,
       tenantId: defaultTenantId,
       clientId: client.id,
@@ -227,33 +228,33 @@ describe("the encrypted store", () => {
       tool: grant.tool,
       arguments: {},
       expiresAt: new Date(Date.now() + 60_000)
-    })
-    await store.settleApproval({
+    }))
+    await run(store.settleApproval({
       tenantId: defaultTenantId,
       id,
       status: "approved",
       decidedBy: "sebastian",
       result: { messageId: "secret-message-id" },
       error: null
-    })
+    }))
 
     const storedResult = String(
-      (await raw.execute(
+      (await run(raw.execute(
         "SELECT result FROM gateway_pending_approval WHERE id = ?",
         [id]
-      )).rows[0]?.["result"]
+      ))).rows[0]?.["result"]
     )
     expect(storedResult).toContain("enc.v1$")
     expect(storedResult).not.toContain("secret-message-id")
 
-    const settled = await store.getApproval(defaultTenantId, id)
+    const settled = await run(store.getApproval(defaultTenantId, id))
     expect(settled?.result).toEqual({ messageId: "secret-message-id" })
   })
 
   test("seals audit arguments at rest", async () => {
-    const { store, raw } = await makeEncryptedStore()
+    const { store, raw } = await run(makeEncryptedStore())
     const id = newAuditId()
-    await store.recordAudit({
+    await run(store.recordAudit({
       tenantId: defaultTenantId,
       id,
       clientId: null,
@@ -267,26 +268,26 @@ describe("the encrypted store", () => {
         value: { body: "personal data ages out" },
         expiresAt: new Date(Date.now() - 1_000)
       }
-    })
+    }))
 
     const stored = String(
-      (await raw.execute(
+      (await run(raw.execute(
         "SELECT arguments FROM gateway_audit_arguments WHERE audit_id = ?",
         [id]
-      )).rows[0]?.["arguments"]
+      ))).rows[0]?.["arguments"]
     )
     expect(stored).toContain("enc.v1$")
     expect(stored).not.toContain("personal data")
   })
 
   test("still matches pre-encryption rows written in plaintext", async () => {
-    const { store, raw } = await makeEncryptedStore()
-    const { client, grant } = await seedClient(store)
+    const { store, raw } = await run(makeEncryptedStore())
+    const { client, grant } = await run(seedClient(store))
 
     // A frozen call from before the master key existed: canonical JSON in the
     // clear, no lookup digest.
     const canonical = canonicalArguments({ to: "old@example.com" })
-    await raw.execute(
+    await run(raw.execute(
       `INSERT INTO gateway_pending_approval
          (id, tenant_id, client_id, grant_id, alias, tool, arguments, status, created_at, expires_at, collected_at)
        VALUES ('legacy-approval', ?, ?, ?, ?, ?, ?, 'pending', 0, ?, NULL)`,
@@ -299,25 +300,25 @@ describe("the encrypted store", () => {
         canonical,
         Date.now() + 60_000
       ]
-    )
+    ))
 
-    const metAgain = await store.findUncollectedApproval(grant.id, { to: "old@example.com" })
+    const metAgain = await run(store.findUncollectedApproval(grant.id, { to: "old@example.com" }))
     expect(metAgain === undefined ? "" : metAgain.id).toBe("legacy-approval")
     expect(metAgain?.arguments).toEqual({ to: "old@example.com" })
   })
 
   test("a store without a key keeps storing plaintext", async () => {
-    const directory = await tempDir()
+    const directory = await run(tempDir())
     const databasePath = path.join(directory, "gateway.sqlite")
-    const store = await createGatewayStore(databasePath)
+    const store = await run(createGatewayStore(databasePath))
     stores.push(store)
-    const client = await store.createClient({
+    const client = await run(store.createClient({
       id: newClientId(),
       tenantId: defaultTenantId,
       name: "agent",
       capabilities: ["provision_connections"]
-    })
-    const grant = await store.createGrant({
+    }))
+    const grant = await run(store.createGrant({
       id: newGrantId(),
       tenantId: defaultTenantId,
       clientId: client.id,
@@ -325,8 +326,8 @@ describe("the encrypted store", () => {
       tool: ToolName.make("sendEmail"),
       connection,
       decision: "require_approval"
-    })
-    const approval = await store.createApproval({
+    }))
+    const approval = await run(store.createApproval({
       id: newApprovalId(),
       tenantId: defaultTenantId,
       clientId: client.id,
@@ -335,14 +336,14 @@ describe("the encrypted store", () => {
       tool: grant.tool,
       arguments: { visible: true },
       expiresAt: new Date(Date.now() + 60_000)
-    })
+    }))
 
     const raw = openRawDatabase({ url: `file:${databasePath}` })
     const storedArguments = String(
-      (await raw.execute(
+      (await run(raw.execute(
         "SELECT arguments FROM gateway_pending_approval WHERE id = ?",
         [approval.id]
-      )).rows[0]?.["arguments"]
+      ))).rows[0]?.["arguments"]
     )
     expect(storedArguments).toBe('{"visible":true}')
     raw.close()

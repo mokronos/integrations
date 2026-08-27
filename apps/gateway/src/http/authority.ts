@@ -6,6 +6,7 @@ import { SessionTokenHash } from "../domain.ts"
 import { hashSessionToken } from "../passwords.ts"
 import type { RateLimiter } from "../ratelimit.ts"
 import type { GatewayStore } from "../store.ts"
+import { GatewayStoreError } from "../store.ts"
 import {
   Identity,
   Forbidden,
@@ -41,6 +42,9 @@ export type { Caller, Refused } from "./identity.ts"
  *  so. */
 
 const sessionCookieName = "wf_session"
+
+const orDieStorage = <A, E, R>(effect: Effect.Effect<A, E | GatewayStoreError, R>) =>
+  effect.pipe(Effect.catchTag("GatewayStoreError", Effect.die))
 
 /** Reads one cookie out of the `Cookie` header, if present. */
 export const readSessionCookieValue = (header: string | undefined): Option.Option<string> => {
@@ -171,15 +175,14 @@ export interface AuthorityOptions {
  *  was presented, since a dashboard page holds a cookie and never a key; the
  *  borrowed local credential is last, and only arrives pre-approved. Anything
  *  presented but not accepted refuses with *why*. */
-const resolveCaller = Effect.fn("authority.resolveCaller")(function* (
+const resolveCaller = Effect.fn("authority.resolveCaller")(function*(
   options: AuthorityOptions,
   headers: Readonly<Record<string, string>>,
   context: RequestContext
 ) {
   const secret = presentedSecret(headers)
   if (Option.isSome(secret)) {
-    const authentication = yield* Effect.promise(() =>
-      authenticateClient(options.store, secret.value)
+    const authentication = yield* orDieStorage(authenticateClient(options.store, secret.value)
     )
     if (authentication.status !== "authenticated") {
       return yield* refusedOf(authentication.status)
@@ -189,7 +192,7 @@ const resolveCaller = Effect.fn("authority.resolveCaller")(function* (
 
   const token = readSessionCookieValue(headers["cookie"])
   if (Option.isSome(token)) {
-    const session = yield* Effect.promise(() =>
+    const session = yield* orDieStorage(
       options.store.findLiveSession(SessionTokenHash.make(hashSessionToken(token.value)))
     )
     if (session === undefined) return { kind: "anonymous" } satisfies Caller
@@ -204,8 +207,7 @@ const resolveCaller = Effect.fn("authority.resolveCaller")(function* (
 
   const localSecret = context.localSecret
   if (localSecret !== undefined) {
-    const authentication = yield* Effect.promise(() =>
-      authenticateClient(options.store, localSecret)
+    const authentication = yield* orDieStorage(authenticateClient(options.store, localSecret)
     )
     if (authentication.status === "authenticated") {
       return { kind: "local", client: authentication.client } satisfies Caller
@@ -216,7 +218,7 @@ const resolveCaller = Effect.fn("authority.resolveCaller")(function* (
 })
 
 /** Whether this caller may reach a route with this access level. */
-const admit = Effect.fn("authority.admit")(function* (
+const admit = Effect.fn("authority.admit")(function*(
   options: AuthorityOptions,
   caller: Caller,
   access: Access,
@@ -258,8 +260,7 @@ const admit = Effect.fn("authority.admit")(function* (
 
   const capability = requiredCapability(access)
   if (capability === undefined) return
-  const authorization = yield* Effect.promise(() =>
-    authorizeClientCapability(options.store, caller.secret, capability)
+  const authorization = yield* orDieStorage(authorizeClientCapability(options.store, caller.secret, capability)
   )
   if (authorization.status !== "authorized") {
     return yield* refusedOf(authorization.status)
@@ -289,7 +290,7 @@ export class Authority extends HttpApiMiddleware.Service<Authority, {
     Layer.effect(
       Authority,
       Effect.sync(() => (httpEffect, { endpoint }) =>
-        Effect.gen(function* () {
+        Effect.gen(function*() {
           const request = yield* HttpServerRequest.HttpServerRequest
           const context = yield* CurrentRequestContext.asEffect()
           const headers = request.headers

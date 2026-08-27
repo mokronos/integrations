@@ -84,14 +84,11 @@ export const inline = (value: string, limit: number): string => {
 /** Awaits the write rather than firing and forgetting, so a large result is
  *  fully drained before the process exits. */
 export const writeStdoutLine = (text: string): Effect.Effect<void> =>
-  Effect.promise(() =>
-    new Promise<void>((resolve, reject) => {
-      process.stdout.write(`${text}\n`, (error) => {
-        if (error === undefined || error === null) resolve()
-        else reject(error)
-      })
+  Effect.callback<void>((resume) => {
+    process.stdout.write(`${text}\n`, (error) => {
+      resume(error === undefined || error === null ? Effect.void : Effect.die(error))
     })
-  )
+  })
 
 /** Listings append the command that follows, so an agent does not have to guess
  *  the next step. `<…>` marks what the reader fills in; anything else is

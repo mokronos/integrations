@@ -1,3 +1,4 @@
+import { run, runAll } from "./effect.ts"
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -28,16 +29,16 @@ const directories: Array<string> = []
 const stores: Array<GatewayStore> = []
 
 afterEach(async () => {
-  await Promise.all(stores.splice(0).map((store) => store.close()))
-  await Promise.all(
+  await runAll(stores.splice(0).map((store) => store.close()))
+  await run(Promise.all(
     directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
-  )
+  ))
 })
 
 const makeStore = async (): Promise<GatewayStore> => {
-  const directory = await mkdtemp(path.join(tmpdir(), "wf-gateway-store-"))
+  const directory = await run(mkdtemp(path.join(tmpdir(), "wf-gateway-store-")))
   directories.push(directory)
-  const store = await createGatewayStore(path.join(directory, "nested", "gateway.sqlite"))
+  const store = await run(createGatewayStore(path.join(directory, "nested", "gateway.sqlite")))
   stores.push(store)
   return store
 }
@@ -50,13 +51,13 @@ const connection: ConnectionRef = {
 }
 
 const seedGrant = async (store: GatewayStore) => {
-  const client = await store.createClient({
+  const client = await run(store.createClient({
     id: newClientId(),
     tenantId: defaultTenantId,
     name: `client-${crypto.randomUUID()}`,
     capabilities: ["provision_connections"]
-  })
-  const grant = await store.createGrant({
+  }))
+  const grant = await run(store.createGrant({
     id: newGrantId(),
     tenantId: defaultTenantId,
     clientId: client.id,
@@ -64,32 +65,32 @@ const seedGrant = async (store: GatewayStore) => {
     tool: ToolName.make("sendEmail"),
     connection,
     decision: "require_approval"
-  })
+  }))
   return { client, grant }
 }
 
 describe("gateway store", () => {
   test("creates the database directory it was pointed at", async () => {
-    const store = await makeStore()
+    const store = await run(makeStore())
     expect(store.databasePath).toContain(path.join("nested", "gateway.sqlite"))
-    expect(await store.listClients(defaultTenantId)).toEqual([])
+    expect(await run(store.listClients(defaultTenantId))).toEqual([])
   })
 
   test("round-trips a user-tier connection through the grant", async () => {
-    const store = await makeStore()
-    const { grant } = await seedGrant(store)
+    const store = await run(makeStore())
+    const { grant } = await run(seedGrant(store))
 
     expect(grant.connection).toEqual(connection)
   })
 
   test("keeps revoked grants as history while freeing the alias and tool", async () => {
-    const store = await makeStore()
-    const { client, grant } = await seedGrant(store)
+    const store = await run(makeStore())
+    const { client, grant } = await run(seedGrant(store))
 
-    await store.revokeGrant(defaultTenantId, grant.id)
+    await run(store.revokeGrant(defaultTenantId, grant.id))
     // The unique index is partial, so re-granting the same tool is allowed once
     // the previous row is revoked.
-    const regranted = await store.createGrant({
+    const regranted = await run(store.createGrant({
       id: newGrantId(),
       tenantId: defaultTenantId,
       clientId: client.id,
@@ -97,17 +98,17 @@ describe("gateway store", () => {
       tool: ToolName.make("sendEmail"),
       connection,
       decision: "allow"
-    })
+    }))
 
     expect(regranted.decision).toBe("allow")
-    expect(await store.listGrants(client.id)).toHaveLength(1)
+    expect(await run(store.listGrants(client.id))).toHaveLength(1)
   })
 
   test("refuses two live grants for the same client, alias, and tool", async () => {
-    const store = await makeStore()
-    const { client } = await seedGrant(store)
+    const store = await run(makeStore())
+    const { client } = await run(seedGrant(store))
 
-    await expect(store.createGrant({
+    await run(expect(run(store.createGrant({
       id: newGrantId(),
       tenantId: defaultTenantId,
       clientId: client.id,
@@ -115,36 +116,36 @@ describe("gateway store", () => {
       tool: ToolName.make("sendEmail"),
       connection,
       decision: "allow"
-    })).rejects.toThrow()
+    }))).rejects.toThrow())
   })
 
   test("stores only a hash of an API key", async () => {
-    const store = await makeStore()
-    const client = await store.createClient({
+    const store = await run(makeStore())
+    const client = await run(store.createClient({
       id: newClientId(),
       tenantId: defaultTenantId,
       name: "hash-check",
       capabilities: ["provision_connections"]
-    })
+    }))
     const key = generateApiKey()
-    await store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
+    await run(store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash }))
 
-    const stored = await store.listApiKeys(client.id)
+    const stored = await run(store.listApiKeys(client.id))
     expect(stored[0]?.hash).toBe(hashApiKey(key.secret))
     expect(JSON.stringify(stored)).not.toContain(key.secret)
   })
 
   test("updates client authority and approval delivery together", async () => {
-    const store = await makeStore()
-    const client = await store.createClient({
+    const store = await run(makeStore())
+    const client = await run(store.createClient({
       id: newClientId(),
       tenantId: defaultTenantId,
       name: "policy-check",
       capabilities: []
-    })
+    }))
     expect(client.approvalDelivery).toEqual({ returnLink: true, webhooks: [] })
 
-    const updated = await store.updateClientSettings({
+    const updated = await run(store.updateClientSettings({
       tenantId: defaultTenantId,
       id: client.id,
       capabilities: ["provision_connections"],
@@ -152,7 +153,7 @@ describe("gateway store", () => {
         returnLink: false,
         webhooks: ["https://automation.example/approval"]
       }
-    })
+    }))
     expect(updated.capabilities).toEqual(["provision_connections"])
     expect(updated.approvalDelivery).toEqual({
       returnLink: false,
@@ -161,47 +162,47 @@ describe("gateway store", () => {
   })
 
   test("completes and consumes login handoffs and OAuth state once", async () => {
-    const store = await makeStore()
-    const tenant = await store.createTenant({ name: "OAuth workspace" })
-    const subject = await store.createSubject({ id: newSubjectId(), tenantId: tenant.id })
-    await store.createLogin({
+    const store = await run(makeStore())
+    const tenant = await run(store.createTenant({ name: "OAuth workspace" }))
+    const subject = await run(store.createSubject({ id: newSubjectId(), tenantId: tenant.id }))
+    await run(store.createLogin({
       subjectId: subject.id,
       tenantId: tenant.id,
       email: "oauth@example.com",
       passwordHash: null
-    })
+    }))
     const handoff = generateLoginHandoff()
-    await store.createLoginHandoff({
+    await run(store.createLoginHandoff({
       requestHash: handoff.hash,
       expiresAt: new Date(Date.now() + 60_000)
-    })
-    expect(await store.completeLoginHandoff({
+    }))
+    expect(await run(store.completeLoginHandoff({
       requestHash: handoff.hash,
       subjectId: subject.id,
       tenantId: tenant.id,
       email: "oauth@example.com"
-    })).toBe(true)
-    expect(await store.collectLoginHandoff(handoff.hash)).toBe(true)
-    expect(await store.collectLoginHandoff(handoff.hash)).toBe(false)
+    }))).toBe(true)
+    expect(await run(store.collectLoginHandoff(handoff.hash))).toBe(true)
+    expect(await run(store.collectLoginHandoff(handoff.hash))).toBe(false)
 
     const state = generateLoginHandoff()
-    await store.createIdentityOAuthState({
+    await run(store.createIdentityOAuthState({
       stateHash: state.hash,
       provider: "google",
       handoffHash: handoff.hash,
       returnPath: "/approvals?approval=ap_1",
       expiresAt: new Date(Date.now() + 60_000)
-    })
-    expect((await store.consumeIdentityOAuthState(state.hash))?.returnPath).toBe(
+    }))
+    expect((await run(store.consumeIdentityOAuthState(state.hash)))?.returnPath).toBe(
       "/approvals?approval=ap_1"
     )
-    expect(await store.consumeIdentityOAuthState(state.hash)).toBeUndefined()
+    expect(await run(store.consumeIdentityOAuthState(state.hash))).toBeUndefined()
   })
 
   test("freezes approval arguments and settles them once", async () => {
-    const store = await makeStore()
-    const { client, grant } = await seedGrant(store)
-    const approval = await store.createApproval({
+    const store = await run(makeStore())
+    const { client, grant } = await run(seedGrant(store))
+    const approval = await run(store.createApproval({
       id: newApprovalId(),
       tenantId: defaultTenantId,
       clientId: client.id,
@@ -210,39 +211,39 @@ describe("gateway store", () => {
       tool: grant.tool,
       arguments: { to: ["customer@example.com"], subject: "Follow up" },
       expiresAt: new Date(Date.now() + 60_000)
-    })
+    }))
 
     expect(approval.status).toBe("pending")
     expect(approval.arguments).toEqual({ to: ["customer@example.com"], subject: "Follow up" })
 
-    await store.settleApproval({
+    await run(store.settleApproval({
       tenantId: defaultTenantId,
       id: approval.id,
       status: "approved",
       decidedBy: "sebastian",
       result: { id: "msg-1" },
       error: null
-    })
+    }))
     // A settled approval is final: a second decision must not overwrite it.
-    await store.settleApproval({
+    await run(store.settleApproval({
       tenantId: defaultTenantId,
       id: approval.id,
       status: "denied",
       decidedBy: "someone-else",
       result: null,
       error: null
-    })
+    }))
 
-    const settled = await store.getApproval(defaultTenantId, approval.id)
+    const settled = await run(store.getApproval(defaultTenantId, approval.id))
     expect(settled?.status).toBe("approved")
     expect(settled?.decidedBy).toBe("sebastian")
     expect(settled?.result).toEqual({ id: "msg-1" })
   })
 
   test("revoking a client cancels its pending approvals", async () => {
-    const store = await makeStore()
-    const { client, grant } = await seedGrant(store)
-    const approval = await store.createApproval({
+    const store = await run(makeStore())
+    const { client, grant } = await run(seedGrant(store))
+    const approval = await run(store.createApproval({
       id: newApprovalId(),
       tenantId: defaultTenantId,
       clientId: client.id,
@@ -251,21 +252,21 @@ describe("gateway store", () => {
       tool: grant.tool,
       arguments: {},
       expiresAt: new Date(Date.now() + 60_000)
-    })
+    }))
 
-    const cancelled = await store.cancelApprovalsForClient(client.id)
+    const cancelled = await run(store.cancelApprovalsForClient(client.id))
 
     expect(cancelled).toBe(1)
-    const after = await store.getApproval(defaultTenantId, approval.id)
+    const after = await run(store.getApproval(defaultTenantId, approval.id))
     expect(after?.status).toBe("denied")
     expect(after?.decidedBy).toBe("client-revoked")
   })
 
   test("keeps the audit record after its arguments expire", async () => {
-    const store = await makeStore()
-    const { client, grant } = await seedGrant(store)
+    const store = await run(makeStore())
+    const { client, grant } = await run(seedGrant(store))
     const id = newAuditId()
-    await store.recordAudit({
+    await run(store.recordAudit({
       tenantId: defaultTenantId,
       id,
       clientId: client.id,
@@ -279,12 +280,12 @@ describe("gateway store", () => {
         value: { body: "personal data that should age out" },
         expiresAt: new Date(Date.now() - 1_000)
       }
-    })
+    }))
 
-    const removed = await store.expireAuditArguments(new Date())
+    const removed = await run(store.expireAuditArguments(new Date()))
 
     expect(removed).toBe(1)
-    const records = await store.listAudit(defaultTenantId, { limit: PositiveInt.make(10) })
+    const records = await run(store.listAudit(defaultTenantId, { limit: PositiveInt.make(10) }))
     expect(records).toHaveLength(1)
     // The compliance half survives: who acted for whom, and what was decided.
     expect(records[0]?.subject).toBe(SubjectId.make("sebastian"))
@@ -293,8 +294,8 @@ describe("gateway store", () => {
   })
 
   test("records a denial that never reached a connection", async () => {
-    const store = await makeStore()
-    await store.recordAudit({
+    const store = await run(makeStore())
+    await run(store.recordAudit({
       tenantId: defaultTenantId,
       id: newAuditId(),
       clientId: null,
@@ -304,15 +305,15 @@ describe("gateway store", () => {
       decision: null,
       outcome: "denied",
       message: "unknown-key"
-    })
+    }))
 
-    const records = await store.listAudit(defaultTenantId, { limit: PositiveInt.make(10) })
+    const records = await run(store.listAudit(defaultTenantId, { limit: PositiveInt.make(10) }))
     expect(records[0]?.outcome).toBe("denied")
     expect(records[0]?.connection).toBeNull()
   })
 
   test("upserts tool snapshots so a resync overwrites rather than duplicates", async () => {
-    const store = await makeStore()
+    const store = await run(makeStore())
     const integration = IntegrationSlug.make("gmail")
     const base = {
       integration,
@@ -321,43 +322,43 @@ describe("gateway store", () => {
       outputSchema: null,
       syncedAt: new Date()
     }
-    await store.putToolSnapshots(defaultTenantId, [{ ...base, inputSchema: { type: "object" } }])
-    await store.putToolSnapshots(defaultTenantId, [{ ...base, inputSchema: { type: "string" } }])
+    await run(store.putToolSnapshots(defaultTenantId, [{ ...base, inputSchema: { type: "object" } }]))
+    await run(store.putToolSnapshots(defaultTenantId, [{ ...base, inputSchema: { type: "string" } }]))
 
-    const snapshots = await store.listToolSnapshots(defaultTenantId, integration)
+    const snapshots = await run(store.listToolSnapshots(defaultTenantId, integration))
     expect(snapshots).toHaveLength(1)
     expect(snapshots[0]?.inputSchema).toEqual({ type: "string" })
   })
 
   test("keeps tenants blind to each other", async () => {
-    const store = await makeStore()
-    const other = await store.createTenant({ name: "Acme" })
-    const otherSubject = await store.createSubject({ id: newSubjectId(), tenantId: other.id })
+    const store = await run(makeStore())
+    const other = await run(store.createTenant({ name: "Acme" }))
+    const otherSubject = await run(store.createSubject({ id: newSubjectId(), tenantId: other.id }))
     expect(otherSubject.tenantId).toBe(other.id)
 
     // The same client name is fine in two partitions...
-    const mine = await store.createClient({
+    const mine = await run(store.createClient({
       id: newClientId(),
       tenantId: defaultTenantId,
       name: "agent",
       capabilities: ["provision_connections", "administer_gateway"]
-    })
-    const theirs = await store.createClient({
+    }))
+    const theirs = await run(store.createClient({
       id: newClientId(),
       tenantId: other.id,
       name: "agent",
       capabilities: ["provision_connections", "administer_gateway"]
-    })
-    expect(await store.listClients(defaultTenantId)).toHaveLength(1)
-    expect((await store.findClientByName(other.id, "agent"))?.id).toBe(theirs.id)
+    }))
+    expect(await run(store.listClients(defaultTenantId))).toHaveLength(1)
+    expect((await run(store.findClientByName(other.id, "agent")))?.id).toBe(theirs.id)
 
     // ...but a client of one tenant cannot be reached through the other's.
-    expect(await store.findClientById(other.id, mine.id)).toBeUndefined()
-    await expect(store.revokeClient(other.id, mine.id)).resolves.toBeUndefined()
-    expect((await store.findClientById(defaultTenantId, mine.id))?.revokedAt).toBeNull()
+    expect(await run(store.findClientById(other.id, mine.id))).toBeUndefined()
+    await run(expect(run(store.revokeClient(other.id, mine.id))).resolves.toBeUndefined())
+    expect((await run(store.findClientById(defaultTenantId, mine.id)))?.revokedAt).toBeNull()
 
     // Grants, approvals, audit, and snapshots are partitioned the same way.
-    const grant = await store.createGrant({
+    const grant = await run(store.createGrant({
       id: newGrantId(),
       tenantId: defaultTenantId,
       clientId: mine.id,
@@ -365,8 +366,8 @@ describe("gateway store", () => {
       tool: ToolName.make("sendEmail"),
       connection,
       decision: "allow"
-    })
-    const approval = await store.createApproval({
+    }))
+    const approval = await run(store.createApproval({
       id: newApprovalId(),
       tenantId: defaultTenantId,
       clientId: mine.id,
@@ -375,12 +376,12 @@ describe("gateway store", () => {
       tool: grant.tool,
       arguments: {},
       expiresAt: new Date(Date.now() + 60_000)
-    })
-    expect(await store.getApproval(other.id, approval.id)).toBeUndefined()
-    expect(await store.listApprovals(other.id)).toEqual([])
-    expect(await store.collectApproval(other.id, approval.id)).toBe(false)
+    }))
+    expect(await run(store.getApproval(other.id, approval.id))).toBeUndefined()
+    expect(await run(store.listApprovals(other.id))).toEqual([])
+    expect(await run(store.collectApproval(other.id, approval.id))).toBe(false)
 
-    await store.recordAudit({
+    await run(store.recordAudit({
       tenantId: defaultTenantId,
       id: newAuditId(),
       clientId: mine.id,
@@ -390,99 +391,99 @@ describe("gateway store", () => {
       decision: null,
       outcome: "succeeded",
       message: null
-    })
-    expect(await store.listAudit(other.id, { limit: PositiveInt.make(10) })).toEqual([])
-    expect(await store.countAudit(other.id, {})).toBe(0)
+    }))
+    expect(await run(store.listAudit(other.id, { limit: PositiveInt.make(10) }))).toEqual([])
+    expect(await run(store.countAudit(other.id, {}))).toBe(0)
 
-    await store.putToolSnapshots(defaultTenantId, [{
+    await run(store.putToolSnapshots(defaultTenantId, [{
       integration: IntegrationSlug.make("gmail"),
       connection: ConnectionName.make("work"),
       tool: ToolName.make("sendEmail"),
       inputSchema: null,
       outputSchema: null,
       syncedAt: new Date()
-    }])
-    expect(await store.listToolSnapshots(other.id, IntegrationSlug.make("gmail"))).toEqual([])
-    expect(await store.countSubjects(defaultTenantId)).toBe(0)
-    expect(await store.countSubjects(other.id)).toBe(1)
+    }]))
+    expect(await run(store.listToolSnapshots(other.id, IntegrationSlug.make("gmail")))).toEqual([])
+    expect(await run(store.countSubjects(defaultTenantId))).toBe(0)
+    expect(await run(store.countSubjects(other.id))).toBe(1)
   })
 
   test("migrates a pre-tenancy database into the default tenant", async () => {
-    const directory = await mkdtemp(path.join(tmpdir(), "wf-gateway-migrate-"))
+    const directory = await run(mkdtemp(path.join(tmpdir(), "wf-gateway-migrate-")))
     directories.push(directory)
     const databasePath = path.join(directory, "gateway.sqlite")
 
     // Build the pre-tenancy shape by hand: clients with no tenant column.
     const legacy = openLegacyDatabase({ url: `file:${databasePath}` })
-    await legacy.execute(`CREATE TABLE gateway_client (
+    await run(legacy.execute(`CREATE TABLE gateway_client (
        id TEXT PRIMARY KEY, name TEXT NOT NULL, capabilities TEXT NOT NULL,
-       created_at INTEGER NOT NULL, revoked_at INTEGER)`)
-    await legacy.execute(`CREATE UNIQUE INDEX gateway_client_name ON gateway_client (name)`)
-    await legacy.execute(
+       created_at INTEGER NOT NULL, revoked_at INTEGER)`))
+    await run(legacy.execute(`CREATE UNIQUE INDEX gateway_client_name ON gateway_client (name)`))
+    await run(legacy.execute(
       `INSERT INTO gateway_client (id, name, capabilities, created_at, revoked_at)
        VALUES ('c1', 'legacy', '["provision_connections","administer_gateway"]', 0, NULL)`
-    )
-    await legacy.close()
+    ))
+    await run(legacy.close())
 
-    const store = await createGatewayStore(databasePath)
+    const store = await run(createGatewayStore(databasePath))
     stores.push(store)
-    const migrated = await store.findClientByName(defaultTenantId, "legacy")
+    const migrated = await run(store.findClientByName(defaultTenantId, "legacy"))
     expect(migrated?.tenantId).toBe(defaultTenantId)
     expect(migrated?.capabilities).toEqual([
       "provision_connections",
       "administer_gateway"
     ])
     // The old global name index is gone; per-tenant uniqueness replaced it.
-    await expect(store.createClient({
+    await run(expect(run(store.createClient({
       id: newClientId(),
       tenantId: defaultTenantId,
       name: "legacy",
       capabilities: ["provision_connections"]
-    })).rejects.toThrow()
-    const other = await store.createTenant({ name: "Other" })
-    await expect(store.createClient({
+    }))).rejects.toThrow())
+    const other = await run(store.createTenant({ name: "Other" }))
+    await run(expect(run(store.createClient({
       id: newClientId(),
       tenantId: other.id,
       name: "legacy",
       capabilities: ["provision_connections"]
-    })).resolves.toBeDefined()
+    }))).resolves.toBeDefined())
   })
 
   test("migrates password-required logins without inventing OAuth passwords", async () => {
-    const directory = await mkdtemp(path.join(tmpdir(), "wf-gateway-login-migrate-"))
+    const directory = await run(mkdtemp(path.join(tmpdir(), "wf-gateway-login-migrate-")))
     directories.push(directory)
     const databasePath = path.join(directory, "gateway.sqlite")
     const legacy = openLegacyDatabase({ url: `file:${databasePath}` })
-    await legacy.execute(`CREATE TABLE gateway_tenant (
-      id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL)`)
-    await legacy.execute(`CREATE TABLE gateway_subject (
-      id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, created_at INTEGER NOT NULL)`)
-    await legacy.execute(`CREATE TABLE gateway_login (
+    await run(legacy.execute(`CREATE TABLE gateway_tenant (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL)`))
+    await run(legacy.execute(`CREATE TABLE gateway_subject (
+      id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, created_at INTEGER NOT NULL)`))
+    await run(legacy.execute(`CREATE TABLE gateway_login (
       subject_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, email TEXT NOT NULL UNIQUE,
-      password_hash TEXT NOT NULL, created_at INTEGER NOT NULL)`)
-    await legacy.execute(
+      password_hash TEXT NOT NULL, created_at INTEGER NOT NULL)`))
+    await run(legacy.execute(
       "INSERT INTO gateway_tenant VALUES ('default', 'Default', 0)"
-    )
-    await legacy.execute(
+    ))
+    await run(legacy.execute(
       "INSERT INTO gateway_subject VALUES ('legacy-subject', 'default', 0)"
-    )
-    await legacy.execute(
+    ))
+    await run(legacy.execute(
       "INSERT INTO gateway_login VALUES ('legacy-subject', 'default', 'legacy@example.com', 'scrypt$c2FsdA==$aGFzaA==', 0)"
-    )
-    await legacy.close()
+    ))
+    await run(legacy.close())
 
-    const store = await createGatewayStore(databasePath)
+    const store = await run(createGatewayStore(databasePath))
     stores.push(store)
-    expect((await store.findLoginByEmail("legacy@example.com"))?.passwordHash).toBe(
+    expect((await run(store.findLoginByEmail("legacy@example.com")))?.passwordHash).toBe(
       PasswordHash.make("scrypt$c2FsdA==$aGFzaA==")
     )
-    const tenant = await store.createTenant({ name: "OAuth tenant" })
-    const subject = await store.createSubject({ id: newSubjectId(), tenantId: tenant.id })
-    await expect(store.createLogin({
+    const tenant = await run(store.createTenant({ name: "OAuth tenant" }))
+    const subject = await run(store.createSubject({ id: newSubjectId(), tenantId: tenant.id }))
+    await run(expect(run(store.createLogin({
       subjectId: subject.id,
       tenantId: tenant.id,
       email: "passwordless@example.com",
       passwordHash: null
-    })).resolves.toBeDefined()
+    }))).resolves.toBeDefined())
   })
 })

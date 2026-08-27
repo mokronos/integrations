@@ -7,6 +7,7 @@ import {
   type GatewayService
 } from "@mokronos/integrations"
 import type { AssetsFetcherLike, D1DatabaseLike, ScheduledEventLike } from "./cloudflare.ts"
+import { Effect } from "effect"
 import { D1Client } from "./d1-client.ts"
 import { d1HostStorage } from "./host-storage-d1.ts"
 import { D1OAuthSessionStore } from "./oauth-store-d1.ts"
@@ -18,8 +19,8 @@ export const masterKeyFromEnv = (envValue: string | undefined): Buffer => {
   if (envValue === undefined || envValue.length === 0) {
     throw new Error(
       "INTEGRATIONS_MASTER_KEY is not set. A hosted gateway seals payloads at rest; " +
-        "provision one with: wrangler secret put INTEGRATIONS_MASTER_KEY " +
-        "(base64url of 32 bytes, e.g. openssl rand -base64 32)"
+      "provision one with: wrangler secret put INTEGRATIONS_MASTER_KEY " +
+      "(base64url of 32 bytes, e.g. openssl rand -base64 32)"
     )
   }
   const key = Buffer.from(envValue, "base64url")
@@ -185,6 +186,6 @@ export default {
 
   async scheduled(_event: ScheduledEventLike, env: Env): Promise<void> {
     const service = await getService(env)
-    await runMaintenance(service.store)
+    await Effect.runPromise(runMaintenance(service.store))
   }
 }

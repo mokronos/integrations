@@ -1,6 +1,7 @@
+import { OAuthSessionError } from "@mokronos/integrations"
 import type { OAuthSession, OAuthSessionStore } from "@mokronos/integrations"
 import { Connection } from "@mokronos/contracts"
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 import type { D1DatabaseLike } from "./cloudflare.ts"
 
 /**
@@ -47,7 +48,7 @@ const StateOwnerRow = Schema.Struct({
   created_at: Schema.Number
 })
 
-const decodeSessionState = Schema.decodeUnknownSync(SessionState)
+const decodeSessionStateJson = Schema.decodeUnknownSync(Schema.fromJsonString(SessionState))
 const decodeStoredSessionRow = Schema.decodeUnknownSync(StoredSessionRow)
 const decodeStateOwnerRow = Schema.decodeUnknownSync(StateOwnerRow)
 
@@ -83,56 +84,56 @@ export class D1OAuthSessionStore implements OAuthSessionStore {
     return this.#ready
   }
 
-  readonly put: (session: OAuthSession) => Promise<void> = async (session) => {
-    await this.ensureReady()
-    const statusJson = JSON.stringify(session.state)
-    await this.#database
-      .prepare(
-        `INSERT INTO gateway_oauth_session (id, integration, connection_name, status_json, created_at)
+  #operation<A>(operation: string, run: () => Promise<A>): Effect.Effect<A, OAuthSessionError> {
+    return Effect.tryPromise({
+      try: run,
+      catch: (cause) => new OAuthSessionError({ operation, cause })
+    }).pipe(Effect.withSpan(`OAuthSessionStore.${operation}`))
+  }
+
+  readonly put = (session: OAuthSession): Effect.Effect<void, OAuthSessionError> =>
+    this.#operation("put", async () => {
+      await this.ensureReady()
+      const statusJson = JSON.stringify(session.state)
+      await this.#database
+        .prepare(
+          `INSERT INTO gateway_oauth_session (id, integration, connection_name, status_json, created_at)
            VALUES (?, ?, ?, ?, ?)
            ON CONFLICT (id) DO UPDATE SET
              integration = excluded.integration,
              connection_name = excluded.connection_name,
              status_json = excluded.status_json`
-      )
-      .bind(session.id, session.integration, session.connection, statusJson, Date.now())
-      .run()
-  }
+        )
+        .bind(session.id, session.integration, session.connection, statusJson, Date.now())
+        .run()
+    })
 
-  readonly get: (id: string) => Promise<OAuthSession | undefined> = async (id) => {
-    await this.ensureReady()
-    const result = await this.#database
-      .prepare(
-        `SELECT id, integration, connection_name, status_json, created_at
+  readonly get = (id: string): Effect.Effect<OAuthSession | undefined, OAuthSessionError> =>
+    this.#operation("get", async () => {
+      await this.ensureReady()
+      const result = await this.#database
+        .prepare(
+          `SELECT id, integration, connection_name, status_json, created_at
            FROM gateway_oauth_session WHERE id = ?`
-      )
-      .bind(id)
-      .first()
-    if (result === null) return undefined
-    const row = decodeStoredSessionRow(result)
-    // Expired rows are dead flows: drop them instead of answering.
-    if (Date.now() - row.created_at > sessionTtlMs) {
-      return undefined
-    }
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(row.status_json)
-    } catch (cause) {
-      throw new Error(`OAuth session ${id} holds malformed state`, { cause })
-    }
-    const state = decodeSessionState(parsed)
-    return {
-      id: row.id,
-      integration: row.integration,
-      connection: row.connection_name,
-      state
-    }
-  }
+        )
+        .bind(id)
+        .first()
+      if (result === null) return undefined
+      const row = decodeStoredSessionRow(result)
+      if (Date.now() - row.created_at > sessionTtlMs) return undefined
+      const state = decodeSessionStateJson(row.status_json)
+      return {
+        id: row.id,
+        integration: row.integration,
+        connection: row.connection_name,
+        state
+      }
+    })
 
-  readonly putState: (state: string, sessionId: string) => Promise<void> = async (
-    state,
-    sessionId
-  ) => {
+  readonly putState = (
+    state: string,
+    sessionId: string
+  ): Effect.Effect<void, OAuthSessionError> => this.#operation("putState", async () => {
     await this.ensureReady()
     await this.#database
       .prepare(
@@ -142,28 +143,27 @@ export class D1OAuthSessionStore implements OAuthSessionStore {
       )
       .bind(state, sessionId, Date.now())
       .run()
-  }
+  })
 
-  readonly findState: (state: string) => Promise<string | undefined> = async (state) => {
-    await this.ensureReady()
-    const row = await this.#database
-      .prepare("SELECT session_id, created_at FROM gateway_oauth_state WHERE state = ?")
-      .bind(state)
-      .first()
-    if (row === null) return undefined
-    const owner = decodeStateOwnerRow(row)
-    // Expired mappings are abandoned flows: their sessions expire alongside.
-    if (Date.now() - owner.created_at > sessionTtlMs) {
-      return undefined
-    }
-    return owner.session_id
-  }
+  readonly findState = (state: string): Effect.Effect<string | undefined, OAuthSessionError> =>
+    this.#operation("findState", async () => {
+      await this.ensureReady()
+      const row = await this.#database
+        .prepare("SELECT session_id, created_at FROM gateway_oauth_state WHERE state = ?")
+        .bind(state)
+        .first()
+      if (row === null) return undefined
+      const owner = decodeStateOwnerRow(row)
+      if (Date.now() - owner.created_at > sessionTtlMs) return undefined
+      return owner.session_id
+    })
 
-  readonly deleteState: (state: string) => Promise<void> = async (state) => {
-    await this.ensureReady()
-    await this.#database
-      .prepare("DELETE FROM gateway_oauth_state WHERE state = ?")
-      .bind(state)
-      .run()
-  }
+  readonly deleteState = (state: string): Effect.Effect<void, OAuthSessionError> =>
+    this.#operation("deleteState", async () => {
+      await this.ensureReady()
+      await this.#database
+        .prepare("DELETE FROM gateway_oauth_state WHERE state = ?")
+        .bind(state)
+        .run()
+    })
 }

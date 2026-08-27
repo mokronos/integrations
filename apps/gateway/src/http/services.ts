@@ -1,6 +1,7 @@
-import { Context, Layer } from "effect"
+import { Context, Effect, Layer } from "effect"
 import type { GoogleIdentityOAuth } from "../identity-oauth.ts"
 import type { OAuthSessions } from "../oauth-sessions.ts"
+import type { GatewayStoreError } from "../store.ts"
 import type { WebAssets } from "../web-assets.ts"
 
 /** What a handler may ask the context for.
@@ -20,7 +21,7 @@ export interface SignInPolicy {
   /** Whether POST /v1/auth/signup may create a new tenant. True while the
    *  gateway has no logins at all (so its first human can claim it) and after
    *  that only when an operator opts in. */
-  readonly signupOpen: () => Promise<boolean>
+  readonly signupOpen: () => Effect.Effect<boolean, GatewayStoreError>
   /** Set on session cookies when the gateway is served over TLS. */
   readonly secureCookies: boolean
   readonly sessionTtlHours?: number
@@ -35,7 +36,7 @@ export class SessionPolicy extends Context.Service<SessionPolicy, SignInPolicy>(
   /** The closed default: a gateway with no session configuration still answers
    *  the auth routes, and answers that signup is not available. */
   static readonly closed: Layer.Layer<SessionPolicy> = Layer.succeed(SessionPolicy, {
-    signupOpen: async () => false,
+    signupOpen: () => Effect.succeed(false),
     secureCookies: false
   })
 }

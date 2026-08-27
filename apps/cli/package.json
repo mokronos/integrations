@@ -21,9 +21,6 @@
     "i": "src/agent.ts",
     "ii": "src/main.ts"
   },
-  "exports": {
-    "./upgrade": "./src/upgrade.ts"
-  },
   "engines": {
     "bun": ">=1.2"
   },

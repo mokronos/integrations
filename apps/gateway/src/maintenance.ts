@@ -1,4 +1,5 @@
-import type { GatewayStore } from "./store.ts"
+import { Effect } from "effect"
+import type { GatewayStore, GatewayStoreError } from "./store.ts"
 
 export type MaintenanceResult = {
   readonly expiredApprovals: number
@@ -15,14 +16,16 @@ export type MaintenanceResult = {
  * be answered" — the answer is that the invocation does not happen. Arguments
  * that aged out are the deliberate half of the audit split: the record stays
  * forever, the payload does not. */
-export const runMaintenance = async (
+export const runMaintenance = Effect.fn("Maintenance.run")(function*(
   store: GatewayStore,
   at: Date = new Date()
-): Promise<MaintenanceResult> => ({
-  expiredApprovals: await store.expireApprovals(at),
-  expiredAuditArguments: await store.expireAuditArguments(at),
-  deletedSessions: await store.deleteExpiredSessions(at),
-  expiredIdentityFlows: await store.deleteExpiredIdentityFlows(at)
+): Effect.fn.Return<MaintenanceResult, GatewayStoreError> {
+  return {
+    expiredApprovals: yield* store.expireApprovals(at),
+    expiredAuditArguments: yield* store.expireAuditArguments(at),
+    deletedSessions: yield* store.deleteExpiredSessions(at),
+    expiredIdentityFlows: yield* store.deleteExpiredIdentityFlows(at)
+  }
 })
 
 export interface MaintenanceLoop {
@@ -36,14 +39,13 @@ export const startMaintenanceLoop = (
   store: GatewayStore,
   options: {
     readonly intervalMs?: number
-    // A caught value. TypeScript types every catch binding as unknown because
-    // JavaScript lets any value be thrown, so there is nothing narrower to accept.
-    // oxlint-disable-next-line anti-slop/no-unknown-parameters
-    readonly onError?: (error: unknown) => void
+    readonly onError?: (error: GatewayStoreError) => void
   } = {}
 ): MaintenanceLoop => {
   const interval = setInterval(() => {
-    void runMaintenance(store).catch((error) => options.onError?.(error))
+    Effect.runFork(runMaintenance(store).pipe(
+      Effect.catch((error) => Effect.sync(() => options.onError?.(error)))
+    ))
   }, options.intervalMs ?? 60_000)
   // Never hold the process open on our account.
   interval.unref?.()

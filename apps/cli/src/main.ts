@@ -10,13 +10,11 @@ import { openBrowser } from "./connection.ts"
 import { writeStdoutLine } from "./output.ts"
 import {
   installService,
-  serviceIsRegistered,
   serviceLabel,
   serviceProgram,
   startDetachedGateway,
   uninstallService
 } from "./service.ts"
-import { upgradeCli } from "./upgrade.ts"
 import packageMetadata from "../package.json" with { type: "json" }
 
 /** Starting the gateway is the one command that does not go through a gateway,
@@ -172,38 +170,6 @@ const uninstallCommand = Command.make(
     })
 ).pipe(Command.withDescription("Stop and deregister the gateway service"))
 
-/** Upgrading does not restart anything: the service keeps serving the version it
- * started with, which is deliberate — a gateway holding live OAuth sessions
- * should go down when the operator says so. It does say what to run. */
-const upgradeCommand = Command.make(
-  "upgrade",
-  {
-    check: Flag.boolean("check").pipe(
-      Flag.withDescription("Report the available version and change nothing")
-    ),
-    pull: Flag.boolean("pull").pipe(
-      Flag.withDescription("For a source install: fast-forward the checkout it runs from")
-    )
-  },
-  ({ check, pull }) =>
-    Effect.tryPromise({
-      try: async () => {
-        const result = await upgradeCli({
-          packageName: "@mokronos/integrations-cli",
-          currentVersion: packageMetadata.version,
-          command: "ii upgrade",
-          check,
-          pull
-        })
-        const restart = result.changed && await serviceIsRegistered()
-          ? ["The installed service is still running the old version. Restart it with: ii install"]
-          : []
-        await Effect.runPromise(writeStdoutLine([...result.lines, ...restart].join("\n")))
-      },
-      catch: serveError
-    })
-).pipe(Command.withDescription("Upgrade this CLI to the latest published version"))
-
 export const rootCommand = Command.make("ii").pipe(
   Command.withDescription(
     "Discover, authorize, delegate, and invoke integrations through the gateway"
@@ -215,8 +181,7 @@ export const rootCommand = Command.make("ii").pipe(
     serveCommand,
     dashboardCommand,
     installCommand,
-    uninstallCommand,
-    upgradeCommand
+    uninstallCommand
   ])
 )
 

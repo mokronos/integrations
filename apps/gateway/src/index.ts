@@ -64,7 +64,7 @@ export type { IssuedApiKey, IssuedLoginHandoff } from "./keys.ts"
 
 export {
   createGatewayStore,
-  GatewayStoreInitializationError,
+  GatewayStoreError,
   GatewayStoreService
 } from "./store.ts"
 export type {
@@ -115,7 +115,7 @@ export { createEncryption, resolveEncryption } from "./crypto.ts"
 export type { Encryption, EncryptionSource } from "./crypto.ts"
 export { createRateLimiter } from "./ratelimit.ts"
 export type { RateLimiter, RateLimiterOptions, RateLimitDecision } from "./ratelimit.ts"
-export { createOAuthSessions } from "./oauth-sessions.ts"
+export { createOAuthSessions, OAuthSessionError } from "./oauth-sessions.ts"
 export type {
   OAuthSession,
   OAuthSessionStore,

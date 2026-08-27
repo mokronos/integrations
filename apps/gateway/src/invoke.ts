@@ -1,5 +1,5 @@
 import { whenPresent } from "@mokronos/contracts"
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 import type { IntegrationsApi } from "@mokronos/integration-host"
 import { ToolAddress } from "@mokronos/contracts"
 import { authorizeInvocation } from "./authorize.ts"
@@ -14,9 +14,17 @@ import type {
   ToolName
 } from "./domain.ts"
 import { newApprovalId, newAuditId } from "./keys.ts"
-import type { GatewayStore, RecordAuditInput } from "./store.ts"
+import type { GatewayStore, GatewayStoreError, RecordAuditInput } from "./store.ts"
 
 type Json = typeof Schema.Json.Type
+
+class IntegrationCallError extends Schema.TaggedErrorClass<IntegrationCallError>()(
+  "IntegrationCallError",
+  {
+    message: Schema.String,
+    cause: Schema.Defect
+  }
+) {}
 
 /** The address is built from the grant, never accepted from the caller. That is
  * what makes invocation-by-address safe to expose: a caller naming an address
@@ -48,7 +56,7 @@ export interface InvokeDependencies {
     readonly approvalId: ApprovalId
     readonly expiresAt: Date
     readonly approvalUrl?: string
-  }) => Promise<void>
+  }) => Effect.Effect<void>
 }
 
 const auditFor = (
@@ -85,7 +93,7 @@ const auditFor = (
  * once. After delivery an identical call is a *new* request, and needs its own
  * decision; replaying an old approval forever would turn one "yes" into
  * standing permission, which is precisely what this design refuses to grant. */
-const freezeOrCollect = async (
+const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function*(
   dependencies: {
     readonly store: GatewayStore
     readonly retentionDays: number
@@ -95,7 +103,7 @@ const freezeOrCollect = async (
   },
   authorization: Extract<Authorization, { status: "authorized" }>,
   argumentsValue: Json
-): Promise<InvocationOutcome> => {
+): Effect.fn.Return<InvocationOutcome, GatewayStoreError> {
   const { store, retentionDays } = dependencies
   const pending = (approvalId: ApprovalId, expiresAt: Date): InvocationOutcome => {
     const approvalUrl = authorization.client.approvalDelivery.returnLink
@@ -108,7 +116,7 @@ const freezeOrCollect = async (
       ...whenPresent("approvalUrl", approvalUrl)
     }
   }
-  const existing = await store.findUncollectedApproval(authorization.grant.id, argumentsValue)
+  const existing = yield* store.findUncollectedApproval(authorization.grant.id, argumentsValue)
 
   if (existing !== undefined && existing.status === "pending") {
     // Deliberately not audited: the frozen call was recorded when it was
@@ -117,11 +125,14 @@ const freezeOrCollect = async (
     return pending(existing.id, existing.expiresAt)
   }
 
-  if (existing !== undefined && await store.collectApproval(authorization.client.tenantId, existing.id)) {
+  if (
+    existing !== undefined
+    && (yield* store.collectApproval(authorization.client.tenantId, existing.id))
+  ) {
     if (existing.status === "approved") {
       // The gateway already performed this call, at approval time. What is
       // being handed back is that call's result, not a second call.
-      await store.recordAudit(auditFor(
+      yield* store.recordAudit(auditFor(
         authorization,
         existing.error === null ? "succeeded" : "failed",
         `approval ${existing.id} collected`,
@@ -134,16 +145,15 @@ const freezeOrCollect = async (
     }
     const reason = existing.status === "expired"
       ? `approval ${existing.id} expired before a decision was recorded`
-      : `approval ${existing.id} was denied${
-        existing.decidedBy === null ? "" : ` by ${existing.decidedBy}`
+      : `approval ${existing.id} was denied${existing.decidedBy === null ? "" : ` by ${existing.decidedBy}`
       }`
-    await store.recordAudit(
+    yield* store.recordAudit(
       auditFor(authorization, "denied", reason, argumentsValue, retentionDays)
     )
     return { status: "denied", reason }
   }
 
-  const approval = await store.createApproval({
+  const approval = yield* store.createApproval({
     id: newApprovalId(),
     tenantId: authorization.client.tenantId,
     clientId: authorization.client.id,
@@ -153,21 +163,23 @@ const freezeOrCollect = async (
     arguments: argumentsValue,
     expiresAt: new Date(Date.now() + dependencies.expiryHours * 60 * 60 * 1000)
   })
-  await store.recordAudit(
+  yield* store.recordAudit(
     auditFor(authorization, "pending", `approval ${approval.id}`, argumentsValue, retentionDays)
   )
   const outcome = pending(approval.id, approval.expiresAt)
-  await dependencies.onApprovalCreated?.({
-    authorization,
-    approvalId: approval.id,
-    expiresAt: approval.expiresAt,
-    ...whenPresent(
-      "approvalUrl",
-      outcome.status === "pending" ? outcome.approvalUrl : undefined
-    )
-  })
+  if (dependencies.onApprovalCreated !== undefined) {
+    yield* dependencies.onApprovalCreated({
+      authorization,
+      approvalId: approval.id,
+      expiresAt: approval.expiresAt,
+      ...whenPresent(
+        "approvalUrl",
+        outcome.status === "pending" ? outcome.approvalUrl : undefined
+      )
+    })
+  }
   return outcome
-}
+})
 
 /** Performs one delegated invocation: authorize, then either execute with
  * injected credentials or freeze the call for a human.
@@ -175,7 +187,7 @@ const freezeOrCollect = async (
  * Every branch writes an audit record, including the denials that never reached
  * a connection — an audit trail with holes where the refusals were is not much
  * of an audit trail. */
-export const invokeThroughGateway = async (
+export const invokeThroughGateway = Effect.fn("Invocation.invokeThroughGateway")(function*(
   dependencies: InvokeDependencies,
   input: {
     readonly secret: string
@@ -183,12 +195,12 @@ export const invokeThroughGateway = async (
     readonly tool: ToolName
     readonly arguments: Json
   }
-): Promise<InvocationOutcome> => {
+): Effect.fn.Return<InvocationOutcome, GatewayStoreError> {
   const { store, integrations } = dependencies
   const retentionDays = dependencies.argumentRetentionDays ?? defaultArgumentRetentionDays
   const expiryHours = dependencies.approvalExpiryHours ?? defaultApprovalExpiryHours
 
-  const authorization = await authorizeInvocation(store, {
+  const authorization = yield* authorizeInvocation(store, {
     secret: input.secret,
     alias: input.alias,
     tool: input.tool
@@ -198,7 +210,7 @@ export const invokeThroughGateway = async (
     // No client id: an unknown key names nobody. The reason is still recorded,
     // under the default tenant — there is nothing else an unauthenticated call
     // could be filed under.
-    await store.recordAudit({
+    yield* store.recordAudit({
       tenantId: defaultTenantId,
       id: newAuditId(),
       clientId: null,
@@ -213,7 +225,7 @@ export const invokeThroughGateway = async (
   }
 
   if (authorization.grant.decision === "require_approval") {
-    return await freezeOrCollect(
+    return yield* freezeOrCollect(
       {
         store,
         retentionDays,
@@ -226,17 +238,17 @@ export const invokeThroughGateway = async (
     )
   }
 
-  return await executeAuthorized(
+  return yield* executeAuthorized(
     { store, integrations, retentionDays },
     authorization,
     input.arguments
   )
-}
+})
 
 /** Runs a call that has already cleared policy. Shared by the allow path and by
  * approval settlement, so an approved invocation is performed by the gateway on
  * exactly the same code path — the caller never gains the capability itself. */
-export const executeAuthorized = async (
+export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(function*(
   dependencies: {
     readonly store: GatewayStore
     readonly integrations: Pick<IntegrationsApi, "tools">
@@ -244,22 +256,27 @@ export const executeAuthorized = async (
   },
   authorization: Extract<Authorization, { status: "authorized" }>,
   argumentsValue: Json
-): Promise<InvocationOutcome> => {
+): Effect.fn.Return<InvocationOutcome, GatewayStoreError> {
   const address = grantToolAddress(authorization.connection, authorization.grant.tool)
-  try {
-    const result = await dependencies.integrations.tools.execute(address, argumentsValue)
-    await dependencies.store.recordAudit(
+  const invocation = yield* Effect.result(Effect.tryPromise({
+    try: () => dependencies.integrations.tools.execute(address, argumentsValue),
+    catch: (cause) => new IntegrationCallError({
+      message: cause instanceof Error ? cause.message : "Integration call failed",
+      cause
+    })
+  }))
+  if (invocation._tag === "Success") {
+    yield* dependencies.store.recordAudit(
       auditFor(authorization, "succeeded", null, argumentsValue, dependencies.retentionDays)
     )
-    return { status: "succeeded", result }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Integration call failed"
-    await dependencies.store.recordAudit(
-      auditFor(authorization, "failed", message, argumentsValue, dependencies.retentionDays)
-    )
-    return { status: "failed", message }
+    return { status: "succeeded", result: invocation.success }
   }
-}
+  const message = invocation.failure.message
+  yield* dependencies.store.recordAudit(
+    auditFor(authorization, "failed", message, argumentsValue, dependencies.retentionDays)
+  )
+  return { status: "failed", message }
+})
 
 export type GrantedTool = {
   readonly alias: Alias
@@ -277,15 +294,15 @@ export type GrantedTool = {
  * Schemas are opt-in because fetching them costs one catalog read per grant.
  * With them, this listing is exactly what codegen emits — so the generated
  * surface and the authorized surface cannot drift apart. */
-export const listGrantedTools = async (
+export const listGrantedTools = Effect.fn("Invocation.listGrantedTools")(function*(
   store: GatewayStore,
   clientId: Parameters<GatewayStore["listGrants"]>[0],
   options: {
     readonly schemas?: boolean
     readonly integrations?: Pick<IntegrationsApi, "tools">
   } = {}
-): Promise<ReadonlyArray<GrantedTool>> => {
-  const grants = await store.listGrants(clientId)
+): Effect.fn.Return<ReadonlyArray<GrantedTool>, GatewayStoreError> {
+  const grants = yield* store.listGrants(clientId)
   const base = grants.map((grant) => ({
     alias: grant.alias,
     tool: grant.tool,
@@ -295,22 +312,18 @@ export const listGrantedTools = async (
   if (options.schemas !== true || options.integrations === undefined) return base
 
   const integrations = options.integrations
-  return await Promise.all(base.map(async (entry, index) => {
+  return yield* Effect.forEach(base, (entry, index) => {
     const grant = grants[index]
-    if (grant === undefined) return entry
-    try {
-      const described = await integrations.tools.describe(
-        grantToolAddress(grant.connection, grant.tool)
-      )
-      return {
+    if (grant === undefined) return Effect.succeed(entry)
+    return Effect.tryPromise(() => integrations.tools.describe(
+      grantToolAddress(grant.connection, grant.tool)
+    )).pipe(
+      Effect.map((described) => ({
         ...entry,
         ...whenPresent("inputSchema", described.inputSchema),
         ...whenPresent("outputSchema", described.outputSchema)
-      }
-    } catch {
-      // A tool that has since disappeared should not fail the whole listing —
-      // that is what `ii drift` is for.
-      return entry
-    }
-  }))
-}
+      })),
+      Effect.orElseSucceed(() => entry)
+    )
+  }, { concurrency: "unbounded" })
+})

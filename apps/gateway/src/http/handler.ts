@@ -3,6 +3,7 @@ import { FileSystem, Path } from "effect"
 import {
   Etag,
   HttpEffect,
+  HttpMiddleware,
   HttpPlatform,
   HttpRouter,
   HttpServerRequest,
@@ -67,6 +68,7 @@ export interface GatewayHandlerOptions extends GatewaySettings {
   readonly maxBodyBytes?: number
   /** Serves the control plane's own files for unmatched non-`/v1` paths. */
   readonly webAssets?: WebAssets
+  readonly observabilityLayer?: Layer.Layer<never>
 }
 
 /** Refuses oversized declared bodies before any handler or authority work.
@@ -184,16 +186,18 @@ export const gatewayAppLayer = (options: GatewayHandlerOptions) => {
     Etag.layerWeak,
     Path.layer
   )
-  const base = failureLayer()
-    .pipe(Layer.provideMerge(bodyLimitLayer(options.maxBodyBytes ?? defaultMaxBodyBytes)))
-    .pipe(Layer.provideMerge(platform))
-  return base
-    .pipe(Layer.provideMerge(groups))
-    .pipe(Layer.provideMerge(Authority.layer({
+  const base = failureLayer().pipe(
+    Layer.provideMerge(bodyLimitLayer(options.maxBodyBytes ?? defaultMaxBodyBytes)),
+    Layer.provideMerge(platform)
+  )
+  return base.pipe(
+    Layer.provideMerge(groups),
+    Layer.provideMerge(Authority.layer({
       store: options.store,
       ...whenPresentMap("addressRateLimiter", options.addressRateLimiter, (l) => l),
       ...whenPresentMap("rateLimiter", options.rateLimiter, (l) => l)
-    })))
+    }))
+  )
 }
 
 
@@ -212,7 +216,11 @@ export const createGatewayHandler = (options: GatewayHandlerOptions): GatewayHan
   const app = HttpApiBuilder.layer(GatewayApi).pipe(
     Layer.provideMerge(gatewayAppLayer(options))
   )
-  const web = HttpEffect.toWebHandlerLayerWith(app, {
+  const web = HttpEffect.toWebHandlerLayerWith(
+    app.pipe(Layer.provide(Layer.merge(
+      options.observabilityLayer ?? Layer.empty,
+      HttpMiddleware.layerTracerDisabledForUrls(["/v1/health", "/v1/metadata"])
+    ))), {
     toHandler: (context) =>
       Effect.succeed(
         Context.getUnsafe(HttpRouter.HttpRouter)(context).asHttpEffect()
