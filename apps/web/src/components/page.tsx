@@ -52,14 +52,14 @@ export function ReloadButton({
  * The gateway's errors are written for a person — "This key may not change the
  * catalog", "Approval ap_7 expired" — so they are shown verbatim rather than
  * replaced with a generic apology. */
-export function QueryError({ error }: { readonly error: unknown }) {
+export function QueryError({ error }: { readonly error: Error | null | undefined }) {
   if (error === null || error === undefined) return null
   return (
     <Alert variant="destructive">
       <AlertTriangle />
       <AlertTitle>The gateway refused that</AlertTitle>
       <AlertDescription>
-        {error instanceof Error ? error.message : String(error)}
+        {error.message}
       </AlertDescription>
     </Alert>
   )

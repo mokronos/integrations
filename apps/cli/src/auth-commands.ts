@@ -52,20 +52,18 @@ export const loginCommand = Command.make(
     )
   },
   ({ email, password: provided, noOpen, timeout }) =>
-    Effect.gen(function* () {
+    Effect.gen(function*() {
       const explicitEmail = Option.getOrUndefined(email)
+      const context = yield* Effect.context()
       const session = explicitEmail === undefined
         ? yield* authTask(() => loginOperatorInBrowser({
           noOpen,
           timeoutSeconds: timeout,
-          onAuthorization: async (url) => await new Promise<void>((resolve, reject) => {
-            process.stdout.write(
-              `${noOpen ? "Open" : "If the browser does not open, visit"}: ${url}\n`,
-              (error) => error === null || error === undefined ? resolve() : reject(error)
-            )
-          })
+          onAuthorization: (url) => Effect.runPromiseWith(context)(writeStdoutLine(
+            `${noOpen ? "Open" : "If the browser does not open, visit"}: ${url}`
+          ))
         }))
-        : yield* Effect.gen(function* () {
+        : yield* Effect.gen(function*() {
           const secret = yield* password(provided)
           return yield* authTask(() => loginOperator({ email: explicitEmail, password: secret }))
         })
@@ -89,7 +87,7 @@ export const signupCommand = Command.make(
     )
   },
   ({ email, password: provided, tenant }) =>
-    Effect.gen(function* () {
+    Effect.gen(function*() {
       const secret = yield* password(provided, "Choose a password")
       const session = yield* authTask(() => signupOperator({
         email,
@@ -126,7 +124,7 @@ const changeEmailCommand = Command.make(
     password: passwordFlag()
   },
   ({ email, password: provided }) =>
-    Effect.gen(function* () {
+    Effect.gen(function*() {
       const secret = yield* password(provided, "Current password")
       const result = yield* controlPlaneTask((client) =>
         client.request("POST", "/v1/auth/email", { email, password: secret })
@@ -151,7 +149,7 @@ const changePasswordCommand = Command.make(
     )
   },
   ({ current, next, initial }) =>
-    Effect.gen(function* () {
+    Effect.gen(function*() {
       const currentPassword = initial
         ? undefined
         : yield* password(current, "Current password")
@@ -178,7 +176,7 @@ const deleteAccountCommand = Command.make(
     if (!yes) {
       return Effect.fail(cliError("Account deletion requires --yes"))
     }
-    return Effect.gen(function* () {
+    return Effect.gen(function*() {
       const secret = yield* password(provided, "Current password")
       const result = yield* controlPlaneTask((client) =>
         client.request("POST", "/v1/auth/account/delete", { password: secret })

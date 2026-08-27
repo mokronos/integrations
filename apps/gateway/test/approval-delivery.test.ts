@@ -1,3 +1,4 @@
+import { run } from "./effect.ts"
 import { describe, expect, test } from "bun:test"
 import { Schema } from "effect"
 import { deliverApprovalNotification, ApprovalNotification } from "../src/approval-delivery.ts"
@@ -18,7 +19,7 @@ describe("approval delivery", () => {
     const server = Bun.serve({
       port: 0,
       fetch: async (request) => {
-        capture.notification = decodeNotification(await request.text())
+        capture.notification = decodeNotification(await run(request.text()))
         const idempotencyKey = request.headers.get("idempotency-key")
         if (idempotencyKey !== null) capture.idempotencyKey = idempotencyKey
         return new Response(null, { status: 204 })
@@ -26,7 +27,7 @@ describe("approval delivery", () => {
     })
     try {
       const approvalId = ApprovalId.make("ap_delivery")
-      await deliverApprovalNotification({
+      await run(deliverApprovalNotification({
         client: {
           id: ClientId.make("client-delivery"),
           tenantId: TenantId.make("tenant-delivery"),
@@ -44,7 +45,7 @@ describe("approval delivery", () => {
         tool: "sendEmail",
         expiresAt: new Date("2030-01-01T00:00:00.000Z"),
         approvalUrl: "https://gateway.example/approvals?approval=ap_delivery"
-      })
+      }))
 
       expect(capture.notification).toEqual({
         version: 1,

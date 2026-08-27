@@ -1,10 +1,8 @@
 export {
-  createRequestTracer,
   telemetryAuthorizationEnvVar,
   telemetryAuthorizationFromEnv,
   telemetryEndpointEnvVar,
   telemetryEndpointFromEnv,
-  telemetryLayer,
-  traceSpanFromHeaders
+  telemetryLayer
 } from "./telemetry.ts"
-export type { HeaderReader, RequestTracer, RequestTracerOptions, TelemetryOptions } from "./telemetry.ts"
+export type { TelemetryOptions } from "./telemetry.ts"

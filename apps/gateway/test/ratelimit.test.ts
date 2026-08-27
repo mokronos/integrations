@@ -1,8 +1,9 @@
+import { run, runAll } from "./effect.ts"
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { whenPresent } from "@mokronos/contracts"
 import type { IntegrationsApi } from "@mokronos/integration-host"
 import {
@@ -11,7 +12,7 @@ import {
   createRateLimiter,
   defaultTenantId,
   generateApiKey,
-    newClientId
+  newClientId
 } from "../src/index.ts"
 import type { GatewayStore } from "../src/index.ts"
 
@@ -21,10 +22,10 @@ const directories: Array<string> = []
 const stores: Array<GatewayStore> = []
 
 afterEach(async () => {
-  await Promise.all(stores.splice(0).map((store) => store.close()))
-  await Promise.all(
+  await runAll(stores.splice(0).map((store) => store.close()))
+  await run(Promise.all(
     directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
-  )
+  ))
 })
 
 describe("the fixed-window limiter", () => {
@@ -116,28 +117,28 @@ describe("gateway traffic shaping", () => {
   }
 
   const setup = async (options: SetupOptions = {}) => {
-    const directory = await mkdtemp(path.join(tmpdir(), "wf-gateway-limits-"))
+    const directory = await run(mkdtemp(path.join(tmpdir(), "wf-gateway-limits-")))
     directories.push(directory)
-    const store = await createGatewayStore(path.join(directory, "gateway.sqlite"))
+    const store = await run(createGatewayStore(path.join(directory, "gateway.sqlite")))
     stores.push(store)
-    const client = await store.createClient({
+    const client = await run(store.createClient({
       id: newClientId(),
       tenantId: defaultTenantId,
       name: "local",
       capabilities: ["provision_connections", "administer_gateway"]
-    })
+    }))
     const key = generateApiKey()
-    await store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
+    await run(store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash }))
 
     const { handle } = createGatewayHandler({
       store,
       integrations: stubIntegrations(),
       retentionDays: 30,
       oauth: {
-        start: async () => { throw new Error("not used") },
-        get: async () => undefined,
-        completeByState: async () => undefined,
-        stop: () => undefined
+        start: () => Effect.die(new Error("not used")),
+        get: () => Effect.sync((): undefined => undefined),
+        completeByState: () => Effect.sync((): undefined => undefined),
+        stop: () => Effect.void
       },
       addressRateLimiter: createRateLimiter({
         limit: options.addressLimit ?? 3,
@@ -154,51 +155,51 @@ describe("gateway traffic shaping", () => {
   }
 
   test("an address that exhausts its pre-auth bucket gets 429 with Retry-After", async () => {
-    const { handle } = await setup({ addressLimit: 2 })
+    const { handle } = await run(setup({ addressLimit: 2 }))
     const attempt = () => handle(new Request("http://gateway.test/v1/tools"))
 
     // The first two spend the bucket; each reaches authentication and is
     // refused there for having no key.
-    expect((await attempt()).status).toBe(401)
-    expect((await attempt()).status).toBe(401)
+    expect((await run(attempt())).status).toBe(401)
+    expect((await run(attempt())).status).toBe(401)
     // The next one never gets that far.
-    const refused = await attempt()
+    const refused = await run(attempt())
     expect(refused.status).toBe(429)
     expect(refused.headers.get("retry-after")).toBe("60")
-    const body = Schema.decodeUnknownSync(JsonBody)(await refused.json())
+    const body = Schema.decodeUnknownSync(JsonBody)(await run(refused.json()))
     expect(body["code"]).toBe("rate-limited")
   })
 
   test("health stays reachable under load — it is what the monitor polls", async () => {
-    const { handle } = await setup({ addressLimit: 1 })
-    expect((await handle(new Request("http://gateway.test/v1/health"))).status).toBe(200)
-    await handle(new Request("http://gateway.test/v1/tools"))
-    const refused = await handle(new Request("http://gateway.test/v1/tools"))
+    const { handle } = await run(setup({ addressLimit: 1 }))
+    expect((await run(handle(new Request("http://gateway.test/v1/health")))).status).toBe(200)
+    await run(handle(new Request("http://gateway.test/v1/tools")))
+    const refused = await run(handle(new Request("http://gateway.test/v1/tools")))
     expect(refused.status).toBe(429)
-    expect((await handle(new Request("http://gateway.test/v1/health"))).status).toBe(200)
+    expect((await run(handle(new Request("http://gateway.test/v1/health")))).status).toBe(200)
   })
 
   test("one exhausted principal does not starve another", async () => {
-    const { handle, client, key } = await setup({
+    const { handle, client, key } = await run(setup({
       principalLimit: 2,
       // Wide open: this test is about principal fairness, not the address.
       addressLimit: 10_000
-    })
+    }))
 
     const otherStore = stores[stores.length - 1]
     if (otherStore === undefined) throw new Error("missing store fixture")
-    const neighbour = await otherStore.createClient({
+    const neighbour = await run(otherStore.createClient({
       id: newClientId(),
       tenantId: defaultTenantId,
       name: "neighbour",
       capabilities: ["provision_connections"]
-    })
+    }))
     const neighbourKey = generateApiKey()
-    await otherStore.addApiKey({
+    await run(otherStore.addApiKey({
       id: neighbourKey.id,
       clientId: neighbour.id,
       hash: neighbourKey.hash
-    })
+    }))
     void client
 
     const as = (secret: string) =>
@@ -206,16 +207,16 @@ describe("gateway traffic shaping", () => {
         headers: { authorization: `Bearer ${secret}` }
       }))
 
-    expect((await as(key.secret)).status).toBe(200)
-    expect((await as(key.secret)).status).toBe(200)
-    expect((await as(key.secret)).status).toBe(429)
+    expect((await run(as(key.secret))).status).toBe(200)
+    expect((await run(as(key.secret))).status).toBe(200)
+    expect((await run(as(key.secret))).status).toBe(429)
     // The neighbour's budget is untouched.
-    expect((await as(neighbourKey.secret)).status).toBe(200)
+    expect((await run(as(neighbourKey.secret))).status).toBe(200)
   })
 
   test("an oversized body is refused with 413 before any handler runs", async () => {
-    const { handle, key } = await setup({ maxBodyBytes: 16 })
-    const response = await handle(new Request("http://gateway.test/v1/clients", {
+    const { handle, key } = await run(setup({ maxBodyBytes: 16 }))
+    const response = await run(handle(new Request("http://gateway.test/v1/clients", {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -223,9 +224,9 @@ describe("gateway traffic shaping", () => {
         "content-length": String(Buffer.byteLength(JSON.stringify({ name: "x".repeat(64) })))
       },
       body: JSON.stringify({ name: "x".repeat(64) })
-    }))
+    })))
     expect(response.status).toBe(413)
-    const body = Schema.decodeUnknownSync(JsonBody)(await response.json())
+    const body = Schema.decodeUnknownSync(JsonBody)(await run(response.json()))
     expect(String(body["error"])).toContain("exceeds")
   })
 })

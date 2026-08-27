@@ -27,7 +27,7 @@ export interface D1BoundStatement {
 }
 
 export interface D1Statement {
-  bind(...values: unknown[]): D1BoundStatement
+  bind(...values: ReadonlyArray<D1Cell>): D1BoundStatement
   /** Executes without binding — how parameterless statements (DDL) run. */
   run(): Promise<D1QueryResult>
 }

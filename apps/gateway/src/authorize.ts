@@ -7,7 +7,9 @@ import type {
   ToolName
 } from "./domain.ts"
 import { hashApiKey } from "./keys.ts"
+import { Effect } from "effect"
 import type { GatewayStore } from "./store.ts"
+import type { GatewayStoreError } from "./store.ts"
 
 /** Whether a presented key belongs to a live client. Says nothing about what
  *  that client may do. */
@@ -20,39 +22,39 @@ export type ClientAuthentication =
 /** Checks in the order they get more expensive: key exists, key live, client
  *  live. The key and its client resolve in one read — the tenant comes *from*
  *  that read — and touching last-used happens only once it is accepted. */
-export const authenticateClient = async (
+export const authenticateClient = Effect.fn("Authorization.authenticateClient")(function*(
   store: GatewayStore,
   secret: string
-): Promise<ClientAuthentication> => {
-  const resolved = await store.findApiKeyByHash(hashApiKey(secret))
+): Effect.fn.Return<ClientAuthentication, GatewayStoreError> {
+  const resolved = yield* store.findApiKeyByHash(hashApiKey(secret))
   if (resolved === undefined) return { status: "unknown-key" }
   if (resolved.key.revokedAt !== null) return { status: "key-revoked" }
 
   const client = resolved.client
   if (client.revokedAt !== null) return { status: "client-revoked" }
 
-  await store.touchApiKey(resolved.key.id)
+  yield* store.touchApiKey(resolved.key.id)
   return { status: "authenticated", client }
-}
+})
 
 /** Resolves a presented key to what it may invoke.
  *
  * This is the single place invocation authority is decided. Everything
  * downstream — the HTTP surface, the workflow invoker, the CLI — goes through
  * it, so a call that skips it is a bug rather than a shortcut. */
-export const authorizeInvocation = async (
+export const authorizeInvocation = Effect.fn("Authorization.authorizeInvocation")(function*(
   store: GatewayStore,
   input: {
     readonly secret: string
     readonly alias: Alias
     readonly tool: ToolName
   }
-): Promise<Authorization> => {
-  const authentication = await authenticateClient(store, input.secret)
+): Effect.fn.Return<Authorization, GatewayStoreError> {
+  const authentication = yield* authenticateClient(store, input.secret)
   if (authentication.status !== "authenticated") return { status: authentication.status }
 
   const client = authentication.client
-  const grant = await store.findGrant(client.id, input.alias, input.tool)
+  const grant = yield* store.findGrant(client.id, input.alias, input.tool)
   // One status for "no such alias" and "tool not granted" alike: telling them
   // apart would let a caller enumerate what else this tenant has connected.
   if (grant === undefined) return { status: "not-granted", alias: input.alias, tool: input.tool }
@@ -64,7 +66,7 @@ export const authorizeInvocation = async (
     connection: grant.connection,
     subject: connectionSubject(grant.connection) ?? null
   }
-}
+})
 
 export type CapabilityAuthorization =
   | { readonly status: "authorized"; readonly client: Client }
@@ -76,15 +78,17 @@ export type CapabilityAuthorization =
 /** Whether a client holds one named non-invocation capability. Kept separate
  * from grants: provisioning a connection and deciding what tools may use it
  * are deliberately different powers. */
-export const authorizeClientCapability = async (
-  store: GatewayStore,
-  secret: string,
-  capability: ClientCapability
-): Promise<CapabilityAuthorization> => {
-  const authentication = await authenticateClient(store, secret)
-  if (authentication.status !== "authenticated") return { status: authentication.status }
-  if (!clientHasCapability(authentication.client, capability)) {
-    return { status: "not-permitted" }
+export const authorizeClientCapability = Effect.fn("Authorization.authorizeClientCapability")(
+  function*(
+    store: GatewayStore,
+    secret: string,
+    capability: ClientCapability
+  ): Effect.fn.Return<CapabilityAuthorization, GatewayStoreError> {
+    const authentication = yield* authenticateClient(store, secret)
+    if (authentication.status !== "authenticated") return { status: authentication.status }
+    if (!clientHasCapability(authentication.client, capability)) {
+      return { status: "not-permitted" }
+    }
+    return { status: "authorized", client: authentication.client }
   }
-  return { status: "authorized", client: authentication.client }
-}
+)

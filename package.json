@@ -13,7 +13,7 @@
   "scripts": {
     "build:observability": "bun run --cwd packages/observability build",
     "build:client": "bun run --cwd apps/ts build",
-    "build:gateway": "bun run build:observability && bun run build:contracts && bun run build:host && bun run build:client && bun run --cwd apps/gateway build",
+    "build:gateway": "bun run build:contracts && bun run build:observability && bun run build:host && bun run build:client && bun run --cwd apps/gateway build",
     "build": "bun run build:gateway",
     "dev:control-plane": "bun run --cwd apps/web dev",
     "build:control-plane": "bun run --cwd apps/web build",

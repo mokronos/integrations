@@ -20,12 +20,11 @@ import { generateApiKey, newClientId } from "./keys.ts"
 import { integrationsHome } from "./paths.ts"
 import type { HostStorage } from "@mokronos/integration-host"
 import { HostHandleService, IntegrationsApiService } from "@mokronos/integration-host"
-import type { GatewayStoreInitializationError, GatewayStoreOptions } from "./store.ts"
+import type { GatewayStoreError, GatewayStoreOptions } from "./store.ts"
 import type { GatewayStore } from "./store.ts"
 import { GatewayStoreService } from "./store.ts"
 import { createWebAssets } from "./web-assets.ts"
-import { createRequestTracer } from "@mokronos/observability"
-import type { RequestTracer } from "@mokronos/observability"
+import { telemetryLayer } from "@mokronos/observability"
 import type { GoogleIdentityOAuth } from "./identity-oauth.ts"
 
 /** The client the local machine uses. Created with both client capabilities so
@@ -75,7 +74,7 @@ export interface GatewayServiceOptions {
   // file-backed defaults. Everything unset keeps the historical behaviour.
   /** Replaces the file SQLite store layer entirely. When given, `home` is
    *  neither created nor read for storage. */
-  readonly storeLayer?: Layer.Layer<GatewayStoreService, GatewayStoreInitializationError>
+  readonly storeLayer?: Layer.Layer<GatewayStoreService, GatewayStoreError>
   /** Storage overrides forwarded to the integration host (credential store
    *  and database). See {@link HostStorage}. */
   readonly hostStorage?: HostStorage
@@ -104,18 +103,17 @@ interface GatewayCore {
   readonly gateway: Gateway
   readonly oauth: ReturnType<typeof createOAuthSessions>
   readonly maintenance: MaintenanceLoop | undefined
-  readonly requestTracer: RequestTracer | undefined
   readonly handlerOptions: Parameters<typeof createGatewayHandler>[0]
   readonly disposeCore: () => Promise<void>
 }
 
 /** Signup is open exactly while the gateway has no humans at all — its first
  *  login claims the instance — or when an operator opts in explicitly. */
-const signupOpen = async (
+const signupOpen = (
   store: GatewayStore,
   explicitlyAllowed = process.env["INTEGRATIONS_ALLOW_SIGNUP"] === "1"
-): Promise<boolean> =>
-  explicitlyAllowed || await store.countLogins() === 0
+): Effect.Effect<boolean, GatewayStoreError> =>
+  explicitlyAllowed ? Effect.succeed(true) : store.countLogins().pipe(Effect.map((count) => count === 0))
 
 const nonBlank = (value: string | undefined): string | undefined => {
   const trimmed = value?.trim()
@@ -142,7 +140,7 @@ const buildCore = async (
   })
   const dependencies = ManagedRuntime.make(Layer.merge(
     options.storeLayer ??
-      GatewayStoreService.layer(`${home}/gateway.sqlite`, encryption, options.storeOptions),
+    GatewayStoreService.layer(`${home}/gateway.sqlite`, encryption, options.storeOptions),
     IntegrationsApiService.layerWithHost(home, options.hostStorage)
   ))
   let resources: Awaited<ReturnType<typeof bootResources>>
@@ -160,7 +158,7 @@ const buildCore = async (
    *  values; everything above it takes layers, and the HTTP handlers ask the
    *  context for what they need rather than being handed a bag of these. */
   async function bootResources() {
-    return await dependencies.runPromise(Effect.gen(function* () {
+    return await dependencies.runPromise(Effect.gen(function*() {
       const store = yield* GatewayStoreService
       const host = yield* HostHandleService
       const integrations = yield* IntegrationsApiService
@@ -179,7 +177,7 @@ const buildCore = async (
   // route is GET /v1/oauth/callback either way.
   const resolvePublicUrl = (): string | undefined =>
     options.publicUrl ?? process.env["INTEGRATIONS_PUBLIC_URL"] ??
-      options.localCallbackOrigin
+    options.localCallbackOrigin
   const googleClientId = nonBlank(
     options.googleIdentity?.clientId ?? process.env["INTEGRATIONS_GOOGLE_CLIENT_ID"]
   )
@@ -229,19 +227,9 @@ const buildCore = async (
     windowMs: 60_000
   })
 
-  // Undefined unless an endpoint is configured (option or INTEGRATIONS_OTLP_ENDPOINT);
-  // the handler then skips wrapping entirely.
-  const requestTracer = await createRequestTracer({
-    serviceName: "integrations-gateway",
-    spanName: "gateway.request",
-    ...whenPresent("endpoint", options.telemetryEndpoint),
-    ...whenPresent("headers", options.telemetryHeaders)
-  })
-
   const disposeCore = async () => {
     maintenance?.stop()
-    oauth.stop()
-    await requestTracer?.dispose()
+    await Effect.runPromise(oauth.stop())
     await dependencies.dispose()
   }
 
@@ -253,7 +241,6 @@ const buildCore = async (
     gateway,
     oauth,
     maintenance,
-    requestTracer,
     disposeCore,
     handlerOptions: {
       store: resources.store,
@@ -269,6 +256,11 @@ const buildCore = async (
       dashboardUrl: resolvePublicUrl,
       rateLimiter,
       addressRateLimiter,
+      observabilityLayer: telemetryLayer({
+        serviceName: "integrations-gateway",
+        ...whenPresent("endpoint", options.telemetryEndpoint),
+        ...whenPresent("headers", options.telemetryHeaders)
+      }),
       ...whenPresent("maxBodyBytes", options.maxBodyBytes),
       sessions: {
         signupOpen: () => signupOpen(resources.store, options.allowSignup),
@@ -299,15 +291,7 @@ export const createGatewayService = async (
     home: core.home,
     store: core.store,
     gateway: core.gateway,
-    handle: (request, context) => {
-      const run = () => dispatch(request, context)
-      // Health checks are liveness noise; tracing them only fills the backend.
-      if (core.requestTracer === undefined ||
-        ["/v1/health", "/v1/metadata"].includes(new URL(request.url).pathname)) {
-        return run()
-      }
-      return core.requestTracer.run(request, run)
-    },
+    handle: dispatch,
     close: async () => {
       if (closed) return
       closed = true
@@ -383,15 +367,7 @@ export const serveGateway = async (options: ServeOptions = {}): Promise<RunningG
       home: core.home,
       store: core.store,
       gateway: core.gateway,
-      handle: (request, context) => {
-        const run = () => handle.handle(request, context)
-        // Health checks are liveness noise; tracing them only fills the backend.
-        if (core.requestTracer === undefined ||
-          ["/v1/health", "/v1/metadata"].includes(new URL(request.url).pathname)) {
-          return run()
-        }
-        return core.requestTracer.run(request, run)
-      },
+      handle: (request, context) => handle.handle(request, context),
       close: async () => {
         if (stopped) return
         stopped = true
@@ -428,7 +404,7 @@ export const serveGateway = async (options: ServeOptions = {}): Promise<RunningG
     })
 
     const boundPort = Number(server.port)
-    localSecret = await ensureLocalCredential(core.store, core.home, boundPort)
+    localSecret = await Effect.runPromise(ensureLocalCredential(core.store, core.home, boundPort))
 
     return {
       port: boundPort,
@@ -447,25 +423,25 @@ export const serveGateway = async (options: ServeOptions = {}): Promise<RunningG
  *  gateway is listening. Idempotent apart from key issue: a fresh key is minted
  *  whenever the recorded one is missing, so losing the config file is
  *  recoverable without losing the client's grants. */
-export const ensureLocalCredential = async (
+export const ensureLocalCredential = Effect.fn("Gateway.ensureLocalCredential")(function*(
   store: GatewayStore,
   home: string,
   port: number
-): Promise<string> => {
-  const existing = await store.findClientByName(defaultTenantId, localClientName)
-  const client = existing ?? await store.createClient({
+): Effect.fn.Return<string, GatewayStoreError> {
+  const existing = yield* store.findClientByName(defaultTenantId, localClientName)
+  const client = existing ?? (yield* store.createClient({
     id: newClientId(),
     tenantId: defaultTenantId,
     name: localClientName,
     capabilities: ["provision_connections", "administer_gateway"]
-  })
+  }))
   const key = generateApiKey()
-  await store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
-  await writeGatewayConfig(home, {
+  yield* store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
+  yield* Effect.promise(() => writeGatewayConfig(home, {
     port,
     url: `http://127.0.0.1:${port}`,
     apiKey: key.secret,
     pid: process.pid
-  })
+  }))
   return key.secret
-}
+})

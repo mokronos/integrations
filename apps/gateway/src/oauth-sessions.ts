@@ -2,6 +2,7 @@ import { whenPresent } from "@mokronos/contracts"
 import { randomUUID } from "node:crypto"
 import type { IntegrationsApi } from "@mokronos/integration-host"
 import type { AuthMethod, Connection } from "@mokronos/contracts"
+import { Effect, Schema } from "effect"
 import {
   authorizeInBrowser,
   startHostedAuthorization
@@ -19,6 +20,14 @@ export type OAuthSession = {
   readonly state: OAuthSessionState
 }
 
+export class OAuthSessionError extends Schema.TaggedErrorClass<OAuthSessionError>()(
+  "OAuthSessionError",
+  {
+    operation: Schema.String,
+    cause: Schema.Defect
+  }
+) {}
+
 /** Where sessions live. The default keeps them in process memory — a browser
  *  redirect cannot survive a daemon restart anyway, so persisting them locally
  *  would just create rows that can never complete.
@@ -29,14 +38,14 @@ export type OAuthSession = {
  *  storage lets the callback find its flow. */
 export interface OAuthSessionStore {
   /** Inserts or overwrites the full session record. */
-  put(session: OAuthSession): Promise<void>
-  get(id: string): Promise<OAuthSession | undefined>
+  put(session: OAuthSession): Effect.Effect<void, OAuthSessionError>
+  get(id: string): Effect.Effect<OAuthSession | undefined, OAuthSessionError>
   /** Records which session a provider-echoed `state` belongs to. */
-  putState(state: string, sessionId: string): Promise<void>
+  putState(state: string, sessionId: string): Effect.Effect<void, OAuthSessionError>
   /** The session id a callback `state` belongs to, or undefined. */
-  findState(state: string): Promise<string | undefined>
+  findState(state: string): Effect.Effect<string | undefined, OAuthSessionError>
   /** Consumes a state, so a replayed callback finds nothing here. */
-  deleteState(state: string): Promise<void>
+  deleteState(state: string): Effect.Effect<void, OAuthSessionError>
 }
 
 export interface OAuthSessions {
@@ -47,16 +56,16 @@ export interface OAuthSessions {
     readonly clientId?: string
     readonly clientSecret?: string
     readonly timeoutMs?: number
-  }): Promise<OAuthSession>
-  get(id: string): Promise<OAuthSession | undefined>
+  }): Effect.Effect<OAuthSession, OAuthSessionError>
+  get(id: string): Effect.Effect<OAuthSession | undefined, OAuthSessionError>
   /** Finishes a hosted flow by the `state` the provider echoed back. Unknown
    *  or already-finished states answer `undefined`, which is what makes a
    *  replayed callback harmless rather than a second connection. */
   completeByState(
     state: string,
     input: { readonly code: string; readonly callbackDomain?: string | null }
-  ): Promise<OAuthSession | undefined>
-  stop(): void
+  ): Effect.Effect<OAuthSession | undefined, OAuthSessionError>
+  stop(): Effect.Effect<void>
 }
 
 export interface OAuthSessionsOptions {
@@ -78,17 +87,17 @@ const inMemoryStore = (): OAuthSessionStore & { clear(): void } => {
   // arrives without any session context finds its flow.
   const flowsByState = new Map<string, string>()
   return {
-    put: async (session) => {
+    put: (session) => Effect.sync(() => {
       sessions.set(session.id, session)
-    },
-    get: async (id) => sessions.get(id),
-    putState: async (state, sessionId) => {
+    }),
+    get: (id) => Effect.sync(() => sessions.get(id)),
+    putState: (state, sessionId) => Effect.sync(() => {
       flowsByState.set(state, sessionId)
-    },
-    findState: async (state) => flowsByState.get(state),
-    deleteState: async (state) => {
+    }),
+    findState: (state) => Effect.sync(() => flowsByState.get(state)),
+    deleteState: (state) => Effect.sync(() => {
       flowsByState.delete(state)
-    },
+    }),
     clear: () => {
       sessions.clear()
       flowsByState.clear()
@@ -111,22 +120,36 @@ export const createOAuthSessions = (
   const store: OAuthSessionStore = options.store ?? memory
   let stopped = false
 
-  const finish = async (id: string, state: OAuthSessionState): Promise<void> => {
-    const existing = await store.get(id)
+  const finish = Effect.fn("OAuthSession.finish")(function*(
+    id: string,
+    state: OAuthSessionState
+  ): Effect.fn.Return<void, OAuthSessionError> {
+    const existing = yield* store.get(id)
     if (existing === undefined) return
-    await store.put({ ...existing, state })
-  }
+    yield* store.put({ ...existing, state })
+  })
+
+  const external = <A>(operation: string, call: () => Promise<A>) =>
+    Effect.tryPromise({
+      try: call,
+      catch: (cause) => new OAuthSessionError({ operation, cause })
+    })
 
   return {
-    start: async (input) => {
-      if (stopped) throw new Error("The gateway is shutting down")
+    start: Effect.fn("OAuthSession.start")(function*(input) {
+      if (stopped) {
+        return yield* new OAuthSessionError({
+          operation: "start",
+          cause: new Error("The gateway is shutting down")
+        })
+      }
       const id = randomUUID()
       const publicUrl = options.publicUrlOf?.() ?? options.publicUrl
 
       // Hosted mode: register against the public URL and hand back a URL for
       // the human's browser. Completion arrives at the callback route.
       if (publicUrl !== undefined) {
-        const flow = await startHostedAuthorization({
+        const flow = yield* external("startHostedAuthorization", () => startHostedAuthorization({
           integration: input.integration,
           connection: input.connection,
           authMethod: input.authMethod,
@@ -134,7 +157,7 @@ export const createOAuthSessions = (
           ...whenPresent("clientId", input.clientId),
           ...whenPresent("clientSecret", input.clientSecret),
           ...whenPresent("timeoutMs", input.timeoutMs)
-        }, integrations.auth)
+        }, integrations.auth))
         if (flow.status === "connected") {
           const connected: OAuthSession = {
             id,
@@ -142,17 +165,17 @@ export const createOAuthSessions = (
             connection: input.connection,
             state: { status: "connected", connection: flow.connection }
           }
-          await store.put(connected)
+          yield* store.put(connected)
           return connected
         }
-        await store.putState(flow.state, id)
+        yield* store.putState(flow.state, id)
         const pending: OAuthSession = {
           id,
           integration: input.integration,
           connection: input.connection,
           state: { status: "pending", authorizationUrl: flow.authorizationUrl }
         }
-        await store.put(pending)
+        yield* store.put(pending)
         return pending
       }
 
@@ -160,6 +183,8 @@ export const createOAuthSessions = (
       // through it. Resolves once the provider's authorization URL is known,
       // which is well before the human finishes authorizing.
       const announced = Promise.withResolvers<string>()
+      const context = yield* Effect.context<never>()
+      const run = Effect.runPromiseWith(context)
       const flowPromise = authorizeInBrowser({
         integration: input.integration,
         connection: input.connection,
@@ -170,61 +195,65 @@ export const createOAuthSessions = (
         onAuthorizationUrl: (url) => announced.resolve(url)
       }, integrations.auth)
 
-      flowPromise.then(
-        async (connection) => {
-          await finish(id, { status: "connected", connection })
+      void flowPromise.then(
+        (connection) => {
+          void run(finish(id, { status: "connected", connection }))
           // A provider that short-circuits to an existing connection never
           // announces a URL, so unblock the caller either way.
           announced.resolve("")
         },
-        async (error) => {
+        (error) => {
           const message = error instanceof Error ? error.message : "OAuth authorization failed"
-          await finish(id, { status: "failed", message })
+          void run(finish(id, { status: "failed", message }))
           announced.resolve("")
         }
       )
 
-      const authorizationUrl = await announced.promise
-      const session = await store.get(id) ?? {
+      const authorizationUrl = yield* external("announceAuthorizationUrl", () => announced.promise)
+      const session = (yield* store.get(id)) ?? {
         id,
         integration: input.integration,
         connection: input.connection,
         state: { status: "pending", authorizationUrl }
       }
-      await store.put(session)
+      yield* store.put(session)
       return session
-    },
+    }),
 
     get: (id) => store.get(id),
 
-    completeByState: async (state, input) => {
+    completeByState: Effect.fn("OAuthSession.completeByState")(function*(state, input) {
       if (stopped) return undefined
-      const id = await store.findState(state)
+      const id = yield* store.findState(state)
       if (id === undefined) return undefined
       // Consumed either way: a state completes once, so a replayed callback
       // finds nothing here.
-      await store.deleteState(state)
-      const session = await store.get(id)
+      yield* store.deleteState(state)
+      const session = yield* store.get(id)
       if (session === undefined || session.state.status !== "pending") return undefined
-      try {
-        const connection = await integrations.auth.complete({
+      const result = yield* Effect.result(external("completeAuthorization", () =>
+        integrations.auth.complete({
           state,
           code: input.code,
           ...whenPresent("callbackDomain", input.callbackDomain)
-        })
-        await finish(id, { status: "connected", connection })
-      } catch (error) {
-        await finish(id, {
+        })))
+      if (result._tag === "Success") {
+        yield* finish(id, { status: "connected", connection: result.success })
+      } else {
+        const error = result.failure
+        yield* finish(id, {
           status: "failed",
-          message: error instanceof Error ? error.message : "OAuth callback could not be verified"
+          message: error.cause instanceof Error
+            ? error.cause.message
+            : "OAuth callback could not be verified"
         })
       }
-      return store.get(id)
-    },
+      return yield* store.get(id)
+    }),
 
-    stop: () => {
+    stop: () => Effect.sync(() => {
       stopped = true
       if (options.store === undefined) memory.clear()
-    }
+    })
   }
 }

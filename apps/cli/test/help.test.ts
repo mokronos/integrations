@@ -77,8 +77,7 @@ describe("i and ii CLI help", () => {
       "serve",
       "dashboard",
       "install",
-      "uninstall",
-      "upgrade"
+      "uninstall"
     ]) {
       expect(`${command} hidden: ${hasCommand(result.stdout, command)}`)
         .toBe(`${command} hidden: false`)
@@ -101,8 +100,7 @@ describe("i and ii CLI help", () => {
     for (const command of [
       "clients", "client", "key", "keys", "grant", "revoke", "approvals",
       "approve", "deny", "audit", "drift", "maintenance", "login", "signup",
-      "logout", "whoami", "account", "serve", "dashboard", "install", "uninstall",
-      "upgrade"
+      "logout", "whoami", "account", "serve", "dashboard", "install", "uninstall"
     ]) {
       expect(`${command} listed: ${operator.stdout.includes(`  ${command}`)}`)
         .toBe(`${command} listed: true`)
@@ -139,10 +137,6 @@ describe("i and ii CLI help", () => {
     expect(install.exitCode).toBe(0)
     expect(install.stdout).toContain("--port")
 
-    const upgrade = runOperator(["upgrade", "--help"])
-    expect(upgrade.exitCode).toBe(0)
-    expect(upgrade.stdout).toContain("--check")
-    expect(upgrade.stdout).toContain("--pull")
   })
 
   test("offers browser authentication as both ii login and ii auth", () => {

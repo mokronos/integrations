@@ -1,7 +1,8 @@
 import type { IntegrationsApi } from "@mokronos/integration-host"
 import { ConnectionName, IntegrationSlug, TenantId, ToolName } from "./domain.ts"
 import type { DriftEntry, ToolSnapshot } from "./domain.ts"
-import type { GatewayStore } from "./store.ts"
+import { Effect, Schema } from "effect"
+import type { GatewayStore, GatewayStoreError } from "./store.ts"
 
 /** Pure discovery means tool names and shapes belong to vendors. A rename or a
  * reshaped schema is therefore a normal event, not a bug — but it is one that
@@ -80,41 +81,54 @@ export type DriftReport = {
   readonly tools: number
 }
 
+export class DriftRefreshError extends Schema.TaggedErrorClass<DriftRefreshError>()(
+  "DriftRefreshError",
+  {
+    integration: Schema.String,
+    cause: Schema.Defect
+  }
+) {}
+
 /** Re-reads an integration's tools, reports what moved since the last sync, and
  *  records the new shape as the baseline. Snapshots are per tenant: two tenants
  *  connecting to the same vendor track their drift independently. */
-export const refreshIntegrationSnapshot = async (
-  dependencies: {
-    readonly store: GatewayStore
-    readonly integrations: ToolCatalogReader
-  },
-  integration: string,
-  tenantId: TenantId
-): Promise<DriftReport> => {
-  const slug = IntegrationSlug.make(integration)
-  const checkedAt = new Date()
-  const tools = await dependencies.integrations.tools.list({ integration })
-  const current: ReadonlyArray<ToolSnapshot> = tools.map((tool) => ({
-    integration: slug,
-    connection: ConnectionName.make(tool.connection),
-    tool: ToolName.make(tool.name),
-    inputSchema: tool.inputSchema ?? null,
-    outputSchema: tool.outputSchema ?? null,
-    syncedAt: checkedAt
-  }))
-  const previous = await dependencies.store.listToolSnapshots(tenantId, slug)
-  const baseline = previous.length === 0
-  const entries = baseline ? [] : diffSnapshots(previous, current)
-  await dependencies.store.putToolSnapshots(tenantId, current)
-  // Removed tools keep their old snapshot row, so the next refresh does not
-  // report the same removal forever.
-  await dependencies.store.forgetToolSnapshots(
-    tenantId,
-    entries.filter((entry) => entry.kind === "removed").map((entry) => ({
+export const refreshIntegrationSnapshot = Effect.fn("Drift.refreshIntegrationSnapshot")(
+  function*(
+    dependencies: {
+      readonly store: GatewayStore
+      readonly integrations: ToolCatalogReader
+    },
+    integration: string,
+    tenantId: TenantId
+  ): Effect.fn.Return<DriftReport, DriftRefreshError | GatewayStoreError> {
+    const slug = IntegrationSlug.make(integration)
+    const checkedAt = new Date()
+    const tools = yield* Effect.tryPromise({
+      try: () => dependencies.integrations.tools.list({ integration }),
+      catch: (cause) => new DriftRefreshError({ integration, cause })
+    })
+    const current: ReadonlyArray<ToolSnapshot> = tools.map((tool) => ({
       integration: slug,
-      connection: entry.connection,
-      tool: entry.tool
+      connection: ConnectionName.make(tool.connection),
+      tool: ToolName.make(tool.name),
+      inputSchema: tool.inputSchema ?? null,
+      outputSchema: tool.outputSchema ?? null,
+      syncedAt: checkedAt
     }))
-  )
-  return { integration, entries, checkedAt, baseline, tools: current.length }
-}
+    const previous = yield* dependencies.store.listToolSnapshots(tenantId, slug)
+    const baseline = previous.length === 0
+    const entries = baseline ? [] : diffSnapshots(previous, current)
+    yield* dependencies.store.putToolSnapshots(tenantId, current)
+    // Removed tools keep their old snapshot row, so the next refresh does not
+    // report the same removal forever.
+    yield* dependencies.store.forgetToolSnapshots(
+      tenantId,
+      entries.filter((entry) => entry.kind === "removed").map((entry) => ({
+        integration: slug,
+        connection: entry.connection,
+        tool: entry.tool
+      }))
+    )
+    return { integration, entries, checkedAt, baseline, tools: current.length }
+  }
+)

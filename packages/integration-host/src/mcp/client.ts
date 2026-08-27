@@ -42,6 +42,7 @@ export const McpToolDefinition = Schema.Struct({
   annotations: Schema.optional(McpToolAnnotations)
 })
 export type McpToolDefinition = typeof McpToolDefinition.Type
+type McpSdkTool = Awaited<ReturnType<Client["listTools"]>>["tools"][number]
 
 const decodeTools = Schema.decodeUnknownEffect(Schema.Array(McpToolDefinition))
 const decodeJson = Schema.decodeUnknownEffect(Schema.Json)
@@ -229,7 +230,7 @@ export class McpHost extends Context.Service<
         withClient(endpoint, credential, (client) =>
           Effect.tryPromise({
             try: async () => {
-              const collected: Array<unknown> = []
+              const collected: Array<McpSdkTool> = []
               let cursor: string | undefined
               do {
                 const page = await client.listTools(
@@ -258,7 +259,7 @@ export class McpHost extends Context.Service<
           ))
       )
 
-      const probe = Effect.fn("McpHost.probe")(function* (endpoint: string) {
+      const probe = Effect.fn("McpHost.probe")(function*(endpoint: string) {
         const response = yield* probeTransport(endpoint)
         const name = fallbackName(endpoint)
         const slug = Option.getOrElse(slugify(name), () => "mcp")

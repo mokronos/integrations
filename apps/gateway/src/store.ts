@@ -46,176 +46,7 @@ import type {
   ToolSnapshot
 } from "./domain.ts"
 import { PasswordHash } from "./passwords.ts"
-
-// Everything the gateway owns lives here, above the host's own database.
-// Resolving a grant is what determines which subject a host instance must
-// be bound to, so these rows have to be readable before that instance exists.
-// See docs/adr/0001.
-//
-// Every row belongs to a tenant. The column was added after the fact, so the
-// DDL below is the *final* shape and `migrateTenancy` brings older databases up
-// to it: add the column, backfill it with the well-known default tenant, then
-// recreate the two indexes whose uniqueness is per-tenant rather than global.
-
-/** The two tables tenancy itself is built on. They exist before every other
- *  statement runs, because the migration backfills rows that reference them. */
-const tenancyTableDdl = [
-  `CREATE TABLE IF NOT EXISTS gateway_tenant (
-     id TEXT PRIMARY KEY,
-     name TEXT NOT NULL UNIQUE,
-     created_at INTEGER NOT NULL
-   )`,
-  `CREATE TABLE IF NOT EXISTS gateway_subject (
-     id TEXT PRIMARY KEY,
-     tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
-     created_at INTEGER NOT NULL
-   )`,
-  // Authentication details live beside the subject, never on it — the subject
-  // stays an opaque human. Deleting a login deletes its sessions with it.
-  `CREATE TABLE IF NOT EXISTS gateway_login (
-     subject_id TEXT PRIMARY KEY REFERENCES gateway_subject (id) ON DELETE CASCADE,
-     tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
-     email TEXT NOT NULL UNIQUE,
-     password_hash TEXT,
-     created_at INTEGER NOT NULL
-   )`,
-  `CREATE TABLE IF NOT EXISTS gateway_session (
-     token_hash TEXT PRIMARY KEY,
-     subject_id TEXT NOT NULL REFERENCES gateway_subject (id) ON DELETE CASCADE,
-     tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
-     created_at INTEGER NOT NULL,
-     expires_at INTEGER NOT NULL
-   )`
-] as const
-
-const ddl = [
-  ...tenancyTableDdl,
-  `CREATE TABLE IF NOT EXISTS gateway_client (
-     id TEXT PRIMARY KEY,
-     tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
-     name TEXT NOT NULL,
-     capabilities TEXT NOT NULL,
-     approval_delivery TEXT NOT NULL,
-     created_at INTEGER NOT NULL,
-     revoked_at INTEGER
-   )`,
-  `CREATE TABLE IF NOT EXISTS gateway_external_identity (
-     provider TEXT NOT NULL,
-     provider_subject TEXT NOT NULL,
-     subject_id TEXT NOT NULL REFERENCES gateway_subject (id) ON DELETE CASCADE,
-     tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
-     email TEXT NOT NULL,
-     created_at INTEGER NOT NULL,
-     PRIMARY KEY (provider, provider_subject)
-   )`,
-  `CREATE TABLE IF NOT EXISTS gateway_login_handoff (
-     request_hash TEXT PRIMARY KEY,
-     subject_id TEXT REFERENCES gateway_subject (id) ON DELETE CASCADE,
-     tenant_id TEXT REFERENCES gateway_tenant (id) ON DELETE CASCADE,
-     email TEXT,
-     created_at INTEGER NOT NULL,
-     expires_at INTEGER NOT NULL,
-     collected_at INTEGER
-   )`,
-  `CREATE TABLE IF NOT EXISTS gateway_identity_oauth_state (
-     state_hash TEXT PRIMARY KEY,
-     provider TEXT NOT NULL,
-     handoff_hash TEXT,
-     return_path TEXT,
-     expires_at INTEGER NOT NULL
-   )`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS gateway_client_name_tenant
-     ON gateway_client (tenant_id, name)`,
-  `CREATE TABLE IF NOT EXISTS gateway_api_key (
-     id TEXT PRIMARY KEY,
-     client_id TEXT NOT NULL REFERENCES gateway_client (id) ON DELETE CASCADE,
-     hash TEXT NOT NULL UNIQUE,
-     created_at INTEGER NOT NULL,
-     last_used_at INTEGER,
-     revoked_at INTEGER
-   )`,
-  `CREATE TABLE IF NOT EXISTS gateway_grant (
-     id TEXT PRIMARY KEY,
-     tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
-     client_id TEXT NOT NULL REFERENCES gateway_client (id) ON DELETE CASCADE,
-     alias TEXT NOT NULL,
-     tool TEXT NOT NULL,
-     owner TEXT NOT NULL,
-     subject TEXT,
-     integration TEXT NOT NULL,
-     connection_name TEXT NOT NULL,
-     decision TEXT NOT NULL,
-     created_at INTEGER NOT NULL,
-     revoked_at INTEGER
-   )`,
-  // One live grant per (client, alias, tool). Revoked rows stay as history, so
-  // the uniqueness is partial rather than a plain constraint. A client already
-  // implies its tenant, so no tenant column is needed in the key.
-  `CREATE UNIQUE INDEX IF NOT EXISTS gateway_grant_live
-     ON gateway_grant (client_id, alias, tool) WHERE revoked_at IS NULL`,
-  `CREATE TABLE IF NOT EXISTS gateway_pending_approval (
-     id TEXT PRIMARY KEY,
-     tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
-     client_id TEXT NOT NULL REFERENCES gateway_client (id) ON DELETE CASCADE,
-     grant_id TEXT NOT NULL,
-     alias TEXT NOT NULL,
-     tool TEXT NOT NULL,
-     arguments TEXT NOT NULL,
-     arguments_lookup TEXT,
-     status TEXT NOT NULL,
-     created_at INTEGER NOT NULL,
-     expires_at INTEGER NOT NULL,
-     decided_at INTEGER,
-     decided_by TEXT,
-     result TEXT,
-     error TEXT,
-     collected_at INTEGER
-   )`,
-  // Finding the frozen call a retry belongs to is a lookup on every frozen
-  // invocation, so it is indexed rather than scanned.
-  `CREATE INDEX IF NOT EXISTS gateway_pending_approval_retry
-     ON gateway_pending_approval (grant_id, arguments) WHERE collected_at IS NULL`,
-  `CREATE TABLE IF NOT EXISTS gateway_audit (
-     id TEXT PRIMARY KEY,
-     tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
-     client_id TEXT,
-     alias TEXT,
-     tool TEXT,
-     owner TEXT,
-     subject TEXT,
-     integration TEXT,
-     connection_name TEXT,
-     decision TEXT,
-     outcome TEXT NOT NULL,
-     message TEXT,
-     created_at INTEGER NOT NULL
-   )`,
-  // Split from the record above because their retention differs: the record is
-  // permanent, the arguments expire.
-  `CREATE TABLE IF NOT EXISTS gateway_audit_arguments (
-     audit_id TEXT PRIMARY KEY REFERENCES gateway_audit (id) ON DELETE CASCADE,
-     arguments TEXT NOT NULL,
-     expires_at INTEGER NOT NULL
-   )`,
-  `CREATE TABLE IF NOT EXISTS gateway_tool_snapshot (
-     tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
-     integration TEXT NOT NULL,
-     connection_name TEXT NOT NULL,
-     tool TEXT NOT NULL,
-     input_schema TEXT,
-     output_schema TEXT,
-     synced_at INTEGER NOT NULL,
-     PRIMARY KEY (tenant_id, integration, connection_name, tool)
-   )`
-] as const
-
-/** Tables that carry a `tenant_id`, for the migration's backfill sweep. */
-const tenantedTables = [
-  "gateway_client",
-  "gateway_grant",
-  "gateway_pending_approval",
-  "gateway_audit"
-] as const
+import { gatewayDdl as ddl, tenantedTables, tenancyTableDdl } from "./store-ddl.ts"
 
 // --- row decoding -----------------------------------------------------------
 // libsql rows carry numeric indices and a length alongside the named columns,
@@ -704,7 +535,7 @@ export interface GatewayOverviewCounts {
   readonly pendingApprovals: number
 }
 
-export interface GatewayStore {
+interface GatewayStoreDriver {
   readonly databasePath: string
 
   createTenant(input?: CreateTenantInput): Promise<Tenant>
@@ -864,13 +695,26 @@ export interface GatewayStore {
   close(): Promise<void>
 }
 
-export class GatewayStoreInitializationError extends Schema.TaggedErrorClass<GatewayStoreInitializationError>()(
-  "GatewayStoreInitializationError",
-  { databasePath: Schema.String, cause: Schema.Defect }
+export class GatewayStoreError extends Schema.TaggedErrorClass<GatewayStoreError>()(
+  "GatewayStoreError",
+  {
+    operation: Schema.String,
+    cause: Schema.Defect
+  }
 ) {}
 
-/** Scoped access to the gateway database. Promise-based store methods remain at
- * the libsql boundary; acquisition and release belong to the Layer lifecycle. */
+type EffectStoreMember<Member> = Member extends (
+  ...args: infer Args
+) => Promise<infer Success>
+  ? (...args: Args) => Effect.Effect<Success, GatewayStoreError>
+  : Member
+
+export type GatewayStore = {
+  readonly [Key in keyof GatewayStoreDriver]: EffectStoreMember<GatewayStoreDriver[Key]>
+}
+
+/** Scoped access to the gateway database. Only the private libsql driver is
+ * Promise-based; consumers compose typed store failures in Effect. */
 export class GatewayStoreService extends Context.Service<
   GatewayStoreService,
   GatewayStore
@@ -879,15 +723,12 @@ export class GatewayStoreService extends Context.Service<
     databasePath: string,
     encryption?: Encryption,
     options?: GatewayStoreOptions
-  ): Layer.Layer<GatewayStoreService, GatewayStoreInitializationError> =>
+  ): Layer.Layer<GatewayStoreService, GatewayStoreError> =>
     Layer.effect(
       GatewayStoreService,
       Effect.acquireRelease(
-        Effect.tryPromise({
-          try: () => createGatewayStore(databasePath, encryption, options),
-          catch: (cause) => new GatewayStoreInitializationError({ databasePath, cause })
-        }),
-        (store) => Effect.promise(() => store.close())
+        createGatewayStore(databasePath, encryption, options),
+        (store) => store.close().pipe(Effect.orDie)
       )
     )
 }
@@ -1088,11 +929,11 @@ const openFileDatabase = async (databasePath: string): Promise<LibsqlClient> => 
   return database
 }
 
-export const createGatewayStore = async (
+const createGatewayStoreDriver = async (
   databasePath: string,
   encryption?: Encryption,
   options: GatewayStoreOptions = {}
-): Promise<GatewayStore> => {
+): Promise<GatewayStoreDriver> => {
   const database: LibsqlClient =
     options.client ?? await openFileDatabase(databasePath)
   // `CREATE TABLE IF NOT EXISTS` does nothing for a database that already
@@ -1823,3 +1664,134 @@ export const createGatewayStore = async (
     }
   }
 }
+
+const storeOperation = <Success>(
+  operation: string,
+  run: () => Promise<Success>
+): Effect.Effect<Success, GatewayStoreError> =>
+  Effect.tryPromise({
+    try: run,
+    catch: (cause) => new GatewayStoreError({ operation, cause })
+  }).pipe(Effect.withSpan(`GatewayStore.${operation}`))
+
+const effectStore = (driver: GatewayStoreDriver): GatewayStore => ({
+  databasePath: driver.databasePath,
+  createTenant: (input) => storeOperation("createTenant", () => driver.createTenant(input)),
+  listTenants: () => storeOperation("listTenants", () => driver.listTenants()),
+  findTenantById: (id) => storeOperation("findTenantById", () => driver.findTenantById(id)),
+  findTenantByName: (name) => storeOperation("findTenantByName", () => driver.findTenantByName(name)),
+  createSubject: (input) => storeOperation("createSubject", () => driver.createSubject(input)),
+  listSubjects: (tenantId) => storeOperation("listSubjects", () => driver.listSubjects(tenantId)),
+  countSubjects: (tenantId) => storeOperation("countSubjects", () => driver.countSubjects(tenantId)),
+  findSubjectById: (id) => storeOperation("findSubjectById", () => driver.findSubjectById(id)),
+  createLogin: (input) => storeOperation("createLogin", () => driver.createLogin(input)),
+  findLoginByEmail: (email) => storeOperation("findLoginByEmail", () => driver.findLoginByEmail(email)),
+  findLoginBySubject: (subjectId) =>
+    storeOperation("findLoginBySubject", () => driver.findLoginBySubject(subjectId)),
+  countLogins: () => storeOperation("countLogins", () => driver.countLogins()),
+  changeLoginEmail: (subjectId, email) =>
+    storeOperation("changeLoginEmail", () => driver.changeLoginEmail(subjectId, email)),
+  changeLoginPassword: (subjectId, passwordHash) =>
+    storeOperation("changeLoginPassword", () => driver.changeLoginPassword(subjectId, passwordHash)),
+  deleteSubject: (subjectId) => storeOperation("deleteSubject", () => driver.deleteSubject(subjectId)),
+  deleteTenant: (id) => storeOperation("deleteTenant", () => driver.deleteTenant(id)),
+  revokeSubjectSessions: (subjectId, exceptTokenHash) =>
+    storeOperation(
+      "revokeSubjectSessions",
+      () => driver.revokeSubjectSessions(subjectId, exceptTokenHash)
+    ),
+  createSession: (input) => storeOperation("createSession", () => driver.createSession(input)),
+  findLiveSession: (tokenHash) =>
+    storeOperation("findLiveSession", () => driver.findLiveSession(tokenHash)),
+  revokeSession: (tokenHash) => storeOperation("revokeSession", () => driver.revokeSession(tokenHash)),
+  deleteExpiredSessions: (at) =>
+    storeOperation("deleteExpiredSessions", () => driver.deleteExpiredSessions(at)),
+  createExternalIdentity: (input) =>
+    storeOperation("createExternalIdentity", () => driver.createExternalIdentity(input)),
+  findExternalIdentity: (provider, providerSubject) =>
+    storeOperation(
+      "findExternalIdentity",
+      () => driver.findExternalIdentity(provider, providerSubject)
+    ),
+  listExternalIdentities: (subjectId) =>
+    storeOperation("listExternalIdentities", () => driver.listExternalIdentities(subjectId)),
+  createLoginHandoff: (input) =>
+    storeOperation("createLoginHandoff", () => driver.createLoginHandoff(input)),
+  getLoginHandoff: (requestHash) =>
+    storeOperation("getLoginHandoff", () => driver.getLoginHandoff(requestHash)),
+  completeLoginHandoff: (input) =>
+    storeOperation("completeLoginHandoff", () => driver.completeLoginHandoff(input)),
+  collectLoginHandoff: (requestHash) =>
+    storeOperation("collectLoginHandoff", () => driver.collectLoginHandoff(requestHash)),
+  createIdentityOAuthState: (input) =>
+    storeOperation("createIdentityOAuthState", () => driver.createIdentityOAuthState(input)),
+  consumeIdentityOAuthState: (stateHash) =>
+    storeOperation("consumeIdentityOAuthState", () => driver.consumeIdentityOAuthState(stateHash)),
+  deleteExpiredIdentityFlows: (at) =>
+    storeOperation("deleteExpiredIdentityFlows", () => driver.deleteExpiredIdentityFlows(at)),
+  createClient: (input) => storeOperation("createClient", () => driver.createClient(input)),
+  listClients: (tenantId) => storeOperation("listClients", () => driver.listClients(tenantId)),
+  overviewCounts: (tenantId) => storeOperation("overviewCounts", () => driver.overviewCounts(tenantId)),
+  findClientById: (tenantId, id) =>
+    storeOperation("findClientById", () => driver.findClientById(tenantId, id)),
+  findClientByName: (tenantId, name) =>
+    storeOperation("findClientByName", () => driver.findClientByName(tenantId, name)),
+  updateClientSettings: (input) =>
+    storeOperation("updateClientSettings", () => driver.updateClientSettings(input)),
+  revokeClient: (tenantId, id) =>
+    storeOperation("revokeClient", () => driver.revokeClient(tenantId, id)),
+  addApiKey: (input) => storeOperation("addApiKey", () => driver.addApiKey(input)),
+  listApiKeys: (clientId) => storeOperation("listApiKeys", () => driver.listApiKeys(clientId)),
+  findApiKeyByHash: (hash) =>
+    storeOperation("findApiKeyByHash", () => driver.findApiKeyByHash(hash)),
+  touchApiKey: (id) => storeOperation("touchApiKey", () => driver.touchApiKey(id)),
+  revokeApiKey: (id) => storeOperation("revokeApiKey", () => driver.revokeApiKey(id)),
+  createGrant: (input) => storeOperation("createGrant", () => driver.createGrant(input)),
+  listGrants: (clientId) => storeOperation("listGrants", () => driver.listGrants(clientId)),
+  findGrant: (clientId, alias, tool) =>
+    storeOperation("findGrant", () => driver.findGrant(clientId, alias, tool)),
+  revokeGrant: (tenantId, id) =>
+    storeOperation("revokeGrant", () => driver.revokeGrant(tenantId, id)),
+  createApproval: (input) => storeOperation("createApproval", () => driver.createApproval(input)),
+  getApproval: (tenantId, id) =>
+    storeOperation("getApproval", () => driver.getApproval(tenantId, id)),
+  listApprovals: (tenantId, status) =>
+    storeOperation("listApprovals", () => driver.listApprovals(tenantId, status)),
+  findUncollectedApproval: (grantId, argumentsValue) =>
+    storeOperation(
+      "findUncollectedApproval",
+      () => driver.findUncollectedApproval(grantId, argumentsValue)
+    ),
+  collectApproval: (tenantId, id) =>
+    storeOperation("collectApproval", () => driver.collectApproval(tenantId, id)),
+  settleApproval: (input) => storeOperation("settleApproval", () => driver.settleApproval(input)),
+  cancelApprovalsForClient: (clientId) =>
+    storeOperation("cancelApprovalsForClient", () => driver.cancelApprovalsForClient(clientId)),
+  recordAudit: (input) => storeOperation("recordAudit", () => driver.recordAudit(input)),
+  listAudit: (tenantId, options) =>
+    storeOperation("listAudit", () => driver.listAudit(tenantId, options)),
+  countAudit: (tenantId, options) =>
+    storeOperation("countAudit", () => driver.countAudit(tenantId, options)),
+  expireAuditArguments: (at) =>
+    storeOperation("expireAuditArguments", () => driver.expireAuditArguments(at)),
+  putToolSnapshots: (tenantId, snapshots) =>
+    storeOperation("putToolSnapshots", () => driver.putToolSnapshots(tenantId, snapshots)),
+  listToolSnapshots: (tenantId, integration) =>
+    storeOperation("listToolSnapshots", () => driver.listToolSnapshots(tenantId, integration)),
+  forgetToolSnapshots: (tenantId, keys) =>
+    storeOperation("forgetToolSnapshots", () => driver.forgetToolSnapshots(tenantId, keys)),
+  expireApprovals: (at) => storeOperation("expireApprovals", () => driver.expireApprovals(at)),
+  close: () => storeOperation("close", () => driver.close())
+})
+
+export const createGatewayStore = Effect.fn("GatewayStore.open")(function*(
+  databasePath: string,
+  encryption?: Encryption,
+  options: GatewayStoreOptions = {}
+) {
+  const driver = yield* storeOperation(
+    "open",
+    () => createGatewayStoreDriver(databasePath, encryption, options)
+  )
+  return effectStore(driver)
+})
