@@ -13,13 +13,13 @@
     "tail": "wrangler tail"
   },
   "dependencies": {
-    "@libsql/client": "0.17.3",
+    "@libsql/client": "catalog:",
     "@mokronos/integration-host": "workspace:*",
     "@mokronos/integrations": "workspace:*",
-    "effect": "4.0.0-beta.59"
+    "effect": "catalog:"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "5.20260822.1",
-    "wrangler": "4.125.0"
+    "@cloudflare/workers-types": "catalog:",
+    "wrangler": "catalog:"
   }
 }

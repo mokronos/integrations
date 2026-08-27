@@ -2,7 +2,7 @@
   "name": "@mokronos/integrations",
   "version": "0.2.0",
   "type": "module",
-  "description": "The integration gateway \u2014 connections, grants, policy, and credential-injecting execution.",
+  "description": "The integration gateway — connections, grants, policy, and credential-injecting execution.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -51,12 +51,12 @@
     "prepublishOnly": "bun run build && bun run build:web"
   },
   "dependencies": {
-    "@libsql/client": "0.17.3",
+    "@libsql/client": "catalog:",
     "@mokronos/contracts": "workspace:*",
     "@mokronos/integration-host": "workspace:*",
     "@mokronos/integrations-client": "workspace:*",
     "@mokronos/observability": "workspace:*",
-    "effect": "4.0.0-beta.59",
-    "@effect/platform-bun": "4.0.0-beta.59"
+    "effect": "catalog:",
+    "@effect/platform-bun": "catalog:"
   }
 }
