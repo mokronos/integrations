@@ -113,8 +113,12 @@ describe("hosted oauth flows", () => {
 
   test("completes by provider state exactly once", async () => {
     const fake = fakeAuth()
+    const completed: Array<string> = []
     const sessions = createOAuthSessions({ auth: fake.auth }, {
-      publicUrl: "https://gw.example.com"
+      publicUrl: "https://gw.example.com",
+      onConnected: async (session) => {
+        completed.push(session.id)
+      }
     })
     await run(sessions.start({
       integration: "google",
@@ -124,11 +128,14 @@ describe("hosted oauth flows", () => {
 
     const done = await run(sessions.completeByState("provider-state-1", { code: "abc" }))
     expect(done?.state.status).toBe("connected")
+    if (done === undefined) throw new Error("Expected OAuth completion")
     expect(fake.record.completedState).toBe("provider-state-1")
     expect(fake.record.completedCode).toBe("abc")
+    expect(completed).toEqual([done.id])
 
     // A replayed callback is consumed, not a second connection.
     expect(await run(sessions.completeByState("provider-state-1", { code: "abc" }))).toBeUndefined()
+    expect(completed).toEqual([done.id])
     expect(await run(sessions.completeByState("never-seen", { code: "abc" }))).toBeUndefined()
   })
 

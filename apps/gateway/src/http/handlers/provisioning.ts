@@ -13,6 +13,7 @@ import {
   ToolName
 } from "../../domain.ts"
 import { grantToolAddress } from "../../invoke.ts"
+import { grantConnectedTools } from "../../connected-grants.ts"
 import { oauthBrowserPage } from "../../oauth.ts"
 import type { GatewayStore } from "../../store.ts"
 import { GatewayStoreError, GatewayStoreService } from "../../store.ts"
@@ -246,6 +247,10 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
         ))
       .handle("connect", (request) =>
         Effect.gen(function*() {
+          const caller = yield* Identity
+          if (caller.kind !== "client" && caller.kind !== "local") {
+            return yield* new ApiBadRequest({ error: "A client key is required to create a connection" })
+          }
           const body = request.payload
           const integration = yield* Effect.promise(() =>
             integrationsApi.catalog.find(body.integration))
@@ -277,6 +282,13 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
                   ? { value: values["token"] }
                   : { values })
             }))
+          yield* grantConnectedTools({
+            store,
+            integrations: integrationsApi,
+            client: caller.client,
+            integration: integration.slug,
+            connection: connection.name
+          }).pipe(orDieStorage)
           return {
             connection,
             tools: yield* Effect.promise(() =>
@@ -288,6 +300,10 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
         }))
       .handle("startOAuth", (request) =>
         Effect.gen(function*() {
+          const caller = yield* Identity
+          if (caller.kind !== "client" && caller.kind !== "local") {
+            return yield* new ApiBadRequest({ error: "A client key is required to create a connection" })
+          }
           const body = request.payload
           const integration = yield* Effect.promise(() =>
             integrationsApi.catalog.find(body.integration))
@@ -308,6 +324,7 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
             integration: integration.slug,
             connection: body.connection ?? "default",
             authMethod: method,
+            grantClient: caller.client,
             ...whenPresentMap("clientId", body.clientId, (id) => id),
             ...whenPresentMap("clientSecret", body.clientSecret, (secret) => secret),
             ...whenPresentMap(

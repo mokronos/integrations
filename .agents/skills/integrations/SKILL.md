@@ -24,14 +24,17 @@ i tools mcp_linear_app --filter issue        # browse tool names
 i schema mcp_linear_app list_issues          # read one tool's input/output schema
                                              # and its canonical tools.… address
 
-i execute linear list_issues '{"limit":5}'   # 4b. call it as a delegated caller
+i execute mcp-linear-app list_issues '{"limit":5}' # 4. call it after connect
 ```
 
-`i execute --direct <tool-address> '<json>'` runs with your own authority — use
-it to prove a fresh connection works, not for real calls. An address has five
-parts, `tools.<integration>.<owner>.<connection>.<tool>` — for example
-`tools.mcp_linear_app.org.default.list_issues`. Never assemble one from memory:
-copy the `address` field out of `i schema <integration> <tool>`.
+OAuth requires a human browser step. Run `i connect` with a command timeout of
+at least 5 minutes; do not let the agent's shell timeout terminate it first.
+
+`i connect` grants every currently available tool from that connection to the
+connecting agent's key. Its execution alias is the integration slug with
+non-alphanumeric separators changed to dashes, so `mcp_linear_app` becomes
+`mcp-linear-app`. These grants allow calls without a second human approval.
+Use `i grants` to inspect the exact alias and tools.
 
 Every call answers in one shape: `{"status":"succeeded","result":…}`,
 `{"status":"pending","approvalId":…}`, `{"status":"denied","reason":…}`, or

@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto"
 import type { IntegrationsApi } from "@mokronos/integration-host"
 import type { AuthMethod, Connection } from "@mokronos/contracts"
 import { Effect, Schema } from "effect"
+import type { Client } from "./domain.ts"
 import {
   authorizeInBrowser,
   startHostedAuthorization
@@ -17,6 +18,7 @@ export type OAuthSession = {
   readonly id: string
   readonly integration: string
   readonly connection: string
+  readonly grantClient?: Client
   readonly state: OAuthSessionState
 }
 
@@ -56,6 +58,7 @@ export interface OAuthSessions {
     readonly clientId?: string
     readonly clientSecret?: string
     readonly timeoutMs?: number
+    readonly grantClient?: Client
   }): Effect.Effect<OAuthSession, OAuthSessionError>
   get(id: string): Effect.Effect<OAuthSession | undefined, OAuthSessionError>
   /** Finishes a hosted flow by the `state` the provider echoed back. Unknown
@@ -79,6 +82,7 @@ export interface OAuthSessionsOptions {
   /** Shared session storage for deployments that serve requests from more
    *  than one process. Absent means in-process memory, as always. */
   readonly store?: OAuthSessionStore
+  readonly onConnected?: (session: OAuthSession) => Promise<void>
 }
 
 const inMemoryStore = (): OAuthSessionStore & { clear(): void } => {
@@ -163,9 +167,13 @@ export const createOAuthSessions = (
             id,
             integration: input.integration,
             connection: input.connection,
+            ...whenPresent("grantClient", input.grantClient),
             state: { status: "connected", connection: flow.connection }
           }
           yield* store.put(connected)
+          if (options.onConnected !== undefined) {
+            yield* external("grantConnectedTools", () => options.onConnected!(connected))
+          }
           return connected
         }
         yield* store.putState(flow.state, id)
@@ -173,6 +181,7 @@ export const createOAuthSessions = (
           id,
           integration: input.integration,
           connection: input.connection,
+          ...whenPresent("grantClient", input.grantClient),
           state: { status: "pending", authorizationUrl: flow.authorizationUrl }
         }
         yield* store.put(pending)
@@ -197,7 +206,13 @@ export const createOAuthSessions = (
 
       void flowPromise.then(
         (connection) => {
-          void run(finish(id, { status: "connected", connection }))
+          void run(Effect.gen(function*() {
+            yield* finish(id, { status: "connected", connection })
+            const session = yield* store.get(id)
+            if (session !== undefined && options.onConnected !== undefined) {
+              yield* external("grantConnectedTools", () => options.onConnected!(session))
+            }
+          }))
           // A provider that short-circuits to an existing connection never
           // announces a URL, so unblock the caller either way.
           announced.resolve("")
@@ -214,6 +229,7 @@ export const createOAuthSessions = (
         id,
         integration: input.integration,
         connection: input.connection,
+        ...whenPresent("grantClient", input.grantClient),
         state: { status: "pending", authorizationUrl }
       }
       yield* store.put(session)
@@ -239,6 +255,10 @@ export const createOAuthSessions = (
         })))
       if (result._tag === "Success") {
         yield* finish(id, { status: "connected", connection: result.success })
+        const completed = yield* store.get(id)
+        if (completed !== undefined && options.onConnected !== undefined) {
+          yield* external("grantConnectedTools", () => options.onConnected!(completed))
+        }
       } else {
         const error = result.failure
         yield* finish(id, {

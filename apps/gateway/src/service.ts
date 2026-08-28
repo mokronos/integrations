@@ -14,6 +14,7 @@ import type { GatewayHandle, GatewayRequestContext } from "./http/handler.ts"
 import { startMaintenanceLoop } from "./maintenance.ts"
 import type { MaintenanceLoop } from "./maintenance.ts"
 import { createOAuthSessions } from "./oauth-sessions.ts"
+import { grantConnectedTools } from "./connected-grants.ts"
 import type { OAuthSessionStore } from "./oauth-sessions.ts"
 import { createRateLimiter } from "./ratelimit.ts"
 import { generateApiKey, newClientId } from "./keys.ts"
@@ -201,6 +202,16 @@ const buildCore = async (
       }
   const oauth = createOAuthSessions(gateway.integrations, {
     publicUrlOf: resolvePublicUrl,
+    onConnected: async (session) => {
+      if (session.grantClient === undefined || session.state.status !== "connected") return
+      await Effect.runPromise(grantConnectedTools({
+        store: resources.store,
+        integrations: gateway.integrations,
+        client: session.grantClient,
+        integration: session.integration,
+        connection: session.connection
+      }))
+    },
     ...whenPresent("store", options.oauthStore)
   })
   const maintenance: MaintenanceLoop | undefined =

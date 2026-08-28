@@ -402,10 +402,14 @@ describe("integrations CLI acceptance", () => {
       const address = listed.connections[0]?.address ?? ""
       expect(address).toStartWith(`tools.${slug}.org.`)
 
-      // Direct-address invocation is deliberately absent from the agent CLI.
-      const direct = await integrations(["execute", "--direct", `${address}.tickets.create`])
-      expect(direct.exitCode).not.toBe(0)
-      expect(vendor.invocations()).toBe(0)
+      const executed = await integrations([
+        "execute",
+        slug.replace(/[^a-z0-9]+/g, "-"),
+        "tickets.create",
+        JSON.stringify({ body: { title: "Connected" } })
+      ])
+      expect(executed.exitCode, executed.stderr).toBe(0)
+      expect(vendor.invocations()).toBe(1)
     },
     30_000
   )
