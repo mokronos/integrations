@@ -1,10 +1,8 @@
 import { whenPresent } from "@mokronos/contracts"
-import type { GatewayClient } from "@mokronos/integrations-client"
-import { generateTypeScriptModule, GrantedTool } from "@mokronos/integrations-client"
-import { Effect, Option, Predicate, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import type { IntegrationsCliError } from "../connection.ts"
-import { cliError, connectToGateway, describeError } from "../connection.ts"
+import { cliError, describeError } from "../connection.ts"
 import type { Page, Window } from "../output.ts"
 import {
   jsonOutput,
@@ -51,14 +49,6 @@ const window = (
   offset: Option.getOrUndefined(offset)
 })
 
-const gatewayTask = <A>(
-  task: (client: GatewayClient) => Promise<A>
-): Effect.Effect<A, IntegrationsCliError> =>
-  Effect.tryPromise({
-    try: async () => await task(await connectToGateway()),
-    catch: (error) => cliError(describeError(error))
-  })
-
 const controlPlaneTask = <A>(
   task: (client: ControlPlaneClient) => Promise<A>
 ): Effect.Effect<A, IntegrationsCliError> =>
@@ -69,8 +59,6 @@ const controlPlaneTask = <A>(
 
 const JsonObject = Schema.Record(Schema.String, Schema.Json)
 const JsonArray = Schema.Array(Schema.Json)
-const GrantedToolsResponse = Schema.Struct({ tools: Schema.Array(GrantedTool) })
-
 /** The gateway's responses arrive as unparsed JSON. These decode a response into
  *  a usable value and fall back to empty rather than failing the command: a
  *  listing that renders nothing is easier for a reader to act on than a crash,
@@ -245,42 +233,6 @@ export const grantCommand = Command.make(
   }
 ).pipe(Command.withDescription("Delegate one tool through one connection to one client"))
 
-export const operatorGrantsCommand = Command.make(
-  "grants",
-  {
-    clientId: Argument.string("client-id").pipe(Argument.optional),
-    limit: limitFlag(),
-    offset: offsetFlag(),
-    verbose: verboseFlag()
-  },
-  ({ clientId, limit, offset, verbose }) =>
-    Effect.gen(function*() {
-      const grants = Option.isNone(clientId)
-        ? yield* gatewayTask(async (client) =>
-          (await client.tools()).map((tool) => record({
-            alias: tool.alias,
-            tool: tool.tool,
-            integration: tool.integration,
-            decision: tool.decision
-          }))
-        )
-        : yield* controlPlaneTask(async (client) =>
-          array(record(await client.request(
-            "GET",
-            `/v1/grants?clientId=${encodeURIComponent(clientId.value)}`
-          ))["grants"])
-        )
-      const all = sortedBy(grants, (grant) => `${text(grant["alias"])} ${text(grant["tool"])}`)
-      yield* listing(page(all, window(limit, offset)), {
-        key: "grants",
-        narrowing: "window with --limit/--offset",
-        verbose,
-        empty: "No grants.",
-        row: (grant) => grant
-      })
-    })
-).pipe(Command.withDescription("List this key's grants, or another client's by id"))
-
 export const revokeCommand = Command.make(
   "revoke",
   {
@@ -309,116 +261,4 @@ export const revokeCommand = Command.make(
     "Revoke a grant, a client, or one API key. Revoked rows stay as history"
   )
 )
-
-// --- approvals and audit ----------------------------------------------------
-
-
-export const ownGrantsCommand = Command.make(
-  "grants",
-  {
-    limit: limitFlag(),
-    offset: offsetFlag(),
-    verbose: verboseFlag()
-  },
-  ({ limit, offset, verbose }) =>
-    gatewayTask(async (client) => await client.tools()).pipe(
-      Effect.flatMap((tools) => {
-        const all = tools.map((tool) => ({
-          alias: tool.alias,
-          tool: tool.tool,
-          integration: tool.integration,
-          decision: tool.decision
-        }))
-        return listing(page(all, window(limit, offset)), {
-          key: "grants",
-          narrowing: "window with --limit/--offset",
-          verbose,
-          empty: "No granted tools.",
-          row: (grant) => grant
-        })
-      })
-    )
-).pipe(Command.withDescription("List the tools granted to this client key"))
-
-
-export const operatorCodegenCommand = Command.make(
-  "codegen",
-  {
-    client: Flag.string("client").pipe(
-      Flag.optional,
-      Flag.withDescription("Generate the surface of another client's grants, by id")
-    ),
-    out: Flag.string("out").pipe(
-      Flag.optional,
-      Flag.withDescription("Write to a file instead of stdout")
-    )
-  },
-  ({ client: clientId, out }) => {
-    // Generated from grants, so the generated surface is the authorized
-    // surface. Adding a tool here means adding a grant — for whichever client
-    // is being provisioned, which is usually not the one running this.
-    const forClient = Option.getOrUndefined(clientId)
-    const toolsTask = forClient === undefined
-      ? gatewayTask(async (client) => ({
-        tools: await client.tools({ schemas: true }),
-        url: client.url
-      }))
-      : controlPlaneTask(async (client) => ({
-        tools: Schema.decodeUnknownSync(GrantedToolsResponse)(await client.request(
-          "GET",
-          `/v1/clients/${encodeURIComponent(forClient)}/tools?schemas=true`
-        )).tools,
-        url: client.url
-      }))
-    return Effect.gen(function*() {
-      const resolved = yield* toolsTask
-      if (resolved.tools.length === 0) {
-        return yield* cliError(
-          forClient === undefined
-            ? "This key holds no grants, so there is nothing to generate."
-            : `Client ${forClient} holds no grants, so there is nothing to generate.`
-        )
-      }
-      const module_ = generateTypeScriptModule(resolved.tools, resolved.url)
-      const destination = Option.getOrUndefined(out)
-      if (destination === undefined) {
-        return yield* writeStdoutLine(module_)
-      }
-      yield* Effect.promise(async () => {
-        await Bun.write(destination, module_)
-      })
-      return yield* writeStdoutLine(
-        `Wrote ${destination} (${resolved.tools.length} tool(s))`
-      )
-    })
-  }
-).pipe(Command.withDescription("Generate typed bindings for the tools a key can reach"))
-
-export const clientCodegenCommand = Command.make(
-  "codegen",
-  {
-    out: Flag.string("out").pipe(
-      Flag.optional,
-      Flag.withDescription("Write to a file instead of stdout")
-    )
-  },
-  ({ out }) =>
-    gatewayTask(async (client) => {
-      const tools = await client.tools({ schemas: true })
-      if (tools.length === 0) {
-        throw cliError("This key holds no grants, so there is nothing to generate.")
-      }
-      const module_ = generateTypeScriptModule(tools, client.url)
-      const destination = Option.getOrUndefined(out)
-      if (destination !== undefined) {
-        await Bun.write(destination, module_)
-        return { written: destination, tools: tools.length }
-      }
-      return { module: module_, tools: tools.length }
-    }).pipe(Effect.flatMap((result) =>
-      Predicate.isString(result.module)
-        ? writeStdoutLine(result.module)
-        : writeStdoutLine(`Wrote ${text(result.written)} (${result.tools} tool(s))`)
-    ))
-).pipe(Command.withDescription("Generate typed bindings for this key's granted tools"))
 

@@ -193,7 +193,7 @@ export const integrationsCommand = (runGateway: GatewayTask) => Command.make(
         })
       })
     )
-).pipe(Command.withDescription("List the gateway's persisted integration catalog"))
+).pipe(Command.withDescription("List registered integrations"))
 
 export const toolsCommand = (runGateway: GatewayTask) => Command.make(
   "tools",
@@ -262,7 +262,7 @@ export const schemaCommand = (runGateway: GatewayTask) => Command.make(
       return writeStdoutLine(jsonOutput(
         withNext(
           verbose ? detail : core,
-          `ii execute --direct ${text(detail["address"])} '<json>'`
+          `i execute ${integration.replace(/[^a-z0-9]+/g, "-")} ${tool} '<json>'`
         ),
         verbose
       ))
@@ -270,4 +270,3 @@ export const schemaCommand = (runGateway: GatewayTask) => Command.make(
 ).pipe(Command.withDescription("Show one tool's description and input/output schemas"))
 
 // --- connections ------------------------------------------------------------
-

@@ -197,7 +197,7 @@ export const clientExecuteCommand = Command.make(
           ))
       ))
     ))
-).pipe(Command.withDescription("Invoke a granted tool through an alias"))
+).pipe(Command.withDescription("Invoke a connected tool through its alias"))
 
 export const validateCommand = (runGateway: GatewayTask) => Command.make(
   "validate",
@@ -205,7 +205,7 @@ export const validateCommand = (runGateway: GatewayTask) => Command.make(
     config: Argument.string("json-or-tool-address").pipe(Argument.optional),
     file: Flag.string("file").pipe(Flag.optional),
     structural: Flag.boolean("structural").pipe(
-      Flag.withDescription("Check the shape only, without asking the gateway what resolves")
+      Flag.withDescription("Check the shape only, without checking what resolves")
     ),
     verbose: verboseFlag()
   },
@@ -238,9 +238,8 @@ export const validateCommand = (runGateway: GatewayTask) => Command.make(
     ))
 ).pipe(
   Command.withDescription(
-    "Validate an integration node: a gateway alias, a tool address, or a node config"
+    "Validate an integration alias, tool address, or node config"
   )
 )
 
 // --- delegation -------------------------------------------------------------
-

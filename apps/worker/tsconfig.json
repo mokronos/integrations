@@ -15,8 +15,7 @@
       "@mokronos/integration-host": ["../../packages/integration-host/src/index.ts"],
       "@mokronos/integrations": ["../../apps/gateway/src/index.ts"],
       "@mokronos/integrations/domain": ["../../apps/gateway/src/domain.ts"],
-      "@mokronos/integrations-client": ["../../apps/ts/src/index.ts"],
-      "@mokronos/integrations-client/codegen": ["../../apps/ts/src/codegen.ts"]
+      "@mokronos/integrations-client": ["../../apps/ts/src/index.ts"]
     }
   },
   "include": ["src"],

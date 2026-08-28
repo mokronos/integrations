@@ -34,7 +34,7 @@ at least 5 minutes; do not let the agent's shell timeout terminate it first.
 connecting agent's key. Its execution alias is the integration slug with
 non-alphanumeric separators changed to dashes, so `mcp_linear_app` becomes
 `mcp-linear-app`. These grants allow calls without a second human approval.
-Use `i grants` to inspect the exact alias and tools.
+Use the normalized alias with `i execute`.
 
 Every call answers in one shape: `{"status":"succeeded","result":…}`,
 `{"status":"pending","approvalId":…}`, `{"status":"denied","reason":…}`, or

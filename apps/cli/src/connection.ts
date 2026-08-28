@@ -39,7 +39,7 @@ export const connectToGateway = async (): Promise<GatewayClient> => {
   const connection = await resolveClientConnection()
   if (connection === undefined) {
     throw cliError(
-      "No gateway found. Start one with `ii serve`, or set INTEGRATIONS_URL and INTEGRATIONS_API_KEY."
+      "No integrations service found. Set INTEGRATIONS_URL and INTEGRATIONS_API_KEY."
     )
   }
   return createGatewayClient(connection)

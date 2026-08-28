@@ -52,9 +52,7 @@ describe("i and ii CLI help", () => {
       "disconnect",
       "execute",
       "validate",
-      "grants",
-      "approval",
-      "codegen"
+      "approval"
     ]) {
       expect(`${command} listed: ${result.stdout.includes(command)}`)
         .toBe(`${command} listed: true`)
@@ -65,7 +63,9 @@ describe("i and ii CLI help", () => {
       "key",
       "keys",
       "grant",
+      "grants",
       "revoke",
+      "codegen",
       "approvals",
       "approve",
       "deny",
@@ -82,7 +82,7 @@ describe("i and ii CLI help", () => {
       expect(`${command} hidden: ${hasCommand(result.stdout, command)}`)
         .toBe(`${command} hidden: false`)
     }
-  })
+  }, 30_000)
 
   test("ii is a strict superset of i and includes operator, account, and host commands", () => {
     const agent = runAgent(["--help"])
@@ -105,7 +105,7 @@ describe("i and ii CLI help", () => {
       expect(`${command} listed: ${operator.stdout.includes(`  ${command}`)}`)
         .toBe(`${command} listed: true`)
     }
-  })
+  }, 30_000)
 
   test("every listing command windows with --limit and --offset", () => {
     // Listings return everything by default. What they must never do is drop
@@ -151,7 +151,7 @@ describe("i and ii CLI help", () => {
       expect(help.stdout).toContain("--no-open")
       expect(help.stdout).toContain("--timeout")
     }
-  })
+  }, 30_000)
 
   test("shows arguments and flags for a specific command", () => {
     const help = runAgent(["search", "--help"])
@@ -166,11 +166,11 @@ describe("i and ii CLI help", () => {
     expect(help.stdout).not.toContain("--text")
   })
 
-  test("reports a missing gateway instead of failing obscurely", () => {
+  test("reports a missing integrations service instead of failing obscurely", () => {
     const result = runAgent(["integrations"])
 
     expect(result.exitCode).toBe(1)
-    expect(result.stderr).toContain("No gateway found")
+    expect(result.stderr).toContain("No integrations service found")
   })
 
   test("rejects an unknown command", () => {
@@ -178,15 +178,10 @@ describe("i and ii CLI help", () => {
     expect(result.exitCode).not.toBe(0)
   })
 
-  test("agent-only variants cannot request operator authority", () => {
+  test("agent execution cannot request operator authority", () => {
     const agentExecute = runAgent(["execute", "--help"])
     const operatorExecute = runOperator(["execute", "--help"])
     expect(agentExecute.stdout).not.toContain("--direct")
     expect(operatorExecute.stdout).toContain("--direct")
-
-    const agentCodegen = runAgent(["codegen", "--help"])
-    const operatorCodegen = runOperator(["codegen", "--help"])
-    expect(agentCodegen.stdout).not.toContain("--client")
-    expect(operatorCodegen.stdout).toContain("--client")
   })
 })

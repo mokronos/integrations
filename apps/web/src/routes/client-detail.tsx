@@ -28,7 +28,6 @@ import {
 import { GrantDialog, GrantRow } from "@/components/clients/client-grants"
 import { ClientKeys } from "@/components/clients/client-keys"
 import { ClientSettings } from "@/components/clients/client-settings"
-import { CodegenDialog } from "@/components/clients/codegen-dialog"
 export function ClientDetailRoute() {
   const { clientId } = useParams()
   const clients = useClients()
@@ -47,7 +46,6 @@ export function ClientDetailRoute() {
       description="Everything this client may reach. Nothing else is visible to it."
       actions={
         <>
-          <CodegenDialog clientId={clientId} />
           <GrantDialog clientId={clientId} />
           <ReloadButton onClick={() => void grants.refetch()} busy={grants.isFetching} />
         </>

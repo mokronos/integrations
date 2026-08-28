@@ -267,7 +267,7 @@ export const connectionsCommand = (runGateway: GatewayTask) => Command.make(
         })
       })
     )
-).pipe(Command.withDescription("List connections without exposing credentials"))
+).pipe(Command.withDescription("List connections"))
 
 export const disconnectCommand = (runGateway: GatewayTask) => Command.make(
   "disconnect",

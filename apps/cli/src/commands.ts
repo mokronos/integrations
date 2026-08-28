@@ -3,7 +3,7 @@ import { Effect } from "effect"
 import { approvalCommand, approvalsCommand, approveCommand, auditCommand, denyCommand, driftCommand, maintenanceCommand } from "./commands/approvals-audit.ts"
 import { discoverCommand, integrationsCommand, schemaCommand, searchCommand, toolsCommand } from "./commands/catalog.ts"
 import { connectCommand, connectionsCommand, disconnectCommand } from "./commands/connections.ts"
-import { clientCodegenCommand, clientCommand, clientsCommand, grantCommand, keyCommand, keysCommand, operatorCodegenCommand, operatorGrantsCommand, ownGrantsCommand, revokeCommand } from "./commands/delegation.ts"
+import { clientCommand, clientsCommand, grantCommand, keyCommand, keysCommand, revokeCommand } from "./commands/delegation.ts"
 import { clientExecuteCommand, operatorExecuteCommand, validateCommand } from "./commands/invocation.ts"
 import type { IntegrationsCliError } from "./connection.ts"
 import {
@@ -40,9 +40,7 @@ export const clientSubcommands = [
   disconnectCommand(gatewayTask),
   clientExecuteCommand,
   validateCommand(gatewayTask),
-  approvalCommand,
-  ownGrantsCommand,
-  clientCodegenCommand
+  approvalCommand
 ] as const
 
 export const operatorClientSubcommands = [
@@ -56,8 +54,7 @@ export const operatorClientSubcommands = [
   disconnectCommand(operatorGatewayTask),
   operatorExecuteCommand,
   validateCommand(operatorGatewayTask),
-  approvalCommand,
-  operatorCodegenCommand
+  approvalCommand
 ] as const
 
 export const controlPlaneSubcommands = [
@@ -66,7 +63,6 @@ export const controlPlaneSubcommands = [
   keyCommand,
   keysCommand,
   grantCommand,
-  operatorGrantsCommand,
   revokeCommand,
   approvalsCommand,
   approveCommand,

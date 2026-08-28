@@ -30,15 +30,6 @@ const DiscoveredOutput = Schema.Struct({
 const ConnectionsOutput = Schema.Struct({
   connections: Schema.Array(Schema.Struct({ address: Schema.String, name: Schema.String }))
 })
-const GrantsOutput = Schema.Struct({
-  grants: Schema.Array(Schema.Struct({
-    alias: Schema.String,
-    tool: Schema.String,
-    integration: Schema.String,
-    decision: Schema.String
-  }))
-})
-const GrantCountOutput = Schema.Struct({ grants: Schema.Array(Schema.Json) })
 const FrozenOutput = Schema.Struct({ status: Schema.String, approvalId: Schema.String })
 const AuditOutput = Schema.Struct({
   records: Schema.Array(Schema.Struct({ outcome: Schema.String }))
@@ -436,11 +427,6 @@ describe("integrations CLI acceptance", () => {
       INTEGRATIONS_API_KEY: key.secret
     }
 
-    // Nothing granted yet.
-    const beforeGrant = await clientCli(["grants"], sandbox)
-    expect(beforeGrant.exitCode, beforeGrant.stderr).toBe(0)
-    expect(JSON.parse(beforeGrant.stdout)).toEqual({ grants: [], count: 0 })
-
     // A sandbox key cannot mint capabilities for itself.
     const escalation = await clientCli(["client", "escalated"], sandbox)
     expect(escalation.exitCode).toBe(1)
@@ -460,11 +446,6 @@ describe("integrations CLI acceptance", () => {
       "--integration",
       slug,
       "--allow"
-    ])
-
-    const afterGrant = parseOutput(GrantsOutput, (await clientCli(["grants"], sandbox)).stdout)
-    expect(afterGrant.grants).toEqual([
-      { alias: "tickets", tool: "tickets.create", integration: slug, decision: "allow" }
     ])
 
     const executed = await clientCli([
@@ -626,12 +607,22 @@ describe("integrations CLI acceptance", () => {
     // Undoing a delegation was the one thing the CLI could not do.
     const revokedGrant = await operator(["revoke", "grant", grant.id])
     expect(revokedGrant.exitCode, revokedGrant.stderr).toBe(0)
-    const afterRevoke = parseOutput(GrantCountOutput, (await clientCli(["grants"], sandbox)).stdout)
-    expect(afterRevoke.grants).toEqual([])
+    const afterRevoke = await clientCli([
+      "execute",
+      "tickets",
+      "tickets.create",
+      JSON.stringify({ body: { title: "Revoked" } })
+    ], sandbox)
+    expect(afterRevoke.exitCode).toBe(1)
 
     const revokedKey = await operator(["revoke", "key", key.id])
     expect(revokedKey.exitCode, revokedKey.stderr).toBe(0)
-    const withRevokedKey = await clientCli(["grants"], sandbox)
+    const withRevokedKey = await clientCli([
+      "execute",
+      "tickets",
+      "tickets.create",
+      JSON.stringify({ body: { title: "Revoked key" } })
+    ], sandbox)
     expect(withRevokedKey.exitCode).toBe(1)
   }, 40_000)
 })

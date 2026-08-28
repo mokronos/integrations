@@ -8,7 +8,7 @@ import packageMetadata from "../package.json" with { type: "json" }
 
 export const rootCommand = Command.make("i").pipe(
   Command.withDescription(
-    "Discover, connect, and invoke integrations through an existing gateway"
+    "Discover, connect, and invoke integrations"
   ),
   Command.withSubcommands(clientSubcommands)
 )

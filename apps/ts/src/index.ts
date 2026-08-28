@@ -84,18 +84,6 @@ export const readGatewayMetadata = async (
   return metadata
 }
 
-export const GrantedTool = Schema.Struct({
-  alias: Schema.String,
-  tool: Schema.String,
-  integration: Schema.String,
-  decision: Schema.Literals(["allow", "require_approval"]),
-  inputSchema: Schema.optional(Schema.Json),
-  outputSchema: Schema.optional(Schema.Json)
-})
-export type GrantedTool = typeof GrantedTool.Type
-
-const GrantedTools = Schema.Struct({ tools: Schema.Array(GrantedTool) })
-
 /** What a delegated call comes back as.
  *
  * `pending` is a first-class outcome rather than an error: the gateway froze
@@ -235,7 +223,6 @@ export const ValidateInput = Schema.Struct({
 })
 export type ValidateInput = typeof ValidateInput.Type
 
-const decodeGrantedTools = Schema.decodeUnknownSync(GrantedTools)
 const decodeOutcome = Schema.decodeUnknownSync(InvocationOutcome)
 const decodeApproval = Schema.decodeUnknownSync(ApprovalRecord)
 const decodeSearch = Schema.decodeUnknownSync(IntegrationSearchResponse)
@@ -266,12 +253,6 @@ export interface GatewayClient {
   connections(): Promise<ConnectionsResponse>
   disconnect(input: DisconnectInput): Promise<DisconnectedConnection>
   validate(input: ValidateInput): Promise<IntegrationValidationReport>
-
-  /** The tools this key can reach. Grant-scoped, so an ungranted tool is
-   *  absent rather than present-and-failing.
-   *
-   *  Schemas are opt-in because they cost a catalog read per grant. */
-  tools(options?: { readonly schemas?: boolean }): Promise<ReadonlyArray<GrantedTool>>
 
   /** Performs a delegated call.
    *
@@ -339,8 +320,6 @@ export const createGatewayClient = (options: GatewayClientOptions): GatewayClien
     return response.parsed
   }
 
-  const query = (schemas: boolean | undefined): string => schemas === true ? "?schemas=true" : ""
-
   return {
     url: base,
     metadata,
@@ -396,8 +375,6 @@ export const createGatewayClient = (options: GatewayClientOptions): GatewayClien
       node: input.node,
       ...whenPresent("live", input.live)
     })),
-    tools: async (options) =>
-      decodeGrantedTools(await request("GET", `/v1/tools${query(options?.schemas)}`)).tools,
     execute: async (input) => {
       const response = await send("POST", "/v1/execute", {
         alias: input.alias,
@@ -446,10 +423,3 @@ export {
   IntegrationSearchResponse,
   IntegrationValidationReport
 }
-
-export {
-  bindingName,
-  generateTypeScriptModule,
-  typeName
-} from "./codegen.ts"
-export type { GeneratableTool } from "./codegen.ts"
