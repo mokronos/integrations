@@ -9,11 +9,6 @@ When im using these words im talking about the following:
 
 - Never use `any` or `unknown`. Model every compile-time-known shape with Effect Schema (the schema is the single source of truth; derive TS types via `typeof X.Type`), brand identifiers where mix-ups are possible, and parse external/dynamic data at the boundary with `Schema.decodeUnknown*` instead of casting. No `as` casts to silence the compiler.
 
-
-## Comments
-
-Don't do any unnecessary comments describing what the code does.
-
 <!-- effect-solutions:start -->
 ## Effect Best Practices
 
