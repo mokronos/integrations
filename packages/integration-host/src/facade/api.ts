@@ -371,6 +371,7 @@ const buildAuth = (host: HostHandle): AuthApi => ({
    *  tokens belong to: a grant with no connection row is unaddressable, so the
    *  two have to happen together. */
   complete: (options) => host.run(Effect.gen(function* () {
+    const integrations = yield* IntegrationHost
     const oauth = yield* OAuthFlows
     const store = yield* CatalogStore
     const state = yield* decodeId(OAuthState, "state", options.state)
@@ -389,6 +390,11 @@ const buildAuth = (host: HostHandle): AuthApi => ({
       createdAt: now
     }
     yield* store.putConnection(record)
+    yield* integrations.refreshConnection({
+      owner: record.owner,
+      integration: record.integration,
+      name: record.name
+    })
     return yield* Schema.decodeUnknownEffect(Connection)({
       owner: record.owner,
       name: record.name,
