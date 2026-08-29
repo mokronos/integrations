@@ -12,6 +12,10 @@ const repos = [
     name: "tanstack-router",
     url: "https://github.com/TanStack/router.git",
   },
+  {
+    name: "executor",
+    url: "https://github.com/UsefulSoftwareCo/executor.git",
+  },
 ];
 
 await mkdir(REFERENCE_DIR, { recursive: true });

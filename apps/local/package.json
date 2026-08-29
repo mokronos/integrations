@@ -1,13 +1,13 @@
 {
-  "name": "@mokronos/integrations",
+  "name": "@mokronos/integrations-local",
   "version": "0.2.0",
   "type": "module",
-  "description": "The integration gateway — connections, grants, policy, and credential-injecting execution.",
+  "description": "Local Bun host for the integrations gateway.",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/mokronos/integrations.git",
-    "directory": "apps/integrations/gateway"
+    "directory": "apps/local"
   },
   "homepage": "https://github.com/mokronos/integrations#readme",
   "bugs": "https://github.com/mokronos/integrations/issues",
@@ -34,8 +34,8 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "bun": "./src/index.ts",
-      "development": "./src/index.ts",
+      "bun": "./index.ts",
+      "development": "./index.ts",
       "default": "./dist/index.js"
     },
     "./domain": {
@@ -51,12 +51,9 @@
     "prepublishOnly": "bun run build && bun run build:web"
   },
   "dependencies": {
-    "@libsql/client": "catalog:",
-    "@mokronos/contracts": "workspace:*",
-    "@mokronos/integration-host": "workspace:*",
+    "@mokronos/gateway-api": "workspace:*",
+    "@mokronos/gateway-core": "workspace:*",
     "@mokronos/integrations-client": "workspace:*",
-    "@mokronos/observability": "workspace:*",
-    "effect": "catalog:",
-    "@effect/platform-bun": "catalog:"
+    "effect": "catalog:"
   }
 }

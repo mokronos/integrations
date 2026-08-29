@@ -1,5 +1,5 @@
 {
-  "name": "@mokronos/integrations-worker",
+  "name": "@mokronos/integrations-host-cloudflare",
   "private": true,
   "version": "0.2.0",
   "type": "module",
@@ -14,8 +14,9 @@
   },
   "dependencies": {
     "@libsql/client": "catalog:",
+    "@mokronos/gateway-api": "workspace:*",
+    "@mokronos/gateway-core": "workspace:*",
     "@mokronos/integration-host": "workspace:*",
-    "@mokronos/integrations": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

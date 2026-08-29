@@ -26,22 +26,34 @@
       "dependencies": {
         "@effect/platform-bun": "catalog:",
         "@mokronos/contracts": "workspace:*",
-        "@mokronos/integrations": "workspace:*",
         "@mokronos/integrations-client": "workspace:*",
+        "@mokronos/integrations-local": "workspace:*",
         "@mokronos/observability": "workspace:*",
         "effect": "catalog:",
       },
     },
-    "apps/gateway": {
-      "name": "@mokronos/integrations",
+    "apps/host-cloudflare": {
+      "name": "@mokronos/integrations-host-cloudflare",
       "version": "0.2.0",
       "dependencies": {
-        "@effect/platform-bun": "catalog:",
         "@libsql/client": "catalog:",
-        "@mokronos/contracts": "workspace:*",
+        "@mokronos/gateway-api": "workspace:*",
+        "@mokronos/gateway-core": "workspace:*",
         "@mokronos/integration-host": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@cloudflare/workers-types": "catalog:",
+        "wrangler": "catalog:",
+      },
+    },
+    "apps/local": {
+      "name": "@mokronos/integrations-local",
+      "version": "0.2.0",
+      "dependencies": {
+        "@mokronos/gateway-api": "workspace:*",
+        "@mokronos/gateway-core": "workspace:*",
         "@mokronos/integrations-client": "workspace:*",
-        "@mokronos/observability": "workspace:*",
         "effect": "catalog:",
       },
     },
@@ -59,8 +71,7 @@
       "dependencies": {
         "@fontsource-variable/geist": "catalog:",
         "@mokronos/contracts": "workspace:*",
-        "@mokronos/integration-host": "workspace:*",
-        "@mokronos/integrations": "workspace:*",
+        "@mokronos/gateway-core": "workspace:*",
         "@mokronos/integrations-client": "workspace:*",
         "@tailwindcss/vite": "catalog:",
         "@tanstack/react-query": "catalog:",
@@ -88,24 +99,34 @@
         "vite": "catalog:",
       },
     },
-    "apps/worker": {
-      "name": "@mokronos/integrations-worker",
-      "version": "0.2.0",
-      "dependencies": {
-        "@libsql/client": "catalog:",
-        "@mokronos/integration-host": "workspace:*",
-        "@mokronos/integrations": "workspace:*",
-        "effect": "catalog:",
-      },
-      "devDependencies": {
-        "@cloudflare/workers-types": "catalog:",
-        "wrangler": "catalog:",
-      },
-    },
     "packages/contracts": {
       "name": "@mokronos/contracts",
       "version": "0.2.0",
       "dependencies": {
+        "effect": "catalog:",
+      },
+    },
+    "packages/core/api": {
+      "name": "@mokronos/gateway-api",
+      "version": "0.2.0",
+      "dependencies": {
+        "@effect/platform-bun": "catalog:",
+        "@mokronos/contracts": "workspace:*",
+        "@mokronos/gateway-core": "workspace:*",
+        "@mokronos/integration-host": "workspace:*",
+        "@mokronos/integrations-client": "workspace:*",
+        "@mokronos/observability": "workspace:*",
+        "effect": "catalog:",
+      },
+    },
+    "packages/core/gateway": {
+      "name": "@mokronos/gateway-core",
+      "version": "0.2.0",
+      "dependencies": {
+        "@libsql/client": "catalog:",
+        "@mokronos/contracts": "workspace:*",
+        "@mokronos/integration-host": "workspace:*",
+        "@mokronos/integrations-client": "workspace:*",
         "effect": "catalog:",
       },
     },
@@ -428,15 +449,19 @@
 
     "@mokronos/contracts": ["@mokronos/contracts@workspace:packages/contracts"],
 
-    "@mokronos/integration-host": ["@mokronos/integration-host@workspace:packages/integration-host"],
+    "@mokronos/gateway-api": ["@mokronos/gateway-api@workspace:packages/core/api"],
 
-    "@mokronos/integrations": ["@mokronos/integrations@workspace:apps/gateway"],
+    "@mokronos/gateway-core": ["@mokronos/gateway-core@workspace:packages/core/gateway"],
+
+    "@mokronos/integration-host": ["@mokronos/integration-host@workspace:packages/integration-host"],
 
     "@mokronos/integrations-cli": ["@mokronos/integrations-cli@workspace:apps/cli"],
 
     "@mokronos/integrations-client": ["@mokronos/integrations-client@workspace:apps/ts"],
 
-    "@mokronos/integrations-worker": ["@mokronos/integrations-worker@workspace:apps/worker"],
+    "@mokronos/integrations-host-cloudflare": ["@mokronos/integrations-host-cloudflare@workspace:apps/host-cloudflare"],
+
+    "@mokronos/integrations-local": ["@mokronos/integrations-local@workspace:apps/local"],
 
     "@mokronos/observability": ["@mokronos/observability@workspace:packages/observability"],
 

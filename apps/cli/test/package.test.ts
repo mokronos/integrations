@@ -74,11 +74,15 @@ describe("published CLI package", () => {
     )
     const client = await pack(path.join(repoRoot, "apps", "ts"), tarballs)
     const observability = await pack(path.join(repoRoot, "packages", "observability"), tarballs)
-    const gateway = await pack(path.join(repoRoot, "apps", "gateway"), tarballs)
+    const gatewayCore = await pack(path.join(repoRoot, "packages", "core", "gateway"), tarballs)
+    const gatewayApi = await pack(path.join(repoRoot, "packages", "core", "api"), tarballs)
+    const local = await pack(path.join(repoRoot, "apps", "local"), tarballs)
     const cli = await pack(path.join(repoRoot, "apps", "cli"), tarballs)
 
     const localPackages = {
-      "@mokronos/integrations": `file:${gateway}`,
+      "@mokronos/gateway-core": `file:${gatewayCore}`,
+      "@mokronos/gateway-api": `file:${gatewayApi}`,
+      "@mokronos/integrations-local": `file:${local}`,
       "@mokronos/integrations-client": `file:${client}`,
       "@mokronos/integration-host": `file:${host}`,
       "@mokronos/observability": `file:${observability}`,

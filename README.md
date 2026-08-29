@@ -11,11 +11,13 @@ key and invoke logical `{ alias, tool }` addresses through the HTTP API.
 
 | Path | Purpose |
 | --- | --- |
-| `apps/gateway/` | Gateway domain, persistence, policy, HTTP API, and local service |
+| `packages/core/gateway/` | Gateway domain, persistence, policy, and execution |
+| `packages/core/api/` | Typed HTTP API, handlers, and server assembly |
+| `apps/local/` | Local Bun host and service lifecycle |
 | `apps/cli/` | `i` delegated client CLI and `ii` operator CLI |
 | `apps/ts/` | `@mokronos/integrations-client`, the thin TypeScript gateway client |
 | `apps/web/` | Browser control plane |
-| `apps/worker/` | Cloudflare Worker runtime |
+| `apps/host-cloudflare/` | Cloudflare Worker host |
 | `packages/integration-host/` | The integration host: MCP and OpenAPI catalog, connections, tools |
 | `packages/contracts/` | Shared vocabulary and wire contracts |
 | `docs/` | Gateway decisions, deployment notes, and client references |

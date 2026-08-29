@@ -1,11 +1,10 @@
+import { createGatewayService, type GatewayService } from "@mokronos/gateway-api"
 import {
   createEncryption,
-  createGatewayService,
   GatewayStoreService,
   runMaintenance,
-  type Encryption,
-  type GatewayService
-} from "@mokronos/integrations"
+  type Encryption
+} from "@mokronos/gateway-core"
 import type { AssetsFetcherLike, D1DatabaseLike, ScheduledEventLike } from "./cloudflare.ts"
 import { Effect } from "effect"
 import { D1Client } from "./d1-client.ts"

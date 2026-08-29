@@ -39,13 +39,15 @@ jobs:
             packages/integration-host/package.json \
             packages/contracts/package.json \
             packages/observability/package.json \
+            packages/core/gateway/package.json \
+            packages/core/api/package.json \
             apps/ts/package.json \
-            apps/gateway/package.json \
+            apps/local/package.json \
             apps/cli/package.json
           do
             jq -er --arg version "$version" '.version == $version' "$manifest" >/dev/null
           done
-          grep -F "gatewayVersion = \"$version\"" apps/gateway/src/version.ts >/dev/null
+          grep -F "gatewayVersion = \"$version\"" packages/core/api/src/version.ts >/dev/null
 
   publish:
     needs: verify
@@ -74,17 +76,23 @@ jobs:
         working-directory: packages/integration-host
       - run: bun pm pack --ignore-scripts --destination ${{ runner.temp }}/release --filename observability.tgz
         working-directory: packages/observability
+      - run: bun pm pack --ignore-scripts --destination ${{ runner.temp }}/release --filename gateway-core.tgz
+        working-directory: packages/core/gateway
+      - run: bun pm pack --ignore-scripts --destination ${{ runner.temp }}/release --filename gateway-api.tgz
+        working-directory: packages/core/api
       - run: bun pm pack --ignore-scripts --destination ${{ runner.temp }}/release --filename client.tgz
         working-directory: apps/ts
-      - run: bun pm pack --ignore-scripts --destination ${{ runner.temp }}/release --filename gateway.tgz
-        working-directory: apps/gateway
+      - run: bun pm pack --ignore-scripts --destination ${{ runner.temp }}/release --filename local.tgz
+        working-directory: apps/local
       - run: bun pm pack --ignore-scripts --destination ${{ runner.temp }}/release --filename cli.tgz
         working-directory: apps/cli
       - run: npm publish ${{ runner.temp }}/release/protocol.tgz --provenance --access public
       - run: npm publish ${{ runner.temp }}/release/executor.tgz --provenance --access public
       - run: npm publish ${{ runner.temp }}/release/observability.tgz --provenance --access public
+      - run: npm publish ${{ runner.temp }}/release/gateway-core.tgz --provenance --access public
+      - run: npm publish ${{ runner.temp }}/release/gateway-api.tgz --provenance --access public
       - run: npm publish ${{ runner.temp }}/release/client.tgz --provenance --access public
-      - run: npm publish ${{ runner.temp }}/release/gateway.tgz --provenance --access public
+      - run: npm publish ${{ runner.temp }}/release/local.tgz --provenance --access public
       - run: npm publish ${{ runner.temp }}/release/cli.tgz --provenance --access public
       - name: Verify the registry install
         env:

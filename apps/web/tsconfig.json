@@ -11,9 +11,7 @@
       "@/*": ["./src/*"],
       "@mokronos/observability": ["../../packages/observability/src/index.ts"],
       "@mokronos/contracts": ["../../packages/contracts/src/index.ts"],
-      "@mokronos/integration-host": ["../../packages/integration-host/src/index.ts"],
-      "@mokronos/integrations": ["../../apps/gateway/src/index.ts"],
-      "@mokronos/integrations/domain": ["../../apps/gateway/src/domain.ts"],
+      "@mokronos/gateway-core": ["../../packages/core/gateway/src/index.ts"],
       "@mokronos/integrations-client": ["../../apps/ts/src/index.ts"]
     },
     "allowArbitraryExtensions": true,

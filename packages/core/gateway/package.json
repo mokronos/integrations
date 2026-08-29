@@ -1,0 +1,27 @@
+{
+  "name": "@mokronos/gateway-core",
+  "version": "0.2.0",
+  "type": "module",
+  "description": "Gateway domain, persistence, authorization, and execution policy.",
+  "license": "MIT",
+  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org" },
+  "files": ["dist", "README.md"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "bun": "./src/index.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@libsql/client": "catalog:",
+    "@mokronos/contracts": "workspace:*",
+    "@mokronos/integration-host": "workspace:*",
+    "@mokronos/integrations-client": "workspace:*",
+    "effect": "catalog:"
+  }
+}

@@ -12,8 +12,8 @@ import {
   readGatewayConfig,
   resolveClientConnection,
   serveGateway
-} from "../src/index.ts"
-import type { RunningGateway } from "../src/index.ts"
+} from "../index.ts"
+import type { RunningGateway } from "../index.ts"
 import { GatewayMetadata } from "@mokronos/contracts"
 import { Schema } from "effect"
 

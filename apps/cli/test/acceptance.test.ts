@@ -3,8 +3,8 @@ import os from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, test } from "bun:test"
 import { Schema } from "effect"
-import { serveGateway } from "@mokronos/integrations"
-import type { RunningGateway } from "@mokronos/integrations"
+import { serveGateway } from "@mokronos/integrations-local"
+import type { RunningGateway } from "@mokronos/integrations-local"
 
 const repoRoot = path.resolve(import.meta.dir, "../../..")
 const agentCli = path.join(repoRoot, "apps", "cli", "src", "agent.ts")

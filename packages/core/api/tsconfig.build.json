@@ -1,5 +1,5 @@
 {
-  "extends": "../../tsconfig.json",
+  "extends": "../../../tsconfig.json",
   "compilerOptions": {
     "noEmit": false,
     "composite": false,
@@ -9,8 +9,7 @@
     "sourceMap": true,
     "outDir": "dist",
     "rootDir": "src",
-    "paths": {},
-    "types": ["bun"]
+    "paths": {}
   },
   "include": ["src"]
 }

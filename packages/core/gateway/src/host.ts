@@ -1,6 +1,6 @@
 import { createHostHandle, createIntegrationsApi } from "@mokronos/integration-host"
 import type { HostHandle, IntegrationsApi } from "@mokronos/integration-host"
-import { integrationsHome } from "./paths.ts"
+import { integrationsHome } from "@mokronos/integrations-client"
 
 export interface Gateway {
   readonly directory: string

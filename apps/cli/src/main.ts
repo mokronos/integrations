@@ -39,7 +39,7 @@ const loopbackWarning = (host: string): void => {
 const runForeground = async (port: number, host: string): Promise<void> => {
   // Imported lazily so every other command stays independent of the
   // gateway package — the CLI is a thin client by construction.
-  const { serveGateway } = await import("@mokronos/integrations")
+  const { serveGateway } = await import("@mokronos/integrations-local")
   const running = await serveGateway({ port, hostname: host })
   await Effect.runPromise(writeStdoutLine(`integrations gateway listening at ${running.url}`))
   loopbackWarning(host)

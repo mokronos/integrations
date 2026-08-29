@@ -3,8 +3,8 @@ import {
   isLoopbackAddress,
   isLoopbackHostHeader,
   mayBorrowLocalCredential
-} from "../src/index.ts"
-import type { LoopbackBootstrap } from "../src/index.ts"
+} from "../index.ts"
+import type { LoopbackBootstrap } from "../index.ts"
 
 const bootstrap = (overrides: Partial<LoopbackBootstrap> = {}): LoopbackBootstrap => ({
   boundToLoopback: true,

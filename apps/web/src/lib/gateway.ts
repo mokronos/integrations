@@ -35,7 +35,7 @@ import type { ApprovalDelivery, ApprovalStatus, GrantDecision } from "@/lib/sche
  *
  * There is no API key here and no place to put one: the page is served by the
  * gateway, so the browser's own same-origin request is what authenticates it.
- * See `apps/gateway/src/http/loopback.ts` for why that is safe and
+ * See `packages/core/api/src/http/loopback.ts` for why that is safe and
  * where it stops being safe.
  */
 
