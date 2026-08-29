@@ -30,21 +30,8 @@ const contentTypeFor = (location: string): string =>
 /** Resolved on first use, not at module load: hosts without a filesystem
  *  (Cloudflare Workers) have no `import.meta.dirname`, and this module rides
  *  along in bundles that never serve assets from disk. */
-const packageDirectory = (): string =>
-  path.resolve(import.meta.dirname ?? process.cwd(), "..")
-
-/** In order: an explicit override, the published layout, then the source
- *  checkout — so a working tree serves `vite build` output with no packaging
- *  step, and a published install serves what shipped with it. */
-const candidateDirectories = (): ReadonlyArray<string> => {
-  const configured = process.env["INTEGRATIONS_WEB_DIR"]
-  const packageDirectory_ = packageDirectory()
-  return [
-    ...(configured === undefined || configured.length === 0 ? [] : [path.resolve(configured)]),
-    path.join(packageDirectory_, "web"),
-    path.resolve(packageDirectory_, "..", "web", "dist")
-  ]
-}
+const webAssetsDirectory = (): string =>
+  path.resolve(import.meta.dirname ?? process.cwd(), "../../../../apps/web/dist")
 
 const directoryExists = async (location: string): Promise<boolean> => {
   try {
@@ -61,10 +48,10 @@ export interface WebAssets {
   respond(pathname: string): Promise<Response | undefined>
 }
 
-const notBuiltMessage = (directories: ReadonlyArray<string>): string =>
-  `The integrations control plane has not been built. Looked in:\n${
-    directories.map((directory) => `  ${directory}`).join("\n")
-  }\n\nBuild it with: bun run --cwd apps/web build\n`
+const notBuiltMessage = (directory: string): string =>
+  `The integrations control plane has not been built.\n` +
+  `  ${directory}\n\n` +
+  `Build it with: bun run --cwd apps/web build\n`
 
 export interface WebAssetsOptions {
   /** Where to look, in order. Defaults to the resolution above; tests pass an
@@ -75,20 +62,16 @@ export interface WebAssetsOptions {
 export const createWebAssets = async (
   options: WebAssetsOptions = {}
 ): Promise<WebAssets> => {
-  const candidates = options.directories ?? candidateDirectories()
-  let directory: string | undefined
-  for (const candidate of candidates) {
-    if (await directoryExists(candidate)) {
-      directory = candidate
-      break
-    }
-  }
+  const directory =
+    options.directories?.[0] ??
+    process.env["INTEGRATIONS_WEB_DIR"] ??
+    webAssetsDirectory()
 
-  if (directory === undefined) {
+  if (!(await directoryExists(directory))) {
     return {
       directory: undefined,
       respond: async () =>
-        new Response(notBuiltMessage(candidates), {
+        new Response(notBuiltMessage(directory), {
           status: 503,
           headers: { "content-type": "text/plain; charset=utf-8" }
         })
