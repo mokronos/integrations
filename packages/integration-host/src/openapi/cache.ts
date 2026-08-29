@@ -5,6 +5,7 @@ import { describeCause, SpecError } from "../errors.ts"
 import { convertGoogleDiscovery, isGoogleDiscoveryUrl } from "./google-discovery.ts"
 import { compileSpec } from "./compile.ts"
 import type { CompiledSpec } from "./compile.ts"
+import { HttpTransport } from "../http-transport.ts"
 
 /** Compiled specifications, kept so a tool listing is not a spec download.
  *
@@ -23,16 +24,17 @@ export class SpecCache extends Context.Service<
     readonly compileUrl: (url: string) => Effect.Effect<CompiledSpec, SpecError>
   }
 >()("@mokronos/integration-host/SpecCache") {
-  static readonly layer: Layer.Layer<SpecCache, never, CatalogStore> = Layer.effect(
+  static readonly layer: Layer.Layer<SpecCache, never, CatalogStore | HttpTransport> = Layer.effect(
     SpecCache,
     Effect.gen(function* () {
       const store = yield* CatalogStore
+      const transport = yield* HttpTransport
       const compiled = new Map<string, CompiledSpec>()
 
       const fetchText = Effect.fn("SpecCache.fetchText")((url: string) =>
         Effect.tryPromise({
           try: async () => {
-            const response = await fetch(url, {
+            const response = await transport.fetch(url, {
               headers: { accept: "application/json, application/yaml, text/yaml, */*" }
             })
             if (!response.ok) {

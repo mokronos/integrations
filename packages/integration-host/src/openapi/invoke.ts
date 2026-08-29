@@ -6,6 +6,7 @@ import { missingArguments, splitArguments } from "./arguments.ts"
 import { whenPresent } from "@mokronos/contracts"
 import { AuthPlacement } from "@mokronos/contracts"
 import { parseJsonString, type Json } from "@mokronos/contracts"
+import { HttpTransport } from "../http-transport.ts"
 
 /** Performing an OpenAPI call.
  *
@@ -120,9 +121,11 @@ export class OpenApiInvoker extends Context.Service<
     ) => Effect.Effect<Json, InvocationError | SpecError>
   }
 >()("@mokronos/integration-host/OpenApiInvoker") {
-  static readonly layer: Layer.Layer<OpenApiInvoker> = Layer.effect(
+  static readonly layer: Layer.Layer<OpenApiInvoker, never, HttpTransport> = Layer.effect(
     OpenApiInvoker,
-    Effect.sync(() => ({
+    Effect.gen(function* () {
+      const transport = yield* HttpTransport
+      return {
       call: Effect.fn("OpenApiInvoker.call")(function* (call: OpenApiCall) {
         const split = splitArguments(call.call, call.input)
         if (split.unknown.length > 0) {
@@ -159,7 +162,7 @@ export class OpenApiInvoker extends Context.Service<
         )
 
         const response = yield* Effect.tryPromise({
-          try: () => fetch(prepared.url, {
+          try: () => transport.fetch(prepared.url, {
             method: built.method,
             headers: { accept: "application/json, */*", ...prepared.headers },
             ...whenPresent("body", Option.getOrUndefined(built.body))
@@ -198,6 +201,12 @@ export class OpenApiInvoker extends Context.Service<
 
         return decodeBody(contentType, body)
       })
-    }))
+      }
+    })
+  )
+
+  static readonly unavailableTestLayer: Layer.Layer<OpenApiInvoker> = Layer.succeed(
+    OpenApiInvoker,
+    { call: () => Effect.die("Unexpected OpenAPI invocation") }
   )
 }

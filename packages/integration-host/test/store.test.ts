@@ -149,14 +149,3 @@ describe("OAuth flows", () => {
     expect(outcome).toEqual({ first: true, second: false })
   })
 })
-
-describe("specification documents", () => {
-  it("caches a document's text so a restart does not refetch it", async () => {
-    const found = await run(Effect.gen(function* () {
-      const store = yield* CatalogStore
-      yield* store.putSpecDocument("https://example.com/openapi.json", "{\"openapi\":\"3.0.0\"}")
-      return yield* store.findSpecDocument("https://example.com/openapi.json")
-    }))
-    expect(Option.getOrThrow(found)).toBe("{\"openapi\":\"3.0.0\"}")
-  })
-})

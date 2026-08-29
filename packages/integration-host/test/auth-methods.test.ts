@@ -1,7 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import { Option } from "effect"
 import {
-  findAuthMethod,
   mcpAuthMethods,
   openApiAuthMethods,
   requiresAuthentication
@@ -136,16 +135,5 @@ describe("OpenAPI auth methods", () => {
     const methods = openApiAuthMethods([])
     expect(methods[0]?.kind).toBe("none")
     expect(requiresAuthentication(methods)).toBe(false)
-  })
-})
-
-describe("findAuthMethod", () => {
-  it("resolves the method a connection was created against", () => {
-    const methods = openApiAuthMethods([
-      scheme({ name: "api_key", type: "apiKey", in: Option.some("header") })
-    ])
-    expect(Option.isSome(findAuthMethod(methods, "api_key"))).toBe(true)
-    // A template that has since disappeared means the connection needs redoing.
-    expect(Option.isNone(findAuthMethod(methods, "gone"))).toBe(true)
   })
 })

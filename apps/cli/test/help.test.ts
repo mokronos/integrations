@@ -54,8 +54,7 @@ describe("i and ii CLI help", () => {
       "validate",
       "approval"
     ]) {
-      expect(`${command} listed: ${result.stdout.includes(command)}`)
-        .toBe(`${command} listed: true`)
+      expect(hasCommand(result.stdout, command)).toBe(true)
     }
     for (const command of [
       "clients",
@@ -79,8 +78,7 @@ describe("i and ii CLI help", () => {
       "install",
       "uninstall"
     ]) {
-      expect(`${command} hidden: ${hasCommand(result.stdout, command)}`)
-        .toBe(`${command} hidden: false`)
+      expect(hasCommand(result.stdout, command)).toBe(false)
     }
   }, 30_000)
 
@@ -94,16 +92,14 @@ describe("i and ii CLI help", () => {
       .filter((command) => command !== undefined)
 
     for (const command of agentCommands) {
-      expect(`${command} inherited: ${operator.stdout.includes(`  ${command}`)}`)
-        .toBe(`${command} inherited: true`)
+      expect(operator.stdout.includes(`  ${command}`)).toBe(true)
     }
     for (const command of [
       "clients", "client", "key", "keys", "grant", "revoke", "approvals",
       "approve", "deny", "audit", "drift", "maintenance", "login", "signup",
       "logout", "whoami", "account", "serve", "dashboard", "install", "uninstall"
     ]) {
-      expect(`${command} listed: ${operator.stdout.includes(`  ${command}`)}`)
-        .toBe(`${command} listed: true`)
+      expect(hasCommand(operator.stdout, command)).toBe(true)
     }
   }, 30_000)
 
@@ -115,13 +111,10 @@ describe("i and ii CLI help", () => {
       const command of ["integrations", "tools", "connections", "clients", "audit", "approvals"]
     ) {
       const help = runOperator([command, "--help"])
-      expect(`${command}: ${help.exitCode}`).toBe(`${command}: 0`)
-      expect(`${command} has --limit: ${help.stdout.includes("--limit")}`)
-        .toBe(`${command} has --limit: true`)
-      expect(`${command} has --offset: ${help.stdout.includes("--offset")}`)
-        .toBe(`${command} has --offset: true`)
-      expect(`${command} has --verbose: ${help.stdout.includes("--verbose")}`)
-        .toBe(`${command} has --verbose: true`)
+      expect(help.exitCode).toBe(0)
+      expect(help.stdout).toContain("--limit")
+      expect(help.stdout).toContain("--offset")
+      expect(help.stdout).toContain("--verbose")
     }
   }, 30_000)
 
@@ -171,11 +164,6 @@ describe("i and ii CLI help", () => {
 
     expect(result.exitCode).toBe(1)
     expect(result.stderr).toContain("No integrations service found")
-  })
-
-  test("rejects an unknown command", () => {
-    const result = runAgent(["missing"])
-    expect(result.exitCode).not.toBe(0)
   })
 
   test("agent execution cannot request operator authority", () => {

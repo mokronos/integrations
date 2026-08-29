@@ -6,23 +6,27 @@ import {
 } from "../src/index.ts"
 
 const fetchOf = (protocolVersion: number) => {
-  let healthRequests = 0
+  let metadataRequests = 0
+  const authenticatedRequests: Array<Headers> = []
   const implementation = async (
-    input: Parameters<typeof globalThis.fetch>[0]
+    input: Parameters<typeof globalThis.fetch>[0],
+    init?: Parameters<typeof globalThis.fetch>[1]
   ): Promise<Response> => {
     const url = String(input)
     if (url.endsWith("/v1/metadata")) {
-      healthRequests += 1
+      metadataRequests += 1
       return Response.json({ ok: true, protocolVersion, gatewayVersion: "test" })
     }
     if (url.endsWith("/v1/connections")) {
+      authenticatedRequests.push(new Headers(init?.headers))
       return Response.json({ connections: [] })
     }
     return Response.json({ error: "not found" }, { status: 404 })
   }
   return {
     fetch: Object.assign(implementation, { preconnect: globalThis.fetch.preconnect }),
-    healthRequests: () => healthRequests
+    metadataRequests: () => metadataRequests,
+    authenticatedRequests: () => authenticatedRequests
   }
 }
 
@@ -39,10 +43,11 @@ describe("gateway protocol compatibility", () => {
     await expect(client.connections()).rejects.toThrow(
       `client requires ${gatewayProtocolVersion}`
     )
-    expect(transport.healthRequests()).toBe(1)
+    expect(transport.metadataRequests()).toBe(1)
+    expect(transport.authenticatedRequests()).toHaveLength(0)
   })
 
-  test("checks compatible metadata once per client", async () => {
+  test("checks compatible metadata once and authenticates delegated calls", async () => {
     const transport = fetchOf(gatewayProtocolVersion)
     const client = createGatewayClient({
       url: "https://gateway.example/",
@@ -53,6 +58,8 @@ describe("gateway protocol compatibility", () => {
     expect((await client.metadata()).gatewayVersion).toBe("test")
     expect((await client.connections()).connections).toEqual([])
     expect(await client.health()).toBe(true)
-    expect(transport.healthRequests()).toBe(1)
+    expect(transport.metadataRequests()).toBe(1)
+    expect(transport.authenticatedRequests()).toHaveLength(1)
+    expect(transport.authenticatedRequests()[0]?.get("authorization")).toBe("Bearer wfi_test")
   })
 })

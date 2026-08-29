@@ -8,6 +8,7 @@ import { McpHost } from "./mcp/client.ts"
 import { OAuthFlows } from "./oauth/flows.ts"
 import { OpenApiInvoker } from "./openapi/invoke.ts"
 import { SpecCache } from "./openapi/cache.ts"
+import { HttpTransport } from "./http-transport.ts"
 
 /** How the host is assembled.
  *
@@ -25,14 +26,14 @@ import { SpecCache } from "./openapi/cache.ts"
  *  exercises the host without depending on a vendor's uptime. */
 const clientsLayer: Layer.Layer<McpHost | OpenApiInvoker> = Layer.mergeAll(
   McpHost.layer,
-  OpenApiInvoker.layer
+  OpenApiInvoker.layer.pipe(Layer.provide(HttpTransport.layer))
 )
 
 /** The host's own logic, over storage and clients supplied by a caller. */
 const capabilitiesLayer: Layer.Layer<
   IntegrationHost | OAuthFlows | SpecCache | CatalogStore,
   never,
-  Database | CredentialStore | McpHost | OpenApiInvoker
+  Database | CredentialStore | HttpTransport | McpHost | OpenApiInvoker
 > = IntegrationHost.layer.pipe(
   Layer.provideMerge(Layer.mergeAll(SpecCache.layer, OAuthFlows.layer)),
   Layer.provideMerge(CatalogStore.layer)
@@ -52,7 +53,7 @@ export interface HostStorageOptions {
 /** The local host: rows in a SQLite file, secrets in a sealed file beside it. */
 export const localLayer = (options: HostStorageOptions): HostLayer =>
   capabilitiesLayer.pipe(
-    Layer.provideMerge(clientsLayer),
+    Layer.provideMerge(Layer.mergeAll(clientsLayer, HttpTransport.layer)),
     Layer.provide(Layer.mergeAll(
       libsqlLayer({ directory: options.directory }),
       CredentialStore.fileLayer(options.directory)
@@ -68,7 +69,7 @@ export const hostLayer = <E>(
   E
 > =>
   capabilitiesLayer.pipe(
-    Layer.provideMerge(clientsLayer),
+    Layer.provideMerge(Layer.mergeAll(clientsLayer, HttpTransport.layer)),
     Layer.provide(storage)
   )
 
@@ -91,6 +92,6 @@ export const stubbedLayer = (
   StorageError
 > =>
   capabilitiesLayer.pipe(
-    Layer.provideMerge(clients),
+    Layer.provideMerge(Layer.mergeAll(clients, HttpTransport.unavailableTestLayer)),
     Layer.provideMerge(Layer.mergeAll(memoryLayer, CredentialStore.memoryLayer))
   )

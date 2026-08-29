@@ -6,11 +6,8 @@ import path from "node:path"
 import { createWebAssets } from "../src/index.ts"
 
 const directories: Array<string> = []
-const previous = process.env["INTEGRATIONS_WEB_DIR"]
 
 afterEach(async () => {
-  if (previous === undefined) delete process.env["INTEGRATIONS_WEB_DIR"]
-  else process.env["INTEGRATIONS_WEB_DIR"] = previous
   await run(Promise.all(
     directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
   ))
@@ -23,14 +20,13 @@ const buildOutput = async (): Promise<string> => {
   await run(writeFile(path.join(directory, "index.html"), "<!doctype html><title>control</title>"))
   await run(mkdir(path.join(directory, "assets"), { recursive: true }))
   await run(writeFile(path.join(directory, "assets", "index-abc.js"), "console.log(1)"))
-  process.env["INTEGRATIONS_WEB_DIR"] = directory
   return directory
 }
 
 describe("control plane assets", () => {
   test("serves the entry document at the root", async () => {
-    await run(buildOutput())
-    const assets = await run(createWebAssets())
+    const directory = await run(buildOutput())
+    const assets = await run(createWebAssets({ directories: [directory] }))
 
     const response = await run(assets.respond("/"))
 
@@ -39,8 +35,8 @@ describe("control plane assets", () => {
   })
 
   test("serves built files with the content type a browser needs", async () => {
-    await run(buildOutput())
-    const assets = await run(createWebAssets())
+    const directory = await run(buildOutput())
+    const assets = await run(createWebAssets({ directories: [directory] }))
 
     const response = await run(assets.respond("/assets/index-abc.js"))
 
@@ -49,8 +45,8 @@ describe("control plane assets", () => {
   })
 
   test("falls back to the entry document for a client-side route", async () => {
-    await run(buildOutput())
-    const assets = await run(createWebAssets())
+    const directory = await run(buildOutput())
+    const assets = await run(createWebAssets({ directories: [directory] }))
 
     // /clients/cl_7 exists in the router, never on disk. Reloading it must work.
     const response = await run(assets.respond("/clients/cl_7"))
@@ -60,8 +56,8 @@ describe("control plane assets", () => {
   })
 
   test("a missing asset is a miss, not the entry document", async () => {
-    await run(buildOutput())
-    const assets = await run(createWebAssets())
+    const directory = await run(buildOutput())
+    const assets = await run(createWebAssets({ directories: [directory] }))
 
     // Serving HTML for a broken script tag turns a build mistake into a blank
     // page with no explanation.
@@ -69,8 +65,8 @@ describe("control plane assets", () => {
   })
 
   test("refuses to escape the build directory", async () => {
-    await run(buildOutput())
-    const assets = await run(createWebAssets())
+    const directory = await run(buildOutput())
+    const assets = await run(createWebAssets({ directories: [directory] }))
 
     for (const pathname of ["/../../etc/passwd", "/assets/../../../../etc/passwd"]) {
       expect(await run(assets.respond(pathname))).toBeUndefined()

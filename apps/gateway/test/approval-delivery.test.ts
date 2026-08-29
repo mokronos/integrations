@@ -16,16 +16,12 @@ interface DeliveryCapture {
 describe("approval delivery", () => {
   test("posts only review metadata to configured webhooks", async () => {
     const capture: DeliveryCapture = {}
-    const server = Bun.serve({
-      port: 0,
-      fetch: async (request) => {
-        capture.notification = decodeNotification(await run(request.text()))
-        const idempotencyKey = request.headers.get("idempotency-key")
-        if (idempotencyKey !== null) capture.idempotencyKey = idempotencyKey
-        return new Response(null, { status: 204 })
-      }
-    })
-    try {
+    const doFetch = Object.assign(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      capture.notification = decodeNotification(String(init?.body))
+      const idempotencyKey = new Headers(init?.headers).get("idempotency-key")
+      if (idempotencyKey !== null) capture.idempotencyKey = idempotencyKey
+      return new Response(null, { status: 204 })
+    }, { preconnect: globalThis.fetch.preconnect })
       const approvalId = ApprovalId.make("ap_delivery")
       await run(deliverApprovalNotification({
         client: {
@@ -35,7 +31,7 @@ describe("approval delivery", () => {
           capabilities: [],
           approvalDelivery: {
             returnLink: true,
-            webhooks: [`http://127.0.0.1:${server.port}/approval`]
+            webhooks: ["https://webhook.example/approval"]
           },
           createdAt: new Date(),
           revokedAt: null
@@ -45,7 +41,7 @@ describe("approval delivery", () => {
         tool: "sendEmail",
         expiresAt: new Date("2030-01-01T00:00:00.000Z"),
         approvalUrl: "https://gateway.example/approvals?approval=ap_delivery"
-      }))
+      }, doFetch))
 
       expect(capture.notification).toEqual({
         version: 1,
@@ -61,8 +57,5 @@ describe("approval delivery", () => {
       expect(capture.idempotencyKey).toBe(approvalId)
       expect(JSON.stringify(capture.notification)).not.toContain("arguments")
       expect(JSON.stringify(capture.notification)).not.toContain("credential")
-    } finally {
-      server.stop(true)
-    }
   })
 })

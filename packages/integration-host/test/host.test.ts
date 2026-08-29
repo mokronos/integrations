@@ -16,6 +16,7 @@ import { ToolAddress } from "@mokronos/contracts"
  *  package's own behaviour rather than a vendor's uptime. */
 const stubMcp = (options: {
   readonly readOnly?: boolean
+  readonly omitReadOnlyHint?: boolean
   readonly onCall?: (tool: string, credential: Option.Option<string>) => void
   readonly onList?: () => void
 } = {}): Layer.Layer<McpHost> =>
@@ -35,13 +36,20 @@ const stubMcp = (options: {
       }),
       listTools: () => {
         options.onList?.()
+        const searchNotes = options.omitReadOnlyHint === true
+          ? {
+              name: "search_notes",
+              description: "Search the notebook.",
+              inputSchema: { type: "object", properties: { q: { type: "string" } } }
+            }
+          : {
+              name: "search_notes",
+              description: "Search the notebook.",
+              inputSchema: { type: "object", properties: { q: { type: "string" } } },
+              annotations: { readOnlyHint: options.readOnly ?? true }
+            }
         return Effect.succeed([
-        {
-          name: "search_notes",
-          description: "Search the notebook.",
-          inputSchema: { type: "object", properties: { q: { type: "string" } } },
-          annotations: { readOnlyHint: options.readOnly ?? true }
-        },
+        searchNotes,
         {
           name: "write_note",
           description: "Add a note.",
@@ -60,7 +68,7 @@ const stubMcp = (options: {
 /** Storage in memory, the MCP client stubbed, and everything between them —
  *  addressing, policy, credential resolution — the real implementation. */
 const testHost = (mcp: Layer.Layer<McpHost>) =>
-  stubbedLayer(Layer.mergeAll(mcp, OpenApiInvoker.layer))
+  stubbedLayer(Layer.mergeAll(mcp, OpenApiInvoker.unavailableTestLayer))
 
 const run = <A, E>(
   operation: Effect.Effect<
@@ -282,10 +290,7 @@ describe("tools", () => {
         const tools = yield* host.toolSummaries({ integration: notes })
         return tools.map((tool) => tool.defaultDecision)
       }),
-      // `readOnly: false` stands in for a server with nothing to declare: an
-      // operator can widen a grant, but a call that already happened cannot be
-      // narrowed, so this is the direction to fail in.
-      stubMcp({ readOnly: false })
+      stubMcp({ omitReadOnlyHint: true })
     )
     expect(decisions).toEqual(["require_approval", "require_approval"])
   })
@@ -298,7 +303,10 @@ describe("tools", () => {
       const byAddress = yield* host.describeTool(byName.address)
       return { byName: String(byName.address), byAddress: String(byAddress.address) }
     }))
-    expect(both.byName).toBe(both.byAddress)
+    expect(both).toEqual({
+      byName: "tools.notes.org.primary.search_notes",
+      byAddress: "tools.notes.org.primary.search_notes"
+    })
   })
 
   it("rejects an address it holds no tool for", async () => {

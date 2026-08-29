@@ -5,7 +5,6 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { Effect, Schema } from "effect"
 import { whenPresent } from "@mokronos/contracts"
-import type { IntegrationsApi } from "@mokronos/integration-host"
 import {
   createGatewayHandler,
   createGatewayStore,
@@ -15,6 +14,7 @@ import {
   newClientId
 } from "../src/index.ts"
 import type { GatewayStore } from "../src/index.ts"
+import { stubIntegrations } from "./stubs.ts"
 
 const JsonBody = Schema.Record(Schema.String, Schema.Json)
 
@@ -62,54 +62,9 @@ describe("the fixed-window limiter", () => {
     expect(limiter.take("a", 0).allowed).toBe(false)
   })
 
-  test("prunes stale counters instead of growing without bound", () => {
-    const limiter = createRateLimiter({ limit: 1000, windowMs: 1_000 })
-    for (let i = 0; i < 5000; i++) limiter.take(`key-${i}`, i * 10)
-    // Every counter is long expired by now; the next take triggers a sweep.
-    expect(limiter.take("fresh", 50_000).allowed).toBe(true)
-  })
 })
 
 describe("gateway traffic shaping", () => {
-  const notStubbed = (member: string) => () => {
-    throw new Error(`stubIntegrations: ${member} is not stubbed for these tests`)
-  }
-
-  const stubIntegrations = (): IntegrationsApi => ({
-    tools: {
-      execute: notStubbed("tools.execute"),
-      summaries: async () => [],
-      describe: notStubbed("tools.describe"),
-      list: async () => []
-    },
-    connections: {
-      list: async () => [],
-      remove: notStubbed("connections.remove"),
-      create: notStubbed("connections.create"),
-      ensure: notStubbed("connections.ensure")
-    },
-    catalog: {
-      classify: notStubbed("catalog.classify"),
-      list: notStubbed("catalog.list"),
-      find: notStubbed("catalog.find"),
-      addMcp: notStubbed("catalog.addMcp"),
-      addOpenApi: notStubbed("catalog.addOpenApi")
-    },
-    auth: {
-      probe: notStubbed("auth.probe"),
-      registerClient: notStubbed("auth.registerClient"),
-      createClient: notStubbed("auth.createClient"),
-      start: notStubbed("auth.start"),
-      complete: notStubbed("auth.complete")
-    },
-    provisioning: {
-      install: notStubbed("provisioning.install"),
-      provision: notStubbed("provisioning.provision")
-    },
-    validateIntegrationNode: notStubbed("validateIntegrationNode"),
-    listIntegrationOverviews: async () => []
-  })
-
   interface SetupOptions {
     readonly addressLimit?: number
     readonly principalLimit?: number

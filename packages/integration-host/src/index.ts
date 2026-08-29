@@ -25,6 +25,7 @@ export { McpHost } from "./mcp/client.ts"
 export { OAuthFlows } from "./oauth/flows.ts"
 export { OpenApiInvoker } from "./openapi/invoke.ts"
 export { SpecCache } from "./openapi/cache.ts"
+export { HttpTransport } from "./http-transport.ts"
 export { classify } from "./classify.ts"
 
 /** The two storage seams, and the layers that satisfy them. */

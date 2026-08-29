@@ -72,8 +72,11 @@ describe("local CLI installer", () => {
     expect(await Bun.file(target).text()).toContain("unrelated")
   })
 
-  test("parses an explicit destination", async () => {
-    const directory = await temporaryDirectory()
-    expect(await parseInstallOptions(["--dir", directory])).toEqual({ directory })
+  test("resolves a relative destination and rejects invalid options", async () => {
+    expect(await parseInstallOptions(["--dir", "local-bin"])).toEqual({
+      directory: path.resolve("local-bin")
+    })
+    await expect(parseInstallOptions(["--dir"])).rejects.toThrow("--dir requires a directory")
+    await expect(parseInstallOptions(["--elsewhere"])).rejects.toThrow("Unknown option")
   })
 })
