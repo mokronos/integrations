@@ -2,8 +2,8 @@ import {
   whenPresent,
   whenPresentMap
 } from "@mokronos/contracts"
-import type { IntegrationsApi } from "@mokronos/integration-host"
-import { IntegrationsApiService, searchIntegrations } from "@mokronos/integration-host"
+import type { IntegrationsApi } from "@mokronos/integrations"
+import { IntegrationsApiService, searchIntegrations } from "@mokronos/integrations"
 import { Effect, Predicate, Schema } from "effect"
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -11,12 +11,12 @@ import {
   Alias,
   ClientId,
   ToolName
-} from "../../domain.ts"
-import { grantToolAddress } from "../../invoke.ts"
-import { grantConnectedTools } from "../../connected-grants.ts"
-import { oauthBrowserPage } from "../../oauth.ts"
-import type { GatewayStore } from "../../store.ts"
-import { GatewayStoreError, GatewayStoreService } from "../../store.ts"
+} from "@mokronos/gateway-core"
+import { grantToolAddress } from "@mokronos/gateway-core"
+import { grantConnectedTools } from "@mokronos/gateway-core"
+import { oauthBrowserPage } from "@mokronos/gateway-core"
+import type { GatewayStore } from "@mokronos/gateway-core"
+import { GatewayStoreError, GatewayStoreService } from "@mokronos/gateway-core"
 import {
   ApiBadRequest,
   ApiNotFound,

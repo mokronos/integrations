@@ -1,4 +1,4 @@
-import type { IntegrationsApi } from "@mokronos/integration-host"
+import type { IntegrationsApi } from "@mokronos/integrations"
 import { Effect } from "effect"
 import {
   Alias,

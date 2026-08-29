@@ -5,23 +5,23 @@ import {
   LoginHandoffHash,
   SubjectId,
   TenantId
-} from "../../domain.ts"
-import type { GoogleIdentityOAuth } from "../../identity-oauth.ts"
+} from "@mokronos/gateway-core"
+import type { GoogleIdentityOAuth } from "@mokronos/gateway-core"
 import {
   googleIdentityAuthorizationUrl,
   googleIdentityCallbackUrl,
   resolveGoogleIdentity
-} from "../../identity-oauth.ts"
+} from "@mokronos/gateway-core"
 import {
   generateLoginHandoff,
   hashLoginHandoff,
   newSubjectId,
   newTenantId
-} from "../../keys.ts"
-import { oauthBrowserPage } from "../../oauth.ts"
-import { generateSessionToken, hashPassword, verifyPassword } from "../../passwords.ts"
-import type { GatewayStore, LoginRecord } from "../../store.ts"
-import { GatewayStoreError, GatewayStoreService } from "../../store.ts"
+} from "@mokronos/gateway-core"
+import { oauthBrowserPage } from "@mokronos/gateway-core"
+import { generateSessionToken, hashPassword, verifyPassword } from "@mokronos/gateway-core"
+import type { GatewayStore, LoginRecord } from "@mokronos/gateway-core"
+import { GatewayStoreError, GatewayStoreService } from "@mokronos/gateway-core"
 import {
   ApiBadRequest,
   ApiNotImplemented,

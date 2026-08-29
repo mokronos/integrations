@@ -1,0 +1,22 @@
+{
+  "name": "@mokronos/core-integrations",
+  "version": "0.2.0",
+  "type": "module",
+  "description": "Protocol-neutral integration domain models.",
+  "license": "MIT",
+  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org" },
+  "files": ["dist"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "bun": "./src/index.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": { "build": "rm -rf dist && tsc -p tsconfig.build.json" },
+  "dependencies": {
+    "@mokronos/contracts": "workspace:*",
+    "effect": "catalog:"
+  }
+}

@@ -4,10 +4,10 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import type { AuthApi, IntegrationsApi } from "@mokronos/integration-host"
+import type { AuthApi, IntegrationsApi } from "@mokronos/integrations"
 import type { Connection } from "@mokronos/contracts"
-import { createGatewayHandler, createOAuthSessions, createGatewayStore } from "../src/index.ts"
-import type { GatewayStore } from "../src/index.ts"
+import { createGatewayHandler, createOAuthSessions, createGatewayStore } from "./gateway.ts"
+import type { GatewayStore } from "./gateway.ts"
 
 const directories: Array<string> = []
 const stores: Array<GatewayStore> = []

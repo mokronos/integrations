@@ -65,7 +65,7 @@ describe("published CLI package", () => {
     await mkdir(project)
 
     const host = await pack(
-      path.join(repoRoot, "packages", "integration-host"),
+      path.join(repoRoot, "packages", "integrations"),
       tarballs
     )
     const contracts = await pack(
@@ -74,6 +74,10 @@ describe("published CLI package", () => {
     )
     const client = await pack(path.join(repoRoot, "apps", "ts"), tarballs)
     const observability = await pack(path.join(repoRoot, "packages", "observability"), tarballs)
+    const coreIntegrations = await pack(
+      path.join(repoRoot, "packages", "core", "integrations"),
+      tarballs
+    )
     const gatewayCore = await pack(path.join(repoRoot, "packages", "core", "gateway"), tarballs)
     const gatewayApi = await pack(path.join(repoRoot, "packages", "core", "api"), tarballs)
     const local = await pack(path.join(repoRoot, "apps", "local"), tarballs)
@@ -84,7 +88,8 @@ describe("published CLI package", () => {
       "@mokronos/gateway-api": `file:${gatewayApi}`,
       "@mokronos/integrations-local": `file:${local}`,
       "@mokronos/integrations-client": `file:${client}`,
-      "@mokronos/integration-host": `file:${host}`,
+      "@mokronos/integrations": `file:${host}`,
+      "@mokronos/core-integrations": `file:${coreIntegrations}`,
       "@mokronos/observability": `file:${observability}`,
       "@mokronos/contracts": `file:${contracts}`
     }

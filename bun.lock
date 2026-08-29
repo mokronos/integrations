@@ -39,7 +39,7 @@
         "@libsql/client": "catalog:",
         "@mokronos/gateway-api": "workspace:*",
         "@mokronos/gateway-core": "workspace:*",
-        "@mokronos/integration-host": "workspace:*",
+        "@mokronos/integrations": "workspace:*",
         "effect": "catalog:",
       },
       "devDependencies": {
@@ -113,7 +113,7 @@
         "@effect/platform-bun": "catalog:",
         "@mokronos/contracts": "workspace:*",
         "@mokronos/gateway-core": "workspace:*",
-        "@mokronos/integration-host": "workspace:*",
+        "@mokronos/integrations": "workspace:*",
         "@mokronos/integrations-client": "workspace:*",
         "@mokronos/observability": "workspace:*",
         "effect": "catalog:",
@@ -125,18 +125,27 @@
       "dependencies": {
         "@libsql/client": "catalog:",
         "@mokronos/contracts": "workspace:*",
-        "@mokronos/integration-host": "workspace:*",
+        "@mokronos/integrations": "workspace:*",
         "@mokronos/integrations-client": "workspace:*",
         "effect": "catalog:",
       },
     },
-    "packages/integration-host": {
-      "name": "@mokronos/integration-host",
+    "packages/core/integrations": {
+      "name": "@mokronos/core-integrations",
+      "version": "0.2.0",
+      "dependencies": {
+        "@mokronos/contracts": "workspace:*",
+        "effect": "catalog:",
+      },
+    },
+    "packages/integrations": {
+      "name": "@mokronos/integrations",
       "version": "0.2.0",
       "dependencies": {
         "@libsql/client": "catalog:",
         "@modelcontextprotocol/sdk": "catalog:",
         "@mokronos/contracts": "workspace:*",
+        "@mokronos/core-integrations": "workspace:*",
         "effect": "catalog:",
         "oas": "catalog:",
         "oas-normalize": "catalog:",
@@ -449,11 +458,13 @@
 
     "@mokronos/contracts": ["@mokronos/contracts@workspace:packages/contracts"],
 
+    "@mokronos/core-integrations": ["@mokronos/core-integrations@workspace:packages/core/integrations"],
+
     "@mokronos/gateway-api": ["@mokronos/gateway-api@workspace:packages/core/api"],
 
     "@mokronos/gateway-core": ["@mokronos/gateway-core@workspace:packages/core/gateway"],
 
-    "@mokronos/integration-host": ["@mokronos/integration-host@workspace:packages/integration-host"],
+    "@mokronos/integrations": ["@mokronos/integrations@workspace:packages/integrations"],
 
     "@mokronos/integrations-cli": ["@mokronos/integrations-cli@workspace:apps/cli"],
 

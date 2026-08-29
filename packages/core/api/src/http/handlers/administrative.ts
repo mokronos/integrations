@@ -3,7 +3,7 @@ import {
   PositiveInt,
   whenPresentMap
 } from "@mokronos/contracts"
-import { IntegrationsApiService } from "@mokronos/integration-host"
+import { IntegrationsApiService } from "@mokronos/integrations"
 import { Clock, Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
@@ -12,17 +12,17 @@ import {
   ConnectionName,
   IntegrationSlug,
   ToolName
-} from "../../domain.ts"
-import type { DriftReport } from "../../drift.ts"
-import { refreshIntegrationSnapshot } from "../../drift.ts"
-import { executeAuthorized, listGrantedTools } from "../../invoke.ts"
+} from "@mokronos/gateway-core"
+import type { DriftReport } from "@mokronos/gateway-core"
+import { refreshIntegrationSnapshot } from "@mokronos/gateway-core"
+import { executeAuthorized, listGrantedTools } from "@mokronos/gateway-core"
 import {
   generateApiKey,
   newClientId,
   newGrantId
-} from "../../keys.ts"
-import { runMaintenance } from "../../maintenance.ts"
-import { GatewayStoreError, GatewayStoreService } from "../../store.ts"
+} from "@mokronos/gateway-core"
+import { runMaintenance } from "@mokronos/gateway-core"
+import { GatewayStoreError, GatewayStoreService } from "@mokronos/gateway-core"
 import {
   ApiBadRequest,
   ApiNotFound,

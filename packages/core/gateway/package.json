@@ -20,7 +20,7 @@
   "dependencies": {
     "@libsql/client": "catalog:",
     "@mokronos/contracts": "workspace:*",
-    "@mokronos/integration-host": "workspace:*",
+    "@mokronos/integrations": "workspace:*",
     "@mokronos/integrations-client": "workspace:*",
     "effect": "catalog:"
   }

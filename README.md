@@ -18,7 +18,7 @@ key and invoke logical `{ alias, tool }` addresses through the HTTP API.
 | `apps/ts/` | `@mokronos/integrations-client`, the thin TypeScript gateway client |
 | `apps/web/` | Browser control plane |
 | `apps/host-cloudflare/` | Cloudflare Worker host |
-| `packages/integration-host/` | The integration host: MCP and OpenAPI catalog, connections, tools |
+| `packages/integrations/` | The integration host: MCP and OpenAPI catalog, connections, tools |
 | `packages/contracts/` | Shared vocabulary and wire contracts |
 | `docs/` | Gateway decisions, deployment notes, and client references |
 
@@ -72,4 +72,4 @@ directory.
 
 The TypeScript client communicates only with the versioned gateway HTTP API.
 Applications such as [`wf`](https://github.com/mokronos/wf) consume the client
-without importing gateway or integration-host implementation.
+without importing gateway or integrations implementation.

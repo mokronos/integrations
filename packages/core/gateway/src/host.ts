@@ -1,5 +1,5 @@
-import { createHostHandle, createIntegrationsApi } from "@mokronos/integration-host"
-import type { HostHandle, IntegrationsApi } from "@mokronos/integration-host"
+import { createHostHandle, createIntegrationsApi } from "@mokronos/integrations"
+import type { HostHandle, IntegrationsApi } from "@mokronos/integrations"
 import { integrationsHome } from "@mokronos/integrations-client"
 
 export interface Gateway {

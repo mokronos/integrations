@@ -1,7 +1,7 @@
 import { Context, Effect, Layer } from "effect"
-import type { GoogleIdentityOAuth } from "../identity-oauth.ts"
-import type { OAuthSessions } from "../oauth-sessions.ts"
-import type { GatewayStoreError } from "../store.ts"
+import type { GoogleIdentityOAuth } from "@mokronos/gateway-core"
+import type { OAuthSessions } from "@mokronos/gateway-core"
+import type { GatewayStoreError } from "@mokronos/gateway-core"
 import type { WebAssets } from "../web-assets.ts"
 
 /** What a handler may ask the context for.

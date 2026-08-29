@@ -21,7 +21,7 @@ import {
   GrantDecision,
   PendingApproval,
   SubjectId
-} from "../domain.ts"
+} from "@mokronos/gateway-core"
 import {
   BooleanFromString,
   Connection,

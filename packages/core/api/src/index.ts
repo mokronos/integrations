@@ -1,4 +1,3 @@
-export * from "@mokronos/gateway-core"
 export * from "./http/api.ts"
 export * from "./http/authority.ts"
 export * from "./http/handler.ts"

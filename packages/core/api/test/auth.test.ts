@@ -17,10 +17,10 @@ import {
   newGrantId,
   TenantId,
   ToolName
-} from "../src/index.ts"
-import type { ConnectionRef, GatewayStore } from "../src/index.ts"
+} from "./gateway.ts"
+import type { ConnectionRef, GatewayStore } from "./gateway.ts"
 import { stubIntegrations } from "./stubs.ts"
-import type { GoogleIdentityOAuth } from "../src/identity-oauth.ts"
+import type { GoogleIdentityOAuth } from "@mokronos/gateway-core"
 
 const JsonBody = Schema.Record(Schema.String, Schema.Json)
 

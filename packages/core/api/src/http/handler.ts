@@ -32,13 +32,13 @@ import {
 } from "./services.ts"
 import type { GatewaySettings, SignInPolicy } from "./services.ts"
 import { NonNegativeIntFromString, whenPresent, whenPresentMap } from "@mokronos/contracts"
-import { IntegrationsApiService } from "@mokronos/integration-host"
-import type { IntegrationsApi } from "@mokronos/integration-host"
-import { GatewayStoreService } from "../store.ts"
-import type { GatewayStore } from "../store.ts"
-import type { OAuthSessions } from "../oauth-sessions.ts"
+import { IntegrationsApiService } from "@mokronos/integrations"
+import type { IntegrationsApi } from "@mokronos/integrations"
+import { GatewayStoreService } from "@mokronos/gateway-core"
+import type { GatewayStore } from "@mokronos/gateway-core"
+import type { OAuthSessions } from "@mokronos/gateway-core"
 import type { WebAssets } from "../web-assets.ts"
-import type { RateLimiter } from "../ratelimit.ts"
+import type { RateLimiter } from "@mokronos/gateway-core"
 
 /** What the server knows about a request that the request itself cannot say.
  *  Carried per request through the web-handler seam; the served gateway

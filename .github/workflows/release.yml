@@ -36,9 +36,10 @@ jobs:
           set -euo pipefail
           version="${RELEASE_TAG#v}"
           for manifest in \
-            packages/integration-host/package.json \
+            packages/integrations/package.json \
             packages/contracts/package.json \
             packages/observability/package.json \
+            packages/core/integrations/package.json \
             packages/core/gateway/package.json \
             packages/core/api/package.json \
             apps/ts/package.json \
@@ -72,8 +73,10 @@ jobs:
       - run: mkdir -p ${{ runner.temp }}/release
       - run: bun pm pack --ignore-scripts --destination ${{ runner.temp }}/release --filename protocol.tgz
         working-directory: packages/contracts
+      - run: bun pm pack --ignore-scripts --destination ${{ runner.temp }}/release --filename core-integrations.tgz
+        working-directory: packages/core/integrations
       - run: bun pm pack --ignore-scripts --destination ${{ runner.temp }}/release --filename executor.tgz
-        working-directory: packages/integration-host
+        working-directory: packages/integrations
       - run: bun pm pack --ignore-scripts --destination ${{ runner.temp }}/release --filename observability.tgz
         working-directory: packages/observability
       - run: bun pm pack --ignore-scripts --destination ${{ runner.temp }}/release --filename gateway-core.tgz
@@ -87,6 +90,7 @@ jobs:
       - run: bun pm pack --ignore-scripts --destination ${{ runner.temp }}/release --filename cli.tgz
         working-directory: apps/cli
       - run: npm publish ${{ runner.temp }}/release/protocol.tgz --provenance --access public
+      - run: npm publish ${{ runner.temp }}/release/core-integrations.tgz --provenance --access public
       - run: npm publish ${{ runner.temp }}/release/executor.tgz --provenance --access public
       - run: npm publish ${{ runner.temp }}/release/observability.tgz --provenance --access public
       - run: npm publish ${{ runner.temp }}/release/gateway-core.tgz --provenance --access public

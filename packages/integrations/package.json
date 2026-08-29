@@ -1,0 +1,54 @@
+{
+  "name": "@mokronos/integrations",
+  "version": "0.2.0",
+  "type": "module",
+  "description": "MCP and OpenAPI catalog, connections, and tool invocation.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mokronos/integrations.git",
+    "directory": "packages/integrations"
+  },
+  "homepage": "https://github.com/mokronos/integrations#readme",
+  "keywords": [
+    "gateway",
+    "integration",
+    "mcp",
+    "openapi",
+    "oauth",
+    "agent"
+  ],
+  "engines": {
+    "bun": ">=1.2"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
+  "files": [
+    "src",
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "bun": "./src/index.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "prepublishOnly": "bun run build"
+  },
+  "dependencies": {
+    "@libsql/client": "catalog:",
+    "@modelcontextprotocol/sdk": "catalog:",
+    "@mokronos/core-integrations": "workspace:*",
+    "@mokronos/contracts": "workspace:*",
+    "effect": "catalog:",
+    "oas": "catalog:",
+    "oas-normalize": "catalog:"
+  }
+}

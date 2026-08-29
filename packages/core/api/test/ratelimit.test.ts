@@ -12,8 +12,8 @@ import {
   defaultTenantId,
   generateApiKey,
   newClientId
-} from "../src/index.ts"
-import type { GatewayStore } from "../src/index.ts"
+} from "./gateway.ts"
+import type { GatewayStore } from "./gateway.ts"
 import { stubIntegrations } from "./stubs.ts"
 
 const JsonBody = Schema.Record(Schema.String, Schema.Json)

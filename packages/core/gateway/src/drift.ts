@@ -1,4 +1,4 @@
-import type { IntegrationsApi } from "@mokronos/integration-host"
+import type { IntegrationsApi } from "@mokronos/integrations"
 import { ConnectionName, IntegrationSlug, TenantId, ToolName } from "./domain.ts"
 import type { DriftEntry, ToolSnapshot } from "./domain.ts"
 import { Effect, Schema } from "effect"

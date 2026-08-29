@@ -1,6 +1,6 @@
 import { whenPresent } from "@mokronos/contracts"
 import { Effect, Schema } from "effect"
-import type { IntegrationsApi } from "@mokronos/integration-host"
+import type { IntegrationsApi } from "@mokronos/integrations"
 import { ToolAddress } from "@mokronos/contracts"
 import { authorizeInvocation } from "./authorize.ts"
 import { defaultApprovalExpiryHours, defaultArgumentRetentionDays } from "./config.ts"

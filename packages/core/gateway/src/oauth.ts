@@ -1,5 +1,5 @@
 import { Schema } from "effect"
-import { type AuthApi } from "@mokronos/integration-host"
+import { type AuthApi } from "@mokronos/integrations"
 import { AuthMethod, Connection, whenPresent } from "@mokronos/contracts"
 import { oauthSetupGuidance } from "./oauth-guidance.ts"
 

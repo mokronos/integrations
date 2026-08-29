@@ -1,6 +1,6 @@
 import { whenPresent } from "@mokronos/contracts"
 import { randomUUID } from "node:crypto"
-import type { IntegrationsApi } from "@mokronos/integration-host"
+import type { IntegrationsApi } from "@mokronos/integrations"
 import type { AuthMethod, Connection } from "@mokronos/contracts"
 import { Effect, Schema } from "effect"
 import type { Client } from "./domain.ts"

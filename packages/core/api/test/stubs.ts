@@ -1,4 +1,4 @@
-import type { IntegrationsApi } from "@mokronos/integration-host"
+import type { IntegrationsApi } from "@mokronos/integrations"
 
 /** Members a given test never reaches. Throwing is deliberate: a partial fake
  *  that returned `undefined` would let a handler quietly start depending on one

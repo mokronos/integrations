@@ -1,12 +1,12 @@
 import { Context, Duration, Effect, Layer, Option } from "effect"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
-import { authenticateClient, authorizeClientCapability } from "../authorize.ts"
-import { SessionTokenHash } from "../domain.ts"
-import { hashSessionToken } from "../passwords.ts"
-import type { RateLimiter } from "../ratelimit.ts"
-import type { GatewayStore } from "../store.ts"
-import { GatewayStoreError } from "../store.ts"
+import { authenticateClient, authorizeClientCapability } from "@mokronos/gateway-core"
+import { SessionTokenHash } from "@mokronos/gateway-core"
+import { hashSessionToken } from "@mokronos/gateway-core"
+import type { RateLimiter } from "@mokronos/gateway-core"
+import type { GatewayStore } from "@mokronos/gateway-core"
+import { GatewayStoreError } from "@mokronos/gateway-core"
 import {
   Identity,
   Forbidden,

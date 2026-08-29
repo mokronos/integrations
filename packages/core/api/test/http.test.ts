@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { Effect, Schema } from "effect"
 import { ToolAddress, whenPresent } from "@mokronos/contracts"
-import type { IntegrationsApi } from "@mokronos/integration-host"
+import type { IntegrationsApi } from "@mokronos/integrations"
 import type { Connection, Tool } from "@mokronos/contracts"
 import {
   Alias,
@@ -20,8 +20,8 @@ import {
   newGrantId,
   SubjectId,
   ToolName
-} from "../src/index.ts"
-import type { ConnectionRef, GatewayStore } from "../src/index.ts"
+} from "./gateway.ts"
+import type { ConnectionRef, GatewayStore } from "./gateway.ts"
 
 const JsonBody = Schema.Record(Schema.String, Schema.Json)
 
