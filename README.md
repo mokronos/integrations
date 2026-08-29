@@ -20,6 +20,7 @@ key and invoke logical `{ alias, tool }` addresses through the HTTP API.
 | `apps/host-cloudflare/` | Cloudflare Worker host |
 | `packages/integrations/` | The integration host: MCP and OpenAPI catalog, connections, tools |
 | `packages/contracts/` | Shared vocabulary and wire contracts |
+| `examples/sandbox-local/` | Pi harness with Gondolin-isolated tools and a host credential broker |
 | `docs/` | Gateway decisions, deployment notes, and client references |
 
 `CONTEXT.md` defines the gateway's domain language. `VISION.md` records product
