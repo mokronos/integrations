@@ -297,7 +297,7 @@ export const decodeAccountDeleted = json(AccountDeleted)
  *  value still reaches here as a string, and `new Date(...).toISOString()` on
  *  one throws mid-render. Asking the schema turns that into an absent filter. */
 const decodeInstant = Schema.decodeUnknownOption(
-  Schema.DateFromString.check(Schema.isDateValid())
+  Schema.DateFromString
 )
 
 export const instantFilter = (value: string): string | undefined =>

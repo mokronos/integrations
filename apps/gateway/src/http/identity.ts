@@ -43,7 +43,7 @@ type ForbiddenReason = Exclude<RefusalReason, UnauthorizedReason>
  *  a permissions-tier problem. The two classes exist because the wire speaks in
  *  status codes — unknown and revoked keys are 401, everything else is 403 —
  *  and a single class could only carry one static status annotation. */
-export class Unauthorized extends Schema.TaggedErrorClass<Unauthorized>()(
+export class Unauthorized extends Schema.TaggedError<Unauthorized>()(
   "Unauthorized",
   { code: Schema.Literals(["unknown-key", "key-revoked"]), error: Schema.String }
 ) {
@@ -55,7 +55,7 @@ export class Unauthorized extends Schema.TaggedErrorClass<Unauthorized>()(
  *  it. Instances of the class encode through this. */
 export const UnauthorizedError = Unauthorized.pipe(HttpApiSchema.status(401))
 
-export class Forbidden extends Schema.TaggedErrorClass<Forbidden>()(
+export class Forbidden extends Schema.TaggedError<Forbidden>()(
   "Forbidden",
   { code: Schema.Literals(["client-revoked", "not-permitted", "cross-site"]), error: Schema.String }
 ) {
@@ -146,7 +146,7 @@ export class Identity extends Context.Service<Identity, Caller>()(
  *  that admits sessions is a bug, and fails loudly rather than authorizing
  *  nobody. */
 export const requireClient: Effect.Effect<Client, Forbidden, Identity> = Effect.flatMap(
-  Identity.asEffect(),
+  Identity,
   (caller) =>
     caller.kind === "client" || caller.kind === "local"
       ? Effect.succeed(caller.client)
@@ -156,7 +156,7 @@ export const requireClient: Effect.Effect<Client, Forbidden, Identity> = Effect.
 /** The presented API key. Only meaningful alongside {@link requireClient}. */
 export const requireSecret: Effect.Effect<string, Unauthorized | Forbidden, Identity> = Effect.gen(
   function* () {
-    const caller = yield* Identity.asEffect()
+    const caller = yield* Identity
     if (caller.kind === "client") return caller.secret
     if (caller.kind === "local") return yield* Forbidden.of("not-permitted")
     return yield* Unauthorized.of("unknown-key")
@@ -167,7 +167,7 @@ export const requireSecret: Effect.Effect<string, Unauthorized | Forbidden, Iden
  *  signed-in human's. Every tenant-scoped read goes through here, so a session
  *  and a key see the same slice of the world. */
 export const requireTenant: Effect.Effect<TenantId, Forbidden, Identity> = Effect.flatMap(
-  Identity.asEffect(),
+  Identity,
   (caller) => {
     switch (caller.kind) {
       case "client":
@@ -188,7 +188,7 @@ export const currentSession: Effect.Effect<
   never,
   Identity
 > = Effect.map(
-  Identity.asEffect(),
+  Identity,
   (caller) => caller.kind === "session" ? Option.some(caller) : Option.none()
 )
 
@@ -199,7 +199,7 @@ export const decidedBy: Effect.Effect<
   never,
   Identity
 > = Effect.map(
-  Identity.asEffect(),
+  Identity,
   (caller) =>
     caller.kind === "session"
       ? caller.email

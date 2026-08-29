@@ -77,7 +77,7 @@ export interface GatewayHandlerOptions extends GatewaySettings {
 const bodyLimitLayer = (maxBytes: number) =>
   HttpRouter.use((router) =>
     router.addGlobalMiddleware((httpEffect) =>
-      Effect.flatMap(HttpServerRequest.HttpServerRequest.asEffect(), (request) => {
+      Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) => {
         // A length that is absent or unreadable is not a length over the limit,
         // so it falls through to the handler like any undeclared body.
         const declared = Schema.decodeUnknownOption(NonNegativeIntFromString)(

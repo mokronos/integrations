@@ -251,55 +251,55 @@ const OAuthSessionView = Schema.Struct({
 
 /** Endpoint-level refusals. Each carries its status as an annotation, so the
  *  encoded response and the documented API cannot disagree. */
-class ApiBadRequest extends Schema.TaggedErrorClass<ApiBadRequest>()(
+class ApiBadRequest extends Schema.TaggedError<ApiBadRequest>()(
   "ApiBadRequest",
   { error: Schema.String }
 ) {}
 const ApiBadRequestError = ApiBadRequest.pipe(HttpApiSchema.status(400))
 
-class ApiNotFound extends Schema.TaggedErrorClass<ApiNotFound>()(
+class ApiNotFound extends Schema.TaggedError<ApiNotFound>()(
   "ApiNotFound",
   { error: Schema.String }
 ) {}
 const ApiNotFoundError = ApiNotFound.pipe(HttpApiSchema.status(404))
 
-class ApiNotImplemented extends Schema.TaggedErrorClass<ApiNotImplemented>()(
+class ApiNotImplemented extends Schema.TaggedError<ApiNotImplemented>()(
   "ApiNotImplemented",
   { error: Schema.String, code: Schema.String }
 ) {}
 const ApiNotImplementedError = ApiNotImplemented.pipe(HttpApiSchema.status(501))
 
-class SignupClosed extends Schema.TaggedErrorClass<SignupClosed>()(
+class SignupClosed extends Schema.TaggedError<SignupClosed>()(
   "SignupClosed",
   { error: Schema.String, code: Schema.Literal("signup-closed") }
 ) {}
 const SignupClosedError = SignupClosed.pipe(HttpApiSchema.status(403))
 
-class InvalidCredentials extends Schema.TaggedErrorClass<InvalidCredentials>()(
+class InvalidCredentials extends Schema.TaggedError<InvalidCredentials>()(
   "InvalidCredentials",
   { error: Schema.String, code: Schema.Literal("invalid-credentials") }
 ) {}
 const InvalidCredentialsError = InvalidCredentials.pipe(HttpApiSchema.status(401))
 
-class PasswordRequired extends Schema.TaggedErrorClass<PasswordRequired>()(
+class PasswordRequired extends Schema.TaggedError<PasswordRequired>()(
   "PasswordRequired",
   { error: Schema.String, code: Schema.Literal("password-required") }
 ) {}
 const PasswordRequiredError = PasswordRequired.pipe(HttpApiSchema.status(409))
 
-class HandoffUnknown extends Schema.TaggedErrorClass<HandoffUnknown>()(
+class HandoffUnknown extends Schema.TaggedError<HandoffUnknown>()(
   "HandoffUnknown",
   { error: Schema.String, code: Schema.Literal("login-handoff-unknown") }
 ) {}
 const HandoffUnknownError = HandoffUnknown.pipe(HttpApiSchema.status(404))
 
-class HandoffExpired extends Schema.TaggedErrorClass<HandoffExpired>()(
+class HandoffExpired extends Schema.TaggedError<HandoffExpired>()(
   "HandoffExpired",
   { error: Schema.String, code: Schema.Literal("login-handoff-expired") }
 ) {}
 const HandoffExpiredError = HandoffExpired.pipe(HttpApiSchema.status(410))
 
-class HandoffCollected extends Schema.TaggedErrorClass<HandoffCollected>()(
+class HandoffCollected extends Schema.TaggedError<HandoffCollected>()(
   "HandoffCollected",
   { error: Schema.String, code: Schema.Literal("login-handoff-collected") }
 ) {}
@@ -558,7 +558,7 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
   }).annotate(RequiredAccess, "administrative"))
   .add(HttpApiEndpoint.get("audit", "/v1/audit", {
     query: {
-      since: Schema.optional(Schema.DateFromString.check(Schema.isDateValid())),
+      since: Schema.optional(Schema.DateFromString),
       outcome: Schema.optional(AuditOutcome),
       clientId: Schema.optional(ClientId),
       alias: Schema.optional(Alias),

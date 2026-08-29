@@ -16,6 +16,7 @@ import {
 
 const verboseFlag = () =>
   Flag.boolean("verbose").pipe(
+    Flag.withDefault(false),
     Flag.withAlias("v"),
     // Says how much of each row to show. It does not say how many rows: a
     // listing returns all of them either way, so nothing is hidden behind a

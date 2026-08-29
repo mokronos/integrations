@@ -18,11 +18,11 @@ import type { GatewayStore, GatewayStoreError, RecordAuditInput } from "./store.
 
 type Json = typeof Schema.Json.Type
 
-class IntegrationCallError extends Schema.TaggedErrorClass<IntegrationCallError>()(
+class IntegrationCallError extends Schema.TaggedError<IntegrationCallError>()(
   "IntegrationCallError",
   {
     message: Schema.String,
-    cause: Schema.Defect
+    cause: Schema.Defect()
   }
 ) {}
 

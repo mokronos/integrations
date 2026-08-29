@@ -15,6 +15,7 @@ import {
 
 const verboseFlag = () =>
   Flag.boolean("verbose").pipe(
+    Flag.withDefault(false),
     Flag.withAlias("v"),
     // Says how much of each row to show. It does not say how many rows: a
     // listing returns all of them either way, so nothing is hidden behind a
@@ -146,7 +147,7 @@ export const connectCommand = (runGateway: GatewayTask) => Command.make(
     ),
     clientId: Flag.string("client-id").pipe(Flag.optional),
     clientSecretEnv: Flag.string("client-secret-env").pipe(Flag.optional),
-    noOpen: Flag.boolean("no-open"),
+    noOpen: Flag.boolean("no-open").pipe(Flag.withDefault(false)),
     timeout: Flag.integer("timeout").pipe(Flag.withDefault(300)),
     verbose: verboseFlag()
   },

@@ -16,6 +16,7 @@ import { connectToControlPlane } from "../session.ts"
 
 const verboseFlag = () =>
   Flag.boolean("verbose").pipe(
+    Flag.withDefault(false),
     Flag.withAlias("v"),
     // Says how much of each row to show. It does not say how many rows: a
     // listing returns all of them either way, so nothing is hidden behind a
@@ -127,9 +128,11 @@ export const clientCommand = Command.make(
   {
     name: Argument.string("name"),
     provision: Flag.boolean("provision").pipe(
+      Flag.withDefault(false),
       Flag.withDescription("Allow this client to discover and connect integrations")
     ),
     administer: Flag.boolean("administer").pipe(
+      Flag.withDefault(false),
       Flag.withDescription("Allow this client to administer clients, keys, grants, audit, and policy")
     )
   },
@@ -200,9 +203,11 @@ export const grantCommand = Command.make(
     ),
     connection: connectionFlag(),
     requireApproval: Flag.boolean("require-approval").pipe(
+      Flag.withDefault(false),
       Flag.withDescription("Freeze this tool's calls for a human instead of running them")
     ),
     allow: Flag.boolean("allow").pipe(
+      Flag.withDefault(false),
       Flag.withDescription("Explicitly allow direct calls, overriding the tool's suggested policy")
     )
   },
@@ -261,4 +266,3 @@ export const revokeCommand = Command.make(
     "Revoke a grant, a client, or one API key. Revoked rows stay as history"
   )
 )
-

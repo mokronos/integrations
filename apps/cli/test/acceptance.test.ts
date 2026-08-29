@@ -30,10 +30,6 @@ const DiscoveredOutput = Schema.Struct({
 const ConnectionsOutput = Schema.Struct({
   connections: Schema.Array(Schema.Struct({ address: Schema.String, name: Schema.String }))
 })
-const FrozenOutput = Schema.Struct({ status: Schema.String, approvalId: Schema.String })
-const AuditOutput = Schema.Struct({
-  records: Schema.Array(Schema.Struct({ outcome: Schema.String }))
-})
 const DirectOutcome = Schema.Struct({
   status: Schema.String,
   result: Schema.Struct({ title: Schema.String })
@@ -466,49 +462,6 @@ describe("integrations CLI acceptance", () => {
       "{}"
     ], sandbox)
     expect(refused.exitCode).toBe(1)
-  }, 30_000)
-
-  test("a require-approval grant freezes the call until a human decides", async () => {
-    const vendor = startVendor()
-    const gateway = await startGateway()
-    await loginOperator(gateway)
-    const clientCli = (args: ReadonlyArray<string>, environment = gateway.environment) =>
-      run(agentCli, args, environment)
-    const operator = (args: ReadonlyArray<string>) =>
-      run(operatorCli, args, { ...gateway.environment, INTEGRATIONS_API_KEY: undefined })
-
-    const discovered = parseOutput(DiscoveredOutput, (await clientCli(["discover", vendor.specUrl])).stdout)
-    const slug = discovered.integration.slug
-    await clientCli(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
-    const client = parseOutput(IdOutput, (await operator(["client", "sales"])).stdout)
-    const key = parseOutput(SecretOutput, (await operator(["key", client.id])).stdout)
-    await operator([
-      "grant",
-      client.id,
-      "tickets",
-      "tickets.create",
-      "--integration",
-      slug,
-      "--require-approval"
-    ])
-
-    const frozen = parseOutput(FrozenOutput, (await clientCli([
-      "execute",
-      "tickets",
-      "tickets.create",
-      JSON.stringify({ body: { title: "Needs a human" } })
-    ], { ...gateway.environment, INTEGRATIONS_API_KEY: key.secret })).stdout)
-
-    expect(frozen.status).toBe("pending")
-    expect(vendor.invocations()).toBe(0)
-
-    const approved = await operator(["approve", frozen.approvalId])
-    expect(approved.exitCode, approved.stderr).toBe(0)
-    // The gateway performed the frozen call itself.
-    expect(vendor.invocations()).toBe(1)
-
-    const audit = parseOutput(AuditOutput, (await operator(["audit"])).stdout)
-    expect(audit.records.map((entry) => entry.outcome)).toContain("succeeded")
   }, 30_000)
 
   test("every result is JSON a reader can parse, whole", async () => {

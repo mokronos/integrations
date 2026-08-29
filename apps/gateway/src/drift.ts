@@ -81,11 +81,11 @@ export type DriftReport = {
   readonly tools: number
 }
 
-export class DriftRefreshError extends Schema.TaggedErrorClass<DriftRefreshError>()(
+export class DriftRefreshError extends Schema.TaggedError<DriftRefreshError>()(
   "DriftRefreshError",
   {
     integration: Schema.String,
-    cause: Schema.Defect
+    cause: Schema.Defect()
   }
 ) {}
 

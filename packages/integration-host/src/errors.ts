@@ -5,15 +5,15 @@ import { Schema } from "effect"
  *  on `_tag` rather than on message text. */
 
 /** Persistence failed — the database or the credential file, not the caller. */
-export class StorageError extends Schema.TaggedErrorClass<StorageError>()(
+export class StorageError extends Schema.TaggedError<StorageError>()(
   "StorageError",
   {
     message: Schema.String,
-    cause: Schema.optional(Schema.Defect)
+    cause: Schema.optional(Schema.Defect())
   }
 ) {}
 
-export class IntegrationNotFoundError extends Schema.TaggedErrorClass<IntegrationNotFoundError>()(
+export class IntegrationNotFoundError extends Schema.TaggedError<IntegrationNotFoundError>()(
   "IntegrationNotFoundError",
   { integration: Schema.String }
 ) {
@@ -22,7 +22,7 @@ export class IntegrationNotFoundError extends Schema.TaggedErrorClass<Integratio
   }
 }
 
-export class ConnectionNotFoundError extends Schema.TaggedErrorClass<ConnectionNotFoundError>()(
+export class ConnectionNotFoundError extends Schema.TaggedError<ConnectionNotFoundError>()(
   "ConnectionNotFoundError",
   {
     integration: Schema.String,
@@ -34,7 +34,7 @@ export class ConnectionNotFoundError extends Schema.TaggedErrorClass<ConnectionN
   }
 }
 
-export class ToolNotFoundError extends Schema.TaggedErrorClass<ToolNotFoundError>()(
+export class ToolNotFoundError extends Schema.TaggedError<ToolNotFoundError>()(
   "ToolNotFoundError",
   { tool: Schema.String }
 ) {
@@ -45,7 +45,7 @@ export class ToolNotFoundError extends Schema.TaggedErrorClass<ToolNotFoundError
 
 /** The integration was reached and refused the call, or the transport failed.
  *  `status` is present when the upstream spoke HTTP. */
-export class InvocationError extends Schema.TaggedErrorClass<InvocationError>()(
+export class InvocationError extends Schema.TaggedError<InvocationError>()(
   "InvocationError",
   {
     code: Schema.String,
@@ -60,12 +60,12 @@ export class InvocationError extends Schema.TaggedErrorClass<InvocationError>()(
 
 /** An OpenAPI or Google Discovery document could not be fetched, parsed, or
  *  projected into tools. */
-export class SpecError extends Schema.TaggedErrorClass<SpecError>()(
+export class SpecError extends Schema.TaggedError<SpecError>()(
   "SpecError",
   {
     source: Schema.String,
     detail: Schema.String,
-    cause: Schema.optional(Schema.Defect)
+    cause: Schema.optional(Schema.Defect())
   }
 ) {
   override get message(): string {
@@ -74,12 +74,12 @@ export class SpecError extends Schema.TaggedErrorClass<SpecError>()(
 }
 
 /** An MCP endpoint could not be reached, initialized, or queried. */
-export class McpError extends Schema.TaggedErrorClass<McpError>()(
+export class McpError extends Schema.TaggedError<McpError>()(
   "McpError",
   {
     endpoint: Schema.String,
     detail: Schema.String,
-    cause: Schema.optional(Schema.Defect)
+    cause: Schema.optional(Schema.Defect())
   }
 ) {
   override get message(): string {
@@ -89,12 +89,12 @@ export class McpError extends Schema.TaggedErrorClass<McpError>()(
 
 /** Discovery, registration, or a token exchange failed. Distinct from
  *  `InvocationError` because the remedy is re-authorization, not a retry. */
-export class OAuthError extends Schema.TaggedErrorClass<OAuthError>()(
+export class OAuthError extends Schema.TaggedError<OAuthError>()(
   "OAuthError",
   {
     stage: Schema.Literals(["probe", "register", "start", "complete", "refresh"]),
     detail: Schema.String,
-    cause: Schema.optional(Schema.Defect)
+    cause: Schema.optional(Schema.Defect())
   }
 ) {
   override get message(): string {
@@ -103,7 +103,7 @@ export class OAuthError extends Schema.TaggedErrorClass<OAuthError>()(
 }
 
 /** The endpoint could not be classified as either MCP or OpenAPI. */
-export class DetectionError extends Schema.TaggedErrorClass<DetectionError>()(
+export class DetectionError extends Schema.TaggedError<DetectionError>()(
   "DetectionError",
   {
     url: Schema.String,
@@ -117,7 +117,7 @@ export class DetectionError extends Schema.TaggedErrorClass<DetectionError>()(
 
 /** A caller supplied something the host cannot act on — a malformed slug, an
  *  auth template the integration does not declare. */
-export class InvalidInputError extends Schema.TaggedErrorClass<InvalidInputError>()(
+export class InvalidInputError extends Schema.TaggedError<InvalidInputError>()(
   "InvalidInputError",
   {
     field: Schema.String,

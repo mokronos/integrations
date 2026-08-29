@@ -43,7 +43,7 @@ export interface HostHandle {
   close(): Promise<void>
 }
 
-export class HostClosedError extends Schema.TaggedErrorClass<HostClosedError>()(
+export class HostClosedError extends Schema.TaggedError<HostClosedError>()(
   "HostClosedError",
   { directory: Schema.String }
 ) {

@@ -292,7 +292,7 @@ export class Authority extends HttpApiMiddleware.Service<Authority, {
       Effect.sync(() => (httpEffect, { endpoint }) =>
         Effect.gen(function*() {
           const request = yield* HttpServerRequest.HttpServerRequest
-          const context = yield* CurrentRequestContext.asEffect()
+          const context = yield* CurrentRequestContext
           const headers = request.headers
           const unmetered = Context.get(endpoint.annotations, Unmetered)
 

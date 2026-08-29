@@ -44,6 +44,7 @@ export const loginCommand = Command.make(
     email: Argument.string("email").pipe(Argument.optional),
     password: passwordFlag(),
     noOpen: Flag.boolean("no-open").pipe(
+      Flag.withDefault(false),
       Flag.withDescription("Print the sign-in URL instead of opening a browser")
     ),
     timeout: Flag.integer("timeout").pipe(
@@ -145,6 +146,7 @@ const changePasswordCommand = Command.make(
       Flag.withDescription("New password. Omit to enter it without terminal echo")
     ),
     initial: Flag.boolean("initial").pipe(
+      Flag.withDefault(false),
       Flag.withDescription("Set the first password on an OAuth-only account")
     )
   },
@@ -169,6 +171,7 @@ const deleteAccountCommand = Command.make(
   {
     password: passwordFlag(),
     yes: Flag.boolean("yes").pipe(
+      Flag.withDefault(false),
       Flag.withDescription("Confirm permanent deletion of this human account")
     )
   },

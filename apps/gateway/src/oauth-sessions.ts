@@ -22,11 +22,11 @@ export type OAuthSession = {
   readonly state: OAuthSessionState
 }
 
-export class OAuthSessionError extends Schema.TaggedErrorClass<OAuthSessionError>()(
+export class OAuthSessionError extends Schema.TaggedError<OAuthSessionError>()(
   "OAuthSessionError",
   {
     operation: Schema.String,
-    cause: Schema.Defect
+    cause: Schema.Defect()
   }
 ) {}
 

@@ -24,11 +24,11 @@ interface IntegrationValidationEffects {
   >
 }
 
-class IntegrationValidationToolsError extends Schema.TaggedErrorClass<
+class IntegrationValidationToolsError extends Schema.TaggedError<
   IntegrationValidationToolsError
 >()("IntegrationValidationToolsError", {
   operation: Schema.String,
-  cause: Schema.Defect
+  cause: Schema.Defect()
 }) {}
 
 const finding = (

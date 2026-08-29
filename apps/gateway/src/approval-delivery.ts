@@ -29,11 +29,11 @@ export interface ApprovalDeliveryInput {
 /** Best-effort fan-out. A notification endpoint cannot make an invocation
  * fail or approve it; it only tells another system where a signed-in human can
  * review the frozen call. */
-class ApprovalWebhookError extends Schema.TaggedErrorClass<ApprovalWebhookError>()(
+class ApprovalWebhookError extends Schema.TaggedError<ApprovalWebhookError>()(
   "ApprovalWebhookError",
   {
     url: Schema.String,
-    cause: Schema.Defect
+    cause: Schema.Defect()
   }
 ) {}
 

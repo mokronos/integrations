@@ -12,6 +12,7 @@ import { connectToControlPlane } from "../session.ts"
 
 const verboseFlag = () =>
   Flag.boolean("verbose").pipe(
+    Flag.withDefault(false),
     Flag.withAlias("v"),
     // Says how much of each row to show. It does not say how many rows: a
     // listing returns all of them either way, so nothing is hidden behind a
@@ -83,6 +84,7 @@ export const operatorExecuteCommand = Command.make(
       Argument.withDescription("Arguments as JSON (default: {})")
     ),
     direct: Flag.boolean("direct").pipe(
+      Flag.withDefault(false),
       Flag.withDescription(
         "Call a tool address with this key's own authority, bypassing aliases. For testing a connection"
       )
@@ -205,6 +207,7 @@ export const validateCommand = (runGateway: GatewayTask) => Command.make(
     config: Argument.string("json-or-tool-address").pipe(Argument.optional),
     file: Flag.string("file").pipe(Flag.optional),
     structural: Flag.boolean("structural").pipe(
+      Flag.withDefault(false),
       Flag.withDescription("Check the shape only, without checking what resolves")
     ),
     verbose: verboseFlag()

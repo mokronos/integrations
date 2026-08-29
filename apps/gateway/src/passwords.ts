@@ -2,9 +2,9 @@ import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } fr
 import { Effect, Schema } from "effect"
 import { SessionTokenHash } from "./domain.ts"
 
-export class PasswordError extends Schema.TaggedErrorClass<PasswordError>()(
+export class PasswordError extends Schema.TaggedError<PasswordError>()(
   "PasswordError",
-  { operation: Schema.String, cause: Schema.Defect }
+  { operation: Schema.String, cause: Schema.Defect() }
 ) {}
 
 const scrypt = (password: string, salt: Buffer, keylen: number): Effect.Effect<Buffer, PasswordError> =>

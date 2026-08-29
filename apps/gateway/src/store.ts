@@ -695,11 +695,11 @@ interface GatewayStoreDriver {
   close(): Promise<void>
 }
 
-export class GatewayStoreError extends Schema.TaggedErrorClass<GatewayStoreError>()(
+export class GatewayStoreError extends Schema.TaggedError<GatewayStoreError>()(
   "GatewayStoreError",
   {
     operation: Schema.String,
-    cause: Schema.Defect
+    cause: Schema.Defect()
   }
 ) {}
 

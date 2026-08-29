@@ -64,6 +64,7 @@ const serveCommand = Command.make(
       Flag.withDescription("Bind address. Anything other than loopback exposes credentials")
     ),
     detach: Flag.boolean("detach").pipe(
+      Flag.withDefault(false),
       Flag.withAlias("d"),
       Flag.withDescription(
         "Start in the background and return, waiting until the gateway is ready"
@@ -92,6 +93,7 @@ const dashboardCommand = Command.make(
   "dashboard",
   {
     print: Flag.boolean("print").pipe(
+      Flag.withDefault(false),
       Flag.withDescription("Print the URL instead of opening a browser")
     )
   },
@@ -134,6 +136,7 @@ const installCommand = Command.make(
       Flag.withDescription(`Port the service listens on (default: ${defaultGatewayPort})`)
     ),
     verbose: Flag.boolean("verbose").pipe(
+      Flag.withDefault(false),
       Flag.withAlias("v"),
       Flag.withDescription("Show service-manager output")
     )
@@ -154,6 +157,7 @@ const uninstallCommand = Command.make(
   "uninstall",
   {
     verbose: Flag.boolean("verbose").pipe(
+      Flag.withDefault(false),
       Flag.withAlias("v"),
       Flag.withDescription("Show service-manager output")
     )
