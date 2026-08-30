@@ -9,7 +9,7 @@ import {
   Grant,
   GrantDecision as GrantDecisionSchema,
   PendingApproval
-} from "@mokronos/gateway-core"
+} from "@mokronos/gateway-core/domain"
 import { IntegrationDiscovery } from "@mokronos/contracts"
 import {
   IntegrationSearchKind,
@@ -54,7 +54,7 @@ export type {
   ConnectionRef,
   GrantDecision,
   GrantId
-} from "@mokronos/gateway-core"
+} from "@mokronos/gateway-core/domain"
 
 /** Derives the JSON codec for a schema and returns a decoder for it. Every
  *  response in this module goes through here, so no shape reaches a component
