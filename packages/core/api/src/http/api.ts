@@ -17,6 +17,7 @@ import {
   Alias,
   ApiKeyId,
   ClientToolBinding,
+  ConnectionRef,
   Policy,
   PolicyDecision,
   PolicyId,
@@ -78,7 +79,7 @@ const CreatePolicyBody = Schema.Struct({
 const ReplacePolicyToolsBody = Schema.Struct({
   integrations: Schema.Array(Schema.String),
   tools: Schema.Array(Schema.Struct({
-    integration: Schema.String,
+    connection: ConnectionRef,
     tool: Schema.String,
     enabled: Schema.Boolean,
     decision: PolicyDecision
@@ -165,6 +166,7 @@ const EffectiveTool = Schema.Struct({
   alias: Alias,
   tool: Schema.String,
   integration: Schema.String,
+  connection: Schema.String,
   decision: PolicyDecision,
   inputSchema: Schema.optional(Json),
   outputSchema: Schema.optional(Json)

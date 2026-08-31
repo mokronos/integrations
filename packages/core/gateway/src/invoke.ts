@@ -4,7 +4,7 @@ import type { IntegrationsApi } from "@mokronos/integrations"
 import { ToolAddress } from "@mokronos/contracts"
 import { authorizeInvocation } from "./authorize.ts"
 import { defaultApprovalExpiryHours, defaultArgumentRetentionDays } from "./config.ts"
-import { defaultTenantId, describeAuthorization } from "./domain.ts"
+import { defaultTenantId, describeAuthorization, sameConnectionRef } from "./domain.ts"
 import type {
   Alias,
   ApprovalId,
@@ -287,6 +287,10 @@ export type EffectiveTool = {
   readonly alias: Alias
   readonly tool: ToolName
   readonly integration: string
+  /** The connection the alias resolves to. Two aliases can carry the same
+   * vendor tool against different credentials, so the name is part of the
+   * answer rather than an implementation detail. */
+  readonly connection: string
   readonly decision: PolicyDecision
   readonly inputSchema?: Json
   readonly outputSchema?: Json
@@ -313,7 +317,7 @@ export const listEffectiveTools = Effect.fn("Invocation.listEffectiveTools")(fun
   const tools = policy === undefined ? [] : yield* store.listPolicyTools(policy.id)
   const policyRows = bindings.map((binding) => {
     const policyTool = tools.find((candidate) =>
-      candidate.enabled && candidate.integration === binding.connection.integration && candidate.tool === binding.tool)
+      candidate.enabled && sameConnectionRef(candidate.connection, binding.connection) && candidate.tool === binding.tool)
     if (!policyIntegrations.some((candidate) =>
       candidate.integration === binding.connection.integration)) return undefined
     return policyTool === undefined ? undefined : { binding, policyTool }
@@ -323,6 +327,7 @@ export const listEffectiveTools = Effect.fn("Invocation.listEffectiveTools")(fun
     alias: binding.alias,
     tool: binding.tool,
     integration: binding.connection.integration,
+    connection: binding.connection.name,
     decision: policyTool.decision
   }))
   if (options.schemas !== true || options.integrations === undefined) return base

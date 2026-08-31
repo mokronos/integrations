@@ -70,14 +70,14 @@ const seed = async (store: GatewayStore, options: {
   }))
   const key = generateApiKey()
   await run(store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash }))
-  const policyIntegration = (options.connection ?? orgConnection).integration
+  const policyConnection = options.connection ?? orgConnection
   await run(store.replacePolicyConfiguration(policy.id, {
-    integrations: [policyIntegration],
+    integrations: [policyConnection.integration],
     tools: [{
-    integration: policyIntegration,
-    tool: ToolName.make("getDocument"),
-    enabled: true,
-    decision: options.decision ?? "allow"
+      connection: policyConnection,
+      tool: ToolName.make("getDocument"),
+      enabled: true,
+      decision: options.decision ?? "allow"
     }]
   }))
   const binding = await run(store.createBinding({
@@ -205,8 +205,8 @@ describe("gateway authorization", () => {
     await run(store.replacePolicyConfiguration(client.policyId, {
       integrations: [orgConnection.integration, userConnection.integration],
       tools: [
-        { integration: orgConnection.integration, tool: ToolName.make("getDocument"), enabled: true, decision: "allow" },
-        { integration: userConnection.integration, tool: ToolName.make("search"), enabled: true, decision: "allow" }
+        { connection: orgConnection, tool: ToolName.make("getDocument"), enabled: true, decision: "allow" },
+        { connection: userConnection, tool: ToolName.make("search"), enabled: true, decision: "allow" }
       ]
     }))
     await run(store.createBinding({
@@ -242,10 +242,10 @@ describe("gateway authorization", () => {
     await run(store.replacePolicyConfiguration(writer.policyId, {
       integrations: [orgConnection.integration],
       tools: [{
-      integration: orgConnection.integration,
-      tool: ToolName.make("getDocument"),
-      enabled: true,
-      decision: "require_approval"
+        connection: orgConnection,
+        tool: ToolName.make("getDocument"),
+        enabled: true,
+        decision: "require_approval"
       }]
     }))
     await run(store.createBinding({
@@ -272,18 +272,28 @@ describe("gateway authorization", () => {
   test("one client exposes two connections to the same integration side by side", async () => {
     const store = await run(makeStore())
     const { client, key } = await run(seed(store))
+    const personal = {
+      owner: "user",
+      subject: SubjectId.make("sebastian"),
+      integration: IntegrationSlug.make("sharepoint"),
+      name: ConnectionName.make("personal")
+    } as const
+    // The same operation on two credentials, judged separately: the shared
+    // application connection is allowed outright, the personal one is not.
+    await run(store.replacePolicyConfiguration(client.policyId, {
+      integrations: [orgConnection.integration],
+      tools: [
+        { connection: orgConnection, tool: ToolName.make("getDocument"), enabled: true, decision: "allow" },
+        { connection: personal, tool: ToolName.make("getDocument"), enabled: true, decision: "require_approval" }
+      ]
+    }))
     await run(store.createBinding({
       id: newClientToolBindingId(),
       tenantId: defaultTenantId,
       clientId: client.id,
       alias: Alias.make("sharepoint-me"),
       tool: ToolName.make("getDocument"),
-      connection: {
-        owner: "user",
-        subject: SubjectId.make("sebastian"),
-        integration: IntegrationSlug.make("sharepoint"),
-        name: ConnectionName.make("personal")
-      },
+      connection: personal
     }))
 
     const application = await run(invoke(store, key.secret, "sharepoint-app"))
@@ -294,6 +304,8 @@ describe("gateway authorization", () => {
     if (application.status !== "authorized" || delegated.status !== "authorized") return
     expect(application.subject).toBeNull()
     expect(delegated.subject).toBe(SubjectId.make("sebastian"))
+    expect(application.decision).toBe("allow")
+    expect(delegated.decision).toBe("require_approval")
   })
 
   test("records when a key was last used", async () => {

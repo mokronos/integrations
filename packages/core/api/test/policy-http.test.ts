@@ -44,7 +44,7 @@ const PolicyListBody = Schema.decodeUnknownSync(Schema.Struct({
   }))
 }))
 const BindingsBody = Schema.decodeUnknownSync(Schema.Struct({
-  bindings: Schema.Array(Schema.Struct({ id: ClientToolBindingId }))
+  bindings: Schema.Array(Schema.Struct({ id: ClientToolBindingId, alias: Schema.String }))
 }))
 
 const setup = async () => {
@@ -137,9 +137,10 @@ describe("policy administration", () => {
     const createdResponse = await call("POST", "/v1/policies", { name: "Reviewers" })
     expect(createdResponse.status).toBe(201)
     const policy = PolicyBody(await createdResponse.json())
+    const mailConnection = { owner: "org", integration: "mail", name: "primary" }
     const toolsResponse = await call("POST", `/v1/policies/${policy.id}/tools`, {
       integrations: ["mail"],
-      tools: [{ integration: "mail", tool: "sendEmail", enabled: false, decision: "allow" }]
+      tools: [{ connection: mailConnection, tool: "sendEmail", enabled: false, decision: "allow" }]
     })
     const configured = PolicyToolsBody(await toolsResponse.json())
     expect(configured.integrations).toHaveLength(1)
@@ -159,7 +160,22 @@ describe("policy administration", () => {
       policyId: policy.id
     })
     expect(ClientBody(await assignedResponse.json()).policyId).toBe(policy.id)
+    // Assigning is the whole operation: the client's routes are re-derived from
+    // the policy it now has. Its previous default-policy route is gone, and the
+    // only rule here is disabled, so there is nothing left to call.
     const bindingsResponse = await call("GET", `/v1/clients/${client.id}/bindings`)
-    expect(BindingsBody(await bindingsResponse.json()).bindings).toHaveLength(1)
+    expect(BindingsBody(await bindingsResponse.json()).bindings).toHaveLength(0)
+
+    // Enabling the rule is likewise the whole operation — no separate step
+    // creates the route.
+    await call("POST", `/v1/policies/${policy.id}/tools`, {
+      integrations: ["mail"],
+      tools: [{ connection: mailConnection, tool: "sendEmail", enabled: true, decision: "allow" }]
+    })
+    const enabled = BindingsBody(
+      await (await call("GET", `/v1/clients/${client.id}/bindings`)).json()
+    ).bindings
+    expect(enabled).toHaveLength(1)
+    expect(enabled[0]?.alias).toBe("mail")
   })
 })

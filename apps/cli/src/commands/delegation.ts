@@ -231,15 +231,38 @@ export const clonePolicyCommand = Command.make(
     )).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false))))
 ).pipe(Command.withDescription("Clone a policy and all of its tool rules"))
 
+/** Which connections one `policy-tool` call writes a rule for. A rule is
+ * per-credential now, so the command has to say which. Naming one is explicit;
+ * naming none means every org connection currently live for that integration,
+ * which is what an operator adding a tool to a policy almost always means. */
+const targetConnections = async (
+  client: ControlPlaneClient,
+  integration: string,
+  requested: Option.Option<string>
+): Promise<ReadonlyArray<{ readonly owner: string; readonly name: string }>> => {
+  const explicit = Option.getOrUndefined(requested)
+  if (explicit !== undefined) return [{ owner: "org", name: explicit }]
+  const listed = array(record(await client.request("GET", "/v1/connections"))["connections"])
+    .filter((entry) => text(entry["integration"]) === integration && text(entry["owner"]) === "org")
+    .map((entry) => ({ owner: "org", name: text(entry["name"]) }))
+  return listed.length === 0 ? [{ owner: "org", name: "default" }] : listed
+}
+
 export const policyToolCommand = Command.make(
   "policy-tool",
   {
     policyId: Argument.string("policy-id"),
     integration: Argument.string("integration"),
     tool: Argument.string("tool"),
-    mode: Argument.choice("mode", ["allow", "require-approval"])
+    mode: Argument.choice("mode", ["allow", "require-approval"]),
+    connection: Flag.string("connection").pipe(
+      Flag.optional,
+      Flag.withDescription(
+        "Write the rule for one connection only (default: every org connection of the integration)"
+      )
+    )
   },
-  ({ integration, mode, policyId, tool }) =>
+  ({ connection, integration, mode, policyId, tool }) =>
     controlPlaneTask(async (client) => {
       const detail = record(await client.request(
         "GET",
@@ -250,10 +273,17 @@ export const policyToolCommand = Command.make(
       const configuredIntegrations = integrations.includes(integration)
         ? integrations
         : [...integrations, integration]
+      const targets = await targetConnections(client, integration, connection)
+      const replaced = new Set(targets.map((target) => `${target.owner}/${target.name}`))
       const tools = array(detail["tools"])
-        .filter((entry) => text(entry["integration"]) !== integration || text(entry["tool"]) !== tool)
+        .filter((entry) => {
+          const existing = record(entry["connection"])
+          return text(existing["integration"]) !== integration ||
+            text(entry["tool"]) !== tool ||
+            !replaced.has(`${text(existing["owner"])}/${text(existing["name"])}`)
+        })
         .map((entry) => ({
-          integration: text(entry["integration"]),
+          connection: record(entry["connection"]),
           tool: text(entry["tool"]),
           enabled: entry["enabled"] === true,
           decision: text(entry["decision"])
@@ -265,12 +295,12 @@ export const policyToolCommand = Command.make(
           integrations: configuredIntegrations,
           tools: [
             ...tools,
-            {
-              integration,
+            ...targets.map((target) => ({
+              connection: { owner: target.owner, integration, name: target.name },
               tool,
               enabled: true,
               decision: mode === "allow" ? "allow" : "require_approval"
-            }
+            }))
           ]
         }
       )

@@ -159,6 +159,22 @@ export type ConnectionRef = typeof ConnectionRef.Type
 export const connectionSubject = (connection: ConnectionRef): SubjectId | undefined =>
   connection.owner === "user" ? connection.subject : undefined
 
+/** One connection's identity as a string, so a route can be looked up in a Map
+ *  without every caller inventing its own delimiter. */
+export const connectionRefKey = (connection: ConnectionRef): string =>
+  [
+    connection.owner,
+    connectionSubject(connection) ?? "",
+    connection.integration,
+    connection.name
+  ].join("\u0000")
+
+/** Whether two references name the same credential. Policy rules and bindings
+ *  are matched on this, so a rule written for the work connection can never
+ *  authorize a call that routes to the personal one. */
+export const sameConnectionRef = (left: ConnectionRef, right: ConnectionRef): boolean =>
+  connectionRefKey(left) === connectionRefKey(right)
+
 // --- clients and keys -------------------------------------------------------
 
 export const ClientCapability = Schema.Literals([
@@ -237,7 +253,9 @@ export type PolicyIntegration = typeof PolicyIntegration.Type
 
 export const PolicyTool = Schema.Struct({
   policyId: PolicyId,
-  integration: IntegrationSlug,
+  /** The credential-bearing route this rule governs. Two connections may give
+   * the same vendor tool different decisions. */
+  connection: ConnectionRef,
   tool: ToolName,
   enabled: Schema.Boolean,
   decision: PolicyDecision

@@ -3,8 +3,11 @@ import { Effect } from "effect"
 import {
   Alias,
   ConnectionName,
+  connectionRefKey,
+  type ConnectionRef,
   IntegrationSlug,
   type Policy,
+  type PolicyTool,
   ToolName,
   type Client
 } from "./domain.ts"
@@ -38,15 +41,24 @@ export const reconcilePolicyConfigurations = Effect.fn(
     ])
     const catalogIntegrations = new Set(connections.map((connection) => connection.integration))
     const catalogTools = new Map<string, {
-      readonly integration: IntegrationSlug
+      readonly connection: Extract<ConnectionRef, { readonly owner: "org" }>
       readonly tool: ToolName
       readonly decision: "allow" | "require_approval"
     }>()
     for (const summary of summaries) {
-      const key = `${summary.integration}\u0000${summary.name}`
+      // Only org-tier connections are reconciled into shared policies. A
+      // user-tier connection is one human's authorization; putting it in a
+      // policy several clients share would hand it to all of them.
+      if (summary.owner !== "org") continue
+      const connection = {
+        owner: "org",
+        integration: IntegrationSlug.make(summary.integration),
+        name: ConnectionName.make(summary.connection)
+      } as const
+      const key = `${connectionRefKey(connection)}\u0000${summary.name}`
       const existing = catalogTools.get(key)
       catalogTools.set(key, {
-        integration: IntegrationSlug.make(summary.integration),
+        connection,
         tool: ToolName.make(summary.name),
         decision: existing?.decision === "require_approval" || summary.defaultDecision === "require_approval"
           ? "require_approval"
@@ -65,18 +77,18 @@ export const reconcilePolicyConfigurations = Effect.fn(
         }
       }
       const tools = new Map(existingTools.map((tool) => [
-        `${tool.integration}\u0000${tool.tool}`,
+        `${connectionRefKey(tool.connection)}\u0000${tool.tool}`,
         {
-          integration: tool.integration,
+          connection: tool.connection,
           tool: tool.tool,
           enabled: tool.enabled,
           decision: tool.decision
         }
       ]))
       for (const [key, catalogTool] of catalogTools) {
-        if (!memberships.has(catalogTool.integration) || tools.has(key)) continue
+        if (!memberships.has(catalogTool.connection.integration) || tools.has(key)) continue
         tools.set(key, {
-          integration: catalogTool.integration,
+          connection: catalogTool.connection,
           tool: catalogTool.tool,
           enabled: true,
           decision: catalogTool.decision
@@ -107,86 +119,175 @@ export const ensureDefaultPolicyTools = Effect.fn("ConnectedBindings.ensureDefau
   }
 )
 
-/** Adds a newly connected integration to the default and reconciles missing
- * tools for every policy that already contains that integration. */
-export const includeConnectedToolsInDefaultPolicy = Effect.fn(
-  "ConnectedBindings.includeConnectedToolsInDefaultPolicy"
+/** The public name a client calls one connection's tools by. A single
+ * connection per integration keeps the plain slug, so the common setup reads
+ * `linear.list_issues`. Once a policy carries more than one connection for the
+ * same integration the name has to say which credential it means, so every
+ * route for that integration is qualified — `linear-work.list_issues` and
+ * `linear-personal.list_issues` — rather than one silently winning. */
+const routeAliases = (
+  rules: ReadonlyArray<PolicyTool>
+): ReadonlyMap<string, Alias> => {
+  const connectionsPerIntegration = new Map<string, Set<string>>()
+  for (const rule of rules) {
+    const names = connectionsPerIntegration.get(rule.connection.integration) ?? new Set<string>()
+    names.add(connectionRefKey(rule.connection))
+    connectionsPerIntegration.set(rule.connection.integration, names)
+  }
+  const aliases = new Map<string, Alias>()
+  for (const rule of rules) {
+    const ambiguous = (connectionsPerIntegration.get(rule.connection.integration)?.size ?? 0) > 1
+    aliases.set(
+      connectionRefKey(rule.connection),
+      aliasFor(ambiguous
+        ? `${rule.connection.integration}-${rule.connection.name}`
+        : rule.connection.integration)
+    )
+  }
+  return aliases
+}
+
+const routeKey = (alias: Alias, tool: ToolName, connection: ConnectionRef): string =>
+  [alias, tool, connectionRefKey(connection)].join("\u0000")
+
+/** Makes a client's callable routes exactly mirror its assigned policy.
+ *
+ * The two concepts stay distinct — a policy decides whether an operation is
+ * allowed, a binding decides which credential it reaches and what the client
+ * calls it — but they are no longer maintained by hand on opposite sides of
+ * the gateway. Assigning or editing a policy is the single operation, and the
+ * routes follow from it. Only enabled rules become routes: a disabled rule is
+ * the operator saying this client should not reach that tool at all.
+ *
+ * Unchanged routes keep their binding id, so pending approvals and audit rows
+ * that point at them survive an unrelated edit elsewhere in the policy. */
+export const synchronizeClientBindings = Effect.fn(
+  "ConnectedBindings.synchronizeClientBindings"
+)(function*(input: {
+  readonly store: GatewayStore
+  readonly client: Client
+}): Effect.fn.Return<void, GatewayStoreError> {
+  const [policyTools, existing] = yield* Effect.all([
+    input.store.listPolicyTools(input.client.policyId),
+    input.store.listBindings(input.client.id)
+  ])
+  const enabled = policyTools.filter((rule) => rule.enabled)
+  const aliases = routeAliases(enabled)
+  const desired = new Map(enabled.map((rule) => {
+    const alias = aliases.get(connectionRefKey(rule.connection)) ?? aliasFor(rule.connection.integration)
+    return [routeKey(alias, rule.tool, rule.connection), {
+      alias,
+      tool: rule.tool,
+      connection: rule.connection
+    }] as const
+  }))
+  const kept = new Set<string>()
+  const stale = existing.filter((binding) => {
+    const key = routeKey(binding.alias, binding.tool, binding.connection)
+    if (!desired.has(key)) return true
+    kept.add(key)
+    return false
+  })
+  // Revocation runs to completion before any route is created: an alias that
+  // moves to another connection would otherwise collide with itself under the
+  // live uniqueness index. Revoking rather than deleting keeps the approval
+  // and audit history that points at the old binding readable.
+  yield* Effect.forEach(stale, (binding) =>
+    input.store.revokeBinding(input.client.tenantId, binding.id), { discard: true })
+  yield* Effect.forEach(
+    [...desired].filter(([key]) => !kept.has(key)).map(([, route]) => route),
+    (route) =>
+      input.store.createBinding({
+        id: newClientToolBindingId(),
+        tenantId: input.client.tenantId,
+        clientId: input.client.id,
+        alias: route.alias,
+        tool: route.tool,
+        connection: route.connection
+      }),
+    { discard: true }
+  )
+})
+
+/** Applies a changed policy to every live client assigned to it. */
+export const synchronizeAssignedPolicyBindings = Effect.fn(
+  "ConnectedBindings.synchronizeAssignedPolicyBindings"
+)(function*(input: {
+  readonly store: GatewayStore
+  readonly policy: Policy
+}): Effect.fn.Return<void, GatewayStoreError> {
+  const clients = yield* input.store.listClients(input.policy.tenantId)
+  yield* Effect.forEach(
+    clients.filter((client) => client.policyId === input.policy.id && client.revokedAt === null),
+    (client) => synchronizeClientBindings({ store: input.store, client }),
+    { discard: true }
+  )
+})
+
+/** Re-derives routes for every live client of a tenant. Used after the catalog
+ * itself moves — a new connection, or a tool that disappeared — where the
+ * policies that changed are not known individually. */
+export const synchronizeTenantBindings = Effect.fn(
+  "ConnectedBindings.synchronizeTenantBindings"
+)(function*(input: {
+  readonly store: GatewayStore
+  readonly tenantId: Client["tenantId"]
+}): Effect.fn.Return<void, GatewayStoreError> {
+  const clients = yield* input.store.listClients(input.tenantId)
+  yield* Effect.forEach(
+    clients.filter((client) => client.revokedAt === null),
+    (client) => synchronizeClientBindings({ store: input.store, client }),
+    { discard: true }
+  )
+})
+
+/** What a newly connected credential means for delegated access: the default
+ * policy gains the integration, every policy that already contains it gains
+ * the missing tools, and every client's routes are re-derived from that. One
+ * call, so no caller can do half of it. */
+export const synchronizeConnectedCatalog = Effect.fn(
+  "ConnectedBindings.synchronizeConnectedCatalog"
 )(function*(input: {
   readonly store: GatewayStore
   readonly integrations: PolicyCatalog
   readonly tenantId: Client["tenantId"]
+}): Effect.fn.Return<void, GatewayStoreError> {
+  yield* reconcilePolicyConfigurations(input)
+  yield* synchronizeTenantBindings({ store: input.store, tenantId: input.tenantId })
+})
+
+/** Removes every policy rule that names a connection that no longer exists and
+ * re-derives routes from what is left. A deleted credential must not leave a
+ * rule that still reads as live in the dashboard while resolving to nothing
+ * when a client calls it. */
+export const forgetConnectionRules = Effect.fn(
+  "ConnectedBindings.forgetConnectionRules"
+)(function*(input: {
+  readonly store: GatewayStore
+  readonly tenantId: Client["tenantId"]
   readonly integration: string
   readonly connection: string
 }): Effect.fn.Return<void, GatewayStoreError> {
-  yield* reconcilePolicyConfigurations({
-    store: input.store,
-    integrations: input.integrations,
-    tenantId: input.tenantId
-  })
-})
-
-/** Gives a new client an immediately useful route for every current org tool. */
-export const bindCurrentOrgTools = Effect.fn("ConnectedBindings.bindCurrentOrgTools")(function*(input: {
-  readonly store: GatewayStore
-  readonly integrations: Pick<IntegrationsApi, "tools">
-  readonly client: Client
-}): Effect.fn.Return<void, GatewayStoreError> {
-  const summaries = yield* Effect.promise(() => input.integrations.tools.summaries())
-  const seen = new Set<string>()
-  yield* Effect.forEach(summaries.filter((tool) => {
-    const key = `${tool.integration}\u0000${tool.name}`
-    if (tool.owner !== "org" || seen.has(key)) return false
-    seen.add(key)
-    return true
-  }), (tool) => input.store.createBinding({
-    id: newClientToolBindingId(),
-    tenantId: input.client.tenantId,
-    clientId: input.client.id,
-    alias: aliasFor(tool.integration),
-    tool: ToolName.make(tool.name),
-    connection: {
-      owner: "org",
-      integration: IntegrationSlug.make(tool.integration),
-      name: ConnectionName.make(tool.connection)
-    }
-  }), { discard: true })
-})
-
-/** Adds client-local routes for newly connected tools. Shared policy rules are
- * intentionally untouched: provisioning a connection cannot widen authority. */
-export const bindConnectedTools = Effect.fn("ConnectedBindings.bindConnectedTools")(function*(input: {
-  readonly store: GatewayStore
-  readonly integrations: Pick<IntegrationsApi, "tools">
-  readonly client: Client
-  readonly integration: string
-  readonly connection: string
-}): Effect.fn.Return<void, GatewayStoreError> {
-  const alias = aliasFor(input.integration)
-  const [tools, existing] = yield* Effect.all([
-    Effect.promise(() => input.integrations.tools.summaries({
-      integration: input.integration,
-      connection: input.connection
-    })),
-    input.store.listBindings(input.client.id)
-  ])
-  yield* Effect.forEach(
-    tools.filter((tool) =>
-      tool.owner === "org" &&
-      tool.connection.toLowerCase() === input.connection.toLowerCase() &&
-      !existing.some((binding) => binding.alias === alias && binding.tool === tool.name)
-    ),
-    (tool) => input.store.createBinding({
-      id: newClientToolBindingId(),
-      tenantId: input.client.tenantId,
-      clientId: input.client.id,
-      alias,
-      tool: ToolName.make(tool.name),
-      connection: {
-        owner: "org",
-        integration: IntegrationSlug.make(tool.integration),
-        name: ConnectionName.make(tool.connection)
-      }
-    }),
-    { discard: true }
-  )
+  const policies = yield* input.store.listPolicies(input.tenantId)
+  yield* Effect.forEach(policies, (policy) =>
+    Effect.gen(function*() {
+      const [memberships, tools] = yield* Effect.all([
+        input.store.listPolicyIntegrations(policy.id),
+        input.store.listPolicyTools(policy.id)
+      ])
+      const remaining = tools.filter((rule) =>
+        rule.connection.integration !== input.integration ||
+        rule.connection.name !== input.connection)
+      if (remaining.length === tools.length) return
+      yield* input.store.replacePolicyConfiguration(policy.id, {
+        integrations: memberships.map((entry) => entry.integration),
+        tools: remaining.map((rule) => ({
+          connection: rule.connection,
+          tool: rule.tool,
+          enabled: rule.enabled,
+          decision: rule.decision
+        }))
+      })
+    }), { discard: true })
+  yield* synchronizeTenantBindings({ store: input.store, tenantId: input.tenantId })
 })

@@ -9,17 +9,21 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
   Alias,
   ClientId,
+  connectionRefKey,
+  type ConnectionRef,
   IntegrationSlug,
   PolicyId,
+  sameConnectionRef,
   ToolName
 } from "@mokronos/gateway-core"
 import type { DriftReport } from "@mokronos/gateway-core"
 import { refreshIntegrationSnapshot } from "@mokronos/gateway-core"
 import {
-  bindCurrentOrgTools,
   ensureDefaultPolicyTools,
   executeAuthorized,
-  listEffectiveTools
+  listEffectiveTools,
+  synchronizeAssignedPolicyBindings,
+  synchronizeClientBindings
 } from "@mokronos/gateway-core"
 import {
   generateApiKey,
@@ -99,7 +103,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
             capabilities: body.capabilities ?? [],
             ...whenPresentMap("approvalDelivery", body.approvalDelivery, (d) => d)
           }))
-          yield* orDieStorage(bindCurrentOrgTools({ store, integrations: integrationsApi, client }))
+          yield* orDieStorage(synchronizeClientBindings({ store, client }))
           return client
         }))
       .handle("updateClientSettings", (request) =>
@@ -247,7 +251,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           const policy = yield* orDieStorage(store.findPolicy(tenantId, request.params["id"]))
           if (policy === undefined) return yield* new ApiNotFound({ error: "Unknown policy" })
           const deduplicated = new Map<string, {
-            readonly integration: IntegrationSlug
+            readonly connection: ConnectionRef
             readonly tool: ToolName
             readonly enabled: boolean
             readonly decision: "allow" | "require_approval"
@@ -256,16 +260,16 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
             .map((integration) => IntegrationSlug.make(integration))
           const membership = new Set<IntegrationSlug>(integrations)
           for (const input of request.payload.tools) {
-            const integration = IntegrationSlug.make(input.integration)
+            const integration = IntegrationSlug.make(input.connection.integration)
             if (!membership.has(integration)) {
               return yield* new ApiBadRequest({
-                error: `Tool ${input.integration}/${input.tool} has no integration membership`
+                error: `Tool ${input.connection.integration}/${input.tool} has no integration membership`
               })
             }
-            const key = `${input.integration}\u0000${input.tool}`
+            const key = `${connectionRefKey(input.connection)}\u0000${input.tool}`
             const existing = deduplicated.get(key)
             deduplicated.set(key, {
-              integration,
+              connection: input.connection,
               tool: ToolName.make(input.tool),
               enabled: existing?.enabled === true || input.enabled,
               decision: existing?.decision === "require_approval" || input.decision === "require_approval"
@@ -279,6 +283,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           }))
           const updated = yield* orDieStorage(store.findPolicy(tenantId, policy.id))
           if (updated === undefined) return yield* new ApiNotFound({ error: "Unknown policy" })
+          yield* orDieStorage(synchronizeAssignedPolicyBindings({ store, policy: updated }))
           return { policy: updated, ...configuration }
         }))
       .handle("clonePolicy", (request) =>
@@ -296,7 +301,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           const configuration = yield* orDieStorage(store.replacePolicyConfiguration(policy.id, {
             integrations: sourceIntegrations.map((entry) => entry.integration),
             tools: sourceTools.map((tool) => ({
-              integration: tool.integration,
+              connection: tool.connection,
               tool: tool.tool,
               enabled: tool.enabled,
               decision: tool.decision
@@ -315,7 +320,9 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           if ((yield* orDieStorage(store.findPolicy(tenantId, policyId))) === undefined) {
             return yield* new ApiBadRequest({ error: `Policy ${policyId} belongs to another tenant or does not exist` })
           }
-          return yield* orDieStorage(store.assignPolicy(tenantId, clientId, policyId))
+          const assigned = yield* orDieStorage(store.assignPolicy(tenantId, clientId, policyId))
+          yield* orDieStorage(synchronizeClientBindings({ store, client: assigned }))
+          return assigned
         }))
       .handle("listBindings", (request) =>
         Effect.gen(function*() {
@@ -371,7 +378,8 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
             : yield* orDieStorage(store.listPolicyIntegrations(policy.id))
           const policyTools = policy === undefined ? [] : yield* orDieStorage(store.listPolicyTools(policy.id))
           const policyTool = binding === undefined ? undefined : policyTools.find((candidate) =>
-            candidate.enabled && candidate.integration === binding.connection.integration && candidate.tool === binding.tool)
+            candidate.enabled && sameConnectionRef(candidate.connection, binding.connection) &&
+              candidate.tool === binding.tool)
           const integrationMember = binding !== undefined && policyIntegrations.some((candidate) =>
             candidate.integration === binding.connection.integration)
           if (client === undefined || client.revokedAt !== null || client.policyId !== approval.policyId

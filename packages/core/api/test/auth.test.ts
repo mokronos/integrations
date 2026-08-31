@@ -64,10 +64,10 @@ const setup = async (options: SetupOptions = {}) => {
   await run(store.replacePolicyConfiguration(policy.id, {
     integrations: [connection.integration],
     tools: [{
-    integration: connection.integration,
-    tool: ToolName.make("sendEmail"),
-    enabled: true,
-    decision: "allow"
+      connection,
+      tool: ToolName.make("sendEmail"),
+      enabled: true,
+      decision: "allow"
     }]
   }))
   const client = await run(store.createClient({
@@ -525,10 +525,10 @@ describe("attribution", () => {
     await run(setup_.store.replacePolicyConfiguration(policy.id, {
       integrations: [connection.integration],
       tools: [{
-      integration: connection.integration,
-      tool: ToolName.make("sendEmail"),
-      enabled: true,
-      decision: "require_approval"
+        connection,
+        tool: ToolName.make("sendEmail"),
+        enabled: true,
+        decision: "require_approval"
       }]
     }))
     const client = await run(setup_.store.createClient({

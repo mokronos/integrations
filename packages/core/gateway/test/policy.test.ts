@@ -21,7 +21,9 @@ import {
   ensureDefaultPolicyTools,
   generateApiKey,
   newClientToolBindingId,
-  newPolicyId
+  newPolicyId,
+  synchronizeAssignedPolicyBindings,
+  synchronizeClientBindings
 } from "../src/index.ts"
 import type { GatewayStore } from "../src/store.ts"
 
@@ -33,6 +35,12 @@ interface TestPolicyCatalog {
   readonly tools: IntegrationsApi["tools"]
   readonly connections: Pick<IntegrationsApi["connections"], "list">
 }
+
+const orgConnection = (integration: string, name: string) => ({
+  owner: "org",
+  integration: IntegrationSlug.make(integration),
+  name: ConnectionName.make(name)
+} as const)
 
 const connected = (integration: string): typeof Connection.Type => ({
   owner: "org",
@@ -65,7 +73,7 @@ describe("tenant policies", () => {
     expect((await run(store.listPolicies(defaultTenantId))).filter((entry) => entry.isDefault)).toHaveLength(1)
   })
 
-  test("seeds the unused default policy from catalog defaults conservatively", async () => {
+  test("seeds one default policy rule per connection, each at its own default", async () => {
     const store = await openStore()
     const integrations: TestPolicyCatalog = {
       connections: { list: async () => [connected("mail")] },
@@ -99,14 +107,29 @@ describe("tenant policies", () => {
       store, integrations, tenantId: defaultTenantId
     }))
     if (policy === undefined) throw new Error("missing default policy")
+    // The same vendor tool on two connections is two rules, so the safe
+    // connection is not dragged down to the cautious one's decision.
     const tools = await run(store.listPolicyTools(policy.id))
-    expect(tools).toHaveLength(1)
     expect(await run(store.listPolicyIntegrations(policy.id))).toEqual([{
       policyId: policy.id,
       integration: IntegrationSlug.make("mail")
     }])
-    expect(tools[0]?.enabled).toBe(true)
-    expect(tools[0]?.decision).toBe("require_approval")
+    expect(tools).toEqual([
+      {
+        policyId: policy.id,
+        connection: orgConnection("mail", "primary"),
+        tool: ToolName.make("sendEmail"),
+        enabled: true,
+        decision: "allow"
+      },
+      {
+        policyId: policy.id,
+        connection: orgConnection("mail", "secondary"),
+        tool: ToolName.make("sendEmail"),
+        enabled: true,
+        decision: "require_approval"
+      }
+    ])
   })
 
   test("adds newly connected safe tools without changing existing decisions", async () => {
@@ -116,10 +139,10 @@ describe("tenant policies", () => {
     await run(store.replacePolicyConfiguration(policy.id, {
       integrations: [IntegrationSlug.make("mail")],
       tools: [{
-      integration: IntegrationSlug.make("mail"),
-      tool: ToolName.make("search"),
-      enabled: true,
-      decision: "require_approval"
+        connection: orgConnection("mail", "primary"),
+        tool: ToolName.make("search"),
+        enabled: true,
+        decision: "require_approval"
       }]
     }))
     const integrations: TestPolicyCatalog = {
@@ -160,19 +183,164 @@ describe("tenant policies", () => {
     expect(tools).toEqual([
       {
         policyId: policy.id,
-        integration: IntegrationSlug.make("context7"),
+        connection: orgConnection("context7", "default"),
         tool: ToolName.make("query-docs"),
         enabled: true,
         decision: "allow"
       },
       {
         policyId: policy.id,
-        integration: IntegrationSlug.make("mail"),
+        connection: orgConnection("mail", "primary"),
         tool: ToolName.make("search"),
         enabled: true,
         decision: "require_approval"
       }
     ])
+  })
+
+  test("derives a client's routes from the policy it is assigned", async () => {
+    const store = await openStore()
+    const policy = await run(store.createPolicy({
+      id: newPolicyId(), tenantId: defaultTenantId, name: "Mail reader"
+    }))
+    await run(store.replacePolicyConfiguration(policy.id, {
+      integrations: [IntegrationSlug.make("mail")],
+      tools: [
+        {
+          connection: orgConnection("mail", "primary"),
+          tool: ToolName.make("search"),
+          enabled: true,
+          decision: "allow"
+        },
+        {
+          connection: orgConnection("mail", "primary"),
+          tool: ToolName.make("sendEmail"),
+          enabled: false,
+          decision: "allow"
+        }
+      ]
+    }))
+    const client = await run(store.createClient({
+      id: ClientId.make("derived-client"),
+      tenantId: defaultTenantId,
+      policyId: policy.id,
+      name: "Derived",
+      capabilities: []
+    }))
+
+    await run(synchronizeClientBindings({ store, client }))
+
+    // Exactly the enabled rules, and nothing an operator had to create by hand.
+    const bindings = await run(store.listBindings(client.id))
+    expect(bindings.map((binding) => [binding.alias, binding.tool])).toEqual([
+      [Alias.make("mail"), ToolName.make("search")]
+    ])
+    expect(bindings[0]?.connection).toEqual(orgConnection("mail", "primary"))
+  })
+
+  test("re-derives routes for every client when the policy changes, keeping ids", async () => {
+    const store = await openStore()
+    const policy = await run(store.createPolicy({
+      id: newPolicyId(), tenantId: defaultTenantId, name: "Growing"
+    }))
+    const search = {
+      connection: orgConnection("mail", "primary"),
+      tool: ToolName.make("search"),
+      enabled: true,
+      decision: "allow"
+    } as const
+    await run(store.replacePolicyConfiguration(policy.id, {
+      integrations: [IntegrationSlug.make("mail")],
+      tools: [search]
+    }))
+    const client = await run(store.createClient({
+      id: ClientId.make("growing-client"),
+      tenantId: defaultTenantId,
+      policyId: policy.id,
+      name: "Growing client",
+      capabilities: []
+    }))
+    await run(synchronizeAssignedPolicyBindings({ store, policy }))
+    const before = await run(store.listBindings(client.id))
+
+    await run(store.replacePolicyConfiguration(policy.id, {
+      integrations: [IntegrationSlug.make("mail")],
+      tools: [search, {
+        connection: orgConnection("mail", "primary"),
+        tool: ToolName.make("sendEmail"),
+        enabled: true,
+        decision: "require_approval"
+      }]
+    }))
+    await run(synchronizeAssignedPolicyBindings({ store, policy }))
+
+    const after = await run(store.listBindings(client.id))
+    expect(after.map((binding) => binding.tool)).toEqual([
+      ToolName.make("search"),
+      ToolName.make("sendEmail")
+    ])
+    // The untouched route is the same row, so approvals and audit entries that
+    // point at it still resolve.
+    expect(after.find((binding) => binding.tool === ToolName.make("search"))?.id)
+      .toBe(before[0]?.id ?? ClientToolBindingId.make("missing"))
+  })
+
+  test("qualifies aliases when one policy carries two connections for an integration", async () => {
+    const store = await openStore()
+    const policy = await run(store.createPolicy({
+      id: newPolicyId(), tenantId: defaultTenantId, name: "Both mailboxes"
+    }))
+    await run(store.replacePolicyConfiguration(policy.id, {
+      integrations: [IntegrationSlug.make("mail"), IntegrationSlug.make("calendar")],
+      tools: [
+        {
+          connection: orgConnection("mail", "work"),
+          tool: ToolName.make("sendEmail"),
+          enabled: true,
+          decision: "require_approval"
+        },
+        {
+          connection: orgConnection("mail", "personal"),
+          tool: ToolName.make("sendEmail"),
+          enabled: true,
+          decision: "allow"
+        },
+        {
+          connection: orgConnection("calendar", "primary"),
+          tool: ToolName.make("createEvent"),
+          enabled: true,
+          decision: "allow"
+        }
+      ]
+    }))
+    const client = await run(store.createClient({
+      id: ClientId.make("two-mailbox-client"),
+      tenantId: defaultTenantId,
+      policyId: policy.id,
+      name: "Two mailboxes",
+      capabilities: []
+    }))
+    const key = generateApiKey()
+    await run(store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash }))
+
+    await run(synchronizeClientBindings({ store, client }))
+
+    // Ambiguity is resolved by naming the connection; the unambiguous
+    // integration keeps its plain slug.
+    expect((await run(store.listBindings(client.id))).map((binding) => binding.alias).sort())
+      .toEqual([Alias.make("calendar"), Alias.make("mail-personal"), Alias.make("mail-work")])
+    const work = await run(authorizeInvocation(store, {
+      secret: key.secret, alias: Alias.make("mail-work"), tool: ToolName.make("sendEmail")
+    }))
+    const personal = await run(authorizeInvocation(store, {
+      secret: key.secret, alias: Alias.make("mail-personal"), tool: ToolName.make("sendEmail")
+    }))
+    expect(work.status).toBe("authorized")
+    expect(personal.status).toBe("authorized")
+    if (work.status !== "authorized" || personal.status !== "authorized") return
+    // The same operation, judged per credential.
+    expect(work.decision).toBe("require_approval")
+    expect(personal.decision).toBe("allow")
   })
 
   test("authorizes only the assigned policy and client binding intersection", async () => {
@@ -183,10 +351,10 @@ describe("tenant policies", () => {
     await run(store.replacePolicyConfiguration(policy.id, {
       integrations: [IntegrationSlug.make("mail")],
       tools: [{
-      integration: IntegrationSlug.make("mail"),
-      tool: ToolName.make("sendEmail"),
-      enabled: true,
-      decision: "require_approval"
+        connection: orgConnection("mail", "primary"),
+        tool: ToolName.make("sendEmail"),
+        enabled: true,
+        decision: "require_approval"
       }]
     }))
 
@@ -238,7 +406,7 @@ describe("tenant policies", () => {
     await run(store.replacePolicyConfiguration(policy.id, {
       integrations: [IntegrationSlug.make("mail")],
       tools: [{
-        integration: IntegrationSlug.make("mail"),
+        connection: orgConnection("mail", "primary"),
         tool: ToolName.make("sendEmail"),
         enabled: false,
         decision: "require_approval"
@@ -273,7 +441,7 @@ describe("tenant policies", () => {
     }))).status).toBe("not-authorized")
     expect(await run(store.listPolicyTools(policy.id))).toEqual([{
       policyId: policy.id,
-      integration: IntegrationSlug.make("mail"),
+      connection: orgConnection("mail", "primary"),
       tool: ToolName.make("sendEmail"),
       enabled: false,
       decision: "require_approval"
@@ -288,7 +456,7 @@ describe("tenant policies", () => {
     await run(store.replacePolicyConfiguration(policy.id, {
       integrations: [IntegrationSlug.make("mail")],
       tools: [{
-        integration: IntegrationSlug.make("mail"),
+        connection: orgConnection("mail", "primary"),
         tool: ToolName.make("sendEmail"),
         enabled: false,
         decision: "require_approval"
@@ -335,13 +503,13 @@ describe("tenant policies", () => {
       .toEqual([IntegrationSlug.make("mail")])
     expect(await run(store.listPolicyTools(policy.id))).toEqual([{
       policyId: policy.id,
-      integration: IntegrationSlug.make("mail"),
+      connection: orgConnection("mail", "primary"),
       tool: ToolName.make("archiveEmail"),
       enabled: true,
       decision: "allow"
     }, {
       policyId: policy.id,
-      integration: IntegrationSlug.make("mail"),
+      connection: orgConnection("mail", "primary"),
       tool: ToolName.make("sendEmail"),
       enabled: false,
       decision: "require_approval"
@@ -356,7 +524,12 @@ describe("tenant policies", () => {
     const mail = IntegrationSlug.make("mail")
     await run(store.replacePolicyConfiguration(policy.id, {
       integrations: [mail],
-      tools: [{ integration: mail, tool: ToolName.make("sendEmail"), enabled: false, decision: "allow" }]
+      tools: [{
+        connection: orgConnection("mail", "primary"),
+        tool: ToolName.make("sendEmail"),
+        enabled: false,
+        decision: "allow"
+      }]
     }))
 
     await expect(run(store.replacePolicyConfiguration(policy.id, {
@@ -427,10 +600,26 @@ describe("tenant policies", () => {
     const client = await run(store.findClientById(defaultTenantId, ClientId.make("legacy-client")))
     expect(client?.policyId).toBe(PolicyId.make("migrated-policy:legacy-client"))
     if (client === undefined) throw new Error("missing migrated client")
+    // The legacy rule named only `mail`, but the client routed to two mail
+    // connections with different decisions. Migration keeps both, so neither
+    // is widened to the other's.
     const tools = await run(store.listPolicyTools(client.policyId))
-    expect(tools).toHaveLength(1)
-    expect(tools[0]?.enabled).toBe(true)
-    expect(tools[0]?.decision).toBe("require_approval")
+    expect(tools).toEqual([
+      {
+        policyId: client.policyId,
+        connection: orgConnection("mail", "primary"),
+        tool: ToolName.make("sendEmail"),
+        enabled: true,
+        decision: "allow"
+      },
+      {
+        policyId: client.policyId,
+        connection: orgConnection("mail", "secondary"),
+        tool: ToolName.make("sendEmail"),
+        enabled: true,
+        decision: "require_approval"
+      }
+    ])
     expect((await run(store.listPolicyIntegrations(client.policyId)))[0]?.integration)
       .toBe(IntegrationSlug.make("mail"))
     expect(await run(store.listBindings(client.id))).toHaveLength(2)

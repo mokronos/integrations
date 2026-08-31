@@ -137,23 +137,25 @@ export function ClientDetailRoute() {
         <Card>
           <CardHeader>
             <CardTitle>Effective tool access</CardTitle>
-            <CardDescription>The read-only intersection of this client’s bindings and assigned policy.</CardDescription>
+            <CardDescription>What this client can call, derived from its assigned policy. Each alias routes to one connection.</CardDescription>
           </CardHeader>
           <CardContent className="p-0">
             <Table>
               <TableHeader><TableRow>
                 <TableHead>Alias</TableHead>
                 <TableHead>Integration</TableHead>
+                <TableHead>Connection</TableHead>
                 <TableHead>Tool</TableHead>
                 <TableHead>Decision</TableHead>
               </TableRow></TableHeader>
               <TableBody>
                 {(tools.data ?? []).length === 0 ? (
-                  <TableRow><TableCell colSpan={4} className="text-muted-foreground py-10 text-center">No effective tools.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={5} className="text-muted-foreground py-10 text-center">No effective tools.</TableCell></TableRow>
                 ) : (tools.data ?? []).map((tool) => (
                   <TableRow key={`${tool.alias}:${tool.tool}`}>
                     <TableCell><code className="text-sm">{tool.alias}</code></TableCell>
                     <TableCell>{tool.integration}</TableCell>
+                    <TableCell><code className="text-xs">{tool.connection}</code></TableCell>
                     <TableCell className="font-medium">{tool.tool}</TableCell>
                     <TableCell><Badge variant={tool.decision === "allow" ? "secondary" : "default"}>{tool.decision === "allow" ? "allow" : "approval required"}</Badge></TableCell>
                   </TableRow>

@@ -15,11 +15,9 @@ import { startMaintenanceLoop } from "@mokronos/gateway-core"
 import type { MaintenanceLoop } from "@mokronos/gateway-core"
 import { createOAuthSessions } from "@mokronos/gateway-core"
 import {
-  bindConnectedTools,
-  bindCurrentOrgTools,
   ensureDefaultPolicyTools,
-  includeConnectedToolsInDefaultPolicy,
-  reconcilePolicyConfigurations
+  synchronizeClientBindings,
+  synchronizeConnectedCatalog
 } from "@mokronos/gateway-core"
 import type { OAuthSessionStore } from "@mokronos/gateway-core"
 import { createRateLimiter } from "@mokronos/gateway-core"
@@ -155,7 +153,7 @@ const buildCore = async (
     resources = await bootResources()
     await Effect.runPromise(Effect.gen(function*() {
       const tenants = yield* resources.store.listTenants()
-      yield* Effect.forEach(tenants, (tenant) => reconcilePolicyConfigurations({
+      yield* Effect.forEach(tenants, (tenant) => synchronizeConnectedCatalog({
         store: resources.store,
         integrations: resources.integrations,
         tenantId: tenant.id
@@ -218,19 +216,10 @@ const buildCore = async (
     publicUrlOf: resolvePublicUrl,
     onConnected: async (session) => {
       if (session.bindingClient === undefined || session.state.status !== "connected") return
-      await Effect.runPromise(bindConnectedTools({
+      await Effect.runPromise(synchronizeConnectedCatalog({
         store: resources.store,
         integrations: gateway.integrations,
-        client: session.bindingClient,
-        integration: session.integration,
-        connection: session.connection
-      }))
-      await Effect.runPromise(includeConnectedToolsInDefaultPolicy({
-        store: resources.store,
-        integrations: gateway.integrations,
-        tenantId: session.bindingClient.tenantId,
-        integration: session.integration,
-        connection: session.connection
+        tenantId: session.bindingClient.tenantId
       }))
     },
     ...whenPresent("store", options.oauthStore)
@@ -481,7 +470,10 @@ export const ensureLocalCredential = Effect.fn("Gateway.ensureLocalCredential")(
     name: localClientName,
     capabilities: ["provision_connections", "administer_gateway"]
   }))
-  if (existing === undefined) yield* bindCurrentOrgTools({ store, integrations, client })
+  // Unconditional: the local client's routes are derived from its policy, so
+  // re-deriving them here is also the repair for a gateway whose catalog moved
+  // while it was not running.
+  yield* synchronizeClientBindings({ store, client })
   const key = generateApiKey()
   yield* store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
   yield* Effect.promise(() => writeGatewayConfig(home, {

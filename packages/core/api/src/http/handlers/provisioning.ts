@@ -14,8 +14,8 @@ import {
 } from "@mokronos/gateway-core"
 import { boundToolAddress } from "@mokronos/gateway-core"
 import {
-  bindConnectedTools,
-  includeConnectedToolsInDefaultPolicy
+  forgetConnectionRules,
+  synchronizeConnectedCatalog
 } from "@mokronos/gateway-core"
 import { oauthBrowserPage } from "@mokronos/gateway-core"
 import type { GatewayStore } from "@mokronos/gateway-core"
@@ -25,7 +25,7 @@ import {
   ApiNotFound,
   GatewayApi
 } from "../api.ts"
-import { Identity } from "../authority.ts"
+import { Identity, requireTenant } from "../authority.ts"
 import {
   GatewayConfig,
   OAuthFlowSessions
@@ -284,19 +284,10 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
                   ? { value: values["token"] }
                   : { values })
             }))
-          yield* bindConnectedTools({
+          yield* synchronizeConnectedCatalog({
             store,
             integrations: integrationsApi,
-            client: caller.client,
-            integration: integration.slug,
-            connection: connection.name
-          }).pipe(orDieStorage)
-          yield* includeConnectedToolsInDefaultPolicy({
-            store,
-            integrations: integrationsApi,
-            tenantId: caller.client.tenantId,
-            integration: integration.slug,
-            connection: connection.name
+            tenantId: caller.client.tenantId
           }).pipe(orDieStorage)
           return {
             connection,
@@ -403,6 +394,7 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
         }))
       .handle("removeConnection", (request) =>
         Effect.gen(function*() {
+          const tenantId = yield* requireTenant
           const integration = request.params["integration"]
           const requested = request.params["name"]
           // Connection names are normalised on the way in (`docs-demo` is
@@ -428,6 +420,14 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
           }
           yield* Effect.promise(() =>
             integrationsApi.connections.remove({ integration, name: match.name }))
+          // Rules that named the deleted credential go with it, for every
+          // policy in the tenant the caller belongs to.
+          yield* forgetConnectionRules({
+            store,
+            tenantId,
+            integration,
+            connection: match.name
+          }).pipe(orDieStorage)
           return { removed: true as const, integration, connection: match.name }
         }))
   }))

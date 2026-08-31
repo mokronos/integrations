@@ -8,6 +8,7 @@ import {
   Client,
   ClientToolBinding,
   DriftEntry,
+  ConnectionRef as ConnectionRefSchema,
   Policy,
   PolicyDecision as PolicyDecisionSchema,
   PolicyId,
@@ -54,7 +55,7 @@ export type {
   PendingApproval
 }
 
-export { ApprovalStatusSchema, PolicyDecisionSchema }
+export { ApprovalStatusSchema, ConnectionRefSchema, PolicyDecisionSchema }
 export type {
   ApprovalStatus,
   ApprovalDelivery,
@@ -112,6 +113,7 @@ export const EffectiveTool = Schema.Struct({
   alias: Alias,
   tool: Schema.String,
   integration: Schema.String,
+  connection: Schema.String,
   decision: PolicyDecisionSchema,
   inputSchema: Schema.optional(Schema.Json),
   outputSchema: Schema.optional(Schema.Json)
@@ -123,7 +125,7 @@ export const EffectiveToolsResponse = Schema.Struct({ tools: Schema.Array(Effect
 export const BindingsResponse = Schema.Struct({ bindings: Schema.Array(ClientToolBinding) })
 
 export const PolicyToolInput = Schema.Struct({
-  integration: Schema.String,
+  connection: ConnectionRefSchema,
   tool: Schema.String,
   enabled: Schema.Boolean,
   decision: PolicyDecisionSchema

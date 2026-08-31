@@ -97,12 +97,21 @@ export const gatewayDdl = [
    )`,
   `CREATE TABLE IF NOT EXISTS gateway_policy_tool (
      policy_id TEXT NOT NULL REFERENCES gateway_policy (id) ON DELETE CASCADE,
+     owner TEXT NOT NULL,
+     subject TEXT,
      integration TEXT NOT NULL,
+     connection_name TEXT NOT NULL,
      tool TEXT NOT NULL,
      enabled INTEGER NOT NULL DEFAULT 1,
      decision TEXT NOT NULL,
-     PRIMARY KEY (policy_id, integration, tool)
+     PRIMARY KEY (policy_id, owner, subject, integration, connection_name, tool)
    )`,
+  // SQLite treats NULLs in a primary key as distinct, and an org-tier rule has
+  // no subject. The expression index is what actually makes one rule per
+  // (policy, connection, tool) true.
+  `CREATE UNIQUE INDEX IF NOT EXISTS gateway_policy_tool_route
+     ON gateway_policy_tool
+        (policy_id, owner, COALESCE(subject, ''), integration, connection_name, tool)`,
   `CREATE TABLE IF NOT EXISTS gateway_client_tool_binding (
      id TEXT PRIMARY KEY,
      tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,

@@ -1,4 +1,4 @@
-import { clientHasCapability, connectionSubject } from "./domain.ts"
+import { clientHasCapability, connectionSubject, sameConnectionRef } from "./domain.ts"
 import type {
   Alias,
   Authorization,
@@ -61,7 +61,7 @@ export const authorizeInvocation = Effect.fn("Authorization.authorizeInvocation"
   const policyTool = binding === undefined
     ? undefined
     : policyTools.find((candidate) =>
-      candidate.enabled && candidate.integration === binding.connection.integration && candidate.tool === binding.tool)
+      candidate.enabled && sameConnectionRef(candidate.connection, binding.connection) && candidate.tool === binding.tool)
   const integrationMember = binding !== undefined && policyIntegrations.some((candidate) =>
     candidate.integration === binding.connection.integration)
   // One status for every missing side of the intersection: telling them apart

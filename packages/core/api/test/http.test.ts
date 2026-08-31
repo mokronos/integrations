@@ -168,10 +168,10 @@ const setup = async (options: {
   await run(store.replacePolicyConfiguration(policy.id, {
     integrations: [connection.integration],
     tools: [{
-    integration: connection.integration,
-    tool: ToolName.make("sendEmail"),
-    enabled: true,
-    decision: options.decision ?? "allow"
+      connection,
+      tool: ToolName.make("sendEmail"),
+      enabled: true,
+      decision: options.decision ?? "allow"
     }]
   }))
   const client = await run(store.createClient({
@@ -278,7 +278,7 @@ describe("gateway http surface", () => {
     const response = await run(call("GET", "/v1/tools"))
     expect(response.status).toBe(200)
     expect(response.body["tools"]).toEqual([
-      { alias: "gmail-work", tool: "sendEmail", integration: "gmail", decision: "allow" }
+      { alias: "gmail-work", tool: "sendEmail", integration: "gmail", connection: "work", decision: "allow" }
     ])
   })
 
@@ -594,7 +594,7 @@ describe("gateway approval settlement", () => {
     await run(store.replacePolicyConfiguration(policy.id, {
       integrations: [connection.integration],
       tools: [{
-        integration: connection.integration,
+        connection,
         tool: ToolName.make("sendEmail"),
         enabled: false,
         decision: "require_approval"
@@ -805,7 +805,7 @@ describe("provisioning surface", () => {
 
     expect(response.status).toBe(200)
     expect(response.body["tools"]).toEqual([
-      { alias: "gmail-work", tool: "sendEmail", integration: "gmail", decision: "allow" }
+      { alias: "gmail-work", tool: "sendEmail", integration: "gmail", connection: "work", decision: "allow" }
     ])
   })
 
