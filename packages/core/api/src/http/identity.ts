@@ -39,7 +39,7 @@ type UnauthorizedReason = Extract<RefusalReason, "unknown-key" | "key-revoked">
 type ForbiddenReason = Exclude<RefusalReason, UnauthorizedReason>
 
 /** A refusal states both a sentence and a `code`. Clients branch on the code:
- *  matching on prose is how "not granted" ends up being explained to a user as
+ *  matching on prose is how "not authorized" ends up being explained to a user as
  *  a permissions-tier problem. The two classes exist because the wire speaks in
  *  status codes — unknown and revoked keys are 401, everything else is 403 —
  *  and a single class could only carry one static status annotation. */
@@ -87,7 +87,7 @@ export const rateLimitedResponse = (retryAfterSeconds: number) =>
 
 /** The authority a route requires.
  *
- *  `delegated` is grant-scoped client work, `provisioning` manages the catalog
+ *  `delegated` is policy-scoped client work, `provisioning` manages the catalog
  *  and connections, `administrative` changes delegation or inspects the control
  *  plane, and `human` is reserved for decisions an automated client must never
  *  make for itself. */
@@ -102,7 +102,7 @@ export type Access =
  *  can enforce every route without a table to keep in step. An endpoint that
  *  declares nothing is `public`, which is the only safe default that is also
  *  never silently wrong: a forgotten annotation on a protected route fails
- *  visibly in tests rather than quietly granting access, because its handler
+ *  visibly in tests rather than quietly authorizing access, because its handler
  *  will find no identity to work with. */
 export const RequiredAccess = Context.Reference<Access>(
   "@mokronos/integrations/RequiredAccess",
@@ -120,7 +120,7 @@ export const Unmetered = Context.Reference<boolean>(
 
 /** An authenticated caller, as the handlers see it.
  *
- *  `local` is ambient authority granted only to the same-origin control plane
+ *  `local` is ambient authority available only to the same-origin control plane
  *  on a loopback deployment; it is not constructible from an HTTP credential. */
 export type Caller =
   | { readonly kind: "anonymous" }

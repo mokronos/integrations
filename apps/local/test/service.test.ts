@@ -114,9 +114,12 @@ describe("gateway service", () => {
 
   test("an explicit key wins over the ambient one", async () => {
     const gateway = await run(start())
+    const local = await run(gateway.service.store.findClientByName(defaultTenantId, localClientName))
+    if (local === undefined) throw new Error("Local client was not bootstrapped")
     const sandbox = await run(gateway.service.store.createClient({
       id: newClientId(),
       tenantId: defaultTenantId,
+      policyId: local.policyId,
       name: "sandbox",
       capabilities: ["provision_connections"]
     }))

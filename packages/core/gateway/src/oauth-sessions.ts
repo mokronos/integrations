@@ -18,7 +18,7 @@ export type OAuthSession = {
   readonly id: string
   readonly integration: string
   readonly connection: string
-  readonly grantClient?: Client
+  readonly bindingClient?: Client
   readonly state: OAuthSessionState
 }
 
@@ -58,7 +58,7 @@ export interface OAuthSessions {
     readonly clientId?: string
     readonly clientSecret?: string
     readonly timeoutMs?: number
-    readonly grantClient?: Client
+    readonly bindingClient?: Client
   }): Effect.Effect<OAuthSession, OAuthSessionError>
   get(id: string): Effect.Effect<OAuthSession | undefined, OAuthSessionError>
   /** Finishes a hosted flow by the `state` the provider echoed back. Unknown
@@ -167,12 +167,12 @@ export const createOAuthSessions = (
             id,
             integration: input.integration,
             connection: input.connection,
-            ...whenPresent("grantClient", input.grantClient),
+            ...whenPresent("bindingClient", input.bindingClient),
             state: { status: "connected", connection: flow.connection }
           }
           yield* store.put(connected)
           if (options.onConnected !== undefined) {
-            yield* external("grantConnectedTools", () => options.onConnected!(connected))
+            yield* external("bindConnectedTools", () => options.onConnected!(connected))
           }
           return connected
         }
@@ -181,7 +181,7 @@ export const createOAuthSessions = (
           id,
           integration: input.integration,
           connection: input.connection,
-          ...whenPresent("grantClient", input.grantClient),
+          ...whenPresent("bindingClient", input.bindingClient),
           state: { status: "pending", authorizationUrl: flow.authorizationUrl }
         }
         yield* store.put(pending)
@@ -210,7 +210,7 @@ export const createOAuthSessions = (
             yield* finish(id, { status: "connected", connection })
             const session = yield* store.get(id)
             if (session !== undefined && options.onConnected !== undefined) {
-              yield* external("grantConnectedTools", () => options.onConnected!(session))
+              yield* external("bindConnectedTools", () => options.onConnected!(session))
             }
           }))
           // A provider that short-circuits to an existing connection never
@@ -229,7 +229,7 @@ export const createOAuthSessions = (
         id,
         integration: input.integration,
         connection: input.connection,
-        ...whenPresent("grantClient", input.grantClient),
+        ...whenPresent("bindingClient", input.bindingClient),
         state: { status: "pending", authorizationUrl }
       }
       yield* store.put(session)
@@ -257,7 +257,7 @@ export const createOAuthSessions = (
         yield* finish(id, { status: "connected", connection: result.success })
         const completed = yield* store.get(id)
         if (completed !== undefined && options.onConnected !== undefined) {
-          yield* external("grantConnectedTools", () => options.onConnected!(completed))
+          yield* external("bindConnectedTools", () => options.onConnected!(completed))
         }
       } else {
         const error = result.failure

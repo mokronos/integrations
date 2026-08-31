@@ -16,9 +16,12 @@ import {
   ClientId,
   Alias,
   ApiKeyId,
-  Grant,
-  GrantId,
-  GrantDecision,
+  ClientToolBinding,
+  Policy,
+  PolicyDecision,
+  PolicyId,
+  PolicyIntegration,
+  PolicyTool,
   PendingApproval,
   SubjectId
 } from "@mokronos/gateway-core"
@@ -56,22 +59,9 @@ const ExecuteBody = Schema.Struct({
   arguments: Schema.optional(Json)
 })
 
-const ConnectionRefBody = Schema.Union([
-  Schema.Struct({
-    owner: Schema.Literal("org"),
-    integration: Schema.String,
-    name: Schema.String
-  }),
-  Schema.Struct({
-    owner: Schema.Literal("user"),
-    subject: Schema.String,
-    integration: Schema.String,
-    name: Schema.String
-  })
-])
-
 const CreateClientBody = Schema.Struct({
   name: Schema.String,
+  policyId: Schema.optional(PolicyId),
   capabilities: Schema.optional(Schema.Array(ClientCapability)),
   approvalDelivery: Schema.optional(ApprovalDelivery)
 })
@@ -81,12 +71,26 @@ const UpdateClientSettingsBody = Schema.Struct({
   approvalDelivery: ApprovalDelivery
 })
 
-const CreateGrantBody = Schema.Struct({
-  clientId: ClientId,
-  alias: WireAlias,
-  tool: Schema.String,
-  connection: ConnectionRefBody,
-  decision: Schema.optional(Schema.Literals(["allow", "require_approval"]))
+const CreatePolicyBody = Schema.Struct({
+  name: Schema.String
+})
+
+const ReplacePolicyToolsBody = Schema.Struct({
+  integrations: Schema.Array(Schema.String),
+  tools: Schema.Array(Schema.Struct({
+    integration: Schema.String,
+    tool: Schema.String,
+    enabled: Schema.Boolean,
+    decision: PolicyDecision
+  }))
+})
+
+const ClonePolicyBody = Schema.Struct({
+  name: Schema.String
+})
+
+const AssignPolicyBody = Schema.Struct({
+  policyId: PolicyId
 })
 
 const DiscoverBody = Schema.Struct({
@@ -155,13 +159,13 @@ export const DeleteAccountBody = Schema.Struct({
   password: Schema.optional(Schema.String)
 })
 
-/** A granted tool as `/v1/tools` reports it. Schemas are opt-in because
- *  fetching them costs a catalog read per grant. */
-const GrantedTool = Schema.Struct({
+/** An effective tool as `/v1/tools` reports it. Schemas are opt-in because
+ * fetching them costs a catalog read per binding. */
+const EffectiveTool = Schema.Struct({
   alias: Alias,
   tool: Schema.String,
   integration: Schema.String,
-  decision: GrantDecision,
+  decision: PolicyDecision,
   inputSchema: Schema.optional(Json),
   outputSchema: Schema.optional(Json)
 })
@@ -346,7 +350,7 @@ const DelegatedGroup = HttpApiGroup.make("delegated")
         Schema.withDecodingDefaultTypeKey(Effect.succeed(false))
       )
     },
-    success: Schema.Struct({ tools: Schema.Array(GrantedTool) })
+    success: Schema.Struct({ tools: Schema.Array(EffectiveTool) })
   }).annotate(RequiredAccess, "delegated"))
   .add(HttpApiEndpoint.post("execute", "/v1/execute", {
     payload: ExecuteBody,
@@ -462,7 +466,8 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
   .add(HttpApiEndpoint.get("overview", "/v1/overview", {
     success: Schema.Struct({
       clients: Schema.Number,
-      grants: Schema.Number,
+      policies: Schema.Number,
+      policyTools: Schema.Number,
       keys: Schema.Number,
       pendingApprovals: Schema.Number,
       connections: Schema.Number,
@@ -508,7 +513,7 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
         Schema.withDecodingDefaultTypeKey(Effect.succeed(false))
       )
     },
-    success: Schema.Struct({ tools: Schema.Array(GrantedTool) }),
+    success: Schema.Struct({ tools: Schema.Array(EffectiveTool) }),
     error: ApiNotFoundError
   }).annotate(RequiredAccess, "administrative"))
   .add(HttpApiEndpoint.post("revokeClient", "/v1/clients/:id/revoke", {
@@ -519,18 +524,60 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
     }),
     error: ApiNotFoundError
   }).annotate(RequiredAccess, "administrative"))
-  .add(HttpApiEndpoint.get("listGrants", "/v1/grants", {
-    query: { clientId: ClientId },
-    success: Schema.Struct({ grants: Schema.Array(Grant) })
+  .add(HttpApiEndpoint.get("listPolicies", "/v1/policies", {
+    success: Schema.Struct({ policies: Schema.Array(Schema.Struct({
+      policy: Policy,
+      integrationCount: Schema.Number,
+      toolCount: Schema.Number,
+      enabledToolCount: Schema.Number,
+      assignedClientCount: Schema.Number
+    })) })
   }).annotate(RequiredAccess, "administrative"))
-  .add(HttpApiEndpoint.post("createGrant", "/v1/grants", {
-    payload: CreateGrantBody,
-    success: HttpApiSchema.status(201)(Grant),
+  .add(HttpApiEndpoint.get("getPolicy", "/v1/policies/:id", {
+    params: { id: PolicyId },
+    success: Schema.Struct({
+      policy: Policy,
+      integrations: Schema.Array(PolicyIntegration),
+      tools: Schema.Array(PolicyTool),
+      assignedClients: Schema.Array(Client)
+    }),
+    error: ApiNotFoundError
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.post("createPolicy", "/v1/policies", {
+    payload: CreatePolicyBody,
+    success: HttpApiSchema.status(201)(Policy),
+    error: ApiBadRequestError
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.post("replacePolicyTools", "/v1/policies/:id/tools", {
+    params: { id: PolicyId },
+    payload: ReplacePolicyToolsBody,
+    success: Schema.Struct({
+      policy: Policy,
+      integrations: Schema.Array(PolicyIntegration),
+      tools: Schema.Array(PolicyTool)
+    }),
     error: [ApiNotFoundError, ApiBadRequestError]
   }).annotate(RequiredAccess, "administrative"))
-  .add(HttpApiEndpoint.post("revokeGrant", "/v1/grants/:id/revoke", {
-    params: { id: GrantId },
-    success: Schema.Struct({ revoked: Schema.Literal(true) })
+  .add(HttpApiEndpoint.post("clonePolicy", "/v1/policies/:id/clone", {
+    params: { id: PolicyId },
+    payload: ClonePolicyBody,
+    success: HttpApiSchema.status(201)(Schema.Struct({
+      policy: Policy,
+      integrations: Schema.Array(PolicyIntegration),
+      tools: Schema.Array(PolicyTool)
+    })),
+    error: [ApiNotFoundError, ApiBadRequestError]
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.post("assignPolicy", "/v1/clients/:id/policy", {
+    params: { id: ClientId },
+    payload: AssignPolicyBody,
+    success: Client,
+    error: [ApiNotFoundError, ApiBadRequestError]
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.get("listBindings", "/v1/clients/:id/bindings", {
+    params: { id: ClientId },
+    success: Schema.Struct({ bindings: Schema.Array(ClientToolBinding) }),
+    error: ApiNotFoundError
   }).annotate(RequiredAccess, "administrative"))
   .add(HttpApiEndpoint.get("listApprovals", "/v1/approvals", {
     query: { status: Schema.optional(ApprovalStatus) },

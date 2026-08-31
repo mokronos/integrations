@@ -6,15 +6,14 @@ import {
   decodeAuthProviders,
   decodeApprovals,
   decodeAudit,
+  decodeBindings,
   decodeClient,
   decodeClients,
   decodeConnectionCreated,
   decodeConnections,
   decodeDiscovery,
   decodeDrift,
-  decodeGrant,
-  decodeGrantedTools,
-  decodeGrants,
+  decodeEffectiveTools,
   decodeIntegrations,
   decodeIssuedKey,
   decodeEmailChanged,
@@ -23,13 +22,21 @@ import {
   decodeKeys,
   decodeOAuthSession,
   decodeOverview,
+  decodePolicies,
+  decodePolicy,
+  decodePolicyCreated,
+  decodePolicyToolsReplaced,
   decodeRemoved,
   decodeRegistrySearch,
   decodeRevoked,
   decodeTool,
   decodeTools
 } from "@/lib/schemas"
-import type { ApprovalDelivery, ApprovalStatus, GrantDecision } from "@/lib/schemas"
+import type {
+  ApprovalDelivery,
+  ApprovalStatus,
+  PolicyToolInput
+} from "@/lib/schemas"
 
 /** The gateway's API, as the control plane uses it.
  *
@@ -38,25 +45,6 @@ import type { ApprovalDelivery, ApprovalStatus, GrantDecision } from "@/lib/sche
  * See `packages/core/api/src/http/loopback.ts` for why that is safe and
  * where it stops being safe.
  */
-
-/** A connection as a request body spells it: the same union as the domain's
- * `ConnectionRef`, minus the brands, because branding is a property of decoded
- * values and this is what goes out on the wire.
- *
- * A decoded `ConnectionRef` is assignable to this, so a grant read back from
- * the gateway can be handed straight to `createGrant` without a cast. */
-export type ConnectionRefInput =
-  | {
-    readonly owner: "org"
-    readonly integration: string
-    readonly name: string
-  }
-  | {
-    readonly owner: "user"
-    readonly subject: string
-    readonly integration: string
-    readonly name: string
-  }
 
 export class GatewayError extends Error {
   readonly status: number
@@ -185,7 +173,7 @@ export const removeConnection = async (input: {
     `/v1/connections/${segment(input.integration)}/${segment(input.name)}`
   ))
 
-// --- clients, keys, grants --------------------------------------------------
+// --- clients, keys, policies ------------------------------------------------
 
 export const listClients = async () =>
   decodeClients(await request("GET", "/v1/clients")).clients
@@ -195,6 +183,7 @@ export const fetchOverview = async () =>
 
 export const createClient = async (input: {
   readonly name: string
+  readonly policyId?: string
   readonly capabilities: ReadonlyArray<"provision_connections" | "administer_gateway">
   readonly approvalDelivery: ApprovalDelivery
 }) => decodeClient(await request("POST", "/v1/clients", input))
@@ -219,7 +208,7 @@ export const revokeKey = async (keyId: string) =>
   decodeRevoked(await request("POST", `/v1/keys/${segment(keyId)}/revoke`))
 
 export const listClientTools = async (clientId: string, schemas = false) =>
-  decodeGrantedTools(await request(
+  decodeEffectiveTools(await request(
     "GET",
     `/v1/clients/${segment(clientId)}/tools${query({ schemas: schemas ? "true" : undefined })}`
   )).tools
@@ -227,19 +216,45 @@ export const listClientTools = async (clientId: string, schemas = false) =>
 export const revokeClient = async (clientId: string) =>
   decodeRevoked(await request("POST", `/v1/clients/${segment(clientId)}/revoke`))
 
-export const listGrants = async (clientId: string) =>
-  decodeGrants(await request("GET", `/v1/grants${query({ clientId })}`)).grants
+export const listPolicies = async () =>
+  decodePolicies(await request("GET", "/v1/policies")).policies
 
-export const createGrant = async (input: {
+export const getPolicy = async (policyId: string) =>
+  decodePolicy(await request("GET", `/v1/policies/${segment(policyId)}`))
+
+export const createPolicy = async (input: { readonly name: string }) =>
+  decodePolicyCreated(await request("POST", "/v1/policies", input))
+
+export const replacePolicyTools = async (input: {
+  readonly policyId: string
+  readonly integrations: ReadonlyArray<string>
+  readonly tools: ReadonlyArray<PolicyToolInput>
+}) => decodePolicyToolsReplaced(await request(
+  "POST",
+  `/v1/policies/${segment(input.policyId)}/tools`,
+  { integrations: input.integrations, tools: input.tools }
+))
+
+export const clonePolicy = async (input: {
+  readonly policyId: string
+  readonly name: string
+}) => decodePolicyToolsReplaced(await request(
+  "POST",
+  `/v1/policies/${segment(input.policyId)}/clone`,
+  { name: input.name }
+))
+
+export const assignPolicy = async (input: {
   readonly clientId: string
-  readonly alias: string
-  readonly tool: string
-  readonly connection: ConnectionRefInput
-  readonly decision: GrantDecision
-}) => decodeGrant(await request("POST", "/v1/grants", input))
+  readonly policyId: string
+}) => decodeClient(await request(
+  "POST",
+  `/v1/clients/${segment(input.clientId)}/policy`,
+  { policyId: input.policyId }
+))
 
-export const revokeGrant = async (grantId: string) =>
-  decodeRevoked(await request("POST", `/v1/grants/${segment(grantId)}/revoke`))
+export const listBindings = async (clientId: string) =>
+  decodeBindings(await request("GET", `/v1/clients/${segment(clientId)}/bindings`)).bindings
 
 // --- approvals, audit, upkeep -----------------------------------------------
 

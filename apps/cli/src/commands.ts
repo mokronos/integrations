@@ -3,7 +3,18 @@ import { Effect } from "effect"
 import { approvalCommand, approvalsCommand, approveCommand, auditCommand, denyCommand, driftCommand, maintenanceCommand } from "./commands/approvals-audit.ts"
 import { discoverCommand, integrationsCommand, schemaCommand, searchCommand, toolsCommand } from "./commands/catalog.ts"
 import { connectCommand, connectionsCommand, disconnectCommand } from "./commands/connections.ts"
-import { clientCommand, clientsCommand, grantCommand, keyCommand, keysCommand, revokeCommand } from "./commands/delegation.ts"
+import {
+  assignPolicyCommand,
+  clientCommand,
+  clientsCommand,
+  clonePolicyCommand,
+  keyCommand,
+  keysCommand,
+  policiesCommand,
+  policyCommand,
+  policyToolCommand,
+  revokeCommand
+} from "./commands/delegation.ts"
 import { clientExecuteCommand, operatorExecuteCommand, validateCommand } from "./commands/invocation.ts"
 import type { IntegrationsCliError } from "./connection.ts"
 import {
@@ -62,7 +73,11 @@ export const controlPlaneSubcommands = [
   clientCommand,
   keyCommand,
   keysCommand,
-  grantCommand,
+  policiesCommand,
+  policyCommand,
+  clonePolicyCommand,
+  policyToolCommand,
+  assignPolicyCommand,
   revokeCommand,
   approvalsCommand,
   approveCommand,

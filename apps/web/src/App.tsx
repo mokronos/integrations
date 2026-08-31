@@ -12,6 +12,8 @@ const ClientsRoute = lazy(() => import("@/routes/clients").then((route) => ({ de
 const ExecutionsRoute = lazy(() => import("@/routes/executions").then((route) => ({ default: route.ExecutionsRoute })))
 const IntegrationsRoute = lazy(() => import("@/routes/integrations").then((route) => ({ default: route.IntegrationsRoute })))
 const OverviewRoute = lazy(() => import("@/routes/overview").then((route) => ({ default: route.OverviewRoute })))
+const PoliciesRoute = lazy(() => import("@/routes/policies").then((route) => ({ default: route.PoliciesRoute })))
+const PolicyDetailRoute = lazy(() => import("@/routes/policies").then((route) => ({ default: route.PolicyDetailRoute })))
 
 export default function App() {
   const [dark, setDark] = useState(() => localStorage.getItem("gateway-theme") !== "light")
@@ -32,6 +34,8 @@ export default function App() {
             <Route path="/integrations/:slug" element={<IntegrationsRoute />} />
             <Route path="/clients" element={<ClientsRoute />} />
             <Route path="/clients/:clientId" element={<ClientDetailRoute />} />
+            <Route path="/policies" element={<PoliciesRoute />} />
+            <Route path="/policies/:policyId" element={<PolicyDetailRoute />} />
             <Route path="/approvals" element={<ApprovalsRoute />} />
             <Route path="/activity" element={<ExecutionsRoute />} />
             <Route path="/executions" element={<Navigate to="/activity" replace />} />

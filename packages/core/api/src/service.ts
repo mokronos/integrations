@@ -14,16 +14,22 @@ import type { GatewayHandle, GatewayRequestContext } from "./http/handler.ts"
 import { startMaintenanceLoop } from "@mokronos/gateway-core"
 import type { MaintenanceLoop } from "@mokronos/gateway-core"
 import { createOAuthSessions } from "@mokronos/gateway-core"
-import { grantConnectedTools } from "@mokronos/gateway-core"
+import {
+  bindConnectedTools,
+  bindCurrentOrgTools,
+  ensureDefaultPolicyTools,
+  includeConnectedToolsInDefaultPolicy,
+  reconcilePolicyConfigurations
+} from "@mokronos/gateway-core"
 import type { OAuthSessionStore } from "@mokronos/gateway-core"
 import { createRateLimiter } from "@mokronos/gateway-core"
 import { generateApiKey, newClientId } from "@mokronos/gateway-core"
 import { integrationsHome } from "./paths.ts"
-import type { HostStorage } from "@mokronos/integrations"
+import type { HostStorage, IntegrationsApi } from "@mokronos/integrations"
 import { HostHandleService, IntegrationsApiService } from "@mokronos/integrations"
-import type { GatewayStoreError, GatewayStoreOptions } from "@mokronos/gateway-core"
+import type { GatewayStoreOptions } from "@mokronos/gateway-core"
 import type { GatewayStore } from "@mokronos/gateway-core"
-import { GatewayStoreService } from "@mokronos/gateway-core"
+import { GatewayStoreError, GatewayStoreService } from "@mokronos/gateway-core"
 import { createWebAssets } from "./web-assets.ts"
 import { telemetryLayer } from "@mokronos/observability"
 import type { GoogleIdentityOAuth } from "@mokronos/gateway-core"
@@ -147,6 +153,14 @@ const buildCore = async (
   let resources: Awaited<ReturnType<typeof bootResources>>
   try {
     resources = await bootResources()
+    await Effect.runPromise(Effect.gen(function*() {
+      const tenants = yield* resources.store.listTenants()
+      yield* Effect.forEach(tenants, (tenant) => reconcilePolicyConfigurations({
+        store: resources.store,
+        integrations: resources.integrations,
+        tenantId: tenant.id
+      }), { discard: true })
+    }))
   } catch (error) {
     await dependencies.dispose()
     throw error
@@ -203,11 +217,18 @@ const buildCore = async (
   const oauth = createOAuthSessions(gateway.integrations, {
     publicUrlOf: resolvePublicUrl,
     onConnected: async (session) => {
-      if (session.grantClient === undefined || session.state.status !== "connected") return
-      await Effect.runPromise(grantConnectedTools({
+      if (session.bindingClient === undefined || session.state.status !== "connected") return
+      await Effect.runPromise(bindConnectedTools({
         store: resources.store,
         integrations: gateway.integrations,
-        client: session.grantClient,
+        client: session.bindingClient,
+        integration: session.integration,
+        connection: session.connection
+      }))
+      await Effect.runPromise(includeConnectedToolsInDefaultPolicy({
+        store: resources.store,
+        integrations: gateway.integrations,
+        tenantId: session.bindingClient.tenantId,
         integration: session.integration,
         connection: session.connection
       }))
@@ -415,7 +436,12 @@ export const serveGateway = async (options: ServeOptions = {}): Promise<RunningG
     })
 
     const boundPort = Number(server.port)
-    localSecret = await Effect.runPromise(ensureLocalCredential(core.store, core.home, boundPort))
+    localSecret = await Effect.runPromise(ensureLocalCredential(
+      core.store,
+      core.gateway.integrations,
+      core.home,
+      boundPort
+    ))
 
     return {
       port: boundPort,
@@ -433,19 +459,29 @@ export const serveGateway = async (options: ServeOptions = {}): Promise<RunningG
 /** Ensures the local client exists and has a live key, then records where the
  *  gateway is listening. Idempotent apart from key issue: a fresh key is minted
  *  whenever the recorded one is missing, so losing the config file is
- *  recoverable without losing the client's grants. */
+ *  recoverable without losing the client's policy and bindings. */
 export const ensureLocalCredential = Effect.fn("Gateway.ensureLocalCredential")(function*(
   store: GatewayStore,
+  integrations: Pick<IntegrationsApi, "tools" | "connections">,
   home: string,
   port: number
 ): Effect.fn.Return<string, GatewayStoreError> {
   const existing = yield* store.findClientByName(defaultTenantId, localClientName)
+  const defaultPolicy = yield* ensureDefaultPolicyTools({ store, integrations, tenantId: defaultTenantId })
+  if (defaultPolicy === undefined) {
+    return yield* new GatewayStoreError({
+      operation: "ensureLocalCredential",
+      cause: new Error("The default tenant has no default policy")
+    })
+  }
   const client = existing ?? (yield* store.createClient({
     id: newClientId(),
     tenantId: defaultTenantId,
+    policyId: defaultPolicy.id,
     name: localClientName,
     capabilities: ["provision_connections", "administer_gateway"]
   }))
+  if (existing === undefined) yield* bindCurrentOrgTools({ store, integrations, client })
   const key = generateApiKey()
   yield* store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
   yield* Effect.promise(() => writeGatewayConfig(home, {

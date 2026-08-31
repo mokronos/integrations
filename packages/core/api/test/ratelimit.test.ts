@@ -76,9 +76,12 @@ describe("gateway traffic shaping", () => {
     directories.push(directory)
     const store = await run(createGatewayStore(path.join(directory, "gateway.sqlite")))
     stores.push(store)
+    const policy = await run(store.findDefaultPolicy(defaultTenantId))
+    if (policy === undefined) throw new Error("missing default policy")
     const client = await run(store.createClient({
       id: newClientId(),
       tenantId: defaultTenantId,
+      policyId: policy.id,
       name: "local",
       capabilities: ["provision_connections", "administer_gateway"]
     }))
@@ -143,9 +146,12 @@ describe("gateway traffic shaping", () => {
 
     const otherStore = stores[stores.length - 1]
     if (otherStore === undefined) throw new Error("missing store fixture")
+    const neighbourPolicy = await run(otherStore.findDefaultPolicy(defaultTenantId))
+    if (neighbourPolicy === undefined) throw new Error("missing default policy")
     const neighbour = await run(otherStore.createClient({
       id: newClientId(),
       tenantId: defaultTenantId,
+      policyId: neighbourPolicy.id,
       name: "neighbour",
       capabilities: ["provision_connections"]
     }))

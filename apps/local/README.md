@@ -1,16 +1,12 @@
 # @mokronos/integrations-local
 
-The integration gateway. Holds connections and credentials, resolves grants,
-decides authorization policy, and performs invocations — so callers hold only
-what they were granted and never a credential.
+The integration gateway. Holds connections and credentials, intersects reusable
+policies with client-specific bindings, and performs invocations — so callers
+hold only an API key and never a credential.
 
-Vocabulary is defined in [CONTEXT.md](../../../CONTEXT.md). The architecture is
-recorded in
-[ADR 0001](../../../docs/adr/0001-subjects-are-human-clients-are-delegated-to.md),
-[ADR 0002](../../../docs/adr/0002-grants-are-explicit-per-tool-rows.md), and
-[ADR 0003](../../../docs/adr/0003-client-identity-binds-at-deployment.md), with
-the build sequence in
-[docs/plans/integration-gateway.md](../../../docs/plans/integration-gateway.md).
+Vocabulary is defined in [CONTEXT.md](../../../CONTEXT.md). The reusable policy
+boundary is recorded in
+[ADR 0001](../../../docs/adr/0001-reusable-policies-bind-to-distinct-clients.md).
 
 ## Storage
 

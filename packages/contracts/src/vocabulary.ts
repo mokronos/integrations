@@ -42,7 +42,7 @@ export type ToolName = typeof ToolName.Type
 export const OwnerTier = Schema.Literals(["org", "user"])
 export type OwnerTier = typeof OwnerTier.Type
 
-/** The logical name a grant exposes a tool under. Declared as a requirement by
+/** The logical name a client binding exposes a tool under. Declared as a requirement by
  *  the caller and bound to a connection per deployment. */
 export const Alias = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9-]*$/)).pipe(
   Schema.brand("Alias")

@@ -44,7 +44,7 @@ export interface DiscoverIntegrationsOptions {
  *   exist?".
  *
  * Neither is the form a workflow authors. A workflow names an alias, which only
- * the gateway can resolve, because only the gateway holds the grant that says
+ * the gateway can resolve, because only the gateway holds the binding that says
  * which connection the alias means.
  */
 export const IntegrationNodeSource = Schema.Union([

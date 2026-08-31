@@ -64,7 +64,7 @@ export function ClientSettings({ client }: { readonly client: Client }) {
       <CardHeader>
         <CardTitle>Authority and approval delivery</CardTitle>
         <CardDescription>
-          Tool access comes from grants below. These switches control the wider
+          Tool access comes from the assigned policy. These switches control the wider
           control-plane actions this credential may perform.
         </CardDescription>
       </CardHeader>
@@ -91,7 +91,7 @@ export function ClientSettings({ client }: { readonly client: Client }) {
             />
             <div className="space-y-1">
               <Label htmlFor="settings-administer">Administer gateway</Label>
-              <p className="text-muted-foreground text-xs">Manage clients, grants, approvals, policy, and audit data.</p>
+              <p className="text-muted-foreground text-xs">Manage clients, policies, approvals, and audit data.</p>
             </div>
           </div>
         </div>
@@ -131,6 +131,3 @@ export function ClientSettings({ client }: { readonly client: Client }) {
     </Card>
   )
 }
-
-/** Grants are per tool, never per pattern: a vendor shipping a new tool must not
- *  land inside an existing grant. That is why this dialog makes you pick one. */

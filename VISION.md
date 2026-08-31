@@ -20,12 +20,13 @@ An integration is defined by a URL that leads to some sort of API.
   - discover integration auth and schemas
   - trigger auth
   - list tools
-  - execute a granted tool
+  - execute an effective policy tool
 
-Client authority has two independent layers: explicit per-tool grants for
+Client authority has two independent layers: one reusable tool policy for
 invocation, and named capabilities for provisioning connections or
-administering the gateway. A newly-created runtime client starts with neither
-control-plane capability.
+administering the gateway. Client-specific bindings select the connection for
+each effective tool. A newly-created runtime client starts with neither
+control-plane capability and uses the tenant's default policy.
 
 ```text
 agent harness -> sandbox -> client -> API-key-injecting proxy -> gateway -> integration
@@ -55,9 +56,9 @@ approval link for the model to present to the user. Links still require a human
 session; webhook notifications carry review metadata but no call arguments or
 credentials.
 
-By default, tools explicitly marked safe may run directly; mutating or
-unclassified tools require approval. The gateway UI allows changing that policy per tool or per
-integration for each client.
+By default, connected tools explicitly marked safe may run directly; mutating
+or unclassified tools require approval. The gateway UI manages reusable
+policies in bulk by integration or tool and assigns exactly one to each client.
 
 Humans may sign into the dashboard with a password or an identity provider.
 The `ii` operator CLI starts that same provider flow in a browser and collects a

@@ -38,10 +38,13 @@ const setup = async (options: {
   directories.push(directory)
   const store = await run(createGatewayStore(path.join(directory, "gateway.sqlite")))
   stores.push(store)
+  const policy = await run(store.findDefaultPolicy(defaultTenantId))
+  if (policy === undefined) throw new Error("missing default policy")
 
   const client = await run(store.createClient({
     id: newClientId(),
     tenantId: defaultTenantId,
+    policyId: policy.id,
     name: "operator",
     capabilities: ["administer_gateway", "provision_connections"]
   }))

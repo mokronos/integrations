@@ -1,7 +1,7 @@
 # integrations
 
 `integrations` is an agent-facing gateway for discovering external APIs,
-holding their credentials, granting clients access to individual tools, and
+holding their credentials, assigning reusable tool policies to clients, and
 executing calls under policy.
 
 The gateway is the only component that sees credentials. Clients receive an API
@@ -61,7 +61,7 @@ ii login
 ```
 
 `i` mirrors the public TypeScript client: agents can discover integrations,
-manage connections, inspect schemas, invoke granted tools, and poll their own
+manage connections, inspect schemas, invoke effective policy tools, and poll their own
 approvals. `ii` is its strict operator superset, adding every dashboard action,
 human login/account commands, and local gateway lifecycle commands.
 

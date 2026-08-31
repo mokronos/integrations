@@ -17,7 +17,8 @@ import {
   generateApiKey,
   IntegrationSlug,
   newClientId,
-  newGrantId,
+  newClientToolBindingId,
+  newPolicyId,
   SubjectId,
   ToolName
 } from "./gateway.ts"
@@ -161,22 +162,34 @@ const setup = async (options: {
   const store = await run(createGatewayStore(path.join(directory, "gateway.sqlite")))
   stores.push(store)
 
+  const policy = await run(store.createPolicy({
+    id: newPolicyId(), tenantId: defaultTenantId, name: `policy-${crypto.randomUUID()}`
+  }))
+  await run(store.replacePolicyConfiguration(policy.id, {
+    integrations: [connection.integration],
+    tools: [{
+    integration: connection.integration,
+    tool: ToolName.make("sendEmail"),
+    enabled: true,
+    decision: options.decision ?? "allow"
+    }]
+  }))
   const client = await run(store.createClient({
     id: newClientId(),
     tenantId: defaultTenantId,
+    policyId: policy.id,
     name: "support-agent",
     capabilities: options.capabilities ?? ["provision_connections"]
   }))
   const key = generateApiKey()
   await run(store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash }))
-  const grant = await run(store.createGrant({
-    id: newGrantId(),
+  const binding = await run(store.createBinding({
+    id: newClientToolBindingId(),
     tenantId: defaultTenantId,
     clientId: client.id,
     alias: Alias.make("gmail-work"),
     tool: ToolName.make("sendEmail"),
     connection,
-    decision: options.decision ?? "allow"
   }))
 
   const stub = stubIntegrations({
@@ -231,7 +244,7 @@ const setup = async (options: {
     }
   }
 
-  return { store, client, key, grant, call, calls: stub.calls, removed: stub.removed }
+  return { store, client, key, policy, binding, call, calls: stub.calls, removed: stub.removed }
 }
 
 describe("gateway http surface", () => {
@@ -260,7 +273,7 @@ describe("gateway http surface", () => {
     expect((await run(call("DELETE", "/v1/tools"))).status).toBe(405)
   })
 
-  test("lists only the tools the caller was granted", async () => {
+  test("lists only the caller's effective tools", async () => {
     const { call } = await run(setup())
     const response = await run(call("GET", "/v1/tools"))
     expect(response.status).toBe(200)
@@ -269,7 +282,7 @@ describe("gateway http surface", () => {
     ])
   })
 
-  test("executes a granted tool against the address built from the grant", async () => {
+  test("executes an effective tool against the address built from the binding", async () => {
     const { call, calls } = await run(setup())
 
     const response = await run(call("POST", "/v1/execute", {
@@ -278,12 +291,12 @@ describe("gateway http surface", () => {
 
     expect(response.status).toBe(200)
     expect(response.body["status"]).toBe("succeeded")
-    // The address is derived from the grant, so a caller cannot forge one.
+    // The address is derived from the binding, so a caller cannot forge one.
     expect(calls).toHaveLength(1)
     expect(calls[0]?.address).toBe("tools.gmail.user.work.sendEmail")
   })
 
-  test("refuses an ungranted tool without calling the vendor", async () => {
+  test("refuses an unauthorized tool without calling the vendor", async () => {
     const { call, calls } = await run(setup())
 
     const response = await run(call("POST", "/v1/execute", {
@@ -340,8 +353,8 @@ describe("gateway http surface", () => {
     for (const [method, route] of [
       ["GET", "/v1/clients"],
       ["POST", "/v1/clients"],
-      ["GET", "/v1/grants?clientId=x"],
-      ["POST", "/v1/grants"],
+      ["GET", "/v1/policies"],
+      ["POST", "/v1/policies"],
       ["GET", "/v1/approvals"],
       ["GET", "/v1/audit"]
     ] as const) {
@@ -366,7 +379,8 @@ describe("gateway http surface", () => {
     expect(response.body).toEqual({
       connections: 0,
       clients: 1,
-      grants: 1,
+      policies: 2,
+      policyTools: 1,
       keys: 1,
       pendingApprovals: 0,
       recentActivity: []
@@ -374,7 +388,7 @@ describe("gateway http surface", () => {
   })
 
   test("does not let one client read another's frozen call", async () => {
-    const { call, store, client } = await run(setup({ decision: "require_approval" }))
+    const { call, store, client, policy } = await run(setup({ decision: "require_approval" }))
     const frozen = await run(call("POST", "/v1/execute", {
       body: { alias: "gmail-work", tool: "sendEmail" }
     }))
@@ -383,6 +397,7 @@ describe("gateway http surface", () => {
     const other = await run(store.createClient({
       id: newClientId(),
       tenantId: defaultTenantId,
+      policyId: policy.id,
       name: "someone-else",
       capabilities: ["provision_connections"]
     }))
@@ -440,9 +455,10 @@ describe("gateway http surface", () => {
     })
   })
 
-  test("uses a tool's conservative policy hint when a grant omits its decision", async () => {
+  test("uses a tool's conservative decision when seeding the default policy", async () => {
     const { call } = await run(setup({
       capabilities: ["provision_connections", "administer_gateway"],
+      connections: [{ integration: "gmail", name: "work" }],
       tools: [{
         address: "tools.gmail.org.work.sendEmail",
         name: "sendEmail",
@@ -451,16 +467,12 @@ describe("gateway http surface", () => {
       }]
     }))
     const created = await run(call("POST", "/v1/clients", { body: { name: "sandbox" } }))
-    const response = await run(call("POST", "/v1/grants", {
-      body: {
-        clientId: String(created.body["id"]),
-        alias: "mail",
-        tool: "sendEmail",
-        connection: { owner: "org", integration: "gmail", name: "work" }
-      }
-    }))
-    expect(response.status).toBe(201)
-    expect(response.body["decision"]).toBe("require_approval")
+    const response = await run(call(
+      "GET",
+      `/v1/clients/${String(created.body["id"])}/tools`
+    ))
+    expect(response.status).toBe(200)
+    expect(JSON.stringify(response.body)).toContain("require_approval")
   })
 
   test("returns an authenticated dashboard link with a pending invocation", async () => {
@@ -549,8 +561,8 @@ describe("gateway approval settlement", () => {
     ))).status).toBe(400)
   })
 
-  test("refuses to approve a call whose grant was revoked while frozen", async () => {
-    const { call, store, grant, calls } = await run(setup({
+  test("refuses to approve a call whose binding was revoked while frozen", async () => {
+    const { call, store, binding, calls } = await run(setup({
       decision: "require_approval",
       capabilities: ["provision_connections", "administer_gateway"]
     }))
@@ -559,7 +571,36 @@ describe("gateway approval settlement", () => {
     }))
     const approvalId = String(frozen.body["approvalId"])
 
-    await run(store.revokeGrant(defaultTenantId, grant.id))
+    await run(store.revokeBinding(defaultTenantId, binding.id))
+    const approved = await run(call(
+      "POST",
+      `/v1/approvals/${approvalId}/approve`,
+      { body: {}, local: true }
+    ))
+
+    expect(approved.status).toBe(400)
+    expect(calls).toHaveLength(0)
+  })
+
+  test("refuses to approve a tool disabled while the call was frozen", async () => {
+    const { call, store, policy, calls } = await run(setup({
+      decision: "require_approval",
+      capabilities: ["provision_connections", "administer_gateway"]
+    }))
+    const frozen = await run(call("POST", "/v1/execute", {
+      body: { alias: "gmail-work", tool: "sendEmail" }
+    }))
+    const approvalId = String(frozen.body["approvalId"])
+    await run(store.replacePolicyConfiguration(policy.id, {
+      integrations: [connection.integration],
+      tools: [{
+        integration: connection.integration,
+        tool: ToolName.make("sendEmail"),
+        enabled: false,
+        decision: "require_approval"
+      }]
+    }))
+
     const approved = await run(call(
       "POST",
       `/v1/approvals/${approvalId}/approve`,
@@ -691,7 +732,7 @@ describe("provisioning surface", () => {
     const checks = Schema.decodeUnknownSync(
       Schema.Array(Schema.Struct({ check: Schema.String }))
     )(report.body["findings"]).map((finding) => finding.check)
-    expect(checks).toEqual(["structural", "grant", "catalog"])
+    expect(checks).toEqual(["structural", "authorization", "catalog"])
   })
 
   test("reports an alias this key does not hold", async () => {
@@ -702,29 +743,19 @@ describe("provisioning surface", () => {
     }))
 
     expect(report.body["ok"]).toBe(false)
-    expect(JSON.stringify(report.body)).toContain("not granted")
+    expect(JSON.stringify(report.body)).toContain("not authorized")
   })
 
-  test("refuses a grant against a connection tier that cannot exist", async () => {
-    const { call, client } = await run(setup({ capabilities: ["provision_connections", "administer_gateway"] }))
-
-    const response = await run(call("POST", "/v1/grants", {
-      body: {
-        clientId: client.id,
-        alias: "gmail-personal",
-        tool: "sendEmail",
-        connection: {
-          owner: "user",
-          subject: "sebastian",
-          integration: "gmail",
-          name: "personal"
-        }
-      }
+  test("supports creating a client with an explicit reusable policy", async () => {
+    const { call } = await run(setup({ capabilities: ["provision_connections", "administer_gateway"] }))
+    const policy = await run(call("POST", "/v1/policies", { body: { name: "Explicit" } }))
+    const response = await run(call("POST", "/v1/clients", {
+      body: { name: "explicit-client", policyId: String(policy.body["id"]) }
     }))
 
-    // Better a refusal here than a grant that can only fail at invoke time.
-    expect(response.status).toBe(400)
-    expect(String(response.body["error"])).toContain("User-tier")
+    expect(policy.status).toBe(201)
+    expect(response.status).toBe(201)
+    expect(response.body["policyId"]).toBe(policy.body["id"])
   })
 
   test("removes a connection by the name it was asked for, not the stored one", async () => {
@@ -767,7 +798,7 @@ describe("provisioning surface", () => {
     expect(after[0]?.revokedAt).not.toBeNull()
   })
 
-  test("reads another client's granted surface, so codegen does not need its key", async () => {
+  test("reads another client's effective surface, so codegen does not need its key", async () => {
     const { call, client } = await run(setup({ capabilities: ["provision_connections", "administer_gateway"] }))
 
     const response = await run(call("GET", `/v1/clients/${client.id}/tools`))

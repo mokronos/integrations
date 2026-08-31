@@ -4,6 +4,7 @@ import {
   ArrowRight,
   Check,
   Circle,
+  FileKey2,
   KeyRound,
   Plug,
   ShieldCheck,
@@ -71,7 +72,8 @@ export function OverviewRoute() {
   const connected = overview.data?.connections ?? 0
   const clients = overview.data?.clients ?? 0
   const pending = overview.data?.pendingApprovals ?? 0
-  const grants = overview.data?.grants ?? 0
+  const policies = overview.data?.policies ?? 0
+  const policyTools = overview.data?.policyTools ?? 0
   const keys = overview.data?.keys ?? 0
 
   return (
@@ -83,10 +85,11 @@ export function OverviewRoute() {
       )}
     >
       <QueryError error={overview.error} />
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <Stat label="connections" value={connected} to="/integrations" icon={Plug} />
         <Stat label="active clients" value={clients} to="/clients" icon={KeyRound} />
-        <Stat label="tool grants" value={grants} to="/clients" icon={Workflow} />
+        <Stat label="policies" value={policies} to="/policies" icon={FileKey2} />
+        <Stat label="policy tools" value={policyTools} to="/policies" icon={Workflow} />
         <Stat label="pending approvals" value={pending} to="/approvals" icon={ShieldCheck} />
       </div>
 
@@ -94,12 +97,12 @@ export function OverviewRoute() {
         <Card>
           <CardHeader>
             <CardTitle>Ready a client</CardTitle>
-            <CardDescription>Each layer is explicit; creating a client alone gives it no tools.</CardDescription>
+            <CardDescription>New clients inherit the default policy; customize it or assign a narrower one.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
             <SetupStep complete={connected > 0} to="/integrations">Connect an integration</SetupStep>
             <SetupStep complete={clients > 0} to="/clients">Create an invocation client</SetupStep>
-            <SetupStep complete={grants > 0} to="/clients">Grant individual tools</SetupStep>
+            <SetupStep complete={policyTools > 0} to="/policies">Choose policy tools</SetupStep>
             <SetupStep complete={keys > 0} to="/clients">Issue a client key</SetupStep>
           </CardContent>
         </Card>

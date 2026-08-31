@@ -472,7 +472,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
           // The subject goes first — its cascade takes the login and sessions —
           // and the workspace follows only when nobody is left inside it. A
           // shared tenant survives its member; a solo signup takes its clients,
-          // keys, grants, approvals, and audit rows down with it.
+          // keys, policies, bindings, approvals, and audit rows down with it.
           yield* orDieStorage(store.deleteSubject(caller.subjectId))
           if ((yield* orDieStorage(store.countSubjects(caller.tenantId))) === 0) {
             yield* orDieStorage(store.deleteTenant(caller.tenantId))

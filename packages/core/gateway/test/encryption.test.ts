@@ -16,7 +16,8 @@ import {
   newApprovalId,
   newAuditId,
   newClientId,
-  newGrantId,
+  newClientToolBindingId,
+  newPolicyId,
   resolveEncryption,
   ToolName
 } from "../src/index.ts"
@@ -165,36 +166,49 @@ describe("the encrypted store", () => {
   }
 
   const seedClient = async (store: GatewayStore) => {
+    const policy = await run(store.createPolicy({
+      id: newPolicyId(), tenantId: defaultTenantId, name: `policy-${crypto.randomUUID()}`
+    }))
+    await run(store.replacePolicyConfiguration(policy.id, {
+      integrations: [connection.integration],
+      tools: [{
+      integration: connection.integration,
+      tool: ToolName.make("sendEmail"),
+      enabled: true,
+      decision: "require_approval"
+      }]
+    }))
     const client = await run(store.createClient({
       id: newClientId(),
       tenantId: defaultTenantId,
+      policyId: policy.id,
       name: "agent",
       capabilities: ["provision_connections"]
     }))
-    const grant = await run(store.createGrant({
-      id: newGrantId(),
+    const binding = await run(store.createBinding({
+      id: newClientToolBindingId(),
       tenantId: defaultTenantId,
       clientId: client.id,
       alias: Alias.make("gmail-work"),
       tool: ToolName.make("sendEmail"),
       connection,
-      decision: "require_approval"
     }))
-    return { client, grant }
+    return { client, policy, binding }
   }
 
   test("stores frozen-call arguments sealed, yet retries still meet them", async () => {
     const { store, raw } = await run(makeEncryptedStore())
-    const { grant } = await run(seedClient(store))
+    const { client, policy, binding } = await run(seedClient(store))
     const argumentsValue = { to: "customer@example.com", subject: "Private" }
 
     const approval = await run(store.createApproval({
       id: newApprovalId(),
       tenantId: defaultTenantId,
-      clientId: (await run(store.listClients(defaultTenantId)))[0]?.id ?? newClientId(),
-      grantId: grant.id,
-      alias: grant.alias,
-      tool: grant.tool,
+      clientId: client.id,
+      policyId: policy.id,
+      bindingId: binding.id,
+      alias: binding.alias,
+      tool: binding.tool,
       arguments: argumentsValue,
       expiresAt: new Date(Date.now() + 60_000)
     }))
@@ -210,22 +224,23 @@ describe("the encrypted store", () => {
     expect(storedArguments).not.toContain("customer@example.com")
 
     // ...and the retry still finds its frozen call.
-    const metAgain = await run(store.findUncollectedApproval(grant.id, argumentsValue))
+    const metAgain = await run(store.findUncollectedApproval(policy.id, binding.id, argumentsValue))
     expect(metAgain === undefined ? "" : metAgain.id).toBe(approval.id)
     expect(metAgain?.arguments).toEqual(argumentsValue)
   })
 
   test("seals a settled result while reading it back intact", async () => {
     const { store, raw } = await run(makeEncryptedStore())
-    const { client, grant } = await run(seedClient(store))
+    const { client, policy, binding } = await run(seedClient(store))
     const id = newApprovalId()
     await run(store.createApproval({
       id,
       tenantId: defaultTenantId,
       clientId: client.id,
-      grantId: grant.id,
-      alias: grant.alias,
-      tool: grant.tool,
+      policyId: policy.id,
+      bindingId: binding.id,
+      alias: binding.alias,
+      tool: binding.tool,
       arguments: {},
       expiresAt: new Date(Date.now() + 60_000)
     }))
@@ -282,27 +297,28 @@ describe("the encrypted store", () => {
 
   test("still matches pre-encryption rows written in plaintext", async () => {
     const { store, raw } = await run(makeEncryptedStore())
-    const { client, grant } = await run(seedClient(store))
+    const { client, policy, binding } = await run(seedClient(store))
 
     // A frozen call from before the master key existed: canonical JSON in the
     // clear, no lookup digest.
     const canonical = canonicalArguments({ to: "old@example.com" })
     await run(raw.execute(
       `INSERT INTO gateway_pending_approval
-         (id, tenant_id, client_id, grant_id, alias, tool, arguments, status, created_at, expires_at, collected_at)
-       VALUES ('legacy-approval', ?, ?, ?, ?, ?, ?, 'pending', 0, ?, NULL)`,
+         (id, tenant_id, client_id, policy_id, binding_id, alias, tool, arguments, status, created_at, expires_at, collected_at)
+       VALUES ('legacy-approval', ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, NULL)`,
       [
         defaultTenantId,
         client.id,
-        grant.id,
-        grant.alias,
-        grant.tool,
+        policy.id,
+        binding.id,
+        binding.alias,
+        binding.tool,
         canonical,
         Date.now() + 60_000
       ]
     ))
 
-    const metAgain = await run(store.findUncollectedApproval(grant.id, { to: "old@example.com" }))
+    const metAgain = await run(store.findUncollectedApproval(policy.id, binding.id, { to: "old@example.com" }))
     expect(metAgain === undefined ? "" : metAgain.id).toBe("legacy-approval")
     expect(metAgain?.arguments).toEqual({ to: "old@example.com" })
   })
@@ -315,25 +331,39 @@ describe("the encrypted store", () => {
     const client = await run(store.createClient({
       id: newClientId(),
       tenantId: defaultTenantId,
+      policyId: (await run(store.findDefaultPolicy(defaultTenantId)))?.id ?? newPolicyId(),
       name: "agent",
       capabilities: ["provision_connections"]
     }))
-    const grant = await run(store.createGrant({
-      id: newGrantId(),
+    const policy = await run(store.createPolicy({
+      id: newPolicyId(), tenantId: defaultTenantId, name: "plaintext"
+    }))
+    await run(store.assignPolicy(defaultTenantId, client.id, policy.id))
+    await run(store.replacePolicyConfiguration(policy.id, {
+      integrations: [connection.integration],
+      tools: [{
+        integration: connection.integration,
+        tool: ToolName.make("sendEmail"),
+        enabled: true,
+        decision: "require_approval"
+      }]
+    }))
+    const binding = await run(store.createBinding({
+      id: newClientToolBindingId(),
       tenantId: defaultTenantId,
       clientId: client.id,
       alias: Alias.make("gmail-work"),
       tool: ToolName.make("sendEmail"),
       connection,
-      decision: "require_approval"
     }))
     const approval = await run(store.createApproval({
       id: newApprovalId(),
       tenantId: defaultTenantId,
       clientId: client.id,
-      grantId: grant.id,
-      alias: grant.alias,
-      tool: grant.tool,
+      policyId: policy.id,
+      bindingId: binding.id,
+      alias: binding.alias,
+      tool: binding.tool,
       arguments: { visible: true },
       expiresAt: new Date(Date.now() + 60_000)
     }))

@@ -259,7 +259,7 @@ function DeleteAccountCard({ hasPassword }: { readonly hasPassword: boolean }) {
       <CardHeader>
         <CardTitle>Delete account</CardTitle>
         <CardDescription>
-          Removes your sign-in, sessions, clients, API keys, grants, and approval
+          Removes your sign-in, sessions, clients, API keys, policies, and approval
           history. Vendor connections stored in the integrations's credential store
           are not reclaimed. This cannot be undone.
         </CardDescription>

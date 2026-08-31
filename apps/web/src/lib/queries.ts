@@ -20,7 +20,10 @@ export const keys = {
   connections: ["connections"] as const,
   overview: ["overview"] as const,
   clients: ["clients"] as const,
-  grants: (clientId: string) => ["grants", clientId] as const,
+  policies: ["policies"] as const,
+  policy: (policyId: string) => ["policies", policyId] as const,
+  bindings: (clientId: string) => ["clients", clientId, "bindings"] as const,
+  clientTools: (clientId: string) => ["clients", clientId, "tools"] as const,
   approvals: (status: ApprovalStatus | "all") => ["approvals", status] as const,
   audit: (input: AuditQuery) => ["audit", input] as const
 }
@@ -55,10 +58,27 @@ export const useClients = () =>
 export const useOverview = () =>
   useQuery({ queryKey: keys.overview, queryFn: gateway.fetchOverview, refetchInterval: 5_000 })
 
-export const useGrants = (clientId: string | undefined) =>
+export const usePolicies = () =>
+  useQuery({ queryKey: keys.policies, queryFn: gateway.listPolicies })
+
+export const usePolicy = (policyId: string | undefined) =>
   useQuery({
-    queryKey: keys.grants(clientId ?? ""),
-    queryFn: () => gateway.listGrants(clientId ?? ""),
+    queryKey: keys.policy(policyId ?? ""),
+    queryFn: () => gateway.getPolicy(policyId ?? ""),
+    enabled: policyId !== undefined
+  })
+
+export const useBindings = (clientId: string | undefined) =>
+  useQuery({
+    queryKey: keys.bindings(clientId ?? ""),
+    queryFn: () => gateway.listBindings(clientId ?? ""),
+    enabled: clientId !== undefined
+  })
+
+export const useClientTools = (clientId: string | undefined) =>
+  useQuery({
+    queryKey: keys.clientTools(clientId ?? ""),
+    queryFn: () => gateway.listClientTools(clientId ?? ""),
     enabled: clientId !== undefined
   })
 

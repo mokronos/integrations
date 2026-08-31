@@ -6,9 +6,9 @@ import type { GatewayStore, GatewayStoreError } from "./store.ts"
 
 /** Pure discovery means tool names and shapes belong to vendors. A rename or a
  * reshaped schema is therefore a normal event, not a bug — but it is one that
- * silently breaks grants and workflows if nobody is told.
+ * silently breaks bindings and workflows if nobody is told.
  *
- * The failure direction is already safe: a grant that no longer matches denies
+ * The failure direction is already safe: a binding that no longer matches denies
  * rather than allows. What is missing without this is the *signal*, so a
  * workflow does not die at 3am with "tool not found" and no explanation. */
 const schemaFingerprint = (snapshot: Pick<ToolSnapshot, "inputSchema" | "outputSchema">): string =>
@@ -27,7 +27,7 @@ export const diffSnapshots = (
   for (const [identity, snapshot] of after) {
     const existing = before.get(identity)
     if (existing === undefined) {
-      // Newly exposed tools are reported too: under explicit grants they are
+      // Newly exposed tools are reported too: under explicit policy rules they are
       // unreachable until someone delegates them, which makes them easy to miss.
       entries.push({
         kind: "added",

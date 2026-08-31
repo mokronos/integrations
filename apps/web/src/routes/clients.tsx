@@ -2,6 +2,7 @@ import { useState } from "react"
 import { Link } from "react-router"
 import { Copy, KeyRound, ShieldAlert } from "lucide-react"
 import { toast } from "sonner"
+import { whenPresent } from "@mokronos/contracts"
 
 import { LoadingRows, Page, QueryError, ReloadButton } from "@/components/page"
 import {
@@ -31,6 +32,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   Table,
   TableBody,
@@ -41,17 +43,20 @@ import {
 } from "@/components/ui/table"
 import { when } from "@/lib/format"
 import * as gateway from "@/lib/gateway"
-import { keys, useClients, useInvalidate, useMutation } from "@/lib/queries"
-import type { Client } from "@/lib/schemas"
+import { keys, useClients, useInvalidate, useMutation, usePolicies } from "@/lib/queries"
+import type { Client, PolicySummary } from "@/lib/schemas"
+import { decodePolicyId } from "@/lib/schemas"
 
 function CreateClientDialog() {
   const invalidate = useInvalidate()
+  const policies = usePolicies()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState("")
   const [mayProvision, setMayProvision] = useState(false)
   const [mayAdminister, setMayAdminister] = useState(false)
   const [returnLink, setReturnLink] = useState(true)
   const [webhooks, setWebhooks] = useState("")
+  const [policyId, setPolicyId] = useState("__default__")
   const parsedWebhooks = webhooks.split("\n")
     .map((value) => value.trim())
     .filter((value) => value.length > 0)
@@ -65,6 +70,7 @@ function CreateClientDialog() {
       if (mayAdminister) capabilities.push("administer_gateway")
       return gateway.createClient({
         name: name.trim(),
+        ...whenPresent("policyId", policyId === "__default__" ? undefined : decodePolicyId(policyId)),
         capabilities,
         approvalDelivery: {
           returnLink,
@@ -81,6 +87,7 @@ function CreateClientDialog() {
       setMayAdminister(false)
       setReturnLink(true)
       setWebhooks("")
+      setPolicyId("__default__")
     },
     onError: (error: Error) => toast.error("Could not create client", { description: error.message })
   })
@@ -95,7 +102,7 @@ function CreateClientDialog() {
           <DialogTitle>New client</DialogTitle>
           <DialogDescription>
             A client is something you delegate to — an agent, a sandbox, a
-            deployment. It holds no connection of its own, only grants.
+            deployment. Its assigned policy controls which connected tools it can use.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
@@ -108,6 +115,25 @@ function CreateClientDialog() {
               placeholder="research-agent"
             />
           </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="client-policy">Policy</Label>
+            <Select value={policyId} onValueChange={setPolicyId}>
+              <SelectTrigger id="client-policy" className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__default__">
+                  Gateway default{(policies.data ?? []).find((summary) => summary.policy.isDefault)?.policy.name === undefined
+                    ? ""
+                    : `: ${(policies.data ?? []).find((summary) => summary.policy.isDefault)?.policy.name}`}
+                </SelectItem>
+                {(policies.data ?? []).filter((summary) => !summary.policy.isDefault).map((summary) => (
+                  <SelectItem key={summary.policy.id} value={summary.policy.id}>{summary.policy.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-muted-foreground text-xs">
+              Leave the gateway default selected to let the backend resolve the default policy.
+            </p>
+          </div>
           <div className="flex items-start gap-3 rounded-md border p-3">
             <Switch
               id="client-provision"
@@ -118,7 +144,7 @@ function CreateClientDialog() {
               <Label htmlFor="client-provision">May provision connections</Label>
               <p className="text-muted-foreground text-xs">
                 Allows catalog discovery and connection setup. Ordinary runtime
-                clients generally need only tool grants, so this starts off.
+                clients generally need only policy-controlled tools, so this starts off.
               </p>
             </div>
           </div>
@@ -131,7 +157,7 @@ function CreateClientDialog() {
             <div className="space-y-1">
               <Label htmlFor="client-administer">May administer the gateway</Label>
               <p className="text-muted-foreground text-xs">
-                Allows managing clients, keys, grants, audit, and policy. Leave
+                Allows managing clients, keys, policies, approvals, and audit. Leave
                 it off for anything running agent code.
               </p>
             </div>
@@ -213,9 +239,16 @@ function IssuedKeyDialog({
   )
 }
 
-function ClientRow({ client }: { readonly client: Client }) {
+function ClientRow({
+  client,
+  policies
+}: {
+  readonly client: Client
+  readonly policies: ReadonlyArray<PolicySummary>
+}) {
   const invalidate = useInvalidate()
   const [secret, setSecret] = useState<string | undefined>()
+  const assignedPolicyAvailable = policies.some((summary) => summary.policy.id === client.policyId)
 
   const issue = useMutation({
     mutationFn: () => gateway.issueKey(client.id),
@@ -234,6 +267,18 @@ function ClientRow({ client }: { readonly client: Client }) {
       })
     },
     onError: (error: Error) => toast.error("Could not revoke", { description: error.message })
+  })
+
+  const assignPolicy = useMutation({
+    mutationFn: (policyId: string) => gateway.assignPolicy({
+      clientId: client.id,
+      policyId: decodePolicyId(policyId)
+    }),
+    onSuccess: (updated) => {
+      invalidate(keys.clients, keys.policies, keys.clientTools(client.id), keys.overview)
+      toast.success(`${updated.name} now uses the selected policy`)
+    },
+    onError: (error: Error) => toast.error("Could not change policy", { description: error.message })
   })
 
   const revoked = client.revokedAt !== null
@@ -255,6 +300,25 @@ function ClientRow({ client }: { readonly client: Client }) {
             </Badge>
           )
           : <Badge variant="secondary">client</Badge>}
+      </TableCell>
+      <TableCell>
+        <Select
+          value={client.policyId}
+          onValueChange={(policyId) => assignPolicy.mutate(policyId)}
+          disabled={revoked || assignPolicy.isPending}
+        >
+          <SelectTrigger className="w-52"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {assignedPolicyAvailable ? null : (
+              <SelectItem value={client.policyId}>{client.policyId} (unavailable)</SelectItem>
+            )}
+            {policies.map((summary) => (
+              <SelectItem key={summary.policy.id} value={summary.policy.id}>
+                {summary.policy.name}{summary.policy.isDefault ? " (default)" : ""}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </TableCell>
       <TableCell className="text-muted-foreground text-sm">{when(client.createdAt)}</TableCell>
       <TableCell>
@@ -299,6 +363,7 @@ function ClientRow({ client }: { readonly client: Client }) {
 
 export function ClientsRoute() {
   const clients = useClients()
+  const policies = usePolicies()
 
   return (
     <Page
@@ -311,7 +376,7 @@ export function ClientsRoute() {
         </>
       }
     >
-      <QueryError error={clients.error} />
+      <QueryError error={clients.error ?? policies.error} />
       {clients.isPending
         ? <LoadingRows />
         : (
@@ -322,6 +387,7 @@ export function ClientsRoute() {
                   <TableRow>
                     <TableHead>Client</TableHead>
                     <TableHead>Authority</TableHead>
+                    <TableHead>Policy</TableHead>
                     <TableHead>Created</TableHead>
                     <TableHead />
                     <TableHead className="text-right">Actions</TableHead>
@@ -331,13 +397,17 @@ export function ClientsRoute() {
                   {(clients.data ?? []).length === 0
                     ? (
                       <TableRow>
-                        <TableCell colSpan={5} className="text-muted-foreground py-10 text-center">
+                        <TableCell colSpan={6} className="text-muted-foreground py-10 text-center">
                           No clients yet.
                         </TableCell>
                       </TableRow>
                     )
                     : (clients.data ?? []).map((client) => (
-                      <ClientRow key={client.id} client={client} />
+                      <ClientRow
+                        key={client.id}
+                        client={client}
+                        policies={policies.data ?? []}
+                      />
                     ))}
                 </TableBody>
               </Table>

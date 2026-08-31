@@ -172,7 +172,7 @@ const toTool = (record: IntegrationTool): Effect.Effect<Tool, StorageError> =>
       new StorageError({ message: `Could not describe tool ${record.name}`, cause })
     )))
 
-/** A newly-created grant's starting policy.
+/** A newly included policy tool's starting decision.
  *
  *  `allow` is reserved for a tool whose own source declares it read-only. For
  *  MCP that is `readOnlyHint`; for OpenAPI it is a safe HTTP method, which is a
@@ -181,7 +181,7 @@ const toTool = (record: IntegrationTool): Effect.Effect<Tool, StorageError> =>
  *
  *  Everything else needs a human. A source with nothing to declare therefore
  *  gets `require_approval` throughout, which is the direction to fail in: an
- *  operator can widen a grant, but a call that already happened cannot be
+ *  operator can widen a policy, but a call that already happened cannot be
  *  narrowed. */
 const defaultDecision = (readOnly: boolean): "allow" | "require_approval" =>
   readOnly ? "allow" : "require_approval"

@@ -4,7 +4,7 @@ import { ConnectionName, IntegrationSlug, OwnerTier, ToolName } from "./vocabula
 /** How a tool and a connection are addressed.
  *
  *  Addressing is a contract, not an implementation detail: the gateway builds an
- *  address from a grant, the host resolves one to a call, and a client reads one
+ *  address from a binding, the host resolves one to a call, and a client reads one
  *  off a listing. All three have to agree, so the format lives here with the
  *  functions that build and parse it. */
 

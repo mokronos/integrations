@@ -2,8 +2,8 @@ import { Schema } from "effect"
 import { ToolAddress } from "./address.ts"
 import { OwnerTier } from "./vocabulary.ts"
 
-/** A single named operation an integration exposes — the smallest unit that can
- *  be invoked, granted, or approved. */
+/** A single named operation an integration exposes: the smallest unit that can
+ * be invoked, authorized, or approved. */
 
 /** A tool's identity and purpose without its schemas. Listing at this level
  *  keeps browsing a large integration cheap; {@link Tool} is the follow-up for
@@ -19,11 +19,11 @@ export const ToolSummary = Schema.Struct({
   integration: Schema.String,
   owner: OwnerTier,
   connection: Schema.String,
-  /** The policy a newly-created grant starts from.
+  /** The policy decision a newly cataloged tool starts from.
    *
    *  `allow` is reserved for a tool whose own source declares it read-only —
    *  MCP's `readOnlyHint`, or a safe HTTP method. Everything else needs a human.
-   *  An operator can widen a grant; a call that already happened cannot be
+   *  An operator can widen a policy; a call that already happened cannot be
    *  narrowed, so this is the direction to fail in. */
   defaultDecision: Schema.Literals(["allow", "require_approval"])
 })

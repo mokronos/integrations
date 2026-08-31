@@ -10,7 +10,7 @@ import type {
   ApprovalId,
   Authorization,
   ConnectionRef,
-  Grant,
+  PolicyDecision,
   ToolName
 } from "./domain.ts"
 import { newApprovalId, newAuditId } from "./keys.ts"
@@ -26,10 +26,10 @@ class IntegrationCallError extends Schema.TaggedError<IntegrationCallError>()(
   }
 ) {}
 
-/** The address is built from the grant, never accepted from the caller. That is
+/** The address is built from the binding, never accepted from the caller. That is
  * what makes invocation-by-address safe to expose: a caller naming an address
- * directly still has to hold a grant that produces it. */
-export const grantToolAddress = (connection: ConnectionRef, tool: ToolName): ToolAddress =>
+ * directly still has to hold a binding and policy rule that produce it. */
+export const boundToolAddress = (connection: ConnectionRef, tool: ToolName): ToolAddress =>
   ToolAddress.make(
     `tools.${connection.integration}.${connection.owner}.${connection.name}.${tool}`
   )
@@ -71,10 +71,10 @@ const auditFor = (
   tenantId: authorization.client.tenantId,
   id: newAuditId(),
   clientId: authorization.client.id,
-  alias: authorization.grant.alias,
-  tool: authorization.grant.tool,
+  alias: authorization.binding.alias,
+  tool: authorization.binding.tool,
   connection: authorization.connection,
-  decision: authorization.grant.decision,
+  decision: authorization.decision,
   outcome,
   message,
   arguments: {
@@ -88,11 +88,11 @@ const auditFor = (
  *
  * A caller that retries — and the retrying caller is the normal case, because a
  * durable step is how a workflow waits — must not ask a human again for a
- * decision it already asked for. So the same (grant, arguments) resolves to the
+ * decision it already asked for. The same (policy, binding, arguments) resolves to the
  * same approval until that approval's outcome has been handed back exactly
  * once. After delivery an identical call is a *new* request, and needs its own
  * decision; replaying an old approval forever would turn one "yes" into
- * standing permission, which is precisely what this design refuses to grant. */
+ * standing permission, which this design deliberately refuses to create. */
 const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function*(
   dependencies: {
     readonly store: GatewayStore
@@ -116,7 +116,11 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function*(
       ...whenPresent("approvalUrl", approvalUrl)
     }
   }
-  const existing = yield* store.findUncollectedApproval(authorization.grant.id, argumentsValue)
+  const existing = yield* store.findUncollectedApproval(
+    authorization.policy.id,
+    authorization.binding.id,
+    argumentsValue
+  )
 
   if (existing !== undefined && existing.status === "pending") {
     // Deliberately not audited: the frozen call was recorded when it was
@@ -157,9 +161,10 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function*(
     id: newApprovalId(),
     tenantId: authorization.client.tenantId,
     clientId: authorization.client.id,
-    grantId: authorization.grant.id,
-    alias: authorization.grant.alias,
-    tool: authorization.grant.tool,
+    policyId: authorization.policy.id,
+    bindingId: authorization.binding.id,
+    alias: authorization.binding.alias,
+    tool: authorization.binding.tool,
     arguments: argumentsValue,
     expiresAt: new Date(Date.now() + dependencies.expiryHours * 60 * 60 * 1000)
   })
@@ -224,7 +229,7 @@ export const invokeThroughGateway = Effect.fn("Invocation.invokeThroughGateway")
     return { status: "denied", reason: describeAuthorization(authorization) }
   }
 
-  if (authorization.grant.decision === "require_approval") {
+  if (authorization.decision === "require_approval") {
     return yield* freezeOrCollect(
       {
         store,
@@ -257,7 +262,7 @@ export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(funct
   authorization: Extract<Authorization, { status: "authorized" }>,
   argumentsValue: Json
 ): Effect.fn.Return<InvocationOutcome, GatewayStoreError> {
-  const address = grantToolAddress(authorization.connection, authorization.grant.tool)
+  const address = boundToolAddress(authorization.connection, authorization.binding.tool)
   const invocation = yield* Effect.result(Effect.tryPromise({
     try: () => dependencies.integrations.tools.execute(address, argumentsValue),
     catch: (cause) => new IntegrationCallError({
@@ -278,45 +283,56 @@ export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(funct
   return { status: "failed", message }
 })
 
-export type GrantedTool = {
+export type EffectiveTool = {
   readonly alias: Alias
   readonly tool: ToolName
   readonly integration: string
-  readonly decision: Grant["decision"]
+  readonly decision: PolicyDecision
   readonly inputSchema?: Json
   readonly outputSchema?: Json
 }
 
-/** The tools a client may actually reach. Discovery is grant-scoped, which is
- * why there is no `block` decision: an ungranted tool is invisible rather than
+/** The tools a client may actually reach. Discovery uses the policy/binding
+ * intersection, so an unauthorized tool is invisible rather than
  * visible-then-failing.
  *
- * Schemas are opt-in because fetching them costs one catalog read per grant.
+ * Schemas are opt-in because fetching them costs one catalog read per binding.
  * With them, this listing is exactly what codegen emits — so the generated
  * surface and the authorized surface cannot drift apart. */
-export const listGrantedTools = Effect.fn("Invocation.listGrantedTools")(function*(
+export const listEffectiveTools = Effect.fn("Invocation.listEffectiveTools")(function*(
   store: GatewayStore,
-  clientId: Parameters<GatewayStore["listGrants"]>[0],
+  clientId: Parameters<GatewayStore["listBindings"]>[0],
   options: {
     readonly schemas?: boolean
     readonly integrations?: Pick<IntegrationsApi, "tools">
   } = {}
-): Effect.fn.Return<ReadonlyArray<GrantedTool>, GatewayStoreError> {
-  const grants = yield* store.listGrants(clientId)
-  const base = grants.map((grant) => ({
-    alias: grant.alias,
-    tool: grant.tool,
-    integration: grant.connection.integration,
-    decision: grant.decision
+): Effect.fn.Return<ReadonlyArray<EffectiveTool>, GatewayStoreError> {
+  const bindings = yield* store.listBindings(clientId)
+  const policy = yield* store.findPolicyForClient(clientId)
+  const policyIntegrations = policy === undefined ? [] : yield* store.listPolicyIntegrations(policy.id)
+  const tools = policy === undefined ? [] : yield* store.listPolicyTools(policy.id)
+  const policyRows = bindings.map((binding) => {
+    const policyTool = tools.find((candidate) =>
+      candidate.enabled && candidate.integration === binding.connection.integration && candidate.tool === binding.tool)
+    if (!policyIntegrations.some((candidate) =>
+      candidate.integration === binding.connection.integration)) return undefined
+    return policyTool === undefined ? undefined : { binding, policyTool }
+  })
+  const effective = policyRows.filter((entry) => entry !== undefined)
+  const base = effective.map(({ binding, policyTool }) => ({
+    alias: binding.alias,
+    tool: binding.tool,
+    integration: binding.connection.integration,
+    decision: policyTool.decision
   }))
   if (options.schemas !== true || options.integrations === undefined) return base
 
   const integrations = options.integrations
   return yield* Effect.forEach(base, (entry, index) => {
-    const grant = grants[index]
-    if (grant === undefined) return Effect.succeed(entry)
+    const binding = effective[index]?.binding
+    if (binding === undefined) return Effect.succeed(entry)
     return Effect.tryPromise(() => integrations.tools.describe(
-      grantToolAddress(grant.connection, grant.tool)
+      boundToolAddress(binding.connection, binding.tool)
     )).pipe(
       Effect.map((described) => ({
         ...entry,

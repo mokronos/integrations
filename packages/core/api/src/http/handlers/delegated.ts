@@ -9,7 +9,7 @@ import {
   ApprovalId,
   ToolName
 } from "@mokronos/gateway-core"
-import { invokeThroughGateway, listGrantedTools } from "@mokronos/gateway-core"
+import { invokeThroughGateway, listEffectiveTools } from "@mokronos/gateway-core"
 import { GatewayStoreError, GatewayStoreService } from "@mokronos/gateway-core"
 import {
   ApiNotFound,
@@ -38,7 +38,7 @@ export const DelegatedLayer = HttpApiBuilder.group(GatewayApi, "delegated", (han
         Effect.gen(function*() {
           const client = yield* requireClient
           return {
-            tools: yield* orDieStorage(listGrantedTools(store, client.id, {
+            tools: yield* orDieStorage(listEffectiveTools(store, client.id, {
               schemas: request.query["schemas"],
               integrations: integrationsApi
             }))
@@ -61,8 +61,8 @@ export const DelegatedLayer = HttpApiBuilder.group(GatewayApi, "delegated", (han
               onApprovalCreated: (input) => deliverApprovalNotification({
                 client: input.authorization.client,
                 approvalId: input.approvalId,
-                alias: input.authorization.grant.alias,
-                tool: input.authorization.grant.tool,
+                alias: input.authorization.binding.alias,
+                tool: input.authorization.binding.tool,
                 expiresAt: input.expiresAt,
                 ...whenPresentMap("approvalUrl", input.approvalUrl, (url) => url)
               })

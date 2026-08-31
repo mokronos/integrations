@@ -1,13 +1,18 @@
 import { Option, Schema } from "effect"
 import {
   ApiKey,
+  Alias,
   ApprovalStatus as ApprovalStatusSchema,
   AuditRecord,
   AuditOutcome,
   Client,
+  ClientToolBinding,
   DriftEntry,
-  Grant,
-  GrantDecision as GrantDecisionSchema,
+  Policy,
+  PolicyDecision as PolicyDecisionSchema,
+  PolicyId,
+  PolicyIntegration,
+  PolicyTool,
   PendingApproval
 } from "@mokronos/gateway-core/domain"
 import { IntegrationDiscovery } from "@mokronos/contracts"
@@ -41,19 +46,22 @@ export type {
   Connection,
   Tool,
   ToolSummary,
-  Grant,
+  ClientToolBinding,
   IntegrationOverview,
+  Policy,
+  PolicyIntegration,
+  PolicyTool,
   PendingApproval
 }
 
-export { ApprovalStatusSchema, GrantDecisionSchema }
+export { ApprovalStatusSchema, PolicyDecisionSchema }
 export type {
   ApprovalStatus,
   ApprovalDelivery,
   ClientId,
   ConnectionRef,
-  GrantDecision,
-  GrantId
+  PolicyDecision,
+  PolicyId
 } from "@mokronos/gateway-core/domain"
 
 /** Derives the JSON codec for a schema and returns a decoder for it. Every
@@ -75,21 +83,52 @@ export const ClientsResponse = Schema.Struct({
   clients: Schema.Array(Client)
 })
 
-export const GrantsResponse = Schema.Struct({
-  grants: Schema.Array(Grant)
+export const PolicySummary = Schema.Struct({
+  policy: Policy,
+  integrationCount: Schema.Number,
+  toolCount: Schema.Number,
+  enabledToolCount: Schema.Number,
+  assignedClientCount: Schema.Number
+})
+export type PolicySummary = typeof PolicySummary.Type
+
+export const PoliciesResponse = Schema.Struct({ policies: Schema.Array(PolicySummary) })
+
+export const PolicyDetail = Schema.Struct({
+  policy: Policy,
+  integrations: Schema.Array(PolicyIntegration),
+  tools: Schema.Array(PolicyTool),
+  assignedClients: Schema.Array(Client)
+})
+export type PolicyDetail = typeof PolicyDetail.Type
+
+export const PolicyToolsReplaced = Schema.Struct({
+  policy: Policy,
+  integrations: Schema.Array(PolicyIntegration),
+  tools: Schema.Array(PolicyTool)
 })
 
-export const GrantedTool = Schema.Struct({
-  alias: Grant.fields.alias,
-  tool: Grant.fields.tool,
+export const EffectiveTool = Schema.Struct({
+  alias: Alias,
+  tool: Schema.String,
   integration: Schema.String,
-  decision: Grant.fields.decision,
+  decision: PolicyDecisionSchema,
   inputSchema: Schema.optional(Schema.Json),
   outputSchema: Schema.optional(Schema.Json)
 })
-export type GrantedTool = typeof GrantedTool.Type
+export type EffectiveTool = typeof EffectiveTool.Type
 
-export const GrantedToolsResponse = Schema.Struct({ tools: Schema.Array(GrantedTool) })
+export const EffectiveToolsResponse = Schema.Struct({ tools: Schema.Array(EffectiveTool) })
+
+export const BindingsResponse = Schema.Struct({ bindings: Schema.Array(ClientToolBinding) })
+
+export const PolicyToolInput = Schema.Struct({
+  integration: Schema.String,
+  tool: Schema.String,
+  enabled: Schema.Boolean,
+  decision: PolicyDecisionSchema
+})
+export type PolicyToolInput = typeof PolicyToolInput.Type
 
 export const ApprovalsResponse = Schema.Struct({
   approvals: Schema.Array(PendingApproval)
@@ -107,7 +146,8 @@ export type AuditResponse = typeof AuditResponse.Type
 export const OverviewResponse = Schema.Struct({
   connections: Schema.Number,
   clients: Schema.Number,
-  grants: Schema.Number,
+  policies: Schema.Number,
+  policyTools: Schema.Number,
   keys: Schema.Number,
   pendingApprovals: Schema.Number,
   recentActivity: Schema.Array(AuditRecord)
@@ -187,8 +227,12 @@ export const Removed = Schema.Struct({ removed: Schema.Boolean })
 export const decodeIntegrations = json(IntegrationsResponse)
 export const decodeConnections = json(ConnectionsResponse)
 export const decodeClients = json(ClientsResponse)
-export const decodeGrants = json(GrantsResponse)
-export const decodeGrantedTools = json(GrantedToolsResponse)
+export const decodePolicies = json(PoliciesResponse)
+export const decodePolicy = json(PolicyDetail)
+export const decodePolicyCreated = json(Policy)
+export const decodePolicyToolsReplaced = json(PolicyToolsReplaced)
+export const decodeEffectiveTools = json(EffectiveToolsResponse)
+export const decodeBindings = json(BindingsResponse)
 export const decodeApprovals = json(ApprovalsResponse)
 export const decodeAudit = json(AuditResponse)
 export const decodeOverview = json(OverviewResponse)
@@ -203,14 +247,14 @@ export const decodeDrift = json(DriftResponse)
 export const decodeRevoked = json(Revoked)
 export const decodeRemoved = json(Removed)
 export const decodeClient = json(Client)
-export const decodeGrant = json(Grant)
 export const decodeRegistrySearch = json(IntegrationSearchResponse)
 
 /** Values arriving from a widget are strings; these turn them back into the
  * domain's own types rather than asserting them. A Select that somehow yields
  * an unknown value fails loudly here instead of silently sending nonsense to
  * the gateway. */
-export const decodeGrantDecision = Schema.decodeUnknownSync(GrantDecisionSchema)
+export const decodePolicyDecision = Schema.decodeUnknownSync(PolicyDecisionSchema)
+export const decodePolicyId = Schema.decodeUnknownSync(PolicyId)
 export const decodeApprovalFilter = Schema.decodeUnknownSync(
   Schema.Union([ApprovalStatusSchema, Schema.Literal("all")])
 )

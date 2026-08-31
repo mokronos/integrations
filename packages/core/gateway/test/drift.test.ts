@@ -16,7 +16,8 @@ import {
   newApprovalId,
   newAuditId,
   newClientId,
-  newGrantId,
+  newClientToolBindingId,
+  newPolicyId,
   refreshIntegrationSnapshot,
   runMaintenance,
   ToolName
@@ -105,7 +106,7 @@ describe("catalog drift", () => {
     ])
   })
 
-  test("surfaces new tools, which explicit grants otherwise make invisible", async () => {
+  test("surfaces new tools, which explicit policies otherwise make invisible", async () => {
     const store = await run(makeStore())
     // The first sync has nothing to compare against, so it records the shape
     // and reports a baseline. Calling an integration's entire surface "added"
@@ -130,7 +131,7 @@ describe("catalog drift", () => {
       defaultTenantId
     ))
 
-    // Unreachable until someone grants it — which is exactly why it has to be
+    // Unreachable until policy and binding allow it, which is why it has to be
     // reported rather than left to be noticed.
     expect(second.entries).toEqual([
       {
@@ -181,28 +182,41 @@ describe("gateway maintenance", () => {
 
   test("turns an undecided approval into an expired one", async () => {
     const store = await run(makeStore())
+    const policy = await run(store.createPolicy({
+      id: newPolicyId(), tenantId: defaultTenantId, name: "sales"
+    }))
+    await run(store.replacePolicyConfiguration(policy.id, {
+      integrations: [connection.integration],
+      tools: [{
+      integration: connection.integration,
+      tool: ToolName.make("create"),
+      enabled: true,
+      decision: "require_approval"
+      }]
+    }))
     const client = await run(store.createClient({
       id: newClientId(),
       tenantId: defaultTenantId,
+      policyId: policy.id,
       name: "sales",
       capabilities: ["provision_connections"]
     }))
-    const grant = await run(store.createGrant({
-      id: newGrantId(),
+    const binding = await run(store.createBinding({
+      id: newClientToolBindingId(),
       tenantId: defaultTenantId,
       clientId: client.id,
       alias: Alias.make("tickets"),
       tool: ToolName.make("create"),
       connection,
-      decision: "require_approval"
     }))
     const stale = await run(store.createApproval({
       id: newApprovalId(),
       tenantId: defaultTenantId,
       clientId: client.id,
-      grantId: grant.id,
-      alias: grant.alias,
-      tool: grant.tool,
+      policyId: policy.id,
+      bindingId: binding.id,
+      alias: binding.alias,
+      tool: binding.tool,
       arguments: {},
       expiresAt: new Date(Date.now() - 1_000)
     }))
@@ -210,7 +224,8 @@ describe("gateway maintenance", () => {
       id: newApprovalId(),
       tenantId: defaultTenantId,
       clientId: client.id,
-      grantId: grant.id,
+      policyId: policy.id,
+      bindingId: binding.id,
       alias: Alias.make("tickets"),
       tool: ToolName.make("close"),
       arguments: {},

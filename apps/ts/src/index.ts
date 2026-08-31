@@ -21,7 +21,7 @@ import {
  * human is asked lives behind the gateway.
  *
  * That is the point of the split — a sandbox holding this client holds no
- * authority beyond the grants attached to its key. */
+ * authority beyond the policy and bindings attached to its client. */
 
 export interface GatewayClientOptions {
   readonly url: string
@@ -302,7 +302,7 @@ export const createGatewayClient = (options: GatewayClientOptions): GatewayClien
 
   const failure = (method: string, path: string, status: number, parsed: Json): GatewayError => {
     // The gateway states a refusal in `error`; a policy answer states it in
-    // `reason`. Reading both is what keeps "alias not granted" from being
+    // `reason`. Reading both is what keeps "alias not authorized" from being
     // reported as the generic "failed with 403".
     const message = Predicate.isObjectOrArray(parsed)
       ? "error" in parsed

@@ -396,12 +396,15 @@ describe("integrations CLI acceptance", () => {
         JSON.stringify({ body: { title: "Connected" } })
       ])
       expect(executed.exitCode, executed.stderr).toBe(0)
-      expect(vendor.invocations()).toBe(1)
+      expect(executed.stdout).toContain("pending")
+      // POST starts from the conservative policy default, so the vendor is not
+      // contacted until a human approves the frozen invocation.
+      expect(vendor.invocations()).toBe(0)
     },
     30_000
   )
 
-  test("a delegated key reaches only what it was granted", async () => {
+  test("a delegated key reaches only what its assigned policy includes", async () => {
     const vendor = startVendor()
     const gateway = await startGateway()
     await loginOperator(gateway)
@@ -417,6 +420,17 @@ describe("integrations CLI acceptance", () => {
     expect(operatorCatalog.exitCode, operatorCatalog.stderr).toBe(0)
 
     const client = parseOutput(IdOutput, (await operator(["client", "sandbox"])).stdout)
+    const policy = parseOutput(IdOutput, (await operator(["policy", "sandbox-policy"])).stdout)
+    const included = await operator([
+      "policy-tool",
+      policy.id,
+      slug,
+      "tickets.create",
+      "allow"
+    ])
+    expect(included.exitCode, included.stderr).toBe(0)
+    const assigned = await operator(["assign-policy", client.id, policy.id])
+    expect(assigned.exitCode, assigned.stderr).toBe(0)
     const key = parseOutput(SecretOutput, (await operator(["key", client.id])).stdout)
     const sandbox = {
       ...gateway.environment,
@@ -434,19 +448,9 @@ describe("integrations CLI acceptance", () => {
     expect(discoverAttempt.exitCode).toBe(1)
     expect(discoverAttempt.stderr).toContain("required capability")
 
-    await operator([
-      "grant",
-      client.id,
-      "tickets",
-      "tickets.create",
-      "--integration",
-      slug,
-      "--allow"
-    ])
-
     const executed = await clientCli([
       "execute",
-      "tickets",
+      slug.replace(/[^a-z0-9]+/g, "-"),
       "tickets.create",
       JSON.stringify({ body: { title: "Delegated" } })
     ], sandbox)
@@ -454,10 +458,10 @@ describe("integrations CLI acceptance", () => {
     expect(executed.stdout).toContain("succeeded")
     expect(vendor.seenKeys()).toEqual(["acceptance-secret"])
 
-    // An ungranted tool on a granted alias is refused.
+    // A tool omitted from the assigned policy is refused on the same binding.
     const refused = await clientCli([
       "execute",
-      "tickets",
+      slug.replace(/[^a-z0-9]+/g, "-"),
       "tickets.delete",
       "{}"
     ], sandbox)
@@ -530,7 +534,7 @@ describe("integrations CLI acceptance", () => {
     expect(catalog.count).toBeGreaterThan(0)
   }, 40_000)
 
-  test("a grant can be revoked, and a key listed and revoked, from the CLI", async () => {
+  test("a policy can remove authority, and a key can be listed and revoked", async () => {
     const vendor = startVendor()
     const gateway = await startGateway()
     await loginOperator(gateway)
@@ -545,24 +549,16 @@ describe("integrations CLI acceptance", () => {
     const client = parseOutput(IdOutput, (await operator(["client", "sandbox"])).stdout)
     const key = parseOutput(KeyOutput, (await operator(["key", client.id])).stdout)
     const sandbox = { ...gateway.environment, INTEGRATIONS_API_KEY: key.secret }
-    const grant = parseOutput(IdOutput, (await operator([
-      "grant",
-      client.id,
-      "tickets",
-      "tickets.create",
-      "--integration",
-      slug
-    ])).stdout)
 
     const keys = parseOutput(KeysOutput, (await operator(["keys", client.id])).stdout)
     expect(keys.keys.map((entry) => entry.id)).toEqual([key.id])
 
-    // Undoing a delegation was the one thing the CLI could not do.
-    const revokedGrant = await operator(["revoke", "grant", grant.id])
-    expect(revokedGrant.exitCode, revokedGrant.stderr).toBe(0)
+    const emptyPolicy = parseOutput(IdOutput, (await operator(["policy", "deny-all"])).stdout)
+    const reassigned = await operator(["assign-policy", client.id, emptyPolicy.id])
+    expect(reassigned.exitCode, reassigned.stderr).toBe(0)
     const afterRevoke = await clientCli([
       "execute",
-      "tickets",
+      slug.replace(/[^a-z0-9]+/g, "-"),
       "tickets.create",
       JSON.stringify({ body: { title: "Revoked" } })
     ], sandbox)

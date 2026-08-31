@@ -1,4 +1,3 @@
-import { whenPresent } from "@mokronos/contracts"
 import { Effect, Option, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import type { IntegrationsCliError } from "../connection.ts"
@@ -34,12 +33,6 @@ const offsetFlag = () =>
   Flag.integer("offset").pipe(
     Flag.optional,
     Flag.withDescription("Skip this many rows. Listings are ordered, so a window is stable")
-  )
-
-const connectionFlag = () =>
-  Flag.string("connection").pipe(
-    Flag.withDefault("default"),
-    Flag.withDescription("Connection name (default: default)")
   )
 
 const window = (
@@ -121,7 +114,7 @@ export const clientsCommand = Command.make(
         })
       })
     )
-).pipe(Command.withDescription("List clients that may hold grants"))
+).pipe(Command.withDescription("List clients and their assigned policies"))
 
 export const clientCommand = Command.make(
   "client",
@@ -133,7 +126,7 @@ export const clientCommand = Command.make(
     ),
     administer: Flag.boolean("administer").pipe(
       Flag.withDefault(false),
-      Flag.withDescription("Allow this client to administer clients, keys, grants, audit, and policy")
+      Flag.withDescription("Allow this client to administer clients, keys, policies, approvals, and audit")
     )
   },
   ({ name, provision, administer }) =>
@@ -152,7 +145,7 @@ export const clientCommand = Command.make(
         ))
       })
     )
-).pipe(Command.withDescription("Create a client that grants can be issued to"))
+).pipe(Command.withDescription("Create a client assigned to the default policy"))
 
 export const keyCommand = Command.make(
   "key",
@@ -192,56 +185,116 @@ export const keysCommand = Command.make(
     }))
 ).pipe(Command.withDescription("List a client's API keys. Secrets are never shown again"))
 
-export const grantCommand = Command.make(
-  "grant",
+export const policiesCommand = Command.make(
+  "policies",
+  {
+    limit: limitFlag(),
+    offset: offsetFlag(),
+    verbose: verboseFlag()
+  },
+  ({ limit, offset, verbose }) =>
+    controlPlaneTask((client) => client.request("GET", "/v1/policies")).pipe(
+      Effect.flatMap((result) => {
+        const all = sortedBy(array(record(result)["policies"]), (entry) =>
+          text(record(entry["policy"])["name"]))
+        return listing(page(all, window(limit, offset)), {
+          key: "policies",
+          narrowing: "window with --limit/--offset",
+          verbose,
+          empty: "No policies.",
+          row: (entry) => entry
+        })
+      })
+    )
+).pipe(Command.withDescription("List reusable tool-access policies"))
+
+export const policyCommand = Command.make(
+  "policy",
+  { name: Argument.string("name") },
+  ({ name }) =>
+    controlPlaneTask((client) => client.request("POST", "/v1/policies", { name })).pipe(
+      Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false)))
+    )
+).pipe(Command.withDescription("Create an empty reusable policy"))
+
+export const clonePolicyCommand = Command.make(
+  "clone-policy",
+  {
+    policyId: Argument.string("policy-id"),
+    name: Argument.string("name")
+  },
+  ({ policyId, name }) =>
+    controlPlaneTask((client) => client.request(
+      "POST",
+      `/v1/policies/${encodeURIComponent(policyId)}/clone`,
+      { name }
+    )).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false))))
+).pipe(Command.withDescription("Clone a policy and all of its tool rules"))
+
+export const policyToolCommand = Command.make(
+  "policy-tool",
+  {
+    policyId: Argument.string("policy-id"),
+    integration: Argument.string("integration"),
+    tool: Argument.string("tool"),
+    mode: Argument.choice("mode", ["allow", "require-approval"])
+  },
+  ({ integration, mode, policyId, tool }) =>
+    controlPlaneTask(async (client) => {
+      const detail = record(await client.request(
+        "GET",
+        `/v1/policies/${encodeURIComponent(policyId)}`
+      ))
+      const integrations = array(detail["integrations"])
+        .map((entry) => text(entry["integration"]))
+      const configuredIntegrations = integrations.includes(integration)
+        ? integrations
+        : [...integrations, integration]
+      const tools = array(detail["tools"])
+        .filter((entry) => text(entry["integration"]) !== integration || text(entry["tool"]) !== tool)
+        .map((entry) => ({
+          integration: text(entry["integration"]),
+          tool: text(entry["tool"]),
+          enabled: entry["enabled"] === true,
+          decision: text(entry["decision"])
+        }))
+      return await client.request(
+        "POST",
+        `/v1/policies/${encodeURIComponent(policyId)}/tools`,
+        {
+          integrations: configuredIntegrations,
+          tools: [
+            ...tools,
+            {
+              integration,
+              tool,
+              enabled: true,
+              decision: mode === "allow" ? "allow" : "require_approval"
+            }
+          ]
+        }
+      )
+    }).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false))))
+).pipe(Command.withDescription("Include or update one tool in a policy"))
+
+export const assignPolicyCommand = Command.make(
+  "assign-policy",
   {
     clientId: Argument.string("client-id"),
-    alias: Argument.string("alias"),
-    tool: Argument.string("tool"),
-    integration: Flag.string("integration").pipe(
-      Flag.withDescription("Integration slug the alias resolves to")
-    ),
-    connection: connectionFlag(),
-    requireApproval: Flag.boolean("require-approval").pipe(
-      Flag.withDefault(false),
-      Flag.withDescription("Freeze this tool's calls for a human instead of running them")
-    ),
-    allow: Flag.boolean("allow").pipe(
-      Flag.withDefault(false),
-      Flag.withDescription("Explicitly allow direct calls, overriding the tool's suggested policy")
-    )
+    policyId: Argument.string("policy-id")
   },
-  (options) => {
-    if (options.requireApproval && options.allow) {
-      return Effect.fail(cliError("Choose either --allow or --require-approval, not both"))
-    }
-    const decision = options.requireApproval
-      ? "require_approval"
-      : options.allow
-        ? "allow"
-        : undefined
-    return controlPlaneTask((client) =>
-      client.request("POST", "/v1/grants", {
-        clientId: options.clientId,
-        alias: options.alias,
-        tool: options.tool,
-        connection: {
-          owner: "org",
-          integration: options.integration,
-          name: options.connection
-        },
-        ...whenPresent("decision", decision)
-      })
-    ).pipe(Effect.flatMap((result) =>
-      writeStdoutLine(jsonOutput(record(result), false))
-    ))
-  }
-).pipe(Command.withDescription("Delegate one tool through one connection to one client"))
+  ({ clientId, policyId }) =>
+    controlPlaneTask((client) => client.request(
+      "POST",
+      `/v1/clients/${encodeURIComponent(clientId)}/policy`,
+      { policyId }
+    )).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false))))
+).pipe(Command.withDescription("Assign one reusable policy to a client"))
 
 export const revokeCommand = Command.make(
   "revoke",
   {
-    kind: Argument.choice("kind", ["grant", "client", "key"]).pipe(
+    kind: Argument.choice("kind", ["client", "key"]).pipe(
       Argument.withDescription("What to revoke")
     ),
     id: Argument.string("id")
@@ -250,11 +303,9 @@ export const revokeCommand = Command.make(
     controlPlaneTask((client) =>
       client.request(
         "POST",
-        kind === "grant"
-          ? `/v1/grants/${encodeURIComponent(id)}/revoke`
-          : kind === "client"
-            ? `/v1/clients/${encodeURIComponent(id)}/revoke`
-            : `/v1/keys/${encodeURIComponent(id)}/revoke`,
+        kind === "client"
+          ? `/v1/clients/${encodeURIComponent(id)}/revoke`
+          : `/v1/keys/${encodeURIComponent(id)}/revoke`,
         {}
       )
     ).pipe(Effect.flatMap((result) => {
@@ -263,6 +314,6 @@ export const revokeCommand = Command.make(
     }))
 ).pipe(
   Command.withDescription(
-    "Revoke a grant, a client, or one API key. Revoked rows stay as history"
+    "Revoke a client or one API key. Revoked rows stay as history"
   )
 )

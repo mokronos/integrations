@@ -54,17 +54,31 @@ export const authorizeInvocation = Effect.fn("Authorization.authorizeInvocation"
   if (authentication.status !== "authenticated") return { status: authentication.status }
 
   const client = authentication.client
-  const grant = yield* store.findGrant(client.id, input.alias, input.tool)
-  // One status for "no such alias" and "tool not granted" alike: telling them
-  // apart would let a caller enumerate what else this tenant has connected.
-  if (grant === undefined) return { status: "not-granted", alias: input.alias, tool: input.tool }
+  const binding = yield* store.findBinding(client.id, input.alias, input.tool)
+  const policy = yield* store.findPolicy(client.tenantId, client.policyId)
+  const policyIntegrations = policy === undefined ? [] : yield* store.listPolicyIntegrations(policy.id)
+  const policyTools = policy === undefined ? [] : yield* store.listPolicyTools(policy.id)
+  const policyTool = binding === undefined
+    ? undefined
+    : policyTools.find((candidate) =>
+      candidate.enabled && candidate.integration === binding.connection.integration && candidate.tool === binding.tool)
+  const integrationMember = binding !== undefined && policyIntegrations.some((candidate) =>
+    candidate.integration === binding.connection.integration)
+  // One status for every missing side of the intersection: telling them apart
+  // would let a caller enumerate policy or connection state.
+  if (binding === undefined || policy === undefined || !integrationMember || policyTool === undefined) {
+    return { status: "not-authorized", alias: input.alias, tool: input.tool }
+  }
 
   return {
     status: "authorized",
     client,
-    grant,
-    connection: grant.connection,
-    subject: connectionSubject(grant.connection) ?? null
+    policy,
+    policyTool,
+    binding,
+    connection: binding.connection,
+    subject: connectionSubject(binding.connection) ?? null,
+    decision: policyTool.decision
   }
 })
 
@@ -76,7 +90,7 @@ export type CapabilityAuthorization =
   | { readonly status: "not-permitted" }
 
 /** Whether a client holds one named non-invocation capability. Kept separate
- * from grants: provisioning a connection and deciding what tools may use it
+ * from invocation policies: provisioning a connection and deciding what tools may use it
  * are deliberately different powers. */
 export const authorizeClientCapability = Effect.fn("Authorization.authorizeClientCapability")(
   function*(

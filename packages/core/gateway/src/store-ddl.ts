@@ -1,5 +1,5 @@
 // Everything the gateway owns lives here, above the host's own database.
-// Resolving a grant is what determines which subject a host instance must
+// Resolving a client binding is what determines which subject a host instance must
 // be bound to, so these rows have to be readable before that instance exists.
 
 /** The two tables tenancy itself is built on. They exist before every other
@@ -36,6 +36,7 @@ export const gatewayDdl = [
   `CREATE TABLE IF NOT EXISTS gateway_client (
      id TEXT PRIMARY KEY,
      tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
+     policy_id TEXT NOT NULL REFERENCES gateway_policy (id),
      name TEXT NOT NULL,
      capabilities TEXT NOT NULL,
      approval_delivery TEXT NOT NULL,
@@ -77,7 +78,32 @@ export const gatewayDdl = [
      last_used_at INTEGER,
      revoked_at INTEGER
    )`,
-  `CREATE TABLE IF NOT EXISTS gateway_grant (
+  `CREATE TABLE IF NOT EXISTS gateway_policy (
+     id TEXT PRIMARY KEY,
+     tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
+     name TEXT NOT NULL,
+     is_default INTEGER NOT NULL DEFAULT 0,
+     created_at INTEGER NOT NULL,
+     updated_at INTEGER NOT NULL
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS gateway_policy_name_tenant
+     ON gateway_policy (tenant_id, name)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS gateway_policy_default_tenant
+     ON gateway_policy (tenant_id) WHERE is_default = 1`,
+  `CREATE TABLE IF NOT EXISTS gateway_policy_integration (
+     policy_id TEXT NOT NULL REFERENCES gateway_policy (id) ON DELETE CASCADE,
+     integration TEXT NOT NULL,
+     PRIMARY KEY (policy_id, integration)
+   )`,
+  `CREATE TABLE IF NOT EXISTS gateway_policy_tool (
+     policy_id TEXT NOT NULL REFERENCES gateway_policy (id) ON DELETE CASCADE,
+     integration TEXT NOT NULL,
+     tool TEXT NOT NULL,
+     enabled INTEGER NOT NULL DEFAULT 1,
+     decision TEXT NOT NULL,
+     PRIMARY KEY (policy_id, integration, tool)
+   )`,
+  `CREATE TABLE IF NOT EXISTS gateway_client_tool_binding (
      id TEXT PRIMARY KEY,
      tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
      client_id TEXT NOT NULL REFERENCES gateway_client (id) ON DELETE CASCADE,
@@ -87,17 +113,17 @@ export const gatewayDdl = [
      subject TEXT,
      integration TEXT NOT NULL,
      connection_name TEXT NOT NULL,
-     decision TEXT NOT NULL,
      created_at INTEGER NOT NULL,
      revoked_at INTEGER
    )`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS gateway_grant_live
-     ON gateway_grant (client_id, alias, tool) WHERE revoked_at IS NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS gateway_client_tool_binding_live
+     ON gateway_client_tool_binding (client_id, alias, tool) WHERE revoked_at IS NULL`,
   `CREATE TABLE IF NOT EXISTS gateway_pending_approval (
      id TEXT PRIMARY KEY,
      tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
      client_id TEXT NOT NULL REFERENCES gateway_client (id) ON DELETE CASCADE,
-     grant_id TEXT NOT NULL,
+     policy_id TEXT NOT NULL REFERENCES gateway_policy (id),
+     binding_id TEXT NOT NULL REFERENCES gateway_client_tool_binding (id),
      alias TEXT NOT NULL,
      tool TEXT NOT NULL,
      arguments TEXT NOT NULL,
@@ -112,7 +138,8 @@ export const gatewayDdl = [
      collected_at INTEGER
    )`,
   `CREATE INDEX IF NOT EXISTS gateway_pending_approval_retry
-     ON gateway_pending_approval (grant_id, arguments) WHERE collected_at IS NULL`,
+     ON gateway_pending_approval (policy_id, binding_id, arguments_lookup, arguments)
+     WHERE collected_at IS NULL`,
   `CREATE TABLE IF NOT EXISTS gateway_audit (
      id TEXT PRIMARY KEY,
      tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
@@ -148,7 +175,8 @@ export const gatewayDdl = [
 /** Tables that carry a `tenant_id`, for the migration's backfill sweep. */
 export const tenantedTables = [
   "gateway_client",
-  "gateway_grant",
+  "gateway_policy",
+  "gateway_client_tool_binding",
   "gateway_pending_approval",
   "gateway_audit"
 ] as const

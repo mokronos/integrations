@@ -4,9 +4,10 @@ import {
   ApiKeyId,
   ApprovalId,
   AuditId,
+  ClientToolBindingId,
   ClientId,
-  GrantId,
   LoginHandoffHash,
+  PolicyId,
   SubjectId,
   TenantId
 } from "./domain.ts"
@@ -50,7 +51,8 @@ export const hashLoginHandoff = (secret: string): LoginHandoffHash =>
   LoginHandoffHash.make(createHash("sha256").update(secret, "utf8").digest("hex"))
 
 export const newClientId = (): ClientId => ClientId.make(randomUUID())
-export const newGrantId = (): GrantId => GrantId.make(randomUUID())
+export const newPolicyId = (): PolicyId => PolicyId.make(randomUUID())
+export const newClientToolBindingId = (): ClientToolBindingId => ClientToolBindingId.make(randomUUID())
 export const newApprovalId = (): ApprovalId => ApprovalId.make(randomUUID())
 export const newAuditId = (): AuditId => AuditId.make(randomUUID())
 export const newTenantId = (): TenantId => TenantId.make(randomUUID())

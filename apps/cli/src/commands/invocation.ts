@@ -73,7 +73,7 @@ export const operatorExecuteCommand = Command.make(
   "execute",
   {
     target: Argument.string("alias-or-address").pipe(
-      Argument.withDescription("Granted alias, or a tools.… address with --direct")
+      Argument.withDescription("Effective tool alias, or a tools.… address with --direct")
     ),
     second: Argument.string("tool").pipe(
       Argument.optional,
@@ -155,7 +155,7 @@ export const operatorExecuteCommand = Command.make(
   }
 ).pipe(
   Command.withDescription(
-    "Invoke a granted tool through an alias, as a delegated caller would. --direct calls an address instead"
+    "Invoke an effective policy tool through an alias. --direct calls an address instead"
   )
 )
 
@@ -163,10 +163,10 @@ export const clientExecuteCommand = Command.make(
   "execute",
   {
     alias: Argument.string("alias").pipe(
-      Argument.withDescription("Granted alias")
+      Argument.withDescription("Effective tool alias")
     ),
     tool: Argument.string("tool").pipe(
-      Argument.withDescription("Granted tool name")
+      Argument.withDescription("Effective tool name")
     ),
     json: Argument.string("json").pipe(
       Argument.optional,

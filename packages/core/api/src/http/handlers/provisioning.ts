@@ -12,8 +12,11 @@ import {
   ClientId,
   ToolName
 } from "@mokronos/gateway-core"
-import { grantToolAddress } from "@mokronos/gateway-core"
-import { grantConnectedTools } from "@mokronos/gateway-core"
+import { boundToolAddress } from "@mokronos/gateway-core"
+import {
+  bindConnectedTools,
+  includeConnectedToolsInDefaultPolicy
+} from "@mokronos/gateway-core"
 import { oauthBrowserPage } from "@mokronos/gateway-core"
 import type { GatewayStore } from "@mokronos/gateway-core"
 import { GatewayStoreError, GatewayStoreService } from "@mokronos/gateway-core"
@@ -90,7 +93,7 @@ const GatewayNodeSource = Schema.Struct({
 
 /** Answers the question a workflow author is actually asking: will this step
  *  resolve when it runs, as *this* caller? An alias is not a name in the
- *  catalog — it is a binding held by a grant — so structural validity and
+ *  catalog; it is a client-local binding, so structural validity and
  *  reachability are separate findings. */
 const validateGatewayNode = (
   dependencies: {
@@ -117,34 +120,33 @@ const validateGatewayNode = (
     )
 
     if (aliasIsWellFormed && live) {
-      const grants = clientId === undefined
+      const bindings = clientId === undefined
         ? []
-        : yield* orDieStorage(dependencies.store.listGrants(clientId))
-      const grant = grants.find((candidate) =>
+        : yield* orDieStorage(dependencies.store.listBindings(clientId))
+      const binding = bindings.find((candidate) =>
         candidate.alias === source.alias && candidate.tool === source.tool
       )
       if (clientId === undefined) {
         findings.push({
           severity: "error",
-          check: "grant",
+          check: "authorization",
           message: "Gateway aliases are client-specific; validate this node with i and its client key"
         })
-      } else if (grant === undefined) {
+      } else if (binding === undefined) {
         findings.push({
           severity: "error",
-          check: "grant",
+          check: "authorization",
           // Naming the alias but not what else it exposes: a validation report
           // is not a place to enumerate a caller's other capabilities.
-          message: `${source.alias}.${source.tool} is not granted to this key`
+          message: `${source.alias}.${source.tool} is not authorized for this key`
         })
       } else {
         findings.push({
           severity: "info",
-          check: "grant",
-          message: `${source.alias}.${source.tool} resolves to ${grant.connection.integration}/${grant.connection.name}${grant.decision === "require_approval" ? " and is frozen for a human" : ""
-            }`
+          check: "authorization",
+          message: `${source.alias}.${source.tool} resolves to ${binding.connection.integration}/${binding.connection.name}`
         })
-        const address = grantToolAddress(grant.connection, ToolName.make(source.tool))
+        const address = boundToolAddress(binding.connection, ToolName.make(source.tool))
         const tools = yield* Effect.promise(() => dependencies.integrations.tools.list())
         findings.push(
           tools.some((candidate) => candidate.address === address)
@@ -152,7 +154,7 @@ const validateGatewayNode = (
             : {
               severity: "error",
               check: "catalog",
-              message: `${source.tool} is granted but no longer in the catalog: ${address}`
+              message: `${source.tool} is bound but no longer in the catalog: ${address}`
             }
         )
       }
@@ -211,8 +213,8 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
             whenPresent("registryUrl", config.registryUrl)
           )))
       .handle("invokeTool", (request) =>
-        // Administrative, and deliberately not grant-checked: a client that may
-        // mutate grants could grant itself this tool in one extra call, so a
+        // Administrative and deliberately not delegated-policy checked: a client
+        // with administration authority can change policy in a separate call, so a
         // check here would be friction rather than a control. The delegated
         // surface has no address form at all. See docs/adr/0002.
         reachOut(`${request.payload.address} failed`, () =>
@@ -282,10 +284,17 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
                   ? { value: values["token"] }
                   : { values })
             }))
-          yield* grantConnectedTools({
+          yield* bindConnectedTools({
             store,
             integrations: integrationsApi,
             client: caller.client,
+            integration: integration.slug,
+            connection: connection.name
+          }).pipe(orDieStorage)
+          yield* includeConnectedToolsInDefaultPolicy({
+            store,
+            integrations: integrationsApi,
+            tenantId: caller.client.tenantId,
             integration: integration.slug,
             connection: connection.name
           }).pipe(orDieStorage)
@@ -324,7 +333,7 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
             integration: integration.slug,
             connection: body.connection ?? "default",
             authMethod: method,
-            grantClient: caller.client,
+            bindingClient: caller.client,
             ...whenPresentMap("clientId", body.clientId, (id) => id),
             ...whenPresentMap("clientSecret", body.clientSecret, (secret) => secret),
             ...whenPresentMap(

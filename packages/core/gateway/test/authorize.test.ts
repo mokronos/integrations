@@ -13,7 +13,8 @@ import {
   generateApiKey,
   IntegrationSlug,
   newClientId,
-  newGrantId,
+  newClientToolBindingId,
+  newPolicyId,
   SubjectId,
   ToolName
 } from "../src/index.ts"
@@ -55,24 +56,39 @@ const seed = async (store: GatewayStore, options: {
   readonly connection?: ConnectionRef
   readonly decision?: "allow" | "require_approval"
 } = {}) => {
+  const policy = await run(store.createPolicy({
+    id: newPolicyId(),
+    tenantId: defaultTenantId,
+    name: `policy-${crypto.randomUUID()}`
+  }))
   const client = await run(store.createClient({
     id: newClientId(),
     tenantId: defaultTenantId,
+    policyId: policy.id,
     name: "support-agent",
     capabilities: options.capabilities ?? ["provision_connections"]
   }))
   const key = generateApiKey()
   await run(store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash }))
-  const grant = await run(store.createGrant({
-    id: newGrantId(),
+  const policyIntegration = (options.connection ?? orgConnection).integration
+  await run(store.replacePolicyConfiguration(policy.id, {
+    integrations: [policyIntegration],
+    tools: [{
+    integration: policyIntegration,
+    tool: ToolName.make("getDocument"),
+    enabled: true,
+    decision: options.decision ?? "allow"
+    }]
+  }))
+  const binding = await run(store.createBinding({
+    id: newClientToolBindingId(),
     tenantId: defaultTenantId,
     clientId: client.id,
     alias: Alias.make("sharepoint-app"),
     tool: ToolName.make("getDocument"),
     connection: options.connection ?? orgConnection,
-    decision: options.decision ?? "allow"
   }))
-  return { client, key, grant }
+  return { client, key, policy, binding }
 }
 
 const invoke = (store: GatewayStore, secret: string, alias = "sharepoint-app", tool = "getDocument") =>
@@ -83,15 +99,15 @@ const invoke = (store: GatewayStore, secret: string, alias = "sharepoint-app", t
   })
 
 describe("gateway authorization", () => {
-  test("authorizes a granted tool and names the connection it resolves to", async () => {
+  test("authorizes an effective tool and names the connection it resolves to", async () => {
     const store = await run(makeStore())
-    const { key, grant } = await run(seed(store))
+    const { key, binding } = await run(seed(store))
 
     const result = await run(invoke(store, key.secret))
 
     expect(result.status).toBe("authorized")
     if (result.status !== "authorized") return
-    expect(result.grant.id).toBe(grant.id)
+    expect(result.binding.id).toBe(binding.id)
     expect(result.connection).toEqual(orgConnection)
     // An org-tier connection belongs to the tenant, so no human is acted for.
     expect(result.subject).toBeNull()
@@ -105,11 +121,11 @@ describe("gateway authorization", () => {
 
     expect(result.status).toBe("authorized")
     if (result.status !== "authorized") return
-    // The delegation lives in the grant. Nothing in the API key says Sebastian.
+    // The delegation lives in the binding. Nothing in the API key says Sebastian.
     expect(result.subject).toBe(SubjectId.make("sebastian"))
   })
 
-  test("carries the grant's approval decision through", async () => {
+  test("carries the policy's approval decision through", async () => {
     const store = await run(makeStore())
     const { key } = await run(seed(store, { decision: "require_approval" }))
 
@@ -117,7 +133,7 @@ describe("gateway authorization", () => {
 
     expect(result.status).toBe("authorized")
     if (result.status !== "authorized") return
-    expect(result.grant.decision).toBe("require_approval")
+    expect(result.decision).toBe("require_approval")
   })
 
   test("rejects an unknown key", async () => {
@@ -163,64 +179,82 @@ describe("gateway authorization", () => {
     expect((await run(invoke(store, replacement.secret))).status).toBe("authorized")
   })
 
-  test("denies an ungranted tool on a granted alias", async () => {
+  test("denies a tool outside the policy and binding intersection", async () => {
     const store = await run(makeStore())
     const { key } = await run(seed(store))
 
     const result = await run(invoke(store, key.secret, "sharepoint-app", "deleteDocument"))
 
-    expect(result.status).toBe("not-granted")
+    expect(result.status).toBe("not-authorized")
   })
 
-  test("does not distinguish an unknown alias from an ungranted tool", async () => {
+  test("does not distinguish an unknown alias from an unauthorized tool", async () => {
     const store = await run(makeStore())
     const { key } = await run(seed(store))
 
     const unknownAlias = await run(invoke(store, key.secret, "nothing-here", "getDocument"))
-    const ungrantedTool = await run(invoke(store, key.secret, "sharepoint-app", "deleteDocument"))
+    const unauthorizedTool = await run(invoke(store, key.secret, "sharepoint-app", "deleteDocument"))
 
     // Telling these apart would let a caller enumerate what else is connected.
-    expect(unknownAlias.status).toBe(ungrantedTool.status)
+    expect(unknownAlias.status).toBe(unauthorizedTool.status)
   })
 
-  test("denies a revoked grant while leaving the client usable", async () => {
+  test("denies a revoked binding while leaving the client usable", async () => {
     const store = await run(makeStore())
-    const { client, key, grant } = await run(seed(store))
-    await run(store.createGrant({
-      id: newGrantId(),
+    const { client, key, binding } = await run(seed(store))
+    await run(store.replacePolicyConfiguration(client.policyId, {
+      integrations: [orgConnection.integration, userConnection.integration],
+      tools: [
+        { integration: orgConnection.integration, tool: ToolName.make("getDocument"), enabled: true, decision: "allow" },
+        { integration: userConnection.integration, tool: ToolName.make("search"), enabled: true, decision: "allow" }
+      ]
+    }))
+    await run(store.createBinding({
+      id: newClientToolBindingId(),
       tenantId: defaultTenantId,
       clientId: client.id,
       alias: Alias.make("gmail-work"),
       tool: ToolName.make("search"),
       connection: userConnection,
-      decision: "allow"
     }))
 
-    await run(store.revokeGrant(defaultTenantId, grant.id))
+    await run(store.revokeBinding(defaultTenantId, binding.id))
 
-    expect((await run(invoke(store, key.secret))).status).toBe("not-granted")
+    expect((await run(invoke(store, key.secret))).status).toBe("not-authorized")
     expect((await run(invoke(store, key.secret, "gmail-work", "search"))).status).toBe("authorized")
   })
 
-  test("two clients hold different grants over the same connection", async () => {
+  test("two clients hold different policies over the same connection", async () => {
     const store = await run(makeStore())
     const { key: readerKey } = await run(seed(store))
+    const writerPolicy = await run(store.createPolicy({
+      id: newPolicyId(), tenantId: defaultTenantId, name: "writer"
+    }))
     const writer = await run(store.createClient({
       id: newClientId(),
       tenantId: defaultTenantId,
+      policyId: writerPolicy.id,
       name: "sales-campaign",
       capabilities: ["provision_connections"]
     }))
     const writerKey = generateApiKey()
     await run(store.addApiKey({ id: writerKey.id, clientId: writer.id, hash: writerKey.hash }))
-    await run(store.createGrant({
-      id: newGrantId(),
+    await run(store.replacePolicyConfiguration(writer.policyId, {
+      integrations: [orgConnection.integration],
+      tools: [{
+      integration: orgConnection.integration,
+      tool: ToolName.make("getDocument"),
+      enabled: true,
+      decision: "require_approval"
+      }]
+    }))
+    await run(store.createBinding({
+      id: newClientToolBindingId(),
       tenantId: defaultTenantId,
       clientId: writer.id,
       alias: Alias.make("sharepoint-app"),
       tool: ToolName.make("getDocument"),
       connection: orgConnection,
-      decision: "require_approval"
     }))
 
     const reader = await run(invoke(store, readerKey.secret))
@@ -231,15 +265,15 @@ describe("gateway authorization", () => {
     if (reader.status !== "authorized" || campaign.status !== "authorized") return
     // Same connection, same tool, different policy — which is the whole point of
     // keying policy by client rather than by connection.
-    expect(reader.grant.decision).toBe("allow")
-    expect(campaign.grant.decision).toBe("require_approval")
+    expect(reader.decision).toBe("allow")
+    expect(campaign.decision).toBe("require_approval")
   })
 
   test("one client exposes two connections to the same integration side by side", async () => {
     const store = await run(makeStore())
     const { client, key } = await run(seed(store))
-    await run(store.createGrant({
-      id: newGrantId(),
+    await run(store.createBinding({
+      id: newClientToolBindingId(),
       tenantId: defaultTenantId,
       clientId: client.id,
       alias: Alias.make("sharepoint-me"),
@@ -250,7 +284,6 @@ describe("gateway authorization", () => {
         integration: IntegrationSlug.make("sharepoint"),
         name: ConnectionName.make("personal")
       },
-      decision: "allow"
     }))
 
     const application = await run(invoke(store, key.secret, "sharepoint-app"))

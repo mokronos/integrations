@@ -368,8 +368,8 @@ const buildAuth = (host: HostHandle): AuthApi => ({
     })
   })),
   /** Finishing a flow both exchanges the code and files the connection the
-   *  tokens belong to: a grant with no connection row is unaddressable, so the
-   *  two have to happen together. */
+   * tokens belong to. A binding without that connection would be unaddressable,
+   * so the two have to happen together. */
   complete: (options) => host.run(Effect.gen(function* () {
     const integrations = yield* IntegrationHost
     const oauth = yield* OAuthFlows

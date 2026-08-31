@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.2.0",
   "type": "module",
-  "description": "The integration gateway's control plane — connections, clients, grants, approvals, and audit.",
+  "description": "The integration gateway's control plane: connections, clients, policies, approvals, and audit.",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",

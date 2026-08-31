@@ -30,10 +30,10 @@ i execute mcp-linear-app list_issues '{"limit":5}' # 4. call it after connect
 OAuth requires a human browser step. Run `i connect` with a command timeout of
 at least 5 minutes; do not let the agent's shell timeout terminate it first.
 
-`i connect` grants every currently available tool from that connection to the
-connecting agent's key. Its execution alias is the integration slug with
+`i connect` binds every currently available tool from that connection to the
+connecting client and adds it to the tenant's default policy. Its execution alias is the integration slug with
 non-alphanumeric separators changed to dashes, so `mcp_linear_app` becomes
-`mcp-linear-app`. These grants allow calls without a second human approval.
+`mcp-linear-app`. Safe tools run directly; mutating or unclassified tools ask a human.
 Use the normalized alias with `i execute`.
 
 Every call answers in one shape: `{"status":"succeeded","result":…}`,

@@ -14,7 +14,8 @@ import {
   generateApiKey,
   IntegrationSlug,
   newClientId,
-  newGrantId,
+  newClientToolBindingId,
+  newPolicyId,
   TenantId,
   ToolName
 } from "./gateway.ts"
@@ -55,24 +56,36 @@ const setup = async (options: SetupOptions = {}) => {
   const store = await run(createGatewayStore(path.join(directory, "gateway.sqlite")))
   stores.push(store)
 
-  // A standing client with a grant, so delegation boundaries are testable
+  // A standing client with policy and binding, so delegation boundaries are testable
   // against a real administrative surface.
+  const policy = await run(store.createPolicy({
+    id: newPolicyId(), tenantId: defaultTenantId, name: "local"
+  }))
+  await run(store.replacePolicyConfiguration(policy.id, {
+    integrations: [connection.integration],
+    tools: [{
+    integration: connection.integration,
+    tool: ToolName.make("sendEmail"),
+    enabled: true,
+    decision: "allow"
+    }]
+  }))
   const client = await run(store.createClient({
     id: newClientId(),
     tenantId: defaultTenantId,
+    policyId: policy.id,
     name: "local",
     capabilities: ["provision_connections", "administer_gateway"]
   }))
   const apiKey = generateApiKey()
   await run(store.addApiKey({ id: apiKey.id, clientId: client.id, hash: apiKey.hash }))
-  await run(store.createGrant({
-    id: newGrantId(),
+  await run(store.createBinding({
+    id: newClientToolBindingId(),
     tenantId: defaultTenantId,
     clientId: client.id,
     alias: Alias.make("gmail-work"),
     tool: ToolName.make("sendEmail"),
     connection,
-    decision: "allow"
   }))
 
   const { handle } = createGatewayHandler({
@@ -506,22 +519,34 @@ describe("attribution", () => {
 
     // A frozen call inside the human's own partition, so the session is the
     // authority that settles it.
+    const policy = await run(setup_.store.createPolicy({
+      id: newPolicyId(), tenantId: human.tenantId, name: "support-agent"
+    }))
+    await run(setup_.store.replacePolicyConfiguration(policy.id, {
+      integrations: [connection.integration],
+      tools: [{
+      integration: connection.integration,
+      tool: ToolName.make("sendEmail"),
+      enabled: true,
+      decision: "require_approval"
+      }]
+    }))
     const client = await run(setup_.store.createClient({
       id: newClientId(),
       tenantId: human.tenantId,
+      policyId: policy.id,
       name: "support-agent",
       capabilities: ["provision_connections"]
     }))
     const key = generateApiKey()
     await run(setup_.store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash }))
-    await run(setup_.store.createGrant({
-      id: newGrantId(),
+    await run(setup_.store.createBinding({
+      id: newClientToolBindingId(),
       tenantId: human.tenantId,
       clientId: client.id,
       alias: Alias.make("gmail-work"),
       tool: ToolName.make("sendEmail"),
       connection,
-      decision: "require_approval"
     }))
 
     const frozen = await run(setup_.call("POST", "/v1/execute", {

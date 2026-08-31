@@ -6,7 +6,7 @@ human operator uses to run and administer the gateway.
 ## Agent access
 
 An agent is a delegated caller. It receives an API key and can use only the
-tools explicitly granted to that key's client.
+effective tools in that key's client's assigned policy and connection bindings.
 
 ### Command line
 
@@ -27,8 +27,8 @@ i execute <alias> <tool> <arguments>
 ```
 
 `i` can search and discover integrations, create and remove its connections,
-inspect tools and schemas, invoke granted tools, validate configuration, and
-read its own approval records. It cannot issue API keys, create grants, or
+inspect tools and schemas, invoke effective policy tools, validate configuration, and
+read its own approval records. It cannot issue API keys, change policies, or
 approve calls.
 
 ### TypeScript client
@@ -58,7 +58,7 @@ const outcome = await gateway.execute({
 
 The client exposes discovery, connection management, tool/schema lookup,
 validation, invocation, and approval polling. The gateway retains credentials,
-selects connections, applies grants and policy, and may return a pending
+selects connections, applies policy, and may return a pending
 approval outcome rather than execute immediately.
 
 ### HTTP API
@@ -76,18 +76,21 @@ administration:
 ii login
 ii client <name>
 ii key <client-id>
-ii grant <client-id> <alias> <tool>
+ii policies
+ii policy <name>
+ii policy-tool <policy-id> <integration> <tool> <allow|require-approval>
+ii assign-policy <client-id> <policy-id>
 ii approvals
 ii approve <approval-id>
 ii audit
 ```
 
-Use `ii` to manage connections, clients, API keys, grants, approvals, audit
+Use `ii` to manage connections, clients, API keys, policies, approvals, audit
 records, tool drift, account settings, and gateway lifecycle. Do not give this
 operator surface to delegated agents.
 
 The browser control plane is the visual operator interface. It manages the
-catalog, connections, grants, approvals, audit trail, drift, and account
+catalog, connections, policies, approvals, audit trail, drift, and account
 settings.
 
 ## Starting and hosting the gateway

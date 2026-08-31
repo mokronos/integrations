@@ -44,7 +44,7 @@ const isAddressForm = (
 /** The live half: does this node point at something callable right now?
  *
  *  This checks the catalog only. Whether a *caller* may reach it is a different
- *  question, answered by the gateway against that caller's grants. */
+ *  question, answered by the gateway against that caller's policy and bindings. */
 const liveFindings = Effect.fn("integrationValidation.liveFindings")(function*(
   source: IntegrationNodeSource,
   tools: IntegrationValidationEffects

@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   LogOut,
   Moon,
+  FileKey2,
   PanelLeftClose,
   PanelLeftOpen,
   Plug,
@@ -27,6 +28,7 @@ const navigation = [
   { to: "/", label: "Overview", icon: LayoutDashboard },
   { to: "/integrations", label: "Integrations", icon: Plug },
   { to: "/clients", label: "Clients", icon: KeyRound },
+  { to: "/policies", label: "Policies", icon: FileKey2 },
   { to: "/approvals", label: "Approvals", icon: ShieldCheck },
   { to: "/activity", label: "Activity", icon: Activity },
   { to: "/account", label: "Account", icon: UserRound }
