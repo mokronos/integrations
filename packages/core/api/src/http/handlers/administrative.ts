@@ -9,6 +9,8 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
   Alias,
   ClientId,
+  ConnectionGrantId,
+  ConnectionName,
   connectionRefKey,
   type ConnectionRef,
   IntegrationSlug,
@@ -19,11 +21,10 @@ import {
 import type { DriftReport } from "@mokronos/gateway-core"
 import { refreshIntegrationSnapshot } from "@mokronos/gateway-core"
 import {
-  ensureDefaultPolicyTools,
   executeAuthorized,
+  grantConnection,
   listEffectiveTools,
-  synchronizeAssignedPolicyBindings,
-  synchronizeClientBindings
+  reconcileDefaultPolicy
 } from "@mokronos/gateway-core"
 import {
   generateApiKey,
@@ -86,7 +87,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           // Clients are created inside the caller's partition. There is no way
           // to provision into another tenant over this surface, by design.
           const policy = body.policyId === undefined
-            ? yield* orDieStorage(ensureDefaultPolicyTools({
+            ? yield* orDieStorage(reconcileDefaultPolicy({
               store,
               integrations: integrationsApi,
               tenantId
@@ -103,7 +104,9 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
             capabilities: body.capabilities ?? [],
             ...whenPresentMap("approvalDelivery", body.approvalDelivery, (d) => d)
           }))
-          yield* orDieStorage(synchronizeClientBindings({ store, client }))
+          // A new client reaches nothing yet. Its policy may govern every
+          // connection the tenant has, but reach is granted per client, so an
+          // operator still chooses which credentials this one gets.
           return client
         }))
       .handle("updateClientSettings", (request) =>
@@ -173,8 +176,8 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
             return yield* new ApiNotFound({ error: `Unknown client ${clientId}` })
           }
           // The same listing `/v1/tools` gives a key about itself, asked about
-          // someone else. Generating bindings for the client you are
-          // provisioning should not require holding its key.
+          // someone else. Reading what the client you are provisioning can
+          // reach should not require holding its key.
           return {
             tools: yield* orDieStorage(listEffectiveTools(store, clientId, {
               schemas: request.query["schemas"],
@@ -205,13 +208,13 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           return {
             policies: yield* Effect.forEach(policies, (policy) =>
               Effect.gen(function*() {
-                const [integrations, tools] = yield* Effect.all([
-                  orDieStorage(store.listPolicyIntegrations(policy.id)),
-                  orDieStorage(store.listPolicyTools(policy.id))
-                ])
+                const tools = yield* orDieStorage(store.listPolicyTools(policy.id))
                 return {
                   policy,
-                  integrationCount: integrations.length,
+                  connectionCount: new Set(tools.map((tool) =>
+                    connectionRefKey(tool.connection))).size,
+                  integrationCount: new Set(tools.map((tool) =>
+                    tool.connection.integration)).size,
                   toolCount: tools.length,
                   enabledToolCount: tools.filter((tool) => tool.enabled).length,
                   assignedClientCount: clients.filter((client) => client.policyId === policy.id).length
@@ -224,14 +227,12 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           const tenantId = yield* requireTenant
           const policy = yield* orDieStorage(store.findPolicy(tenantId, request.params["id"]))
           if (policy === undefined) return yield* new ApiNotFound({ error: "Unknown policy" })
-          const [integrations, tools, clients] = yield* Effect.all([
-            orDieStorage(store.listPolicyIntegrations(policy.id)),
+          const [tools, clients] = yield* Effect.all([
             orDieStorage(store.listPolicyTools(policy.id)),
             orDieStorage(store.listClients(tenantId))
           ])
           return {
             policy,
-            integrations,
             tools,
             assignedClients: clients.filter((client) => client.policyId === policy.id)
           }
@@ -250,22 +251,16 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           const tenantId = yield* requireTenant
           const policy = yield* orDieStorage(store.findPolicy(tenantId, request.params["id"]))
           if (policy === undefined) return yield* new ApiNotFound({ error: "Unknown policy" })
+          // The rule set is the whole policy now — there is no coarser
+          // membership to validate against, so a rule for any connection is
+          // simply accepted. Clients that hold no grant for it see nothing.
           const deduplicated = new Map<string, {
             readonly connection: ConnectionRef
             readonly tool: ToolName
             readonly enabled: boolean
             readonly decision: "allow" | "require_approval"
           }>()
-          const integrations = [...new Set(request.payload.integrations)]
-            .map((integration) => IntegrationSlug.make(integration))
-          const membership = new Set<IntegrationSlug>(integrations)
           for (const input of request.payload.tools) {
-            const integration = IntegrationSlug.make(input.connection.integration)
-            if (!membership.has(integration)) {
-              return yield* new ApiBadRequest({
-                error: `Tool ${input.connection.integration}/${input.tool} has no integration membership`
-              })
-            }
             const key = `${connectionRefKey(input.connection)}\u0000${input.tool}`
             const existing = deduplicated.get(key)
             deduplicated.set(key, {
@@ -277,14 +272,11 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
                 : "allow"
             })
           }
-          const configuration = yield* orDieStorage(store.replacePolicyConfiguration(policy.id, {
-            integrations,
-            tools: [...deduplicated.values()]
-          }))
+          const tools = yield* orDieStorage(
+            store.replacePolicyTools(policy.id, [...deduplicated.values()]))
           const updated = yield* orDieStorage(store.findPolicy(tenantId, policy.id))
           if (updated === undefined) return yield* new ApiNotFound({ error: "Unknown policy" })
-          yield* orDieStorage(synchronizeAssignedPolicyBindings({ store, policy: updated }))
-          return { policy: updated, ...configuration }
+          return { policy: updated, tools }
         }))
       .handle("clonePolicy", (request) =>
         Effect.gen(function*() {
@@ -294,20 +286,17 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           const policy = yield* orDieStorage(store.createPolicy({
             id: newPolicyId(), tenantId, name: request.payload.name
           }))
-          const [sourceIntegrations, sourceTools] = yield* Effect.all([
-            orDieStorage(store.listPolicyIntegrations(source.id)),
-            orDieStorage(store.listPolicyTools(source.id))
-          ])
-          const configuration = yield* orDieStorage(store.replacePolicyConfiguration(policy.id, {
-            integrations: sourceIntegrations.map((entry) => entry.integration),
-            tools: sourceTools.map((tool) => ({
+          const sourceTools = yield* orDieStorage(store.listPolicyTools(source.id))
+          const tools = yield* orDieStorage(store.replacePolicyTools(
+            policy.id,
+            sourceTools.map((tool) => ({
               connection: tool.connection,
               tool: tool.tool,
               enabled: tool.enabled,
               decision: tool.decision
             }))
-          }))
-          return { policy, ...configuration }
+          ))
+          return { policy, tools }
         }))
       .handle("assignPolicy", (request) =>
         Effect.gen(function*() {
@@ -320,18 +309,78 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           if ((yield* orDieStorage(store.findPolicy(tenantId, policyId))) === undefined) {
             return yield* new ApiBadRequest({ error: `Policy ${policyId} belongs to another tenant or does not exist` })
           }
-          const assigned = yield* orDieStorage(store.assignPolicy(tenantId, clientId, policyId))
-          yield* orDieStorage(synchronizeClientBindings({ store, client: assigned }))
-          return assigned
+          // Nothing else to do: the client keeps every grant and every alias it
+          // had, and the new policy simply decides what those connections may be
+          // used for. Reassignment can never rename a route.
+          return yield* orDieStorage(store.assignPolicy(tenantId, clientId, policyId))
         }))
-      .handle("listBindings", (request) =>
+      .handle("listGrants", (request) =>
         Effect.gen(function*() {
           const tenantId = yield* requireTenant
           const clientId = request.params["id"]
           if ((yield* orDieStorage(store.findClientById(tenantId, clientId))) === undefined) {
             return yield* new ApiNotFound({ error: `Unknown client ${clientId}` })
           }
-          return { bindings: yield* orDieStorage(store.listBindings(clientId)) }
+          return { grants: yield* orDieStorage(store.listGrants(clientId)) }
+        }))
+      .handle("grantConnection", (request) =>
+        Effect.gen(function*() {
+          const tenantId = yield* requireTenant
+          const clientId = request.params["id"]
+          const client = yield* orDieStorage(store.findClientById(tenantId, clientId))
+          if (client === undefined) {
+            return yield* new ApiNotFound({ error: `Unknown client ${clientId}` })
+          }
+          const owner = request.payload.owner ?? "org"
+          if (owner === "user" && request.payload.subject === undefined) {
+            return yield* new ApiBadRequest({
+              error: "A user-tier connection must name the subject it belongs to"
+            })
+          }
+          const integration = IntegrationSlug.make(request.payload.integration)
+          const name = ConnectionName.make(request.payload.connection ?? "default")
+          const connection: ConnectionRef = owner === "org"
+            ? { owner: "org", integration, name }
+            : { owner: "user", subject: request.payload.subject!, integration, name }
+          return yield* orDieStorage(grantConnection({
+            store,
+            integrations: integrationsApi,
+            client,
+            connection
+          }))
+        }))
+      .handle("renameGrant", (request) =>
+        Effect.gen(function*() {
+          const tenantId = yield* requireTenant
+          const clientId = request.params["id"]
+          const grantId = ConnectionGrantId.make(request.params["grantId"])
+          if ((yield* orDieStorage(store.findClientById(tenantId, clientId))) === undefined) {
+            return yield* new ApiNotFound({ error: `Unknown client ${clientId}` })
+          }
+          const grants = yield* orDieStorage(store.listGrants(clientId))
+          if (!grants.some((grant) => grant.id === grantId)) {
+            return yield* new ApiNotFound({ error: `Unknown grant ${grantId}` })
+          }
+          if (grants.some((grant) => grant.id !== grantId && grant.alias === request.payload.alias)) {
+            return yield* new ApiBadRequest({
+              error: `This client already calls another connection ${request.payload.alias}`
+            })
+          }
+          return yield* orDieStorage(
+            store.renameGrantAlias(tenantId, grantId, request.payload.alias))
+        }))
+      .handle("revokeGrant", (request) =>
+        Effect.gen(function*() {
+          const tenantId = yield* requireTenant
+          const clientId = request.params["id"]
+          const grantId = ConnectionGrantId.make(request.params["grantId"])
+          const grant = yield* orDieStorage(store.findGrantById(clientId, grantId))
+          if (grant === undefined || (yield* orDieStorage(
+            store.findClientById(tenantId, clientId))) === undefined) {
+            return yield* new ApiNotFound({ error: `Unknown grant ${grantId}` })
+          }
+          yield* orDieStorage(store.revokeGrant(tenantId, grantId))
+          return { revoked: true as const }
         }))
       .handle("listApprovals", (request) =>
         Effect.gen(function*() {
@@ -371,26 +420,24 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           }
 
           const client = yield* orDieStorage(store.findClientById(tenantId, approval.clientId))
-          const binding = yield* orDieStorage(store.findBindingById(approval.clientId, approval.bindingId))
+          // Re-decided against today's grant and policy, not the ones that were
+          // in force when the call was frozen. A human approving a stale request
+          // must not resurrect authority that has since been withdrawn.
+          const grant = yield* orDieStorage(store.findGrantById(approval.clientId, approval.grantId))
           const policy = yield* orDieStorage(store.findPolicy(tenantId, approval.policyId))
-          const policyIntegrations = policy === undefined
-            ? []
-            : yield* orDieStorage(store.listPolicyIntegrations(policy.id))
           const policyTools = policy === undefined ? [] : yield* orDieStorage(store.listPolicyTools(policy.id))
-          const policyTool = binding === undefined ? undefined : policyTools.find((candidate) =>
-            candidate.enabled && sameConnectionRef(candidate.connection, binding.connection) &&
-              candidate.tool === binding.tool)
-          const integrationMember = binding !== undefined && policyIntegrations.some((candidate) =>
-            candidate.integration === binding.connection.integration)
+          const policyTool = grant === undefined ? undefined : policyTools.find((candidate) =>
+            candidate.enabled && sameConnectionRef(candidate.connection, grant.connection) &&
+              candidate.tool === approval.tool)
           if (client === undefined || client.revokedAt !== null || client.policyId !== approval.policyId
-            || binding === undefined || policy === undefined || !integrationMember || policyTool === undefined) {
+            || grant === undefined || policy === undefined || policyTool === undefined) {
             yield* orDieStorage(store.settleApproval({
               tenantId,
               id,
               status: "denied",
               decidedBy: by,
               result: null,
-              error: "the client policy or binding changed while this call was frozen"
+              error: "the client policy or grant changed while this call was frozen"
             }))
             return yield* new ApiBadRequest({ error: `Approval ${id} is no longer authorized` })
           }
@@ -408,9 +455,9 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
               client,
               policy,
               policyTool,
-              binding,
-              connection: binding.connection,
-              subject: binding.connection.owner === "user" ? binding.connection.subject : null,
+              grant,
+              connection: grant.connection,
+              subject: grant.connection.owner === "user" ? grant.connection.subject : null,
               decision: policyTool.decision
             },
             approval.arguments

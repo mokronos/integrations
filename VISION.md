@@ -24,9 +24,11 @@ An integration is defined by a URL that leads to some sort of API.
 
 Client authority has two independent layers: one reusable tool policy for
 invocation, and named capabilities for provisioning connections or
-administering the gateway. Client-specific bindings select the connection for
-each effective tool. A newly-created runtime client starts with neither
-control-plane capability and uses the tenant's default policy.
+administering the gateway. Which connections a client reaches, and what it calls
+each one, is its own — a policy rule for a connection the client was not granted
+reaches nothing. A newly-created runtime client starts with neither
+control-plane capability, uses the tenant's default policy, and holds no
+connections until it is granted one.
 
 ```text
 agent harness -> sandbox -> client -> API-key-injecting proxy -> gateway -> integration

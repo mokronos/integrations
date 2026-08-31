@@ -6,7 +6,8 @@ import {
   decodeAuthProviders,
   decodeApprovals,
   decodeAudit,
-  decodeBindings,
+  decodeGrantCreated,
+  decodeGrants,
   decodeClient,
   decodeClients,
   decodeConnectionCreated,
@@ -227,12 +228,11 @@ export const createPolicy = async (input: { readonly name: string }) =>
 
 export const replacePolicyTools = async (input: {
   readonly policyId: string
-  readonly integrations: ReadonlyArray<string>
   readonly tools: ReadonlyArray<PolicyToolInput>
 }) => decodePolicyToolsReplaced(await request(
   "POST",
   `/v1/policies/${segment(input.policyId)}/tools`,
-  { integrations: input.integrations, tools: input.tools }
+  { tools: input.tools }
 ))
 
 export const clonePolicy = async (input: {
@@ -253,8 +253,36 @@ export const assignPolicy = async (input: {
   { policyId: input.policyId }
 ))
 
-export const listBindings = async (clientId: string) =>
-  decodeBindings(await request("GET", `/v1/clients/${segment(clientId)}/bindings`)).bindings
+export const listGrants = async (clientId: string) =>
+  decodeGrants(await request("GET", `/v1/clients/${segment(clientId)}/connections`)).grants
+
+export const grantConnection = async (input: {
+  readonly clientId: string
+  readonly integration: string
+  readonly connection: string
+}) => decodeGrantCreated(await request(
+  "POST",
+  `/v1/clients/${segment(input.clientId)}/connections`,
+  { integration: input.integration, connection: input.connection }
+))
+
+export const renameGrant = async (input: {
+  readonly clientId: string
+  readonly grantId: string
+  readonly alias: string
+}) => await request(
+  "POST",
+  `/v1/clients/${segment(input.clientId)}/connections/${segment(input.grantId)}`,
+  { alias: input.alias }
+)
+
+export const revokeGrant = async (input: {
+  readonly clientId: string
+  readonly grantId: string
+}) => await request(
+  "POST",
+  `/v1/clients/${segment(input.clientId)}/connections/${segment(input.grantId)}/revoke`
+)
 
 // --- approvals, audit, upkeep -----------------------------------------------
 

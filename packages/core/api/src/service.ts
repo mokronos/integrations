@@ -15,9 +15,11 @@ import { startMaintenanceLoop } from "@mokronos/gateway-core"
 import type { MaintenanceLoop } from "@mokronos/gateway-core"
 import { createOAuthSessions } from "@mokronos/gateway-core"
 import {
-  ensureDefaultPolicyTools,
-  synchronizeClientBindings,
-  synchronizeConnectedCatalog
+  ConnectionName,
+  grantCatalogConnections,
+  grantConnection,
+  IntegrationSlug,
+  reconcileDefaultPolicy
 } from "@mokronos/gateway-core"
 import type { OAuthSessionStore } from "@mokronos/gateway-core"
 import { createRateLimiter } from "@mokronos/gateway-core"
@@ -153,7 +155,7 @@ const buildCore = async (
     resources = await bootResources()
     await Effect.runPromise(Effect.gen(function*() {
       const tenants = yield* resources.store.listTenants()
-      yield* Effect.forEach(tenants, (tenant) => synchronizeConnectedCatalog({
+      yield* Effect.forEach(tenants, (tenant) => reconcileDefaultPolicy({
         store: resources.store,
         integrations: resources.integrations,
         tenantId: tenant.id
@@ -215,11 +217,27 @@ const buildCore = async (
   const oauth = createOAuthSessions(gateway.integrations, {
     publicUrlOf: resolvePublicUrl,
     onConnected: async (session) => {
-      if (session.bindingClient === undefined || session.state.status !== "connected") return
-      await Effect.runPromise(synchronizeConnectedCatalog({
-        store: resources.store,
-        integrations: gateway.integrations,
-        tenantId: session.bindingClient.tenantId
+      const state = session.state
+      if (session.bindingClient === undefined || state.status !== "connected") return
+      const client = session.bindingClient
+      await Effect.runPromise(Effect.gen(function*() {
+        yield* reconcileDefaultPolicy({
+          store: resources.store,
+          integrations: gateway.integrations,
+          tenantId: client.tenantId
+        })
+        // The client that ran the OAuth flow connected this credential for
+        // itself, so it gets the grant. Every other client stays where it was.
+        yield* grantConnection({
+          store: resources.store,
+          integrations: gateway.integrations,
+          client,
+          connection: {
+            owner: "org",
+            integration: IntegrationSlug.make(state.connection.integration),
+            name: ConnectionName.make(state.connection.name)
+          }
+        })
       }))
     },
     ...whenPresent("store", options.oauthStore)
@@ -448,7 +466,7 @@ export const serveGateway = async (options: ServeOptions = {}): Promise<RunningG
 /** Ensures the local client exists and has a live key, then records where the
  *  gateway is listening. Idempotent apart from key issue: a fresh key is minted
  *  whenever the recorded one is missing, so losing the config file is
- *  recoverable without losing the client's policy and bindings. */
+ *  recoverable without losing the client's policy and granted connections. */
 export const ensureLocalCredential = Effect.fn("Gateway.ensureLocalCredential")(function*(
   store: GatewayStore,
   integrations: Pick<IntegrationsApi, "tools" | "connections">,
@@ -456,7 +474,7 @@ export const ensureLocalCredential = Effect.fn("Gateway.ensureLocalCredential")(
   port: number
 ): Effect.fn.Return<string, GatewayStoreError> {
   const existing = yield* store.findClientByName(defaultTenantId, localClientName)
-  const defaultPolicy = yield* ensureDefaultPolicyTools({ store, integrations, tenantId: defaultTenantId })
+  const defaultPolicy = yield* reconcileDefaultPolicy({ store, integrations, tenantId: defaultTenantId })
   if (defaultPolicy === undefined) {
     return yield* new GatewayStoreError({
       operation: "ensureLocalCredential",
@@ -470,10 +488,11 @@ export const ensureLocalCredential = Effect.fn("Gateway.ensureLocalCredential")(
     name: localClientName,
     capabilities: ["provision_connections", "administer_gateway"]
   }))
-  // Unconditional: the local client's routes are derived from its policy, so
-  // re-deriving them here is also the repair for a gateway whose catalog moved
-  // while it was not running.
-  yield* synchronizeClientBindings({ store, client })
+  // The local client is the operator's own hands, so it reaches every org
+  // credential the tenant holds. Unconditional, because this is also the repair
+  // for a gateway whose catalog moved while it was not running — and it cannot
+  // disturb an existing alias, only add one for a connection not yet held.
+  yield* grantCatalogConnections({ store, integrations, client })
   const key = generateApiKey()
   yield* store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
   yield* Effect.promise(() => writeGatewayConfig(home, {

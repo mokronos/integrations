@@ -26,7 +26,7 @@ export function PoliciesRoute() {
             <Table>
               <TableHeader><TableRow>
                 <TableHead>Policy</TableHead>
-                <TableHead>Integrations</TableHead>
+                <TableHead>Connections</TableHead>
                 <TableHead>Tools</TableHead>
                 <TableHead>Assigned clients</TableHead>
                 <TableHead>Updated</TableHead>
@@ -44,7 +44,12 @@ export function PoliciesRoute() {
                         {summary.policy.isDefault ? <Badge>default</Badge> : null}
                       </div>
                     </TableCell>
-                    <TableCell>{summary.integrationCount}</TableCell>
+                    <TableCell>
+                      {summary.connectionCount}
+                      <span className="text-muted-foreground text-xs">
+                        {" "}across {summary.integrationCount} integration{summary.integrationCount === 1 ? "" : "s"}
+                      </span>
+                    </TableCell>
                     <TableCell>{summary.enabledToolCount}/{summary.toolCount}</TableCell>
                     <TableCell>{summary.assignedClientCount}</TableCell>
                     <TableCell className="text-muted-foreground text-sm">{when(summary.policy.updatedAt)}</TableCell>
@@ -70,7 +75,7 @@ export function PolicyDetailRoute() {
   return (
     <Page
       title={policy?.name ?? "Policy"}
-      description="Choose the complete set of tools clients assigned to this policy may use."
+      description="Choose what the connections in this policy may be used for. Which clients reach them is decided per client."
       actions={policy === undefined ? undefined : <><ClonePolicyDialog policyId={policy.id} policyName={policy.name} /><ReloadButton onClick={() => void detail.refetch()} busy={detail.isFetching} /></>}
     >
       <Button variant="ghost" size="sm" className="w-fit" asChild><Link to="/policies"><ArrowLeft className="size-3" />All policies</Link></Button>
@@ -83,6 +88,7 @@ export function PolicyDetailRoute() {
                 <FileKey2 className="size-4" />
                 <CardTitle>{policy.name}</CardTitle>
                 {policy.isDefault ? <Badge>default policy</Badge> : null}
+                {policy.forkedFrom === null ? null : <Badge variant="outline">forked copy</Badge>}
                 <Badge variant="secondary">{clients.length} assigned client{clients.length === 1 ? "" : "s"}</Badge>
               </div>
               <CardDescription>
@@ -93,7 +99,6 @@ export function PolicyDetailRoute() {
           <PolicyEditor
             key={`${policy.id}:${policy.updatedAt.toISOString()}`}
             policyId={policy.id}
-            storedIntegrations={detail.data?.integrations ?? []}
             storedTools={detail.data?.tools ?? []}
             assignedClientCount={clients.length}
           />

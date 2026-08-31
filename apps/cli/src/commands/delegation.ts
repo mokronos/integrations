@@ -268,11 +268,6 @@ export const policyToolCommand = Command.make(
         "GET",
         `/v1/policies/${encodeURIComponent(policyId)}`
       ))
-      const integrations = array(detail["integrations"])
-        .map((entry) => text(entry["integration"]))
-      const configuredIntegrations = integrations.includes(integration)
-        ? integrations
-        : [...integrations, integration]
       const targets = await targetConnections(client, integration, connection)
       const replaced = new Set(targets.map((target) => `${target.owner}/${target.name}`))
       const tools = array(detail["tools"])
@@ -292,7 +287,6 @@ export const policyToolCommand = Command.make(
         "POST",
         `/v1/policies/${encodeURIComponent(policyId)}/tools`,
         {
-          integrations: configuredIntegrations,
           tools: [
             ...tools,
             ...targets.map((target) => ({
@@ -306,6 +300,66 @@ export const policyToolCommand = Command.make(
       )
     }).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false))))
 ).pipe(Command.withDescription("Include or update one tool in a policy"))
+
+/** Hands one client reach to one connection. Separate from `policy-tool` on
+ * purpose: a rule says what a credential may be used for, a grant says which
+ * client holds it, and conflating them is what used to make connecting a second
+ * account rename everybody's tools. */
+export const grantCommand = Command.make(
+  "grant",
+  {
+    clientId: Argument.string("client-id"),
+    integration: Argument.string("integration"),
+    connection: Flag.string("connection").pipe(
+      Flag.withDefault("default"),
+      Flag.withDescription("Connection name (default: default)")
+    )
+  },
+  ({ clientId, connection, integration }) =>
+    controlPlaneTask((client) => client.request(
+      "POST",
+      `/v1/clients/${encodeURIComponent(clientId)}/connections`,
+      { integration, connection }
+    )).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false))))
+).pipe(Command.withDescription("Give a client reach to one connection"))
+
+export const grantsCommand = Command.make(
+  "grants",
+  { clientId: Argument.string("client-id") },
+  ({ clientId }) =>
+    controlPlaneTask((client) => client.request(
+      "GET",
+      `/v1/clients/${encodeURIComponent(clientId)}/connections`
+    )).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false))))
+).pipe(Command.withDescription("List the connections one client reaches, and its aliases"))
+
+export const renameGrantCommand = Command.make(
+  "rename-grant",
+  {
+    clientId: Argument.string("client-id"),
+    grantId: Argument.string("grant-id"),
+    alias: Argument.string("alias")
+  },
+  ({ alias, clientId, grantId }) =>
+    controlPlaneTask((client) => client.request(
+      "POST",
+      `/v1/clients/${encodeURIComponent(clientId)}/connections/${encodeURIComponent(grantId)}`,
+      { alias }
+    )).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false))))
+).pipe(Command.withDescription("Change what one client calls a connection"))
+
+export const revokeGrantCommand = Command.make(
+  "revoke-grant",
+  {
+    clientId: Argument.string("client-id"),
+    grantId: Argument.string("grant-id")
+  },
+  ({ clientId, grantId }) =>
+    controlPlaneTask((client) => client.request(
+      "POST",
+      `/v1/clients/${encodeURIComponent(clientId)}/connections/${encodeURIComponent(grantId)}/revoke`
+    )).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false))))
+).pipe(Command.withDescription("Withdraw a client's reach to one connection"))
 
 export const assignPolicyCommand = Command.make(
   "assign-policy",

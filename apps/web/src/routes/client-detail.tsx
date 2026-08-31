@@ -3,6 +3,7 @@ import { useState } from "react"
 import { Link, useParams } from "react-router"
 import { toast } from "sonner"
 
+import { ClientConnections } from "@/components/clients/client-connections"
 import { ClientKeys } from "@/components/clients/client-keys"
 import { ClientSettings } from "@/components/clients/client-settings"
 import { ClonePolicyDialog } from "@/components/policies/policy-dialogs"
@@ -48,7 +49,7 @@ function AssignedPolicyCard({
         <CardDescription>
           {assigned === undefined
             ? `Policy ${client.policyId} is assigned but could not be loaded.`
-            : `${assigned.policy.name} includes ${assigned.integrationCount} integrations and ${assigned.enabledToolCount} tools, and is shared by ${assigned.assignedClientCount} clients.`}
+            : `${assigned.policy.name} governs ${assigned.connectionCount} connections and ${assigned.enabledToolCount} enabled tools, and is shared by ${assigned.assignedClientCount} clients. It only takes effect on the connections granted below.`}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -119,7 +120,7 @@ export function ClientDetailRoute() {
             </CardHeader>
             {client.capabilities.includes("administer_gateway") ? (
               <CardContent className="text-muted-foreground text-sm">
-                This client can administer clients, keys, policies, approvals, and audit. Tool invocation still resolves through its assigned policy and bindings.
+                This client can administer clients, keys, policies, approvals, and audit. Tool invocation still resolves through the intersection of its assigned policy and the connections it has been granted.
               </CardContent>
             ) : null}
           </Card>
@@ -128,6 +129,7 @@ export function ClientDetailRoute() {
             client={client}
             policies={policies.data ?? []}
           />
+          <ClientConnections clientId={clientId} disabled={client.revokedAt !== null} />
           <ClientSettings key={`${client.id}:${client.capabilities.join(",")}:${JSON.stringify(client.approvalDelivery)}`} client={client} />
           <ClientKeys clientId={clientId} disabled={client.revokedAt !== null} />
         </>
@@ -137,7 +139,7 @@ export function ClientDetailRoute() {
         <Card>
           <CardHeader>
             <CardTitle>Effective tool access</CardTitle>
-            <CardDescription>What this client can call, derived from its assigned policy. Each alias routes to one connection.</CardDescription>
+            <CardDescription>What this client can call: the connections it holds, crossed with what its policy enables on them.</CardDescription>
           </CardHeader>
           <CardContent className="p-0">
             <Table>

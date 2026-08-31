@@ -17,7 +17,7 @@ import {
   generateApiKey,
   IntegrationSlug,
   newClientId,
-  newClientToolBindingId,
+  newConnectionGrantId,
   newPolicyId,
   SubjectId,
   ToolName
@@ -165,15 +165,12 @@ const setup = async (options: {
   const policy = await run(store.createPolicy({
     id: newPolicyId(), tenantId: defaultTenantId, name: `policy-${crypto.randomUUID()}`
   }))
-  await run(store.replacePolicyConfiguration(policy.id, {
-    integrations: [connection.integration],
-    tools: [{
+  await run(store.replacePolicyTools(policy.id, [{
       connection,
       tool: ToolName.make("sendEmail"),
       enabled: true,
       decision: options.decision ?? "allow"
-    }]
-  }))
+    }]))
   const client = await run(store.createClient({
     id: newClientId(),
     tenantId: defaultTenantId,
@@ -183,12 +180,11 @@ const setup = async (options: {
   }))
   const key = generateApiKey()
   await run(store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash }))
-  const binding = await run(store.createBinding({
-    id: newClientToolBindingId(),
+  const grant = await run(store.createGrant({
+    id: newConnectionGrantId(),
     tenantId: defaultTenantId,
     clientId: client.id,
     alias: Alias.make("gmail-work"),
-    tool: ToolName.make("sendEmail"),
     connection,
   }))
 
@@ -244,7 +240,7 @@ const setup = async (options: {
     }
   }
 
-  return { store, client, key, policy, binding, call, calls: stub.calls, removed: stub.removed }
+  return { store, client, key, policy, grant, call, calls: stub.calls, removed: stub.removed }
 }
 
 describe("gateway http surface", () => {
@@ -282,7 +278,7 @@ describe("gateway http surface", () => {
     ])
   })
 
-  test("executes an effective tool against the address built from the binding", async () => {
+  test("executes an effective tool against the address built from the grant", async () => {
     const { call, calls } = await run(setup())
 
     const response = await run(call("POST", "/v1/execute", {
@@ -291,7 +287,7 @@ describe("gateway http surface", () => {
 
     expect(response.status).toBe(200)
     expect(response.body["status"]).toBe("succeeded")
-    // The address is derived from the binding, so a caller cannot forge one.
+    // The address is derived from the grant, so a caller cannot forge one.
     expect(calls).toHaveLength(1)
     expect(calls[0]?.address).toBe("tools.gmail.user.work.sendEmail")
   })
@@ -467,10 +463,14 @@ describe("gateway http surface", () => {
       }]
     }))
     const created = await run(call("POST", "/v1/clients", { body: { name: "sandbox" } }))
-    const response = await run(call(
-      "GET",
-      `/v1/clients/${String(created.body["id"])}/tools`
-    ))
+    const clientId = String(created.body["id"])
+    // A new client is governed by the default policy but reaches nothing, so
+    // the decision only becomes observable once it is granted the connection.
+    expect((await run(call("GET", `/v1/clients/${clientId}/tools`))).body).toEqual({ tools: [] })
+    await run(call("POST", `/v1/clients/${clientId}/connections`, {
+      body: { integration: "gmail", connection: "work" }
+    }))
+    const response = await run(call("GET", `/v1/clients/${clientId}/tools`))
     expect(response.status).toBe(200)
     expect(JSON.stringify(response.body)).toContain("require_approval")
   })
@@ -561,8 +561,8 @@ describe("gateway approval settlement", () => {
     ))).status).toBe(400)
   })
 
-  test("refuses to approve a call whose binding was revoked while frozen", async () => {
-    const { call, store, binding, calls } = await run(setup({
+  test("refuses to approve a call whose grant was revoked while frozen", async () => {
+    const { call, store, grant, calls } = await run(setup({
       decision: "require_approval",
       capabilities: ["provision_connections", "administer_gateway"]
     }))
@@ -571,7 +571,7 @@ describe("gateway approval settlement", () => {
     }))
     const approvalId = String(frozen.body["approvalId"])
 
-    await run(store.revokeBinding(defaultTenantId, binding.id))
+    await run(store.revokeGrant(defaultTenantId, grant.id))
     const approved = await run(call(
       "POST",
       `/v1/approvals/${approvalId}/approve`,
@@ -591,15 +591,12 @@ describe("gateway approval settlement", () => {
       body: { alias: "gmail-work", tool: "sendEmail" }
     }))
     const approvalId = String(frozen.body["approvalId"])
-    await run(store.replacePolicyConfiguration(policy.id, {
-      integrations: [connection.integration],
-      tools: [{
+    await run(store.replacePolicyTools(policy.id, [{
         connection,
         tool: ToolName.make("sendEmail"),
         enabled: false,
         decision: "require_approval"
-      }]
-    }))
+      }]))
 
     const approved = await run(call(
       "POST",

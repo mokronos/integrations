@@ -12,19 +12,16 @@ _Avoid_: Agent, API key
 A reusable, tenant-owned configuration of integration memberships and explicit tool states. Exactly one policy is assigned to each client.
 _Avoid_: Grant, permission set
 
-**Policy integration**:
-An integration explicitly added to a policy. Its absence means the integration is not part of that policy.
-
 **Policy tool**:
-A tool under a policy integration, with an explicit enabled state and approval decision. Disabled tools remain in the policy.
-_Avoid_: Tool grant
+A rule under a policy for one tool on one connection, with an explicit enabled state and approval decision. A rule is what puts a connection in the policy; disabled rules remain.
+_Avoid_: Tool grant, policy integration
 
-**Client tool binding**:
-A client-specific route from an alias and tool name to the connection whose credentials perform the call.
-_Avoid_: Grant, policy rule
+**Connection grant**:
+One client's reach to one connection, and the alias that client calls it by. The alias is chosen when the grant is made and never recomputed.
+_Avoid_: Binding, policy rule
 
 **Effective tool**:
-An enabled tool whose integration is in the client's assigned policy and which has a client tool binding.
+A tool on a connection the client holds a grant for, enabled by a rule in the client's assigned policy. A rule for a connection the client was not granted contributes nothing and is not an error.
 _Avoid_: Granted tool
 
 **Approval**:

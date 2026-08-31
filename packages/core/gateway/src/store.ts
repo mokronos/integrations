@@ -13,7 +13,7 @@ import {
   ApprovalId,
   AuditId,
   canonicalArguments,
-  ClientToolBindingId,
+  ConnectionGrantId,
   ClientId,
   ConnectionName,
   defaultApprovalDelivery,
@@ -36,21 +36,20 @@ import type {
   ClientCapability,
   ConnectionRef,
   ExternalIdentity,
-  ClientToolBinding,
+  ConnectionGrant,
   Login,
   LoginHandoff,
   IdentityProvider,
   PendingApproval,
   Policy,
   PolicyDecision,
-  PolicyIntegration,
   PolicyTool,
   Subject,
   Tenant,
   ToolSnapshot
 } from "./domain.ts"
 import { PasswordHash } from "./passwords.ts"
-import { gatewayDdl as ddl, tenantedTables, tenancyTableDdl } from "./store-ddl.ts"
+import { gatewayDdl as ddl } from "./store-ddl.ts"
 
 // --- row decoding -----------------------------------------------------------
 // libsql rows carry numeric indices and a length alongside the named columns,
@@ -142,6 +141,7 @@ const PolicyRow = Schema.Struct({
   tenant_id: Schema.String,
   name: Schema.String,
   is_default: Schema.Number,
+  forked_from: NullableString,
   created_at: Schema.Number,
   updated_at: Schema.Number
 })
@@ -157,20 +157,14 @@ const PolicyToolRow = Schema.Struct({
   decision: Schema.Literals(["allow", "require_approval"])
 })
 
-const PolicyIntegrationRow = Schema.Struct({
-  policy_id: Schema.String,
-  integration: Schema.String
-})
-
-const BindingRow = Schema.Struct({
+const GrantRow = Schema.Struct({
   id: Schema.String,
   client_id: Schema.String,
-  alias: Schema.String,
-  tool: Schema.String,
   owner: Schema.Literals(["org", "user"]),
   subject: NullableString,
   integration: Schema.String,
   connection_name: Schema.String,
+  alias: Schema.String,
   created_at: Schema.Number,
   revoked_at: NullableNumber
 })
@@ -179,7 +173,7 @@ const ApprovalRow = Schema.Struct({
   id: Schema.String,
   client_id: Schema.String,
   policy_id: Schema.String,
-  binding_id: Schema.String,
+  grant_id: Schema.String,
   alias: Schema.String,
   tool: Schema.String,
   arguments: Schema.String,
@@ -234,17 +228,18 @@ const identityOAuthStateColumns = [
   "state_hash", "provider", "handoff_hash", "return_path", "expires_at"
 ]
 const apiKeyColumns = ["id", "client_id", "hash", "created_at", "last_used_at", "revoked_at"]
-const policyColumns = ["id", "tenant_id", "name", "is_default", "created_at", "updated_at"]
+const policyColumns = [
+  "id", "tenant_id", "name", "is_default", "forked_from", "created_at", "updated_at"
+]
 const policyToolColumns = [
   "policy_id", "owner", "subject", "integration", "connection_name", "tool", "enabled", "decision"
 ]
-const policyIntegrationColumns = ["policy_id", "integration"]
-const bindingColumns = [
-  "id", "client_id", "alias", "tool", "owner", "subject",
-  "integration", "connection_name", "created_at", "revoked_at"
+const grantColumns = [
+  "id", "client_id", "owner", "subject", "integration", "connection_name",
+  "alias", "created_at", "revoked_at"
 ]
 const approvalColumns = [
-  "id", "client_id", "policy_id", "binding_id", "alias", "tool", "arguments", "status",
+  "id", "client_id", "policy_id", "grant_id", "alias", "tool", "arguments", "status",
   "created_at", "expires_at", "decided_at", "decided_by", "result", "error", "collected_at"
 ]
 const auditColumns = [
@@ -266,8 +261,7 @@ const decodeIdentityOAuthStateRow = Schema.decodeUnknownSync(IdentityOAuthStateR
 const decodeApiKeyRow = Schema.decodeUnknownSync(ApiKeyRow)
 const decodePolicyRow = Schema.decodeUnknownSync(PolicyRow)
 const decodePolicyToolRow = Schema.decodeUnknownSync(PolicyToolRow)
-const decodePolicyIntegrationRow = Schema.decodeUnknownSync(PolicyIntegrationRow)
-const decodeBindingRow = Schema.decodeUnknownSync(BindingRow)
+const decodeGrantRow = Schema.decodeUnknownSync(GrantRow)
 const decodeApprovalRow = Schema.decodeUnknownSync(ApprovalRow)
 const decodeAuditRow = Schema.decodeUnknownSync(AuditRow)
 const decodeSnapshotRow = Schema.decodeUnknownSync(SnapshotRow)
@@ -416,6 +410,7 @@ const toPolicy = (row: Row): Policy => {
     tenantId: TenantId.make(decoded.tenant_id),
     name: decoded.name,
     isDefault: decoded.is_default === 1,
+    forkedFrom: decoded.forked_from === null ? null : PolicyId.make(decoded.forked_from),
     createdAt: date(decoded.created_at),
     updatedAt: date(decoded.updated_at)
   }
@@ -432,22 +427,13 @@ const toPolicyTool = (row: Row): PolicyTool => {
   }
 }
 
-const toPolicyIntegration = (row: Row): PolicyIntegration => {
-  const decoded = decodePolicyIntegrationRow(pick(row, policyIntegrationColumns))
+const toGrant = (row: Row): ConnectionGrant => {
+  const decoded = decodeGrantRow(pick(row, grantColumns))
   return {
-    policyId: PolicyId.make(decoded.policy_id),
-    integration: IntegrationSlug.make(decoded.integration)
-  }
-}
-
-const toBinding = (row: Row): ClientToolBinding => {
-  const decoded = decodeBindingRow(pick(row, bindingColumns))
-  return {
-    id: ClientToolBindingId.make(decoded.id),
+    id: ConnectionGrantId.make(decoded.id),
     clientId: ClientId.make(decoded.client_id),
-    alias: Alias.make(decoded.alias),
-    tool: ToolName.make(decoded.tool),
     connection: toConnectionRef(decoded),
+    alias: Alias.make(decoded.alias),
     createdAt: date(decoded.created_at),
     revokedAt: nullableDate(decoded.revoked_at)
   }
@@ -462,7 +448,7 @@ const toApproval = (row: Row, open: (text: string) => string = identity): Pendin
     id: ApprovalId.make(decoded.id),
     clientId: ClientId.make(decoded.client_id),
     policyId: PolicyId.make(decoded.policy_id),
-    bindingId: ClientToolBindingId.make(decoded.binding_id),
+    grantId: ConnectionGrantId.make(decoded.grant_id),
     alias: Alias.make(decoded.alias),
     tool: ToolName.make(decoded.tool),
     arguments: parseJsonColumn(open(decoded.arguments)),
@@ -555,25 +541,17 @@ export interface CreatePolicyInput {
   readonly id: PolicyId
   readonly name: string
   readonly isDefault?: boolean
+  readonly forkedFrom?: PolicyId
 }
 
-export interface PolicyConfigurationInput {
-  readonly integrations: ReadonlyArray<IntegrationSlug>
-  readonly tools: ReadonlyArray<Omit<PolicyTool, "policyId">>
-}
+export type PolicyToolInput = Omit<PolicyTool, "policyId">
 
-export interface PolicyConfiguration {
-  readonly integrations: ReadonlyArray<PolicyIntegration>
-  readonly tools: ReadonlyArray<PolicyTool>
-}
-
-export interface CreateBindingInput {
+export interface CreateGrantInput {
   readonly tenantId: TenantId
-  readonly id: ClientToolBindingId
+  readonly id: ConnectionGrantId
   readonly clientId: ClientId
-  readonly alias: Alias
-  readonly tool: ToolName
   readonly connection: ConnectionRef
+  readonly alias: Alias
 }
 
 export interface CreateApprovalInput {
@@ -581,7 +559,7 @@ export interface CreateApprovalInput {
   readonly id: ApprovalId
   readonly clientId: ClientId
   readonly policyId: PolicyId
-  readonly bindingId: ClientToolBindingId
+  readonly grantId: ConnectionGrantId
   readonly alias: Alias
   readonly tool: ToolName
   readonly arguments: typeof Schema.Json.Type
@@ -733,16 +711,30 @@ interface GatewayStoreDriver {
   findPolicy(tenantId: TenantId, id: PolicyId): Promise<Policy | undefined>
   findDefaultPolicy(tenantId: TenantId): Promise<Policy | undefined>
   findPolicyForClient(clientId: ClientId): Promise<Policy | undefined>
-  listPolicyIntegrations(policyId: PolicyId): Promise<ReadonlyArray<PolicyIntegration>>
   listPolicyTools(policyId: PolicyId): Promise<ReadonlyArray<PolicyTool>>
-  replacePolicyConfiguration(policyId: PolicyId, configuration: PolicyConfigurationInput): Promise<PolicyConfiguration>
+  /** The rule set IS the policy's membership: a connection is governed exactly
+   *  when a rule names it, and `enabled: false` is a rule that is remembered
+   *  and off. There is no coarser membership to keep in step with this. */
+  replacePolicyTools(
+    policyId: PolicyId,
+    tools: ReadonlyArray<PolicyToolInput>
+  ): Promise<ReadonlyArray<PolicyTool>>
   assignPolicy(tenantId: TenantId, clientId: ClientId, policyId: PolicyId): Promise<Client>
 
-  createBinding(input: CreateBindingInput): Promise<ClientToolBinding>
-  listBindings(clientId: ClientId): Promise<ReadonlyArray<ClientToolBinding>>
-  findBinding(clientId: ClientId, alias: Alias, tool: ToolName): Promise<ClientToolBinding | undefined>
-  findBindingById(clientId: ClientId, id: ClientToolBindingId): Promise<ClientToolBinding | undefined>
-  revokeBinding(tenantId: TenantId, id: ClientToolBindingId): Promise<void>
+  createGrant(input: CreateGrantInput): Promise<ConnectionGrant>
+  listGrants(clientId: ClientId): Promise<ReadonlyArray<ConnectionGrant>>
+  /** The reverse lookup a call needs: an alias is what the client presents, and
+   *  it names one connection within that client. */
+  findGrantByAlias(clientId: ClientId, alias: Alias): Promise<ConnectionGrant | undefined>
+  findGrantById(clientId: ClientId, id: ConnectionGrantId): Promise<ConnectionGrant | undefined>
+  /** The one path that changes what a client calls a connection. Deliberately
+   *  explicit: nothing else in the system may rename a live route. */
+  renameGrantAlias(
+    tenantId: TenantId,
+    id: ConnectionGrantId,
+    alias: Alias
+  ): Promise<ConnectionGrant>
+  revokeGrant(tenantId: TenantId, id: ConnectionGrantId): Promise<void>
 
   createApproval(input: CreateApprovalInput): Promise<PendingApproval>
   getApproval(tenantId: TenantId, id: ApprovalId): Promise<PendingApproval | undefined>
@@ -751,7 +743,8 @@ interface GatewayStoreDriver {
    *  undelivered. This is what makes a retrying step ask a human once. */
   findUncollectedApproval(
     policyId: PolicyId,
-    bindingId: ClientToolBindingId,
+    grantId: ConnectionGrantId,
+    tool: ToolName,
     argumentsValue: Schema.Json
   ): Promise<PendingApproval | undefined>
   /** Hands a settled approval's outcome to the caller, once. Returns false if
@@ -838,367 +831,22 @@ export class GatewayStoreService extends Context.Service<
 
 const now = (): number => Date.now()
 
-/** Adds columns an older database is missing. Idempotent, and narrow on
- *  purpose: this is a schema top-up for additive changes, not a migration
- *  framework. Anything that rewrites data belongs in one. */
-const addMissingColumns = async (
-  database: LibsqlClient,
-  table: string,
-  columns: Readonly<Record<string, string>>
-): Promise<void> => {
-  const existing = new Set(
-    (await database.execute(`PRAGMA table_info(${table})`)).rows.map((row) => String(row["name"]))
-  )
-  // No columns means no table: this is a fresh database, and the DDL that
-  // follows creates it with every column already in place.
-  if (existing.size === 0) return
-  for (const [column, type] of Object.entries(columns)) {
-    if (existing.has(column)) continue
-    await database.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`)
-  }
-}
-
-/** Brings a pre-tenancy database up to the current shape.
- *
- * Three steps, each idempotent:
- *
- *  1. Ensure the well-known default tenant row exists — everything backfilled
- *     points at it, and a fresh database needs it too.
- *  2. Add the `tenant_id` column where an older table lacks it, then fill it
- *     with the default tenant. A one-tenant-per-deployment gateway has exactly
- *     one possible value, so this is a constant fill rather than a guess.
- *  3. Recreate the indexes whose uniqueness is per-tenant. The old global
- *     client-name index would let tenant B be blocked by tenant A's name
- *     choice; the tool-snapshot primary key would make two tenants overwrite
- *     one another's baselines. The snapshot rebuild is the only statement here
- *     that rewrites rows, and it runs only when the old shape is detected.
- */
-const migrateTenancy = async (database: LibsqlClient): Promise<void> => {
-  await database.execute({
-    sql: "INSERT INTO gateway_tenant (id, name, created_at) VALUES (?, ?, ?) ON CONFLICT (id) DO NOTHING",
-    args: [defaultTenantId, "Default", Date.now()]
-  })
-  for (const table of tenantedTables) {
-    // A fresh database has none of these yet — the final-shape DDL below
-    // creates them complete. Only an existing table needs topping up.
-    if (!await tableExists(database, table)) continue
-    await addMissingColumns(database, table, { tenant_id: "TEXT REFERENCES gateway_tenant (id)" })
-    await database.execute(
-      `UPDATE ${table} SET tenant_id = ? WHERE tenant_id IS NULL`,
-      [defaultTenantId]
-    )
-  }
-  // The old global name index is superseded by the per-tenant one in the DDL.
-  // Dropped before any early return: leaving it in place would let one
-  // tenant's client name block every other tenant's.
-  await database.execute("DROP INDEX IF EXISTS gateway_client_name")
-
-  if (!await tableExists(database, "gateway_tool_snapshot")) return
-
-  await addMissingColumns(database, "gateway_tool_snapshot", {
-    tenant_id: "TEXT REFERENCES gateway_tenant (id)"
-  })
-
-  // Rebuild the snapshot table when its primary key is still the pre-tenancy
-  // shape. Detected from sqlite_master because PRAGMA cannot see the PK of an
-  // older row directly and a WITHOUT ROWID check would be indirect.
-  const snapshotSql = await one_(
-    database,
-    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'gateway_tool_snapshot'"
-  )
-  if (snapshotSql !== undefined && !String(snapshotSql["sql"] ?? "").includes("tenant_id")) {
-    await database.execute("ALTER TABLE gateway_tool_snapshot RENAME TO gateway_tool_snapshot_old")
-    await database.execute(`CREATE TABLE gateway_tool_snapshot (
-       tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
-       integration TEXT NOT NULL,
-       connection_name TEXT NOT NULL,
-       tool TEXT NOT NULL,
-       input_schema TEXT,
-       output_schema TEXT,
-       synced_at INTEGER NOT NULL,
-       PRIMARY KEY (tenant_id, integration, connection_name, tool)
-     )`)
-    await database.execute(`
-       INSERT INTO gateway_tool_snapshot
-         (tenant_id, integration, connection_name, tool, input_schema, output_schema, synced_at)
-       SELECT COALESCE(tenant_id, ?), integration, connection_name, tool,
-              input_schema, output_schema, synced_at
-         FROM gateway_tool_snapshot_old`,
-      [defaultTenantId]
-    )
-    await database.execute("DROP TABLE gateway_tool_snapshot_old")
-  } else if (snapshotSql !== undefined) {
-    // Column exists but was added by addMissingColumns without the composite
-    // key: deduplicate defensively, then swap the PK in the same guarded way.
-    await database.execute(`
-      DELETE FROM gateway_tool_snapshot WHERE rowid NOT IN (
-        SELECT MIN(rowid) FROM gateway_tool_snapshot GROUP BY tenant_id, integration, connection_name, tool
-      )`)
-  }
-}
-
-/** Single-row helper for the migration, which runs before the store's own
- *  query helpers exist. */
-const one_ = async (
-  database: LibsqlClient,
-  sql: string,
-  args: ReadonlyArray<InValue> = []
-): Promise<Row | undefined> =>
-  (await database.execute({ sql, args: [...args] })).rows[0]
-
-const hasColumn = async (database: LibsqlClient, table: string, column: string): Promise<boolean> =>
-  (await database.execute(`PRAGMA table_info(${table})`)).rows
-    .some((row) => String(row["name"]) === column)
-
-const tableExists = async (database: LibsqlClient, name: string): Promise<boolean> =>
-  await one_(database, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", [name]) !== undefined
-
-/** OAuth-only subjects have no password credential. Older databases declared
- * the column NOT NULL, so rebuild this small identity table once to make that
- * absence representable instead of inventing an unrecoverable fake password. */
-const migrateNullableLoginPasswords = async (database: LibsqlClient): Promise<void> => {
-  if (!await tableExists(database, "gateway_login")) return
-  const passwordColumn = (await database.execute("PRAGMA table_info(gateway_login)"))
-    .rows.find((row) => String(row["name"] ?? "") === "password_hash")
-  if (Number(passwordColumn?.["notnull"] ?? 0) === 0) return
-
-  await database.execute("ALTER TABLE gateway_login RENAME TO gateway_login_password_required")
-  await database.execute(`CREATE TABLE gateway_login (
-     subject_id TEXT PRIMARY KEY REFERENCES gateway_subject (id) ON DELETE CASCADE,
-     tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
-     email TEXT NOT NULL UNIQUE,
-     password_hash TEXT,
-     created_at INTEGER NOT NULL
-   )`)
-  await database.execute(`INSERT INTO gateway_login
-     (subject_id, tenant_id, email, password_hash, created_at)
-     SELECT subject_id, tenant_id, email, password_hash, created_at
-       FROM gateway_login_password_required`)
-  await database.execute("DROP TABLE gateway_login_password_required")
-}
-
-/** Replaces the legacy per-client combined rows with reusable policy rules and
- * client-local connection bindings. The transaction is restart-safe: the old
- * table is removed only after clients and pending approvals point at migrated
- * records. */
-/** Brings a pre-existing policy-tool table to the current shape before anything
- * reads or writes it: `enabled` first, then per-connection rules. Both steps
- * are no-ops on a database that already has them. */
-const migrateLegacyPolicyTools = async (database: LibsqlClient): Promise<void> => {
-  if (!await tableExists(database, "gateway_policy_tool")) return
-  await addMissingColumns(database, "gateway_policy_tool", {
-    enabled: "INTEGER NOT NULL DEFAULT 1"
-  })
-  await database.execute("UPDATE gateway_policy_tool SET enabled = 1 WHERE enabled IS NULL")
-  await migratePolicyToolConnections(database)
-}
-
-const migratePolicies = async (database: LibsqlClient): Promise<void> => {
-  await migrateLegacyPolicyTools(database)
-  await database.execute(`CREATE TABLE IF NOT EXISTS gateway_policy (
-     id TEXT PRIMARY KEY,
-     tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
-     name TEXT NOT NULL,
-     is_default INTEGER NOT NULL DEFAULT 0,
-     created_at INTEGER NOT NULL,
-     updated_at INTEGER NOT NULL
-   )`)
-  await database.execute(`CREATE TABLE IF NOT EXISTS gateway_policy_tool (
-     policy_id TEXT NOT NULL REFERENCES gateway_policy (id) ON DELETE CASCADE,
-     owner TEXT NOT NULL,
-     subject TEXT,
-     integration TEXT NOT NULL,
-     connection_name TEXT NOT NULL,
-     tool TEXT NOT NULL,
-     enabled INTEGER NOT NULL DEFAULT 1,
-     decision TEXT NOT NULL,
-     PRIMARY KEY (policy_id, owner, subject, integration, connection_name, tool)
-   )`)
-  await database.execute(`CREATE UNIQUE INDEX IF NOT EXISTS gateway_policy_tool_route
-     ON gateway_policy_tool
-        (policy_id, owner, COALESCE(subject, ''), integration, connection_name, tool)`)
-  await database.execute(`CREATE TABLE IF NOT EXISTS gateway_client_tool_binding (
-     id TEXT PRIMARY KEY,
-     tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
-     client_id TEXT NOT NULL REFERENCES gateway_client (id) ON DELETE CASCADE,
-     alias TEXT NOT NULL,
-     tool TEXT NOT NULL,
-     owner TEXT NOT NULL,
-     subject TEXT,
-     integration TEXT NOT NULL,
-     connection_name TEXT NOT NULL,
-     created_at INTEGER NOT NULL,
-     revoked_at INTEGER
-   )`)
-
+/** The tenant a single-user gateway is implicitly working in, and its default
+ *  policy. Written on every open because it is cheap and idempotent, and
+ *  because a gateway with no tenant has nowhere to put a client. Every other
+ *  tenant gets both from `createTenant`. */
+const bootstrapDefaultTenant = async (database: LibsqlClient): Promise<void> => {
   const timestamp = now()
   await database.execute({
-    sql: `INSERT INTO gateway_policy (id, tenant_id, name, is_default, created_at, updated_at)
-          SELECT 'default-policy:' || tenant.id, tenant.id, 'Default', 1, ?, ?
-            FROM gateway_tenant AS tenant
-           WHERE NOT EXISTS (
-             SELECT 1 FROM gateway_policy AS policy
-              WHERE policy.tenant_id = tenant.id AND policy.is_default = 1
-           )
-          ON CONFLICT (id) DO NOTHING`,
-    args: [timestamp, timestamp]
+    sql: "INSERT INTO gateway_tenant (id, name, created_at) VALUES (?, ?, ?) ON CONFLICT (id) DO NOTHING",
+    args: [defaultTenantId, "Default", timestamp]
   })
-  if (!await tableExists(database, "gateway_client")) return
-
-  await addMissingColumns(database, "gateway_client", { policy_id: "TEXT REFERENCES gateway_policy (id)" })
-  if (!await tableExists(database, "gateway_grant")) {
-    await database.execute(`UPDATE gateway_client
-      SET policy_id = 'default-policy:' || tenant_id WHERE policy_id IS NULL`)
-    return
-  }
-
-  await database.execute("BEGIN IMMEDIATE")
-  try {
-    await database.execute(`INSERT INTO gateway_policy
-      (id, tenant_id, name, is_default, created_at, updated_at)
-      SELECT 'migrated-policy:' || id, tenant_id,
-             'Migrated ' || name || ' (' || id || ')', 0, created_at, ?
-        FROM gateway_client WHERE policy_id IS NULL
-      ON CONFLICT (id) DO NOTHING`, [timestamp])
-    await database.execute(`UPDATE gateway_client
-      SET policy_id = 'migrated-policy:' || id WHERE policy_id IS NULL`)
-    await database.execute(`INSERT INTO gateway_policy_tool
-      (policy_id, owner, subject, integration, connection_name, tool, decision)
-      SELECT 'migrated-policy:' || client_id, owner, subject, integration, connection_name, tool,
-             CASE WHEN SUM(CASE WHEN decision = 'require_approval' THEN 1 ELSE 0 END) > 0
-                  THEN 'require_approval' ELSE 'allow' END
-        FROM gateway_grant
-       GROUP BY client_id, owner, subject, integration, connection_name, tool
-      ON CONFLICT (policy_id, owner, COALESCE(subject, ''), integration, connection_name, tool)
-        DO UPDATE SET decision =
-        CASE WHEN gateway_policy_tool.decision = 'require_approval'
-               OR excluded.decision = 'require_approval'
-             THEN 'require_approval' ELSE 'allow' END`)
-    await database.execute(`INSERT INTO gateway_client_tool_binding
-      (id, tenant_id, client_id, alias, tool, owner, subject, integration,
-       connection_name, created_at, revoked_at)
-      SELECT id, tenant_id, client_id, alias, tool, owner, subject, integration,
-              connection_name, created_at, revoked_at FROM gateway_grant WHERE 1
-      ON CONFLICT (id) DO NOTHING`)
-
-    if (await tableExists(database, "gateway_pending_approval")) {
-      await addMissingColumns(database, "gateway_pending_approval", {
-        policy_id: "TEXT",
-        binding_id: "TEXT"
-      })
-      await database.execute(`UPDATE gateway_pending_approval
-        SET policy_id = (SELECT policy_id FROM gateway_client
-                          WHERE gateway_client.id = gateway_pending_approval.client_id),
-            binding_id = grant_id
-        WHERE policy_id IS NULL OR binding_id IS NULL`)
-      await database.execute(
-        "ALTER TABLE gateway_pending_approval RENAME TO gateway_pending_approval_legacy"
-      )
-      await database.execute(`CREATE TABLE gateway_pending_approval (
-        id TEXT PRIMARY KEY,
-        tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
-        client_id TEXT NOT NULL REFERENCES gateway_client (id) ON DELETE CASCADE,
-        policy_id TEXT NOT NULL REFERENCES gateway_policy (id),
-        binding_id TEXT NOT NULL REFERENCES gateway_client_tool_binding (id),
-        alias TEXT NOT NULL,
-        tool TEXT NOT NULL,
-        arguments TEXT NOT NULL,
-        arguments_lookup TEXT,
-        status TEXT NOT NULL,
-        created_at INTEGER NOT NULL,
-        expires_at INTEGER NOT NULL,
-        decided_at INTEGER,
-        decided_by TEXT,
-        result TEXT,
-        error TEXT,
-        collected_at INTEGER
-      )`)
-      await database.execute(`INSERT INTO gateway_pending_approval
-        (id, tenant_id, client_id, policy_id, binding_id, alias, tool, arguments,
-         arguments_lookup, status, created_at, expires_at, decided_at, decided_by,
-         result, error, collected_at)
-        SELECT id, tenant_id, client_id, policy_id, binding_id, alias, tool, arguments,
-               arguments_lookup, status, created_at, expires_at, decided_at, decided_by,
-               result, error, collected_at
-          FROM gateway_pending_approval_legacy`)
-      await database.execute("DROP TABLE gateway_pending_approval_legacy")
-    }
-    await database.execute("DROP TABLE gateway_grant")
-    await database.execute("COMMIT")
-  } catch (cause) {
-    await database.execute("ROLLBACK")
-    throw cause
-  }
-}
-
-/** Policy rules originally identified only an integration and tool. Rebuild the
- * small table once so a policy can give the same operation different decisions
- * on separate connections. Legacy rules target the conventional org/default
- * connection; reconciliation expands current catalog routes afterwards. */
-const migratePolicyToolConnections = async (database: LibsqlClient): Promise<void> => {
-  if (!await tableExists(database, "gateway_policy_tool")) return
-  const columns = new Set(
-    (await database.execute("PRAGMA table_info(gateway_policy_tool)")).rows
-      .map((row) => String(row["name"]))
-  )
-  if (columns.has("connection_name")) return
-  // The fan-out below reads the routes clients already have. A database old
-  // enough to lack either side of that join simply falls back to org/default.
-  const routed = await tableExists(database, "gateway_client_tool_binding") &&
-    await hasColumn(database, "gateway_client", "policy_id")
-  await database.execute("BEGIN IMMEDIATE")
-  try {
-    await database.execute("ALTER TABLE gateway_policy_tool RENAME TO gateway_policy_tool_legacy")
-    await database.execute(`CREATE TABLE gateway_policy_tool (
-       policy_id TEXT NOT NULL REFERENCES gateway_policy (id) ON DELETE CASCADE,
-       owner TEXT NOT NULL,
-       subject TEXT,
-       integration TEXT NOT NULL,
-       connection_name TEXT NOT NULL,
-       tool TEXT NOT NULL,
-       enabled INTEGER NOT NULL DEFAULT 1,
-       decision TEXT NOT NULL,
-       PRIMARY KEY (policy_id, owner, subject, integration, connection_name, tool)
-     )`)
-    await database.execute(`CREATE UNIQUE INDEX IF NOT EXISTS gateway_policy_tool_route
-       ON gateway_policy_tool
-          (policy_id, owner, COALESCE(subject, ''), integration, connection_name, tool)`)
-    // A legacy rule named an integration, so it applied to whichever connection
-    // a client's binding happened to reach. Fan each one out over exactly those
-    // connections, so an operator's `require_approval` keeps covering the same
-    // calls it did before. Rules for an integration nothing routes to fall back
-    // to the conventional org/default connection.
-    if (routed) {
-      await database.execute(`INSERT INTO gateway_policy_tool
-        (policy_id, owner, subject, integration, connection_name, tool, enabled, decision)
-        SELECT legacy.policy_id, route.owner, route.subject, legacy.integration,
-               route.connection_name, legacy.tool, legacy.enabled, legacy.decision
-          FROM gateway_policy_tool_legacy AS legacy
-          JOIN (SELECT DISTINCT client.policy_id AS policy_id, binding.owner AS owner,
-                       binding.subject AS subject, binding.integration AS integration,
-                       binding.connection_name AS connection_name
-                  FROM gateway_client_tool_binding AS binding
-                  JOIN gateway_client AS client ON client.id = binding.client_id
-                 WHERE binding.revoked_at IS NULL) AS route
-            ON route.policy_id = legacy.policy_id AND route.integration = legacy.integration`)
-    }
-    await database.execute(`INSERT INTO gateway_policy_tool
-      (policy_id, owner, subject, integration, connection_name, tool, enabled, decision)
-      SELECT legacy.policy_id, 'org', NULL, legacy.integration, 'default',
-             legacy.tool, legacy.enabled, legacy.decision
-        FROM gateway_policy_tool_legacy AS legacy
-       WHERE NOT EXISTS (
-         SELECT 1 FROM gateway_policy_tool AS migrated
-          WHERE migrated.policy_id = legacy.policy_id
-            AND migrated.integration = legacy.integration
-            AND migrated.tool = legacy.tool
-       )`)
-    await database.execute("DROP TABLE gateway_policy_tool_legacy")
-    await database.execute("COMMIT")
-  } catch (cause) {
-    await database.execute("ROLLBACK")
-    throw cause
-  }
+  await database.execute({
+    sql: `INSERT INTO gateway_policy (id, tenant_id, name, is_default, forked_from, created_at, updated_at)
+          VALUES (?, ?, 'Default', 1, NULL, ?, ?)
+          ON CONFLICT (id) DO NOTHING`,
+    args: [`default-policy:${defaultTenantId}`, defaultTenantId, timestamp, timestamp]
+  })
 }
 
 /** One filter builder for both the page and its total, so a listing can never
@@ -1267,35 +915,11 @@ const createGatewayStoreDriver = async (
 ): Promise<GatewayStoreDriver> => {
   const database: LibsqlClient =
     options.client ?? await openFileDatabase(databasePath)
-  // `CREATE TABLE IF NOT EXISTS` does nothing for a database that already
-  // exists, so a column added after the fact has to be added explicitly — and
-  // before the DDL below, which indexes it. A gateway that has been running
-  // since before delivery-once tracking must not have to be deleted to get it.
-  await addMissingColumns(database, "gateway_pending_approval", {
-    collected_at: "INTEGER",
-    arguments_lookup: "TEXT"
-  })
-  // Tenancy tables first, then the backfill that references them, then the
-  // rest of the final shape.
-  for (const statement of tenancyTableDdl) await database.execute(statement)
-  await migrateNullableLoginPasswords(database)
-  await migrateTenancy(database)
-  await migratePolicies(database)
-  await database.execute(`CREATE TABLE IF NOT EXISTS gateway_policy_integration (
-     policy_id TEXT NOT NULL REFERENCES gateway_policy (id) ON DELETE CASCADE,
-     integration TEXT NOT NULL,
-     PRIMARY KEY (policy_id, integration)
-   )`)
-  await database.execute(`INSERT INTO gateway_policy_integration (policy_id, integration)
-    SELECT DISTINCT policy_id, integration FROM gateway_policy_tool WHERE 1
-    ON CONFLICT (policy_id, integration) DO NOTHING`)
-  await addMissingColumns(database, "gateway_client", {
-    approval_delivery: `TEXT NOT NULL DEFAULT '${JSON.stringify(defaultApprovalDelivery)}'`
-  })
-  await addMissingColumns(database, "gateway_identity_oauth_state", {
-    return_path: "TEXT"
-  })
+  // The schema is declared once and created as declared. There is no migration
+  // step: this project is early enough that a shape change means deleting the
+  // database, not carrying code that reshapes yesterday's.
   for (const statement of ddl) await database.execute(statement)
+  await bootstrapDefaultTenant(database)
 
   const one = async (sql: string, args: ReadonlyArray<InValue>): Promise<Row | undefined> => {
     const result = await database.execute({ sql, args: [...args] })
@@ -1767,9 +1391,17 @@ const createGatewayStoreDriver = async (
       const timestamp = now()
       await run(
         `INSERT INTO gateway_policy
-           (id, tenant_id, name, is_default, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [input.id, input.tenantId, input.name, input.isDefault === true ? 1 : 0, timestamp, timestamp]
+           (id, tenant_id, name, is_default, forked_from, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          input.id,
+          input.tenantId,
+          input.name,
+          input.isDefault === true ? 1 : 0,
+          input.forkedFrom ?? null,
+          timestamp,
+          timestamp
+        ]
       )
       const row = await one("SELECT * FROM gateway_policy WHERE id = ?", [input.id])
       if (row === undefined) throw new Error(`Failed to store policy ${input.id}`)
@@ -1833,35 +1465,17 @@ const createGatewayStoreDriver = async (
       return row === undefined ? undefined : toPolicy(row)
     },
 
-    listPolicyIntegrations: async (policyId) =>
-      (await all(
-        "SELECT * FROM gateway_policy_integration WHERE policy_id = ? ORDER BY integration",
-        [policyId]
-      )).map(toPolicyIntegration),
-
     listPolicyTools: async (policyId) =>
       (await all(
         "SELECT * FROM gateway_policy_tool WHERE policy_id = ? ORDER BY integration, connection_name, tool",
         [policyId]
       )).map(toPolicyTool),
 
-    replacePolicyConfiguration: async (policyId, configuration) => {
-      const memberships = new Set(configuration.integrations)
-      const orphan = configuration.tools.find((tool) => !memberships.has(tool.connection.integration))
-      if (orphan !== undefined) {
-        throw new Error(`Policy tool ${orphan.connection.integration}/${orphan.tool} has no integration membership`)
-      }
+    replacePolicyTools: async (policyId, tools) => {
       await database.execute("BEGIN IMMEDIATE")
       try {
         await run("DELETE FROM gateway_policy_tool WHERE policy_id = ?", [policyId])
-        await run("DELETE FROM gateway_policy_integration WHERE policy_id = ?", [policyId])
-        for (const integration of configuration.integrations) {
-          await run(
-            "INSERT INTO gateway_policy_integration (policy_id, integration) VALUES (?, ?)",
-            [policyId, integration]
-          )
-        }
-        for (const tool of configuration.tools) {
+        for (const tool of tools) {
           await run(
             `INSERT INTO gateway_policy_tool
                (policy_id, owner, subject, integration, connection_name, tool, enabled, decision)
@@ -1889,16 +1503,10 @@ const createGatewayStoreDriver = async (
         await database.execute("ROLLBACK")
         throw cause
       }
-      return {
-        integrations: (await all(
-          "SELECT * FROM gateway_policy_integration WHERE policy_id = ? ORDER BY integration",
-          [policyId]
-        )).map(toPolicyIntegration),
-        tools: (await all(
-          "SELECT * FROM gateway_policy_tool WHERE policy_id = ? ORDER BY integration, connection_name, tool",
-          [policyId]
-        )).map(toPolicyTool)
-      }
+      return (await all(
+        "SELECT * FROM gateway_policy_tool WHERE policy_id = ? ORDER BY integration, connection_name, tool",
+        [policyId]
+      )).map(toPolicyTool)
     },
 
     assignPolicy: async (tenantId, clientId, policyId) => {
@@ -1915,55 +1523,68 @@ const createGatewayStoreDriver = async (
       return await requireClient(clientId)
     },
 
-    createBinding: async (input) => {
+    createGrant: async (input) => {
       const subject = input.connection.owner === "user" ? input.connection.subject : null
       await run(
-        `INSERT INTO gateway_client_tool_binding
-           (id, tenant_id, client_id, alias, tool, owner, subject, integration, connection_name, created_at, revoked_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+        `INSERT INTO gateway_connection_grant
+           (id, tenant_id, client_id, owner, subject, integration, connection_name, alias, created_at, revoked_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
         [
           input.id,
           input.tenantId,
           input.clientId,
-          input.alias,
-          input.tool,
           input.connection.owner,
           subject,
           input.connection.integration,
           input.connection.name,
+          input.alias,
           now()
         ]
       )
-      const row = await one("SELECT * FROM gateway_client_tool_binding WHERE id = ?", [input.id])
-      if (row === undefined) throw new Error(`Failed to store binding ${input.id}`)
-      return toBinding(row)
+      const row = await one("SELECT * FROM gateway_connection_grant WHERE id = ?", [input.id])
+      if (row === undefined) throw new Error(`Failed to store grant ${input.id}`)
+      return toGrant(row)
     },
 
-    listBindings: async (clientId) =>
+    listGrants: async (clientId) =>
       (await all(
-        "SELECT * FROM gateway_client_tool_binding WHERE client_id = ? AND revoked_at IS NULL ORDER BY alias, tool",
+        "SELECT * FROM gateway_connection_grant WHERE client_id = ? AND revoked_at IS NULL ORDER BY alias",
         [clientId]
-      )).map(toBinding),
+      )).map(toGrant),
 
-    findBinding: async (clientId, alias, tool) => {
+    findGrantByAlias: async (clientId, alias) => {
       const row = await one(
-        "SELECT * FROM gateway_client_tool_binding WHERE client_id = ? AND alias = ? AND tool = ? AND revoked_at IS NULL",
-        [clientId, alias, tool]
+        "SELECT * FROM gateway_connection_grant WHERE client_id = ? AND alias = ? AND revoked_at IS NULL",
+        [clientId, alias]
       )
-      return row === undefined ? undefined : toBinding(row)
+      return row === undefined ? undefined : toGrant(row)
     },
 
-    findBindingById: async (clientId, id) => {
+    findGrantById: async (clientId, id) => {
       const row = await one(
-        "SELECT * FROM gateway_client_tool_binding WHERE client_id = ? AND id = ? AND revoked_at IS NULL",
+        "SELECT * FROM gateway_connection_grant WHERE client_id = ? AND id = ? AND revoked_at IS NULL",
         [clientId, id]
       )
-      return row === undefined ? undefined : toBinding(row)
+      return row === undefined ? undefined : toGrant(row)
     },
 
-    revokeBinding: async (tenantId, id) => {
+    renameGrantAlias: async (tenantId, id, alias) => {
+      const result = await database.execute({
+        sql: `UPDATE gateway_connection_grant SET alias = ?
+               WHERE tenant_id = ? AND id = ? AND revoked_at IS NULL`,
+        args: [alias, tenantId, id]
+      })
+      if (Number(result.rowsAffected) === 0) {
+        throw new Error(`Grant ${id} cannot be renamed`)
+      }
+      const row = await one("SELECT * FROM gateway_connection_grant WHERE id = ?", [id])
+      if (row === undefined) throw new Error(`Failed to read grant ${id}`)
+      return toGrant(row)
+    },
+
+    revokeGrant: async (tenantId, id) => {
       await run(
-        "UPDATE gateway_client_tool_binding SET revoked_at = ? WHERE tenant_id = ? AND id = ? AND revoked_at IS NULL",
+        "UPDATE gateway_connection_grant SET revoked_at = ? WHERE tenant_id = ? AND id = ? AND revoked_at IS NULL",
         [now(), tenantId, id]
       )
     },
@@ -1976,14 +1597,14 @@ const createGatewayStoreDriver = async (
       const canonical = canonicalArguments(input.arguments)
       await run(
         `INSERT INTO gateway_pending_approval
-           (id, tenant_id, client_id, policy_id, binding_id, alias, tool, arguments, arguments_lookup, status, created_at, expires_at, decided_at, decided_by, result, error, collected_at)
+           (id, tenant_id, client_id, policy_id, grant_id, alias, tool, arguments, arguments_lookup, status, created_at, expires_at, decided_at, decided_by, result, error, collected_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, NULL, NULL, NULL, NULL, NULL)`,
         [
           input.id,
           input.tenantId,
           input.clientId,
           input.policyId,
-          input.bindingId,
+          input.grantId,
           input.alias,
           input.tool,
           sealText(canonical),
@@ -1997,18 +1618,19 @@ const createGatewayStoreDriver = async (
       return openApproval(row)
     },
 
-    findUncollectedApproval: async (policyId, bindingId, argumentsValue) => {
+    findUncollectedApproval: async (policyId, grantId, tool, argumentsValue) => {
       const canonical = canonicalArguments(argumentsValue)
       const row = await one(
         `SELECT * FROM gateway_pending_approval
-          WHERE policy_id = ? AND binding_id = ?
+          WHERE policy_id = ? AND grant_id = ? AND tool = ?
             AND ((arguments_lookup IS NOT NULL AND arguments_lookup = ?)
               OR (arguments_lookup IS NULL AND arguments = ?))
             AND collected_at IS NULL
           ORDER BY created_at DESC LIMIT 1`,
         [
           policyId,
-          bindingId,
+          grantId,
+          tool,
           encryption === undefined ? canonical : encryption.lookup(canonical),
           canonical
         ]
@@ -2278,34 +1900,31 @@ const effectStore = (driver: GatewayStoreDriver): GatewayStore => ({
     storeOperation("findDefaultPolicy", () => driver.findDefaultPolicy(tenantId)),
   findPolicyForClient: (clientId) =>
     storeOperation("findPolicyForClient", () => driver.findPolicyForClient(clientId)),
-  listPolicyIntegrations: (policyId) =>
-    storeOperation("listPolicyIntegrations", () => driver.listPolicyIntegrations(policyId)),
   listPolicyTools: (policyId) =>
     storeOperation("listPolicyTools", () => driver.listPolicyTools(policyId)),
-  replacePolicyConfiguration: (policyId, configuration) =>
-    storeOperation(
-      "replacePolicyConfiguration",
-      () => driver.replacePolicyConfiguration(policyId, configuration)
-    ),
+  replacePolicyTools: (policyId, tools) =>
+    storeOperation("replacePolicyTools", () => driver.replacePolicyTools(policyId, tools)),
   assignPolicy: (tenantId, clientId, policyId) =>
     storeOperation("assignPolicy", () => driver.assignPolicy(tenantId, clientId, policyId)),
-  createBinding: (input) => storeOperation("createBinding", () => driver.createBinding(input)),
-  listBindings: (clientId) => storeOperation("listBindings", () => driver.listBindings(clientId)),
-  findBinding: (clientId, alias, tool) =>
-    storeOperation("findBinding", () => driver.findBinding(clientId, alias, tool)),
-  findBindingById: (clientId, id) =>
-    storeOperation("findBindingById", () => driver.findBindingById(clientId, id)),
-  revokeBinding: (tenantId, id) =>
-    storeOperation("revokeBinding", () => driver.revokeBinding(tenantId, id)),
+  createGrant: (input) => storeOperation("createGrant", () => driver.createGrant(input)),
+  listGrants: (clientId) => storeOperation("listGrants", () => driver.listGrants(clientId)),
+  findGrantByAlias: (clientId, alias) =>
+    storeOperation("findGrantByAlias", () => driver.findGrantByAlias(clientId, alias)),
+  findGrantById: (clientId, id) =>
+    storeOperation("findGrantById", () => driver.findGrantById(clientId, id)),
+  renameGrantAlias: (tenantId, id, alias) =>
+    storeOperation("renameGrantAlias", () => driver.renameGrantAlias(tenantId, id, alias)),
+  revokeGrant: (tenantId, id) =>
+    storeOperation("revokeGrant", () => driver.revokeGrant(tenantId, id)),
   createApproval: (input) => storeOperation("createApproval", () => driver.createApproval(input)),
   getApproval: (tenantId, id) =>
     storeOperation("getApproval", () => driver.getApproval(tenantId, id)),
   listApprovals: (tenantId, status) =>
     storeOperation("listApprovals", () => driver.listApprovals(tenantId, status)),
-  findUncollectedApproval: (policyId, bindingId, argumentsValue) =>
+  findUncollectedApproval: (policyId, grantId, tool, argumentsValue) =>
     storeOperation(
       "findUncollectedApproval",
-      () => driver.findUncollectedApproval(policyId, bindingId, argumentsValue)
+      () => driver.findUncollectedApproval(policyId, grantId, tool, argumentsValue)
     ),
   collectApproval: (tenantId, id) =>
     storeOperation("collectApproval", () => driver.collectApproval(tenantId, id)),

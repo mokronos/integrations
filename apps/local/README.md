@@ -1,7 +1,7 @@
 # @mokronos/integrations-local
 
 The integration gateway. Holds connections and credentials, intersects reusable
-policies with client-specific bindings, and performs invocations — so callers
+policies with client-specific connection grants, and performs invocations — so callers
 hold only an API key and never a credential.
 
 Vocabulary is defined in [CONTEXT.md](../../../CONTEXT.md). The reusable policy

@@ -431,6 +431,11 @@ describe("integrations CLI acceptance", () => {
     expect(included.exitCode, included.stderr).toBe(0)
     const assigned = await operator(["assign-policy", client.id, policy.id])
     expect(assigned.exitCode, assigned.stderr).toBe(0)
+    // The policy says what the credential may be used for; the grant is what
+    // lets this client reach it at all. Both are needed, and neither implies
+    // the other.
+    const granted = await operator(["grant", client.id, slug])
+    expect(granted.exitCode, granted.stderr).toBe(0)
     const key = parseOutput(SecretOutput, (await operator(["key", client.id])).stdout)
     const sandbox = {
       ...gateway.environment,

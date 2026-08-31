@@ -1,10 +1,13 @@
 // Everything the gateway owns lives here, above the host's own database.
-// Resolving a client binding is what determines which subject a host instance must
-// be bound to, so these rows have to be readable before that instance exists.
+// Resolving a client's grant is what determines which subject a host instance
+// must be bound to, so these rows have to be readable before that instance
+// exists.
+//
+// This is the whole schema, declared once and created as declared. Changing a
+// shape here means deleting the database — the project is early enough that
+// carrying code to reshape yesterday's is not worth what it costs to read.
 
-/** The two tables tenancy itself is built on. They exist before every other
- * statement runs, because the migration backfills rows that reference them. */
-export const tenancyTableDdl = [
+export const gatewayDdl = [
   `CREATE TABLE IF NOT EXISTS gateway_tenant (
      id TEXT PRIMARY KEY,
      name TEXT NOT NULL UNIQUE,
@@ -28,11 +31,7 @@ export const tenancyTableDdl = [
      tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
      created_at INTEGER NOT NULL,
      expires_at INTEGER NOT NULL
-   )`
-] as const
-
-export const gatewayDdl = [
-  ...tenancyTableDdl,
+   )`,
   `CREATE TABLE IF NOT EXISTS gateway_client (
      id TEXT PRIMARY KEY,
      tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
@@ -83,6 +82,7 @@ export const gatewayDdl = [
      tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
      name TEXT NOT NULL,
      is_default INTEGER NOT NULL DEFAULT 0,
+     forked_from TEXT REFERENCES gateway_policy (id),
      created_at INTEGER NOT NULL,
      updated_at INTEGER NOT NULL
    )`,
@@ -90,11 +90,6 @@ export const gatewayDdl = [
      ON gateway_policy (tenant_id, name)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS gateway_policy_default_tenant
      ON gateway_policy (tenant_id) WHERE is_default = 1`,
-  `CREATE TABLE IF NOT EXISTS gateway_policy_integration (
-     policy_id TEXT NOT NULL REFERENCES gateway_policy (id) ON DELETE CASCADE,
-     integration TEXT NOT NULL,
-     PRIMARY KEY (policy_id, integration)
-   )`,
   `CREATE TABLE IF NOT EXISTS gateway_policy_tool (
      policy_id TEXT NOT NULL REFERENCES gateway_policy (id) ON DELETE CASCADE,
      owner TEXT NOT NULL,
@@ -112,27 +107,35 @@ export const gatewayDdl = [
   `CREATE UNIQUE INDEX IF NOT EXISTS gateway_policy_tool_route
      ON gateway_policy_tool
         (policy_id, owner, COALESCE(subject, ''), integration, connection_name, tool)`,
-  `CREATE TABLE IF NOT EXISTS gateway_client_tool_binding (
+  `CREATE TABLE IF NOT EXISTS gateway_connection_grant (
      id TEXT PRIMARY KEY,
      tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
      client_id TEXT NOT NULL REFERENCES gateway_client (id) ON DELETE CASCADE,
-     alias TEXT NOT NULL,
-     tool TEXT NOT NULL,
      owner TEXT NOT NULL,
      subject TEXT,
      integration TEXT NOT NULL,
      connection_name TEXT NOT NULL,
+     alias TEXT NOT NULL,
      created_at INTEGER NOT NULL,
      revoked_at INTEGER
    )`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS gateway_client_tool_binding_live
-     ON gateway_client_tool_binding (client_id, alias, tool) WHERE revoked_at IS NULL`,
+  // As with policy rules, SQLite treats NULL subjects as distinct, so the
+  // expression index is what makes one live grant per (client, connection) true.
+  `CREATE UNIQUE INDEX IF NOT EXISTS gateway_connection_grant_live
+     ON gateway_connection_grant
+        (client_id, owner, COALESCE(subject, ''), integration, connection_name)
+     WHERE revoked_at IS NULL`,
+  // An alias is what one client calls one connection, so it has to be unique
+  // within that client and nowhere else. Two clients naming different
+  // credentials `linear` is normal and correct.
+  `CREATE UNIQUE INDEX IF NOT EXISTS gateway_connection_grant_alias
+     ON gateway_connection_grant (client_id, alias) WHERE revoked_at IS NULL`,
   `CREATE TABLE IF NOT EXISTS gateway_pending_approval (
      id TEXT PRIMARY KEY,
      tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
      client_id TEXT NOT NULL REFERENCES gateway_client (id) ON DELETE CASCADE,
      policy_id TEXT NOT NULL REFERENCES gateway_policy (id),
-     binding_id TEXT NOT NULL REFERENCES gateway_client_tool_binding (id),
+     grant_id TEXT NOT NULL REFERENCES gateway_connection_grant (id),
      alias TEXT NOT NULL,
      tool TEXT NOT NULL,
      arguments TEXT NOT NULL,
@@ -147,7 +150,7 @@ export const gatewayDdl = [
      collected_at INTEGER
    )`,
   `CREATE INDEX IF NOT EXISTS gateway_pending_approval_retry
-     ON gateway_pending_approval (policy_id, binding_id, arguments_lookup, arguments)
+     ON gateway_pending_approval (policy_id, grant_id, tool, arguments_lookup, arguments)
      WHERE collected_at IS NULL`,
   `CREATE TABLE IF NOT EXISTS gateway_audit (
      id TEXT PRIMARY KEY,
@@ -179,13 +182,4 @@ export const gatewayDdl = [
      synced_at INTEGER NOT NULL,
      PRIMARY KEY (tenant_id, integration, connection_name, tool)
    )`
-] as const
-
-/** Tables that carry a `tenant_id`, for the migration's backfill sweep. */
-export const tenantedTables = [
-  "gateway_client",
-  "gateway_policy",
-  "gateway_client_tool_binding",
-  "gateway_pending_approval",
-  "gateway_audit"
 ] as const

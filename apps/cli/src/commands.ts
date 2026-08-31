@@ -8,12 +8,16 @@ import {
   clientCommand,
   clientsCommand,
   clonePolicyCommand,
+  grantCommand,
+  grantsCommand,
   keyCommand,
   keysCommand,
   policiesCommand,
   policyCommand,
   policyToolCommand,
-  revokeCommand
+  renameGrantCommand,
+  revokeCommand,
+  revokeGrantCommand
 } from "./commands/delegation.ts"
 import { clientExecuteCommand, operatorExecuteCommand, validateCommand } from "./commands/invocation.ts"
 import type { IntegrationsCliError } from "./connection.ts"
@@ -78,6 +82,10 @@ export const controlPlaneSubcommands = [
   clonePolicyCommand,
   policyToolCommand,
   assignPolicyCommand,
+  grantCommand,
+  grantsCommand,
+  renameGrantCommand,
+  revokeGrantCommand,
   revokeCommand,
   approvalsCommand,
   approveCommand,

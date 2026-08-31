@@ -6,7 +6,8 @@ human operator uses to run and administer the gateway.
 ## Agent access
 
 An agent is a delegated caller. It receives an API key and can use only the
-effective tools in that key's client's assigned policy and connection bindings.
+effective tools in the intersection of that key's client's assigned policy and
+the connections that client has been granted.
 
 ### Command line
 

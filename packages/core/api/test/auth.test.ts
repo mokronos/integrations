@@ -14,7 +14,7 @@ import {
   generateApiKey,
   IntegrationSlug,
   newClientId,
-  newClientToolBindingId,
+  newConnectionGrantId,
   newPolicyId,
   TenantId,
   ToolName
@@ -56,20 +56,17 @@ const setup = async (options: SetupOptions = {}) => {
   const store = await run(createGatewayStore(path.join(directory, "gateway.sqlite")))
   stores.push(store)
 
-  // A standing client with policy and binding, so delegation boundaries are testable
+  // A standing client with policy and grant, so delegation boundaries are testable
   // against a real administrative surface.
   const policy = await run(store.createPolicy({
     id: newPolicyId(), tenantId: defaultTenantId, name: "local"
   }))
-  await run(store.replacePolicyConfiguration(policy.id, {
-    integrations: [connection.integration],
-    tools: [{
+  await run(store.replacePolicyTools(policy.id, [{
       connection,
       tool: ToolName.make("sendEmail"),
       enabled: true,
       decision: "allow"
-    }]
-  }))
+    }]))
   const client = await run(store.createClient({
     id: newClientId(),
     tenantId: defaultTenantId,
@@ -79,12 +76,11 @@ const setup = async (options: SetupOptions = {}) => {
   }))
   const apiKey = generateApiKey()
   await run(store.addApiKey({ id: apiKey.id, clientId: client.id, hash: apiKey.hash }))
-  await run(store.createBinding({
-    id: newClientToolBindingId(),
+  await run(store.createGrant({
+    id: newConnectionGrantId(),
     tenantId: defaultTenantId,
     clientId: client.id,
     alias: Alias.make("gmail-work"),
-    tool: ToolName.make("sendEmail"),
     connection,
   }))
 
@@ -522,15 +518,12 @@ describe("attribution", () => {
     const policy = await run(setup_.store.createPolicy({
       id: newPolicyId(), tenantId: human.tenantId, name: "support-agent"
     }))
-    await run(setup_.store.replacePolicyConfiguration(policy.id, {
-      integrations: [connection.integration],
-      tools: [{
+    await run(setup_.store.replacePolicyTools(policy.id, [{
         connection,
         tool: ToolName.make("sendEmail"),
         enabled: true,
         decision: "require_approval"
-      }]
-    }))
+      }]))
     const client = await run(setup_.store.createClient({
       id: newClientId(),
       tenantId: human.tenantId,
@@ -540,12 +533,11 @@ describe("attribution", () => {
     }))
     const key = generateApiKey()
     await run(setup_.store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash }))
-    await run(setup_.store.createBinding({
-      id: newClientToolBindingId(),
+    await run(setup_.store.createGrant({
+      id: newConnectionGrantId(),
       tenantId: human.tenantId,
       clientId: client.id,
       alias: Alias.make("gmail-work"),
-      tool: ToolName.make("sendEmail"),
       connection,
     }))
 

@@ -22,7 +22,7 @@ export const keys = {
   clients: ["clients"] as const,
   policies: ["policies"] as const,
   policy: (policyId: string) => ["policies", policyId] as const,
-  bindings: (clientId: string) => ["clients", clientId, "bindings"] as const,
+  grants: (clientId: string) => ["clients", clientId, "connections"] as const,
   clientTools: (clientId: string) => ["clients", clientId, "tools"] as const,
   approvals: (status: ApprovalStatus | "all") => ["approvals", status] as const,
   audit: (input: AuditQuery) => ["audit", input] as const
@@ -68,10 +68,10 @@ export const usePolicy = (policyId: string | undefined) =>
     enabled: policyId !== undefined
   })
 
-export const useBindings = (clientId: string | undefined) =>
+export const useGrants = (clientId: string | undefined) =>
   useQuery({
-    queryKey: keys.bindings(clientId ?? ""),
-    queryFn: () => gateway.listBindings(clientId ?? ""),
+    queryKey: keys.grants(clientId ?? ""),
+    queryFn: () => gateway.listGrants(clientId ?? ""),
     enabled: clientId !== undefined
   })
 

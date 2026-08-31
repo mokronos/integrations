@@ -16,12 +16,11 @@ import {
   ClientId,
   Alias,
   ApiKeyId,
-  ClientToolBinding,
+  ConnectionGrant,
   ConnectionRef,
   Policy,
   PolicyDecision,
   PolicyId,
-  PolicyIntegration,
   PolicyTool,
   PendingApproval,
   SubjectId
@@ -77,7 +76,6 @@ const CreatePolicyBody = Schema.Struct({
 })
 
 const ReplacePolicyToolsBody = Schema.Struct({
-  integrations: Schema.Array(Schema.String),
   tools: Schema.Array(Schema.Struct({
     connection: ConnectionRef,
     tool: Schema.String,
@@ -93,6 +91,35 @@ const ClonePolicyBody = Schema.Struct({
 const AssignPolicyBody = Schema.Struct({
   policyId: PolicyId
 })
+
+/** Which credential a client is being handed, and — for a user-tier one — whose
+ *  authorization it is. The alias is chosen by the gateway, not the caller: it
+ *  has to be unique within the client and stable forever after. */
+const GrantConnectionBody = Schema.Struct({
+  integration: Schema.String,
+  connection: Schema.optional(Schema.String),
+  owner: Schema.optional(Schema.Literals(["org", "user"])),
+  subject: Schema.optional(SubjectId)
+})
+
+const RenameGrantBody = Schema.Struct({
+  alias: Alias
+})
+
+/** What granting did to the client's policy. Reported rather than silent: a
+ *  fork detaches this client from a shared policy, which an operator has to
+ *  know about at the moment it happens. */
+const PolicySeedingReport = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("already-governed"), policy: Policy }),
+  Schema.Struct({ kind: Schema.Literal("seeded-in-place"), policy: Policy }),
+  Schema.Struct({
+    kind: Schema.Literal("forked"),
+    policy: Policy,
+    forkedFrom: Policy
+  }),
+  Schema.Struct({ kind: Schema.Literal("no-tools"), policy: Policy }),
+  Schema.Struct({ kind: Schema.Literal("no-policy") })
+])
 
 const DiscoverBody = Schema.Struct({
   url: Schema.String,
@@ -529,6 +556,7 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
   .add(HttpApiEndpoint.get("listPolicies", "/v1/policies", {
     success: Schema.Struct({ policies: Schema.Array(Schema.Struct({
       policy: Policy,
+      connectionCount: Schema.Number,
       integrationCount: Schema.Number,
       toolCount: Schema.Number,
       enabledToolCount: Schema.Number,
@@ -539,7 +567,6 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
     params: { id: PolicyId },
     success: Schema.Struct({
       policy: Policy,
-      integrations: Schema.Array(PolicyIntegration),
       tools: Schema.Array(PolicyTool),
       assignedClients: Schema.Array(Client)
     }),
@@ -555,7 +582,6 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
     payload: ReplacePolicyToolsBody,
     success: Schema.Struct({
       policy: Policy,
-      integrations: Schema.Array(PolicyIntegration),
       tools: Schema.Array(PolicyTool)
     }),
     error: [ApiNotFoundError, ApiBadRequestError]
@@ -565,7 +591,6 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
     payload: ClonePolicyBody,
     success: HttpApiSchema.status(201)(Schema.Struct({
       policy: Policy,
-      integrations: Schema.Array(PolicyIntegration),
       tools: Schema.Array(PolicyTool)
     })),
     error: [ApiNotFoundError, ApiBadRequestError]
@@ -576,9 +601,30 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
     success: Client,
     error: [ApiNotFoundError, ApiBadRequestError]
   }).annotate(RequiredAccess, "administrative"))
-  .add(HttpApiEndpoint.get("listBindings", "/v1/clients/:id/bindings", {
+  .add(HttpApiEndpoint.get("listGrants", "/v1/clients/:id/connections", {
     params: { id: ClientId },
-    success: Schema.Struct({ bindings: Schema.Array(ClientToolBinding) }),
+    success: Schema.Struct({ grants: Schema.Array(ConnectionGrant) }),
+    error: ApiNotFoundError
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.post("grantConnection", "/v1/clients/:id/connections", {
+    params: { id: ClientId },
+    payload: GrantConnectionBody,
+    success: HttpApiSchema.status(201)(Schema.Struct({
+      grant: ConnectionGrant,
+      existing: Schema.Boolean,
+      seeding: PolicySeedingReport
+    })),
+    error: [ApiNotFoundError, ApiBadRequestError]
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.post("renameGrant", "/v1/clients/:id/connections/:grantId", {
+    params: { id: ClientId, grantId: Schema.String },
+    payload: RenameGrantBody,
+    success: ConnectionGrant,
+    error: [ApiNotFoundError, ApiBadRequestError]
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.post("revokeGrant", "/v1/clients/:id/connections/:grantId/revoke", {
+    params: { id: ClientId, grantId: Schema.String },
+    success: Schema.Struct({ revoked: Schema.Literal(true) }),
     error: ApiNotFoundError
   }).annotate(RequiredAccess, "administrative"))
   .add(HttpApiEndpoint.get("listApprovals", "/v1/approvals", {

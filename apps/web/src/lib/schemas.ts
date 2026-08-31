@@ -6,13 +6,12 @@ import {
   AuditRecord,
   AuditOutcome,
   Client,
-  ClientToolBinding,
+  ConnectionGrant,
   DriftEntry,
   ConnectionRef as ConnectionRefSchema,
   Policy,
   PolicyDecision as PolicyDecisionSchema,
   PolicyId,
-  PolicyIntegration,
   PolicyTool,
   PendingApproval
 } from "@mokronos/gateway-core/domain"
@@ -47,10 +46,9 @@ export type {
   Connection,
   Tool,
   ToolSummary,
-  ClientToolBinding,
+  ConnectionGrant,
   IntegrationOverview,
   Policy,
-  PolicyIntegration,
   PolicyTool,
   PendingApproval
 }
@@ -86,6 +84,7 @@ export const ClientsResponse = Schema.Struct({
 
 export const PolicySummary = Schema.Struct({
   policy: Policy,
+  connectionCount: Schema.Number,
   integrationCount: Schema.Number,
   toolCount: Schema.Number,
   enabledToolCount: Schema.Number,
@@ -97,7 +96,6 @@ export const PoliciesResponse = Schema.Struct({ policies: Schema.Array(PolicySum
 
 export const PolicyDetail = Schema.Struct({
   policy: Policy,
-  integrations: Schema.Array(PolicyIntegration),
   tools: Schema.Array(PolicyTool),
   assignedClients: Schema.Array(Client)
 })
@@ -105,7 +103,6 @@ export type PolicyDetail = typeof PolicyDetail.Type
 
 export const PolicyToolsReplaced = Schema.Struct({
   policy: Policy,
-  integrations: Schema.Array(PolicyIntegration),
   tools: Schema.Array(PolicyTool)
 })
 
@@ -122,7 +119,25 @@ export type EffectiveTool = typeof EffectiveTool.Type
 
 export const EffectiveToolsResponse = Schema.Struct({ tools: Schema.Array(EffectiveTool) })
 
-export const BindingsResponse = Schema.Struct({ bindings: Schema.Array(ClientToolBinding) })
+export const GrantsResponse = Schema.Struct({ grants: Schema.Array(ConnectionGrant) })
+
+/** What granting did to the client's policy. A fork is reported rather than
+ *  silent: it detaches this client from a shared policy, which an operator has
+ *  to see at the moment it happens. */
+export const PolicySeeding = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("already-governed"), policy: Policy }),
+  Schema.Struct({ kind: Schema.Literal("seeded-in-place"), policy: Policy }),
+  Schema.Struct({ kind: Schema.Literal("forked"), policy: Policy, forkedFrom: Policy }),
+  Schema.Struct({ kind: Schema.Literal("no-tools"), policy: Policy }),
+  Schema.Struct({ kind: Schema.Literal("no-policy") })
+])
+export type PolicySeeding = typeof PolicySeeding.Type
+
+export const GrantCreated = Schema.Struct({
+  grant: ConnectionGrant,
+  existing: Schema.Boolean,
+  seeding: PolicySeeding
+})
 
 export const PolicyToolInput = Schema.Struct({
   connection: ConnectionRefSchema,
@@ -234,7 +249,8 @@ export const decodePolicy = json(PolicyDetail)
 export const decodePolicyCreated = json(Policy)
 export const decodePolicyToolsReplaced = json(PolicyToolsReplaced)
 export const decodeEffectiveTools = json(EffectiveToolsResponse)
-export const decodeBindings = json(BindingsResponse)
+export const decodeGrants = json(GrantsResponse)
+export const decodeGrantCreated = json(GrantCreated)
 export const decodeApprovals = json(ApprovalsResponse)
 export const decodeAudit = json(AuditResponse)
 export const decodeOverview = json(OverviewResponse)

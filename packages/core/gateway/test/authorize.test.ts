@@ -13,7 +13,7 @@ import {
   generateApiKey,
   IntegrationSlug,
   newClientId,
-  newClientToolBindingId,
+  newConnectionGrantId,
   newPolicyId,
   SubjectId,
   ToolName
@@ -71,24 +71,20 @@ const seed = async (store: GatewayStore, options: {
   const key = generateApiKey()
   await run(store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash }))
   const policyConnection = options.connection ?? orgConnection
-  await run(store.replacePolicyConfiguration(policy.id, {
-    integrations: [policyConnection.integration],
-    tools: [{
+  await run(store.replacePolicyTools(policy.id, [{
       connection: policyConnection,
       tool: ToolName.make("getDocument"),
       enabled: true,
       decision: options.decision ?? "allow"
-    }]
-  }))
-  const binding = await run(store.createBinding({
-    id: newClientToolBindingId(),
+    }]))
+  const grant = await run(store.createGrant({
+    id: newConnectionGrantId(),
     tenantId: defaultTenantId,
     clientId: client.id,
     alias: Alias.make("sharepoint-app"),
-    tool: ToolName.make("getDocument"),
     connection: options.connection ?? orgConnection,
   }))
-  return { client, key, policy, binding }
+  return { client, key, policy, grant }
 }
 
 const invoke = (store: GatewayStore, secret: string, alias = "sharepoint-app", tool = "getDocument") =>
@@ -101,13 +97,13 @@ const invoke = (store: GatewayStore, secret: string, alias = "sharepoint-app", t
 describe("gateway authorization", () => {
   test("authorizes an effective tool and names the connection it resolves to", async () => {
     const store = await run(makeStore())
-    const { key, binding } = await run(seed(store))
+    const { key, grant } = await run(seed(store))
 
     const result = await run(invoke(store, key.secret))
 
     expect(result.status).toBe("authorized")
     if (result.status !== "authorized") return
-    expect(result.binding.id).toBe(binding.id)
+    expect(result.grant.id).toBe(grant.id)
     expect(result.connection).toEqual(orgConnection)
     // An org-tier connection belongs to the tenant, so no human is acted for.
     expect(result.subject).toBeNull()
@@ -121,7 +117,7 @@ describe("gateway authorization", () => {
 
     expect(result.status).toBe("authorized")
     if (result.status !== "authorized") return
-    // The delegation lives in the binding. Nothing in the API key says Sebastian.
+    // The delegation lives in the grant. Nothing in the API key says Sebastian.
     expect(result.subject).toBe(SubjectId.make("sebastian"))
   })
 
@@ -179,7 +175,7 @@ describe("gateway authorization", () => {
     expect((await run(invoke(store, replacement.secret))).status).toBe("authorized")
   })
 
-  test("denies a tool outside the policy and binding intersection", async () => {
+  test("denies a tool outside the policy and grant intersection", async () => {
     const store = await run(makeStore())
     const { key } = await run(seed(store))
 
@@ -199,26 +195,22 @@ describe("gateway authorization", () => {
     expect(unknownAlias.status).toBe(unauthorizedTool.status)
   })
 
-  test("denies a revoked binding while leaving the client usable", async () => {
+  test("denies a revoked grant while leaving the client usable", async () => {
     const store = await run(makeStore())
-    const { client, key, binding } = await run(seed(store))
-    await run(store.replacePolicyConfiguration(client.policyId, {
-      integrations: [orgConnection.integration, userConnection.integration],
-      tools: [
+    const { client, key, grant } = await run(seed(store))
+    await run(store.replacePolicyTools(client.policyId, [
         { connection: orgConnection, tool: ToolName.make("getDocument"), enabled: true, decision: "allow" },
         { connection: userConnection, tool: ToolName.make("search"), enabled: true, decision: "allow" }
-      ]
-    }))
-    await run(store.createBinding({
-      id: newClientToolBindingId(),
+      ]))
+    await run(store.createGrant({
+      id: newConnectionGrantId(),
       tenantId: defaultTenantId,
       clientId: client.id,
       alias: Alias.make("gmail-work"),
-      tool: ToolName.make("search"),
       connection: userConnection,
     }))
 
-    await run(store.revokeBinding(defaultTenantId, binding.id))
+    await run(store.revokeGrant(defaultTenantId, grant.id))
 
     expect((await run(invoke(store, key.secret))).status).toBe("not-authorized")
     expect((await run(invoke(store, key.secret, "gmail-work", "search"))).status).toBe("authorized")
@@ -239,21 +231,17 @@ describe("gateway authorization", () => {
     }))
     const writerKey = generateApiKey()
     await run(store.addApiKey({ id: writerKey.id, clientId: writer.id, hash: writerKey.hash }))
-    await run(store.replacePolicyConfiguration(writer.policyId, {
-      integrations: [orgConnection.integration],
-      tools: [{
+    await run(store.replacePolicyTools(writer.policyId, [{
         connection: orgConnection,
         tool: ToolName.make("getDocument"),
         enabled: true,
         decision: "require_approval"
-      }]
-    }))
-    await run(store.createBinding({
-      id: newClientToolBindingId(),
+      }]))
+    await run(store.createGrant({
+      id: newConnectionGrantId(),
       tenantId: defaultTenantId,
       clientId: writer.id,
       alias: Alias.make("sharepoint-app"),
-      tool: ToolName.make("getDocument"),
       connection: orgConnection,
     }))
 
@@ -280,19 +268,15 @@ describe("gateway authorization", () => {
     } as const
     // The same operation on two credentials, judged separately: the shared
     // application connection is allowed outright, the personal one is not.
-    await run(store.replacePolicyConfiguration(client.policyId, {
-      integrations: [orgConnection.integration],
-      tools: [
+    await run(store.replacePolicyTools(client.policyId, [
         { connection: orgConnection, tool: ToolName.make("getDocument"), enabled: true, decision: "allow" },
         { connection: personal, tool: ToolName.make("getDocument"), enabled: true, decision: "require_approval" }
-      ]
-    }))
-    await run(store.createBinding({
-      id: newClientToolBindingId(),
+      ]))
+    await run(store.createGrant({
+      id: newConnectionGrantId(),
       tenantId: defaultTenantId,
       clientId: client.id,
       alias: Alias.make("sharepoint-me"),
-      tool: ToolName.make("getDocument"),
       connection: personal
     }))
 

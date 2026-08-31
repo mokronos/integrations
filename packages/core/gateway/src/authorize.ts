@@ -54,19 +54,23 @@ export const authorizeInvocation = Effect.fn("Authorization.authorizeInvocation"
   if (authentication.status !== "authenticated") return { status: authentication.status }
 
   const client = authentication.client
-  const binding = yield* store.findBinding(client.id, input.alias, input.tool)
+  // The intersection ADR 0001 describes, read in two halves. The grant is the
+  // client's own reach: which credential this alias names. The rule is its
+  // policy's judgement about that credential's tool. Neither implies the
+  // other — a policy may govern a connection this client was never granted,
+  // and a grant reaches nothing the policy has not enabled.
+  const grant = yield* store.findGrantByAlias(client.id, input.alias)
   const policy = yield* store.findPolicy(client.tenantId, client.policyId)
-  const policyIntegrations = policy === undefined ? [] : yield* store.listPolicyIntegrations(policy.id)
   const policyTools = policy === undefined ? [] : yield* store.listPolicyTools(policy.id)
-  const policyTool = binding === undefined
+  const policyTool = grant === undefined
     ? undefined
     : policyTools.find((candidate) =>
-      candidate.enabled && sameConnectionRef(candidate.connection, binding.connection) && candidate.tool === binding.tool)
-  const integrationMember = binding !== undefined && policyIntegrations.some((candidate) =>
-    candidate.integration === binding.connection.integration)
+      candidate.enabled
+      && candidate.tool === input.tool
+      && sameConnectionRef(candidate.connection, grant.connection))
   // One status for every missing side of the intersection: telling them apart
   // would let a caller enumerate policy or connection state.
-  if (binding === undefined || policy === undefined || !integrationMember || policyTool === undefined) {
+  if (grant === undefined || policy === undefined || policyTool === undefined) {
     return { status: "not-authorized", alias: input.alias, tool: input.tool }
   }
 
@@ -75,9 +79,9 @@ export const authorizeInvocation = Effect.fn("Authorization.authorizeInvocation"
     client,
     policy,
     policyTool,
-    binding,
-    connection: binding.connection,
-    subject: connectionSubject(binding.connection) ?? null,
+    grant,
+    connection: grant.connection,
+    subject: connectionSubject(grant.connection) ?? null,
     decision: policyTool.decision
   }
 })

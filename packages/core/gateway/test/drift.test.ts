@@ -16,7 +16,7 @@ import {
   newApprovalId,
   newAuditId,
   newClientId,
-  newClientToolBindingId,
+  newConnectionGrantId,
   newPolicyId,
   refreshIntegrationSnapshot,
   runMaintenance,
@@ -131,7 +131,7 @@ describe("catalog drift", () => {
       defaultTenantId
     ))
 
-    // Unreachable until policy and binding allow it, which is why it has to be
+    // Unreachable until policy and grant allow it, which is why it has to be
     // reported rather than left to be noticed.
     expect(second.entries).toEqual([
       {
@@ -185,15 +185,12 @@ describe("gateway maintenance", () => {
     const policy = await run(store.createPolicy({
       id: newPolicyId(), tenantId: defaultTenantId, name: "sales"
     }))
-    await run(store.replacePolicyConfiguration(policy.id, {
-      integrations: [connection.integration],
-      tools: [{
+    await run(store.replacePolicyTools(policy.id, [{
         connection,
         tool: ToolName.make("create"),
         enabled: true,
         decision: "require_approval"
-      }]
-    }))
+      }]))
     const client = await run(store.createClient({
       id: newClientId(),
       tenantId: defaultTenantId,
@@ -201,12 +198,11 @@ describe("gateway maintenance", () => {
       name: "sales",
       capabilities: ["provision_connections"]
     }))
-    const binding = await run(store.createBinding({
-      id: newClientToolBindingId(),
+    const grant = await run(store.createGrant({
+      id: newConnectionGrantId(),
       tenantId: defaultTenantId,
       clientId: client.id,
       alias: Alias.make("tickets"),
-      tool: ToolName.make("create"),
       connection,
     }))
     const stale = await run(store.createApproval({
@@ -214,9 +210,9 @@ describe("gateway maintenance", () => {
       tenantId: defaultTenantId,
       clientId: client.id,
       policyId: policy.id,
-      bindingId: binding.id,
-      alias: binding.alias,
-      tool: binding.tool,
+      grantId: grant.id,
+      alias: grant.alias,
+      tool: ToolName.make("create"),
       arguments: {},
       expiresAt: new Date(Date.now() - 1_000)
     }))
@@ -225,7 +221,7 @@ describe("gateway maintenance", () => {
       tenantId: defaultTenantId,
       clientId: client.id,
       policyId: policy.id,
-      bindingId: binding.id,
+      grantId: grant.id,
       alias: Alias.make("tickets"),
       tool: ToolName.make("close"),
       arguments: {},

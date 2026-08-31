@@ -3,7 +3,6 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { createClient as openLegacyDatabase } from "@libsql/client"
 import { PositiveInt } from "@mokronos/contracts"
 import {
   Alias,
@@ -16,7 +15,7 @@ import {
   newApprovalId,
   newAuditId,
   newClientId,
-  newClientToolBindingId,
+  newConnectionGrantId,
   newPolicyId,
   newSubjectId,
   SubjectId,
@@ -24,7 +23,6 @@ import {
 } from "../src/index.ts"
 import type { ConnectionRef, GatewayStore } from "../src/index.ts"
 import { generateLoginHandoff } from "../src/keys.ts"
-import { PasswordHash } from "../src/passwords.ts"
 
 const directories: Array<string> = []
 const stores: Array<GatewayStore> = []
@@ -61,15 +59,12 @@ const seedBinding = async (store: GatewayStore) => {
   const policy = await run(store.createPolicy({
     id: newPolicyId(), tenantId: defaultTenantId, name: `policy-${crypto.randomUUID()}`
   }))
-  await run(store.replacePolicyConfiguration(policy.id, {
-    integrations: [connection.integration],
-    tools: [{
+  await run(store.replacePolicyTools(policy.id, [{
       connection,
       tool: ToolName.make("sendEmail"),
       enabled: true,
       decision: "require_approval"
-    }]
-  }))
+    }]))
   const client = await run(store.createClient({
     id: newClientId(),
     tenantId: defaultTenantId,
@@ -77,15 +72,14 @@ const seedBinding = async (store: GatewayStore) => {
     name: `client-${crypto.randomUUID()}`,
     capabilities: ["provision_connections"]
   }))
-  const binding = await run(store.createBinding({
-    id: newClientToolBindingId(),
+  const grant = await run(store.createGrant({
+    id: newConnectionGrantId(),
     tenantId: defaultTenantId,
     clientId: client.id,
     alias: Alias.make("gmail-work"),
-    tool: ToolName.make("sendEmail"),
     connection,
   }))
-  return { client, policy, binding }
+  return { client, policy, grant }
 }
 
 describe("gateway store", () => {
@@ -95,43 +89,41 @@ describe("gateway store", () => {
     expect(await run(store.listClients(defaultTenantId))).toEqual([])
   })
 
-  test("round-trips a user-tier connection through the binding", async () => {
+  test("round-trips a user-tier connection through the grant", async () => {
     const store = await run(makeStore())
-    const { binding } = await run(seedBinding(store))
+    const { grant } = await run(seedBinding(store))
 
-    expect(binding.connection).toEqual(connection)
+    expect(grant.connection).toEqual(connection)
   })
 
-  test("keeps revoked bindings as history while freeing the alias and tool", async () => {
+  test("keeps revoked grants as history while freeing the alias and tool", async () => {
     const store = await run(makeStore())
-    const { client, binding } = await run(seedBinding(store))
+    const { client, grant } = await run(seedBinding(store))
 
-    await run(store.revokeBinding(defaultTenantId, binding.id))
+    await run(store.revokeGrant(defaultTenantId, grant.id))
     // The unique index is partial, so rebinding the same tool is allowed once
     // the previous row is revoked.
-    const rebound = await run(store.createBinding({
-      id: newClientToolBindingId(),
+    const regranted = await run(store.createGrant({
+      id: newConnectionGrantId(),
       tenantId: defaultTenantId,
       clientId: client.id,
       alias: Alias.make("gmail-work"),
-      tool: ToolName.make("sendEmail"),
       connection,
     }))
 
-    expect(rebound.connection).toEqual(connection)
-    expect(await run(store.listBindings(client.id))).toHaveLength(1)
+    expect(regranted.connection).toEqual(connection)
+    expect(await run(store.listGrants(client.id))).toHaveLength(1)
   })
 
-  test("refuses two live bindings for the same client, alias, and tool", async () => {
+  test("refuses two live grants for the same client, alias, and tool", async () => {
     const store = await run(makeStore())
     const { client } = await run(seedBinding(store))
 
-    await run(expect(run(store.createBinding({
-      id: newClientToolBindingId(),
+    await run(expect(run(store.createGrant({
+      id: newConnectionGrantId(),
       tenantId: defaultTenantId,
       clientId: client.id,
       alias: Alias.make("gmail-work"),
-      tool: ToolName.make("sendEmail"),
       connection,
     }))).rejects.toThrow())
   })
@@ -220,15 +212,15 @@ describe("gateway store", () => {
 
   test("freezes approval arguments and settles them once", async () => {
     const store = await run(makeStore())
-    const { client, policy, binding } = await run(seedBinding(store))
+    const { client, policy, grant } = await run(seedBinding(store))
     const approval = await run(store.createApproval({
       id: newApprovalId(),
       tenantId: defaultTenantId,
       clientId: client.id,
       policyId: policy.id,
-      bindingId: binding.id,
-      alias: binding.alias,
-      tool: binding.tool,
+      grantId: grant.id,
+      alias: grant.alias,
+      tool: ToolName.make("sendEmail"),
       arguments: { to: ["customer@example.com"], subject: "Follow up" },
       expiresAt: new Date(Date.now() + 60_000)
     }))
@@ -262,15 +254,15 @@ describe("gateway store", () => {
 
   test("revoking a client cancels its pending approvals", async () => {
     const store = await run(makeStore())
-    const { client, policy, binding } = await run(seedBinding(store))
+    const { client, policy, grant } = await run(seedBinding(store))
     const approval = await run(store.createApproval({
       id: newApprovalId(),
       tenantId: defaultTenantId,
       clientId: client.id,
       policyId: policy.id,
-      bindingId: binding.id,
-      alias: binding.alias,
-      tool: binding.tool,
+      grantId: grant.id,
+      alias: grant.alias,
+      tool: ToolName.make("sendEmail"),
       arguments: {},
       expiresAt: new Date(Date.now() + 60_000)
     }))
@@ -285,14 +277,14 @@ describe("gateway store", () => {
 
   test("keeps the audit record after its arguments expire", async () => {
     const store = await run(makeStore())
-    const { client, binding } = await run(seedBinding(store))
+    const { client, grant } = await run(seedBinding(store))
     const id = newAuditId()
     await run(store.recordAudit({
       tenantId: defaultTenantId,
       id,
       clientId: client.id,
-      alias: binding.alias,
-      tool: binding.tool,
+      alias: grant.alias,
+      tool: ToolName.make("sendEmail"),
       connection,
       decision: "allow",
       outcome: "succeeded",
@@ -381,12 +373,11 @@ describe("gateway store", () => {
     expect((await run(store.findClientById(defaultTenantId, mine.id)))?.revokedAt).toBeNull()
 
     // Bindings, approvals, audit, and snapshots are partitioned the same way.
-    const binding = await run(store.createBinding({
-      id: newClientToolBindingId(),
+    const grant = await run(store.createGrant({
+      id: newConnectionGrantId(),
       tenantId: defaultTenantId,
       clientId: mine.id,
       alias: Alias.make("gmail-work"),
-      tool: ToolName.make("sendEmail"),
       connection,
     }))
     const approval = await run(store.createApproval({
@@ -394,9 +385,9 @@ describe("gateway store", () => {
       tenantId: defaultTenantId,
       clientId: mine.id,
       policyId: mine.policyId,
-      bindingId: binding.id,
-      alias: binding.alias,
-      tool: binding.tool,
+      grantId: grant.id,
+      alias: grant.alias,
+      tool: ToolName.make("sendEmail"),
       arguments: {},
       expiresAt: new Date(Date.now() + 60_000)
     }))
@@ -431,84 +422,4 @@ describe("gateway store", () => {
     expect(await run(store.countSubjects(other.id))).toBe(1)
   })
 
-  test("migrates a pre-tenancy database into the default tenant", async () => {
-    const directory = await run(mkdtemp(path.join(tmpdir(), "wf-gateway-migrate-")))
-    directories.push(directory)
-    const databasePath = path.join(directory, "gateway.sqlite")
-
-    // Build the pre-tenancy shape by hand: clients with no tenant column.
-    const legacy = openLegacyDatabase({ url: `file:${databasePath}` })
-    await run(legacy.execute(`CREATE TABLE gateway_client (
-       id TEXT PRIMARY KEY, name TEXT NOT NULL, capabilities TEXT NOT NULL,
-       created_at INTEGER NOT NULL, revoked_at INTEGER)`))
-    await run(legacy.execute(`CREATE UNIQUE INDEX gateway_client_name ON gateway_client (name)`))
-    await run(legacy.execute(
-      `INSERT INTO gateway_client (id, name, capabilities, created_at, revoked_at)
-       VALUES ('c1', 'legacy', '["provision_connections","administer_gateway"]', 0, NULL)`
-    ))
-    await run(legacy.close())
-
-    const store = await run(createGatewayStore(databasePath))
-    stores.push(store)
-    const migrated = await run(store.findClientByName(defaultTenantId, "legacy"))
-    expect(migrated?.tenantId).toBe(defaultTenantId)
-    expect(migrated?.capabilities).toEqual([
-      "provision_connections",
-      "administer_gateway"
-    ])
-    // The old global name index is gone; per-tenant uniqueness replaced it.
-    await run(expect(run(store.createClient({
-      id: newClientId(),
-      tenantId: defaultTenantId,
-      policyId: await tenantPolicyId(store),
-      name: "legacy",
-      capabilities: ["provision_connections"]
-    }))).rejects.toThrow())
-    const other = await run(store.createTenant({ name: "Other" }))
-    await run(expect(run(store.createClient({
-      id: newClientId(),
-      tenantId: other.id,
-      policyId: await tenantPolicyId(store, other.id),
-      name: "legacy",
-      capabilities: ["provision_connections"]
-    }))).resolves.toBeDefined())
-  })
-
-  test("migrates password-required logins without inventing OAuth passwords", async () => {
-    const directory = await run(mkdtemp(path.join(tmpdir(), "wf-gateway-login-migrate-")))
-    directories.push(directory)
-    const databasePath = path.join(directory, "gateway.sqlite")
-    const legacy = openLegacyDatabase({ url: `file:${databasePath}` })
-    await run(legacy.execute(`CREATE TABLE gateway_tenant (
-      id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL)`))
-    await run(legacy.execute(`CREATE TABLE gateway_subject (
-      id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, created_at INTEGER NOT NULL)`))
-    await run(legacy.execute(`CREATE TABLE gateway_login (
-      subject_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, email TEXT NOT NULL UNIQUE,
-      password_hash TEXT NOT NULL, created_at INTEGER NOT NULL)`))
-    await run(legacy.execute(
-      "INSERT INTO gateway_tenant VALUES ('default', 'Default', 0)"
-    ))
-    await run(legacy.execute(
-      "INSERT INTO gateway_subject VALUES ('legacy-subject', 'default', 0)"
-    ))
-    await run(legacy.execute(
-      "INSERT INTO gateway_login VALUES ('legacy-subject', 'default', 'legacy@example.com', 'scrypt$c2FsdA==$aGFzaA==', 0)"
-    ))
-    await run(legacy.close())
-
-    const store = await run(createGatewayStore(databasePath))
-    stores.push(store)
-    expect((await run(store.findLoginByEmail("legacy@example.com")))?.passwordHash).toBe(
-      PasswordHash.make("scrypt$c2FsdA==$aGFzaA==")
-    )
-    const tenant = await run(store.createTenant({ name: "OAuth tenant" }))
-    const subject = await run(store.createSubject({ id: newSubjectId(), tenantId: tenant.id }))
-    await run(expect(run(store.createLogin({
-      subjectId: subject.id,
-      tenantId: tenant.id,
-      email: "passwordless@example.com",
-      passwordHash: null
-    }))).resolves.toBeDefined())
-  })
 })

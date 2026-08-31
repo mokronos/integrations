@@ -1,0 +1,3 @@
+# Clients hold connection grants with stable aliases
+
+A client's reach is a per-client grant of one connection carrying the alias it calls that connection by, allocated once and never recomputed; a policy holds per-connection tool rules and no coarser membership, and authorization is the intersection — restoring ADR 0001 at connection grain after bindings were briefly derived from the policy. We rejected deriving the alias from the connection set, because a second account for the same integration then renames the first and breaks every caller; and we rejected seeding rules straight into a shared policy when a grant needs them, forking the policy for that client instead, because widening a shared policy changes what every other client on it could reach.
