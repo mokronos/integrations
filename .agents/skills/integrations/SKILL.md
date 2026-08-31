@@ -15,11 +15,22 @@ pipe into `jq`.
 
 ## Quickstart
 
+This is an example of a typical workflow (in this case for Linear).
+Always check if the integration is already connected:
+
+```bash
+i integrations # list all integrations
+```
+
+If it isn't connected, connect it:
 ```bash
 i search linear                              # 1. find the integration's discovery URL
 i discover https://mcp.linear.app/mcp        # 2. register it; returns slug, tools, auth templates
 i connect mcp_linear_app                     # 3. authorize (OAuth opens a browser)
+```
 
+Then call whatever tool you want:
+```bash
 i tools mcp_linear_app --filter issue        # browse tool names
 i schema mcp_linear_app list_issues          # read one tool's input/output schema
                                              # and its canonical tools.… address
