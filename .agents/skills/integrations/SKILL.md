@@ -1,6 +1,6 @@
 ---
 name: integrations
-description: Use the `i` (integrations) CLI to find, connect, and call external APIs and MCP servers through the local gateway. Use when you need a tool from an outside service (Linear, GitHub, Gmail, Slack, any OpenAPI/MCP endpoint) and don't already have a working call for it.
+description: Use the `i` (integrations) CLI to find, connect, and call external APIs and MCP servers. Use when you need a tool from an outside service (Linear, GitHub, Gmail, Slack, any OpenAPI/MCP endpoint) and don't already have a working call for it.
 ---
 
 # integrations (`i`)
