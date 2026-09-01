@@ -54,7 +54,20 @@ export const useConnections = () =>
   useQuery({ queryKey: keys.connections, queryFn: gateway.listConnections })
 
 export const useClients = () =>
-  useQuery({ queryKey: keys.clients, queryFn: gateway.listClients })
+  useQuery({
+    queryKey: keys.clients,
+    queryFn: gateway.listClients,
+    select: (response) => response.clients
+  })
+
+/** The endpoint an MCP client connects to, as the gateway reports it. Shares
+ *  the clients query because it is the same fact about the same list. */
+export const useMcpUrl = () =>
+  useQuery({
+    queryKey: keys.clients,
+    queryFn: gateway.listClients,
+    select: (response) => response.mcpUrl
+  })
 
 export const useOverview = () =>
   useQuery({ queryKey: keys.overview, queryFn: gateway.fetchOverview, refetchInterval: 5_000 })

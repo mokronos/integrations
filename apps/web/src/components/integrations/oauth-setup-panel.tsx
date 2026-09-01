@@ -1,7 +1,6 @@
-import { Copy, ExternalLink } from "lucide-react"
-import { toast } from "sonner"
+import { ExternalLink } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
+import { CopyField } from "@/components/ui/copy-field"
 import {
   type AuthMethod
 } from "@/lib/schemas"
@@ -91,23 +90,11 @@ export function OAuthSetupPanel({
         This provider does not support dynamic client registration, so a redirect
         URI must be registered there first — exactly as written:
       </p>
-      <div className="flex items-center gap-2">
-        <code className="min-w-0 flex-1 truncate rounded border bg-background px-2 py-1 font-mono text-xs">
-          {callbackUrl ?? "unavailable — start the gateway with a public URL or on loopback"}
-        </code>
-        {callbackUrl !== undefined && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              void navigator.clipboard.writeText(callbackUrl)
-              toast.success("Copied")
-            }}
-          >
-            <Copy className="size-3.5" />
-          </Button>
-        )}
-      </div>
+      {callbackUrl === undefined
+        ? <p className="text-muted-foreground rounded border bg-background px-2 py-1 text-xs">
+          unavailable — start the gateway with a public URL or on loopback
+        </p>
+        : <CopyField value={callbackUrl} label="Redirect URI" />}
       <ol className="text-muted-foreground list-decimal space-y-0.5 pl-5 text-xs">
         {providerSetupSteps[provider].map((step) => <li key={step}>{step}</li>)}
       </ol>

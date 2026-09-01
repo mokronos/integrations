@@ -1,4 +1,4 @@
-import { Copy, KeyRound } from "lucide-react"
+import { Copy, KeyRound, Plug } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 
@@ -30,8 +30,10 @@ import {
 } from "@/components/ui/table"
 import { when } from "@/lib/format"
 import * as gateway from "@/lib/gateway"
+import { mcpConfiguration } from "@/lib/mcp"
 import {
   useInvalidate,
+  useMcpUrl,
   useMutation,
   useQuery
 } from "@/lib/queries"
@@ -69,8 +71,13 @@ function KeyRow({ keySummary, clientId }: {
   )
 }
 
-export function ClientKeys({ clientId, disabled }: { readonly clientId: string; readonly disabled: boolean }) {
+export function ClientKeys({ clientId, clientName, disabled }: {
+  readonly clientId: string
+  readonly clientName: string
+  readonly disabled: boolean
+}) {
   const invalidate = useInvalidate()
+  const mcpUrl = useMcpUrl().data
   const [secret, setSecret] = useState<string | undefined>()
   const keysQuery = useQuery({
     queryKey: ["keys", clientId],
@@ -111,8 +118,27 @@ export function ClientKeys({ clientId, disabled }: { readonly clientId: string; 
             <DialogDescription>The gateway stores only its hash. The plaintext cannot be shown again.</DialogDescription>
           </DialogHeader>
           <code className="bg-muted block break-all rounded-md p-3 font-mono text-sm">{secret}</code>
+          {/* The only moment the plaintext exists is also the only moment a
+              ready-to-paste MCP configuration can carry it, so it is offered
+              here rather than left to be assembled by hand afterwards. */}
+          {mcpUrl === undefined ? null : (
+            <p className="text-muted-foreground text-xs">
+              Or take it as MCP client configuration, with the key already in it.
+            </p>
+          )}
           <DialogFooter>
-            <Button onClick={() => { void navigator.clipboard.writeText(secret ?? ""); toast.success("Copied") }}>
+            {mcpUrl === undefined ? null : (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  void navigator.clipboard.writeText(mcpConfiguration(clientName, mcpUrl, secret ?? ""))
+                  toast.success("MCP configuration copied")
+                }}
+              >
+                <Plug className="size-4" /> Copy MCP configuration
+              </Button>
+            )}
+            <Button onClick={() => { void navigator.clipboard.writeText(secret ?? ""); toast.success("Key copied") }}>
               <Copy className="size-4" /> Copy key
             </Button>
           </DialogFooter>

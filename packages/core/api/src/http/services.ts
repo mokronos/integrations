@@ -59,6 +59,11 @@ export interface GatewaySettings {
   /** Where a provider must redirect after the human approves, so clients can
    *  show it before a flow starts. */
   readonly oauthCallbackUrl?: () => string | undefined
+  /** The Streamable HTTP endpoint an MCP client connects to. The operator has
+   *  to hand this to an agent, and only the gateway knows the origin it is
+   *  actually reachable at, so it is answered here rather than guessed from
+   *  wherever a browser happens to have loaded the control plane. */
+  readonly mcpUrl?: () => string | undefined
   /** Overrides the public registry for an isolated deployment or acceptance test. */
   readonly registryUrl?: string
 }

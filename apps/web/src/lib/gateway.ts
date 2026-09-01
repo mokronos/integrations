@@ -173,8 +173,13 @@ export const removeConnection = async (input: {
 
 // --- clients, keys, policies ------------------------------------------------
 
-export const listClients = async () =>
-  decodeClients(await request("GET", "/v1/clients")).clients
+export const listClients = async () => {
+  const response = decodeClients(await request("GET", "/v1/clients"))
+  return {
+    clients: response.clients,
+    mcpUrl: response.mcpUrl ?? undefined
+  }
+}
 
 export const fetchOverview = async () =>
   decodeOverview(await request("GET", "/v1/overview"))

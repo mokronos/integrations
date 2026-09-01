@@ -167,6 +167,7 @@ const setup = async (options: {
     readonly defaultDecision?: "allow" | "require_approval"
   }>
   readonly dashboardUrl?: string
+  readonly mcpUrl?: string
 } = {}) => {
   const directory = await run(mkdtemp(path.join(tmpdir(), "wf-gateway-http-")))
   directories.push(directory)
@@ -216,7 +217,10 @@ const setup = async (options: {
     },
     ...whenPresent("dashboardUrl", options.dashboardUrl === undefined
       ? undefined
-      : () => options.dashboardUrl)
+      : () => options.dashboardUrl),
+    ...whenPresent("mcpUrl", options.mcpUrl === undefined
+      ? undefined
+      : () => options.mcpUrl)
   })
 
   const call = async (
@@ -869,6 +873,29 @@ describe("provisioning surface", () => {
     expect(revoked.status).toBe(200)
     const after = await run(store.listApiKeys(client.id))
     expect(after[0]?.revokedAt).not.toBeNull()
+  })
+
+  test("names the MCP endpoint alongside the clients that connect to it", async () => {
+    const { call } = await run(setup({
+      capabilities: ["provision_connections", "administer_gateway"],
+      mcpUrl: "https://gateway.example/mcp"
+    }))
+
+    const response = await run(call("GET", "/v1/clients"))
+
+    expect(response.status).toBe(200)
+    expect(response.body["mcpUrl"]).toBe("https://gateway.example/mcp")
+  })
+
+  test("omits the MCP endpoint when the gateway has no public origin to name", async () => {
+    const { call } = await run(setup({ capabilities: ["provision_connections", "administer_gateway"] }))
+
+    const response = await run(call("GET", "/v1/clients"))
+
+    expect(response.status).toBe(200)
+    // Absent rather than null or a guess: the dashboard says so instead of
+    // handing an operator an address that reaches nothing.
+    expect(response.body["mcpUrl"]).toBeUndefined()
   })
 
   test("reads another client's effective surface, so codegen does not need its key", async () => {

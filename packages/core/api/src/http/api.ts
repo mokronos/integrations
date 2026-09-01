@@ -481,7 +481,13 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
     })
   }).annotate(RequiredAccess, "administrative"))
   .add(HttpApiEndpoint.get("listClients", "/v1/clients", {
-    success: Schema.Struct({ clients: Schema.Array(Client) })
+    // Every client in the list reaches the gateway at the same MCP endpoint,
+    // and it is absent rather than invented when this deployment has no public
+    // origin to name.
+    success: Schema.Struct({
+      clients: Schema.Array(Client),
+      mcpUrl: Schema.optional(Schema.NullOr(Schema.String))
+    })
   }).annotate(RequiredAccess, "administrative"))
   .add(HttpApiEndpoint.post("createClient", "/v1/clients", {
     payload: CreateClientBody,

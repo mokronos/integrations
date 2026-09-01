@@ -72,7 +72,8 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
         Effect.gen(function*() {
           const tenantId = yield* requireTenant
           return {
-            clients: yield* orDieStorage(store.listClients(tenantId))
+            clients: yield* orDieStorage(store.listClients(tenantId)),
+            ...whenPresentMap("mcpUrl", config.mcpUrl?.(), (url) => url)
           }
         }))
       .handle("createClient", (request) =>

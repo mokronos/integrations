@@ -274,6 +274,10 @@ const buildCore = async (
           ? undefined
           : `${origin.replace(/\/+$/, "")}/v1/oauth/callback`
       },
+      mcpUrl: () => {
+        const origin = resolvePublicUrl()
+        return origin === undefined ? undefined : `${origin.replace(/\/+$/, "")}/mcp`
+      },
       dashboardUrl: resolvePublicUrl,
       rateLimiter,
       addressRateLimiter,

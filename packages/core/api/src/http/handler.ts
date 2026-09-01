@@ -161,6 +161,7 @@ export const gatewayAppLayer = (options: GatewayHandlerOptions) => {
       retentionDays: options.retentionDays,
       ...optional("dashboardUrl", options.dashboardUrl),
       ...optional("oauthCallbackUrl", options.oauthCallbackUrl),
+      ...optional("mcpUrl", options.mcpUrl),
       ...optional("registryUrl", options.registryUrl)
     }),
     options.sessions === undefined

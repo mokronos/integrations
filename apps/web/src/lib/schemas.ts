@@ -83,7 +83,8 @@ export const ConnectionsResponse = Schema.Struct({
 })
 
 export const ClientsResponse = Schema.Struct({
-  clients: Schema.Array(Client)
+  clients: Schema.Array(Client),
+  mcpUrl: Schema.optional(Schema.NullOr(Schema.String))
 })
 
 export const AccessProfileSummary = Schema.Struct({
