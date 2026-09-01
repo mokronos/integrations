@@ -12,6 +12,7 @@
     "paths": {
       "@mokronos/observability": ["../../packages/observability/src/index.ts"],
       "@mokronos/contracts": ["../../packages/contracts/src/index.ts"],
+      "@mokronos/core-integrations": ["../../packages/core/integrations/src/index.ts"],
       "@mokronos/integrations": ["../../packages/integrations/src/index.ts"],
       "@mokronos/gateway-core": ["../../packages/core/gateway/src/index.ts"],
       "@mokronos/gateway-api": ["../../packages/core/api/src/index.ts"],
