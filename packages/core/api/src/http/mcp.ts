@@ -109,7 +109,7 @@ const serverFor = async (
     server.registerTool(
       toolName(tool.alias, tool.tool),
       {
-        title: `${tool.integration} / ${tool.connection} / ${tool.tool}`,
+        title: `${tool.connection.integration} / ${tool.connection.name} / ${tool.tool}`,
         ...whenPresent("description", tool.description),
         inputSchema: fromJsonSchema<Record<string, Json>>(
           inputSchema

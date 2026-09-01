@@ -120,8 +120,7 @@ export const ApprovalPolicyToolsReplaced = Schema.Struct({ approvalPolicy: Appro
 export const EffectiveTool = Schema.Struct({
   alias: Alias,
   tool: Schema.String,
-  integration: Schema.String,
-  connection: Schema.String,
+  connection: ConnectionRefSchema,
   decision: PolicyDecisionSchema,
   inputSchema: Schema.optional(Schema.Json),
   outputSchema: Schema.optional(Schema.Json)

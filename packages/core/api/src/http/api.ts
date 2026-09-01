@@ -167,8 +167,7 @@ export const DeleteAccountBody = Schema.Struct({
 const EffectiveTool = Schema.Struct({
   alias: Alias,
   tool: Schema.String,
-  integration: Schema.String,
-  connection: Schema.String,
+  connection: ConnectionRef,
   decision: PolicyDecision,
   description: Schema.optional(Schema.String),
   inputSchema: Schema.optional(Json),

@@ -39,8 +39,9 @@
   "dependencies": {
     "@effect/platform-bun": "catalog:",
     "@mokronos/contracts": "workspace:*",
-    "@mokronos/integrations-local": "workspace:*",
+    "@mokronos/gateway-core": "workspace:*",
     "@mokronos/integrations-client": "workspace:*",
+    "@mokronos/integrations-local": "workspace:*",
     "@mokronos/observability": "workspace:*",
     "effect": "catalog:"
   }

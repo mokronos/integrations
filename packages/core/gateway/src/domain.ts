@@ -175,16 +175,44 @@ export const connectionRefKey = (connection: ConnectionRef): string =>
 export const sameConnectionRef = (left: ConnectionRef, right: ConnectionRef): boolean =>
   connectionRefKey(left) === connectionRefKey(right)
 
-/** The wire protocol needs a compact connection name. Including the connection
- * name makes separate accounts
- * stable and unambiguous without allocation state. */
-export const aliasForConnection = (connection: ConnectionRef): Alias => {
-  const normalized = `${connection.integration}-${connection.name}`
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "")
-  return Alias.make(/^[a-z]/.test(normalized) ? normalized : `c-${normalized}`)
-}
+const utf8 = new TextEncoder()
+
+/** One part of an alias, in the only character class an alias may contain.
+ *
+ *  `[a-z0-9]` passes through; every other byte becomes `-` and its two hex
+ *  digits. Two properties follow, and the join below depends on both: the
+ *  encoding is reversible, so two different parts can never encode alike, and
+ *  an encoded part can never contain `--`, because a `-` is always followed by
+ *  a hex digit. UTF-8 bytes rather than code points keep the escape a fixed two
+ *  characters wide for a subject identifier outside ASCII. */
+const aliasPart = (value: string): string =>
+  Array.from(utf8.encode(value), (byte) =>
+    byte >= 0x61 && byte <= 0x7a || byte >= 0x30 && byte <= 0x39
+      ? String.fromCharCode(byte)
+      : `-${byte.toString(16).padStart(2, "0")}`).join("")
+
+/** The wire protocol needs a compact name for a connection: a tool is called as
+ *  `alias.tool`, and neither `/` nor `:` survives that spelling.
+ *
+ *  Every field of the reference is in here, joined by `--`, because the alias
+ *  is the whole identity or it is a collision waiting to happen: dropping the
+ *  owner tier and subject would file the tenant's Linear connection and one
+ *  person's own under the same name, and `authorizeInvocation` resolves a call
+ *  by finding the first profile tool whose alias matches. Since no encoded part
+ *  contains `--`, the join is unambiguous and the mapping from connection to
+ *  alias is injective — distinct connections cannot share an alias.
+ *
+ *  The common case stays readable: `org--linear--work`, and a user-tier
+ *  connection reads `user--sebastian--linear--work`. */
+export const aliasForConnection = (connection: ConnectionRef): Alias =>
+  Alias.make([
+    // The tier is already `org` or `user`, which is also what starts the alias
+    // with a letter as its pattern requires.
+    connection.owner,
+    ...connection.owner === "user" ? [aliasPart(connection.subject)] : [],
+    aliasPart(connection.integration),
+    aliasPart(connection.name)
+  ].join("--"))
 
 // --- clients and keys -------------------------------------------------------
 

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { Schema } from "effect"
 import { serveGateway } from "@mokronos/integrations-local"
 import type { RunningGateway } from "@mokronos/integrations-local"
+import { aliasForConnection, ConnectionName, IntegrationSlug } from "@mokronos/gateway-core"
 
 const repoRoot = path.resolve(import.meta.dir, "../../..")
 const agentCli = path.join(repoRoot, "apps", "cli", "src", "agent.ts")
@@ -18,6 +19,16 @@ const gateways: Array<RunningGateway> = []
  *  command is still free to report more than the test names. */
 const parseOutput = <A>(schema: Schema.Codec<A>, text: string): A =>
   Schema.decodeUnknownSync(schema)(JSON.parse(text))
+
+/** The alias the gateway will derive for a connection the CLI just made. Asked
+ *  of the gateway's own function rather than spelled out here, so this test
+ *  exercises the wire name instead of restating how it is built. */
+const orgAlias = (integration: string, name: string): string =>
+  aliasForConnection({
+    owner: "org",
+    integration: IntegrationSlug.make(integration),
+    name: ConnectionName.make(name)
+  })
 
 const ApiKeyConfig = Schema.Struct({ apiKey: Schema.String })
 const IdOutput = Schema.Struct({ id: Schema.String })
@@ -424,7 +435,7 @@ describe("integrations CLI acceptance", () => {
 
       const executed = await run(agentCli, [
         "execute",
-        `${slug}-${connectionName}`.replace(/[^a-z0-9]+/g, "-"),
+        orgAlias(slug, connectionName),
         "tickets.create",
         JSON.stringify({ body: { title: "Connected" } })
       ], { ...gateway.environment, INTEGRATIONS_API_KEY: key.secret })
@@ -502,7 +513,7 @@ describe("integrations CLI acceptance", () => {
 
     const executed = await clientCli([
       "execute",
-      `${slug}-${connectionName}`.replace(/[^a-z0-9]+/g, "-"),
+      orgAlias(slug, connectionName),
       "tickets.create",
       JSON.stringify({ body: { title: "Delegated" } })
     ], sandbox)
@@ -513,7 +524,7 @@ describe("integrations CLI acceptance", () => {
     // A tool omitted from the assigned policy is refused on the same binding.
     const refused = await clientCli([
       "execute",
-      `${slug}-${connectionName}`.replace(/[^a-z0-9]+/g, "-"),
+      orgAlias(slug, connectionName),
       "tickets.delete",
       "{}"
     ], sandbox)

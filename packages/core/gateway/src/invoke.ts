@@ -292,11 +292,11 @@ export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(funct
 export type EffectiveTool = {
   readonly alias: Alias
   readonly tool: ToolName
-  readonly integration: string
-  /** The connection the alias resolves to. Two aliases can carry the same
-   * vendor tool against different credentials, so the name is part of the
-   * answer rather than an implementation detail. */
-  readonly connection: string
+  /** The connection the alias resolves to, whole. Two aliases can carry the
+   * same vendor tool against different credentials, and the owner tier and
+   * subject are what tell those apart, so the reference travels rather than a
+   * name that would read the same for both. */
+  readonly connection: ConnectionRef
   readonly decision: PolicyDecision
   readonly description?: string
   readonly inputSchema?: Json
@@ -340,8 +340,7 @@ export const listEffectiveTools = Effect.fn("Invocation.listEffectiveTools")(fun
   const base = reachable.map(({ profileTool, policyTool }) => ({
     alias: aliasForConnection(profileTool.connection),
     tool: profileTool.tool,
-    integration: profileTool.connection.integration,
-    connection: profileTool.connection.name,
+    connection: profileTool.connection,
     decision: policyTool.decision
   }))
   if (options.schemas !== true || options.integrations === undefined) return base

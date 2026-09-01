@@ -51,7 +51,7 @@ const gateway = createGatewayClient({
 })
 
 const outcome = await gateway.execute({
-  alias: "github",
+  alias: "org--github--work",
   tool: "create_issue",
   arguments: { title: "Example" }
 })

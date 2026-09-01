@@ -77,4 +77,6 @@ without importing gateway or integrations implementation.
 MCP clients connect to the Streamable HTTP endpoint at `/mcp` and send their
 gateway API key as a bearer token. The server exposes only that client's
 effective tools. Tool names use `<connection-alias>__<tool-name>` so tools from
-multiple enabled connections remain distinct.
+multiple enabled connections remain distinct. A connection alias spells out the
+whole reference — `org--github--work`, or `user--sebastian--github--work` for a
+connection held on one person's behalf — so no two connections can share one.

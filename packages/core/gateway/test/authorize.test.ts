@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import {
   Alias,
+  aliasForConnection,
   authorizeClientCapability,
   authorizeInvocation,
   ConnectionName,
@@ -89,7 +90,7 @@ const seed = async (store: GatewayStore, options: {
   return { client, key, accessProfile, approvalPolicy }
 }
 
-const invoke = (store: GatewayStore, secret: string, alias = "sharepoint-default", tool = "getDocument") =>
+const invoke = (store: GatewayStore, secret: string, alias = "org--sharepoint--default", tool = "getDocument") =>
   authorizeInvocation(store, {
     secret,
     alias: Alias.make(alias),
@@ -115,7 +116,7 @@ describe("gateway authorization", () => {
     const store = await run(makeStore())
     const { key } = await run(seed(store, { connection: userConnection }))
 
-    const result = await run(invoke(store, key.secret, "gmail-work"))
+    const result = await run(invoke(store, key.secret, "user--sebastian--gmail--work"))
 
     expect(result.status).toBe("authorized")
     if (result.status !== "authorized") return
@@ -181,7 +182,7 @@ describe("gateway authorization", () => {
     const store = await run(makeStore())
     const { key } = await run(seed(store))
 
-    const result = await run(invoke(store, key.secret, "sharepoint-default", "deleteDocument"))
+    const result = await run(invoke(store, key.secret, "org--sharepoint--default", "deleteDocument"))
 
     expect(result.status).toBe("not-authorized")
   })
@@ -191,7 +192,7 @@ describe("gateway authorization", () => {
     const { key } = await run(seed(store))
 
     const unknownAlias = await run(invoke(store, key.secret, "nothing-here", "getDocument"))
-    const unauthorizedTool = await run(invoke(store, key.secret, "sharepoint-default", "deleteDocument"))
+    const unauthorizedTool = await run(invoke(store, key.secret, "org--sharepoint--default", "deleteDocument"))
 
     // Telling these apart would let a caller enumerate what else is connected.
     expect(unknownAlias.status).toBe(unauthorizedTool.status)
@@ -214,7 +215,7 @@ describe("gateway authorization", () => {
     ]))
 
     expect((await run(invoke(store, key.secret))).status).toBe("not-authorized")
-    expect((await run(invoke(store, key.secret, "gmail-work", "search"))).status).toBe("authorized")
+    expect((await run(invoke(store, key.secret, "user--sebastian--gmail--work", "search"))).status).toBe("authorized")
   })
 
   test("two clients hold different policies over the same connection", async () => {
@@ -278,8 +279,8 @@ describe("gateway authorization", () => {
       { connection: personal, tool: ToolName.make("getDocument"), decision: "require_approval" }
     ]))
 
-    const application = await run(invoke(store, key.secret, "sharepoint-default"))
-    const delegated = await run(invoke(store, key.secret, "sharepoint-personal"))
+    const application = await run(invoke(store, key.secret, "org--sharepoint--default"))
+    const delegated = await run(invoke(store, key.secret, "user--sebastian--sharepoint--personal"))
 
     expect(application.status).toBe("authorized")
     expect(delegated.status).toBe("authorized")
@@ -288,6 +289,44 @@ describe("gateway authorization", () => {
     expect(delegated.subject).toBe(SubjectId.make("sebastian"))
     expect(application.decision).toBe("allow")
     expect(delegated.decision).toBe("require_approval")
+  })
+
+  test("the tenant's connection and one person's own never share an alias", async () => {
+    const store = await run(makeStore())
+    const { client, key } = await run(seed(store))
+    // Same integration, same connection name, different owner: before the owner
+    // tier and subject were part of the alias these two collided, and a call
+    // meant for one credential resolved to whichever route was stored first.
+    const shared = {
+      owner: "org",
+      integration: IntegrationSlug.make("gmail"),
+      name: ConnectionName.make("work")
+    } as const
+    expect(aliasForConnection(shared)).not.toBe(aliasForConnection(userConnection))
+
+    const accessProfile = await run(store.findAccessProfile(defaultTenantId, client.accessProfileId))
+    const approvalPolicy = await run(store.findApprovalPolicy(defaultTenantId, client.approvalPolicyId))
+    if (accessProfile === undefined || approvalPolicy === undefined) throw new Error("missing configuration")
+    await run(store.replaceAccessProfileTools(accessProfile.id, [
+      { connection: shared, tool: ToolName.make("sendEmail") },
+      { connection: userConnection, tool: ToolName.make("sendEmail") }
+    ]))
+    await run(store.replaceApprovalPolicyTools(approvalPolicy.id, [
+      { connection: shared, tool: ToolName.make("sendEmail"), decision: "allow" },
+      { connection: userConnection, tool: ToolName.make("sendEmail"), decision: "allow" }
+    ]))
+
+    const tenant = await run(invoke(store, key.secret, aliasForConnection(shared), "sendEmail"))
+    const personal = await run(invoke(store, key.secret, aliasForConnection(userConnection), "sendEmail"))
+
+    expect(tenant.status).toBe("authorized")
+    expect(personal.status).toBe("authorized")
+    if (tenant.status !== "authorized" || personal.status !== "authorized") return
+    // Each alias reaches its own credential rather than both landing on one.
+    expect(tenant.connection).toEqual(shared)
+    expect(tenant.subject).toBeNull()
+    expect(personal.connection).toEqual(userConnection)
+    expect(personal.subject).toBe(SubjectId.make("sebastian"))
   })
 
   test("records when a key was last used", async () => {
