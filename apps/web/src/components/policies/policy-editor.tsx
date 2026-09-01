@@ -1,3 +1,4 @@
+import { ChevronRight, Search } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 import { ConnectionName, IntegrationSlug } from "@mokronos/contracts"
@@ -6,10 +7,12 @@ import { QueryError } from "@/components/page"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import { Item, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item"
 import { Switch } from "@/components/ui/switch"
 import * as gateway from "@/lib/gateway"
-import { connectionLabel } from "@/lib/format"
+import { connectionLabel, pluralise } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import { keys, useIntegrations, useInvalidate, useMutation } from "@/lib/queries"
 import type { AccessProfileTool, ApprovalPolicyTool, ConnectionRef, PolicyDecision } from "@/lib/schemas"
 
@@ -73,14 +76,76 @@ export function ApprovalPolicyEditor({ id, storedTools, assignedClientCount }: {
   }} save={() => save.mutate()} saving={save.isPending} error={integrations.error} />
 }
 
+/** Whether a tool answers what was typed. Connection, name, and description all
+ *  count, because "which of these touches mail" and "what was that tool called"
+ *  are the same box to the person typing. */
+const matches = (tool: RouteTool, query: string): boolean => {
+  const needle = query.trim().toLowerCase()
+  if (needle.length === 0) return true
+  return `${connectionLabel(tool.connection)} ${tool.name} ${tool.description}`
+    .toLowerCase()
+    .includes(needle)
+}
+
 function ToolEditor({ title, description, catalog, assignedClientCount, render, renderGroup, save, saving, error }: { readonly title: string; readonly description: string; readonly catalog: ReadonlyArray<RouteTool>; readonly assignedClientCount: number; readonly render: (tool: RouteTool) => React.ReactNode; readonly renderGroup?: (tools: ReadonlyArray<RouteTool>) => React.ReactNode; readonly save: () => void; readonly saving: boolean; readonly error: Error | null }) {
-  const groups = Map.groupBy(catalog, (tool) => connectionLabel(tool.connection))
+  const [query, setQuery] = useState("")
+  // Closed until asked about: a tenant with a dozen connections is hundreds of
+  // rows, and the question is nearly always about one of them.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
+  const searching = query.trim().length > 0
+  const groups = [...Map.groupBy(catalog, (tool) => connectionLabel(tool.connection))]
+    .map(([connection, tools]) => ({ connection, tools: tools.filter((tool) => matches(tool, query)) }))
+    // A connection with nothing matching is not a collapsed connection, it is
+    // one that has no answer to the question.
+    .filter((group) => group.tools.length > 0)
+
   return <div className="space-y-4">
     {assignedClientCount > 0 ? <Alert><AlertDescription>Saving affects all {assignedClientCount} assigned client{assignedClientCount === 1 ? "" : "s"} immediately.</AlertDescription></Alert> : null}
     <QueryError error={error} />
-    <Card><CardHeader><CardTitle>{title}</CardTitle><p className="text-muted-foreground text-sm">{description}</p></CardHeader><CardContent className="space-y-5">
-      {[...groups].map(([connection, tools]) => <section key={connection} className="space-y-2"><h3 className="flex items-center justify-between gap-3 border-b pb-2 font-mono text-sm font-medium"><span className="min-w-0 truncate">{connection}</span>{renderGroup?.(tools)}</h3>{tools.map((tool) => <Item key={keyOf(tool.connection, tool.name)} asChild interactive variant="plain" size="sm"><label><ItemContent><ItemTitle className="font-mono font-normal">{tool.name}</ItemTitle>{tool.description.length === 0 ? null : <ItemDescription className="line-clamp-2">{tool.description}</ItemDescription>}</ItemContent>{render(tool)}</label></Item>)}</section>)}
-      {catalog.length === 0 ? <p className="text-muted-foreground py-6 text-center text-sm">No connected tools are available.</p> : null}
-    </CardContent><CardFooter className="justify-end"><Button onClick={save} disabled={saving}>{saving ? "Saving..." : "Save"}</Button></CardFooter></Card>
+    <Card>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+        <p className="text-muted-foreground text-sm">{description}</p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {catalog.length === 0 ? null : <div className="relative">
+          <Search aria-hidden className="text-muted-foreground absolute left-2.5 top-1/2 size-4 -translate-y-1/2" />
+          <Input className="pl-8" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search connections and tools…" aria-label="Search connections and tools" />
+        </div>}
+        {groups.map(({ connection, tools }) => {
+          // A search that left everything closed would answer nothing, so a
+          // match opens its connection without disturbing what was opened by
+          // hand — clearing the box returns to that.
+          const open = searching || expanded.has(connection)
+          return <section key={connection} className="space-y-2">
+            <div className="flex items-center gap-2 border-b pb-2">
+              <Item asChild interactive variant="plain" size="sm" className="min-w-0 flex-1">
+                <button type="button" aria-expanded={open} onClick={() => setExpanded((current) => {
+                  const next = new Set(current)
+                  if (next.has(connection)) next.delete(connection); else next.add(connection)
+                  return next
+                })}>
+                  <ChevronRight aria-hidden className={cn("size-4 shrink-0 transition-transform", open && "rotate-90")} />
+                  <ItemContent><ItemTitle className="font-mono font-medium">{connection}</ItemTitle></ItemContent>
+                  {/* Only when nothing else is counting: the access editor's
+                      group control already reads "N of M enabled". */}
+                  {renderGroup === undefined ? <span className="text-muted-foreground shrink-0 text-xs">{pluralise(tools.length, "tool")}</span> : null}
+                </button>
+              </Item>
+              {/* The group control acts on what the search has left showing, so
+                  flipping it never reaches a row the operator cannot see. */}
+              {renderGroup?.(tools)}
+            </div>
+            {open ? tools.map((tool) => <Item key={keyOf(tool.connection, tool.name)} asChild interactive variant="plain" size="sm"><label><ItemContent><ItemTitle className="font-mono font-normal">{tool.name}</ItemTitle>{tool.description.length === 0 ? null : <ItemDescription className="line-clamp-2">{tool.description}</ItemDescription>}</ItemContent>{render(tool)}</label></Item>) : null}
+          </section>
+        })}
+        {catalog.length === 0
+          ? <p className="text-muted-foreground py-6 text-center text-sm">No connected tools are available.</p>
+          : groups.length === 0
+          ? <p className="text-muted-foreground py-6 text-center text-sm">Nothing matches “{query.trim()}”.</p>
+          : null}
+      </CardContent>
+      <CardFooter className="justify-end"><Button onClick={save} disabled={saving}>{saving ? "Saving..." : "Save"}</Button></CardFooter>
+    </Card>
   </div>
 }

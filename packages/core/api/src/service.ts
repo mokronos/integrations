@@ -214,12 +214,11 @@ const buildCore = async (
     publicUrlOf: resolvePublicUrl,
     onConnected: async (session) => {
       const state = session.state
-      if (session.bindingClient === undefined || state.status !== "connected") return
-      const client = session.bindingClient
+      if (session.bindingTenant === undefined || state.status !== "connected") return
       await Effect.runPromise(reconcileDefaults({
         store: resources.store,
         integrations: gateway.integrations,
-        tenantId: client.tenantId
+        tenantId: session.bindingTenant
       }))
     },
     ...whenPresent("store", options.oauthStore)

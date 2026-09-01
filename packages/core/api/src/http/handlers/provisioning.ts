@@ -260,10 +260,12 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
         ))
       .handle("connect", (request) =>
         Effect.gen(function*() {
-          const caller = yield* Identity
-          if (caller.kind !== "client" && caller.kind !== "local") {
-            return yield* new ApiBadRequest({ error: "A client key is required to create a connection" })
-          }
+          // A connection belongs to a tenant, not to whoever asked for it, so
+          // this needs the partition and nothing more. Demanding a client key
+          // here refused the signed-in human that the route's `provisioning`
+          // access had already admitted — the dashboard could not connect
+          // anything.
+          const tenantId = yield* requireTenant
           const body = request.payload
           const integration = yield* Effect.promise(() =>
             integrationsApi.catalog.find(body.integration))
@@ -295,7 +297,7 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
                   ? { value: values["token"] }
                   : { values })
             }))
-          yield* reconcileDefaults({ store, integrations: integrationsApi, tenantId: caller.client.tenantId }).pipe(orDieStorage)
+          yield* reconcileDefaults({ store, integrations: integrationsApi, tenantId }).pipe(orDieStorage)
           return {
             connection,
             tools: yield* Effect.promise(() =>
@@ -307,10 +309,7 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
         }))
       .handle("startOAuth", (request) =>
         Effect.gen(function*() {
-          const caller = yield* Identity
-          if (caller.kind !== "client" && caller.kind !== "local") {
-            return yield* new ApiBadRequest({ error: "A client key is required to create a connection" })
-          }
+          const tenantId = yield* requireTenant
           const body = request.payload
           const integration = yield* Effect.promise(() =>
             integrationsApi.catalog.find(body.integration))
@@ -331,7 +330,7 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
             integration: integration.slug,
             connection: body.connection ?? "default",
             authMethod: method,
-            bindingClient: caller.client,
+            bindingTenant: tenantId,
             ...whenPresentMap("clientId", body.clientId, (id) => id),
             ...whenPresentMap("clientSecret", body.clientSecret, (secret) => secret),
             ...whenPresentMap(

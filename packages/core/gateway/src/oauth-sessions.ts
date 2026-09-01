@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto"
 import type { IntegrationsApi } from "@mokronos/integrations"
 import type { AuthMethod, Connection } from "@mokronos/contracts"
 import { Effect, Schema } from "effect"
-import type { Client } from "./domain.ts"
+import type { TenantId } from "./domain.ts"
 import {
   authorizeInBrowser,
   startHostedAuthorization
@@ -18,7 +18,9 @@ export type OAuthSession = {
   readonly id: string
   readonly integration: string
   readonly connection: string
-  readonly bindingClient?: Client
+  /** Whose partition the finished connection belongs to. A tenant rather than
+   *  a client, because a signed-in human connects on nobody's key. */
+  readonly bindingTenant?: TenantId
   readonly state: OAuthSessionState
 }
 
@@ -58,7 +60,7 @@ export interface OAuthSessions {
     readonly clientId?: string
     readonly clientSecret?: string
     readonly timeoutMs?: number
-    readonly bindingClient?: Client
+    readonly bindingTenant?: TenantId
   }): Effect.Effect<OAuthSession, OAuthSessionError>
   get(id: string): Effect.Effect<OAuthSession | undefined, OAuthSessionError>
   /** Finishes a hosted flow by the `state` the provider echoed back. Unknown
@@ -167,7 +169,7 @@ export const createOAuthSessions = (
             id,
             integration: input.integration,
             connection: input.connection,
-            ...whenPresent("bindingClient", input.bindingClient),
+            ...whenPresent("bindingTenant", input.bindingTenant),
             state: { status: "connected", connection: flow.connection }
           }
           yield* store.put(connected)
@@ -181,7 +183,7 @@ export const createOAuthSessions = (
           id,
           integration: input.integration,
           connection: input.connection,
-          ...whenPresent("bindingClient", input.bindingClient),
+          ...whenPresent("bindingTenant", input.bindingTenant),
           state: { status: "pending", authorizationUrl: flow.authorizationUrl }
         }
         yield* store.put(pending)
@@ -229,7 +231,7 @@ export const createOAuthSessions = (
         id,
         integration: input.integration,
         connection: input.connection,
-        ...whenPresent("bindingClient", input.bindingClient),
+        ...whenPresent("bindingTenant", input.bindingTenant),
         state: { status: "pending", authorizationUrl }
       }
       yield* store.put(session)

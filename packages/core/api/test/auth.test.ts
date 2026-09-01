@@ -20,6 +20,7 @@ import {
 } from "./gateway.ts"
 import type { ConnectionRef, GatewayStore } from "./gateway.ts"
 import { stubIntegrations } from "./stubs.ts"
+import type { IntegrationsApi } from "@mokronos/integrations"
 import type { GoogleIdentityOAuth } from "@mokronos/gateway-core"
 
 const JsonBody = Schema.Record(Schema.String, Schema.Json)
@@ -47,6 +48,8 @@ interface SetupOptions {
   readonly signupOpenOf?: () => Promise<boolean>
   readonly secureCookies?: boolean
   readonly google?: GoogleIdentityOAuth
+  /** Replaces the host for a test that reaches past authority into provisioning. */
+  readonly integrations?: IntegrationsApi
 }
 
 const setup = async (options: SetupOptions = {}) => {
@@ -83,7 +86,7 @@ const setup = async (options: SetupOptions = {}) => {
 
   const { handle } = createGatewayHandler({
     store,
-    integrations: stubIntegrations(),
+    integrations: options.integrations ?? stubIntegrations(),
     retentionDays: 30,
     oauth: {
       start: () => Effect.die(new Error("not used")),
@@ -389,6 +392,53 @@ describe("what a session may do", () => {
       headers: { origin: "http://gateway.test", "sec-fetch-site": "same-origin" }
     }))
     expect(execute.status).toBe(403)
+  })
+
+  test("connects an integration on its own authority, holding no API key", async () => {
+    // The route already admits a signed-in human; before this the handler
+    // demanded a client key anyway, so the dashboard could not connect
+    // anything at all.
+    const created: Array<{ readonly integration: string; readonly name: string }> = []
+    const host: IntegrationsApi = {
+      ...stubIntegrations(),
+      catalog: {
+        ...stubIntegrations().catalog,
+        find: async (slug: string) => slug !== "gmail" ? undefined : {
+          slug: "gmail",
+          name: "Gmail",
+          description: "Mail",
+          kind: "openapi",
+          canRemove: true,
+          canRefresh: true,
+          authMethods: [{ id: "token", label: "API token", kind: "apikey", template: "token" }]
+        }
+      },
+      connections: {
+        ...stubIntegrations().connections,
+        create: async (input: { readonly integration: string; readonly name: string }) => {
+          created.push({ integration: input.integration, name: input.name })
+          return {
+            owner: "org" as const,
+            name: input.name,
+            integration: input.integration,
+            template: "token",
+            address: `tools.${input.integration}.org.${input.name}`,
+            provider: input.integration
+          }
+        }
+      }
+    }
+    const setup_ = await run(setup({ signupOpen: true, integrations: host }))
+    const human = await run(signupHuman(setup_))
+
+    const response = await run(setup_.call("POST", "/v1/connections", {
+      body: { integration: "gmail", connection: "work", values: { token: "secret" } },
+      cookie: human.cookie,
+      headers: { origin: "http://gateway.test", "sec-fetch-site": "same-origin" }
+    }))
+
+    expect(response.status).toBe(201)
+    expect(created).toEqual([{ integration: "gmail", name: "work" }])
   })
 
   test("is scoped to its own tenant", async () => {
