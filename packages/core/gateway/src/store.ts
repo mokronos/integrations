@@ -49,8 +49,8 @@ import type {
   Tenant,
   ToolSnapshot
 } from "./domain.ts"
+import { applyGatewayMigrations } from "./migrate.ts"
 import { PasswordHash } from "./passwords.ts"
-import { gatewayDdl as ddl } from "./store-ddl.ts"
 
 // --- row decoding -----------------------------------------------------------
 // libsql rows carry numeric indices and a length alongside the named columns,
@@ -917,10 +917,10 @@ const createGatewayStoreDriver = async (
 ): Promise<GatewayStoreDriver> => {
   const database: LibsqlClient =
     options.client ?? await openFileDatabase(databasePath)
-  // The schema is declared once and created as declared. There is no migration
-  // step: this project is early enough that a shape change means deleting the
-  // database, not carrying code that reshapes yesterday's.
-  for (const statement of ddl) await database.execute(statement)
+  // Generated SQL, embedded at generate time, carries this database from
+  // whatever shape it is on to the one db/schema.ts declares. A D1 binding runs
+  // the same statements as a local file — see migrate.ts.
+  await applyGatewayMigrations(database)
   await bootstrapDefaultTenant(database)
 
   const one = async (sql: string, args: ReadonlyArray<InValue>): Promise<Row | undefined> => {

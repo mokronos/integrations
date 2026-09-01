@@ -34,6 +34,10 @@ export interface D1Statement {
 
 export interface D1DatabaseLike {
   prepare(query: string): D1Statement
+  /** Runs bound statements in order inside one implicit transaction. This is
+   *  D1's only transaction: it has no interactive `BEGIN`, so a set of writes
+   *  that has to land together has to arrive together. */
+  batch(statements: ReadonlyArray<D1BoundStatement>): Promise<ReadonlyArray<D1QueryResult>>
 }
 
 /** The static-assets binding, when the Worker is deployed with one. */

@@ -4,7 +4,10 @@
   "type": "module",
   "description": "Gateway domain, persistence, authorization, and execution policy.",
   "license": "MIT",
-  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org" },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
   "files": ["dist", "README.md"],
   "exports": {
     ".": {
@@ -21,7 +24,8 @@
     }
   },
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json"
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "db:generate": "drizzle-kit generate && bun run scripts/embed-migrations.ts"
   },
   "dependencies": {
     "@libsql/client": "catalog:",
@@ -29,5 +33,9 @@
     "@mokronos/integrations": "workspace:*",
     "@mokronos/integrations-client": "workspace:*",
     "effect": "catalog:"
+  },
+  "devDependencies": {
+    "drizzle-kit": "catalog:",
+    "drizzle-orm": "catalog:"
   }
 }

@@ -1,6 +1,6 @@
 import type { InArgs, InStatement, InValue, ResultSet, Row, TransactionMode, Value } from "@libsql/client"
 import { Schema } from "effect"
-import type { D1BoundStatement, D1Cell, D1DatabaseLike } from "./cloudflare.ts"
+import type { D1Cell, D1DatabaseLike, D1QueryResult } from "./cloudflare.ts"
 
 /** What a D1 binding accepts as a parameter. */
 const Bindable = Schema.Union([
@@ -88,16 +88,26 @@ const toResultSet = (
   return { ...jsonView, toJSON: () => jsonView }
 }
 
+/** One D1 answer as a libsql ResultSet. Column names come from the first row;
+ *  the store reads by name only, and a write returns no rows to name. */
+const toD1ResultSet = (result: D1QueryResult): ResultSet => {
+  const rows = (result.results ?? []).map(toRow)
+  const columns = Object.keys(rows[0] ?? {}).filter((name) => Number.isNaN(Number(name)))
+  return toResultSet(columns, rows, result.meta ?? {})
+}
+
 /**
  * The slice of `@libsql/client`'s Client that the gateway store speaks,
  * carried by a Cloudflare D1 binding instead of a local file.
  *
- * Only `execute` is real: the store runs single statements exclusively
- * (verified — no batch/transaction calls anywhere), generates ids
- * application-side, and consumes rows by name plus `rowsAffected`. The
- * multi-statement surface throws rather than pretending. Pragmas pass
- * through except `journal_mode`, which is file-engine business: D1 has no
- * journal to tune and enforces foreign keys unconditionally.
+ * `execute` serves the store, which runs single statements exclusively,
+ * generates ids application-side, and consumes rows by name plus
+ * `rowsAffected`. `batch` serves the migration runner, which needs a set of
+ * statements and the row that records them applied to land together or not at
+ * all; D1's own batch is that transaction. The rest of the multi-statement
+ * surface throws rather than pretending. Pragmas pass through except
+ * `journal_mode`, which is file-engine business: D1 has no journal to tune and
+ * enforces foreign keys unconditionally.
  */
 export class D1Client {
   /** Identifies the engine the way libsql clients report their URL scheme. */
@@ -117,15 +127,44 @@ export class D1Client {
    *  no connection to re-establish, so there is nothing to do. */
   reconnect(): void {}
 
-  /** libsql exposes two shapes — `execute(stmt)` and the `execute(sql, args)`
-   *  convenience overload. The store uses both; dropping the second argument
-   *  would silently strip every string-form call's bindings (D1 answers with
-   *  "wrong number of parameter bindings"), so both arrive here. */
   async execute(statement: InStatement, argsOverride?: InArgs): Promise<ResultSet> {
     const sql = isRawSql(statement) ? statement : statement.sql
     if (/^\s*PRAGMA\s+journal_mode/im.test(sql)) {
       return toResultSet([], [], {})
     }
+    const prepared = this.#prepare(statement, argsOverride)
+    let result: D1QueryResult
+    try {
+      result = await prepared.statement.all()
+    } catch (cause) {
+      // D1's own error names neither the statement nor the arity mismatch;
+      // both travel with the rethrow instead.
+      throw new Error(`D1 rejected: ${sql} (bindings: ${prepared.bindings})`, { cause })
+    }
+    return toD1ResultSet(result)
+  }
+
+  /** Runs every statement inside D1's implicit batch transaction: either all of
+   *  them are applied or none are. The migration runner sends a migration and
+   *  the row that stamps it as one batch for exactly this reason. */
+  async batch(statements: Array<InStatement>): Promise<Array<ResultSet>> {
+    const prepared = statements.map((statement) => this.#prepare(statement))
+    let results: ReadonlyArray<D1QueryResult>
+    try {
+      results = await this.#database.batch(prepared.map((entry) => entry.statement))
+    } catch (cause) {
+      throw new Error(`D1 rejected a batch of ${statements.length} statement(s)`, { cause })
+    }
+    return results.map(toD1ResultSet)
+  }
+
+  /** Binds one libsql statement onto D1. libsql exposes two shapes —
+   *  `execute(stmt)` and the `execute(sql, args)` convenience overload — and
+   *  the store uses both; dropping the second argument would silently strip
+   *  every string-form call's bindings (D1 answers with "wrong number of
+   *  parameter bindings"), so both arrive here. */
+  #prepare(statement: InStatement, argsOverride?: InArgs) {
+    const sql = isRawSql(statement) ? statement : statement.sql
     const rawArgs = isRawSql(statement)
       ? argsOverride ?? []
       : statement.args ?? []
@@ -133,22 +172,7 @@ export class D1Client {
       throw new Error("The D1 adapter binds positional arguments only; the store never sends named ones")
     }
     const args = rawArgs.map(toBindValue)
-    let result: Awaited<ReturnType<D1BoundStatement["all"]>>
-    try {
-      result = await this.#database.prepare(sql).bind(...args).all()
-    } catch (cause) {
-      // D1's own error names neither the statement nor the arity mismatch;
-      // both travel with the rethrow instead.
-      throw new Error(`D1 rejected: ${sql} (bindings: ${args.length})`, { cause })
-    }
-    const rows = (result.results ?? []).map(toRow)
-    // Column names come from the first row; the store reads by name only.
-    const columns = Object.keys(rows[0] ?? {}).filter((name) => Number.isNaN(Number(name)))
-    return toResultSet(columns, rows, result.meta ?? {})
-  }
-
-  async batch(_statements: Array<InStatement>): Promise<Array<ResultSet>> {
-    throw new Error("The D1 adapter does not implement batch; the gateway store never batches")
+    return { statement: this.#database.prepare(sql).bind(...args), bindings: args.length }
   }
 
   async executeMultiple(_sql: string): Promise<void> {
