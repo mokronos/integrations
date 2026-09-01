@@ -22,6 +22,7 @@ import {
   CardHeader,
   CardTitle
 } from "@/components/ui/card"
+import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item"
 import { when } from "@/lib/format"
 import { useOverview } from "@/lib/queries"
 
@@ -37,8 +38,8 @@ function Stat({
   readonly icon: typeof Plug
 }) {
   return (
-    <Link to={to} className="block">
-      <Card className="transition-colors hover:bg-muted/30">
+    <Link to={to} className="group/stat block rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+      <Card className="transition-colors group-hover/stat:bg-accent/40 group-focus-visible/stat:border-ring">
         <CardContent className="flex items-center gap-3">
           <div className="rounded-lg bg-muted p-2"><Icon className="size-4" /></div>
           <div>
@@ -57,13 +58,21 @@ function SetupStep({ complete, children, to }: {
   readonly to: string
 }) {
   return (
-    <Link to={to} className="flex items-center gap-3 rounded-lg border p-3 hover:bg-muted/40">
-      {complete
-        ? <span className="rounded-full bg-primary p-1 text-primary-foreground"><Check className="size-3" /></span>
-        : <Circle className="size-5 text-muted-foreground" />}
-      <span className={complete ? "text-muted-foreground line-through" : "font-medium"}>{children}</span>
-      <ArrowRight className="ml-auto size-4 text-muted-foreground" />
-    </Link>
+    <Item asChild interactive>
+      <Link to={to}>
+        <ItemMedia>
+          {complete
+            ? <span className="bg-primary text-primary-foreground rounded-full p-1"><Check className="size-3" /></span>
+            : <Circle className="size-5" />}
+        </ItemMedia>
+        <ItemContent>
+          <ItemTitle className={complete ? "text-muted-foreground font-normal line-through" : undefined}>
+            {children}
+          </ItemTitle>
+        </ItemContent>
+        <ArrowRight className="text-muted-foreground ml-auto size-4 shrink-0" />
+      </Link>
+    </Item>
   )
 }
 

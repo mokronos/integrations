@@ -7,6 +7,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Item, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item"
 import { Switch } from "@/components/ui/switch"
 import * as gateway from "@/lib/gateway"
 import { connectionLabel } from "@/lib/format"
@@ -49,9 +50,12 @@ export function ApprovalPolicyEditor({ id, storedTools, assignedClientCount }: {
     onSuccess: () => { invalidate(keys.approvalPolicy(id), keys.approvalPolicies, keys.clients, keys.overview); toast.success("Approval policy saved") },
     onError: (error: Error) => toast.error("Could not save approval policy", { description: error.message })
   })
+  // One state, named, rather than a switch between two labels: the row itself is
+  // the toggle now, and "Allow | Require approval" on either side of it gave a
+  // click near the words no obvious meaning.
   return <ToolEditor title="Approval decisions" description="Choose whether each connected tool runs immediately or waits for human approval." catalog={catalog} assignedClientCount={assignedClientCount} render={(tool) => {
     const value = decision(tool)
-    return <label className="flex items-center gap-2 text-xs"><span>Allow</span><Switch checked={value === "require_approval"} onCheckedChange={(checked) => setDecisions((current) => new Map(current).set(keyOf(tool.connection, tool.name), checked ? "require_approval" : "allow"))} /><span>Require approval</span></label>
+    return <span className="flex shrink-0 items-center gap-2 text-xs"><span className="text-muted-foreground">{value === "require_approval" ? "Requires approval" : "Runs immediately"}</span><Switch checked={value === "require_approval"} onCheckedChange={(checked) => setDecisions((current) => new Map(current).set(keyOf(tool.connection, tool.name), checked ? "require_approval" : "allow"))} /></span>
   }} save={() => save.mutate()} saving={save.isPending} error={integrations.error} />
 }
 
@@ -61,7 +65,7 @@ function ToolEditor({ title, description, catalog, assignedClientCount, render, 
     {assignedClientCount > 0 ? <Alert><AlertDescription>Saving affects all {assignedClientCount} assigned client{assignedClientCount === 1 ? "" : "s"} immediately.</AlertDescription></Alert> : null}
     <QueryError error={error} />
     <Card><CardHeader><CardTitle>{title}</CardTitle><p className="text-muted-foreground text-sm">{description}</p></CardHeader><CardContent className="space-y-5">
-      {[...groups].map(([connection, tools]) => <section key={connection} className="space-y-2"><h3 className="border-b pb-2 font-mono text-sm font-medium">{connection}</h3>{tools.map((tool) => <div key={keyOf(tool.connection, tool.name)} className="flex items-center justify-between gap-4 py-1"><div><p className="font-mono text-sm">{tool.name}</p><p className="text-muted-foreground text-xs">{tool.description}</p></div>{render(tool)}</div>)}</section>)}
+      {[...groups].map(([connection, tools]) => <section key={connection} className="space-y-2"><h3 className="border-b pb-2 font-mono text-sm font-medium">{connection}</h3>{tools.map((tool) => <Item key={keyOf(tool.connection, tool.name)} asChild interactive variant="plain" size="sm"><label><ItemContent><ItemTitle className="font-mono font-normal">{tool.name}</ItemTitle>{tool.description.length === 0 ? null : <ItemDescription className="line-clamp-2">{tool.description}</ItemDescription>}</ItemContent>{render(tool)}</label></Item>)}</section>)}
       {catalog.length === 0 ? <p className="text-muted-foreground py-6 text-center text-sm">No connected tools are available.</p> : null}
     </CardContent><CardFooter className="justify-end"><Button onClick={save} disabled={saving}>{saving ? "Saving..." : "Save"}</Button></CardFooter></Card>
   </div>

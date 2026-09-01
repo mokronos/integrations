@@ -3,6 +3,7 @@ import { Download, Search } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 
+import { IntegrationIcon } from "@/components/integrations/integration-icon"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -126,6 +127,7 @@ export function RegistrySearchDialog() {
               return (
                 <div key={result.domain} className="space-y-3 rounded-lg border p-3">
                   <div className="flex items-start gap-3">
+                    <IntegrationIcon host={result.domain} size={20} className="mt-0.5" />
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-medium">{result.name}</span>

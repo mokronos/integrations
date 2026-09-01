@@ -6,14 +6,19 @@ import { toast } from "sonner"
 import { ConnectionBadge } from "@/components/integrations/connection-badge"
 import { DiscoverDialog } from "@/components/integrations/discover-dialog"
 import { IntegrationDetail } from "@/components/integrations/integration-detail"
+import {
+  IntegrationIcon,
+  integrationHost
+} from "@/components/integrations/integration-icon"
 import { RegistrySearchDialog } from "@/components/integrations/registry-search-dialog"
 import { LoadingRows, Page, QueryError, ReloadButton } from "@/components/page"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item"
+import { pluralise } from "@/lib/format"
 import * as gateway from "@/lib/gateway"
 import { useIntegrations, useMutation } from "@/lib/queries"
-import { cn } from "@/lib/utils"
 export function IntegrationsRoute() {
   const navigate = useNavigate()
   const { slug } = useParams()
@@ -90,26 +95,34 @@ export function IntegrationsRoute() {
                 </CardHeader>
                 <CardContent className="space-y-1">
                   {listed.map((integration) => (
-                    <button
+                    <Item
                       key={integration.slug}
-                      type="button"
-                      onClick={() => void navigate(`/integrations/${integration.slug}`)}
-                      className={cn(
-                        "flex min-w-0 w-full flex-col gap-1 rounded-md border p-2 text-left text-sm transition-colors",
-                        selected?.slug === integration.slug
-                          ? "border-primary bg-accent/40"
-                          : "hover:bg-accent/20"
-                      )}
+                      asChild
+                      interactive
+                      size="sm"
+                      data-active={selected?.slug === integration.slug}
                     >
-                      <span className="flex min-w-0 items-center gap-2">
-                        <span className="min-w-0 truncate font-medium">{integration.name}</span>
-                        <ConnectionBadge integration={integration} />
-                      </span>
-                      <span className="text-muted-foreground flex min-w-0 items-center gap-2 font-mono text-xs">
-                        <span className="min-w-0 truncate">{integration.slug}</span>
-                        <span className="shrink-0">· {integration.tools.length} tools</span>
-                      </span>
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => void navigate(`/integrations/${integration.slug}`)}
+                      >
+                        <ItemMedia>
+                          <IntegrationIcon host={integrationHost(integration)} />
+                        </ItemMedia>
+                        <ItemContent>
+                          <ItemTitle>
+                            <span className="min-w-0 truncate">{integration.name}</span>
+                            <ConnectionBadge integration={integration} />
+                          </ItemTitle>
+                          <ItemDescription className="flex items-center gap-1.5 font-mono">
+                            <span className="min-w-0 truncate">{integration.slug}</span>
+                            <span className="shrink-0">
+                              · {pluralise(integration.tools.length, "tool")}
+                            </span>
+                          </ItemDescription>
+                        </ItemContent>
+                      </button>
+                    </Item>
                   ))}
                 </CardContent>
               </Card>

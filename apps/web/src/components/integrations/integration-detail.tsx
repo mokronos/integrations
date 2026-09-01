@@ -1,12 +1,13 @@
-import { ExternalLink, Plug, Search, Unplug } from "lucide-react"
+import { ChevronRight, ExternalLink, Search, Unplug } from "lucide-react"
 import { useMemo, useState } from "react"
 import { toast } from "sonner"
 
-import { JsonView } from "@/components/json-view"
+import { SchemaView } from "@/components/schema-view"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { Item, ItemActions, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item"
 import { Separator } from "@/components/ui/separator"
 import { when } from "@/lib/format"
 import * as gateway from "@/lib/gateway"
@@ -16,8 +17,10 @@ import {
   type IntegrationOverview,
   type Tool
 } from "@/lib/schemas"
+import { cn } from "@/lib/utils"
 import { ConnectDialog } from "./connect-dialog"
 import { ConnectionBadge } from "./connection-badge"
+import { IntegrationIcon, integrationHost } from "./integration-icon"
 const isConnected = (integration: IntegrationOverview): boolean =>
   integration.connections.length > 0
 
@@ -25,26 +28,57 @@ const expiry = (connection: Connection): string =>
   connection.expiresAt === undefined || connection.expiresAt === null
     ? "no expiry"
     : `expires ${when(new Date(connection.expiresAt))}`
+/** One tool, closed until asked about. The header is the whole click target —
+ *  a row that only responds on its words is a row people click twice. */
 function ToolCard({ tool }: { readonly tool: Tool }) {
+  const [open, setOpen] = useState(false)
   return (
-    <details className="group min-w-0 rounded-lg border p-3">
-      <summary className="flex min-w-0 cursor-pointer list-none items-center gap-2">
-        <span className="min-w-0 truncate font-medium">{tool.name}</span>
-        <Badge variant="outline">{tool.connection}</Badge>
-        <code className="text-muted-foreground ml-auto min-w-0 truncate font-mono text-xs">
-          {tool.address}
-        </code>
-      </summary>
-      <div className="mt-3 space-y-3">
-        {tool.description.length === 0
-          ? null
-          : <p className="text-muted-foreground text-sm">{tool.description}</p>}
-        <div className="grid gap-2 sm:grid-cols-2">
-          <JsonView value={tool.inputSchema ?? null} label="input schema" />
-          <JsonView value={tool.outputSchema ?? null} label="output schema" />
-        </div>
-      </div>
-    </details>
+    <div className="min-w-0 rounded-lg border">
+      <Item asChild interactive variant="plain">
+        <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}>
+          <ItemMedia>
+            <ChevronRight
+              aria-hidden
+              className={cn("size-4 transition-transform", open && "rotate-90")}
+            />
+          </ItemMedia>
+          <ItemContent>
+            <ItemTitle>
+              <span className="min-w-0 truncate">{tool.name}</span>
+              <Badge variant="outline">{tool.connection}</Badge>
+            </ItemTitle>
+            {tool.description.length === 0
+              ? null
+              : <ItemDescription className="truncate">{tool.description}</ItemDescription>}
+          </ItemContent>
+          <code className="text-muted-foreground hidden max-w-[40%] shrink-0 truncate font-mono text-xs sm:block">
+            {tool.address}
+          </code>
+        </button>
+      </Item>
+
+      {open
+        ? (
+          <div className="space-y-3 border-t p-3">
+            {tool.description.length === 0
+              ? null
+              : <p className="text-muted-foreground text-sm">{tool.description}</p>}
+            <div className="grid min-w-0 gap-2 xl:grid-cols-2">
+              <SchemaView
+                schema={tool.inputSchema}
+                definitions={tool.schemaDefinitions}
+                label="input"
+              />
+              <SchemaView
+                schema={tool.outputSchema}
+                definitions={tool.schemaDefinitions}
+                label="output"
+              />
+            </div>
+          </div>
+        )
+        : null}
+    </div>
   )
 }
 
@@ -75,7 +109,7 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-center gap-2">
-            <Plug className="size-4" />
+            <IntegrationIcon host={integrationHost(integration)} size={20} />
             <CardTitle className="min-w-0 break-words">{integration.name}</CardTitle>
             <ConnectionBadge integration={integration} />
             <div className="ml-auto">
@@ -129,27 +163,34 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
               : (
                 <ul className="space-y-2">
                   {integration.connections.map((connection) => (
-                    <li
-                      key={connection.address}
-                      className="flex flex-wrap items-center gap-2 rounded-md border p-2 text-sm"
-                    >
-                      <span className="font-medium">{connection.name}</span>
-                      <Badge variant="outline">{connection.owner}</Badge>
-                      <Badge variant="secondary">{connection.template}</Badge>
-                      {connection.identityLabel === undefined || connection.identityLabel === null
-                        ? null
-                        : <span className="text-muted-foreground">{connection.identityLabel}</span>}
-                      <span className="text-muted-foreground text-xs">{expiry(connection)}</span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="ml-auto"
-                        onClick={() => disconnect.mutate(connection)}
-                        disabled={disconnect.isPending}
-                      >
-                        <Unplug className="size-3" />
-                        Disconnect
-                      </Button>
+                    <li key={connection.address} className="min-w-0">
+                      <Item size="sm">
+                        <ItemContent>
+                          <ItemTitle className="flex-wrap">
+                            <span>{connection.name}</span>
+                            <Badge variant="outline">{connection.owner}</Badge>
+                            <Badge variant="secondary">{connection.template}</Badge>
+                          </ItemTitle>
+                          <ItemDescription className="flex flex-wrap items-center gap-2">
+                            {connection.identityLabel === undefined
+                                || connection.identityLabel === null
+                              ? null
+                              : <span>{connection.identityLabel}</span>}
+                            <span>{expiry(connection)}</span>
+                          </ItemDescription>
+                        </ItemContent>
+                        <ItemActions>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => disconnect.mutate(connection)}
+                            disabled={disconnect.isPending}
+                          >
+                            <Unplug className="size-3" />
+                            Disconnect
+                          </Button>
+                        </ItemActions>
+                      </Item>
                     </li>
                   ))}
                 </ul>
