@@ -162,7 +162,7 @@ export default {
     // Static assets normally answer everything outside /v1 (the platform
     // routes them ahead of this Worker); honour the binding directly too, so
     // the Worker also stands alone without the assets configuration.
-    if (!pathname.startsWith("/v1/") && env.ASSETS !== undefined) {
+    if (!pathname.startsWith("/v1/") && pathname !== "/mcp" && env.ASSETS !== undefined) {
       return await env.ASSETS.fetch(request)
     }
     try {

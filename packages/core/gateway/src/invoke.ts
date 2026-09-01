@@ -298,6 +298,7 @@ export type EffectiveTool = {
    * answer rather than an implementation detail. */
   readonly connection: string
   readonly decision: PolicyDecision
+  readonly description?: string
   readonly inputSchema?: Json
   readonly outputSchema?: Json
 }
@@ -354,6 +355,7 @@ export const listEffectiveTools = Effect.fn("Invocation.listEffectiveTools")(fun
     )).pipe(
       Effect.map((described) => ({
         ...entry,
+        ...whenPresent("description", described.description),
         ...whenPresent("inputSchema", described.inputSchema),
         ...whenPresent("outputSchema", described.outputSchema)
       })),

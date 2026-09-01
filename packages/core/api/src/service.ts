@@ -403,7 +403,7 @@ export const serveGateway = async (options: ServeOptions = {}): Promise<RunningG
       port: requestedPort,
       fetch: async (request, running) => {
         const pathname = new URL(request.url).pathname
-        if (web !== undefined && !pathname.startsWith("/v1/")) {
+        if (web !== undefined && !pathname.startsWith("/v1/") && pathname !== "/mcp") {
           const asset = await web.respond(pathname)
           if (asset !== undefined) return asset
         }

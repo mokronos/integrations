@@ -73,3 +73,8 @@ directory.
 The TypeScript client communicates only with the versioned gateway HTTP API.
 Applications such as [`wf`](https://github.com/mokronos/wf) consume the client
 without importing gateway or integrations implementation.
+
+MCP clients connect to the Streamable HTTP endpoint at `/mcp` and send their
+gateway API key as a bearer token. The server exposes only that client's
+effective tools. Tool names use `<connection-alias>__<tool-name>` so tools from
+multiple enabled connections remain distinct.

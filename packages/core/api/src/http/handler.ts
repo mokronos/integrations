@@ -39,6 +39,7 @@ import type { GatewayStore } from "@mokronos/gateway-core"
 import type { OAuthSessions } from "@mokronos/gateway-core"
 import type { WebAssets } from "../web-assets.ts"
 import type { RateLimiter } from "@mokronos/gateway-core"
+import { createMcpGatewayHandler } from "./mcp.ts"
 
 /** What the server knows about a request that the request itself cannot say.
  *  Carried per request through the web-handler seam; the served gateway
@@ -211,6 +212,12 @@ export interface GatewayHandle {
  *  socket — the seam the Cloudflare Worker, acceptance tests, and any embedded
  *  consumer drive directly. */
 export const createGatewayHandler = (options: GatewayHandlerOptions): GatewayHandle => {
+  const mcp = createMcpGatewayHandler({
+    store: options.store,
+    integrations: options.integrations,
+    retentionDays: options.retentionDays,
+    ...whenPresent("dashboardUrl", options.dashboardUrl)
+  })
   // The API builder's requirements (groups, router, platform services) are all
   // satisfied by the app layer's outputs, and its outputs keep them.
   const app = HttpApiBuilder.layer(GatewayApi).pipe(
@@ -232,7 +239,12 @@ export const createGatewayHandler = (options: GatewayHandlerOptions): GatewayHan
       : Context.makeUnsafe(new Map([[String(CurrentRequestContext.key), requestContext]]))
   return {
     handle: (request, requestContext) =>
-      web.handler(request, contextFor(requestContext) ?? Context.empty()),
-    dispose: () => web.dispose()
+      new URL(request.url).pathname === "/mcp"
+        ? mcp.handle(request)
+        : web.handler(request, contextFor(requestContext) ?? Context.empty()),
+    dispose: async () => {
+      await mcp.dispose()
+      await web.dispose()
+    }
   }
 }

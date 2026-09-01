@@ -170,6 +170,7 @@ const EffectiveTool = Schema.Struct({
   integration: Schema.String,
   connection: Schema.String,
   decision: PolicyDecision,
+  description: Schema.optional(Schema.String),
   inputSchema: Schema.optional(Json),
   outputSchema: Schema.optional(Json)
 })

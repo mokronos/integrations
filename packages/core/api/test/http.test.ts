@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { Effect, Schema } from "effect"
 import { ToolAddress, whenPresent } from "@mokronos/contracts"
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client"
 import type { IntegrationsApi } from "@mokronos/integrations"
 import type { Connection, Tool } from "@mokronos/contracts"
 import {
@@ -108,7 +109,18 @@ const stubIntegrations = (behaviour: {
         return { ok: true }
       },
       summaries: async () => (behaviour.tools ?? []).map(stubTool),
-      describe: notStubbed("tools.describe"),
+      describe: async (address) => ({
+        ...stubTool({
+          address: String(address),
+          name: String(address).split(".").at(-1) ?? "tool"
+        }),
+        description: "Send an email",
+        inputSchema: {
+          type: "object",
+          properties: { to: { type: "string" } },
+          required: ["to"]
+        }
+      }),
       list: async () => (behaviour.tools ?? []).map(stubTool)
     },
     connections: {
@@ -238,10 +250,65 @@ const setup = async (options: {
     }
   }
 
-  return { store, client, key, accessProfile, approvalPolicy, call, calls: stub.calls, removed: stub.removed }
+  return {
+    store,
+    client,
+    key,
+    accessProfile,
+    approvalPolicy,
+    handle,
+    call,
+    calls: stub.calls,
+    removed: stub.removed
+  }
 }
 
 describe("gateway http surface", () => {
+  test("serves each API key's effective tools over MCP", async () => {
+    const { handle, key, calls } = await run(setup())
+    const client = new Client({ name: "gateway-test", version: "1.0.0" })
+    const transport = new StreamableHTTPClientTransport(
+      new URL("http://gateway.test/mcp"),
+      {
+        authProvider: { token: async () => key.secret },
+        fetch: (input, init) => handle(new Request(input, init))
+      }
+    )
+
+    try {
+      await run(client.connect(transport))
+      const listed = await run(client.listTools())
+      expect(listed.tools).toEqual([expect.objectContaining({
+        name: "gmail-work__sendEmail",
+        description: "Send an email",
+        inputSchema: expect.objectContaining({ type: "object" })
+      })])
+
+      const called = await run(client.callTool({
+        name: "gmail-work__sendEmail",
+        arguments: { to: "a@b.c" }
+      }))
+      expect(called.isError).not.toBe(true)
+      expect(calls).toEqual([{
+        address: "tools.gmail.user.work.sendEmail",
+        input: { to: "a@b.c" }
+      }])
+    } finally {
+      await run(client.close())
+    }
+  })
+
+  test("requires an API key on the MCP endpoint", async () => {
+    const { handle } = await run(setup())
+    const response = await run(handle(new Request("http://gateway.test/mcp", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}"
+    })))
+    expect(response.status).toBe(401)
+    expect(response.headers.get("www-authenticate")).toBe("Bearer")
+  })
+
   test("serves health without a key", async () => {
     const { call } = await run(setup())
     const response = await run(call("GET", "/v1/health", { secret: null }))

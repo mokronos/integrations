@@ -4,7 +4,10 @@
   "type": "module",
   "description": "Gateway HTTP API definitions, handlers, and server assembly.",
   "license": "MIT",
-  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org" },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
   "files": ["dist", "README.md"],
   "exports": {
     ".": {
@@ -18,12 +21,16 @@
     "build": "rm -rf dist && tsc -p tsconfig.build.json"
   },
   "dependencies": {
+    "@effect/platform-bun": "catalog:",
+    "@modelcontextprotocol/server": "^2.0.0",
     "@mokronos/contracts": "workspace:*",
     "@mokronos/gateway-core": "workspace:*",
     "@mokronos/integrations": "workspace:*",
     "@mokronos/integrations-client": "workspace:*",
     "@mokronos/observability": "workspace:*",
-    "effect": "catalog:",
-    "@effect/platform-bun": "catalog:"
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "^2.0.0"
   }
 }
