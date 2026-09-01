@@ -1,454 +1,68 @@
 import { useState } from "react"
-import {
-  AlertTriangle,
-  CheckCheck,
-  ChevronDown,
-  ChevronRight,
-  Plug,
-  Plus,
-  ShieldCheck,
-  X
-} from "lucide-react"
 import { toast } from "sonner"
+import { ConnectionName, IntegrationSlug } from "@mokronos/contracts"
 
 import { QueryError } from "@/components/page"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Badge } from "@/components/ui/badge"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Switch } from "@/components/ui/switch"
-import { ConnectionName, IntegrationSlug } from "@mokronos/contracts"
-import { connectionLabel } from "@/lib/format"
 import * as gateway from "@/lib/gateway"
+import { connectionLabel } from "@/lib/format"
 import { keys, useIntegrations, useInvalidate, useMutation } from "@/lib/queries"
-import type {
-  ConnectionRef,
-  IntegrationOverview,
-  PolicyDecision,
-  PolicyTool,
-  PolicyToolInput,
-  Tool
-} from "@/lib/schemas"
+import type { AccessProfileTool, ApprovalPolicyTool, ConnectionRef, PolicyDecision } from "@/lib/schemas"
 
-/** A rule is per connection, so every lookup here is keyed by the credential
- * and the tool together. The same vendor tool on two connections is two rows
- * that can disagree — allowed on the personal account, approval-gated on the
- * work one. */
-const ruleKey = (connection: ConnectionRef, tool: string): string =>
-  `${connectionLabel(connection)} ${tool}`
+type RouteTool = { readonly connection: ConnectionRef; readonly name: string; readonly description: string }
+const keyOf = (connection: ConnectionRef, tool: string) => `${connectionLabel(connection)}:${tool}`
 
-const inputFromStored = (tool: PolicyTool): PolicyToolInput => ({
-  connection: tool.connection,
-  tool: tool.tool,
-  enabled: tool.enabled,
-  decision: tool.decision
-})
+const catalogTools = (integrations: ReturnType<typeof useIntegrations>["data"]): ReadonlyArray<RouteTool> =>
+  (integrations ?? []).flatMap((integration) => integration.connections.filter((connection) => connection.owner === "org").flatMap((connection) => {
+    const ref: ConnectionRef = { owner: "org", integration: IntegrationSlug.make(integration.slug), name: ConnectionName.make(connection.name) }
+    return integration.tools.filter((tool) => tool.owner === "org" && tool.connection === connection.name).map((tool) => ({ connection: ref, name: tool.name, description: tool.description }))
+  }))
 
-const connectedCatalog = (
-  integrations: ReadonlyArray<IntegrationOverview>
-): ReadonlyArray<IntegrationOverview> =>
-  integrations.filter((integration) => integration.connections.length > 0)
-
-/** One connection's tools, as the catalog reports them.
- *
- * Only org-tier connections appear: a user-tier connection is one human's
- * authorization, and a policy is shared, so it is not something to hand out
- * here. Stored rules that name one still show below under their own heading. */
-type CatalogRoute = {
-  readonly connection: ConnectionRef
-  readonly tools: ReadonlyArray<Tool>
-}
-
-const orgConnection = (integration: string, name: string): ConnectionRef => ({
-  owner: "org",
-  integration: IntegrationSlug.make(integration),
-  name: ConnectionName.make(name)
-})
-
-const catalogRoutes = (integration: IntegrationOverview): ReadonlyArray<CatalogRoute> => {
-  const byConnection = new Map<string, Map<string, Tool>>()
-  for (const tool of integration.tools) {
-    if (tool.owner !== "org") continue
-    const tools = byConnection.get(tool.connection) ?? new Map<string, Tool>()
-    const existing = tools.get(tool.name)
-    // A duplicate name within one connection keeps the cautious default.
-    if (existing === undefined || tool.defaultDecision === "require_approval") {
-      tools.set(tool.name, tool)
-    }
-    byConnection.set(tool.connection, tools)
-  }
-  return integration.connections
-    .filter((connection) => connection.owner === "org")
-    .map((connection) => ({
-      connection: orgConnection(integration.slug, connection.name),
-      tools: [...(byConnection.get(connection.name)?.values() ?? [])]
-    }))
-}
-
-function DecisionSwitch({
-  decision,
-  disabled,
-  onChange
-}: {
-  readonly decision: PolicyDecision
-  readonly disabled: boolean
-  readonly onChange: (decision: PolicyDecision) => void
-}) {
-  const requiresApproval = decision === "require_approval"
-  return (
-    <div className="flex shrink-0 items-center gap-2 text-xs">
-      <span className={requiresApproval ? "text-muted-foreground" : "font-medium"}>Allow</span>
-      <Switch
-        checked={requiresApproval}
-        disabled={disabled}
-        aria-label="Require approval"
-        onCheckedChange={(checked) => onChange(checked ? "require_approval" : "allow")}
-      />
-      <span className={requiresApproval ? "font-medium" : "text-muted-foreground"}>Require approval</span>
-    </div>
-  )
-}
-
-export function PolicyEditor({
-  policyId,
-  storedTools,
-  assignedClientCount
-}: {
-  readonly policyId: string
-  readonly storedTools: ReadonlyArray<PolicyTool>
-  readonly assignedClientCount: number
-}) {
-  const invalidate = useInvalidate()
+export function AccessProfileEditor({ id, storedTools, assignedClientCount }: { readonly id: string; readonly storedTools: ReadonlyArray<AccessProfileTool>; readonly assignedClientCount: number }) {
   const integrations = useIntegrations()
-  const [tools, setTools] = useState<ReadonlyArray<PolicyToolInput>>(
-    storedTools.map(inputFromStored)
-  )
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set())
-  const connected = connectedCatalog(integrations.data ?? [])
-
-  // A rule naming a connection IS that connection's membership, so there is no
-  // second list to keep in step. Adding a connection writes its rules; removing
-  // it drops them.
-  const included = new Set(tools.map((tool) => connectionLabel(tool.connection)))
-  const catalogKeys = new Set(
-    connected.flatMap((integration) =>
-      catalogRoutes(integration).flatMap((route) =>
-        route.tools.map((tool) => ruleKey(route.connection, tool.name))))
-  )
-  const unavailable = tools.filter((tool) => !catalogKeys.has(ruleKey(tool.connection, tool.tool)))
-  const enabledCount = tools.filter((tool) => tool.enabled).length
-
-  const configuredTool = (connection: ConnectionRef, tool: string) =>
-    tools.find((candidate) => ruleKey(candidate.connection, candidate.tool) === ruleKey(connection, tool))
-
-  const replaceTool = (next: PolicyToolInput) => {
-    setTools((current) => [
-      ...current.filter((candidate) =>
-        ruleKey(candidate.connection, candidate.tool) !== ruleKey(next.connection, next.tool)),
-      next
-    ])
-  }
-
-  const setAllDecisions = (decision: PolicyDecision) => {
-    setTools((current) => current.map((tool) => tool.enabled ? { ...tool, decision } : tool))
-  }
-
-  const toggleExpanded = (label: string) => {
-    setExpanded((current) => {
-      const next = new Set(current)
-      if (next.has(label)) next.delete(label)
-      else next.add(label)
-      return next
-    })
-  }
-
-  const addRoutes = (routes: ReadonlyArray<CatalogRoute>) => {
-    setTools((current) => {
-      const currentKeys = new Set(current.map((tool) => ruleKey(tool.connection, tool.tool)))
-      return [
-        ...current,
-        ...routes.flatMap((route) =>
-          route.tools
-            .filter((tool) => !currentKeys.has(ruleKey(route.connection, tool.name)))
-            .map((tool) => ({
-              connection: route.connection,
-              tool: tool.name,
-              enabled: true,
-              decision: tool.defaultDecision
-            })))
-      ]
-    })
-    setExpanded((current) =>
-      new Set([...current, ...routes.map((route) => connectionLabel(route.connection))]))
-  }
-
-  const removeConnections = (connections: ReadonlyArray<ConnectionRef>) => {
-    const labels = new Set(connections.map(connectionLabel))
-    setTools((current) =>
-      current.filter((tool) => !labels.has(connectionLabel(tool.connection))))
-    setExpanded((current) => new Set([...current].filter((label) => !labels.has(label))))
-  }
-
+  const invalidate = useInvalidate()
+  const [enabled, setEnabled] = useState(() => new Set(storedTools.map((tool) => keyOf(tool.connection, tool.tool))))
+  const catalog = catalogTools(integrations.data)
   const save = useMutation({
-    mutationFn: () => gateway.replacePolicyTools({ policyId, tools }),
-    onSuccess: () => {
-      invalidate(keys.policy(policyId), keys.policies, keys.overview, keys.clients)
-      toast.success("Policy saved", {
-        description: assignedClientCount === 0
-          ? undefined
-          : `${assignedClientCount} assigned client${assignedClientCount === 1 ? "" : "s"} may now use exactly these tools on the connections they hold.`
-      })
-    },
-    onError: (error: Error) => toast.error("Could not save policy", { description: error.message })
+    mutationFn: () => gateway.replaceAccessProfileTools(id, catalog.filter((tool) => enabled.has(keyOf(tool.connection, tool.name))).map((tool) => ({ connection: tool.connection, tool: tool.name }))),
+    onSuccess: () => { invalidate(keys.accessProfile(id), keys.accessProfiles, keys.clients, keys.overview); toast.success("Access profile saved") },
+    onError: (error: Error) => toast.error("Could not save access profile", { description: error.message })
   })
+  return <ToolEditor title="Enabled tools" description="A connection is enabled when at least one of its tools is checked." catalog={catalog} assignedClientCount={assignedClientCount} render={(tool) => {
+    const key = keyOf(tool.connection, tool.name)
+    return <Checkbox checked={enabled.has(key)} onChange={() => setEnabled((current) => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next })} />
+  }} save={() => save.mutate()} saving={save.isPending} error={integrations.error} />
+}
 
-  return (
-    <div className="space-y-4">
-      {assignedClientCount > 0 ? (
-        <Alert>
-          <AlertTriangle />
-          <AlertTitle>Shared policy</AlertTitle>
-          <AlertDescription>
-            Saving changes affects all {assignedClientCount} assigned client{assignedClientCount === 1 ? "" : "s"} immediately.
-          </AlertDescription>
-        </Alert>
-      ) : null}
+export function ApprovalPolicyEditor({ id, storedTools, assignedClientCount }: { readonly id: string; readonly storedTools: ReadonlyArray<ApprovalPolicyTool>; readonly assignedClientCount: number }) {
+  const integrations = useIntegrations()
+  const invalidate = useInvalidate()
+  const [decisions, setDecisions] = useState(() => new Map(storedTools.map((tool) => [keyOf(tool.connection, tool.tool), tool.decision])))
+  const catalog = catalogTools(integrations.data)
+  const decision = (tool: RouteTool): PolicyDecision => decisions.get(keyOf(tool.connection, tool.name)) ?? "require_approval"
+  const save = useMutation({
+    mutationFn: () => gateway.replaceApprovalPolicyTools(id, catalog.map((tool) => ({ connection: tool.connection, tool: tool.name, decision: decision(tool) }))),
+    onSuccess: () => { invalidate(keys.approvalPolicy(id), keys.approvalPolicies, keys.clients, keys.overview); toast.success("Approval policy saved") },
+    onError: (error: Error) => toast.error("Could not save approval policy", { description: error.message })
+  })
+  return <ToolEditor title="Approval decisions" description="Choose whether each connected tool runs immediately or waits for human approval." catalog={catalog} assignedClientCount={assignedClientCount} render={(tool) => {
+    const value = decision(tool)
+    return <label className="flex items-center gap-2 text-xs"><span>Allow</span><Switch checked={value === "require_approval"} onCheckedChange={(checked) => setDecisions((current) => new Map(current).set(keyOf(tool.connection, tool.name), checked ? "require_approval" : "allow"))} /><span>Require approval</span></label>
+  }} save={() => save.mutate()} saving={save.isPending} error={integrations.error} />
+}
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-muted-foreground text-sm">
-          {included.size} connection{included.size === 1 ? "" : "s"} added · {enabledCount} tools enabled
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={() => setAllDecisions("allow")} disabled={enabledCount === 0}>
-            <CheckCheck className="size-4" />Allow all enabled
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setAllDecisions("require_approval")} disabled={enabledCount === 0}>
-            <ShieldCheck className="size-4" />Require approval for all enabled
-          </Button>
-        </div>
-      </div>
-
-      <Alert>
-        <AlertDescription>
-          A rule here says what a connection may be used for. It does not hand the
-          connection to anyone: a client reaches it only once it is granted on
-          that client's page, so rules for connections a client does not hold are
-          simply invisible to it.
-        </AlertDescription>
-      </Alert>
-
-      {integrations.isPending ? <p className="text-muted-foreground text-sm">Loading connected tools…</p> : null}
-      <QueryError error={integrations.error} />
-      {connected.length === 0 && !integrations.isPending ? (
-        <Card><CardContent className="text-muted-foreground py-8 text-center">No connected integrations are available.</CardContent></Card>
-      ) : null}
-
-      {connected.map((integration) => {
-        const routes = catalogRoutes(integration)
-        const addedRoutes = routes.filter((route) => included.has(connectionLabel(route.connection)))
-        const missingRoutes = routes.filter((route) => !included.has(connectionLabel(route.connection)))
-        const catalogCount = addedRoutes.reduce((total, route) => total + route.tools.length, 0)
-        const toolState = (connection: ConnectionRef, tool: Tool): PolicyToolInput =>
-          configuredTool(connection, tool.name) ?? {
-            connection,
-            tool: tool.name,
-            enabled: true,
-            decision: tool.defaultDecision
-          }
-        const enabledTools = addedRoutes.reduce(
-          (total, route) =>
-            total + route.tools.filter((tool) => toolState(route.connection, tool).enabled).length,
-          0
-        )
-        const setIntegrationDecision = (decision: PolicyDecision) => {
-          setTools((current) => current.map((tool) =>
-            tool.connection.integration === integration.slug && tool.enabled
-              ? { ...tool, decision }
-              : tool))
-        }
-
-        return (
-          <Card key={integration.slug}>
-            <CardHeader className={addedRoutes.length > 0 ? "border-b" : undefined}>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className="min-w-0">
-                    <CardTitle className="truncate">{integration.name}</CardTitle>
-                    <span className="text-muted-foreground font-mono text-xs">{integration.slug}</span>
-                  </span>
-                  <Badge variant={addedRoutes.length > 0 ? "secondary" : "outline"}>
-                    {addedRoutes.length}/{routes.length} connection{routes.length === 1 ? "" : "s"}
-                  </Badge>
-                  {addedRoutes.length > 0
-                    ? <Badge variant="secondary">{enabledTools}/{catalogCount} enabled</Badge>
-                    : null}
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  {missingRoutes.length > 0 ? (
-                    <Button size="sm" onClick={() => addRoutes(missingRoutes)}>
-                      <Plus className="size-4" />
-                      {missingRoutes.length === routes.length
-                        ? routes.length === 1 ? "Add connection" : `Add all ${routes.length} connections`
-                        : `Add ${missingRoutes.length} more`}
-                    </Button>
-                  ) : null}
-                  {addedRoutes.length > 0 ? (
-                    <>
-                      <Button variant="ghost" size="sm" onClick={() => setIntegrationDecision("allow")}>Allow enabled</Button>
-                      <Button variant="ghost" size="sm" onClick={() => setIntegrationDecision("require_approval")}>Approval enabled</Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeConnections(addedRoutes.map((route) => route.connection))}
-                      >
-                        <X className="size-3" />
-                        {addedRoutes.length === 1 ? "Remove connection" : "Remove all"}
-                      </Button>
-                    </>
-                  ) : null}
-                </div>
-              </div>
-            </CardHeader>
-            {routes.length === 0 ? null : (
-              <CardContent className="divide-y px-0">
-                {integration.toolError === undefined ? null : (
-                  <div className="px-4 py-3 text-destructive text-sm">Catalog unavailable: {integration.toolError}</div>
-                )}
-                {routes.map((route) => {
-                  const label = connectionLabel(route.connection)
-                  const isIncluded = included.has(label)
-                  const isExpanded = isIncluded && expanded.has(label)
-                  const setRouteEnabled = (enabled: boolean) => {
-                    for (const tool of route.tools) {
-                      replaceTool({ ...toolState(route.connection, tool), enabled })
-                    }
-                  }
-                  const setRouteDecision = (decision: PolicyDecision) => {
-                    for (const tool of route.tools) {
-                      const current = toolState(route.connection, tool)
-                      if (current.enabled) replaceTool({ ...current, decision })
-                    }
-                  }
-                  return (
-                    <div key={label}>
-                      {/* Each connection is judged on its own: the same tool can be
-                          allowed here and approval-gated one block down. */}
-                      <div className="bg-muted/40 flex flex-wrap items-center justify-between gap-2 px-4 py-2">
-                        <span className="flex min-w-0 items-center gap-2">
-                          {isIncluded ? (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="size-6 shrink-0"
-                              aria-label={`${isExpanded ? "Collapse" : "Expand"} ${label}`}
-                              aria-expanded={isExpanded}
-                              onClick={() => toggleExpanded(label)}
-                            >
-                              {isExpanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-                            </Button>
-                          ) : <Plug className="size-3 shrink-0" />}
-                          <code className="truncate text-xs">{label}</code>
-                          {isIncluded ? null : <Badge variant="outline">not added</Badge>}
-                        </span>
-                        <span className="flex flex-wrap gap-1">
-                          {isIncluded ? (
-                            <>
-                              <Button variant="ghost" size="sm" onClick={() => setRouteDecision("allow")}>Allow enabled</Button>
-                              <Button variant="ghost" size="sm" onClick={() => setRouteDecision("require_approval")}>Approval enabled</Button>
-                              <Button variant="ghost" size="sm" onClick={() => setRouteEnabled(true)}>Enable all</Button>
-                              <Button variant="ghost" size="sm" onClick={() => setRouteEnabled(false)}>Disable all</Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => removeConnections([route.connection])}
-                              >
-                                <X className="size-3" />Remove
-                              </Button>
-                            </>
-                          ) : (
-                            <Button size="sm" variant="outline" onClick={() => addRoutes([route])}>
-                              <Plus className="size-4" />Add connection
-                            </Button>
-                          )}
-                        </span>
-                      </div>
-                      {!isExpanded ? null : route.tools.length === 0 ? (
-                        <div className="text-muted-foreground px-4 py-3 text-sm">
-                          This connection reports no tools.
-                        </div>
-                      ) : route.tools.map((tool) => {
-                        const current = toolState(route.connection, tool)
-                        return (
-                          <div
-                            key={ruleKey(route.connection, tool.name)}
-                            className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center"
-                          >
-                            <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3">
-                              <Checkbox
-                                checked={current.enabled}
-                                onChange={() => replaceTool({ ...current, enabled: !current.enabled })}
-                              />
-                              <span className="min-w-0">
-                                <span className="block font-mono text-sm font-medium">{tool.name}</span>
-                                <span className="text-muted-foreground line-clamp-2 text-xs">{tool.description}</span>
-                              </span>
-                            </label>
-                            <DecisionSwitch
-                              decision={current.decision}
-                              disabled={!current.enabled}
-                              onChange={(decision) => replaceTool({ ...current, decision })}
-                            />
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )
-                })}
-              </CardContent>
-            )}
-          </Card>
-        )
-      })}
-
-      {unavailable.length > 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Unavailable configured tools</CardTitle>
-            <p className="text-muted-foreground text-sm">
-              These explicit states remain stored even though the connection or tool is not currently in the catalog.
-            </p>
-          </CardHeader>
-          <CardContent className="divide-y px-0">
-            {unavailable.map((tool) => (
-              <div key={ruleKey(tool.connection, tool.tool)} className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center">
-                <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
-                  <Checkbox checked={tool.enabled} onChange={() => replaceTool({ ...tool, enabled: !tool.enabled })} />
-                  <code className="min-w-0 break-all text-sm">{connectionLabel(tool.connection)} / {tool.tool}</code>
-                  <Badge variant="outline">unavailable</Badge>
-                </label>
-                <DecisionSwitch
-                  decision={tool.decision}
-                  disabled={!tool.enabled}
-                  onChange={(decision) => replaceTool({ ...tool, decision })}
-                />
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      ) : null}
-
-      <Card>
-        <CardFooter className="justify-between border-t-0">
-          <p className="text-muted-foreground text-xs">
-            Saving replaces this policy's rules. Client aliases and the connections they hold are untouched.
-          </p>
-          <Button onClick={() => save.mutate()} disabled={save.isPending}>
-            {save.isPending ? "Saving…" : "Save policy"}
-          </Button>
-        </CardFooter>
-      </Card>
-    </div>
-  )
+function ToolEditor({ title, description, catalog, assignedClientCount, render, save, saving, error }: { readonly title: string; readonly description: string; readonly catalog: ReadonlyArray<RouteTool>; readonly assignedClientCount: number; readonly render: (tool: RouteTool) => React.ReactNode; readonly save: () => void; readonly saving: boolean; readonly error: Error | null }) {
+  const groups = Map.groupBy(catalog, (tool) => connectionLabel(tool.connection))
+  return <div className="space-y-4">
+    {assignedClientCount > 0 ? <Alert><AlertDescription>Saving affects all {assignedClientCount} assigned client{assignedClientCount === 1 ? "" : "s"} immediately.</AlertDescription></Alert> : null}
+    <QueryError error={error} />
+    <Card><CardHeader><CardTitle>{title}</CardTitle><p className="text-muted-foreground text-sm">{description}</p></CardHeader><CardContent className="space-y-5">
+      {[...groups].map(([connection, tools]) => <section key={connection} className="space-y-2"><h3 className="border-b pb-2 font-mono text-sm font-medium">{connection}</h3>{tools.map((tool) => <div key={keyOf(tool.connection, tool.name)} className="flex items-center justify-between gap-4 py-1"><div><p className="font-mono text-sm">{tool.name}</p><p className="text-muted-foreground text-xs">{tool.description}</p></div>{render(tool)}</div>)}</section>)}
+      {catalog.length === 0 ? <p className="text-muted-foreground py-6 text-center text-sm">No connected tools are available.</p> : null}
+    </CardContent><CardFooter className="justify-end"><Button onClick={save} disabled={saving}>{saving ? "Saving..." : "Save"}</Button></CardFooter></Card>
+  </div>
 }

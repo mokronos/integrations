@@ -1,109 +1,25 @@
-import { ArrowLeft, FileKey2 } from "lucide-react"
+import { ArrowLeft } from "lucide-react"
 import { Link, useParams } from "react-router"
-
-import { CreatePolicyDialog, ClonePolicyDialog } from "@/components/policies/policy-dialogs"
-import { PolicyEditor } from "@/components/policies/policy-editor"
+import { ConfigurationDialog } from "@/components/policies/policy-dialogs"
+import { AccessProfileEditor, ApprovalPolicyEditor } from "@/components/policies/policy-editor"
 import { LoadingRows, Page, QueryError, ReloadButton } from "@/components/page"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { when } from "@/lib/format"
-import { usePolicies, usePolicy } from "@/lib/queries"
+import { useAccessProfile, useAccessProfiles, useApprovalPolicies, useApprovalPolicy } from "@/lib/queries"
 
-export function PoliciesRoute() {
-  const policies = usePolicies()
-  return (
-    <Page
-      title="Policies"
-      description="Reusable tool access rules shared by clients."
-      actions={<><CreatePolicyDialog /><ReloadButton onClick={() => void policies.refetch()} busy={policies.isFetching} /></>}
-    >
-      <QueryError error={policies.error} />
-      {policies.isPending ? <LoadingRows /> : (
-        <Card>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader><TableRow>
-                <TableHead>Policy</TableHead>
-                <TableHead>Connections</TableHead>
-                <TableHead>Tools</TableHead>
-                <TableHead>Assigned clients</TableHead>
-                <TableHead>Updated</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow></TableHeader>
-              <TableBody>
-                {(policies.data ?? []).length === 0 ? (
-                  <TableRow><TableCell colSpan={6} className="text-muted-foreground py-10 text-center">No policies yet.</TableCell></TableRow>
-                ) : (policies.data ?? []).map((summary) => (
-                  <TableRow key={summary.policy.id}>
-                    <TableCell>
-                      <Link className="font-medium hover:underline" to={`/policies/${summary.policy.id}`}>{summary.policy.name}</Link>
-                      <div className="mt-1 flex items-center gap-2">
-                        <code className="text-muted-foreground text-xs">{summary.policy.id}</code>
-                        {summary.policy.isDefault ? <Badge>default</Badge> : null}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      {summary.connectionCount}
-                      <span className="text-muted-foreground text-xs">
-                        {" "}across {summary.integrationCount} integration{summary.integrationCount === 1 ? "" : "s"}
-                      </span>
-                    </TableCell>
-                    <TableCell>{summary.enabledToolCount}/{summary.toolCount}</TableCell>
-                    <TableCell>{summary.assignedClientCount}</TableCell>
-                    <TableCell className="text-muted-foreground text-sm">{when(summary.policy.updatedAt)}</TableCell>
-                    <TableCell className="text-right"><ClonePolicyDialog policyId={summary.policy.id} policyName={summary.policy.name} /></TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
-    </Page>
-  )
+export function AccessProfilesRoute() { const query = useAccessProfiles(); return <ConfigurationList kind="access-profile" query={query} /> }
+export function ApprovalPoliciesRoute() { const query = useApprovalPolicies(); return <ConfigurationList kind="approval-policy" query={query} /> }
+
+function ConfigurationList({ kind, query }: { readonly kind: "access-profile" | "approval-policy"; readonly query: ReturnType<typeof useAccessProfiles> | ReturnType<typeof useApprovalPolicies> }) {
+  const access = kind === "access-profile"
+  const rows = query.data ?? []
+  return <Page title={access ? "Access profiles" : "Approval policies"} description={access ? "Reusable sets of enabled tools and connections." : "Reusable allow and approval requirements for connected tools."} actions={<><ConfigurationDialog kind={kind} /><ReloadButton onClick={() => void query.refetch()} busy={query.isFetching} /></>}><QueryError error={query.error} />{query.isPending ? <LoadingRows /> : <Card><CardContent className="p-0"><Table><TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Connections</TableHead><TableHead>Tools</TableHead><TableHead>Clients</TableHead><TableHead>Updated</TableHead><TableHead /></TableRow></TableHeader><TableBody>{rows.map((summary) => { const resource = "accessProfile" in summary ? summary.accessProfile : summary.approvalPolicy; return <TableRow key={resource.id}><TableCell><Link className="font-medium hover:underline" to={`/${access ? "access-profiles" : "approval-policies"}/${resource.id}`}>{resource.name}</Link>{resource.isDefault ? <Badge className="ml-2">default</Badge> : null}</TableCell><TableCell>{summary.connectionCount}</TableCell><TableCell>{summary.toolCount}</TableCell><TableCell>{summary.assignedClientCount}</TableCell><TableCell>{when(resource.updatedAt)}</TableCell><TableCell><ConfigurationDialog kind={kind} source={{ id: resource.id, name: resource.name }} /></TableCell></TableRow>})}</TableBody></Table></CardContent></Card>}</Page>
 }
 
-export function PolicyDetailRoute() {
-  const { policyId } = useParams()
-  const detail = usePolicy(policyId)
-  if (policyId === undefined) return null
-  const policy = detail.data?.policy
-  const clients = detail.data?.assignedClients ?? []
+export function AccessProfileDetailRoute() { const { accessProfileId } = useParams(); const query = useAccessProfile(accessProfileId); const resource = query.data?.accessProfile; return <ConfigurationDetail title="Access profile" back="/access-profiles" query={query} resource={resource}>{resource === undefined ? null : <AccessProfileEditor key={resource.updatedAt.toISOString()} id={resource.id} storedTools={query.data?.tools ?? []} assignedClientCount={query.data?.assignedClients.length ?? 0} />}</ConfigurationDetail> }
+export function ApprovalPolicyDetailRoute() { const { approvalPolicyId } = useParams(); const query = useApprovalPolicy(approvalPolicyId); const resource = query.data?.approvalPolicy; return <ConfigurationDetail title="Approval policy" back="/approval-policies" query={query} resource={resource}>{resource === undefined ? null : <ApprovalPolicyEditor key={resource.updatedAt.toISOString()} id={resource.id} storedTools={query.data?.tools ?? []} assignedClientCount={query.data?.assignedClients.length ?? 0} />}</ConfigurationDetail> }
 
-  return (
-    <Page
-      title={policy?.name ?? "Policy"}
-      description="Choose what the connections in this policy may be used for. Which clients reach them is decided per client."
-      actions={policy === undefined ? undefined : <><ClonePolicyDialog policyId={policy.id} policyName={policy.name} /><ReloadButton onClick={() => void detail.refetch()} busy={detail.isFetching} /></>}
-    >
-      <Button variant="ghost" size="sm" className="w-fit" asChild><Link to="/policies"><ArrowLeft className="size-3" />All policies</Link></Button>
-      <QueryError error={detail.error} />
-      {detail.isPending ? <LoadingRows /> : policy === undefined ? null : (
-        <>
-          <Card>
-            <CardHeader>
-              <div className="flex flex-wrap items-center gap-2">
-                <FileKey2 className="size-4" />
-                <CardTitle>{policy.name}</CardTitle>
-                {policy.isDefault ? <Badge>default policy</Badge> : null}
-                {policy.forkedFrom === null ? null : <Badge variant="outline">forked copy</Badge>}
-                <Badge variant="secondary">{clients.length} assigned client{clients.length === 1 ? "" : "s"}</Badge>
-              </div>
-              <CardDescription>
-                Updated {when(policy.updatedAt)}. {clients.length === 0 ? "No clients currently use this policy." : `Used by ${clients.map((client) => client.name).join(", ")}.`}
-              </CardDescription>
-            </CardHeader>
-          </Card>
-          <PolicyEditor
-            key={`${policy.id}:${policy.updatedAt.toISOString()}`}
-            policyId={policy.id}
-            storedTools={detail.data?.tools ?? []}
-            assignedClientCount={clients.length}
-          />
-        </>
-      )}
-    </Page>
-  )
-}
+function ConfigurationDetail({ title, back, query, resource, children }: { readonly title: string; readonly back: string; readonly query: ReturnType<typeof useAccessProfile> | ReturnType<typeof useApprovalPolicy>; readonly resource: { readonly name: string; readonly isDefault: boolean } | undefined; readonly children: React.ReactNode }) { return <Page title={resource?.name ?? title} description={`Edit this reusable ${title.toLowerCase()}.`} actions={<ReloadButton onClick={() => void query.refetch()} busy={query.isFetching} />}><Button variant="ghost" size="sm" className="w-fit" asChild><Link to={back}><ArrowLeft className="size-3" />All {title.toLowerCase()}s</Link></Button><QueryError error={query.error} />{query.isPending ? <LoadingRows /> : <>{resource?.isDefault ? <Badge className="w-fit">default</Badge> : null}{children}</>}</Page> }

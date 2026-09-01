@@ -1,7 +1,6 @@
 // Everything the gateway owns lives here, above the host's own database.
-// Resolving a client's grant is what determines which subject a host instance
-// must be bound to, so these rows have to be readable before that instance
-// exists.
+// Resolving a client's access profile determines which subject a host instance
+// must be bound to, so these rows are readable before that instance exists.
 //
 // This is the whole schema, declared once and created as declared. Changing a
 // shape here means deleting the database — the project is early enough that
@@ -35,7 +34,8 @@ export const gatewayDdl = [
   `CREATE TABLE IF NOT EXISTS gateway_client (
      id TEXT PRIMARY KEY,
      tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
-     policy_id TEXT NOT NULL REFERENCES gateway_policy (id),
+      access_profile_id TEXT NOT NULL REFERENCES gateway_access_profile (id),
+      approval_policy_id TEXT NOT NULL REFERENCES gateway_approval_policy (id),
      name TEXT NOT NULL,
      capabilities TEXT NOT NULL,
      approval_delivery TEXT NOT NULL,
@@ -77,65 +77,61 @@ export const gatewayDdl = [
      last_used_at INTEGER,
      revoked_at INTEGER
    )`,
-  `CREATE TABLE IF NOT EXISTS gateway_policy (
-     id TEXT PRIMARY KEY,
-     tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
-     name TEXT NOT NULL,
-     is_default INTEGER NOT NULL DEFAULT 0,
-     forked_from TEXT REFERENCES gateway_policy (id),
-     created_at INTEGER NOT NULL,
-     updated_at INTEGER NOT NULL
-   )`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS gateway_policy_name_tenant
-     ON gateway_policy (tenant_id, name)`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS gateway_policy_default_tenant
-     ON gateway_policy (tenant_id) WHERE is_default = 1`,
-  `CREATE TABLE IF NOT EXISTS gateway_policy_tool (
-     policy_id TEXT NOT NULL REFERENCES gateway_policy (id) ON DELETE CASCADE,
-     owner TEXT NOT NULL,
-     subject TEXT,
-     integration TEXT NOT NULL,
-     connection_name TEXT NOT NULL,
-     tool TEXT NOT NULL,
-     enabled INTEGER NOT NULL DEFAULT 1,
-     decision TEXT NOT NULL,
-     PRIMARY KEY (policy_id, owner, subject, integration, connection_name, tool)
-   )`,
-  // SQLite treats NULLs in a primary key as distinct, and an org-tier rule has
-  // no subject. The expression index is what actually makes one rule per
-  // (policy, connection, tool) true.
-  `CREATE UNIQUE INDEX IF NOT EXISTS gateway_policy_tool_route
-     ON gateway_policy_tool
-        (policy_id, owner, COALESCE(subject, ''), integration, connection_name, tool)`,
-  `CREATE TABLE IF NOT EXISTS gateway_connection_grant (
-     id TEXT PRIMARY KEY,
-     tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
-     client_id TEXT NOT NULL REFERENCES gateway_client (id) ON DELETE CASCADE,
-     owner TEXT NOT NULL,
-     subject TEXT,
-     integration TEXT NOT NULL,
-     connection_name TEXT NOT NULL,
-     alias TEXT NOT NULL,
-     created_at INTEGER NOT NULL,
-     revoked_at INTEGER
-   )`,
-  // As with policy rules, SQLite treats NULL subjects as distinct, so the
-  // expression index is what makes one live grant per (client, connection) true.
-  `CREATE UNIQUE INDEX IF NOT EXISTS gateway_connection_grant_live
-     ON gateway_connection_grant
-        (client_id, owner, COALESCE(subject, ''), integration, connection_name)
-     WHERE revoked_at IS NULL`,
-  // An alias is what one client calls one connection, so it has to be unique
-  // within that client and nowhere else. Two clients naming different
-  // credentials `linear` is normal and correct.
-  `CREATE UNIQUE INDEX IF NOT EXISTS gateway_connection_grant_alias
-     ON gateway_connection_grant (client_id, alias) WHERE revoked_at IS NULL`,
+   `CREATE TABLE IF NOT EXISTS gateway_access_profile (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      is_default INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`,
+   `CREATE UNIQUE INDEX IF NOT EXISTS gateway_access_profile_name_tenant
+      ON gateway_access_profile (tenant_id, name)`,
+   `CREATE UNIQUE INDEX IF NOT EXISTS gateway_access_profile_default_tenant
+      ON gateway_access_profile (tenant_id) WHERE is_default = 1`,
+   `CREATE TABLE IF NOT EXISTS gateway_access_profile_tool (
+      access_profile_id TEXT NOT NULL REFERENCES gateway_access_profile (id) ON DELETE CASCADE,
+      owner TEXT NOT NULL,
+      subject TEXT,
+      integration TEXT NOT NULL,
+      connection_name TEXT NOT NULL,
+      tool TEXT NOT NULL,
+      PRIMARY KEY (access_profile_id, owner, subject, integration, connection_name, tool)
+    )`,
+   `CREATE UNIQUE INDEX IF NOT EXISTS gateway_access_profile_tool_route
+      ON gateway_access_profile_tool
+         (access_profile_id, owner, COALESCE(subject, ''), integration, connection_name, tool)`,
+   `CREATE TABLE IF NOT EXISTS gateway_approval_policy (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      is_default INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`,
+   `CREATE UNIQUE INDEX IF NOT EXISTS gateway_approval_policy_name_tenant
+      ON gateway_approval_policy (tenant_id, name)`,
+   `CREATE UNIQUE INDEX IF NOT EXISTS gateway_approval_policy_default_tenant
+      ON gateway_approval_policy (tenant_id) WHERE is_default = 1`,
+   `CREATE TABLE IF NOT EXISTS gateway_approval_policy_tool (
+      approval_policy_id TEXT NOT NULL REFERENCES gateway_approval_policy (id) ON DELETE CASCADE,
+      owner TEXT NOT NULL,
+      subject TEXT,
+      integration TEXT NOT NULL,
+      connection_name TEXT NOT NULL,
+      tool TEXT NOT NULL,
+      decision TEXT NOT NULL,
+      PRIMARY KEY (approval_policy_id, owner, subject, integration, connection_name, tool)
+    )`,
+   `CREATE UNIQUE INDEX IF NOT EXISTS gateway_approval_policy_tool_route
+      ON gateway_approval_policy_tool
+         (approval_policy_id, owner, COALESCE(subject, ''), integration, connection_name, tool)`,
   `CREATE TABLE IF NOT EXISTS gateway_pending_approval (
      id TEXT PRIMARY KEY,
      tenant_id TEXT NOT NULL REFERENCES gateway_tenant (id) ON DELETE CASCADE,
      client_id TEXT NOT NULL REFERENCES gateway_client (id) ON DELETE CASCADE,
-     policy_id TEXT NOT NULL REFERENCES gateway_policy (id),
-     grant_id TEXT NOT NULL REFERENCES gateway_connection_grant (id),
+      approval_policy_id TEXT NOT NULL REFERENCES gateway_approval_policy (id),
+      access_profile_id TEXT NOT NULL REFERENCES gateway_access_profile (id),
      alias TEXT NOT NULL,
      tool TEXT NOT NULL,
      arguments TEXT NOT NULL,
@@ -150,7 +146,7 @@ export const gatewayDdl = [
      collected_at INTEGER
    )`,
   `CREATE INDEX IF NOT EXISTS gateway_pending_approval_retry
-     ON gateway_pending_approval (policy_id, grant_id, tool, arguments_lookup, arguments)
+      ON gateway_pending_approval (approval_policy_id, access_profile_id, tool, arguments_lookup, arguments)
      WHERE collected_at IS NULL`,
   `CREATE TABLE IF NOT EXISTS gateway_audit (
      id TEXT PRIMARY KEY,

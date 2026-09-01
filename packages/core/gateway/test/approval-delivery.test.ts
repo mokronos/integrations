@@ -2,7 +2,7 @@ import { run } from "./effect.ts"
 import { describe, expect, test } from "bun:test"
 import { Schema } from "effect"
 import { deliverApprovalNotification, ApprovalNotification } from "../src/approval-delivery.ts"
-import { ApprovalId, ClientId, PolicyId, TenantId } from "../src/domain.ts"
+import { AccessProfileId, ApprovalId, ApprovalPolicyId, ClientId, TenantId } from "../src/domain.ts"
 
 const decodeNotification = Schema.decodeUnknownSync(
   Schema.fromJsonString(ApprovalNotification)
@@ -27,7 +27,8 @@ describe("approval delivery", () => {
         client: {
           id: ClientId.make("client-delivery"),
           tenantId: TenantId.make("tenant-delivery"),
-          policyId: PolicyId.make("policy-delivery"),
+          accessProfileId: AccessProfileId.make("access-delivery"),
+          approvalPolicyId: ApprovalPolicyId.make("approval-delivery"),
           name: "support-agent",
           capabilities: [],
           approvalDelivery: {

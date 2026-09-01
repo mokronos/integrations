@@ -6,7 +6,6 @@ import path from "node:path"
 import { Effect, Schema } from "effect"
 import { whenPresent } from "@mokronos/contracts"
 import {
-  Alias,
   ConnectionName,
   createGatewayHandler,
   createGatewayStore,
@@ -14,8 +13,8 @@ import {
   generateApiKey,
   IntegrationSlug,
   newClientId,
-  newConnectionGrantId,
-  newPolicyId,
+  newAccessProfileId,
+  newApprovalPolicyId,
   TenantId,
   ToolName
 } from "./gateway.ts"
@@ -56,33 +55,31 @@ const setup = async (options: SetupOptions = {}) => {
   const store = await run(createGatewayStore(path.join(directory, "gateway.sqlite")))
   stores.push(store)
 
-  // A standing client with policy and grant, so delegation boundaries are testable
-  // against a real administrative surface.
-  const policy = await run(store.createPolicy({
-    id: newPolicyId(), tenantId: defaultTenantId, name: "local"
+  const accessProfile = await run(store.createAccessProfile({
+    id: newAccessProfileId(), tenantId: defaultTenantId, name: "local"
   }))
-  await run(store.replacePolicyTools(policy.id, [{
+  await run(store.replaceAccessProfileTools(accessProfile.id, [{
+    connection,
+    tool: ToolName.make("sendEmail")
+  }]))
+  const approvalPolicy = await run(store.createApprovalPolicy({
+    id: newApprovalPolicyId(), tenantId: defaultTenantId, name: "local"
+  }))
+  await run(store.replaceApprovalPolicyTools(approvalPolicy.id, [{
       connection,
       tool: ToolName.make("sendEmail"),
-      enabled: true,
       decision: "allow"
     }]))
   const client = await run(store.createClient({
     id: newClientId(),
     tenantId: defaultTenantId,
-    policyId: policy.id,
+    accessProfileId: accessProfile.id,
+    approvalPolicyId: approvalPolicy.id,
     name: "local",
     capabilities: ["provision_connections", "administer_gateway"]
   }))
   const apiKey = generateApiKey()
   await run(store.addApiKey({ id: apiKey.id, clientId: client.id, hash: apiKey.hash }))
-  await run(store.createGrant({
-    id: newConnectionGrantId(),
-    tenantId: defaultTenantId,
-    clientId: client.id,
-    alias: Alias.make("gmail-work"),
-    connection,
-  }))
 
   const { handle } = createGatewayHandler({
     store,
@@ -515,31 +512,31 @@ describe("attribution", () => {
 
     // A frozen call inside the human's own partition, so the session is the
     // authority that settles it.
-    const policy = await run(setup_.store.createPolicy({
-      id: newPolicyId(), tenantId: human.tenantId, name: "support-agent"
+    const accessProfile = await run(setup_.store.createAccessProfile({
+      id: newAccessProfileId(), tenantId: human.tenantId, name: "support-agent"
     }))
-    await run(setup_.store.replacePolicyTools(policy.id, [{
+    await run(setup_.store.replaceAccessProfileTools(accessProfile.id, [{
+      connection,
+      tool: ToolName.make("sendEmail")
+    }]))
+    const approvalPolicy = await run(setup_.store.createApprovalPolicy({
+      id: newApprovalPolicyId(), tenantId: human.tenantId, name: "support-agent"
+    }))
+    await run(setup_.store.replaceApprovalPolicyTools(approvalPolicy.id, [{
         connection,
         tool: ToolName.make("sendEmail"),
-        enabled: true,
         decision: "require_approval"
       }]))
     const client = await run(setup_.store.createClient({
       id: newClientId(),
       tenantId: human.tenantId,
-      policyId: policy.id,
+      accessProfileId: accessProfile.id,
+      approvalPolicyId: approvalPolicy.id,
       name: "support-agent",
       capabilities: ["provision_connections"]
     }))
     const key = generateApiKey()
     await run(setup_.store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash }))
-    await run(setup_.store.createGrant({
-      id: newConnectionGrantId(),
-      tenantId: human.tenantId,
-      clientId: client.id,
-      alias: Alias.make("gmail-work"),
-      connection,
-    }))
 
     const frozen = await run(setup_.call("POST", "/v1/execute", {
       body: { alias: "gmail-work", tool: "sendEmail", arguments: {} },

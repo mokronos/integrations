@@ -6,8 +6,8 @@ import {
   decodeAuthProviders,
   decodeApprovals,
   decodeAudit,
-  decodeGrantCreated,
-  decodeGrants,
+  decodeAccessProfile, decodeAccessProfileCreated, decodeAccessProfiles, decodeAccessProfileToolsReplaced,
+  decodeApprovalPolicy, decodeApprovalPolicyCreated, decodeApprovalPolicies, decodeApprovalPolicyToolsReplaced,
   decodeClient,
   decodeClients,
   decodeConnectionCreated,
@@ -23,10 +23,6 @@ import {
   decodeKeys,
   decodeOAuthSession,
   decodeOverview,
-  decodePolicies,
-  decodePolicy,
-  decodePolicyCreated,
-  decodePolicyToolsReplaced,
   decodeRemoved,
   decodeRegistrySearch,
   decodeRevoked,
@@ -36,7 +32,8 @@ import {
 import type {
   ApprovalDelivery,
   ApprovalStatus,
-  PolicyToolInput
+  AccessProfileToolInput,
+  ApprovalPolicyToolInput
 } from "@/lib/schemas"
 
 /** The gateway's API, as the control plane uses it.
@@ -184,7 +181,8 @@ export const fetchOverview = async () =>
 
 export const createClient = async (input: {
   readonly name: string
-  readonly policyId?: string
+  readonly accessProfileId?: string
+  readonly approvalPolicyId?: string
   readonly capabilities: ReadonlyArray<"provision_connections" | "administer_gateway">
   readonly approvalDelivery: ApprovalDelivery
 }) => decodeClient(await request("POST", "/v1/clients", input))
@@ -217,72 +215,19 @@ export const listClientTools = async (clientId: string, schemas = false) =>
 export const revokeClient = async (clientId: string) =>
   decodeRevoked(await request("POST", `/v1/clients/${segment(clientId)}/revoke`))
 
-export const listPolicies = async () =>
-  decodePolicies(await request("GET", "/v1/policies")).policies
+export const listAccessProfiles = async () => decodeAccessProfiles(await request("GET", "/v1/access-profiles")).accessProfiles
+export const getAccessProfile = async (id: string) => decodeAccessProfile(await request("GET", `/v1/access-profiles/${segment(id)}`))
+export const createAccessProfile = async (name: string) => decodeAccessProfileCreated(await request("POST", "/v1/access-profiles", { name }))
+export const cloneAccessProfile = async (id: string, name: string) => decodeAccessProfileToolsReplaced(await request("POST", `/v1/access-profiles/${segment(id)}/clone`, { name }))
+export const replaceAccessProfileTools = async (id: string, tools: ReadonlyArray<AccessProfileToolInput>) => decodeAccessProfileToolsReplaced(await request("POST", `/v1/access-profiles/${segment(id)}/tools`, { tools }))
+export const assignAccessProfile = async (clientId: string, accessProfileId: string) => decodeClient(await request("POST", `/v1/clients/${segment(clientId)}/access-profile`, { accessProfileId }))
 
-export const getPolicy = async (policyId: string) =>
-  decodePolicy(await request("GET", `/v1/policies/${segment(policyId)}`))
-
-export const createPolicy = async (input: { readonly name: string }) =>
-  decodePolicyCreated(await request("POST", "/v1/policies", input))
-
-export const replacePolicyTools = async (input: {
-  readonly policyId: string
-  readonly tools: ReadonlyArray<PolicyToolInput>
-}) => decodePolicyToolsReplaced(await request(
-  "POST",
-  `/v1/policies/${segment(input.policyId)}/tools`,
-  { tools: input.tools }
-))
-
-export const clonePolicy = async (input: {
-  readonly policyId: string
-  readonly name: string
-}) => decodePolicyToolsReplaced(await request(
-  "POST",
-  `/v1/policies/${segment(input.policyId)}/clone`,
-  { name: input.name }
-))
-
-export const assignPolicy = async (input: {
-  readonly clientId: string
-  readonly policyId: string
-}) => decodeClient(await request(
-  "POST",
-  `/v1/clients/${segment(input.clientId)}/policy`,
-  { policyId: input.policyId }
-))
-
-export const listGrants = async (clientId: string) =>
-  decodeGrants(await request("GET", `/v1/clients/${segment(clientId)}/connections`)).grants
-
-export const grantConnection = async (input: {
-  readonly clientId: string
-  readonly integration: string
-  readonly connection: string
-}) => decodeGrantCreated(await request(
-  "POST",
-  `/v1/clients/${segment(input.clientId)}/connections`,
-  { integration: input.integration, connection: input.connection }
-))
-
-export const renameGrant = async (input: {
-  readonly clientId: string
-  readonly grantId: string
-  readonly alias: string
-}) => await request(
-  "POST",
-  `/v1/clients/${segment(input.clientId)}/connections/${segment(input.grantId)}`,
-  { alias: input.alias }
-)
-
-export const revokeGrant = async (input: {
-  readonly clientId: string
-  readonly grantId: string
-}) => await request(
-  "POST",
-  `/v1/clients/${segment(input.clientId)}/connections/${segment(input.grantId)}/revoke`
-)
+export const listApprovalPolicies = async () => decodeApprovalPolicies(await request("GET", "/v1/approval-policies")).approvalPolicies
+export const getApprovalPolicy = async (id: string) => decodeApprovalPolicy(await request("GET", `/v1/approval-policies/${segment(id)}`))
+export const createApprovalPolicy = async (name: string) => decodeApprovalPolicyCreated(await request("POST", "/v1/approval-policies", { name }))
+export const cloneApprovalPolicy = async (id: string, name: string) => decodeApprovalPolicyToolsReplaced(await request("POST", `/v1/approval-policies/${segment(id)}/clone`, { name }))
+export const replaceApprovalPolicyTools = async (id: string, tools: ReadonlyArray<ApprovalPolicyToolInput>) => decodeApprovalPolicyToolsReplaced(await request("POST", `/v1/approval-policies/${segment(id)}/tools`, { tools }))
+export const assignApprovalPolicy = async (clientId: string, approvalPolicyId: string) => decodeClient(await request("POST", `/v1/clients/${segment(clientId)}/approval-policy`, { approvalPolicyId }))
 
 // --- approvals, audit, upkeep -----------------------------------------------
 

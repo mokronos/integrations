@@ -13,8 +13,8 @@ import {
   generateApiKey,
   IntegrationSlug,
   newClientId,
-  newConnectionGrantId,
-  newPolicyId,
+  newAccessProfileId,
+  newApprovalPolicyId,
   SubjectId,
   ToolName
 } from "../src/index.ts"
@@ -56,38 +56,40 @@ const seed = async (store: GatewayStore, options: {
   readonly connection?: ConnectionRef
   readonly decision?: "allow" | "require_approval"
 } = {}) => {
-  const policy = await run(store.createPolicy({
-    id: newPolicyId(),
+  const accessProfile = await run(store.createAccessProfile({
+    id: newAccessProfileId(),
     tenantId: defaultTenantId,
-    name: `policy-${crypto.randomUUID()}`
+    name: `access-${crypto.randomUUID()}`
+  }))
+  const approvalPolicy = await run(store.createApprovalPolicy({
+    id: newApprovalPolicyId(),
+    tenantId: defaultTenantId,
+    name: `approval-${crypto.randomUUID()}`
   }))
   const client = await run(store.createClient({
     id: newClientId(),
     tenantId: defaultTenantId,
-    policyId: policy.id,
+    accessProfileId: accessProfile.id,
+    approvalPolicyId: approvalPolicy.id,
     name: "support-agent",
     capabilities: options.capabilities ?? ["provision_connections"]
   }))
   const key = generateApiKey()
   await run(store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash }))
   const policyConnection = options.connection ?? orgConnection
-  await run(store.replacePolicyTools(policy.id, [{
-      connection: policyConnection,
-      tool: ToolName.make("getDocument"),
-      enabled: true,
-      decision: options.decision ?? "allow"
-    }]))
-  const grant = await run(store.createGrant({
-    id: newConnectionGrantId(),
-    tenantId: defaultTenantId,
-    clientId: client.id,
-    alias: Alias.make("sharepoint-app"),
-    connection: options.connection ?? orgConnection,
-  }))
-  return { client, key, policy, grant }
+  await run(store.replaceAccessProfileTools(accessProfile.id, [{
+    connection: policyConnection,
+    tool: ToolName.make("getDocument")
+  }]))
+  await run(store.replaceApprovalPolicyTools(approvalPolicy.id, [{
+    connection: policyConnection,
+    tool: ToolName.make("getDocument"),
+    decision: options.decision ?? "allow"
+  }]))
+  return { client, key, accessProfile, approvalPolicy }
 }
 
-const invoke = (store: GatewayStore, secret: string, alias = "sharepoint-app", tool = "getDocument") =>
+const invoke = (store: GatewayStore, secret: string, alias = "sharepoint-default", tool = "getDocument") =>
   authorizeInvocation(store, {
     secret,
     alias: Alias.make(alias),
@@ -97,13 +99,13 @@ const invoke = (store: GatewayStore, secret: string, alias = "sharepoint-app", t
 describe("gateway authorization", () => {
   test("authorizes an effective tool and names the connection it resolves to", async () => {
     const store = await run(makeStore())
-    const { key, grant } = await run(seed(store))
+    const { key, accessProfile } = await run(seed(store))
 
     const result = await run(invoke(store, key.secret))
 
     expect(result.status).toBe("authorized")
     if (result.status !== "authorized") return
-    expect(result.grant.id).toBe(grant.id)
+    expect(result.accessProfile.id).toBe(accessProfile.id)
     expect(result.connection).toEqual(orgConnection)
     // An org-tier connection belongs to the tenant, so no human is acted for.
     expect(result.subject).toBeNull()
@@ -113,11 +115,11 @@ describe("gateway authorization", () => {
     const store = await run(makeStore())
     const { key } = await run(seed(store, { connection: userConnection }))
 
-    const result = await run(invoke(store, key.secret))
+    const result = await run(invoke(store, key.secret, "gmail-work"))
 
     expect(result.status).toBe("authorized")
     if (result.status !== "authorized") return
-    // The delegation lives in the grant. Nothing in the API key says Sebastian.
+    // The delegation lives in the profile route. Nothing in the API key says Sebastian.
     expect(result.subject).toBe(SubjectId.make("sebastian"))
   })
 
@@ -175,11 +177,11 @@ describe("gateway authorization", () => {
     expect((await run(invoke(store, replacement.secret))).status).toBe("authorized")
   })
 
-  test("denies a tool outside the policy and grant intersection", async () => {
+  test("denies a tool outside the access profile and approval policy intersection", async () => {
     const store = await run(makeStore())
     const { key } = await run(seed(store))
 
-    const result = await run(invoke(store, key.secret, "sharepoint-app", "deleteDocument"))
+    const result = await run(invoke(store, key.secret, "sharepoint-default", "deleteDocument"))
 
     expect(result.status).toBe("not-authorized")
   })
@@ -189,28 +191,27 @@ describe("gateway authorization", () => {
     const { key } = await run(seed(store))
 
     const unknownAlias = await run(invoke(store, key.secret, "nothing-here", "getDocument"))
-    const unauthorizedTool = await run(invoke(store, key.secret, "sharepoint-app", "deleteDocument"))
+    const unauthorizedTool = await run(invoke(store, key.secret, "sharepoint-default", "deleteDocument"))
 
     // Telling these apart would let a caller enumerate what else is connected.
     expect(unknownAlias.status).toBe(unauthorizedTool.status)
   })
 
-  test("denies a revoked grant while leaving the client usable", async () => {
+  test("removing a profile route denies it while leaving another route usable", async () => {
     const store = await run(makeStore())
-    const { client, key, grant } = await run(seed(store))
-    await run(store.replacePolicyTools(client.policyId, [
-        { connection: orgConnection, tool: ToolName.make("getDocument"), enabled: true, decision: "allow" },
-        { connection: userConnection, tool: ToolName.make("search"), enabled: true, decision: "allow" }
-      ]))
-    await run(store.createGrant({
-      id: newConnectionGrantId(),
-      tenantId: defaultTenantId,
-      clientId: client.id,
-      alias: Alias.make("gmail-work"),
-      connection: userConnection,
-    }))
+    const { key, accessProfile, approvalPolicy } = await run(seed(store))
+    await run(store.replaceAccessProfileTools(accessProfile.id, [
+      { connection: orgConnection, tool: ToolName.make("getDocument") },
+      { connection: userConnection, tool: ToolName.make("search") }
+    ]))
+    await run(store.replaceApprovalPolicyTools(approvalPolicy.id, [
+      { connection: orgConnection, tool: ToolName.make("getDocument"), decision: "allow" },
+      { connection: userConnection, tool: ToolName.make("search"), decision: "allow" }
+    ]))
 
-    await run(store.revokeGrant(defaultTenantId, grant.id))
+    await run(store.replaceAccessProfileTools(accessProfile.id, [
+      { connection: userConnection, tool: ToolName.make("search") }
+    ]))
 
     expect((await run(invoke(store, key.secret))).status).toBe("not-authorized")
     expect((await run(invoke(store, key.secret, "gmail-work", "search"))).status).toBe("authorized")
@@ -219,31 +220,28 @@ describe("gateway authorization", () => {
   test("two clients hold different policies over the same connection", async () => {
     const store = await run(makeStore())
     const { key: readerKey } = await run(seed(store))
-    const writerPolicy = await run(store.createPolicy({
-      id: newPolicyId(), tenantId: defaultTenantId, name: "writer"
+    const writerAccess = await run(store.createAccessProfile({
+      id: newAccessProfileId(), tenantId: defaultTenantId, name: "writer access"
+    }))
+    const writerApproval = await run(store.createApprovalPolicy({
+      id: newApprovalPolicyId(), tenantId: defaultTenantId, name: "writer approval"
     }))
     const writer = await run(store.createClient({
       id: newClientId(),
       tenantId: defaultTenantId,
-      policyId: writerPolicy.id,
+      accessProfileId: writerAccess.id,
+      approvalPolicyId: writerApproval.id,
       name: "sales-campaign",
       capabilities: ["provision_connections"]
     }))
     const writerKey = generateApiKey()
     await run(store.addApiKey({ id: writerKey.id, clientId: writer.id, hash: writerKey.hash }))
-    await run(store.replacePolicyTools(writer.policyId, [{
-        connection: orgConnection,
-        tool: ToolName.make("getDocument"),
-        enabled: true,
-        decision: "require_approval"
-      }]))
-    await run(store.createGrant({
-      id: newConnectionGrantId(),
-      tenantId: defaultTenantId,
-      clientId: writer.id,
-      alias: Alias.make("sharepoint-app"),
-      connection: orgConnection,
-    }))
+    await run(store.replaceAccessProfileTools(writerAccess.id, [{
+      connection: orgConnection, tool: ToolName.make("getDocument")
+    }]))
+    await run(store.replaceApprovalPolicyTools(writerApproval.id, [{
+      connection: orgConnection, tool: ToolName.make("getDocument"), decision: "require_approval"
+    }]))
 
     const reader = await run(invoke(store, readerKey.secret))
     const campaign = await run(invoke(store, writerKey.secret))
@@ -268,20 +266,20 @@ describe("gateway authorization", () => {
     } as const
     // The same operation on two credentials, judged separately: the shared
     // application connection is allowed outright, the personal one is not.
-    await run(store.replacePolicyTools(client.policyId, [
-        { connection: orgConnection, tool: ToolName.make("getDocument"), enabled: true, decision: "allow" },
-        { connection: personal, tool: ToolName.make("getDocument"), enabled: true, decision: "require_approval" }
-      ]))
-    await run(store.createGrant({
-      id: newConnectionGrantId(),
-      tenantId: defaultTenantId,
-      clientId: client.id,
-      alias: Alias.make("sharepoint-me"),
-      connection: personal
-    }))
+    const accessProfile = await run(store.findAccessProfile(defaultTenantId, client.accessProfileId))
+    const approvalPolicy = await run(store.findApprovalPolicy(defaultTenantId, client.approvalPolicyId))
+    if (accessProfile === undefined || approvalPolicy === undefined) throw new Error("missing configuration")
+    await run(store.replaceAccessProfileTools(accessProfile.id, [
+      { connection: orgConnection, tool: ToolName.make("getDocument") },
+      { connection: personal, tool: ToolName.make("getDocument") }
+    ]))
+    await run(store.replaceApprovalPolicyTools(approvalPolicy.id, [
+      { connection: orgConnection, tool: ToolName.make("getDocument"), decision: "allow" },
+      { connection: personal, tool: ToolName.make("getDocument"), decision: "require_approval" }
+    ]))
 
-    const application = await run(invoke(store, key.secret, "sharepoint-app"))
-    const delegated = await run(invoke(store, key.secret, "sharepoint-me"))
+    const application = await run(invoke(store, key.secret, "sharepoint-default"))
+    const delegated = await run(invoke(store, key.secret, "sharepoint-personal"))
 
     expect(application.status).toBe("authorized")
     expect(delegated.status).toBe("authorized")

@@ -10,16 +10,14 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
   Alias,
   ClientId,
-  ConnectionName,
-  IntegrationSlug,
+  aliasForConnection,
   sameConnectionRef,
   ToolName
 } from "@mokronos/gateway-core"
 import { boundToolAddress } from "@mokronos/gateway-core"
 import {
   forgetConnection,
-  grantConnection,
-  reconcileDefaultPolicy
+  reconcileDefaults
 } from "@mokronos/gateway-core"
 import { oauthBrowserPage } from "@mokronos/gateway-core"
 import type { GatewayStore } from "@mokronos/gateway-core"
@@ -124,32 +122,28 @@ const validateGatewayNode = (
     )
 
     if (aliasIsWellFormed && live) {
-      // Reachability is the same intersection a call goes through: the alias
-      // has to name a connection this client was granted, and its policy has to
-      // enable that tool on it.
-      const grant = clientId === undefined
+      const accessProfile = clientId === undefined
         ? undefined
-        : yield* orDieStorage(dependencies.store.findGrantByAlias(
-          clientId,
-          Alias.make(source.alias)
-        ))
-      const policy = clientId === undefined
+        : yield* orDieStorage(dependencies.store.findAccessProfileForClient(clientId))
+      const approvalPolicy = clientId === undefined
         ? undefined
-        : yield* orDieStorage(dependencies.store.findPolicyForClient(clientId))
-      const rules = policy === undefined
+        : yield* orDieStorage(dependencies.store.findApprovalPolicyForClient(clientId))
+      const accessTools = accessProfile === undefined
         ? []
-        : yield* orDieStorage(dependencies.store.listPolicyTools(policy.id))
-      const reachable = grant !== undefined && rules.some((rule) =>
-        rule.enabled
-        && rule.tool === source.tool
-        && sameConnectionRef(rule.connection, grant.connection))
+        : yield* orDieStorage(dependencies.store.listAccessProfileTools(accessProfile.id))
+      const approvalTools = approvalPolicy === undefined
+        ? []
+        : yield* orDieStorage(dependencies.store.listApprovalPolicyTools(approvalPolicy.id))
+      const accessTool = accessTools.find((tool) => tool.tool === source.tool && aliasForConnection(tool.connection) === source.alias)
+      const approvalTool = accessTool === undefined ? undefined : approvalTools.find((tool) =>
+        tool.tool === source.tool && sameConnectionRef(tool.connection, accessTool.connection))
       if (clientId === undefined) {
         findings.push({
           severity: "error",
           check: "authorization",
           message: "Gateway aliases are client-specific; validate this node with i and its client key"
         })
-      } else if (grant === undefined || !reachable) {
+      } else if (accessTool === undefined || approvalTool === undefined) {
         findings.push({
           severity: "error",
           check: "authorization",
@@ -161,9 +155,9 @@ const validateGatewayNode = (
         findings.push({
           severity: "info",
           check: "authorization",
-          message: `${source.alias}.${source.tool} resolves to ${grant.connection.integration}/${grant.connection.name}`
+          message: `${source.alias}.${source.tool} resolves to ${accessTool.connection.integration}/${accessTool.connection.name}`
         })
-        const address = boundToolAddress(grant.connection, ToolName.make(source.tool))
+        const address = boundToolAddress(accessTool.connection, ToolName.make(source.tool))
         const tools = yield* Effect.promise(() => dependencies.integrations.tools.list())
         findings.push(
           tools.some((candidate) => candidate.address === address)
@@ -301,27 +295,7 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
                   ? { value: values["token"] }
                   : { values })
             }))
-          // Connecting a credential and reaching it are separate acts. The
-          // tenant's default policy absorbs the new connection so it is
-          // governed, and the client that connected it — which did so for
-          // itself — is granted reach. No other client is touched.
-          yield* Effect.gen(function*() {
-            yield* reconcileDefaultPolicy({
-              store,
-              integrations: integrationsApi,
-              tenantId: caller.client.tenantId
-            })
-            yield* grantConnection({
-              store,
-              integrations: integrationsApi,
-              client: caller.client,
-              connection: {
-                owner: "org",
-                integration: IntegrationSlug.make(integration.slug),
-                name: ConnectionName.make(connection.name)
-              }
-            })
-          }).pipe(orDieStorage)
+          yield* reconcileDefaults({ store, integrations: integrationsApi, tenantId: caller.client.tenantId }).pipe(orDieStorage)
           return {
             connection,
             tools: yield* Effect.promise(() =>

@@ -61,8 +61,8 @@ export const DelegatedLayer = HttpApiBuilder.group(GatewayApi, "delegated", (han
               onApprovalCreated: (input) => deliverApprovalNotification({
                 client: input.authorization.client,
                 approvalId: input.approvalId,
-                alias: input.authorization.grant.alias,
-                tool: input.authorization.policyTool.tool,
+                alias: input.authorization.alias,
+                tool: input.authorization.accessProfileTool.tool,
                 expiresAt: input.expiresAt,
                 ...whenPresentMap("approvalUrl", input.approvalUrl, (url) => url)
               })

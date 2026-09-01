@@ -21,7 +21,7 @@ import {
  * human is asked lives behind the gateway.
  *
  * That is the point of the split — a sandbox holding this client holds no
- * authority beyond the policy and bindings attached to its client. */
+ * authority beyond the access profile and approval policy attached to its client. */
 
 export interface GatewayClientOptions {
   readonly url: string
@@ -256,7 +256,7 @@ export interface GatewayClient {
 
   /** Performs a delegated call.
    *
-   *  Every answer the *policy* produced comes back as a value, `denied` and
+   *  Every authorization answer comes back as a value, `denied` and
    *  `failed` included: the gateway answered, and which answer it gave is the
    *  caller's to branch on. A thrown `GatewayError` means the gateway did not
    *  answer at all — bad key, no route, unreachable. */
@@ -301,7 +301,7 @@ export const createGatewayClient = (options: GatewayClientOptions): GatewayClien
   }
 
   const failure = (method: string, path: string, status: number, parsed: Json): GatewayError => {
-    // The gateway states a refusal in `error`; a policy answer states it in
+    // The gateway states a refusal in `error`; an authorization answer states it in
     // `reason`. Reading both is what keeps "alias not authorized" from being
     // reported as the generic "failed with 403".
     const message = Predicate.isObjectOrArray(parsed)
@@ -383,7 +383,7 @@ export const createGatewayClient = (options: GatewayClientOptions): GatewayClien
       })
       // A denial and a vendor failure are answers, carried on 403 and 502 so
       // that HTTP callers see them too. They decode into the outcome union
-      // rather than throwing, so one branch handles every policy result.
+      // rather than throwing, so one branch handles every authorization result.
       if (!response.ok && !isOutcome(response.parsed)) {
         throw failure("POST", "/v1/execute", response.status, response.parsed)
       }

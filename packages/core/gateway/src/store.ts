@@ -7,20 +7,20 @@ import type { NonNegativeInt, PositiveInt } from "@mokronos/contracts"
 import type { Encryption } from "./crypto.ts"
 import {
   Alias,
+  AccessProfileId,
   ApiKeyHash,
   ApiKeyId,
   ApprovalDelivery,
   ApprovalId,
   AuditId,
   canonicalArguments,
-  ConnectionGrantId,
+  ApprovalPolicyId,
   ClientId,
   ConnectionName,
   defaultApprovalDelivery,
   defaultTenantId,
   IntegrationSlug,
   LoginHandoffHash,
-  PolicyId,
   SessionTokenHash,
   SubjectId,
   TenantId,
@@ -28,6 +28,8 @@ import {
 } from "./domain.ts"
 import type {
   ApiKey,
+  AccessProfile,
+  AccessProfileTool,
   ApprovalStatus,
   AuditOutcome,
   AuditRecord,
@@ -36,14 +38,13 @@ import type {
   ClientCapability,
   ConnectionRef,
   ExternalIdentity,
-  ConnectionGrant,
+  ApprovalPolicy,
+  ApprovalPolicyTool,
   Login,
   LoginHandoff,
   IdentityProvider,
   PendingApproval,
-  Policy,
   PolicyDecision,
-  PolicyTool,
   Subject,
   Tenant,
   ToolSnapshot
@@ -64,7 +65,8 @@ const NullableString = Schema.NullOr(Schema.String)
 const ClientRow = Schema.Struct({
   id: Schema.String,
   tenant_id: Schema.String,
-  policy_id: Schema.String,
+  access_profile_id: Schema.String,
+  approval_policy_id: Schema.String,
   name: Schema.String,
   capabilities: Schema.String,
   approval_delivery: Schema.String,
@@ -136,44 +138,39 @@ const ApiKeyRow = Schema.Struct({
   revoked_at: NullableNumber
 })
 
-const PolicyRow = Schema.Struct({
+const ConfigurationRow = Schema.Struct({
   id: Schema.String,
   tenant_id: Schema.String,
   name: Schema.String,
   is_default: Schema.Number,
-  forked_from: NullableString,
   created_at: Schema.Number,
   updated_at: Schema.Number
 })
 
-const PolicyToolRow = Schema.Struct({
-  policy_id: Schema.String,
+const AccessProfileToolRow = Schema.Struct({
+  access_profile_id: Schema.String,
+  owner: Schema.Literals(["org", "user"]),
+  subject: NullableString,
+  integration: Schema.String,
+  connection_name: Schema.String,
+  tool: Schema.String
+})
+
+const ApprovalPolicyToolRow = Schema.Struct({
+  approval_policy_id: Schema.String,
   owner: Schema.Literals(["org", "user"]),
   subject: NullableString,
   integration: Schema.String,
   connection_name: Schema.String,
   tool: Schema.String,
-  enabled: Schema.Number,
   decision: Schema.Literals(["allow", "require_approval"])
-})
-
-const GrantRow = Schema.Struct({
-  id: Schema.String,
-  client_id: Schema.String,
-  owner: Schema.Literals(["org", "user"]),
-  subject: NullableString,
-  integration: Schema.String,
-  connection_name: Schema.String,
-  alias: Schema.String,
-  created_at: Schema.Number,
-  revoked_at: NullableNumber
 })
 
 const ApprovalRow = Schema.Struct({
   id: Schema.String,
   client_id: Schema.String,
-  policy_id: Schema.String,
-  grant_id: Schema.String,
+  approval_policy_id: Schema.String,
+  access_profile_id: Schema.String,
   alias: Schema.String,
   tool: Schema.String,
   arguments: Schema.String,
@@ -212,7 +209,7 @@ const SnapshotRow = Schema.Struct({
 })
 
 const clientColumns = [
-  "id", "tenant_id", "policy_id", "name", "capabilities", "approval_delivery", "created_at", "revoked_at"
+  "id", "tenant_id", "access_profile_id", "approval_policy_id", "name", "capabilities", "approval_delivery", "created_at", "revoked_at"
 ]
 const tenantColumns = ["id", "name", "created_at"]
 const subjectColumns = ["id", "tenant_id", "created_at"]
@@ -228,18 +225,17 @@ const identityOAuthStateColumns = [
   "state_hash", "provider", "handoff_hash", "return_path", "expires_at"
 ]
 const apiKeyColumns = ["id", "client_id", "hash", "created_at", "last_used_at", "revoked_at"]
-const policyColumns = [
-  "id", "tenant_id", "name", "is_default", "forked_from", "created_at", "updated_at"
+const configurationColumns = [
+  "id", "tenant_id", "name", "is_default", "created_at", "updated_at"
 ]
-const policyToolColumns = [
-  "policy_id", "owner", "subject", "integration", "connection_name", "tool", "enabled", "decision"
+const accessProfileToolColumns = [
+  "access_profile_id", "owner", "subject", "integration", "connection_name", "tool"
 ]
-const grantColumns = [
-  "id", "client_id", "owner", "subject", "integration", "connection_name",
-  "alias", "created_at", "revoked_at"
+const approvalPolicyToolColumns = [
+  "approval_policy_id", "owner", "subject", "integration", "connection_name", "tool", "decision"
 ]
 const approvalColumns = [
-  "id", "client_id", "policy_id", "grant_id", "alias", "tool", "arguments", "status",
+  "id", "client_id", "approval_policy_id", "access_profile_id", "alias", "tool", "arguments", "status",
   "created_at", "expires_at", "decided_at", "decided_by", "result", "error", "collected_at"
 ]
 const auditColumns = [
@@ -259,9 +255,9 @@ const decodeExternalIdentityRow = Schema.decodeUnknownSync(ExternalIdentityRow)
 const decodeLoginHandoffRow = Schema.decodeUnknownSync(LoginHandoffRow)
 const decodeIdentityOAuthStateRow = Schema.decodeUnknownSync(IdentityOAuthStateRow)
 const decodeApiKeyRow = Schema.decodeUnknownSync(ApiKeyRow)
-const decodePolicyRow = Schema.decodeUnknownSync(PolicyRow)
-const decodePolicyToolRow = Schema.decodeUnknownSync(PolicyToolRow)
-const decodeGrantRow = Schema.decodeUnknownSync(GrantRow)
+const decodeConfigurationRow = Schema.decodeUnknownSync(ConfigurationRow)
+const decodeAccessProfileToolRow = Schema.decodeUnknownSync(AccessProfileToolRow)
+const decodeApprovalPolicyToolRow = Schema.decodeUnknownSync(ApprovalPolicyToolRow)
 const decodeApprovalRow = Schema.decodeUnknownSync(ApprovalRow)
 const decodeAuditRow = Schema.decodeUnknownSync(AuditRow)
 const decodeSnapshotRow = Schema.decodeUnknownSync(SnapshotRow)
@@ -287,7 +283,8 @@ const toClient = (row: Row): Client => {
   return {
     id: ClientId.make(decoded.id),
     tenantId: TenantId.make(decoded.tenant_id),
-    policyId: PolicyId.make(decoded.policy_id),
+    accessProfileId: AccessProfileId.make(decoded.access_profile_id),
+    approvalPolicyId: ApprovalPolicyId.make(decoded.approval_policy_id),
     name: decoded.name,
     capabilities: decodeCapabilities(decoded.capabilities),
     approvalDelivery: decodeApprovalDelivery(decoded.approval_delivery),
@@ -403,39 +400,46 @@ const toConnectionRef = (fields: {
   return { owner: "user", subject: SubjectId.make(fields.subject), integration, name }
 }
 
-const toPolicy = (row: Row): Policy => {
-  const decoded = decodePolicyRow(pick(row, policyColumns))
+const toAccessProfile = (row: Row): AccessProfile => {
+  const decoded = decodeConfigurationRow(pick(row, configurationColumns))
   return {
-    id: PolicyId.make(decoded.id),
+    id: AccessProfileId.make(decoded.id),
     tenantId: TenantId.make(decoded.tenant_id),
     name: decoded.name,
     isDefault: decoded.is_default === 1,
-    forkedFrom: decoded.forked_from === null ? null : PolicyId.make(decoded.forked_from),
     createdAt: date(decoded.created_at),
     updatedAt: date(decoded.updated_at)
   }
 }
 
-const toPolicyTool = (row: Row): PolicyTool => {
-  const decoded = decodePolicyToolRow(pick(row, policyToolColumns))
+const toAccessProfileTool = (row: Row): AccessProfileTool => {
+  const decoded = decodeAccessProfileToolRow(pick(row, accessProfileToolColumns))
   return {
-    policyId: PolicyId.make(decoded.policy_id),
+    accessProfileId: AccessProfileId.make(decoded.access_profile_id),
     connection: toConnectionRef(decoded),
-    tool: ToolName.make(decoded.tool),
-    enabled: decoded.enabled === 1,
-    decision: decoded.decision
+    tool: ToolName.make(decoded.tool)
   }
 }
 
-const toGrant = (row: Row): ConnectionGrant => {
-  const decoded = decodeGrantRow(pick(row, grantColumns))
+const toApprovalPolicy = (row: Row): ApprovalPolicy => {
+  const decoded = decodeConfigurationRow(pick(row, configurationColumns))
   return {
-    id: ConnectionGrantId.make(decoded.id),
-    clientId: ClientId.make(decoded.client_id),
-    connection: toConnectionRef(decoded),
-    alias: Alias.make(decoded.alias),
+    id: ApprovalPolicyId.make(decoded.id),
+    tenantId: TenantId.make(decoded.tenant_id),
+    name: decoded.name,
+    isDefault: decoded.is_default === 1,
     createdAt: date(decoded.created_at),
-    revokedAt: nullableDate(decoded.revoked_at)
+    updatedAt: date(decoded.updated_at)
+  }
+}
+
+const toApprovalPolicyTool = (row: Row): ApprovalPolicyTool => {
+  const decoded = decodeApprovalPolicyToolRow(pick(row, approvalPolicyToolColumns))
+  return {
+    approvalPolicyId: ApprovalPolicyId.make(decoded.approval_policy_id),
+    connection: toConnectionRef(decoded),
+    tool: ToolName.make(decoded.tool),
+    decision: decoded.decision
   }
 }
 
@@ -447,8 +451,8 @@ const toApproval = (row: Row, open: (text: string) => string = identity): Pendin
   return {
     id: ApprovalId.make(decoded.id),
     clientId: ClientId.make(decoded.client_id),
-    policyId: PolicyId.make(decoded.policy_id),
-    grantId: ConnectionGrantId.make(decoded.grant_id),
+    approvalPolicyId: ApprovalPolicyId.make(decoded.approval_policy_id),
+    accessProfileId: AccessProfileId.make(decoded.access_profile_id),
     alias: Alias.make(decoded.alias),
     tool: ToolName.make(decoded.tool),
     arguments: parseJsonColumn(open(decoded.arguments)),
@@ -530,36 +534,36 @@ export interface IdentityOAuthStateRecord {
 export interface CreateClientInput {
   readonly tenantId: TenantId
   readonly id: ClientId
-  readonly policyId: PolicyId
+  readonly accessProfileId: AccessProfileId
+  readonly approvalPolicyId: ApprovalPolicyId
   readonly name: string
   readonly capabilities: ReadonlyArray<ClientCapability>
   readonly approvalDelivery?: ApprovalDelivery
 }
 
-export interface CreatePolicyInput {
+export interface CreateAccessProfileInput {
   readonly tenantId: TenantId
-  readonly id: PolicyId
+  readonly id: AccessProfileId
   readonly name: string
   readonly isDefault?: boolean
-  readonly forkedFrom?: PolicyId
 }
 
-export type PolicyToolInput = Omit<PolicyTool, "policyId">
-
-export interface CreateGrantInput {
+export interface CreateApprovalPolicyInput {
   readonly tenantId: TenantId
-  readonly id: ConnectionGrantId
-  readonly clientId: ClientId
-  readonly connection: ConnectionRef
-  readonly alias: Alias
+  readonly id: ApprovalPolicyId
+  readonly name: string
+  readonly isDefault?: boolean
 }
+
+export type AccessProfileToolInput = Omit<AccessProfileTool, "accessProfileId">
+export type ApprovalPolicyToolInput = Omit<ApprovalPolicyTool, "approvalPolicyId">
 
 export interface CreateApprovalInput {
   readonly tenantId: TenantId
   readonly id: ApprovalId
   readonly clientId: ClientId
-  readonly policyId: PolicyId
-  readonly grantId: ConnectionGrantId
+  readonly approvalPolicyId: ApprovalPolicyId
+  readonly accessProfileId: AccessProfileId
   readonly alias: Alias
   readonly tool: ToolName
   readonly arguments: typeof Schema.Json.Type
@@ -596,8 +600,10 @@ export interface RecordAuditInput {
 
 export interface GatewayOverviewCounts {
   readonly clients: number
-  readonly policies: number
-  readonly policyTools: number
+  readonly accessProfiles: number
+  readonly accessProfileTools: number
+  readonly approvalPolicies: number
+  readonly approvalPolicyTools: number
   readonly keys: number
   readonly pendingApprovals: number
 }
@@ -704,37 +710,27 @@ interface GatewayStoreDriver {
   touchApiKey(id: ApiKeyId): Promise<void>
   revokeApiKey(id: ApiKeyId): Promise<void>
 
-  createPolicy(input: CreatePolicyInput): Promise<Policy>
-  updatePolicy(tenantId: TenantId, id: PolicyId, name: string): Promise<Policy>
-  deletePolicy(tenantId: TenantId, id: PolicyId): Promise<void>
-  listPolicies(tenantId: TenantId): Promise<ReadonlyArray<Policy>>
-  findPolicy(tenantId: TenantId, id: PolicyId): Promise<Policy | undefined>
-  findDefaultPolicy(tenantId: TenantId): Promise<Policy | undefined>
-  findPolicyForClient(clientId: ClientId): Promise<Policy | undefined>
-  listPolicyTools(policyId: PolicyId): Promise<ReadonlyArray<PolicyTool>>
-  /** The rule set IS the policy's membership: a connection is governed exactly
-   *  when a rule names it, and `enabled: false` is a rule that is remembered
-   *  and off. There is no coarser membership to keep in step with this. */
-  replacePolicyTools(
-    policyId: PolicyId,
-    tools: ReadonlyArray<PolicyToolInput>
-  ): Promise<ReadonlyArray<PolicyTool>>
-  assignPolicy(tenantId: TenantId, clientId: ClientId, policyId: PolicyId): Promise<Client>
+  createAccessProfile(input: CreateAccessProfileInput): Promise<AccessProfile>
+  updateAccessProfile(tenantId: TenantId, id: AccessProfileId, name: string): Promise<AccessProfile>
+  deleteAccessProfile(tenantId: TenantId, id: AccessProfileId): Promise<void>
+  listAccessProfiles(tenantId: TenantId): Promise<ReadonlyArray<AccessProfile>>
+  findAccessProfile(tenantId: TenantId, id: AccessProfileId): Promise<AccessProfile | undefined>
+  findDefaultAccessProfile(tenantId: TenantId): Promise<AccessProfile | undefined>
+  findAccessProfileForClient(clientId: ClientId): Promise<AccessProfile | undefined>
+  listAccessProfileTools(id: AccessProfileId): Promise<ReadonlyArray<AccessProfileTool>>
+  replaceAccessProfileTools(id: AccessProfileId, tools: ReadonlyArray<AccessProfileToolInput>): Promise<ReadonlyArray<AccessProfileTool>>
+  assignAccessProfile(tenantId: TenantId, clientId: ClientId, id: AccessProfileId): Promise<Client>
 
-  createGrant(input: CreateGrantInput): Promise<ConnectionGrant>
-  listGrants(clientId: ClientId): Promise<ReadonlyArray<ConnectionGrant>>
-  /** The reverse lookup a call needs: an alias is what the client presents, and
-   *  it names one connection within that client. */
-  findGrantByAlias(clientId: ClientId, alias: Alias): Promise<ConnectionGrant | undefined>
-  findGrantById(clientId: ClientId, id: ConnectionGrantId): Promise<ConnectionGrant | undefined>
-  /** The one path that changes what a client calls a connection. Deliberately
-   *  explicit: nothing else in the system may rename a live route. */
-  renameGrantAlias(
-    tenantId: TenantId,
-    id: ConnectionGrantId,
-    alias: Alias
-  ): Promise<ConnectionGrant>
-  revokeGrant(tenantId: TenantId, id: ConnectionGrantId): Promise<void>
+  createApprovalPolicy(input: CreateApprovalPolicyInput): Promise<ApprovalPolicy>
+  updateApprovalPolicy(tenantId: TenantId, id: ApprovalPolicyId, name: string): Promise<ApprovalPolicy>
+  deleteApprovalPolicy(tenantId: TenantId, id: ApprovalPolicyId): Promise<void>
+  listApprovalPolicies(tenantId: TenantId): Promise<ReadonlyArray<ApprovalPolicy>>
+  findApprovalPolicy(tenantId: TenantId, id: ApprovalPolicyId): Promise<ApprovalPolicy | undefined>
+  findDefaultApprovalPolicy(tenantId: TenantId): Promise<ApprovalPolicy | undefined>
+  findApprovalPolicyForClient(clientId: ClientId): Promise<ApprovalPolicy | undefined>
+  listApprovalPolicyTools(id: ApprovalPolicyId): Promise<ReadonlyArray<ApprovalPolicyTool>>
+  replaceApprovalPolicyTools(id: ApprovalPolicyId, tools: ReadonlyArray<ApprovalPolicyToolInput>): Promise<ReadonlyArray<ApprovalPolicyTool>>
+  assignApprovalPolicy(tenantId: TenantId, clientId: ClientId, id: ApprovalPolicyId): Promise<Client>
 
   createApproval(input: CreateApprovalInput): Promise<PendingApproval>
   getApproval(tenantId: TenantId, id: ApprovalId): Promise<PendingApproval | undefined>
@@ -742,8 +738,8 @@ interface GatewayStoreDriver {
   /** The frozen call a retry of these arguments belongs to, if one is still
    *  undelivered. This is what makes a retrying step ask a human once. */
   findUncollectedApproval(
-    policyId: PolicyId,
-    grantId: ConnectionGrantId,
+    approvalPolicyId: ApprovalPolicyId,
+    accessProfileId: AccessProfileId,
     tool: ToolName,
     argumentsValue: Schema.Json
   ): Promise<PendingApproval | undefined>
@@ -842,10 +838,16 @@ const bootstrapDefaultTenant = async (database: LibsqlClient): Promise<void> => 
     args: [defaultTenantId, "Default", timestamp]
   })
   await database.execute({
-    sql: `INSERT INTO gateway_policy (id, tenant_id, name, is_default, forked_from, created_at, updated_at)
-          VALUES (?, ?, 'Default', 1, NULL, ?, ?)
+    sql: `INSERT INTO gateway_access_profile (id, tenant_id, name, is_default, created_at, updated_at)
+          VALUES (?, ?, 'Default', 1, ?, ?)
           ON CONFLICT (id) DO NOTHING`,
-    args: [`default-policy:${defaultTenantId}`, defaultTenantId, timestamp, timestamp]
+    args: [`default-access-profile:${defaultTenantId}`, defaultTenantId, timestamp, timestamp]
+  })
+  await database.execute({
+    sql: `INSERT INTO gateway_approval_policy (id, tenant_id, name, is_default, created_at, updated_at)
+          VALUES (?, ?, 'Default', 1, ?, ?)
+          ON CONFLICT (id) DO NOTHING`,
+    args: [`default-approval-policy:${defaultTenantId}`, defaultTenantId, timestamp, timestamp]
   })
 }
 
@@ -977,9 +979,14 @@ const createGatewayStoreDriver = async (
         )
         const timestamp = now()
         await run(
-          `INSERT INTO gateway_policy (id, tenant_id, name, is_default, created_at, updated_at)
+         `INSERT INTO gateway_access_profile (id, tenant_id, name, is_default, created_at, updated_at)
            VALUES (?, ?, 'Default', 1, ?, ?)`,
-          [PolicyId.make(`default-policy:${id}`), id, timestamp, timestamp]
+          [AccessProfileId.make(`default-access-profile:${id}`), id, timestamp, timestamp]
+        )
+        await run(
+          `INSERT INTO gateway_approval_policy (id, tenant_id, name, is_default, created_at, updated_at)
+           VALUES (?, ?, 'Default', 1, ?, ?)`,
+          [ApprovalPolicyId.make(`default-approval-policy:${id}`), id, timestamp, timestamp]
         )
         await database.execute("COMMIT")
       } catch (cause) {
@@ -1250,11 +1257,12 @@ const createGatewayStoreDriver = async (
 
     createClient: async (input) => {
       await run(
-        "INSERT INTO gateway_client (id, tenant_id, policy_id, name, capabilities, approval_delivery, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)",
+        "INSERT INTO gateway_client (id, tenant_id, access_profile_id, approval_policy_id, name, capabilities, approval_delivery, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)",
         [
           input.id,
           input.tenantId,
-          input.policyId,
+          input.accessProfileId,
+          input.approvalPolicyId,
           input.name,
           JSON.stringify(input.capabilities),
           JSON.stringify(input.approvalDelivery ?? defaultApprovalDelivery),
@@ -1275,23 +1283,28 @@ const createGatewayStoreDriver = async (
         `SELECT
           (SELECT COUNT(*) FROM gateway_client
             WHERE tenant_id = ? AND revoked_at IS NULL) AS clients,
-          (SELECT COUNT(*) FROM gateway_policy
-            WHERE tenant_id = ?) AS policies,
-          (SELECT COUNT(*) FROM gateway_policy_tool AS policy_tool
-            JOIN gateway_policy AS policy ON policy.id = policy_tool.policy_id
-            WHERE policy.tenant_id = ?) AS policy_tools,
+          (SELECT COUNT(*) FROM gateway_access_profile WHERE tenant_id = ?) AS access_profiles,
+          (SELECT COUNT(*) FROM gateway_access_profile_tool AS tool
+            JOIN gateway_access_profile AS profile ON profile.id = tool.access_profile_id
+            WHERE profile.tenant_id = ?) AS access_profile_tools,
+          (SELECT COUNT(*) FROM gateway_approval_policy WHERE tenant_id = ?) AS approval_policies,
+          (SELECT COUNT(*) FROM gateway_approval_policy_tool AS tool
+            JOIN gateway_approval_policy AS policy ON policy.id = tool.approval_policy_id
+            WHERE policy.tenant_id = ?) AS approval_policy_tools,
           (SELECT COUNT(*) FROM gateway_api_key AS api_key
             JOIN gateway_client AS client ON client.id = api_key.client_id
             WHERE client.tenant_id = ? AND client.revoked_at IS NULL
               AND api_key.revoked_at IS NULL) AS keys,
           (SELECT COUNT(*) FROM gateway_pending_approval
             WHERE tenant_id = ? AND status = 'pending' AND expires_at > ?) AS pending_approvals`,
-        [tenantId, tenantId, tenantId, tenantId, tenantId, now()]
+        [tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, now()]
       )
       return {
         clients: Number(row?.["clients"] ?? 0),
-        policies: Number(row?.["policies"] ?? 0),
-        policyTools: Number(row?.["policy_tools"] ?? 0),
+        accessProfiles: Number(row?.["access_profiles"] ?? 0),
+        accessProfileTools: Number(row?.["access_profile_tools"] ?? 0),
+        approvalPolicies: Number(row?.["approval_policies"] ?? 0),
+        approvalPolicyTools: Number(row?.["approval_policy_tools"] ?? 0),
         keys: Number(row?.["keys"] ?? 0),
         pendingApprovals: Number(row?.["pending_approvals"] ?? 0)
       }
@@ -1351,7 +1364,8 @@ const createGatewayStoreDriver = async (
     findApiKeyByHash: async (hash) => {
       const row = await one(
         `SELECT gateway_api_key.*, gateway_client.tenant_id AS client_tenant_id,
-                gateway_client.policy_id AS client_policy_id,
+                 gateway_client.access_profile_id AS client_access_profile_id,
+                 gateway_client.approval_policy_id AS client_approval_policy_id,
                 gateway_client.name AS client_name,
                 gateway_client.capabilities AS client_capabilities,
                 gateway_client.approval_delivery AS client_approval_delivery,
@@ -1369,7 +1383,8 @@ const createGatewayStoreDriver = async (
           // client field must come from its aliased column, including id.
           id: row["client_id"] ?? "",
           tenant_id: row["client_tenant_id"] ?? "",
-          policy_id: row["client_policy_id"] ?? "",
+           access_profile_id: row["client_access_profile_id"] ?? "",
+           approval_policy_id: row["client_approval_policy_id"] ?? "",
           name: row["client_name"] ?? "",
           capabilities: row["client_capabilities"] ?? "[]",
           approval_delivery: row["client_approval_delivery"] ?? JSON.stringify(defaultApprovalDelivery),
@@ -1387,206 +1402,192 @@ const createGatewayStoreDriver = async (
       await run("UPDATE gateway_api_key SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL", [now(), id])
     },
 
-    createPolicy: async (input) => {
+    createAccessProfile: async (input) => {
       const timestamp = now()
       await run(
-        `INSERT INTO gateway_policy
-           (id, tenant_id, name, is_default, forked_from, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO gateway_access_profile (id, tenant_id, name, is_default, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
         [
-          input.id,
-          input.tenantId,
-          input.name,
-          input.isDefault === true ? 1 : 0,
-          input.forkedFrom ?? null,
-          timestamp,
-          timestamp
+          input.id, input.tenantId, input.name, input.isDefault === true ? 1 : 0, timestamp, timestamp
         ]
       )
-      const row = await one("SELECT * FROM gateway_policy WHERE id = ?", [input.id])
-      if (row === undefined) throw new Error(`Failed to store policy ${input.id}`)
-      return toPolicy(row)
+      const row = await one("SELECT * FROM gateway_access_profile WHERE id = ?", [input.id])
+      if (row === undefined) throw new Error(`Failed to store access profile ${input.id}`)
+      return toAccessProfile(row)
     },
 
-    updatePolicy: async (tenantId, id, name) => {
+    updateAccessProfile: async (tenantId, id, name) => {
       await run(
-        "UPDATE gateway_policy SET name = ?, updated_at = ? WHERE tenant_id = ? AND id = ?",
+        "UPDATE gateway_access_profile SET name = ?, updated_at = ? WHERE tenant_id = ? AND id = ?",
         [name, now(), tenantId, id]
       )
-      const row = await one(
-        "SELECT * FROM gateway_policy WHERE tenant_id = ? AND id = ?",
-        [tenantId, id]
-      )
-      if (row === undefined) throw new Error(`Unknown policy ${id}`)
-      return toPolicy(row)
+      const row = await one("SELECT * FROM gateway_access_profile WHERE tenant_id = ? AND id = ?", [tenantId, id])
+      if (row === undefined) throw new Error(`Unknown access profile ${id}`)
+      return toAccessProfile(row)
     },
 
-    deletePolicy: async (tenantId, id) => {
+    deleteAccessProfile: async (tenantId, id) => {
       const result = await database.execute({
-        sql: `DELETE FROM gateway_policy
+        sql: `DELETE FROM gateway_access_profile
                WHERE tenant_id = ? AND id = ? AND is_default = 0
-                 AND NOT EXISTS (SELECT 1 FROM gateway_client WHERE policy_id = ?)`,
+                  AND NOT EXISTS (SELECT 1 FROM gateway_client WHERE access_profile_id = ?)`,
         args: [tenantId, id, id]
       })
       if (Number(result.rowsAffected) === 0) {
-        throw new Error(`Policy ${id} is default, assigned, or does not exist`)
+        throw new Error(`Access profile ${id} is default, assigned, or does not exist`)
       }
     },
 
-    listPolicies: async (tenantId) =>
-      (await all(
-        "SELECT * FROM gateway_policy WHERE tenant_id = ? ORDER BY is_default DESC, name",
-        [tenantId]
-      )).map(toPolicy),
+    listAccessProfiles: async (tenantId) =>
+      (await all("SELECT * FROM gateway_access_profile WHERE tenant_id = ? ORDER BY is_default DESC, name", [tenantId])).map(toAccessProfile),
 
-    findPolicy: async (tenantId, id) => {
-      const row = await one(
-        "SELECT * FROM gateway_policy WHERE tenant_id = ? AND id = ?",
-        [tenantId, id]
-      )
-      return row === undefined ? undefined : toPolicy(row)
+    findAccessProfile: async (tenantId, id) => {
+      const row = await one("SELECT * FROM gateway_access_profile WHERE tenant_id = ? AND id = ?", [tenantId, id])
+      return row === undefined ? undefined : toAccessProfile(row)
     },
 
-    findDefaultPolicy: async (tenantId) => {
-      const row = await one(
-        "SELECT * FROM gateway_policy WHERE tenant_id = ? AND is_default = 1",
-        [tenantId]
-      )
-      return row === undefined ? undefined : toPolicy(row)
+    findDefaultAccessProfile: async (tenantId) => {
+      const row = await one("SELECT * FROM gateway_access_profile WHERE tenant_id = ? AND is_default = 1", [tenantId])
+      return row === undefined ? undefined : toAccessProfile(row)
     },
 
-    findPolicyForClient: async (clientId) => {
+    findAccessProfileForClient: async (clientId) => {
       const row = await one(
-        `SELECT policy.* FROM gateway_policy AS policy
-           JOIN gateway_client AS client ON client.policy_id = policy.id
-          WHERE client.id = ?`,
+        `SELECT profile.* FROM gateway_access_profile AS profile
+           JOIN gateway_client AS client ON client.access_profile_id = profile.id
+           WHERE client.id = ?`,
         [clientId]
       )
-      return row === undefined ? undefined : toPolicy(row)
+      return row === undefined ? undefined : toAccessProfile(row)
     },
 
-    listPolicyTools: async (policyId) =>
-      (await all(
-        "SELECT * FROM gateway_policy_tool WHERE policy_id = ? ORDER BY integration, connection_name, tool",
-        [policyId]
-      )).map(toPolicyTool),
+    listAccessProfileTools: async (id) =>
+      (await all("SELECT * FROM gateway_access_profile_tool WHERE access_profile_id = ? ORDER BY integration, connection_name, tool", [id])).map(toAccessProfileTool),
 
-    replacePolicyTools: async (policyId, tools) => {
+    replaceAccessProfileTools: async (id, tools) => {
       await database.execute("BEGIN IMMEDIATE")
       try {
-        await run("DELETE FROM gateway_policy_tool WHERE policy_id = ?", [policyId])
+        await run("DELETE FROM gateway_access_profile_tool WHERE access_profile_id = ?", [id])
         for (const tool of tools) {
           await run(
-            `INSERT INTO gateway_policy_tool
-               (policy_id, owner, subject, integration, connection_name, tool, enabled, decision)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO gateway_access_profile_tool
+               (access_profile_id, owner, subject, integration, connection_name, tool)
+             VALUES (?, ?, ?, ?, ?, ?)`,
             [
-              policyId,
+              id,
               tool.connection.owner,
               tool.connection.owner === "user" ? tool.connection.subject : null,
               tool.connection.integration,
               tool.connection.name,
-              tool.tool,
-              tool.enabled ? 1 : 0,
-              tool.decision
+              tool.tool
             ]
           )
         }
         await run(
-          `UPDATE gateway_policy
+          `UPDATE gateway_access_profile
               SET updated_at = CASE WHEN updated_at >= ? THEN updated_at + 1 ELSE ? END
             WHERE id = ?`,
-          [now(), now(), policyId]
+          [now(), now(), id]
         )
         await database.execute("COMMIT")
       } catch (cause) {
         await database.execute("ROLLBACK")
         throw cause
       }
-      return (await all(
-        "SELECT * FROM gateway_policy_tool WHERE policy_id = ? ORDER BY integration, connection_name, tool",
-        [policyId]
-      )).map(toPolicyTool)
+      return (await all("SELECT * FROM gateway_access_profile_tool WHERE access_profile_id = ? ORDER BY integration, connection_name, tool", [id])).map(toAccessProfileTool)
     },
 
-    assignPolicy: async (tenantId, clientId, policyId) => {
+    assignAccessProfile: async (tenantId, clientId, id) => {
       const result = await database.execute({
-        sql: `UPDATE gateway_client SET policy_id = ?
+        sql: `UPDATE gateway_client SET access_profile_id = ?
                WHERE tenant_id = ? AND id = ? AND EXISTS (
-                 SELECT 1 FROM gateway_policy WHERE id = ? AND tenant_id = ?
-               )`,
-        args: [policyId, tenantId, clientId, policyId, tenantId]
+                  SELECT 1 FROM gateway_access_profile WHERE id = ? AND tenant_id = ?
+                )`,
+        args: [id, tenantId, clientId, id, tenantId]
       })
-      if (Number(result.rowsAffected) === 0) {
-        throw new Error(`Policy ${policyId} cannot be assigned to client ${clientId}`)
-      }
+      if (Number(result.rowsAffected) === 0) throw new Error(`Access profile ${id} cannot be assigned to client ${clientId}`)
       return await requireClient(clientId)
     },
 
-    createGrant: async (input) => {
-      const subject = input.connection.owner === "user" ? input.connection.subject : null
+    createApprovalPolicy: async (input) => {
+      const timestamp = now()
       await run(
-        `INSERT INTO gateway_connection_grant
-           (id, tenant_id, client_id, owner, subject, integration, connection_name, alias, created_at, revoked_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
-        [
-          input.id,
-          input.tenantId,
-          input.clientId,
-          input.connection.owner,
-          subject,
-          input.connection.integration,
-          input.connection.name,
-          input.alias,
-          now()
-        ]
+        `INSERT INTO gateway_approval_policy (id, tenant_id, name, is_default, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [input.id, input.tenantId, input.name, input.isDefault === true ? 1 : 0, timestamp, timestamp]
       )
-      const row = await one("SELECT * FROM gateway_connection_grant WHERE id = ?", [input.id])
-      if (row === undefined) throw new Error(`Failed to store grant ${input.id}`)
-      return toGrant(row)
+      const row = await one("SELECT * FROM gateway_approval_policy WHERE id = ?", [input.id])
+      if (row === undefined) throw new Error(`Failed to store approval policy ${input.id}`)
+      return toApprovalPolicy(row)
     },
 
-    listGrants: async (clientId) =>
-      (await all(
-        "SELECT * FROM gateway_connection_grant WHERE client_id = ? AND revoked_at IS NULL ORDER BY alias",
-        [clientId]
-      )).map(toGrant),
-
-    findGrantByAlias: async (clientId, alias) => {
-      const row = await one(
-        "SELECT * FROM gateway_connection_grant WHERE client_id = ? AND alias = ? AND revoked_at IS NULL",
-        [clientId, alias]
-      )
-      return row === undefined ? undefined : toGrant(row)
+    updateApprovalPolicy: async (tenantId, id, name) => {
+      await run("UPDATE gateway_approval_policy SET name = ?, updated_at = ? WHERE tenant_id = ? AND id = ?", [name, now(), tenantId, id])
+      const row = await one("SELECT * FROM gateway_approval_policy WHERE tenant_id = ? AND id = ?", [tenantId, id])
+      if (row === undefined) throw new Error(`Unknown approval policy ${id}`)
+      return toApprovalPolicy(row)
     },
 
-    findGrantById: async (clientId, id) => {
-      const row = await one(
-        "SELECT * FROM gateway_connection_grant WHERE client_id = ? AND id = ? AND revoked_at IS NULL",
-        [clientId, id]
-      )
-      return row === undefined ? undefined : toGrant(row)
-    },
-
-    renameGrantAlias: async (tenantId, id, alias) => {
+    deleteApprovalPolicy: async (tenantId, id) => {
       const result = await database.execute({
-        sql: `UPDATE gateway_connection_grant SET alias = ?
-               WHERE tenant_id = ? AND id = ? AND revoked_at IS NULL`,
-        args: [alias, tenantId, id]
+        sql: `DELETE FROM gateway_approval_policy WHERE tenant_id = ? AND id = ? AND is_default = 0
+              AND NOT EXISTS (SELECT 1 FROM gateway_client WHERE approval_policy_id = ?)`,
+        args: [tenantId, id, id]
       })
-      if (Number(result.rowsAffected) === 0) {
-        throw new Error(`Grant ${id} cannot be renamed`)
-      }
-      const row = await one("SELECT * FROM gateway_connection_grant WHERE id = ?", [id])
-      if (row === undefined) throw new Error(`Failed to read grant ${id}`)
-      return toGrant(row)
+      if (Number(result.rowsAffected) === 0) throw new Error(`Approval policy ${id} is default, assigned, or does not exist`)
     },
 
-    revokeGrant: async (tenantId, id) => {
-      await run(
-        "UPDATE gateway_connection_grant SET revoked_at = ? WHERE tenant_id = ? AND id = ? AND revoked_at IS NULL",
-        [now(), tenantId, id]
-      )
+    listApprovalPolicies: async (tenantId) =>
+      (await all("SELECT * FROM gateway_approval_policy WHERE tenant_id = ? ORDER BY is_default DESC, name", [tenantId])).map(toApprovalPolicy),
+
+    findApprovalPolicy: async (tenantId, id) => {
+      const row = await one("SELECT * FROM gateway_approval_policy WHERE tenant_id = ? AND id = ?", [tenantId, id])
+      return row === undefined ? undefined : toApprovalPolicy(row)
+    },
+
+    findDefaultApprovalPolicy: async (tenantId) => {
+      const row = await one("SELECT * FROM gateway_approval_policy WHERE tenant_id = ? AND is_default = 1", [tenantId])
+      return row === undefined ? undefined : toApprovalPolicy(row)
+    },
+
+    findApprovalPolicyForClient: async (clientId) => {
+      const row = await one(`SELECT policy.* FROM gateway_approval_policy AS policy
+        JOIN gateway_client AS client ON client.approval_policy_id = policy.id WHERE client.id = ?`, [clientId])
+      return row === undefined ? undefined : toApprovalPolicy(row)
+    },
+
+    listApprovalPolicyTools: async (id) =>
+      (await all("SELECT * FROM gateway_approval_policy_tool WHERE approval_policy_id = ? ORDER BY integration, connection_name, tool", [id])).map(toApprovalPolicyTool),
+
+    replaceApprovalPolicyTools: async (id, tools) => {
+      await database.execute("BEGIN IMMEDIATE")
+      try {
+        await run("DELETE FROM gateway_approval_policy_tool WHERE approval_policy_id = ?", [id])
+        for (const tool of tools) {
+          await run(`INSERT INTO gateway_approval_policy_tool
+            (approval_policy_id, owner, subject, integration, connection_name, tool, decision)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`, [
+            id, tool.connection.owner, tool.connection.owner === "user" ? tool.connection.subject : null,
+            tool.connection.integration, tool.connection.name, tool.tool, tool.decision
+          ])
+        }
+        await run(`UPDATE gateway_approval_policy SET updated_at = CASE WHEN updated_at >= ? THEN updated_at + 1 ELSE ? END WHERE id = ?`, [now(), now(), id])
+        await database.execute("COMMIT")
+      } catch (cause) {
+        await database.execute("ROLLBACK")
+        throw cause
+      }
+      return (await all("SELECT * FROM gateway_approval_policy_tool WHERE approval_policy_id = ? ORDER BY integration, connection_name, tool", [id])).map(toApprovalPolicyTool)
+    },
+
+    assignApprovalPolicy: async (tenantId, clientId, id) => {
+      const result = await database.execute({
+        sql: `UPDATE gateway_client SET approval_policy_id = ? WHERE tenant_id = ? AND id = ? AND EXISTS (
+          SELECT 1 FROM gateway_approval_policy WHERE id = ? AND tenant_id = ?)`,
+        args: [id, tenantId, clientId, id, tenantId]
+      })
+      if (Number(result.rowsAffected) === 0) throw new Error(`Approval policy ${id} cannot be assigned to client ${clientId}`)
+      return await requireClient(clientId)
     },
 
     createApproval: async (input) => {
@@ -1597,14 +1598,14 @@ const createGatewayStoreDriver = async (
       const canonical = canonicalArguments(input.arguments)
       await run(
         `INSERT INTO gateway_pending_approval
-           (id, tenant_id, client_id, policy_id, grant_id, alias, tool, arguments, arguments_lookup, status, created_at, expires_at, decided_at, decided_by, result, error, collected_at)
+           (id, tenant_id, client_id, approval_policy_id, access_profile_id, alias, tool, arguments, arguments_lookup, status, created_at, expires_at, decided_at, decided_by, result, error, collected_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, NULL, NULL, NULL, NULL, NULL)`,
         [
           input.id,
           input.tenantId,
           input.clientId,
-          input.policyId,
-          input.grantId,
+          input.approvalPolicyId,
+          input.accessProfileId,
           input.alias,
           input.tool,
           sealText(canonical),
@@ -1618,18 +1619,18 @@ const createGatewayStoreDriver = async (
       return openApproval(row)
     },
 
-    findUncollectedApproval: async (policyId, grantId, tool, argumentsValue) => {
+    findUncollectedApproval: async (approvalPolicyId, accessProfileId, tool, argumentsValue) => {
       const canonical = canonicalArguments(argumentsValue)
       const row = await one(
         `SELECT * FROM gateway_pending_approval
-          WHERE policy_id = ? AND grant_id = ? AND tool = ?
+          WHERE approval_policy_id = ? AND access_profile_id = ? AND tool = ?
             AND ((arguments_lookup IS NOT NULL AND arguments_lookup = ?)
               OR (arguments_lookup IS NULL AND arguments = ?))
             AND collected_at IS NULL
           ORDER BY created_at DESC LIMIT 1`,
         [
-          policyId,
-          grantId,
+          approvalPolicyId,
+          accessProfileId,
           tool,
           encryption === undefined ? canonical : encryption.lookup(canonical),
           canonical
@@ -1889,42 +1890,35 @@ const effectStore = (driver: GatewayStoreDriver): GatewayStore => ({
     storeOperation("findApiKeyByHash", () => driver.findApiKeyByHash(hash)),
   touchApiKey: (id) => storeOperation("touchApiKey", () => driver.touchApiKey(id)),
   revokeApiKey: (id) => storeOperation("revokeApiKey", () => driver.revokeApiKey(id)),
-  createPolicy: (input) => storeOperation("createPolicy", () => driver.createPolicy(input)),
-  updatePolicy: (tenantId, id, name) =>
-    storeOperation("updatePolicy", () => driver.updatePolicy(tenantId, id, name)),
-  deletePolicy: (tenantId, id) =>
-    storeOperation("deletePolicy", () => driver.deletePolicy(tenantId, id)),
-  listPolicies: (tenantId) => storeOperation("listPolicies", () => driver.listPolicies(tenantId)),
-  findPolicy: (tenantId, id) => storeOperation("findPolicy", () => driver.findPolicy(tenantId, id)),
-  findDefaultPolicy: (tenantId) =>
-    storeOperation("findDefaultPolicy", () => driver.findDefaultPolicy(tenantId)),
-  findPolicyForClient: (clientId) =>
-    storeOperation("findPolicyForClient", () => driver.findPolicyForClient(clientId)),
-  listPolicyTools: (policyId) =>
-    storeOperation("listPolicyTools", () => driver.listPolicyTools(policyId)),
-  replacePolicyTools: (policyId, tools) =>
-    storeOperation("replacePolicyTools", () => driver.replacePolicyTools(policyId, tools)),
-  assignPolicy: (tenantId, clientId, policyId) =>
-    storeOperation("assignPolicy", () => driver.assignPolicy(tenantId, clientId, policyId)),
-  createGrant: (input) => storeOperation("createGrant", () => driver.createGrant(input)),
-  listGrants: (clientId) => storeOperation("listGrants", () => driver.listGrants(clientId)),
-  findGrantByAlias: (clientId, alias) =>
-    storeOperation("findGrantByAlias", () => driver.findGrantByAlias(clientId, alias)),
-  findGrantById: (clientId, id) =>
-    storeOperation("findGrantById", () => driver.findGrantById(clientId, id)),
-  renameGrantAlias: (tenantId, id, alias) =>
-    storeOperation("renameGrantAlias", () => driver.renameGrantAlias(tenantId, id, alias)),
-  revokeGrant: (tenantId, id) =>
-    storeOperation("revokeGrant", () => driver.revokeGrant(tenantId, id)),
+  createAccessProfile: (input) => storeOperation("createAccessProfile", () => driver.createAccessProfile(input)),
+  updateAccessProfile: (tenantId, id, name) => storeOperation("updateAccessProfile", () => driver.updateAccessProfile(tenantId, id, name)),
+  deleteAccessProfile: (tenantId, id) => storeOperation("deleteAccessProfile", () => driver.deleteAccessProfile(tenantId, id)),
+  listAccessProfiles: (tenantId) => storeOperation("listAccessProfiles", () => driver.listAccessProfiles(tenantId)),
+  findAccessProfile: (tenantId, id) => storeOperation("findAccessProfile", () => driver.findAccessProfile(tenantId, id)),
+  findDefaultAccessProfile: (tenantId) => storeOperation("findDefaultAccessProfile", () => driver.findDefaultAccessProfile(tenantId)),
+  findAccessProfileForClient: (clientId) => storeOperation("findAccessProfileForClient", () => driver.findAccessProfileForClient(clientId)),
+  listAccessProfileTools: (id) => storeOperation("listAccessProfileTools", () => driver.listAccessProfileTools(id)),
+  replaceAccessProfileTools: (id, tools) => storeOperation("replaceAccessProfileTools", () => driver.replaceAccessProfileTools(id, tools)),
+  assignAccessProfile: (tenantId, clientId, id) => storeOperation("assignAccessProfile", () => driver.assignAccessProfile(tenantId, clientId, id)),
+  createApprovalPolicy: (input) => storeOperation("createApprovalPolicy", () => driver.createApprovalPolicy(input)),
+  updateApprovalPolicy: (tenantId, id, name) => storeOperation("updateApprovalPolicy", () => driver.updateApprovalPolicy(tenantId, id, name)),
+  deleteApprovalPolicy: (tenantId, id) => storeOperation("deleteApprovalPolicy", () => driver.deleteApprovalPolicy(tenantId, id)),
+  listApprovalPolicies: (tenantId) => storeOperation("listApprovalPolicies", () => driver.listApprovalPolicies(tenantId)),
+  findApprovalPolicy: (tenantId, id) => storeOperation("findApprovalPolicy", () => driver.findApprovalPolicy(tenantId, id)),
+  findDefaultApprovalPolicy: (tenantId) => storeOperation("findDefaultApprovalPolicy", () => driver.findDefaultApprovalPolicy(tenantId)),
+  findApprovalPolicyForClient: (clientId) => storeOperation("findApprovalPolicyForClient", () => driver.findApprovalPolicyForClient(clientId)),
+  listApprovalPolicyTools: (id) => storeOperation("listApprovalPolicyTools", () => driver.listApprovalPolicyTools(id)),
+  replaceApprovalPolicyTools: (id, tools) => storeOperation("replaceApprovalPolicyTools", () => driver.replaceApprovalPolicyTools(id, tools)),
+  assignApprovalPolicy: (tenantId, clientId, id) => storeOperation("assignApprovalPolicy", () => driver.assignApprovalPolicy(tenantId, clientId, id)),
   createApproval: (input) => storeOperation("createApproval", () => driver.createApproval(input)),
   getApproval: (tenantId, id) =>
     storeOperation("getApproval", () => driver.getApproval(tenantId, id)),
   listApprovals: (tenantId, status) =>
     storeOperation("listApprovals", () => driver.listApprovals(tenantId, status)),
-  findUncollectedApproval: (policyId, grantId, tool, argumentsValue) =>
+  findUncollectedApproval: (approvalPolicyId, accessProfileId, tool, argumentsValue) =>
     storeOperation(
       "findUncollectedApproval",
-      () => driver.findUncollectedApproval(policyId, grantId, tool, argumentsValue)
+      () => driver.findUncollectedApproval(approvalPolicyId, accessProfileId, tool, argumentsValue)
     ),
   collectApproval: (tenantId, id) =>
     storeOperation("collectApproval", () => driver.collectApproval(tenantId, id)),

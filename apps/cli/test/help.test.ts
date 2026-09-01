@@ -100,8 +100,10 @@ describe("i and ii CLI help", () => {
       expect(operator.stdout.includes(`  ${command}`)).toBe(true)
     }
     for (const command of [
-      "clients", "client", "key", "keys", "policies", "policy", "clone-policy",
-      "policy-tool", "assign-policy", "revoke", "approvals",
+      "clients", "client", "key", "keys", "access-profiles", "access-profile",
+      "clone-access-profile", "access-profile-tool", "assign-access-profile",
+      "approval-policies", "approval-policy", "clone-approval-policy",
+      "approval-policy-tool", "assign-approval-policy", "revoke", "approvals",
       "approve", "deny", "audit", "drift", "maintenance", "login", "signup",
       "logout", "whoami", "account", "serve", "dashboard", "install", "uninstall"
     ]) {
@@ -114,7 +116,10 @@ describe("i and ii CLI help", () => {
     // rows silently — so the window is explicit, and it is the same window on
     // every listing rather than a different mechanism per command.
     for (
-      const command of ["integrations", "tools", "connections", "clients", "policies", "audit", "approvals"]
+      const command of [
+        "integrations", "tools", "connections", "clients", "access-profiles",
+        "approval-policies", "audit", "approvals"
+      ]
     ) {
       const help = runOperator([command, "--help"])
       expect(help.exitCode).toBe(0)

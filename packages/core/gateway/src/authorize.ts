@@ -1,4 +1,9 @@
-import { clientHasCapability, connectionSubject, sameConnectionRef } from "./domain.ts"
+import {
+  aliasForConnection,
+  clientHasCapability,
+  connectionSubject,
+  sameConnectionRef
+} from "./domain.ts"
 import type {
   Alias,
   Authorization,
@@ -54,35 +59,45 @@ export const authorizeInvocation = Effect.fn("Authorization.authorizeInvocation"
   if (authentication.status !== "authenticated") return { status: authentication.status }
 
   const client = authentication.client
-  // The intersection ADR 0001 describes, read in two halves. The grant is the
-  // client's own reach: which credential this alias names. The rule is its
-  // policy's judgement about that credential's tool. Neither implies the
-  // other — a policy may govern a connection this client was never granted,
-  // and a grant reaches nothing the policy has not enabled.
-  const grant = yield* store.findGrantByAlias(client.id, input.alias)
-  const policy = yield* store.findPolicy(client.tenantId, client.policyId)
-  const policyTools = policy === undefined ? [] : yield* store.listPolicyTools(policy.id)
-  const policyTool = grant === undefined
+  const [accessProfile, approvalPolicy] = yield* Effect.all([
+    store.findAccessProfile(client.tenantId, client.accessProfileId),
+    store.findApprovalPolicy(client.tenantId, client.approvalPolicyId)
+  ])
+  const profileTools = accessProfile === undefined
+    ? []
+    : yield* store.listAccessProfileTools(accessProfile.id)
+  const accessProfileTool = profileTools.find((candidate) =>
+    candidate.tool === input.tool && aliasForConnection(candidate.connection) === input.alias)
+  const approvalPolicyTools = approvalPolicy === undefined
+    ? []
+    : yield* store.listApprovalPolicyTools(approvalPolicy.id)
+  const approvalPolicyTool = accessProfileTool === undefined
     ? undefined
-    : policyTools.find((candidate) =>
-      candidate.enabled
-      && candidate.tool === input.tool
-      && sameConnectionRef(candidate.connection, grant.connection))
+    : approvalPolicyTools.find((candidate) =>
+      candidate.tool === input.tool
+      && sameConnectionRef(candidate.connection, accessProfileTool.connection))
   // One status for every missing side of the intersection: telling them apart
   // would let a caller enumerate policy or connection state.
-  if (grant === undefined || policy === undefined || policyTool === undefined) {
+  if (
+    accessProfile === undefined
+    || accessProfileTool === undefined
+    || approvalPolicy === undefined
+    || approvalPolicyTool === undefined
+  ) {
     return { status: "not-authorized", alias: input.alias, tool: input.tool }
   }
 
   return {
     status: "authorized",
     client,
-    policy,
-    policyTool,
-    grant,
-    connection: grant.connection,
-    subject: connectionSubject(grant.connection) ?? null,
-    decision: policyTool.decision
+    accessProfile,
+    accessProfileTool,
+    approvalPolicy,
+    approvalPolicyTool,
+    alias: input.alias,
+    connection: accessProfileTool.connection,
+    subject: connectionSubject(accessProfileTool.connection) ?? null,
+    decision: approvalPolicyTool.decision
   }
 })
 

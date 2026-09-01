@@ -8,20 +8,24 @@ The gateway delegates access to external tools without exposing credentials to a
 A distinct runtime identity, such as one agent sandbox or deployment, authenticated by one or more API keys.
 _Avoid_: Agent, API key
 
-**Policy**:
-A reusable, tenant-owned configuration of integration memberships and explicit tool states. Exactly one policy is assigned to each client.
-_Avoid_: Grant, permission set
+**Access profile**:
+A reusable, tenant-owned configuration of enabled tools on named connections. Exactly one access profile is assigned to each client.
+_Avoid_: Grant, binding
 
-**Policy tool**:
-A rule under a policy for one tool on one connection, with an explicit enabled state and approval decision. A rule is what puts a connection in the policy; disabled rules remain.
-_Avoid_: Tool grant, policy integration
+**Approval policy**:
+A reusable, tenant-owned configuration of approval decisions for tools on named connections. Exactly one approval policy is assigned to each client.
+_Avoid_: Permission set
 
-**Connection grant**:
-One client's reach to one connection, and the alias that client calls it by. The alias is chosen when the grant is made and never recomputed.
-_Avoid_: Binding, policy rule
+**Access-profile tool**:
+One enabled tool on one connection in an access profile. A connection belongs to the profile exactly when it has an enabled tool.
+_Avoid_: Tool grant
+
+**Approval-policy tool**:
+One approval decision for a tool on one connection in an approval policy.
+_Avoid_: Policy rule
 
 **Effective tool**:
-A tool on a connection the client holds a grant for, enabled by a rule in the client's assigned policy. A rule for a connection the client was not granted contributes nothing and is not an error.
+A tool enabled by the client's access profile and governed by its approval policy.
 _Avoid_: Granted tool
 
 **Approval**:

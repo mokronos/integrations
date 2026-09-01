@@ -1,7 +1,7 @@
 import { Schema } from "effect"
 
 // --- identifiers ------------------------------------------------------------
-// Nearly every primitive here is branded: a ClientId and a PolicyId are both
+// Nearly every primitive here is branded: configuration and client IDs are all
 // strings, and confusing them would silently authorize the wrong caller.
 
 export const TenantId = Schema.String.pipe(Schema.brand("TenantId"))
@@ -18,13 +18,11 @@ export type ClientId = typeof ClientId.Type
 export const ApiKeyId = Schema.String.pipe(Schema.brand("ApiKeyId"))
 export type ApiKeyId = typeof ApiKeyId.Type
 
-export const PolicyId = Schema.String.pipe(Schema.brand("PolicyId"))
-export type PolicyId = typeof PolicyId.Type
+export const AccessProfileId = Schema.String.pipe(Schema.brand("AccessProfileId"))
+export type AccessProfileId = typeof AccessProfileId.Type
 
-/** One client's reach to one credential. Named separately from the binding it
- *  replaces because it is coarser: a grant is per connection, not per tool. */
-export const ConnectionGrantId = Schema.String.pipe(Schema.brand("ConnectionGrantId"))
-export type ConnectionGrantId = typeof ConnectionGrantId.Type
+export const ApprovalPolicyId = Schema.String.pipe(Schema.brand("ApprovalPolicyId"))
+export type ApprovalPolicyId = typeof ApprovalPolicyId.Type
 
 export const ApprovalId = Schema.String.pipe(Schema.brand("ApprovalId"))
 export type ApprovalId = typeof ApprovalId.Type
@@ -171,11 +169,22 @@ export const connectionRefKey = (connection: ConnectionRef): string =>
     connection.name
   ].join("\u0000")
 
-/** Whether two references name the same credential. Policy rules and bindings
+/** Whether two references name the same credential. Configuration rules
  *  are matched on this, so a rule written for the work connection can never
  *  authorize a call that routes to the personal one. */
 export const sameConnectionRef = (left: ConnectionRef, right: ConnectionRef): boolean =>
   connectionRefKey(left) === connectionRefKey(right)
+
+/** The wire protocol needs a compact connection name. Including the connection
+ * name makes separate accounts
+ * stable and unambiguous without allocation state. */
+export const aliasForConnection = (connection: ConnectionRef): Alias => {
+  const normalized = `${connection.integration}-${connection.name}`
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "")
+  return Alias.make(/^[a-z]/.test(normalized) ? normalized : `c-${normalized}`)
+}
 
 // --- clients and keys -------------------------------------------------------
 
@@ -203,13 +212,14 @@ export const defaultApprovalDelivery: ApprovalDelivery = {
 
 export const Client = Schema.Struct({
   id: ClientId,
-  /** The tenant this client belongs to. Every policy, key, and audit record the
+  /** The tenant this client belongs to. Every access profile, approval policy, key, and audit record the
    *  client produces resolves inside this partition. */
   tenantId: TenantId,
-  policyId: PolicyId,
+  accessProfileId: AccessProfileId,
+  approvalPolicyId: ApprovalPolicyId,
   name: Schema.String,
   /** Non-invocation authority held by this client. Tool authority is the
-   *  intersection of its policy and bindings. */
+   *  intersection of its access profile and approval policy. */
   capabilities: Schema.Array(ClientCapability),
   approvalDelivery: ApprovalDelivery,
   createdAt: Schema.Date,
@@ -232,56 +242,46 @@ export const ApiKey = Schema.Struct({
 })
 export type ApiKey = typeof ApiKey.Type
 
-// --- policies and bindings --------------------------------------------------
+// --- access profiles and approval policies ---------------------------------
 
 export const PolicyDecision = Schema.Literals(["allow", "require_approval"])
 export type PolicyDecision = typeof PolicyDecision.Type
 
-export const Policy = Schema.Struct({
-  id: PolicyId,
+const ReusableConfiguration = {
   tenantId: TenantId,
   name: Schema.String,
   isDefault: Schema.Boolean,
-  /** The shared policy this one was copied out of, when a grant needed rules a
-   *  shared policy did not have. Provenance only — a fork is independent from
-   *  the moment it exists, and nothing reads this to resolve authority. */
-  forkedFrom: Schema.NullOr(PolicyId),
   createdAt: Schema.Date,
   updatedAt: Schema.Date
-})
-export type Policy = typeof Policy.Type
+}
 
-export const PolicyTool = Schema.Struct({
-  policyId: PolicyId,
-  /** The credential-bearing route this rule governs. Two connections may give
-   * the same vendor tool different decisions. */
+export const AccessProfile = Schema.Struct({
+  id: AccessProfileId,
+  ...ReusableConfiguration
+})
+export type AccessProfile = typeof AccessProfile.Type
+
+/** One enabled tool. Connection membership is derived from this set. */
+export const AccessProfileTool = Schema.Struct({
+  accessProfileId: AccessProfileId,
+  connection: ConnectionRef,
+  tool: ToolName
+})
+export type AccessProfileTool = typeof AccessProfileTool.Type
+
+export const ApprovalPolicy = Schema.Struct({
+  id: ApprovalPolicyId,
+  ...ReusableConfiguration
+})
+export type ApprovalPolicy = typeof ApprovalPolicy.Type
+
+export const ApprovalPolicyTool = Schema.Struct({
+  approvalPolicyId: ApprovalPolicyId,
   connection: ConnectionRef,
   tool: ToolName,
-  enabled: Schema.Boolean,
   decision: PolicyDecision
 })
-export type PolicyTool = typeof PolicyTool.Type
-
-/** One client's reach to one credential, and the name it calls it by.
- *
- * This is the client-specific half of ADR 0001's intersection: the grant says
- * *which* credentials a client can reach, its assigned policy says *how* it may
- * use them. A policy rule naming a connection the client holds no grant for is
- * inert — the tool is simply absent, never an error.
- *
- * The alias is stored rather than derived, and that is the whole point. It is
- * allocated once, when the grant is made, and never recomputed. A client that
- * calls one connection `linear` keeps calling it `linear` when a second Linear
- * account is granted later; the newcomer takes the qualified name instead. */
-export const ConnectionGrant = Schema.Struct({
-  id: ConnectionGrantId,
-  clientId: ClientId,
-  connection: ConnectionRef,
-  alias: Alias,
-  createdAt: Schema.Date,
-  revokedAt: Schema.NullOr(Schema.Date)
-})
-export type ConnectionGrant = typeof ConnectionGrant.Type
+export type ApprovalPolicyTool = typeof ApprovalPolicyTool.Type
 
 // --- authorization ----------------------------------------------------------
 
@@ -294,9 +294,14 @@ export const Authorization = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("authorized"),
     client: Client,
-    policy: Policy,
-    policyTool: PolicyTool,
-    grant: ConnectionGrant,
+    accessProfile: AccessProfile,
+    accessProfileTool: AccessProfileTool,
+    approvalPolicy: ApprovalPolicy,
+    approvalPolicyTool: ApprovalPolicyTool,
+    /** The protocol still addresses a connection by an alias. It is derived
+     * deterministically from the profile tool's connection, not stored per
+     * client as authorization state. */
+    alias: Alias,
     connection: ConnectionRef,
     subject: Schema.NullOr(SubjectId),
     decision: PolicyDecision
@@ -315,7 +320,7 @@ export type Authorization = typeof Authorization.Type
 export const describeAuthorization = (authorization: Authorization): string => {
   switch (authorization.status) {
     case "authorized":
-      return `authorized ${authorization.grant.alias}.${authorization.policyTool.tool}`
+      return `authorized ${authorization.alias}.${authorization.accessProfileTool.tool}`
     case "unknown-key":
       return "the presented API key is not recognised"
     case "key-revoked":
@@ -342,15 +347,15 @@ export type ApprovalStatus = typeof ApprovalStatus.Type
  *  discharges one specific invocation rather than creating a capability.
  *
  *  One frozen call, not one per attempt: a caller that retries the same
- *  arguments through the same policy and grant meets the approval it already
+ *  arguments through the same access profile and approval policy meets the approval it already
  *  proposed.
  *  Otherwise a step with `retry: { attempts: 3 }` asks a human three times for
  *  one decision. */
 export const PendingApproval = Schema.Struct({
   id: ApprovalId,
   clientId: ClientId,
-  policyId: PolicyId,
-  grantId: ConnectionGrantId,
+  approvalPolicyId: ApprovalPolicyId,
+  accessProfileId: AccessProfileId,
   alias: Alias,
   tool: ToolName,
   arguments: Schema.Json,

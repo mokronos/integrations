@@ -16,12 +16,14 @@ import {
   ClientId,
   Alias,
   ApiKeyId,
-  ConnectionGrant,
   ConnectionRef,
-  Policy,
+  AccessProfile,
+  AccessProfileId,
+  AccessProfileTool,
+  ApprovalPolicy,
+  ApprovalPolicyId,
+  ApprovalPolicyTool,
   PolicyDecision,
-  PolicyId,
-  PolicyTool,
   PendingApproval,
   SubjectId
 } from "@mokronos/gateway-core"
@@ -61,7 +63,8 @@ const ExecuteBody = Schema.Struct({
 
 const CreateClientBody = Schema.Struct({
   name: Schema.String,
-  policyId: Schema.optional(PolicyId),
+  accessProfileId: Schema.optional(AccessProfileId),
+  approvalPolicyId: Schema.optional(ApprovalPolicyId),
   capabilities: Schema.optional(Schema.Array(ClientCapability)),
   approvalDelivery: Schema.optional(ApprovalDelivery)
 })
@@ -71,55 +74,27 @@ const UpdateClientSettingsBody = Schema.Struct({
   approvalDelivery: ApprovalDelivery
 })
 
-const CreatePolicyBody = Schema.Struct({
+const ConfigurationBody = Schema.Struct({
   name: Schema.String
 })
 
-const ReplacePolicyToolsBody = Schema.Struct({
+const ReplaceAccessProfileToolsBody = Schema.Struct({
+  tools: Schema.Array(Schema.Struct({
+    connection: ConnectionRef,
+    tool: Schema.String
+  }))
+})
+
+const ReplaceApprovalPolicyToolsBody = Schema.Struct({
   tools: Schema.Array(Schema.Struct({
     connection: ConnectionRef,
     tool: Schema.String,
-    enabled: Schema.Boolean,
     decision: PolicyDecision
   }))
 })
 
-const ClonePolicyBody = Schema.Struct({
-  name: Schema.String
-})
-
-const AssignPolicyBody = Schema.Struct({
-  policyId: PolicyId
-})
-
-/** Which credential a client is being handed, and — for a user-tier one — whose
- *  authorization it is. The alias is chosen by the gateway, not the caller: it
- *  has to be unique within the client and stable forever after. */
-const GrantConnectionBody = Schema.Struct({
-  integration: Schema.String,
-  connection: Schema.optional(Schema.String),
-  owner: Schema.optional(Schema.Literals(["org", "user"])),
-  subject: Schema.optional(SubjectId)
-})
-
-const RenameGrantBody = Schema.Struct({
-  alias: Alias
-})
-
-/** What granting did to the client's policy. Reported rather than silent: a
- *  fork detaches this client from a shared policy, which an operator has to
- *  know about at the moment it happens. */
-const PolicySeedingReport = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("already-governed"), policy: Policy }),
-  Schema.Struct({ kind: Schema.Literal("seeded-in-place"), policy: Policy }),
-  Schema.Struct({
-    kind: Schema.Literal("forked"),
-    policy: Policy,
-    forkedFrom: Policy
-  }),
-  Schema.Struct({ kind: Schema.Literal("no-tools"), policy: Policy }),
-  Schema.Struct({ kind: Schema.Literal("no-policy") })
-])
+const AssignAccessProfileBody = Schema.Struct({ accessProfileId: AccessProfileId })
+const AssignApprovalPolicyBody = Schema.Struct({ approvalPolicyId: ApprovalPolicyId })
 
 const DiscoverBody = Schema.Struct({
   url: Schema.String,
@@ -495,8 +470,10 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
   .add(HttpApiEndpoint.get("overview", "/v1/overview", {
     success: Schema.Struct({
       clients: Schema.Number,
-      policies: Schema.Number,
-      policyTools: Schema.Number,
+      accessProfiles: Schema.Number,
+      accessProfileTools: Schema.Number,
+      approvalPolicies: Schema.Number,
+      approvalPolicyTools: Schema.Number,
       keys: Schema.Number,
       pendingApprovals: Schema.Number,
       connections: Schema.Number,
@@ -553,79 +530,92 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
     }),
     error: ApiNotFoundError
   }).annotate(RequiredAccess, "administrative"))
-  .add(HttpApiEndpoint.get("listPolicies", "/v1/policies", {
-    success: Schema.Struct({ policies: Schema.Array(Schema.Struct({
-      policy: Policy,
+  .add(HttpApiEndpoint.get("listAccessProfiles", "/v1/access-profiles", {
+    success: Schema.Struct({ accessProfiles: Schema.Array(Schema.Struct({
+      accessProfile: AccessProfile,
       connectionCount: Schema.Number,
       integrationCount: Schema.Number,
       toolCount: Schema.Number,
-      enabledToolCount: Schema.Number,
       assignedClientCount: Schema.Number
     })) })
   }).annotate(RequiredAccess, "administrative"))
-  .add(HttpApiEndpoint.get("getPolicy", "/v1/policies/:id", {
-    params: { id: PolicyId },
+  .add(HttpApiEndpoint.get("getAccessProfile", "/v1/access-profiles/:id", {
+    params: { id: AccessProfileId },
     success: Schema.Struct({
-      policy: Policy,
-      tools: Schema.Array(PolicyTool),
+      accessProfile: AccessProfile,
+      tools: Schema.Array(AccessProfileTool),
       assignedClients: Schema.Array(Client)
     }),
     error: ApiNotFoundError
   }).annotate(RequiredAccess, "administrative"))
-  .add(HttpApiEndpoint.post("createPolicy", "/v1/policies", {
-    payload: CreatePolicyBody,
-    success: HttpApiSchema.status(201)(Policy),
+  .add(HttpApiEndpoint.post("createAccessProfile", "/v1/access-profiles", {
+    payload: ConfigurationBody,
+    success: HttpApiSchema.status(201)(AccessProfile),
     error: ApiBadRequestError
   }).annotate(RequiredAccess, "administrative"))
-  .add(HttpApiEndpoint.post("replacePolicyTools", "/v1/policies/:id/tools", {
-    params: { id: PolicyId },
-    payload: ReplacePolicyToolsBody,
+  .add(HttpApiEndpoint.post("updateAccessProfile", "/v1/access-profiles/:id", {
+    params: { id: AccessProfileId }, payload: ConfigurationBody, success: AccessProfile,
+    error: ApiNotFoundError
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.delete("deleteAccessProfile", "/v1/access-profiles/:id", {
+    params: { id: AccessProfileId }, success: Schema.Struct({ deleted: Schema.Literal(true) }),
+    error: [ApiNotFoundError, ApiBadRequestError]
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.post("replaceAccessProfileTools", "/v1/access-profiles/:id/tools", {
+    params: { id: AccessProfileId },
+    payload: ReplaceAccessProfileToolsBody,
     success: Schema.Struct({
-      policy: Policy,
-      tools: Schema.Array(PolicyTool)
+      accessProfile: AccessProfile,
+      tools: Schema.Array(AccessProfileTool)
     }),
     error: [ApiNotFoundError, ApiBadRequestError]
   }).annotate(RequiredAccess, "administrative"))
-  .add(HttpApiEndpoint.post("clonePolicy", "/v1/policies/:id/clone", {
-    params: { id: PolicyId },
-    payload: ClonePolicyBody,
+  .add(HttpApiEndpoint.post("cloneAccessProfile", "/v1/access-profiles/:id/clone", {
+    params: { id: AccessProfileId }, payload: ConfigurationBody,
     success: HttpApiSchema.status(201)(Schema.Struct({
-      policy: Policy,
-      tools: Schema.Array(PolicyTool)
+      accessProfile: AccessProfile, tools: Schema.Array(AccessProfileTool)
     })),
     error: [ApiNotFoundError, ApiBadRequestError]
   }).annotate(RequiredAccess, "administrative"))
-  .add(HttpApiEndpoint.post("assignPolicy", "/v1/clients/:id/policy", {
-    params: { id: ClientId },
-    payload: AssignPolicyBody,
+  .add(HttpApiEndpoint.get("listApprovalPolicies", "/v1/approval-policies", {
+    success: Schema.Struct({ approvalPolicies: Schema.Array(Schema.Struct({
+      approvalPolicy: ApprovalPolicy, connectionCount: Schema.Number,
+      integrationCount: Schema.Number, toolCount: Schema.Number, assignedClientCount: Schema.Number
+    })) })
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.get("getApprovalPolicy", "/v1/approval-policies/:id", {
+    params: { id: ApprovalPolicyId }, success: Schema.Struct({
+      approvalPolicy: ApprovalPolicy, tools: Schema.Array(ApprovalPolicyTool), assignedClients: Schema.Array(Client)
+    }), error: ApiNotFoundError
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.post("createApprovalPolicy", "/v1/approval-policies", {
+    payload: ConfigurationBody, success: HttpApiSchema.status(201)(ApprovalPolicy), error: ApiBadRequestError
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.post("updateApprovalPolicy", "/v1/approval-policies/:id", {
+    params: { id: ApprovalPolicyId }, payload: ConfigurationBody, success: ApprovalPolicy, error: ApiNotFoundError
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.delete("deleteApprovalPolicy", "/v1/approval-policies/:id", {
+    params: { id: ApprovalPolicyId }, success: Schema.Struct({ deleted: Schema.Literal(true) }),
+    error: [ApiNotFoundError, ApiBadRequestError]
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.post("replaceApprovalPolicyTools", "/v1/approval-policies/:id/tools", {
+    params: { id: ApprovalPolicyId }, payload: ReplaceApprovalPolicyToolsBody,
+    success: Schema.Struct({ approvalPolicy: ApprovalPolicy, tools: Schema.Array(ApprovalPolicyTool) }),
+    error: [ApiNotFoundError, ApiBadRequestError]
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.post("cloneApprovalPolicy", "/v1/approval-policies/:id/clone", {
+    params: { id: ApprovalPolicyId }, payload: ConfigurationBody,
+    success: HttpApiSchema.status(201)(Schema.Struct({ approvalPolicy: ApprovalPolicy, tools: Schema.Array(ApprovalPolicyTool) })),
+    error: [ApiNotFoundError, ApiBadRequestError]
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.post("assignAccessProfile", "/v1/clients/:id/access-profile", {
+    params: { id: ClientId }, payload: AssignAccessProfileBody,
     success: Client,
     error: [ApiNotFoundError, ApiBadRequestError]
   }).annotate(RequiredAccess, "administrative"))
-  .add(HttpApiEndpoint.get("listGrants", "/v1/clients/:id/connections", {
-    params: { id: ClientId },
-    success: Schema.Struct({ grants: Schema.Array(ConnectionGrant) }),
-    error: ApiNotFoundError
-  }).annotate(RequiredAccess, "administrative"))
-  .add(HttpApiEndpoint.post("grantConnection", "/v1/clients/:id/connections", {
-    params: { id: ClientId },
-    payload: GrantConnectionBody,
-    success: HttpApiSchema.status(201)(Schema.Struct({
-      grant: ConnectionGrant,
-      existing: Schema.Boolean,
-      seeding: PolicySeedingReport
-    })),
-    error: [ApiNotFoundError, ApiBadRequestError]
-  }).annotate(RequiredAccess, "administrative"))
-  .add(HttpApiEndpoint.post("renameGrant", "/v1/clients/:id/connections/:grantId", {
-    params: { id: ClientId, grantId: Schema.String },
-    payload: RenameGrantBody,
-    success: ConnectionGrant,
-    error: [ApiNotFoundError, ApiBadRequestError]
-  }).annotate(RequiredAccess, "administrative"))
-  .add(HttpApiEndpoint.post("revokeGrant", "/v1/clients/:id/connections/:grantId/revoke", {
-    params: { id: ClientId, grantId: Schema.String },
-    success: Schema.Struct({ revoked: Schema.Literal(true) }),
-    error: ApiNotFoundError
+  .add(HttpApiEndpoint.post("assignApprovalPolicy", "/v1/clients/:id/approval-policy", {
+    params: { id: ClientId }, payload: AssignApprovalPolicyBody,
+    success: Client, error: [ApiNotFoundError, ApiBadRequestError]
   }).annotate(RequiredAccess, "administrative"))
   .add(HttpApiEndpoint.get("listApprovals", "/v1/approvals", {
     query: { status: Schema.optional(ApprovalStatus) },

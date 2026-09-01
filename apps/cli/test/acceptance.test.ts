@@ -387,14 +387,47 @@ describe("integrations CLI acceptance", () => {
 
       const listed = parseOutput(ConnectionsOutput, (await integrations(["connections"])).stdout)
       const address = listed.connections[0]?.address ?? ""
+      const connectionName = listed.connections[0]?.name ?? ""
       expect(address).toStartWith(`tools.${slug}.org.`)
 
-      const executed = await integrations([
+      await loginOperator(gateway)
+      const operator = (args: ReadonlyArray<string>) =>
+        run(operatorCli, args, { ...gateway.environment, INTEGRATIONS_API_KEY: undefined })
+      const client = parseOutput(IdOutput, (await operator(["client", "acceptance-agent"])).stdout)
+      const accessProfile = parseOutput(
+        IdOutput,
+        (await operator(["access-profile", "acceptance-access"])).stdout
+      )
+      const included = await operator([
+        "access-profile-tool", accessProfile.id, slug, "tickets.create",
+        "--connection", connectionName
+      ])
+      expect(included.exitCode, included.stderr).toBe(0)
+      const assignedAccess = await operator([
+        "assign-access-profile", client.id, accessProfile.id
+      ])
+      expect(assignedAccess.exitCode, assignedAccess.stderr).toBe(0)
+      const approvalPolicy = parseOutput(
+        IdOutput,
+        (await operator(["approval-policy", "acceptance-approval"])).stdout
+      )
+      const decided = await operator([
+        "approval-policy-tool", approvalPolicy.id, slug, "tickets.create", "require-approval",
+        "--connection", connectionName
+      ])
+      expect(decided.exitCode, decided.stderr).toBe(0)
+      const assignedApproval = await operator([
+        "assign-approval-policy", client.id, approvalPolicy.id
+      ])
+      expect(assignedApproval.exitCode, assignedApproval.stderr).toBe(0)
+      const key = parseOutput(SecretOutput, (await operator(["key", client.id])).stdout)
+
+      const executed = await run(agentCli, [
         "execute",
-        slug.replace(/[^a-z0-9]+/g, "-"),
+        `${slug}-${connectionName}`.replace(/[^a-z0-9]+/g, "-"),
         "tickets.create",
         JSON.stringify({ body: { title: "Connected" } })
-      ])
+      ], { ...gateway.environment, INTEGRATIONS_API_KEY: key.secret })
       expect(executed.exitCode, executed.stderr).toBe(0)
       expect(executed.stdout).toContain("pending")
       // POST starts from the conservative policy default, so the vendor is not
@@ -404,7 +437,7 @@ describe("integrations CLI acceptance", () => {
     30_000
   )
 
-  test("a delegated key reaches only what its assigned policy includes", async () => {
+  test("a delegated key reaches only what its assigned access profile includes", async () => {
     const vendor = startVendor()
     const gateway = await startGateway()
     await loginOperator(gateway)
@@ -416,26 +449,40 @@ describe("integrations CLI acceptance", () => {
     const discovered = parseOutput(DiscoveredOutput, (await clientCli(["discover", vendor.specUrl])).stdout)
     const slug = discovered.integration.slug
     await clientCli(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
+    const connections = parseOutput(ConnectionsOutput, (await clientCli(["connections"])).stdout)
+    const connectionName = connections.connections[0]?.name ?? ""
     const operatorCatalog = await operator(["integrations"])
     expect(operatorCatalog.exitCode, operatorCatalog.stderr).toBe(0)
 
     const client = parseOutput(IdOutput, (await operator(["client", "sandbox"])).stdout)
-    const policy = parseOutput(IdOutput, (await operator(["policy", "sandbox-policy"])).stdout)
+    const accessProfile = parseOutput(
+      IdOutput,
+      (await operator(["access-profile", "sandbox-access"])).stdout
+    )
     const included = await operator([
-      "policy-tool",
-      policy.id,
+      "access-profile-tool",
+      accessProfile.id,
       slug,
       "tickets.create",
-      "allow"
+      "--connection",
+      connectionName
     ])
     expect(included.exitCode, included.stderr).toBe(0)
-    const assigned = await operator(["assign-policy", client.id, policy.id])
-    expect(assigned.exitCode, assigned.stderr).toBe(0)
-    // The policy says what the credential may be used for; the grant is what
-    // lets this client reach it at all. Both are needed, and neither implies
-    // the other.
-    const granted = await operator(["grant", client.id, slug])
-    expect(granted.exitCode, granted.stderr).toBe(0)
+    const assignedAccess = await operator(["assign-access-profile", client.id, accessProfile.id])
+    expect(assignedAccess.exitCode, assignedAccess.stderr).toBe(0)
+    const approvalPolicy = parseOutput(
+      IdOutput,
+      (await operator(["approval-policy", "sandbox-approval"])).stdout
+    )
+    const allowed = await operator([
+      "approval-policy-tool", approvalPolicy.id, slug, "tickets.create", "allow",
+      "--connection", connectionName
+    ])
+    expect(allowed.exitCode, allowed.stderr).toBe(0)
+    const assignedApproval = await operator([
+      "assign-approval-policy", client.id, approvalPolicy.id
+    ])
+    expect(assignedApproval.exitCode, assignedApproval.stderr).toBe(0)
     const key = parseOutput(SecretOutput, (await operator(["key", client.id])).stdout)
     const sandbox = {
       ...gateway.environment,
@@ -455,7 +502,7 @@ describe("integrations CLI acceptance", () => {
 
     const executed = await clientCli([
       "execute",
-      slug.replace(/[^a-z0-9]+/g, "-"),
+      `${slug}-${connectionName}`.replace(/[^a-z0-9]+/g, "-"),
       "tickets.create",
       JSON.stringify({ body: { title: "Delegated" } })
     ], sandbox)
@@ -466,7 +513,7 @@ describe("integrations CLI acceptance", () => {
     // A tool omitted from the assigned policy is refused on the same binding.
     const refused = await clientCli([
       "execute",
-      slug.replace(/[^a-z0-9]+/g, "-"),
+      `${slug}-${connectionName}`.replace(/[^a-z0-9]+/g, "-"),
       "tickets.delete",
       "{}"
     ], sandbox)
@@ -539,7 +586,7 @@ describe("integrations CLI acceptance", () => {
     expect(catalog.count).toBeGreaterThan(0)
   }, 40_000)
 
-  test("a policy can remove authority, and a key can be listed and revoked", async () => {
+  test("an access profile can remove authority, and a key can be listed and revoked", async () => {
     const vendor = startVendor()
     const gateway = await startGateway()
     await loginOperator(gateway)
@@ -558,8 +605,11 @@ describe("integrations CLI acceptance", () => {
     const keys = parseOutput(KeysOutput, (await operator(["keys", client.id])).stdout)
     expect(keys.keys.map((entry) => entry.id)).toEqual([key.id])
 
-    const emptyPolicy = parseOutput(IdOutput, (await operator(["policy", "deny-all"])).stdout)
-    const reassigned = await operator(["assign-policy", client.id, emptyPolicy.id])
+    const emptyProfile = parseOutput(
+      IdOutput,
+      (await operator(["access-profile", "deny-all"])).stdout
+    )
+    const reassigned = await operator(["assign-access-profile", client.id, emptyProfile.id])
     expect(reassigned.exitCode, reassigned.stderr).toBe(0)
     const afterRevoke = await clientCli([
       "execute",

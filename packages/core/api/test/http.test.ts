@@ -8,7 +8,6 @@ import { ToolAddress, whenPresent } from "@mokronos/contracts"
 import type { IntegrationsApi } from "@mokronos/integrations"
 import type { Connection, Tool } from "@mokronos/contracts"
 import {
-  Alias,
   ClientId,
   ConnectionName,
   createGatewayHandler,
@@ -17,8 +16,8 @@ import {
   generateApiKey,
   IntegrationSlug,
   newClientId,
-  newConnectionGrantId,
-  newPolicyId,
+  newAccessProfileId,
+  newApprovalPolicyId,
   SubjectId,
   ToolName
 } from "./gateway.ts"
@@ -162,32 +161,31 @@ const setup = async (options: {
   const store = await run(createGatewayStore(path.join(directory, "gateway.sqlite")))
   stores.push(store)
 
-  const policy = await run(store.createPolicy({
-    id: newPolicyId(), tenantId: defaultTenantId, name: `policy-${crypto.randomUUID()}`
+  const accessProfile = await run(store.createAccessProfile({
+    id: newAccessProfileId(), tenantId: defaultTenantId, name: `access-${crypto.randomUUID()}`
   }))
-  await run(store.replacePolicyTools(policy.id, [{
+  await run(store.replaceAccessProfileTools(accessProfile.id, [{
+      connection,
+      tool: ToolName.make("sendEmail")
+    }]))
+  const approvalPolicy = await run(store.createApprovalPolicy({
+    id: newApprovalPolicyId(), tenantId: defaultTenantId, name: `approval-${crypto.randomUUID()}`
+  }))
+  await run(store.replaceApprovalPolicyTools(approvalPolicy.id, [{
       connection,
       tool: ToolName.make("sendEmail"),
-      enabled: true,
       decision: options.decision ?? "allow"
     }]))
   const client = await run(store.createClient({
     id: newClientId(),
     tenantId: defaultTenantId,
-    policyId: policy.id,
+    accessProfileId: accessProfile.id,
+    approvalPolicyId: approvalPolicy.id,
     name: "support-agent",
     capabilities: options.capabilities ?? ["provision_connections"]
   }))
   const key = generateApiKey()
   await run(store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash }))
-  const grant = await run(store.createGrant({
-    id: newConnectionGrantId(),
-    tenantId: defaultTenantId,
-    clientId: client.id,
-    alias: Alias.make("gmail-work"),
-    connection,
-  }))
-
   const stub = stubIntegrations({
     ...whenPresent("fail", options.fail),
     ...whenPresent("connections", options.connections),
@@ -240,7 +238,7 @@ const setup = async (options: {
     }
   }
 
-  return { store, client, key, policy, grant, call, calls: stub.calls, removed: stub.removed }
+  return { store, client, key, accessProfile, approvalPolicy, call, calls: stub.calls, removed: stub.removed }
 }
 
 describe("gateway http surface", () => {
@@ -278,7 +276,7 @@ describe("gateway http surface", () => {
     ])
   })
 
-  test("executes an effective tool against the address built from the grant", async () => {
+  test("executes an effective tool against the address built from the access profile", async () => {
     const { call, calls } = await run(setup())
 
     const response = await run(call("POST", "/v1/execute", {
@@ -287,7 +285,7 @@ describe("gateway http surface", () => {
 
     expect(response.status).toBe(200)
     expect(response.body["status"]).toBe("succeeded")
-    // The address is derived from the grant, so a caller cannot forge one.
+    // The address is derived from the profile, so a caller cannot forge one.
     expect(calls).toHaveLength(1)
     expect(calls[0]?.address).toBe("tools.gmail.user.work.sendEmail")
   })
@@ -349,8 +347,10 @@ describe("gateway http surface", () => {
     for (const [method, route] of [
       ["GET", "/v1/clients"],
       ["POST", "/v1/clients"],
-      ["GET", "/v1/policies"],
-      ["POST", "/v1/policies"],
+      ["GET", "/v1/access-profiles"],
+      ["POST", "/v1/access-profiles"],
+      ["GET", "/v1/approval-policies"],
+      ["POST", "/v1/approval-policies"],
       ["GET", "/v1/approvals"],
       ["GET", "/v1/audit"]
     ] as const) {
@@ -375,8 +375,10 @@ describe("gateway http surface", () => {
     expect(response.body).toEqual({
       connections: 0,
       clients: 1,
-      policies: 2,
-      policyTools: 1,
+      accessProfiles: 2,
+      accessProfileTools: 1,
+      approvalPolicies: 2,
+      approvalPolicyTools: 1,
       keys: 1,
       pendingApprovals: 0,
       recentActivity: []
@@ -384,7 +386,7 @@ describe("gateway http surface", () => {
   })
 
   test("does not let one client read another's frozen call", async () => {
-    const { call, store, client, policy } = await run(setup({ decision: "require_approval" }))
+    const { call, store, client, accessProfile, approvalPolicy } = await run(setup({ decision: "require_approval" }))
     const frozen = await run(call("POST", "/v1/execute", {
       body: { alias: "gmail-work", tool: "sendEmail" }
     }))
@@ -393,7 +395,8 @@ describe("gateway http surface", () => {
     const other = await run(store.createClient({
       id: newClientId(),
       tenantId: defaultTenantId,
-      policyId: policy.id,
+      accessProfileId: accessProfile.id,
+      approvalPolicyId: approvalPolicy.id,
       name: "someone-else",
       capabilities: ["provision_connections"]
     }))
@@ -464,12 +467,6 @@ describe("gateway http surface", () => {
     }))
     const created = await run(call("POST", "/v1/clients", { body: { name: "sandbox" } }))
     const clientId = String(created.body["id"])
-    // A new client is governed by the default policy but reaches nothing, so
-    // the decision only becomes observable once it is granted the connection.
-    expect((await run(call("GET", `/v1/clients/${clientId}/tools`))).body).toEqual({ tools: [] })
-    await run(call("POST", `/v1/clients/${clientId}/connections`, {
-      body: { integration: "gmail", connection: "work" }
-    }))
     const response = await run(call("GET", `/v1/clients/${clientId}/tools`))
     expect(response.status).toBe(200)
     expect(JSON.stringify(response.body)).toContain("require_approval")
@@ -561,8 +558,8 @@ describe("gateway approval settlement", () => {
     ))).status).toBe(400)
   })
 
-  test("refuses to approve a call whose grant was revoked while frozen", async () => {
-    const { call, store, grant, calls } = await run(setup({
+  test("refuses to approve a call removed by access profile reassignment while frozen", async () => {
+    const { call, store, client, calls } = await run(setup({
       decision: "require_approval",
       capabilities: ["provision_connections", "administer_gateway"]
     }))
@@ -571,7 +568,12 @@ describe("gateway approval settlement", () => {
     }))
     const approvalId = String(frozen.body["approvalId"])
 
-    await run(store.revokeGrant(defaultTenantId, grant.id))
+    const emptyProfile = await run(store.createAccessProfile({
+      id: newAccessProfileId(),
+      tenantId: defaultTenantId,
+      name: "No mail access"
+    }))
+    await run(store.assignAccessProfile(defaultTenantId, client.id, emptyProfile.id))
     const approved = await run(call(
       "POST",
       `/v1/approvals/${approvalId}/approve`,
@@ -582,8 +584,8 @@ describe("gateway approval settlement", () => {
     expect(calls).toHaveLength(0)
   })
 
-  test("refuses to approve a tool disabled while the call was frozen", async () => {
-    const { call, store, policy, calls } = await run(setup({
+  test("refuses to approve a tool removed while the call was frozen", async () => {
+    const { call, store, accessProfile, calls } = await run(setup({
       decision: "require_approval",
       capabilities: ["provision_connections", "administer_gateway"]
     }))
@@ -591,12 +593,7 @@ describe("gateway approval settlement", () => {
       body: { alias: "gmail-work", tool: "sendEmail" }
     }))
     const approvalId = String(frozen.body["approvalId"])
-    await run(store.replacePolicyTools(policy.id, [{
-        connection,
-        tool: ToolName.make("sendEmail"),
-        enabled: false,
-        decision: "require_approval"
-      }]))
+    await run(store.replaceAccessProfileTools(accessProfile.id, []))
 
     const approved = await run(call(
       "POST",
@@ -743,16 +740,23 @@ describe("provisioning surface", () => {
     expect(JSON.stringify(report.body)).toContain("not authorized")
   })
 
-  test("supports creating a client with an explicit reusable policy", async () => {
+  test("supports creating a client with explicit reusable configurations", async () => {
     const { call } = await run(setup({ capabilities: ["provision_connections", "administer_gateway"] }))
-    const policy = await run(call("POST", "/v1/policies", { body: { name: "Explicit" } }))
+    const profile = await run(call("POST", "/v1/access-profiles", { body: { name: "Explicit access" } }))
+    const policy = await run(call("POST", "/v1/approval-policies", { body: { name: "Explicit approval" } }))
     const response = await run(call("POST", "/v1/clients", {
-      body: { name: "explicit-client", policyId: String(policy.body["id"]) }
+      body: {
+        name: "explicit-client",
+        accessProfileId: String(profile.body["id"]),
+        approvalPolicyId: String(policy.body["id"])
+      }
     }))
 
+    expect(profile.status).toBe(201)
     expect(policy.status).toBe(201)
     expect(response.status).toBe(201)
-    expect(response.body["policyId"]).toBe(policy.body["id"])
+    expect(response.body["accessProfileId"]).toBe(profile.body["id"])
+    expect(response.body["approvalPolicyId"]).toBe(policy.body["id"])
   })
 
   test("removes a connection by the name it was asked for, not the stored one", async () => {

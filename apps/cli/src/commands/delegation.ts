@@ -114,7 +114,7 @@ export const clientsCommand = Command.make(
         })
       })
     )
-).pipe(Command.withDescription("List clients and their assigned policies"))
+).pipe(Command.withDescription("List clients and their assigned access profiles and approval policies"))
 
 export const clientCommand = Command.make(
   "client",
@@ -126,7 +126,7 @@ export const clientCommand = Command.make(
     ),
     administer: Flag.boolean("administer").pipe(
       Flag.withDefault(false),
-      Flag.withDescription("Allow this client to administer clients, keys, policies, approvals, and audit")
+      Flag.withDescription("Allow this client to administer clients, keys, access profiles, approval policies, approvals, and audit")
     )
   },
   ({ name, provision, administer }) =>
@@ -145,7 +145,7 @@ export const clientCommand = Command.make(
         ))
       })
     )
-).pipe(Command.withDescription("Create a client assigned to the default policy"))
+).pipe(Command.withDescription("Create a client assigned to the default access profile and approval policy"))
 
 export const keyCommand = Command.make(
   "key",
@@ -185,56 +185,55 @@ export const keysCommand = Command.make(
     }))
 ).pipe(Command.withDescription("List a client's API keys. Secrets are never shown again"))
 
-export const policiesCommand = Command.make(
-  "policies",
+export const accessProfilesCommand = Command.make(
+  "access-profiles",
   {
     limit: limitFlag(),
     offset: offsetFlag(),
     verbose: verboseFlag()
   },
   ({ limit, offset, verbose }) =>
-    controlPlaneTask((client) => client.request("GET", "/v1/policies")).pipe(
+    controlPlaneTask((client) => client.request("GET", "/v1/access-profiles")).pipe(
       Effect.flatMap((result) => {
-        const all = sortedBy(array(record(result)["policies"]), (entry) =>
-          text(record(entry["policy"])["name"]))
+        const all = sortedBy(array(record(result)["accessProfiles"]), (entry) =>
+          text(record(entry["accessProfile"])["name"]))
         return listing(page(all, window(limit, offset)), {
-          key: "policies",
+          key: "accessProfiles",
           narrowing: "window with --limit/--offset",
           verbose,
-          empty: "No policies.",
+          empty: "No access profiles.",
           row: (entry) => entry
         })
       })
     )
-).pipe(Command.withDescription("List reusable tool-access policies"))
+).pipe(Command.withDescription("List reusable tool-access profiles"))
 
-export const policyCommand = Command.make(
-  "policy",
+export const accessProfileCommand = Command.make(
+  "access-profile",
   { name: Argument.string("name") },
   ({ name }) =>
-    controlPlaneTask((client) => client.request("POST", "/v1/policies", { name })).pipe(
+    controlPlaneTask((client) => client.request("POST", "/v1/access-profiles", { name })).pipe(
       Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false)))
     )
-).pipe(Command.withDescription("Create an empty reusable policy"))
+).pipe(Command.withDescription("Create an empty reusable access profile"))
 
-export const clonePolicyCommand = Command.make(
-  "clone-policy",
+export const cloneAccessProfileCommand = Command.make(
+  "clone-access-profile",
   {
-    policyId: Argument.string("policy-id"),
+    accessProfileId: Argument.string("access-profile-id"),
     name: Argument.string("name")
   },
-  ({ policyId, name }) =>
+  ({ accessProfileId, name }) =>
     controlPlaneTask((client) => client.request(
       "POST",
-      `/v1/policies/${encodeURIComponent(policyId)}/clone`,
+      `/v1/access-profiles/${encodeURIComponent(accessProfileId)}/clone`,
       { name }
     )).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false))))
-).pipe(Command.withDescription("Clone a policy and all of its tool rules"))
+).pipe(Command.withDescription("Clone an access profile and all of its tools"))
 
-/** Which connections one `policy-tool` call writes a rule for. A rule is
- * per-credential now, so the command has to say which. Naming one is explicit;
+/** Which connections one profile or policy tool command writes a rule for. Naming one is explicit;
  * naming none means every org connection currently live for that integration,
- * which is what an operator adding a tool to a policy almost always means. */
+ * which is what an operator adding a tool usually means. */
 const targetConnections = async (
   client: ControlPlaneClient,
   integration: string,
@@ -248,13 +247,12 @@ const targetConnections = async (
   return listed.length === 0 ? [{ owner: "org", name: "default" }] : listed
 }
 
-export const policyToolCommand = Command.make(
-  "policy-tool",
+export const accessProfileToolCommand = Command.make(
+  "access-profile-tool",
   {
-    policyId: Argument.string("policy-id"),
+    accessProfileId: Argument.string("access-profile-id"),
     integration: Argument.string("integration"),
     tool: Argument.string("tool"),
-    mode: Argument.choice("mode", ["allow", "require-approval"]),
     connection: Flag.string("connection").pipe(
       Flag.optional,
       Flag.withDescription(
@@ -262,11 +260,106 @@ export const policyToolCommand = Command.make(
       )
     )
   },
-  ({ connection, integration, mode, policyId, tool }) =>
+  ({ accessProfileId, connection, integration, tool }) =>
     controlPlaneTask(async (client) => {
       const detail = record(await client.request(
         "GET",
-        `/v1/policies/${encodeURIComponent(policyId)}`
+        `/v1/access-profiles/${encodeURIComponent(accessProfileId)}`
+      ))
+      const targets = await targetConnections(client, integration, connection)
+      const replaced = new Set(targets.map((target) => `${target.owner}/${target.name}`))
+      const tools = array(detail["tools"])
+        .filter((entry) => {
+          const existing = record(entry["connection"])
+          return text(existing["integration"]) !== integration ||
+            text(entry["tool"]) !== tool ||
+            !replaced.has(`${text(existing["owner"])}/${text(existing["name"])}`)
+        })
+        .map((entry) => ({
+          connection: record(entry["connection"]),
+          tool: text(entry["tool"])
+        }))
+      return await client.request(
+        "POST",
+        `/v1/access-profiles/${encodeURIComponent(accessProfileId)}/tools`,
+        {
+          tools: [
+            ...tools,
+            ...targets.map((target) => ({
+              connection: { owner: target.owner, integration, name: target.name },
+              tool
+            }))
+          ]
+        }
+      )
+    }).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false))))
+).pipe(Command.withDescription("Include one tool in an access profile"))
+
+export const approvalPoliciesCommand = Command.make(
+  "approval-policies",
+  {
+    limit: limitFlag(),
+    offset: offsetFlag(),
+    verbose: verboseFlag()
+  },
+  ({ limit, offset, verbose }) =>
+    controlPlaneTask((client) => client.request("GET", "/v1/approval-policies")).pipe(
+      Effect.flatMap((result) => {
+        const all = sortedBy(array(record(result)["approvalPolicies"]), (entry) =>
+          text(record(entry["approvalPolicy"])["name"]))
+        return listing(page(all, window(limit, offset)), {
+          key: "approvalPolicies",
+          narrowing: "window with --limit/--offset",
+          verbose,
+          empty: "No approval policies.",
+          row: (entry) => entry
+        })
+      })
+    )
+).pipe(Command.withDescription("List reusable approval policies"))
+
+export const approvalPolicyCommand = Command.make(
+  "approval-policy",
+  { name: Argument.string("name") },
+  ({ name }) =>
+    controlPlaneTask((client) => client.request("POST", "/v1/approval-policies", { name })).pipe(
+      Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false)))
+    )
+).pipe(Command.withDescription("Create an empty reusable approval policy"))
+
+export const cloneApprovalPolicyCommand = Command.make(
+  "clone-approval-policy",
+  {
+    approvalPolicyId: Argument.string("approval-policy-id"),
+    name: Argument.string("name")
+  },
+  ({ approvalPolicyId, name }) =>
+    controlPlaneTask((client) => client.request(
+      "POST",
+      `/v1/approval-policies/${encodeURIComponent(approvalPolicyId)}/clone`,
+      { name }
+    )).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false))))
+).pipe(Command.withDescription("Clone an approval policy and all of its decisions"))
+
+export const approvalPolicyToolCommand = Command.make(
+  "approval-policy-tool",
+  {
+    approvalPolicyId: Argument.string("approval-policy-id"),
+    integration: Argument.string("integration"),
+    tool: Argument.string("tool"),
+    mode: Argument.choice("mode", ["allow", "require-approval"]),
+    connection: Flag.string("connection").pipe(
+      Flag.optional,
+      Flag.withDescription(
+        "Write the decision for one connection only (default: every org connection of the integration)"
+      )
+    )
+  },
+  ({ approvalPolicyId, connection, integration, mode, tool }) =>
+    controlPlaneTask(async (client) => {
+      const detail = record(await client.request(
+        "GET",
+        `/v1/approval-policies/${encodeURIComponent(approvalPolicyId)}`
       ))
       const targets = await targetConnections(client, integration, connection)
       const replaced = new Set(targets.map((target) => `${target.owner}/${target.name}`))
@@ -280,100 +373,52 @@ export const policyToolCommand = Command.make(
         .map((entry) => ({
           connection: record(entry["connection"]),
           tool: text(entry["tool"]),
-          enabled: entry["enabled"] === true,
           decision: text(entry["decision"])
         }))
       return await client.request(
         "POST",
-        `/v1/policies/${encodeURIComponent(policyId)}/tools`,
+        `/v1/approval-policies/${encodeURIComponent(approvalPolicyId)}/tools`,
         {
           tools: [
             ...tools,
             ...targets.map((target) => ({
               connection: { owner: target.owner, integration, name: target.name },
               tool,
-              enabled: true,
               decision: mode === "allow" ? "allow" : "require_approval"
             }))
           ]
         }
       )
     }).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false))))
-).pipe(Command.withDescription("Include or update one tool in a policy"))
+).pipe(Command.withDescription("Set one tool's decision in an approval policy"))
 
-/** Hands one client reach to one connection. Separate from `policy-tool` on
- * purpose: a rule says what a credential may be used for, a grant says which
- * client holds it, and conflating them is what used to make connecting a second
- * account rename everybody's tools. */
-export const grantCommand = Command.make(
-  "grant",
+export const assignAccessProfileCommand = Command.make(
+  "assign-access-profile",
   {
     clientId: Argument.string("client-id"),
-    integration: Argument.string("integration"),
-    connection: Flag.string("connection").pipe(
-      Flag.withDefault("default"),
-      Flag.withDescription("Connection name (default: default)")
-    )
+    accessProfileId: Argument.string("access-profile-id")
   },
-  ({ clientId, connection, integration }) =>
+  ({ accessProfileId, clientId }) =>
     controlPlaneTask((client) => client.request(
       "POST",
-      `/v1/clients/${encodeURIComponent(clientId)}/connections`,
-      { integration, connection }
+      `/v1/clients/${encodeURIComponent(clientId)}/access-profile`,
+      { accessProfileId }
     )).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false))))
-).pipe(Command.withDescription("Give a client reach to one connection"))
+).pipe(Command.withDescription("Assign one reusable access profile to a client"))
 
-export const grantsCommand = Command.make(
-  "grants",
-  { clientId: Argument.string("client-id") },
-  ({ clientId }) =>
-    controlPlaneTask((client) => client.request(
-      "GET",
-      `/v1/clients/${encodeURIComponent(clientId)}/connections`
-    )).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false))))
-).pipe(Command.withDescription("List the connections one client reaches, and its aliases"))
-
-export const renameGrantCommand = Command.make(
-  "rename-grant",
+export const assignApprovalPolicyCommand = Command.make(
+  "assign-approval-policy",
   {
     clientId: Argument.string("client-id"),
-    grantId: Argument.string("grant-id"),
-    alias: Argument.string("alias")
+    approvalPolicyId: Argument.string("approval-policy-id")
   },
-  ({ alias, clientId, grantId }) =>
+  ({ approvalPolicyId, clientId }) =>
     controlPlaneTask((client) => client.request(
       "POST",
-      `/v1/clients/${encodeURIComponent(clientId)}/connections/${encodeURIComponent(grantId)}`,
-      { alias }
+      `/v1/clients/${encodeURIComponent(clientId)}/approval-policy`,
+      { approvalPolicyId }
     )).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false))))
-).pipe(Command.withDescription("Change what one client calls a connection"))
-
-export const revokeGrantCommand = Command.make(
-  "revoke-grant",
-  {
-    clientId: Argument.string("client-id"),
-    grantId: Argument.string("grant-id")
-  },
-  ({ clientId, grantId }) =>
-    controlPlaneTask((client) => client.request(
-      "POST",
-      `/v1/clients/${encodeURIComponent(clientId)}/connections/${encodeURIComponent(grantId)}/revoke`
-    )).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false))))
-).pipe(Command.withDescription("Withdraw a client's reach to one connection"))
-
-export const assignPolicyCommand = Command.make(
-  "assign-policy",
-  {
-    clientId: Argument.string("client-id"),
-    policyId: Argument.string("policy-id")
-  },
-  ({ clientId, policyId }) =>
-    controlPlaneTask((client) => client.request(
-      "POST",
-      `/v1/clients/${encodeURIComponent(clientId)}/policy`,
-      { policyId }
-    )).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false))))
-).pipe(Command.withDescription("Assign one reusable policy to a client"))
+).pipe(Command.withDescription("Assign one reusable approval policy to a client"))
 
 export const revokeCommand = Command.make(
   "revoke",

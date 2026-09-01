@@ -28,7 +28,8 @@ const navigation = [
   { to: "/", label: "Overview", icon: LayoutDashboard },
   { to: "/integrations", label: "Integrations", icon: Plug },
   { to: "/clients", label: "Clients", icon: KeyRound },
-  { to: "/policies", label: "Policies", icon: FileKey2 },
+  { to: "/access-profiles", label: "Access profiles", icon: FileKey2 },
+  { to: "/approval-policies", label: "Approval policies", icon: ShieldCheck },
   { to: "/approvals", label: "Approvals", icon: ShieldCheck },
   { to: "/activity", label: "Activity", icon: Activity },
   { to: "/account", label: "Account", icon: UserRound }

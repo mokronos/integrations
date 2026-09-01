@@ -6,13 +6,15 @@ import {
   AuditRecord,
   AuditOutcome,
   Client,
-  ConnectionGrant,
   DriftEntry,
   ConnectionRef as ConnectionRefSchema,
-  Policy,
+  AccessProfile,
+  AccessProfileId,
+  AccessProfileTool,
+  ApprovalPolicy,
+  ApprovalPolicyId,
+  ApprovalPolicyTool,
   PolicyDecision as PolicyDecisionSchema,
-  PolicyId,
-  PolicyTool,
   PendingApproval
 } from "@mokronos/gateway-core/domain"
 import { IntegrationDiscovery } from "@mokronos/contracts"
@@ -46,10 +48,11 @@ export type {
   Connection,
   Tool,
   ToolSummary,
-  ConnectionGrant,
   IntegrationOverview,
-  Policy,
-  PolicyTool,
+  AccessProfile,
+  AccessProfileTool,
+  ApprovalPolicy,
+  ApprovalPolicyTool,
   PendingApproval
 }
 
@@ -60,7 +63,8 @@ export type {
   ClientId,
   ConnectionRef,
   PolicyDecision,
-  PolicyId
+  AccessProfileId,
+  ApprovalPolicyId
 } from "@mokronos/gateway-core/domain"
 
 /** Derives the JSON codec for a schema and returns a decoder for it. Every
@@ -82,29 +86,36 @@ export const ClientsResponse = Schema.Struct({
   clients: Schema.Array(Client)
 })
 
-export const PolicySummary = Schema.Struct({
-  policy: Policy,
+export const AccessProfileSummary = Schema.Struct({
+  accessProfile: AccessProfile,
   connectionCount: Schema.Number,
   integrationCount: Schema.Number,
   toolCount: Schema.Number,
-  enabledToolCount: Schema.Number,
   assignedClientCount: Schema.Number
 })
-export type PolicySummary = typeof PolicySummary.Type
-
-export const PoliciesResponse = Schema.Struct({ policies: Schema.Array(PolicySummary) })
-
-export const PolicyDetail = Schema.Struct({
-  policy: Policy,
-  tools: Schema.Array(PolicyTool),
+export type AccessProfileSummary = typeof AccessProfileSummary.Type
+export const AccessProfilesResponse = Schema.Struct({ accessProfiles: Schema.Array(AccessProfileSummary) })
+export const AccessProfileDetail = Schema.Struct({
+  accessProfile: AccessProfile,
+  tools: Schema.Array(AccessProfileTool),
   assignedClients: Schema.Array(Client)
 })
-export type PolicyDetail = typeof PolicyDetail.Type
-
-export const PolicyToolsReplaced = Schema.Struct({
-  policy: Policy,
-  tools: Schema.Array(PolicyTool)
+export const AccessProfileToolsReplaced = Schema.Struct({
+  accessProfile: AccessProfile,
+  tools: Schema.Array(AccessProfileTool)
 })
+
+export const ApprovalPolicySummary = Schema.Struct({
+  approvalPolicy: ApprovalPolicy,
+  connectionCount: Schema.Number,
+  integrationCount: Schema.Number,
+  toolCount: Schema.Number,
+  assignedClientCount: Schema.Number
+})
+export type ApprovalPolicySummary = typeof ApprovalPolicySummary.Type
+export const ApprovalPoliciesResponse = Schema.Struct({ approvalPolicies: Schema.Array(ApprovalPolicySummary) })
+export const ApprovalPolicyDetail = Schema.Struct({ approvalPolicy: ApprovalPolicy, tools: Schema.Array(ApprovalPolicyTool), assignedClients: Schema.Array(Client) })
+export const ApprovalPolicyToolsReplaced = Schema.Struct({ approvalPolicy: ApprovalPolicy, tools: Schema.Array(ApprovalPolicyTool) })
 
 export const EffectiveTool = Schema.Struct({
   alias: Alias,
@@ -119,33 +130,13 @@ export type EffectiveTool = typeof EffectiveTool.Type
 
 export const EffectiveToolsResponse = Schema.Struct({ tools: Schema.Array(EffectiveTool) })
 
-export const GrantsResponse = Schema.Struct({ grants: Schema.Array(ConnectionGrant) })
-
-/** What granting did to the client's policy. A fork is reported rather than
- *  silent: it detaches this client from a shared policy, which an operator has
- *  to see at the moment it happens. */
-export const PolicySeeding = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("already-governed"), policy: Policy }),
-  Schema.Struct({ kind: Schema.Literal("seeded-in-place"), policy: Policy }),
-  Schema.Struct({ kind: Schema.Literal("forked"), policy: Policy, forkedFrom: Policy }),
-  Schema.Struct({ kind: Schema.Literal("no-tools"), policy: Policy }),
-  Schema.Struct({ kind: Schema.Literal("no-policy") })
-])
-export type PolicySeeding = typeof PolicySeeding.Type
-
-export const GrantCreated = Schema.Struct({
-  grant: ConnectionGrant,
-  existing: Schema.Boolean,
-  seeding: PolicySeeding
-})
-
-export const PolicyToolInput = Schema.Struct({
+export const AccessProfileToolInput = Schema.Struct({
   connection: ConnectionRefSchema,
-  tool: Schema.String,
-  enabled: Schema.Boolean,
-  decision: PolicyDecisionSchema
+  tool: Schema.String
 })
-export type PolicyToolInput = typeof PolicyToolInput.Type
+export type AccessProfileToolInput = typeof AccessProfileToolInput.Type
+export const ApprovalPolicyToolInput = Schema.Struct({ connection: ConnectionRefSchema, tool: Schema.String, decision: PolicyDecisionSchema })
+export type ApprovalPolicyToolInput = typeof ApprovalPolicyToolInput.Type
 
 export const ApprovalsResponse = Schema.Struct({
   approvals: Schema.Array(PendingApproval)
@@ -163,8 +154,10 @@ export type AuditResponse = typeof AuditResponse.Type
 export const OverviewResponse = Schema.Struct({
   connections: Schema.Number,
   clients: Schema.Number,
-  policies: Schema.Number,
-  policyTools: Schema.Number,
+  accessProfiles: Schema.Number,
+  accessProfileTools: Schema.Number,
+  approvalPolicies: Schema.Number,
+  approvalPolicyTools: Schema.Number,
   keys: Schema.Number,
   pendingApprovals: Schema.Number,
   recentActivity: Schema.Array(AuditRecord)
@@ -244,13 +237,15 @@ export const Removed = Schema.Struct({ removed: Schema.Boolean })
 export const decodeIntegrations = json(IntegrationsResponse)
 export const decodeConnections = json(ConnectionsResponse)
 export const decodeClients = json(ClientsResponse)
-export const decodePolicies = json(PoliciesResponse)
-export const decodePolicy = json(PolicyDetail)
-export const decodePolicyCreated = json(Policy)
-export const decodePolicyToolsReplaced = json(PolicyToolsReplaced)
+export const decodeAccessProfiles = json(AccessProfilesResponse)
+export const decodeAccessProfile = json(AccessProfileDetail)
+export const decodeAccessProfileCreated = json(AccessProfile)
+export const decodeAccessProfileToolsReplaced = json(AccessProfileToolsReplaced)
+export const decodeApprovalPolicies = json(ApprovalPoliciesResponse)
+export const decodeApprovalPolicy = json(ApprovalPolicyDetail)
+export const decodeApprovalPolicyCreated = json(ApprovalPolicy)
+export const decodeApprovalPolicyToolsReplaced = json(ApprovalPolicyToolsReplaced)
 export const decodeEffectiveTools = json(EffectiveToolsResponse)
-export const decodeGrants = json(GrantsResponse)
-export const decodeGrantCreated = json(GrantCreated)
 export const decodeApprovals = json(ApprovalsResponse)
 export const decodeAudit = json(AuditResponse)
 export const decodeOverview = json(OverviewResponse)
@@ -272,7 +267,8 @@ export const decodeRegistrySearch = json(IntegrationSearchResponse)
  * an unknown value fails loudly here instead of silently sending nonsense to
  * the gateway. */
 export const decodePolicyDecision = Schema.decodeUnknownSync(PolicyDecisionSchema)
-export const decodePolicyId = Schema.decodeUnknownSync(PolicyId)
+export const decodeAccessProfileId = Schema.decodeUnknownSync(AccessProfileId)
+export const decodeApprovalPolicyId = Schema.decodeUnknownSync(ApprovalPolicyId)
 export const decodeApprovalFilter = Schema.decodeUnknownSync(
   Schema.Union([ApprovalStatusSchema, Schema.Literal("all")])
 )

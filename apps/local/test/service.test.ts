@@ -119,7 +119,8 @@ describe("gateway service", () => {
     const sandbox = await run(gateway.service.store.createClient({
       id: newClientId(),
       tenantId: defaultTenantId,
-      policyId: local.policyId,
+      accessProfileId: local.accessProfileId,
+      approvalPolicyId: local.approvalPolicyId,
       name: "sandbox",
       capabilities: ["provision_connections"]
     }))

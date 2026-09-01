@@ -15,8 +15,8 @@ import {
   newApprovalId,
   newAuditId,
   newClientId,
-  newConnectionGrantId,
-  newPolicyId,
+  newAccessProfileId,
+  newApprovalPolicyId,
   newSubjectId,
   SubjectId,
   ToolName
@@ -49,37 +49,37 @@ const connection: ConnectionRef = {
   name: ConnectionName.make("work")
 }
 
-const tenantPolicyId = async (store: GatewayStore, tenantId = defaultTenantId) => {
-  const policy = await run(store.findDefaultPolicy(tenantId))
-  if (policy === undefined) throw new Error(`Missing default policy for ${tenantId}`)
-  return policy.id
+const tenantConfigIds = async (store: GatewayStore, tenantId = defaultTenantId) => {
+  const [accessProfile, approvalPolicy] = await Promise.all([
+    run(store.findDefaultAccessProfile(tenantId)),
+    run(store.findDefaultApprovalPolicy(tenantId))
+  ])
+  if (accessProfile === undefined || approvalPolicy === undefined) {
+    throw new Error(`Missing default configuration for ${tenantId}`)
+  }
+  return { accessProfileId: accessProfile.id, approvalPolicyId: approvalPolicy.id }
 }
 
 const seedBinding = async (store: GatewayStore) => {
-  const policy = await run(store.createPolicy({
-    id: newPolicyId(), tenantId: defaultTenantId, name: `policy-${crypto.randomUUID()}`
+  const accessProfile = await run(store.createAccessProfile({
+    id: newAccessProfileId(), tenantId: defaultTenantId, name: `profile-${crypto.randomUUID()}`
   }))
-  await run(store.replacePolicyTools(policy.id, [{
-      connection,
-      tool: ToolName.make("sendEmail"),
-      enabled: true,
-      decision: "require_approval"
-    }]))
+  await run(store.replaceAccessProfileTools(accessProfile.id, [{ connection, tool: ToolName.make("sendEmail") }]))
+  const approvalPolicy = await run(store.createApprovalPolicy({
+    id: newApprovalPolicyId(), tenantId: defaultTenantId, name: `policy-${crypto.randomUUID()}`
+  }))
+  await run(store.replaceApprovalPolicyTools(approvalPolicy.id, [{
+    connection, tool: ToolName.make("sendEmail"), decision: "require_approval"
+  }]))
   const client = await run(store.createClient({
     id: newClientId(),
     tenantId: defaultTenantId,
-    policyId: policy.id,
+    accessProfileId: accessProfile.id,
+    approvalPolicyId: approvalPolicy.id,
     name: `client-${crypto.randomUUID()}`,
     capabilities: ["provision_connections"]
   }))
-  const grant = await run(store.createGrant({
-    id: newConnectionGrantId(),
-    tenantId: defaultTenantId,
-    clientId: client.id,
-    alias: Alias.make("gmail-work"),
-    connection,
-  }))
-  return { client, policy, grant }
+  return { client, accessProfile, approvalPolicy }
 }
 
 describe("gateway store", () => {
@@ -89,43 +89,35 @@ describe("gateway store", () => {
     expect(await run(store.listClients(defaultTenantId))).toEqual([])
   })
 
-  test("round-trips a user-tier connection through the grant", async () => {
+  test("persists access profiles and their tools", async () => {
     const store = await run(makeStore())
-    const { grant } = await run(seedBinding(store))
+    const { accessProfile } = await run(seedBinding(store))
 
-    expect(grant.connection).toEqual(connection)
+    expect(await run(store.findAccessProfile(defaultTenantId, accessProfile.id))).toMatchObject({
+      id: accessProfile.id,
+      name: accessProfile.name
+    })
+    expect(await run(store.listAccessProfileTools(accessProfile.id))).toEqual([{
+      accessProfileId: accessProfile.id,
+      connection,
+      tool: ToolName.make("sendEmail")
+    }])
   })
 
-  test("keeps revoked grants as history while freeing the alias and tool", async () => {
+  test("persists approval policies and their decisions", async () => {
     const store = await run(makeStore())
-    const { client, grant } = await run(seedBinding(store))
+    const { approvalPolicy } = await run(seedBinding(store))
 
-    await run(store.revokeGrant(defaultTenantId, grant.id))
-    // The unique index is partial, so rebinding the same tool is allowed once
-    // the previous row is revoked.
-    const regranted = await run(store.createGrant({
-      id: newConnectionGrantId(),
-      tenantId: defaultTenantId,
-      clientId: client.id,
-      alias: Alias.make("gmail-work"),
+    expect(await run(store.findApprovalPolicy(defaultTenantId, approvalPolicy.id))).toMatchObject({
+      id: approvalPolicy.id,
+      name: approvalPolicy.name
+    })
+    expect(await run(store.listApprovalPolicyTools(approvalPolicy.id))).toEqual([{
+      approvalPolicyId: approvalPolicy.id,
       connection,
-    }))
-
-    expect(regranted.connection).toEqual(connection)
-    expect(await run(store.listGrants(client.id))).toHaveLength(1)
-  })
-
-  test("refuses two live grants for the same client, alias, and tool", async () => {
-    const store = await run(makeStore())
-    const { client } = await run(seedBinding(store))
-
-    await run(expect(run(store.createGrant({
-      id: newConnectionGrantId(),
-      tenantId: defaultTenantId,
-      clientId: client.id,
-      alias: Alias.make("gmail-work"),
-      connection,
-    }))).rejects.toThrow())
+      tool: ToolName.make("sendEmail"),
+      decision: "require_approval"
+    }])
   })
 
   test("stores only a hash of an API key", async () => {
@@ -133,7 +125,7 @@ describe("gateway store", () => {
     const client = await run(store.createClient({
       id: newClientId(),
       tenantId: defaultTenantId,
-      policyId: await tenantPolicyId(store),
+      ...await tenantConfigIds(store),
       name: "hash-check",
       capabilities: ["provision_connections"]
     }))
@@ -150,7 +142,7 @@ describe("gateway store", () => {
     const client = await run(store.createClient({
       id: newClientId(),
       tenantId: defaultTenantId,
-      policyId: await tenantPolicyId(store),
+      ...await tenantConfigIds(store),
       name: "policy-check",
       capabilities: []
     }))
@@ -212,14 +204,14 @@ describe("gateway store", () => {
 
   test("freezes approval arguments and settles them once", async () => {
     const store = await run(makeStore())
-    const { client, policy, grant } = await run(seedBinding(store))
+    const { client, accessProfile, approvalPolicy } = await run(seedBinding(store))
     const approval = await run(store.createApproval({
       id: newApprovalId(),
       tenantId: defaultTenantId,
       clientId: client.id,
-      policyId: policy.id,
-      grantId: grant.id,
-      alias: grant.alias,
+      approvalPolicyId: approvalPolicy.id,
+      accessProfileId: accessProfile.id,
+      alias: Alias.make("gmail-work"),
       tool: ToolName.make("sendEmail"),
       arguments: { to: ["customer@example.com"], subject: "Follow up" },
       expiresAt: new Date(Date.now() + 60_000)
@@ -254,14 +246,14 @@ describe("gateway store", () => {
 
   test("revoking a client cancels its pending approvals", async () => {
     const store = await run(makeStore())
-    const { client, policy, grant } = await run(seedBinding(store))
+    const { client, accessProfile, approvalPolicy } = await run(seedBinding(store))
     const approval = await run(store.createApproval({
       id: newApprovalId(),
       tenantId: defaultTenantId,
       clientId: client.id,
-      policyId: policy.id,
-      grantId: grant.id,
-      alias: grant.alias,
+      approvalPolicyId: approvalPolicy.id,
+      accessProfileId: accessProfile.id,
+      alias: Alias.make("gmail-work"),
       tool: ToolName.make("sendEmail"),
       arguments: {},
       expiresAt: new Date(Date.now() + 60_000)
@@ -277,13 +269,13 @@ describe("gateway store", () => {
 
   test("keeps the audit record after its arguments expire", async () => {
     const store = await run(makeStore())
-    const { client, grant } = await run(seedBinding(store))
+    const { client } = await run(seedBinding(store))
     const id = newAuditId()
     await run(store.recordAudit({
       tenantId: defaultTenantId,
       id,
       clientId: client.id,
-      alias: grant.alias,
+      alias: Alias.make("gmail-work"),
       tool: ToolName.make("sendEmail"),
       connection,
       decision: "allow",
@@ -353,14 +345,14 @@ describe("gateway store", () => {
     const mine = await run(store.createClient({
       id: newClientId(),
       tenantId: defaultTenantId,
-      policyId: await tenantPolicyId(store),
+      ...await tenantConfigIds(store),
       name: "agent",
       capabilities: ["provision_connections", "administer_gateway"]
     }))
     const theirs = await run(store.createClient({
       id: newClientId(),
       tenantId: other.id,
-      policyId: await tenantPolicyId(store, other.id),
+      ...await tenantConfigIds(store, other.id),
       name: "agent",
       capabilities: ["provision_connections", "administer_gateway"]
     }))
@@ -372,21 +364,14 @@ describe("gateway store", () => {
     await run(expect(run(store.revokeClient(other.id, mine.id))).resolves.toBeUndefined())
     expect((await run(store.findClientById(defaultTenantId, mine.id)))?.revokedAt).toBeNull()
 
-    // Bindings, approvals, audit, and snapshots are partitioned the same way.
-    const grant = await run(store.createGrant({
-      id: newConnectionGrantId(),
-      tenantId: defaultTenantId,
-      clientId: mine.id,
-      alias: Alias.make("gmail-work"),
-      connection,
-    }))
+    // Configuration, approvals, audit, and snapshots are partitioned the same way.
     const approval = await run(store.createApproval({
       id: newApprovalId(),
       tenantId: defaultTenantId,
       clientId: mine.id,
-      policyId: mine.policyId,
-      grantId: grant.id,
-      alias: grant.alias,
+      approvalPolicyId: mine.approvalPolicyId,
+      accessProfileId: mine.accessProfileId,
+      alias: Alias.make("gmail-work"),
       tool: ToolName.make("sendEmail"),
       arguments: {},
       expiresAt: new Date(Date.now() + 60_000)
