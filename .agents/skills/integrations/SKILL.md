@@ -49,9 +49,9 @@ Use the normalized alias with `i execute`.
 
 Every call answers in one shape: `{"status":"succeeded","result":…}`,
 `{"status":"pending","approvalId":…}`, `{"status":"denied","reason":…}`, or
-`{"status":"failed","message":…}`. `pending` means a human has to decide: poll
-`i approval <id>`, or just run the same call again — a retry meets the same
-frozen call rather than asking again, and collects the decision once it lands.
+`{"status":"failed","message":…}`. `pending` means a human has to decide.
+If you need to wait for approval, poll `i approval <id>` every 60 seconds and sleep in between.
+Afterwards or alternatively just run the same `i execute` call again — a retry meets the same frozen call rather than asking again, and collects the decision once it lands.
 
 ## Rules
 
