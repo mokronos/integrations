@@ -316,13 +316,13 @@ describe("gateway http surface", () => {
       await run(client.connect(transport))
       const listed = await run(client.listTools())
       expect(listed.tools).toEqual([expect.objectContaining({
-        name: "user--sebastian--gmail--work__sendEmail",
+        name: "user_sebastian_gmail_work__sendEmail",
         description: "Send an email",
         inputSchema: expect.objectContaining({ type: "object" })
       })])
 
       const called = await run(client.callTool({
-        name: "user--sebastian--gmail--work__sendEmail",
+        name: "user_sebastian_gmail_work__sendEmail",
         arguments: { to: "a@b.c" }
       }))
       expect(called.isError).not.toBe(true)
@@ -377,7 +377,7 @@ describe("gateway http surface", () => {
     expect(response.status).toBe(200)
     expect(response.body["tools"]).toEqual([
       {
-        alias: "user--sebastian--gmail--work",
+        alias: "user_sebastian_gmail_work",
         tool: "sendEmail",
         connection: { owner: "user", subject: "sebastian", integration: "gmail", name: "work" },
         decision: "allow"
@@ -389,7 +389,7 @@ describe("gateway http surface", () => {
     const { call, calls } = await run(setup())
 
     const response = await run(call("POST", "/v1/execute", {
-      body: { alias: "user--sebastian--gmail--work", tool: "sendEmail", arguments: { to: "a@b.c" } }
+      body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } }
     }))
 
     expect(response.status).toBe(200)
@@ -403,7 +403,7 @@ describe("gateway http surface", () => {
     const { call, calls } = await run(setup())
 
     const response = await run(call("POST", "/v1/execute", {
-      body: { alias: "user--sebastian--gmail--work", tool: "deleteEverything" }
+      body: { alias: "user_sebastian_gmail_work", tool: "deleteEverything" }
     }))
 
     expect(response.status).toBe(403)
@@ -414,7 +414,7 @@ describe("gateway http surface", () => {
     const { call, calls } = await run(setup({ decision: "require_approval" }))
 
     const response = await run(call("POST", "/v1/execute", {
-      body: { alias: "user--sebastian--gmail--work", tool: "sendEmail", arguments: { to: "a@b.c" } }
+      body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } }
     }))
 
     expect(response.status).toBe(200)
@@ -428,7 +428,7 @@ describe("gateway http surface", () => {
     const { call } = await run(setup({ fail: true }))
 
     const response = await run(call("POST", "/v1/execute", {
-      body: { alias: "user--sebastian--gmail--work", tool: "sendEmail" }
+      body: { alias: "user_sebastian_gmail_work", tool: "sendEmail" }
     }))
 
     expect(response.status).toBe(502)
@@ -437,7 +437,7 @@ describe("gateway http surface", () => {
 
   test("rejects a malformed body at the boundary", async () => {
     const { call } = await run(setup())
-    const response = await run(call("POST", "/v1/execute", { body: { alias: "user--sebastian--gmail--work" } }))
+    const response = await run(call("POST", "/v1/execute", { body: { alias: "user_sebastian_gmail_work" } }))
     expect(response.status).toBe(400)
   })
 
@@ -497,7 +497,7 @@ describe("gateway http surface", () => {
   test("does not let one client read another's frozen call", async () => {
     const { call, store, client, accessProfile, approvalPolicy } = await run(setup({ decision: "require_approval" }))
     const frozen = await run(call("POST", "/v1/execute", {
-      body: { alias: "user--sebastian--gmail--work", tool: "sendEmail" }
+      body: { alias: "user_sebastian_gmail_work", tool: "sendEmail" }
     }))
     const approvalId = String(frozen.body["approvalId"])
 
@@ -587,7 +587,7 @@ describe("gateway http surface", () => {
       dashboardUrl: "https://gateway.example"
     }))
     const response = await run(call("POST", "/v1/execute", {
-      body: { alias: "user--sebastian--gmail--work", tool: "sendEmail" }
+      body: { alias: "user_sebastian_gmail_work", tool: "sendEmail" }
     }))
     expect(response.body["approvalUrl"]).toBe(
       `https://gateway.example/approvals?approval=${String(response.body["approvalId"])}`
@@ -596,7 +596,7 @@ describe("gateway http surface", () => {
 
   test("revoking a client through the API cancels its frozen calls", async () => {
     const { call, client } = await run(setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] }))
-    await run(call("POST", "/v1/execute", { body: { alias: "user--sebastian--gmail--work", tool: "sendEmail" } }))
+    await run(call("POST", "/v1/execute", { body: { alias: "user_sebastian_gmail_work", tool: "sendEmail" } }))
 
     const response = await run(call("POST", `/v1/clients/${client.id}/revoke`, { body: {} }))
 
@@ -612,7 +612,7 @@ describe("gateway approval settlement", () => {
       capabilities: ["provision_connections", "administer_gateway"]
     }))
     const frozen = await run(call("POST", "/v1/execute", {
-      body: { alias: "user--sebastian--gmail--work", tool: "sendEmail" }
+      body: { alias: "user_sebastian_gmail_work", tool: "sendEmail" }
     }))
     const approvalId = String(frozen.body["approvalId"])
 
@@ -631,7 +631,7 @@ describe("gateway approval settlement", () => {
   test("the gateway performs the call itself once approved", async () => {
     const { call, calls } = await run(setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] }))
     const frozen = await run(call("POST", "/v1/execute", {
-      body: { alias: "user--sebastian--gmail--work", tool: "sendEmail", arguments: { to: "a@b.c" } }
+      body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } }
     }))
     const approvalId = String(frozen.body["approvalId"])
     expect(calls).toHaveLength(0)
@@ -651,7 +651,7 @@ describe("gateway approval settlement", () => {
   test("refuses to approve twice", async () => {
     const { call } = await run(setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] }))
     const frozen = await run(call("POST", "/v1/execute", {
-      body: { alias: "user--sebastian--gmail--work", tool: "sendEmail" }
+      body: { alias: "user_sebastian_gmail_work", tool: "sendEmail" }
     }))
     const approvalId = String(frozen.body["approvalId"])
 
@@ -673,7 +673,7 @@ describe("gateway approval settlement", () => {
       capabilities: ["provision_connections", "administer_gateway"]
     }))
     const frozen = await run(call("POST", "/v1/execute", {
-      body: { alias: "user--sebastian--gmail--work", tool: "sendEmail" }
+      body: { alias: "user_sebastian_gmail_work", tool: "sendEmail" }
     }))
     const approvalId = String(frozen.body["approvalId"])
 
@@ -699,7 +699,7 @@ describe("gateway approval settlement", () => {
       capabilities: ["provision_connections", "administer_gateway"]
     }))
     const frozen = await run(call("POST", "/v1/execute", {
-      body: { alias: "user--sebastian--gmail--work", tool: "sendEmail" }
+      body: { alias: "user_sebastian_gmail_work", tool: "sendEmail" }
     }))
     const approvalId = String(frozen.body["approvalId"])
     await run(store.replaceAccessProfileTools(accessProfile.id, []))
@@ -717,7 +717,7 @@ describe("gateway approval settlement", () => {
   test("denying settles without performing the call", async () => {
     const { call, calls } = await run(setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] }))
     const frozen = await run(call("POST", "/v1/execute", {
-      body: { alias: "user--sebastian--gmail--work", tool: "sendEmail" }
+      body: { alias: "user_sebastian_gmail_work", tool: "sendEmail" }
     }))
     const approvalId = String(frozen.body["approvalId"])
 
@@ -736,7 +736,7 @@ describe("frozen calls and retries", () => {
     call: Awaited<ReturnType<typeof setup>>["call"],
     args: Record<string, typeof Schema.Json.Type> = { to: "a@b.c" }
   ) => call("POST", "/v1/execute", {
-    body: { alias: "user--sebastian--gmail--work", tool: "sendEmail", arguments: args }
+    body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: args }
   })
 
   test("a retry meets the frozen call it already proposed", async () => {
@@ -747,7 +747,7 @@ describe("frozen calls and retries", () => {
     // Key order is an artefact of how the caller built its JSON, not part of
     // what it asked for.
     const third = await run(call("POST", "/v1/execute", {
-      body: { alias: "user--sebastian--gmail--work", tool: "sendEmail", arguments: { to: "a@b.c" } }
+      body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } }
     }))
 
     expect(second.body["approvalId"]).toBe(first.body["approvalId"])
@@ -827,7 +827,7 @@ describe("provisioning surface", () => {
     }))
 
     const report = await run(call("POST", "/v1/validate", {
-      body: { node: { source: { kind: "gateway", alias: "user--sebastian--gmail--work", tool: "sendEmail" } } }
+      body: { node: { source: { kind: "gateway", alias: "user_sebastian_gmail_work", tool: "sendEmail" } } }
     }))
 
     expect(report.status).toBe(200)
@@ -842,7 +842,7 @@ describe("provisioning surface", () => {
     const { call } = await run(setup({ capabilities: ["provision_connections", "administer_gateway"] }))
 
     const report = await run(call("POST", "/v1/validate", {
-      body: { node: { source: { kind: "gateway", alias: "user--sebastian--gmail--work", tool: "deleteEverything" } } }
+      body: { node: { source: { kind: "gateway", alias: "user_sebastian_gmail_work", tool: "deleteEverything" } } }
     }))
 
     expect(report.body["ok"]).toBe(false)
@@ -1005,7 +1005,7 @@ describe("provisioning surface", () => {
     expect(response.status).toBe(200)
     expect(response.body["tools"]).toEqual([
       {
-        alias: "user--sebastian--gmail--work",
+        alias: "user_sebastian_gmail_work",
         tool: "sendEmail",
         connection: { owner: "user", subject: "sebastian", integration: "gmail", name: "work" },
         decision: "allow"
@@ -1015,8 +1015,8 @@ describe("provisioning surface", () => {
 
   test("filters and windows the audit trail, and says how much there is", async () => {
     const { call } = await run(setup({ capabilities: ["provision_connections", "administer_gateway"] }))
-    await run(call("POST", "/v1/execute", { body: { alias: "user--sebastian--gmail--work", tool: "sendEmail" } }))
-    await run(call("POST", "/v1/execute", { body: { alias: "user--sebastian--gmail--work", tool: "nope" } }))
+    await run(call("POST", "/v1/execute", { body: { alias: "user_sebastian_gmail_work", tool: "sendEmail" } }))
+    await run(call("POST", "/v1/execute", { body: { alias: "user_sebastian_gmail_work", tool: "nope" } }))
 
     const all = await run(call("GET", "/v1/audit"))
     expect(all.body["total"]).toBe(2)

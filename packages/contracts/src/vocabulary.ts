@@ -44,7 +44,7 @@ export type OwnerTier = typeof OwnerTier.Type
 
 /** The logical name a client binding exposes a tool under. Declared as a requirement by
  *  the caller and bound to a connection per deployment. */
-export const Alias = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9-]*$/)).pipe(
+export const Alias = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_-]*$/)).pipe(
   Schema.brand("Alias")
 )
 export type Alias = typeof Alias.Type

@@ -90,7 +90,7 @@ const seed = async (store: GatewayStore, options: {
   return { client, key, accessProfile, approvalPolicy }
 }
 
-const invoke = (store: GatewayStore, secret: string, alias = "org--sharepoint--default", tool = "getDocument") =>
+const invoke = (store: GatewayStore, secret: string, alias = "org_sharepoint_default", tool = "getDocument") =>
   authorizeInvocation(store, {
     secret,
     alias: Alias.make(alias),
@@ -116,7 +116,7 @@ describe("gateway authorization", () => {
     const store = await run(makeStore())
     const { key } = await run(seed(store, { connection: userConnection }))
 
-    const result = await run(invoke(store, key.secret, "user--sebastian--gmail--work"))
+    const result = await run(invoke(store, key.secret, "user_sebastian_gmail_work"))
 
     expect(result.status).toBe("authorized")
     if (result.status !== "authorized") return
@@ -182,7 +182,7 @@ describe("gateway authorization", () => {
     const store = await run(makeStore())
     const { key } = await run(seed(store))
 
-    const result = await run(invoke(store, key.secret, "org--sharepoint--default", "deleteDocument"))
+    const result = await run(invoke(store, key.secret, "org_sharepoint_default", "deleteDocument"))
 
     expect(result.status).toBe("not-authorized")
   })
@@ -192,7 +192,7 @@ describe("gateway authorization", () => {
     const { key } = await run(seed(store))
 
     const unknownAlias = await run(invoke(store, key.secret, "nothing-here", "getDocument"))
-    const unauthorizedTool = await run(invoke(store, key.secret, "org--sharepoint--default", "deleteDocument"))
+    const unauthorizedTool = await run(invoke(store, key.secret, "org_sharepoint_default", "deleteDocument"))
 
     // Telling these apart would let a caller enumerate what else is connected.
     expect(unknownAlias.status).toBe(unauthorizedTool.status)
@@ -215,7 +215,7 @@ describe("gateway authorization", () => {
     ]))
 
     expect((await run(invoke(store, key.secret))).status).toBe("not-authorized")
-    expect((await run(invoke(store, key.secret, "user--sebastian--gmail--work", "search"))).status).toBe("authorized")
+    expect((await run(invoke(store, key.secret, "user_sebastian_gmail_work", "search"))).status).toBe("authorized")
   })
 
   test("two clients hold different policies over the same connection", async () => {
@@ -279,8 +279,8 @@ describe("gateway authorization", () => {
       { connection: personal, tool: ToolName.make("getDocument"), decision: "require_approval" }
     ]))
 
-    const application = await run(invoke(store, key.secret, "org--sharepoint--default"))
-    const delegated = await run(invoke(store, key.secret, "user--sebastian--sharepoint--personal"))
+    const application = await run(invoke(store, key.secret, "org_sharepoint_default"))
+    const delegated = await run(invoke(store, key.secret, "user_sebastian_sharepoint_personal"))
 
     expect(application.status).toBe("authorized")
     expect(delegated.status).toBe("authorized")

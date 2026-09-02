@@ -106,7 +106,7 @@ describe("access profile and approval policy administration", () => {
     expect((await call("POST", `/v1/clients/${client.id}/approval-policy`, { approvalPolicyId: approval.id })).status).toBe(200)
 
     const effective = ToolsBody(await (await call("GET", `/v1/clients/${client.id}/tools`)).json())
-    expect(effective.tools).toEqual([{ alias: "org--mail--primary", tool: "sendEmail", decision: "require_approval" }])
+    expect(effective.tools).toEqual([{ alias: "org_mail_primary", tool: "sendEmail", decision: "require_approval" }])
 
     await call("POST", `/v1/approval-policies/${approval.id}/tools`, { tools: [] })
     expect(ToolsBody(await (await call("GET", `/v1/clients/${client.id}/tools`)).json()).tools).toEqual([])

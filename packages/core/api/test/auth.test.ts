@@ -387,7 +387,7 @@ describe("what a session may do", () => {
     expect(tools.body["code"]).toBe("not-permitted")
 
     const execute = await run(setup_.call("POST", "/v1/execute", {
-      body: { alias: "org--gmail--work", tool: "sendEmail" },
+      body: { alias: "org_gmail_work", tool: "sendEmail" },
       cookie: human.cookie,
       headers: { origin: "http://gateway.test", "sec-fetch-site": "same-origin" }
     }))
@@ -589,7 +589,7 @@ describe("attribution", () => {
     await run(setup_.store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash }))
 
     const frozen = await run(setup_.call("POST", "/v1/execute", {
-      body: { alias: "org--gmail--work", tool: "sendEmail", arguments: {} },
+      body: { alias: "org_gmail_work", tool: "sendEmail", arguments: {} },
       headers: { authorization: `Bearer ${key.secret}` }
     }))
     expect(frozen.body["status"]).toBe("pending")

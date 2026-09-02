@@ -36,7 +36,7 @@ i schema mcp_linear_app list_issues          # read one tool's input/output sche
                                              # its tools.… address, and the `alias`
                                              # to call it under
 
-i execute org--mcp-5flinear-5fapp--default list_issues '{"limit":5}' # 4. use the alias
+i execute org_mcp-5flinear-5fapp_default list_issues '{"limit":5}' # 4. use the alias
                                                                     #    `schema` printed
 ```
 
@@ -48,7 +48,7 @@ connecting client and adds it to the tenant's default policy. Safe tools run
 directly; mutating or unclassified tools ask a human.
 
 `i execute` takes an **alias**, not an integration slug. An alias names one
-connection uniquely — `org--statelessserver--default` — because a slug does not:
+connection uniquely — `org_statelessserver_default` — because a slug does not:
 the same integration can be connected twice, and a personal connection also
 carries whose it is. Do not construct one. `i schema` reports the alias to use
 in its `alias` field and in its `next` line; a slug passed to `i execute` is

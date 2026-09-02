@@ -110,13 +110,13 @@ describe("access profiles and approval policies", () => {
     const { client, key } = await createClient(store, "intersection", accessProfile.id, approvalPolicy.id)
 
     expect(await run(listEffectiveTools(store, client.id))).toEqual([{
-      alias: Alias.make("org--mail--primary"), tool: ToolName.make("sendEmail"),
+      alias: Alias.make("org_mail_primary"), tool: ToolName.make("sendEmail"),
       connection: connection("mail", "primary"),
       decision: "require_approval"
     }])
-    expect((await run(authorizeInvocation(store, { secret: key.secret, alias: Alias.make("org--mail--primary"), tool: ToolName.make("sendEmail") }))).status).toBe("authorized")
-    expect((await run(authorizeInvocation(store, { secret: key.secret, alias: Alias.make("org--calendar--primary"), tool: ToolName.make("createEvent") }))).status).toBe("not-authorized")
-    expect((await run(authorizeInvocation(store, { secret: key.secret, alias: Alias.make("org--mail--primary"), tool: ToolName.make("archiveEmail") }))).status).toBe("not-authorized")
+    expect((await run(authorizeInvocation(store, { secret: key.secret, alias: Alias.make("org_mail_primary"), tool: ToolName.make("sendEmail") }))).status).toBe("authorized")
+    expect((await run(authorizeInvocation(store, { secret: key.secret, alias: Alias.make("org_calendar_primary"), tool: ToolName.make("createEvent") }))).status).toBe("not-authorized")
+    expect((await run(authorizeInvocation(store, { secret: key.secret, alias: Alias.make("org_mail_primary"), tool: ToolName.make("archiveEmail") }))).status).toBe("not-authorized")
   })
 
   test("changing only the approval policy changes the decision without changing reach", async () => {
