@@ -102,6 +102,7 @@ const stubIntegrations = (behaviour: {
   const calls: Array<ExecutedCall> = []
   const removed: Array<{ readonly integration: string; readonly name: string }> = []
   const forgotten: Array<string> = []
+  const renamed: Array<{ readonly slug: string; readonly name: string }> = []
   const known = new Set((behaviour.connections ?? []).map((connection) => connection.integration))
   const integrations: IntegrationsApi = {
     tools: {
@@ -152,6 +153,18 @@ const stubIntegrations = (behaviour: {
           : undefined,
       addMcp: notStubbed("catalog.addMcp"),
       addOpenApi: notStubbed("catalog.addOpenApi"),
+      rename: async (slug, name) => {
+        renamed.push({ slug, name })
+        return {
+          slug,
+          name,
+          description: "",
+          kind: "mcp",
+          canRemove: true,
+          canRefresh: true,
+          authMethods: []
+        }
+      },
       remove: async (slug) => {
         forgotten.push(slug)
       }
@@ -170,7 +183,7 @@ const stubIntegrations = (behaviour: {
     validateIntegrationNode: notStubbed("validateIntegrationNode"),
     listIntegrationOverviews: async () => []
   }
-  return { calls, removed, forgotten, integrations }
+  return { calls, removed, forgotten, renamed, integrations }
 }
 
 const setup = async (options: {
@@ -282,7 +295,8 @@ const setup = async (options: {
     call,
     calls: stub.calls,
     removed: stub.removed,
-    forgotten: stub.forgotten
+    forgotten: stub.forgotten,
+    renamed: stub.renamed
   }
 }
 
@@ -887,6 +901,38 @@ describe("provisioning surface", () => {
     // authorize a call against whatever later takes that name.
     expect(await run(store.listAccessProfileTools(accessProfile.id))).toEqual([])
     expect(await run(store.listApprovalPolicyTools(approvalPolicy.id))).toEqual([])
+  })
+
+  test("renames an integration without moving its slug", async () => {
+    const { call, renamed } = await run(setup({
+      capabilities: ["provision_connections", "administer_gateway"],
+      connections: [{ integration: "statelessserver", name: "default" }]
+    }))
+
+    const response = await run(call("POST", "/v1/integrations/statelessserver/name", {
+      body: { name: "Gmail" }
+    }))
+
+    expect(response.status).toBe(200)
+    expect(response.body["name"]).toBe("Gmail")
+    // The slug is what every address and alias is made of, so a rename must
+    // leave it exactly where it was.
+    expect(response.body["slug"]).toBe("statelessserver")
+    expect(renamed).toEqual([{ slug: "statelessserver", name: "Gmail" }])
+  })
+
+  test("refuses to rename an integration it never installed", async () => {
+    const { call, renamed } = await run(setup({
+      capabilities: ["provision_connections", "administer_gateway"],
+      connections: [{ integration: "gmail", name: "work" }]
+    }))
+
+    const response = await run(call("POST", "/v1/integrations/notion/name", {
+      body: { name: "Notion" }
+    }))
+
+    expect(response.status).toBe(404)
+    expect(renamed).toEqual([])
   })
 
   test("refuses to remove an integration it never installed", async () => {

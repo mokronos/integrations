@@ -8,7 +8,7 @@ import {
 } from "@modelcontextprotocol/sdk/client/auth.js"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import { describeCause, McpError } from "../errors.ts"
-import { slugify } from "@mokronos/contracts"
+import { serviceName, slugify } from "@mokronos/contracts"
 import { whenPresent } from "@mokronos/contracts"
 import { isJsonObject, type Json, type JsonObject } from "@mokronos/contracts"
 import { McpProbe } from "@mokronos/contracts"
@@ -223,11 +223,13 @@ const probeTransport = (endpoint: string): Effect.Effect<Response, McpError> =>
     })
   })
 
+/** What to call a server that did not say. The host is all there is to go on,
+ *  and the whole host names a URL rather than a vendor. */
 const fallbackName = (endpoint: string): string => {
   const parsed = Option.getOrUndefined(
     Option.liftThrowable(() => new URL(endpoint))()
   )
-  return parsed?.hostname ?? endpoint
+  return parsed === undefined ? endpoint : serviceName(parsed.hostname)
 }
 
 export class McpHost extends Context.Service<

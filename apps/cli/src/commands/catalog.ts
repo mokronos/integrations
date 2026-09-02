@@ -115,10 +115,26 @@ export const discoverCommand = (runGateway: GatewayTask) => Command.make(
       Argument.withDescription("MCP endpoint or OpenAPI document URL")
     ),
     connection: connectionFlag(),
+    slug: Flag.string("slug").pipe(
+      Flag.optional,
+      // Offered here and only here. Afterwards the slug is what every tool
+      // address and alias is made of, and moving it would mean moving them.
+      Flag.withDescription("Address it as this instead of a name derived from the URL")
+    ),
+    name: Flag.string("name").pipe(
+      Flag.optional,
+      Flag.withDescription("Show it under this name instead of the derived one")
+    ),
     verbose: verboseFlag()
   },
-  ({ url, connection, verbose }) =>
-    runGateway((client) => client.discover({ url, connection }))
+  ({ url, connection, slug: chosenSlug, name, verbose }) =>
+    runGateway((client) =>
+      client.discover({
+        url,
+        connection,
+        ...whenPresent("slug", Option.getOrUndefined(chosenSlug)),
+        ...whenPresent("name", Option.getOrUndefined(name))
+      }))
       .pipe(Effect.flatMap((result) => {
         const body = record(result)
         const integration = record(body["integration"])
@@ -166,6 +182,29 @@ export const searchCommand = (runGateway: GatewayTask) => Command.make(
       ))
     }))
 ).pipe(Command.withDescription("Search integrations.sh for exact integration URLs"))
+
+export const renameCommand = (runGateway: GatewayTask) => Command.make(
+  "rename",
+  {
+    integration: Argument.string("integration").pipe(
+      Argument.withDescription("Integration slug")
+    ),
+    name: Argument.string("name").pipe(
+      Argument.withDescription("What to show it as from now on")
+    ),
+    verbose: verboseFlag()
+  },
+  ({ integration, name, verbose }) =>
+    runGateway((client) => client.renameIntegration({ integration, name })).pipe(
+      Effect.flatMap((result) =>
+        writeStdoutLine(jsonOutput(record(result), verbose))
+      )
+    )
+).pipe(Command.withDescription(
+  // Says what it does not do, because a slug is the thing a caller would most
+  // reasonably expect a rename to change.
+  "Change an integration's display name. Its slug does not change"
+))
 
 export const integrationsCommand = (runGateway: GatewayTask) => Command.make(
   "integrations",
@@ -246,12 +285,14 @@ export const schemaCommand = (runGateway: GatewayTask) => Command.make(
     verbose: verboseFlag()
   },
   ({ integration, tool, connection, verbose }) =>
-    runGateway((client) => client.integrationTool({
-      integration,
-      tool,
-      connection
-    })).pipe(Effect.flatMap((result) => {
-      const detail = record(result)
+    runGateway(async (client) => ({
+      detail: await client.integrationTool({ integration, tool, connection }),
+      // The alias is asked for rather than derived. It belongs to the gateway's
+      // policy, not to the catalog: it carries the owner tier and, for a
+      // personal connection, the subject — neither of which the slug knows.
+      effective: await client.effectiveTools()
+    })).pipe(Effect.flatMap(({ detail: found, effective }) => {
+      const detail = record(found)
       // Schemas stay objects, whole, at both verbosities. They are the reason
       // to run this command, and a schema handed back as a truncated string
       // has to be re-fetched before it can be used for anything.
@@ -260,10 +301,20 @@ export const schemaCommand = (runGateway: GatewayTask) => Command.make(
           key !== "inputTypeScript" && key !== "outputTypeScript"
         )
       )
+      const callable = effective.tools.find((candidate) =>
+        candidate.tool === tool &&
+        candidate.connection.integration === integration &&
+        candidate.connection.name === connection
+      )
       return writeStdoutLine(jsonOutput(
         withNext(
-          verbose ? detail : core,
-          `i execute ${integration.replace(/[^a-z0-9]+/g, "-")} ${tool} '<json>'`
+          { ...(verbose ? detail : core), alias: callable?.alias ?? null },
+          // A tool the catalog holds is not automatically a tool this key may
+          // call, and saying so here is the difference between one command and
+          // a denial the reader has to work backwards from.
+          callable === undefined
+            ? `i connect ${integration}`
+            : `i execute ${callable.alias} ${tool} '<json>'`
         ),
         verbose
       ))

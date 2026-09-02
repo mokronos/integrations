@@ -2,6 +2,7 @@ import { whenPresent, whenPresentMap } from "@mokronos/contracts"
 import { Predicate, Schema } from "effect"
 import {
   Connection,
+  Integration,
   Tool,
   ToolSummary,
   IntegrationOverview
@@ -182,9 +183,35 @@ export type RegistrySearchInput = typeof RegistrySearchInput.Type
 
 export const DiscoverIntegrationInput = Schema.Struct({
   url: Schema.String,
-  connection: Schema.optional(Schema.String)
+  connection: Schema.optional(Schema.String),
+  /** What to call it. `slug` is accepted here and nowhere else: after this it
+   *  is what every tool address and alias is made of. */
+  slug: Schema.optional(Schema.String),
+  name: Schema.optional(Schema.String)
 })
 export type DiscoverIntegrationInput = typeof DiscoverIntegrationInput.Type
+
+/** One tool as this key may actually call it.
+ *
+ *  `alias` is the gateway's own name for the connection behind the tool, and
+ *  the only thing `execute` accepts. It is not derivable from the integration
+ *  slug — a user-tier connection carries the subject it belongs to — so it is
+ *  read from the gateway rather than reconstructed. */
+export const EffectiveTool = Schema.Struct({
+  alias: Schema.String,
+  tool: Schema.String,
+  connection: Schema.Struct({
+    owner: Schema.String,
+    integration: Schema.String,
+    name: Schema.String
+  })
+})
+export type EffectiveTool = typeof EffectiveTool.Type
+
+export const EffectiveToolsResponse = Schema.Struct({
+  tools: Schema.Array(EffectiveTool)
+})
+export type EffectiveToolsResponse = typeof EffectiveToolsResponse.Type
 
 export const IntegrationToolInput = Schema.Struct({
   integration: Schema.String,
@@ -235,6 +262,8 @@ const decodeOAuthSession = Schema.decodeUnknownSync(OAuthSession)
 const decodeConnections = Schema.decodeUnknownSync(ConnectionsResponse)
 const decodeDisconnectedConnection = Schema.decodeUnknownSync(DisconnectedConnection)
 const decodeValidation = Schema.decodeUnknownSync(IntegrationValidationReport)
+const decodeIntegration = Schema.decodeUnknownSync(Integration)
+const decodeEffectiveTools = Schema.decodeUnknownSync(EffectiveToolsResponse)
 const isOutcome = Schema.is(InvocationOutcome)
 
 export interface GatewayClient {
@@ -244,9 +273,13 @@ export interface GatewayClient {
 
   search(input: RegistrySearchInput): Promise<IntegrationSearchResponse>
   discover(input: DiscoverIntegrationInput): Promise<IntegrationDiscovery>
+  /** Changes an integration's display name. Its slug does not move. */
+  renameIntegration(input: { readonly integration: string; readonly name: string }): Promise<Integration>
   integrations(): Promise<GatewayIntegrationsResponse>
   integrationTools(integration: string): Promise<IntegrationToolsResponse>
   integrationTool(input: IntegrationToolInput): Promise<Tool>
+  /** What this key may call, and under which alias. */
+  effectiveTools(): Promise<EffectiveToolsResponse>
   connect(input: CreateConnectionInput): Promise<ConnectionCreated>
   startOAuth(input: StartOAuthInput): Promise<OAuthSession>
   oauth(id: string): Promise<OAuthSession>
@@ -333,9 +366,18 @@ export const createGatewayClient = (options: GatewayClientOptions): GatewayClien
     },
     discover: async (input) => decodeDiscovery(await request("POST", "/v1/integrations/discover", {
       url: input.url,
-      ...whenPresent("connection", input.connection)
+      ...whenPresent("connection", input.connection),
+      ...whenPresent("slug", input.slug),
+      ...whenPresent("name", input.name)
     })),
+    renameIntegration: async (input) =>
+      decodeIntegration(await request(
+        "POST",
+        `/v1/integrations/${encodeURIComponent(input.integration)}/name`,
+        { name: input.name }
+      )),
     integrations: async () => decodeIntegrations(await request("GET", "/v1/integrations")),
+    effectiveTools: async () => decodeEffectiveTools(await request("GET", "/v1/tools")),
     integrationTools: async (integration) =>
       decodeIntegrationTools(
         await request("GET", `/v1/integrations/${encodeURIComponent(integration)}/tools`)

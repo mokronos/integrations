@@ -200,6 +200,10 @@ export class IntegrationHost extends Context.Service<
     readonly addOpenApi: (
       options: AddOpenApiOptions
     ) => Effect.Effect<IntegrationSlug, HostFailure>
+    readonly renameIntegration: (
+      slug: IntegrationSlug,
+      name: string
+    ) => Effect.Effect<void, StorageError>
     readonly removeIntegration: (
       slug: IntegrationSlug
     ) => Effect.Effect<void, StorageError>
@@ -306,6 +310,22 @@ export class IntegrationHost extends Context.Service<
           connection: ConnectionRecord
         ) {
           const method = findAuthMethod(integration.authMethods, connection.template)
+          if (Option.isNone(method)) {
+            // The connection names a method the integration no longer offers —
+            // a vendor that added a wall, or an endpoint re-probed into a
+            // different shape. Falling through from here would reach the branch
+            // that presents whatever is stored under the connection's key,
+            // which for an OAuth connection is the sealed token record itself:
+            // a bearer token made of JSON, and a refusal that reads as if the
+            // credential were wrong rather than unbuilt.
+            return yield* new InvalidInputError({
+              field: "connection",
+              detail:
+                `${connection.integration}/${connection.name} was authorized against the ` +
+                `${connection.template} method, which ${connection.integration} no longer offers. ` +
+                `Connect it again.`
+            })
+          }
           const placements = Option.match(method, {
             onNone: () => [],
             onSome: (found) => found.placements ?? []
@@ -642,6 +662,7 @@ export class IntegrationHost extends Context.Service<
         ),
         addMcp,
         addOpenApi,
+        renameIntegration: store.renameIntegration,
         removeIntegration,
         createConnection,
         listConnections: Effect.fn("IntegrationHost.listConnections")(

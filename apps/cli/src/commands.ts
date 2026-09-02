@@ -1,7 +1,7 @@
 import type { GatewayClient } from "@mokronos/integrations-client"
 import { Effect } from "effect"
 import { approvalCommand, approvalsCommand, approveCommand, auditCommand, denyCommand, driftCommand, maintenanceCommand } from "./commands/approvals-audit.ts"
-import { discoverCommand, integrationsCommand, schemaCommand, searchCommand, toolsCommand } from "./commands/catalog.ts"
+import { discoverCommand, integrationsCommand, renameCommand, schemaCommand, searchCommand, toolsCommand } from "./commands/catalog.ts"
 import { connectCommand, connectionsCommand, disconnectCommand } from "./commands/connections.ts"
 import {
   accessProfileCommand,
@@ -49,6 +49,7 @@ export const clientSubcommands = [
   discoverCommand(gatewayTask),
   searchCommand(gatewayTask),
   integrationsCommand(gatewayTask),
+  renameCommand(gatewayTask),
   toolsCommand(gatewayTask),
   schemaCommand(gatewayTask),
   connectCommand(gatewayTask),
@@ -63,6 +64,7 @@ export const operatorClientSubcommands = [
   discoverCommand(operatorGatewayTask),
   searchCommand(operatorGatewayTask),
   integrationsCommand(operatorGatewayTask),
+  renameCommand(operatorGatewayTask),
   toolsCommand(operatorGatewayTask),
   schemaCommand(operatorGatewayTask),
   connectCommand(operatorGatewayTask),

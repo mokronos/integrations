@@ -75,6 +75,9 @@ export interface CatalogApi {
   }) => Promise<string>
   readonly list: () => Promise<ReadonlyArray<Integration>>
   readonly find: (slug: string) => Promise<Integration | undefined>
+  /** Changes what an integration is called. Not what it is addressed as: the
+   *  slug is in every tool address and alias already written. */
+  readonly rename: (slug: string, name: string) => Promise<Integration>
   /** Removes the integration and every connection made against it. */
   readonly remove: (slug: string) => Promise<void>
 }
@@ -217,6 +220,16 @@ const buildCatalog = (host: HostHandle): CatalogApi => ({
     if (decoded._tag === "Failure") return undefined
     const found = yield* integrations.findIntegration(decoded.success)
     return Option.getOrUndefined(found)
+  })),
+  rename: (slug, name) => host.run(Effect.gen(function* () {
+    const integrations = yield* IntegrationHost
+    const decoded = yield* decodeId(IntegrationSlug, "slug", slug)
+    yield* integrations.renameIntegration(decoded, name)
+    const renamed = yield* integrations.findIntegration(decoded)
+    return yield* Option.match(renamed, {
+      onNone: () => Effect.die(new Error(`The catalog lost integration ${slug} while renaming it`)),
+      onSome: Effect.succeed
+    })
   })),
   remove: (slug) => host.run(Effect.gen(function* () {
     const integrations = yield* IntegrationHost
@@ -399,11 +412,17 @@ const buildAuth = (host: HostHandle): AuthApi => ({
       createdAt: now
     }
     yield* store.putConnection(record)
-    yield* integrations.refreshConnection({
+    // The grant is exchanged, sealed and filed by this point, so the account is
+    // connected whatever happens next. Reading the tool list is a separate
+    // conversation with the vendor, and letting its failure fail the flow tells
+    // someone who just authorized in a browser that they did not — while the
+    // connection it denies sits in the catalog. The overview reports a capture
+    // that did not work as `toolError`, which is where a reader looks for it.
+    yield* Effect.ignore(integrations.refreshConnection({
       owner: record.owner,
       integration: record.integration,
       name: record.name
-    })
+    }))
     return yield* Schema.decodeUnknownEffect(Connection)({
       owner: record.owner,
       name: record.name,

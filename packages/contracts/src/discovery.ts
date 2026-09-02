@@ -30,6 +30,14 @@ export type IntegrationDiscovery = typeof IntegrationDiscovery.Type
 
 export interface DiscoverIntegrationsOptions {
   readonly connection?: string
+  /** What to call it, when the derived name is not what a person would say.
+   *
+   *  `slug` is offered here and nowhere else. It is the identity — every tool
+   *  address, every alias, and the key each sealed credential is filed under —
+   *  so discovery is the one moment at which choosing it costs nothing,
+   *  because nothing refers to it yet. */
+  readonly slug?: string
+  readonly name?: string
 }
 
 /**

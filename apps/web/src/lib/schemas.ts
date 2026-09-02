@@ -25,6 +25,7 @@ import {
 import {
   AuthMethod,
   Connection,
+  Integration,
   Tool,
   ToolSummary,
   IntegrationOverview
@@ -268,6 +269,7 @@ export const decodeDiscovery = json(IntegrationDiscovery)
 export const decodeDrift = json(DriftResponse)
 export const decodeRevoked = json(Revoked)
 export const decodeRemoved = json(Removed)
+export const decodeIntegration = json(Integration)
 export const decodeIntegrationRemoved = json(IntegrationRemoved)
 export const decodeClient = json(Client)
 export const decodeRegistrySearch = json(IntegrationSearchResponse)

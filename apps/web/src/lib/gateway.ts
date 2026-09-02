@@ -23,6 +23,7 @@ import {
   decodeKeys,
   decodeOAuthSession,
   decodeOverview,
+  decodeIntegration,
   decodeIntegrationRemoved,
   decodeRemoved,
   decodeRegistrySearch,
@@ -140,7 +141,21 @@ export const searchRegistry = async (input: {
 export const discoverIntegration = async (input: {
   readonly url: string
   readonly connection?: string
+  /** Chosen here or not at all: after discovery the slug is what every tool
+   *  address and alias is made of. */
+  readonly slug?: string
+  readonly name?: string
 }) => decodeDiscovery(await request("POST", "/v1/integrations/discover", input))
+
+export const renameIntegration = async (input: {
+  readonly slug: string
+  readonly name: string
+}) =>
+  decodeIntegration(await request(
+    "POST",
+    `/v1/integrations/${segment(input.slug)}/name`,
+    { name: input.name }
+  ))
 
 export const listConnections = async () =>
   decodeConnections(await request("GET", "/v1/connections")).connections

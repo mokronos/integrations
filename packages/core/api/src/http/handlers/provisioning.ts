@@ -194,12 +194,23 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
         }))
       .handle("discover", (request) =>
         reachOut(`Could not read an integration from ${request.payload.url}`, () =>
-          integrationsApi.provisioning.provision(
-            request.payload.url,
-            request.payload.connection === undefined
-              ? {}
-              : { connection: request.payload.connection }
-          )))
+          integrationsApi.provisioning.provision(request.payload.url, {
+            ...whenPresent("connection", request.payload.connection),
+            ...whenPresent("slug", request.payload.slug),
+            ...whenPresent("name", request.payload.name)
+          })))
+      .handle("renameIntegration", (request) =>
+        Effect.gen(function*() {
+          const slug = request.params["slug"]
+          const found = yield* Effect.promise(() => integrationsApi.catalog.find(slug))
+          if (found === undefined) {
+            return yield* new ApiNotFound({ error: `Unknown integration ${slug}` })
+          }
+          // Only the display name changes, so nothing addressed elsewhere moves
+          // and there is nothing to reconcile.
+          return yield* Effect.promise(() =>
+            integrationsApi.catalog.rename(slug, request.payload.name))
+        }))
       .handle("integrationTools", (request) =>
         Effect.map(
           Effect.promise(() =>

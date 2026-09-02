@@ -1,5 +1,5 @@
 import { Effect, Option } from "effect"
-import { slugify } from "@mokronos/contracts"
+import { serviceName, slugify } from "@mokronos/contracts"
 import type { EndpointClassification } from "@mokronos/contracts"
 import { DetectionError } from "./errors.ts"
 import { McpHost } from "./mcp/client.ts"
@@ -14,9 +14,10 @@ import { SpecCache } from "./openapi/cache.ts"
  *  otherwise the same URL is compiled as an OpenAPI document. A URL that is
  *  neither fails, rather than coming back as a hedge the caller has to rank. */
 
-const hostnameOf = (url: string): string =>
+/** What to call a document that declares no title. */
+const hostNameOf = (url: string): string =>
   Option.getOrElse(
-    Option.liftThrowable(() => new URL(url).hostname)(),
+    Option.liftThrowable(() => serviceName(new URL(url).hostname))(),
     () => url
   )
 
@@ -43,7 +44,7 @@ const asOpenApi = (
   Effect.gen(function* () {
     const specs = yield* SpecCache
     const spec = yield* specs.compileUrl(url)
-    const name = Option.getOrElse(spec.title, () => hostnameOf(url))
+    const name = Option.getOrElse(spec.title, () => hostNameOf(url))
     const classified: EndpointClassification = {
       kind: "openapi",
       endpoint: url,

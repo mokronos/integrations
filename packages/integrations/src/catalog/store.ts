@@ -271,6 +271,10 @@ export class CatalogStore extends Context.Service<
       slug: IntegrationSlug
     ) => Effect.Effect<Option.Option<IntegrationRecord>, StorageError>
     readonly putIntegration: (record: IntegrationRecord) => Effect.Effect<void, StorageError>
+    readonly renameIntegration: (
+      slug: IntegrationSlug,
+      name: string
+    ) => Effect.Effect<void, StorageError>
     readonly removeIntegration: (slug: IntegrationSlug) => Effect.Effect<void, StorageError>
 
     readonly listConnections: (
@@ -383,6 +387,17 @@ export class CatalogStore extends Context.Service<
               JSON.stringify(record.authMethods),
               record.createdAt
             ]
+          })
+      )
+
+      /** Only the display name. The slug is the identity — it is in every tool
+       *  address, every alias, and the key each sealed credential is stored
+       *  under — so it is chosen once, at discovery, and never edited. */
+      const renameIntegration = Effect.fn("CatalogStore.renameIntegration")(
+        (slug: IntegrationSlug, name: string) =>
+          write({
+            sql: "UPDATE integration SET name = ? WHERE slug = ?",
+            params: [name, slug]
           })
       )
 
@@ -657,6 +672,7 @@ export class CatalogStore extends Context.Service<
         listIntegrations,
         findIntegration,
         putIntegration,
+        renameIntegration,
         removeIntegration,
         listConnections,
         putConnection,

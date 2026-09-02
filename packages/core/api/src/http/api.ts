@@ -31,6 +31,7 @@ import {
   BooleanFromString,
   Connection,
   GatewayMetadata,
+  Integration,
   IntegrationDiscovery,
   IntegrationSearchKind,
   IntegrationSearchResponse,
@@ -98,8 +99,15 @@ const AssignApprovalPolicyBody = Schema.Struct({ approvalPolicyId: ApprovalPolic
 
 const DiscoverBody = Schema.Struct({
   url: Schema.String,
-  connection: Schema.optional(Schema.String)
+  connection: Schema.optional(Schema.String),
+  /** Chosen by the caller when the derived name is not what a person would
+   *  say. The slug can only be chosen here, because after this it is what
+   *  every address and alias is made of. */
+  slug: Schema.optional(Schema.String),
+  name: Schema.optional(Schema.String)
 })
+
+const RenameIntegrationBody = Schema.Struct({ name: Schema.String })
 
 const ConnectBody = Schema.Struct({
   integration: Schema.String,
@@ -445,6 +453,12 @@ const ProvisioningGroup = HttpApiGroup.make("provisioning")
     // The provider's redirect lands here; every answer is a page for a human.
     success: Schema.Struct({ rendered: Schema.Literal(true) })
   }).annotate(RequiredAccess, "public"))
+  .add(HttpApiEndpoint.post("renameIntegration", "/v1/integrations/:slug/name", {
+    params: { slug: Schema.String },
+    payload: RenameIntegrationBody,
+    success: Integration,
+    error: ApiNotFoundError
+  }).annotate(RequiredAccess, "provisioning"))
   .add(HttpApiEndpoint.delete("removeIntegration", "/v1/integrations/:slug", {
     params: { slug: Schema.String },
     success: Schema.Struct({

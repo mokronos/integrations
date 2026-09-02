@@ -23,12 +23,16 @@ export function DiscoverDialog() {
   const [open, setOpen] = useState(false)
   const [url, setUrl] = useState("")
   const [connection, setConnection] = useState("default")
+  const [slug, setSlug] = useState("")
+  const [name, setName] = useState("")
 
   const discover = useMutation({
     mutationFn: () =>
       gateway.discoverIntegration({
         url,
-        ...whenPresentMap("connection", connection.trim() || undefined, (name) => name)
+        ...whenPresentMap("connection", connection.trim() || undefined, (value) => value),
+        ...whenPresentMap("slug", slug.trim() || undefined, (value) => value),
+        ...whenPresentMap("name", name.trim() || undefined, (value) => value)
       }),
     onSuccess: (result) => {
       invalidate(keys.integrations, keys.connections)
@@ -37,6 +41,8 @@ export function DiscoverDialog() {
       })
       setOpen(false)
       setUrl("")
+      setSlug("")
+      setName("")
     },
     onError: (error: Error) => toast.error("Discovery failed", { description: error.message })
   })
@@ -73,6 +79,32 @@ export function DiscoverDialog() {
               placeholder="default"
             />
           </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="discover-name">Name</Label>
+              <Input
+                id="discover-name"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="derived from the endpoint"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="discover-slug">Slug</Label>
+              <Input
+                id="discover-slug"
+                className="font-mono"
+                value={slug}
+                onChange={(event) => setSlug(event.target.value)}
+                placeholder="derived from the name"
+              />
+            </div>
+          </div>
+          <p className="text-muted-foreground text-xs">
+            Both are guessed from the endpoint when left blank. The name can be
+            changed later; the slug cannot — it is what every tool address and
+            alias is made of.
+          </p>
         </div>
         <DialogFooter>
           <Button

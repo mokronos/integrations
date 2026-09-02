@@ -132,5 +132,18 @@ export class InvalidInputError extends Schema.TaggedError<InvalidInputError>()(
 
 /** Narrows a caught defect to a readable sentence without leaking a stack into
  *  an error field that is rendered to a human. */
-export const describeCause = (cause: unknown): string =>
-  cause instanceof Error ? cause.message : String(cause)
+/** How much of a failure's message is worth carrying.
+ *
+ *  A vendor's error body can be its whole catalogue. Google answers a bearer
+ *  token it does not accept with HTTP 401 and a complete, valid `tools/list`
+ *  result, and the MCP SDK puts that body verbatim into the error it throws.
+ *  Fifty kilobytes of tool schemas in a "could not connect" message tells a
+ *  reader nothing the first line did not, and buries the line that does. */
+const detailLimit = 400
+
+export const describeCause = (cause: unknown): string => {
+  const message = cause instanceof Error ? cause.message : String(cause)
+  return message.length <= detailLimit
+    ? message
+    : `${message.slice(0, detailLimit)}… (${message.length} characters, truncated)`
+}

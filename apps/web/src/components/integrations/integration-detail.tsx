@@ -1,4 +1,4 @@
-import { ChevronRight, ExternalLink, Search, Trash2, Unplug } from "lucide-react"
+import { Check, ChevronRight, ExternalLink, Pencil, Search, Trash2, Unplug, X } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useNavigate } from "react-router"
 import { toast } from "sonner"
@@ -170,6 +170,80 @@ function RemoveIntegration({ integration }: { readonly integration: IntegrationO
   )
 }
 
+/** The name is a label and nothing points at it, so editing it in place is
+ *  safe. The slug beside it is the identity and stays read-only: it is in every
+ *  tool address, every alias, and the key each credential is sealed under. */
+function IntegrationName({ integration }: { readonly integration: IntegrationOverview }) {
+  const invalidate = useInvalidate()
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(integration.name)
+
+  const rename = useMutation({
+    mutationFn: () => gateway.renameIntegration({ slug: integration.slug, name: draft.trim() }),
+    onSuccess: (result) => {
+      setEditing(false)
+      invalidate(keys.integrations, keys.overview)
+      toast.success(`Now called ${result.name}`)
+    },
+    onError: (error: Error) => toast.error("Could not rename it", { description: error.message })
+  })
+
+  const start = () => {
+    setDraft(integration.name)
+    setEditing(true)
+  }
+
+  if (!editing) {
+    return (
+      <>
+        <CardTitle className="min-w-0 break-words">{integration.name}</CardTitle>
+        <Button variant="ghost" size="sm" onClick={start} aria-label="Rename">
+          <Pencil className="size-3" />
+        </Button>
+      </>
+    )
+  }
+
+  return (
+    <form
+      className="flex min-w-0 items-center gap-1"
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (draft.trim().length > 0) rename.mutate()
+      }}
+    >
+      <Input
+        autoFocus
+        className="h-8 w-48"
+        value={draft}
+        aria-label="Integration name"
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") setEditing(false)
+        }}
+      />
+      <Button
+        type="submit"
+        variant="ghost"
+        size="sm"
+        aria-label="Save name"
+        disabled={rename.isPending || draft.trim().length === 0}
+      >
+        <Check className="size-3" />
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        aria-label="Cancel rename"
+        onClick={() => setEditing(false)}
+      >
+        <X className="size-3" />
+      </Button>
+    </form>
+  )
+}
+
 export function IntegrationDetail({ integration }: { readonly integration: IntegrationOverview }) {
   const invalidate = useInvalidate()
   const [filter, setFilter] = useState("")
@@ -198,7 +272,7 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
         <CardHeader>
           <div className="flex flex-wrap items-center gap-2">
             <IntegrationIcon host={integrationHost(integration)} size={20} />
-            <CardTitle className="min-w-0 break-words">{integration.name}</CardTitle>
+            <IntegrationName integration={integration} />
             <ConnectionBadge integration={integration} />
             <div className="ml-auto flex items-center gap-1">
               <ConnectDialog integration={integration} />

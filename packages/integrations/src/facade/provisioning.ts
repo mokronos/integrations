@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import { whenPresent } from "@mokronos/contracts"
 import { requiresAuthentication } from "../catalog/auth-methods.ts"
 import type {
   CatalogApi,
@@ -30,7 +31,19 @@ const installWith = async (
 ): Promise<Integration> => {
   const decoded = Schema.decodeUnknownSync(EndpointClassification)(classification)
   const existing = await dependencies.catalog.find(decoded.slug)
-  if (existing !== undefined) return existing
+  if (existing !== undefined) {
+    // Discovering the same URL twice is idempotent and returns what is already
+    // installed. A different URL under a name already taken is not the same
+    // act, and handing back the other integration would report success for an
+    // endpoint that was never installed.
+    if (existing.displayUrl !== undefined && existing.displayUrl !== decoded.endpoint) {
+      throw new Error(
+        `${decoded.slug} is already installed and points at ${existing.displayUrl}. ` +
+        `Discover this URL under a different name.`
+      )
+    }
+    return existing
+  }
 
   // The auth method is never passed in: installing re-probes the endpoint and
   // derives it from how the server actually refuses, so a caller cannot record
@@ -56,12 +69,25 @@ const installWith = async (
   return installed
 }
 
+/** What the endpoint said it was, with what the caller decided to call it.
+ *
+ *  Applied before installing rather than after, because the slug is what the
+ *  install is filed under; renaming afterwards would mean moving it. */
+const named = (
+  classification: EndpointClassification,
+  options: DiscoverIntegrationsOptions
+): EndpointClassification => ({
+  ...classification,
+  ...whenPresent("name", options.name),
+  ...whenPresent("slug", options.slug)
+})
+
 const provisionWith = async (
   url: string,
   options: DiscoverIntegrationsOptions,
   dependencies: IntegrationProvisioningDependencies
 ): Promise<IntegrationDiscovery> => {
-  const classification = await dependencies.catalog.classify(url)
+  const classification = named(await dependencies.catalog.classify(url), options)
   const integration = await installWith(classification, dependencies)
   const connectionName = options.connection ?? "default"
   const connected = await dependencies.connections.ensure(integration, connectionName)

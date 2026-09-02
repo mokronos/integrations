@@ -132,6 +132,59 @@ describe("the catalog", () => {
     expect(remaining).toEqual([])
   })
 
+  it("refuses to guess a credential for a template the integration dropped", async () => {
+    // A vendor that adds a wall re-probes into different auth methods, and the
+    // connection made under the old one now names nothing. The branch below
+    // this one presents whatever is stored under the connection's key, which
+    // for an OAuth connection is the sealed token record — so guessing here
+    // sends a bearer token made of JSON and reads back as a bad credential.
+    const outcome = await run(Effect.result(Effect.gen(function* () {
+      const host = yield* IntegrationHost
+      const store = yield* CatalogStore
+      yield* install()
+      const found = yield* store.findIntegration(notes)
+      const record = Option.getOrThrow(found)
+      yield* store.putIntegration({
+        ...record,
+        authMethods: [{
+          id: "oauth2",
+          label: "OAuth",
+          kind: "oauth",
+          template: "oauth2"
+        }]
+      })
+      return yield* host.refreshConnection({
+        owner: "org",
+        integration: notes,
+        name: primary
+      })
+    })))
+    expect(outcome._tag).toBe("Failure")
+    if (outcome._tag === "Failure") {
+      expect(outcome.failure._tag).toBe("InvalidInputError")
+      if (outcome.failure._tag === "InvalidInputError") {
+        expect(outcome.failure.detail).toContain("no longer offers")
+      }
+    }
+  })
+
+  it("renames an integration without moving what addresses it", async () => {
+    const after = await run(Effect.gen(function* () {
+      const host = yield* IntegrationHost
+      yield* install()
+      yield* host.renameIntegration(notes, "Field Notes")
+      const found = yield* host.findIntegration(notes)
+      const connections = yield* host.listConnections()
+      return {
+        name: Option.map(found, (integration) => integration.name),
+        addresses: connections.map((connection) => connection.address)
+      }
+    }))
+    expect(Option.getOrNull(after.name)).toBe("Field Notes")
+    // The slug is the identity, so every address stays exactly where it was.
+    expect(after.addresses).toEqual(["tools.notes.org.primary"])
+  })
+
   it("takes the credentials of every connection with it too", async () => {
     // The catalog's cascade is SQL and a sealed credential is not in the
     // database, so removing the integration has to go out through the
