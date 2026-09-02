@@ -28,7 +28,8 @@ export const stubIntegrations = (): IntegrationsApi => ({
     list: notStubbed("catalog.list"),
     find: notStubbed("catalog.find"),
     addMcp: notStubbed("catalog.addMcp"),
-    addOpenApi: notStubbed("catalog.addOpenApi")
+    addOpenApi: notStubbed("catalog.addOpenApi"),
+    remove: notStubbed("catalog.remove")
   },
   auth: {
     probe: notStubbed("auth.probe"),

@@ -23,6 +23,7 @@ import {
   decodeKeys,
   decodeOAuthSession,
   decodeOverview,
+  decodeIntegrationRemoved,
   decodeRemoved,
   decodeRegistrySearch,
   decodeRevoked,
@@ -161,6 +162,9 @@ export const startOAuth = async (input: {
 
 export const pollOAuth = async (id: string) =>
   decodeOAuthSession(await request("GET", `/v1/connections/oauth/${segment(id)}`))
+
+export const removeIntegration = async (slug: string) =>
+  decodeIntegrationRemoved(await request("DELETE", `/v1/integrations/${segment(slug)}`))
 
 export const removeConnection = async (input: {
   readonly integration: string

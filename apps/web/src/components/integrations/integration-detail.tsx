@@ -1,15 +1,27 @@
-import { ChevronRight, ExternalLink, Search, Unplug } from "lucide-react"
+import { ChevronRight, ExternalLink, Search, Trash2, Unplug } from "lucide-react"
 import { useMemo, useState } from "react"
+import { useNavigate } from "react-router"
 import { toast } from "sonner"
 
 import { SchemaView } from "@/components/schema-view"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger
+} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Item, ItemActions, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item"
 import { Separator } from "@/components/ui/separator"
-import { when } from "@/lib/format"
+import { pluralise, when } from "@/lib/format"
 import * as gateway from "@/lib/gateway"
 import { keys, useInvalidate, useMutation } from "@/lib/queries"
 import {
@@ -82,6 +94,82 @@ function ToolCard({ tool }: { readonly tool: Tool }) {
   )
 }
 
+/** Removing an integration is not one deletion, and the confirmation says what
+ *  else goes: connections are removed with their credentials, and the policy
+ *  rules that named them go too. A reader who only sees the integration's name
+ *  cannot weigh that. */
+function RemoveIntegration({ integration }: { readonly integration: IntegrationOverview }) {
+  const invalidate = useInvalidate()
+  const navigate = useNavigate()
+  const [open, setOpen] = useState(false)
+
+  const remove = useMutation({
+    mutationFn: () => gateway.removeIntegration(integration.slug),
+    onSuccess: (result) => {
+      setOpen(false)
+      invalidate(keys.integrations, keys.connections, keys.overview)
+      toast.success(`${integration.name} removed`, {
+        description: result.connections.length === 0
+          ? undefined
+          : `${pluralise(result.connections.length, "connection")} removed with it.`
+      })
+      // The route addressed the integration by slug, and the slug no longer
+      // resolves.
+      void navigate("/integrations")
+    },
+    onError: (error: Error) =>
+      toast.error("Could not remove the integration", { description: error.message })
+  })
+
+  return (
+    <AlertDialog open={open} onOpenChange={setOpen}>
+      <AlertDialogTrigger asChild>
+        <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive">
+          <Trash2 className="size-3" />
+          Remove
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Remove {integration.name}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            The gateway forgets this integration and its tools. Any workflow
+            addressing them stops resolving. Discovering the same URL again
+            installs it fresh.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        {integration.connections.length === 0
+          ? null
+          : (
+            <div className="space-y-1 text-sm">
+              <p>
+                {pluralise(integration.connections.length, "connection")} goes with it,
+                along with the stored credentials and every policy rule naming them:
+              </p>
+              <ul className="text-muted-foreground list-inside list-disc font-mono text-xs">
+                {integration.connections.map((connection) => (
+                  <li key={connection.address}>{connection.name}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={remove.isPending}>Keep it</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={remove.isPending}
+            onClick={(event) => {
+              event.preventDefault()
+              remove.mutate()
+            }}
+          >
+            {remove.isPending ? "Removing…" : "Remove"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
 export function IntegrationDetail({ integration }: { readonly integration: IntegrationOverview }) {
   const invalidate = useInvalidate()
   const [filter, setFilter] = useState("")
@@ -112,8 +200,9 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
             <IntegrationIcon host={integrationHost(integration)} size={20} />
             <CardTitle className="min-w-0 break-words">{integration.name}</CardTitle>
             <ConnectionBadge integration={integration} />
-            <div className="ml-auto">
+            <div className="ml-auto flex items-center gap-1">
               <ConnectDialog integration={integration} />
+              <RemoveIntegration integration={integration} />
             </div>
           </div>
         </CardHeader>

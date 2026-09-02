@@ -75,6 +75,8 @@ export interface CatalogApi {
   }) => Promise<string>
   readonly list: () => Promise<ReadonlyArray<Integration>>
   readonly find: (slug: string) => Promise<Integration | undefined>
+  /** Removes the integration and every connection made against it. */
+  readonly remove: (slug: string) => Promise<void>
 }
 
 export interface ConnectionsApi {
@@ -122,6 +124,7 @@ export interface AuthApi {
     readonly clientId: string
     readonly clientSecret?: string
     readonly resource?: string | null
+    readonly scopes?: ReadonlyArray<string>
   }) => Promise<string>
   readonly start: (options: {
     readonly client: string
@@ -214,6 +217,11 @@ const buildCatalog = (host: HostHandle): CatalogApi => ({
     if (decoded._tag === "Failure") return undefined
     const found = yield* integrations.findIntegration(decoded.success)
     return Option.getOrUndefined(found)
+  })),
+  remove: (slug) => host.run(Effect.gen(function* () {
+    const integrations = yield* IntegrationHost
+    const decoded = yield* decodeId(IntegrationSlug, "slug", slug)
+    yield* integrations.removeIntegration(decoded)
   }))
 })
 
@@ -343,7 +351,8 @@ const buildAuth = (host: HostHandle): AuthApi => ({
       tokenUrl: options.tokenUrl,
       clientId: options.clientId,
       ...whenPresent("clientSecret", options.clientSecret),
-      ...whenPresent("resource", options.resource)
+      ...whenPresent("resource", options.resource),
+      ...whenPresent("scopes", options.scopes)
     })
   })),
   start: (options) => host.run(Effect.gen(function* () {

@@ -13,6 +13,7 @@ const probe = (overrides: Partial<McpProbe>): McpProbe => ({
   requiresAuthentication: false,
   requiresOAuth: false,
   supportsDynamicRegistration: false,
+  scopes: [],
   name: "Example",
   slug: "example",
   toolCount: 1,
@@ -57,6 +58,30 @@ describe("MCP auth methods", () => {
     expect(methods[0]?.kind).toBe("oauth")
     expect(methods[0]?.oauth?.discoveryUrl).toBe("https://mcp.linear.app/mcp")
     expect(methods[0]?.oauth?.supportsDynamicRegistration).toBe(true)
+    expect(requiresAuthentication(methods)).toBe(true)
+  })
+
+  it("offers OAuth to a server that answers anonymously and still declares one", () => {
+    // Gmail's endpoint: `initialize` and `tools/list` succeed unauthenticated,
+    // every `tools/call` does not, and its protected-resource metadata says so
+    // the whole time. `connected` stays true — it is reachable — but reachable
+    // is not usable.
+    const methods = mcpAuthMethods(
+      probe({
+        connected: true,
+        requiresAuthentication: true,
+        requiresOAuth: true,
+        scopes: ["https://www.googleapis.com/auth/gmail.readonly"]
+      }),
+      "https://gmailmcp.googleapis.com/mcp/v1"
+    )
+    expect(methods).toHaveLength(1)
+    expect(methods[0]?.kind).toBe("oauth")
+    expect(methods[0]?.oauth?.scopes).toEqual([
+      "https://www.googleapis.com/auth/gmail.readonly"
+    ])
+    // No `none` alongside it: a connection that authorizes nothing can list
+    // tools and call none of them.
     expect(requiresAuthentication(methods)).toBe(true)
   })
 

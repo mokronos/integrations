@@ -33,7 +33,8 @@ const noAuthMethod: AuthMethod = {
   template: "none"
 }
 
-/** The method an MCP endpoint's refusal implies. */
+/** The method an MCP endpoint implies — by refusing an anonymous request, or by
+ *  declaring an authorization server it never mentions until you call a tool. */
 export const mcpAuthMethods = (
   probe: McpProbe,
   endpoint: string
@@ -50,7 +51,11 @@ export const mcpAuthMethods = (
         // protected-resource metadata off it, which then names the
         // authorization server.
         discoveryUrl: endpoint,
-        supportsDynamicRegistration: probe.supportsDynamicRegistration
+        supportsDynamicRegistration: probe.supportsDynamicRegistration,
+        // A provider without dynamic registration sends the operator to its
+        // console to create a client by hand, and the setup guidance can only
+        // name the scopes to enable there if the probe carried them here.
+        ...whenPresent("scopes", probe.scopes.length === 0 ? undefined : probe.scopes)
       }
     }]
   }

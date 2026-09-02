@@ -51,12 +51,20 @@ export const Integration = Schema.Struct({
 })
 export type Integration = typeof Integration.Type
 
-/** What an unauthenticated request to an MCP endpoint revealed. */
+/** What an unauthenticated request to an MCP endpoint revealed.
+ *
+ *  `connected` and `requiresAuthentication` are separate answers to separate
+ *  questions. A server can complete a handshake and list its tools for anybody
+ *  and still refuse every call, so reaching it says nothing about being able to
+ *  use it. */
 export const McpProbe = Schema.Struct({
   connected: Schema.Boolean,
   requiresAuthentication: Schema.Boolean,
   requiresOAuth: Schema.Boolean,
   supportsDynamicRegistration: Schema.Boolean,
+  /** What the endpoint's protected-resource metadata says it issues tokens for.
+   *  Empty when it published none, which is most servers. */
+  scopes: Schema.Array(Schema.String),
   name: Schema.String,
   slug: Schema.String,
   toolCount: Schema.NullOr(Schema.Number),

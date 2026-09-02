@@ -28,6 +28,7 @@ const stubMcp = (options: {
         requiresAuthentication: false,
         requiresOAuth: false,
         supportsDynamicRegistration: false,
+        scopes: [],
         name: "Notes",
         slug: "notes",
         toolCount: 2,
@@ -130,6 +131,34 @@ describe("the catalog", () => {
     }))
     expect(remaining).toEqual([])
   })
+
+  it("takes the credentials of every connection with it too", async () => {
+    // The catalog's cascade is SQL and a sealed credential is not in the
+    // database, so removing the integration has to go out through the
+    // connection path or the row goes and the secret stays.
+    const held = await run(Effect.gen(function* () {
+      const host = yield* IntegrationHost
+      const credentials = yield* CredentialStore
+      yield* host.addMcp({
+        endpoint: "https://notes.example.com/mcp",
+        name: "Notes",
+        slug: notes
+      })
+      const address = connectionAddress({ owner: "org", integration: notes, connection: primary })
+      yield* host.createConnection({
+        owner: "org",
+        integration: notes,
+        name: primary,
+        template: AuthTemplateSlug.make("none"),
+        value: "secret"
+      })
+      const before = yield* credentials.get(connectionCredentialKey(address))
+      yield* host.removeIntegration(notes)
+      const after = yield* credentials.get(connectionCredentialKey(address))
+      return { before: Option.isSome(before), after: Option.isSome(after) }
+    }))
+    expect(held).toEqual({ before: true, after: false })
+  })
 })
 
 describe("connections", () => {
@@ -230,7 +259,7 @@ describe("tools", () => {
       Effect.sync(() => ({
         probe: () => Effect.succeed({
           connected: true, requiresAuthentication: false, requiresOAuth: false,
-          supportsDynamicRegistration: false, name: "Notes", slug: "notes",
+          supportsDynamicRegistration: false, scopes: [], name: "Notes", slug: "notes",
           toolCount: 2, serverName: "Notes", instructions: null
         }),
         listTools: () => Effect.succeed(shrunk
@@ -344,6 +373,7 @@ describe("tools", () => {
           requiresAuthentication: false,
           requiresOAuth: false,
           supportsDynamicRegistration: false,
+          scopes: [],
           name: "Notes",
           slug: "notes",
           toolCount: 0,

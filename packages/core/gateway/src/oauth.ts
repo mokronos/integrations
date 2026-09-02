@@ -80,7 +80,10 @@ const prepareFlow = async (
       tokenUrl,
       clientId: input.clientId,
       ...whenPresent("clientSecret", input.clientSecret),
-      ...whenPresent("resource", resource)
+      ...whenPresent("resource", resource),
+      // A hand-registered client still has to ask for something: an
+      // authorization request with no `scope` buys a token that opens nothing.
+      scopes: oauth.scopes ?? discovered?.scopesSupported ?? []
     })
   } else {
     const registrationEndpoint = oauth.registrationEndpoint ?? discovered?.registrationEndpoint

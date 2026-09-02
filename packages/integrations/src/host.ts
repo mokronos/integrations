@@ -607,6 +607,25 @@ export class IntegrationHost extends Context.Service<
         }
       )
 
+      /** Removing an integration removes what it was standing for.
+       *
+       *  Every connection goes out through `removeConnection` rather than the
+       *  catalog's own cascade: the cascade is SQL, and a sealed credential
+       *  does not live in the database, so the row would go and the secret
+       *  would stay. */
+      const removeIntegration = Effect.fn("IntegrationHost.removeIntegration")(
+        function* (slug: IntegrationSlug) {
+          const connections = yield* store.listConnections({ integration: slug })
+          yield* Effect.forEach(connections, (connection) =>
+            removeConnection({
+              owner: connection.owner,
+              integration: slug,
+              name: connection.name
+            }))
+          yield* store.removeIntegration(slug)
+        }
+      )
+
       return {
         listIntegrations: Effect.fn("IntegrationHost.listIntegrations")(function* () {
           const records = yield* store.listIntegrations()
@@ -623,7 +642,7 @@ export class IntegrationHost extends Context.Service<
         ),
         addMcp,
         addOpenApi,
-        removeIntegration: store.removeIntegration,
+        removeIntegration,
         createConnection,
         listConnections: Effect.fn("IntegrationHost.listConnections")(
           function* (filter: {

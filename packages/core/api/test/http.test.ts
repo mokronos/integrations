@@ -101,6 +101,8 @@ const stubIntegrations = (behaviour: {
 } = {}) => {
   const calls: Array<ExecutedCall> = []
   const removed: Array<{ readonly integration: string; readonly name: string }> = []
+  const forgotten: Array<string> = []
+  const known = new Set((behaviour.connections ?? []).map((connection) => connection.integration))
   const integrations: IntegrationsApi = {
     tools: {
       execute: async (address, input) => {
@@ -134,9 +136,25 @@ const stubIntegrations = (behaviour: {
     catalog: {
       classify: notStubbed("catalog.classify"),
       list: notStubbed("catalog.list"),
-      find: notStubbed("catalog.find"),
+      // An integration exists here exactly when a connection names it, which is
+      // all these tests need to tell installed from unknown.
+      find: async (slug) =>
+        known.has(slug)
+          ? {
+            slug,
+            name: slug,
+            description: "",
+            kind: "mcp",
+            canRemove: true,
+            canRefresh: true,
+            authMethods: []
+          }
+          : undefined,
       addMcp: notStubbed("catalog.addMcp"),
-      addOpenApi: notStubbed("catalog.addOpenApi")
+      addOpenApi: notStubbed("catalog.addOpenApi"),
+      remove: async (slug) => {
+        forgotten.push(slug)
+      }
     },
     auth: {
       probe: notStubbed("auth.probe"),
@@ -152,7 +170,7 @@ const stubIntegrations = (behaviour: {
     validateIntegrationNode: notStubbed("validateIntegrationNode"),
     listIntegrationOverviews: async () => []
   }
-  return { calls, removed, integrations }
+  return { calls, removed, forgotten, integrations }
 }
 
 const setup = async (options: {
@@ -263,7 +281,8 @@ const setup = async (options: {
     handle,
     call,
     calls: stub.calls,
-    removed: stub.removed
+    removed: stub.removed,
+    forgotten: stub.forgotten
   }
 }
 
@@ -846,6 +865,40 @@ describe("provisioning surface", () => {
     expect(response.status).toBe(200)
     expect(response.body["connection"]).toBe("docsDemo")
     expect(removed).toEqual([{ integration: "gmail", name: "docsDemo" }])
+  })
+
+  test("removing an integration takes its connections and their policy rules", async () => {
+    const { call, store, accessProfile, approvalPolicy, forgotten } = await run(setup({
+      capabilities: ["provision_connections", "administer_gateway"],
+      connections: [{ integration: "gmail", name: "work" }]
+    }))
+
+    // The profile and policy this setup builds both name gmail/work, so there
+    // is something for the removal to clear.
+    expect(await run(store.listAccessProfileTools(accessProfile.id))).toHaveLength(1)
+    expect(await run(store.listApprovalPolicyTools(approvalPolicy.id))).toHaveLength(1)
+
+    const response = await run(call("DELETE", "/v1/integrations/gmail"))
+
+    expect(response.status).toBe(200)
+    expect(forgotten).toEqual(["gmail"])
+    expect(response.body["connections"]).toEqual(["work"])
+    // A rule that names a connection nobody can reach is a rule that would
+    // authorize a call against whatever later takes that name.
+    expect(await run(store.listAccessProfileTools(accessProfile.id))).toEqual([])
+    expect(await run(store.listApprovalPolicyTools(approvalPolicy.id))).toEqual([])
+  })
+
+  test("refuses to remove an integration it never installed", async () => {
+    const { call, forgotten } = await run(setup({
+      capabilities: ["provision_connections", "administer_gateway"],
+      connections: [{ integration: "gmail", name: "work" }]
+    }))
+
+    const response = await run(call("DELETE", "/v1/integrations/notion"))
+
+    expect(response.status).toBe(404)
+    expect(forgotten).toEqual([])
   })
 
   test("says which connections exist when none matches", async () => {

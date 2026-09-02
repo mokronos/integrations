@@ -445,6 +445,17 @@ const ProvisioningGroup = HttpApiGroup.make("provisioning")
     // The provider's redirect lands here; every answer is a page for a human.
     success: Schema.Struct({ rendered: Schema.Literal(true) })
   }).annotate(RequiredAccess, "public"))
+  .add(HttpApiEndpoint.delete("removeIntegration", "/v1/integrations/:slug", {
+    params: { slug: Schema.String },
+    success: Schema.Struct({
+      removed: Schema.Literal(true),
+      integration: Schema.String,
+      /** What went with it. Removing an integration is not one deletion, and
+       *  the caller should be able to say what it cost. */
+      connections: Schema.Array(Schema.String)
+    }),
+    error: ApiNotFoundError
+  }).annotate(RequiredAccess, "provisioning"))
   .add(HttpApiEndpoint.delete("removeConnection", "/v1/connections/:integration/:name", {
     params: { integration: Schema.String, name: Schema.String },
     success: Schema.Struct({

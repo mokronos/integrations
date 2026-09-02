@@ -398,6 +398,33 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
             message: `${completed.integration} was connected. You can close this window.`
           })
         }))
+      .handle("removeIntegration", (request) =>
+        Effect.gen(function*() {
+          const tenantId = yield* requireTenant
+          const slug = request.params["slug"]
+          const found = yield* Effect.promise(() => integrationsApi.catalog.find(slug))
+          if (found === undefined) {
+            return yield* new ApiNotFound({ error: `Unknown integration ${slug}` })
+          }
+          const connections = yield* Effect.promise(() =>
+            integrationsApi.connections.list())
+          const owned = connections.filter((connection) => connection.integration === slug)
+          // The policy rules naming each connection are dropped one at a time,
+          // before the catalog forgets which connections there were.
+          yield* Effect.forEach(owned, (connection) =>
+            forgetConnection({
+              store,
+              tenantId,
+              integration: slug,
+              connection: connection.name
+            }).pipe(orDieStorage))
+          yield* Effect.promise(() => integrationsApi.catalog.remove(slug))
+          return {
+            removed: true as const,
+            integration: slug,
+            connections: owned.map((connection) => connection.name)
+          }
+        }))
       .handle("removeConnection", (request) =>
         Effect.gen(function*() {
           const tenantId = yield* requireTenant

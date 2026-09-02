@@ -131,38 +131,67 @@ const AuthorizationServerMetadata = Schema.Struct({
   registration_endpoint: Schema.optional(Schema.String)
 })
 
-/** What an unauthenticated request tells us about the wall in front of the
- *  endpoint. A 401 alone only says "credentials needed"; whether OAuth is on
- *  offer, and whether a client can register itself, comes from the metadata the
- *  challenge points at. */
-const inspectAuthWall = (
+const ProtectedResourceMetadata = Schema.Struct({
+  authorization_servers: Schema.optional(Schema.Array(Schema.String)),
+  scopes_supported: Schema.optional(Schema.Array(Schema.String))
+})
+
+/** An OAuth authority the endpoint pointed us at, and what it will accept. */
+interface McpAuthority {
+  readonly supportsDynamicRegistration: boolean
+  readonly scopes: ReadonlyArray<string>
+}
+
+/** The OAuth authority an endpoint names for itself, when it names one.
+ *
+ *  RFC 9728 metadata is published unconditionally, not only behind a challenge,
+ *  and reading it only after a 401 misses the servers that most need it read.
+ *  Google's Gmail endpoint answers `initialize` and `tools/list` to anybody and
+ *  refuses every `tools/call`; it declares its authorization server and scopes
+ *  the whole time. Taking the anonymous handshake as the answer files it as
+ *  needing no credential, which is true of exactly the two methods nobody
+ *  connects an integration in order to use.
+ *
+ *  `None` means the endpoint published no metadata — not that it is open. What
+ *  an unexplained refusal implies is the caller's to decide. */
+const inspectAuthority = (
   endpoint: string,
   response: Response
-): Effect.Effect<{
-  readonly requiresOAuth: boolean
-  readonly supportsDynamicRegistration: boolean
-}> =>
+): Effect.Effect<Option.Option<McpAuthority>> =>
   Effect.promise(async () => {
+    // Absent on a 200, present on a challenge that names its metadata: either
+    // way this is a hint, and discovery has its own path convention to fall
+    // back on.
     const { resourceMetadataUrl } = extractWWWAuthenticateParams(response)
     try {
-      const resource = await discoverOAuthProtectedResourceMetadata(
+      const discovered = await discoverOAuthProtectedResourceMetadata(
         endpoint,
         resourceMetadataUrl === undefined ? {} : { resourceMetadataUrl }
       )
-      const authorizationServer = resource.authorization_servers?.[0] ?? endpoint
-      const metadata = await discoverAuthorizationServerMetadata(authorizationServer)
-      const decoded = Schema.decodeUnknownOption(AuthorizationServerMetadata)(metadata)
-      return {
-        requiresOAuth: true,
-        supportsDynamicRegistration: Option.match(decoded, {
+      const resource = Schema.decodeUnknownOption(ProtectedResourceMetadata)(discovered)
+      const authorizationServer = Option.flatMap(
+        resource,
+        (found) => Option.fromNullishOr(found.authorization_servers?.[0])
+      )
+      const metadata = await discoverAuthorizationServerMetadata(
+        Option.getOrElse(authorizationServer, () => endpoint)
+      )
+      const server = Schema.decodeUnknownOption(AuthorizationServerMetadata)(metadata)
+      return Option.some({
+        supportsDynamicRegistration: Option.match(server, {
           onNone: () => false,
-          onSome: (server) => server.registration_endpoint !== undefined
+          onSome: (found) => found.registration_endpoint !== undefined
+        }),
+        // Carried from here rather than rediscovered at authorization time,
+        // because a provider without dynamic registration sends the operator to
+        // a console to enter these by hand before any flow starts.
+        scopes: Option.match(resource, {
+          onNone: (): ReadonlyArray<string> => [],
+          onSome: (found) => found.scopes_supported ?? []
         })
-      }
+      })
     } catch {
-      // No RFC 9728 metadata: the wall is real but it is not an OAuth one we
-      // can drive, so a bearer token is the only thing left to offer.
-      return { requiresOAuth: false, supportsDynamicRegistration: false }
+      return Option.none()
     }
   })
 
@@ -265,12 +294,22 @@ export class McpHost extends Context.Service<
         const slug = Option.getOrElse(slugify(name), () => "mcp")
 
         if (response.status === 401 || response.status === 403) {
-          const wall = yield* inspectAuthWall(endpoint, response)
+          const authority = yield* inspectAuthority(endpoint, response)
           return yield* Schema.decodeUnknownEffect(McpProbe)({
             connected: false,
             requiresAuthentication: true,
-            requiresOAuth: wall.requiresOAuth,
-            supportsDynamicRegistration: wall.supportsDynamicRegistration,
+            requiresOAuth: Option.isSome(authority),
+            supportsDynamicRegistration: Option.match(authority, {
+              onNone: () => false,
+              onSome: (found) => found.supportsDynamicRegistration
+            }),
+            // No metadata behind the refusal: the wall is real but not an OAuth
+            // one this host can drive, so a bearer token is what is left to
+            // offer.
+            scopes: Option.match(authority, {
+              onNone: (): ReadonlyArray<string> => [],
+              onSome: (found) => found.scopes
+            }),
             name,
             slug,
             toolCount: null,
@@ -303,12 +342,23 @@ export class McpHost extends Context.Service<
           })
         )
 
+        // An anonymous handshake is not a claim that the server is open. Ask it
+        // directly, and believe its own metadata over the two methods it let
+        // through.
+        const authority = yield* inspectAuthority(endpoint, response)
         const serverName = detail.serverName
         return yield* Schema.decodeUnknownEffect(McpProbe)({
           connected: true,
-          requiresAuthentication: false,
-          requiresOAuth: false,
-          supportsDynamicRegistration: false,
+          requiresAuthentication: Option.isSome(authority),
+          requiresOAuth: Option.isSome(authority),
+          supportsDynamicRegistration: Option.match(authority, {
+            onNone: () => false,
+            onSome: (found) => found.supportsDynamicRegistration
+          }),
+          scopes: Option.match(authority, {
+            onNone: (): ReadonlyArray<string> => [],
+            onSome: (found) => found.scopes
+          }),
           name: serverName ?? name,
           slug: serverName === null
             ? slug

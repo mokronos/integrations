@@ -234,6 +234,15 @@ export type Revoked = typeof Revoked.Type
 
 export const Removed = Schema.Struct({ removed: Schema.Boolean })
 
+/** Removing an integration takes its connections with it, and the page says so
+ *  rather than leaving the reader to notice. */
+export const IntegrationRemoved = Schema.Struct({
+  removed: Schema.Boolean,
+  integration: Schema.String,
+  connections: Schema.Array(Schema.String)
+})
+export type IntegrationRemoved = typeof IntegrationRemoved.Type
+
 export const decodeIntegrations = json(IntegrationsResponse)
 export const decodeConnections = json(ConnectionsResponse)
 export const decodeClients = json(ClientsResponse)
@@ -259,6 +268,7 @@ export const decodeDiscovery = json(IntegrationDiscovery)
 export const decodeDrift = json(DriftResponse)
 export const decodeRevoked = json(Revoked)
 export const decodeRemoved = json(Removed)
+export const decodeIntegrationRemoved = json(IntegrationRemoved)
 export const decodeClient = json(Client)
 export const decodeRegistrySearch = json(IntegrationSearchResponse)
 
