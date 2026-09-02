@@ -31,6 +31,7 @@ const navigation = [
   { to: "/access-profiles", label: "Access profiles", icon: FileKey2 },
   { to: "/approval-policies", label: "Approval policies", icon: ShieldCheck },
   { to: "/approvals", label: "Approvals", icon: ShieldCheck },
+  { to: "/approval-destinations", label: "Approval destinations", icon: ShieldCheck },
   { to: "/activity", label: "Activity", icon: Activity },
   { to: "/account", label: "Account", icon: UserRound }
 ] as const

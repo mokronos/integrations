@@ -44,5 +44,32 @@ export const gatewayMigrations: ReadonlyArray<GatewayMigration> = [
       "CREATE UNIQUE INDEX `gateway_tenant_name_unique` ON `gateway_tenant` (`name`);",
       "CREATE TABLE `gateway_tool_snapshot` (\n\t`tenant_id` text NOT NULL,\n\t`integration` text NOT NULL,\n\t`connection_name` text NOT NULL,\n\t`tool` text NOT NULL,\n\t`input_schema` text,\n\t`output_schema` text,\n\t`synced_at` integer NOT NULL,\n\tPRIMARY KEY(`tenant_id`, `integration`, `connection_name`, `tool`),\n\tFOREIGN KEY (`tenant_id`) REFERENCES `gateway_tenant`(`id`) ON UPDATE no action ON DELETE cascade\n);"
     ]
+  },
+  {
+    id: 1,
+    name: "0001_glossy_ezekiel",
+    statements: [
+      "CREATE TABLE `gateway_approval_delivery` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`approval_id` text NOT NULL,\n\t`destination_id` text NOT NULL,\n\t`status` text NOT NULL,\n\t`attempts` integer NOT NULL,\n\t`next_attempt_at` integer,\n\t`delivered_at` integer,\n\t`last_error` text,\n\tFOREIGN KEY (`approval_id`) REFERENCES `gateway_pending_approval`(`id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`destination_id`) REFERENCES `gateway_approval_destination`(`id`) ON UPDATE no action ON DELETE cascade\n);",
+      "CREATE UNIQUE INDEX `gateway_approval_delivery_once` ON `gateway_approval_delivery` (`approval_id`,`destination_id`);",
+      "CREATE INDEX `gateway_approval_delivery_due` ON `gateway_approval_delivery` (`status`,`next_attempt_at`);",
+      "CREATE TABLE `gateway_approval_destination` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`tenant_id` text NOT NULL,\n\t`name` text NOT NULL,\n\t`type` text NOT NULL,\n\t`url` text NOT NULL,\n\t`signing_secret` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\tFOREIGN KEY (`tenant_id`) REFERENCES `gateway_tenant`(`id`) ON UPDATE no action ON DELETE cascade\n);",
+      "CREATE UNIQUE INDEX `gateway_approval_destination_name_tenant` ON `gateway_approval_destination` (`tenant_id`,`name`);",
+      "CREATE TABLE `gateway_client_approval_destination` (\n\t`client_id` text NOT NULL,\n\t`destination_id` text NOT NULL,\n\tPRIMARY KEY(`client_id`, `destination_id`),\n\tFOREIGN KEY (`client_id`) REFERENCES `gateway_client`(`id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`destination_id`) REFERENCES `gateway_approval_destination`(`id`) ON UPDATE no action ON DELETE cascade\n);"
+    ]
+  },
+  {
+    id: 2,
+    name: "0002_loud_marauders",
+    statements: [
+      "PRAGMA foreign_keys=OFF;",
+      "CREATE TABLE `__new_gateway_approval_delivery` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`approval_id` text NOT NULL,\n\t`destination_id` text NOT NULL,\n\t`status` text NOT NULL,\n\t`attempts` integer NOT NULL,\n\t`next_attempt_at` integer,\n\t`delivered_at` integer,\n\t`last_error` text,\n\tFOREIGN KEY (`approval_id`) REFERENCES `gateway_pending_approval`(`id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`destination_id`) REFERENCES `gateway_approval_destination`(`id`) ON UPDATE no action ON DELETE no action\n);",
+      "INSERT INTO `__new_gateway_approval_delivery`(\"id\", \"approval_id\", \"destination_id\", \"status\", \"attempts\", \"next_attempt_at\", \"delivered_at\", \"last_error\") SELECT \"id\", \"approval_id\", \"destination_id\", \"status\", \"attempts\", \"next_attempt_at\", \"delivered_at\", \"last_error\" FROM `gateway_approval_delivery`;",
+      "DROP TABLE `gateway_approval_delivery`;",
+      "ALTER TABLE `__new_gateway_approval_delivery` RENAME TO `gateway_approval_delivery`;",
+      "PRAGMA foreign_keys=ON;",
+      "CREATE UNIQUE INDEX `gateway_approval_delivery_once` ON `gateway_approval_delivery` (`approval_id`,`destination_id`);",
+      "CREATE INDEX `gateway_approval_delivery_due` ON `gateway_approval_delivery` (`status`,`next_attempt_at`);",
+      "ALTER TABLE `gateway_approval_destination` ADD `deleted_at` integer;"
+    ]
   }
 ]

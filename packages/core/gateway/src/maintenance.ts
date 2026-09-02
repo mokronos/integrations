@@ -40,10 +40,12 @@ export const startMaintenanceLoop = (
   options: {
     readonly intervalMs?: number
     readonly onError?: (error: GatewayStoreError) => void
+    readonly afterSweep?: () => Effect.Effect<void, GatewayStoreError>
   } = {}
 ): MaintenanceLoop => {
   const interval = setInterval(() => {
     Effect.runFork(runMaintenance(store).pipe(
+      Effect.andThen(options.afterSweep?.() ?? Effect.void),
       Effect.catch((error) => Effect.sync(() => options.onError?.(error)))
     ))
   }, options.intervalMs ?? 60_000)

@@ -27,6 +27,12 @@ export type ApprovalPolicyId = typeof ApprovalPolicyId.Type
 export const ApprovalId = Schema.String.pipe(Schema.brand("ApprovalId"))
 export type ApprovalId = typeof ApprovalId.Type
 
+export const ApprovalDestinationId = Schema.String.pipe(Schema.brand("ApprovalDestinationId"))
+export type ApprovalDestinationId = typeof ApprovalDestinationId.Type
+
+export const ApprovalDeliveryId = Schema.String.pipe(Schema.brand("ApprovalDeliveryId"))
+export type ApprovalDeliveryId = typeof ApprovalDeliveryId.Type
+
 export const AuditId = Schema.String.pipe(Schema.brand("AuditId"))
 export type AuditId = typeof AuditId.Type
 
@@ -231,17 +237,39 @@ export type ClientCapability = typeof ClientCapability.Type
  * announces the pending approval; it never carries authority to decide it.
  * Approval links still require a signed-in human at the dashboard. */
 export const ApprovalDelivery = Schema.Struct({
-  returnLink: Schema.Boolean,
-  webhooks: Schema.Array(
-    Schema.String.check(Schema.isPattern(/^https?:\/\/[^\s]+$/))
-  ).check(Schema.isMaxLength(10))
+  returnLink: Schema.Boolean
 })
 export type ApprovalDelivery = typeof ApprovalDelivery.Type
 
 export const defaultApprovalDelivery: ApprovalDelivery = {
-  returnLink: true,
-  webhooks: []
+  returnLink: true
 }
+
+export const ApprovalDestination = Schema.Struct({
+  id: ApprovalDestinationId,
+  tenantId: TenantId,
+  name: Schema.String,
+  type: Schema.Literal("webhook"),
+  url: Schema.String.check(Schema.isPattern(/^https:\/\/[^\s]+$/)),
+  createdAt: Schema.Date
+})
+export type ApprovalDestination = typeof ApprovalDestination.Type
+
+export const ApprovalDeliveryStatus = Schema.Literals(["pending", "retrying", "delivered", "failed"])
+export type ApprovalDeliveryStatus = typeof ApprovalDeliveryStatus.Type
+
+export const ApprovalDeliveryAttempt = Schema.Struct({
+  id: ApprovalDeliveryId,
+  approvalId: ApprovalId,
+  destinationId: ApprovalDestinationId,
+  destinationName: Schema.String,
+  status: ApprovalDeliveryStatus,
+  attempts: Schema.Number,
+  nextAttemptAt: Schema.NullOr(Schema.Date),
+  deliveredAt: Schema.NullOr(Schema.Date),
+  lastError: Schema.NullOr(Schema.String)
+})
+export type ApprovalDeliveryAttempt = typeof ApprovalDeliveryAttempt.Type
 
 export const Client = Schema.Struct({
   id: ClientId,

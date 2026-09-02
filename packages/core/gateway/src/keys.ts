@@ -3,6 +3,8 @@ import {
   ApiKeyHash,
   ApiKeyId,
   ApprovalId,
+  ApprovalDeliveryId,
+  ApprovalDestinationId,
   AuditId,
   ClientId,
   AccessProfileId,
@@ -54,6 +56,9 @@ export const newClientId = (): ClientId => ClientId.make(randomUUID())
 export const newAccessProfileId = (): AccessProfileId => AccessProfileId.make(randomUUID())
 export const newApprovalPolicyId = (): ApprovalPolicyId => ApprovalPolicyId.make(randomUUID())
 export const newApprovalId = (): ApprovalId => ApprovalId.make(randomUUID())
+export const newApprovalDestinationId = (): ApprovalDestinationId => ApprovalDestinationId.make(randomUUID())
+export const newApprovalDeliveryId = (): ApprovalDeliveryId => ApprovalDeliveryId.make(randomUUID())
+export const generateApprovalSigningSecret = (): string => `wfs_${randomBytes(32).toString("base64url")}`
 export const newAuditId = (): AuditId => AuditId.make(randomUUID())
 export const newTenantId = (): TenantId => TenantId.make(randomUUID())
 export const newSubjectId = (): SubjectId => SubjectId.make(randomUUID())

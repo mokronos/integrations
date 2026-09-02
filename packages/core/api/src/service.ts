@@ -12,6 +12,7 @@ import { isLoopbackAddress, mayBorrowLocalCredential } from "./http/loopback.ts"
 import { createGatewayHandler } from "./http/handler.ts"
 import type { GatewayHandle, GatewayRequestContext } from "./http/handler.ts"
 import { startMaintenanceLoop } from "@mokronos/gateway-core"
+import { deliverDueApprovalNotifications } from "@mokronos/gateway-core"
 import type { MaintenanceLoop } from "@mokronos/gateway-core"
 import { createOAuthSessions } from "@mokronos/gateway-core"
 import {
@@ -224,7 +225,12 @@ const buildCore = async (
     ...whenPresent("store", options.oauthStore)
   })
   const maintenance: MaintenanceLoop | undefined =
-    options.externalMaintenance === true ? undefined : startMaintenanceLoop(resources.store)
+    options.externalMaintenance === true ? undefined : startMaintenanceLoop(resources.store, {
+      afterSweep: () => deliverDueApprovalNotifications({
+        store: resources.store,
+        ...whenPresent("dashboardUrl", resolvePublicUrl())
+      })
+    })
 
   // The option carries a number and the environment carries text; a budget is
   // a positive whole number either way. Anything else — absent, empty, a typo —

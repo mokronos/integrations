@@ -12,17 +12,41 @@ import {
 } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-import { Textarea } from "@/components/ui/textarea"
 import * as gateway from "@/lib/gateway"
 import {
   keys,
   useInvalidate,
-  useMutation
+  useMutation,
+  useApprovalDestinations,
+  useClientApprovalDestinations
 } from "@/lib/queries"
-import type { Client } from "@/lib/schemas"
+import type { ApprovalDestinationId, Client } from "@/lib/schemas"
 
-const webhookLines = (source: string): ReadonlyArray<string> =>
-  source.split("\n").map((value) => value.trim()).filter((value) => value.length > 0)
+function DestinationAssignments({ client }: { readonly client: Client }) {
+  const destinations = useApprovalDestinations()
+  const assigned = useClientApprovalDestinations(client.id)
+  const invalidate = useInvalidate()
+  const save = useMutation({
+    mutationFn: (destinationId: ApprovalDestinationId) => {
+      const current = assigned.data ?? []
+      const next = current.includes(destinationId)
+        ? current.filter((id) => id !== destinationId)
+        : [...current, destinationId]
+      return gateway.replaceClientApprovalDestinations(client.id, next)
+    },
+    onSuccess: () => invalidate(keys.clientApprovalDestinations(client.id)),
+    onError: (error: Error) => toast.error("Could not update destinations", { description: error.message })
+  })
+  return <div className="space-y-2">
+    <Label>Notification destinations</Label>
+    {(destinations.data ?? []).length === 0
+      ? <p className="text-muted-foreground text-xs">Create a destination from Approval destinations first.</p>
+      : (destinations.data ?? []).map((destination) => <div key={destination.id} className="flex items-center gap-3 rounded-md border p-3">
+        <Switch checked={(assigned.data ?? []).includes(destination.id)} disabled={client.revokedAt !== null || save.isPending} onCheckedChange={() => save.mutate(destination.id)} />
+        <div><p className="text-sm font-medium">{destination.name}</p><p className="text-muted-foreground text-xs">{destination.url}</p></div>
+      </div>)}
+  </div>
+}
 
 export function ClientSettings({ client }: { readonly client: Client }) {
   const invalidate = useInvalidate()
@@ -33,10 +57,6 @@ export function ClientSettings({ client }: { readonly client: Client }) {
     client.capabilities.includes("administer_gateway")
   )
   const [returnLink, setReturnLink] = useState(client.approvalDelivery.returnLink)
-  const [webhooks, setWebhooks] = useState(client.approvalDelivery.webhooks.join("\n"))
-  const parsedWebhooks = webhookLines(webhooks)
-  const validWebhooks = parsedWebhooks.length <= 10 &&
-    parsedWebhooks.every((url) => /^https?:\/\/[^\s]+$/.test(url))
 
   const save = useMutation({
     mutationFn: () => {
@@ -46,7 +66,7 @@ export function ClientSettings({ client }: { readonly client: Client }) {
       return gateway.updateClientSettings({
         clientId: client.id,
         capabilities,
-        approvalDelivery: { returnLink, webhooks: parsedWebhooks }
+        approvalDelivery: { returnLink }
       })
     },
     onSuccess: () => {
@@ -108,23 +128,11 @@ export function ClientSettings({ client }: { readonly client: Client }) {
               <p className="text-muted-foreground text-xs">Include a signed-in dashboard destination in pending outcomes.</p>
             </div>
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="settings-webhooks">Notification webhooks</Label>
-            <Textarea
-              id="settings-webhooks"
-              value={webhooks}
-              onChange={(event) => setWebhooks(event.target.value)}
-              disabled={disabled}
-              placeholder="https://automation.example/hooks/approvals"
-            />
-            <p className={validWebhooks ? "text-muted-foreground text-xs" : "text-destructive text-xs"}>
-              One HTTP(S) URL per line, up to 10. Payloads omit call arguments and credentials.
-            </p>
-          </div>
+          <DestinationAssignments client={client} />
         </div>
       </CardContent>
       <CardFooter>
-        <Button onClick={() => save.mutate()} disabled={disabled || !validWebhooks || save.isPending}>
+        <Button onClick={() => save.mutate()} disabled={disabled || save.isPending}>
           {save.isPending ? "Saving…" : "Save settings"}
         </Button>
       </CardFooter>

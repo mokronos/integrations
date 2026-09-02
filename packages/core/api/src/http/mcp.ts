@@ -16,7 +16,7 @@ import {
 import {
   authenticateClient,
   ClientId,
-  deliverApprovalNotification,
+  deliverDueApprovalNotifications,
   invokeThroughGateway,
   listEffectiveTools
 } from "@mokronos/gateway-core"
@@ -72,14 +72,10 @@ const runInvocation = (options: McpGatewayOptions, input: {
         ? undefined
         : `${origin.replace(/\/+$/, "")}/approvals?approval=${encodeURIComponent(approvalId)}`
     },
-    onApprovalCreated: (input) => deliverApprovalNotification({
-      client: input.authorization.client,
-      approvalId: input.approvalId,
-      alias: input.authorization.alias,
-      tool: input.authorization.accessProfileTool.tool,
-      expiresAt: input.expiresAt,
-      ...whenPresentMap("approvalUrl", input.approvalUrl, (url) => url)
-    })
+    onApprovalCreated: () => deliverDueApprovalNotifications({
+      store: options.store,
+      ...whenPresentMap("dashboardUrl", options.dashboardUrl?.(), (url) => url)
+    }).pipe(Effect.orDie)
   },
   input
 ))

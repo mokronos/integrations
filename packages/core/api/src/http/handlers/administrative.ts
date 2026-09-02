@@ -25,11 +25,14 @@ import {
 } from "@mokronos/gateway-core"
 import {
   generateApiKey,
+  generateApprovalSigningSecret,
   newAccessProfileId,
+  newApprovalDestinationId,
   newApprovalPolicyId,
   newClientId
 } from "@mokronos/gateway-core"
 import { runMaintenance } from "@mokronos/gateway-core"
+import { deliverDueApprovalNotifications } from "@mokronos/gateway-core"
 import { GatewayStoreError, GatewayStoreService } from "@mokronos/gateway-core"
 import {
   ApiBadRequest,
@@ -46,6 +49,21 @@ import {
 
 const orDieStorage = <A, E, R>(effect: Effect.Effect<A, E | GatewayStoreError, R>) =>
   effect.pipe(Effect.catchTag("GatewayStoreError", Effect.die))
+
+const approvalWebhookUrl = (value: string): URL | undefined => {
+  try {
+    const url = new URL(value)
+    const host = url.hostname.toLowerCase()
+    if (url.protocol !== "https:" || url.username !== "" || url.password !== "") return undefined
+    if (host === "localhost" || host === "::1" || host === "0.0.0.0" || host.endsWith(".localhost")) return undefined
+    if (host.startsWith("127.") || host.startsWith("10.") || host.startsWith("192.168.")) return undefined
+    const match = /^172\.(\d+)\./.exec(host)
+    if (match?.[1] !== undefined && Number(match[1]) >= 16 && Number(match[1]) <= 31) return undefined
+    return url
+  } catch {
+    return undefined
+  }
+}
 
 // --- system -----------------------------------------------------------------
 
@@ -127,6 +145,43 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
             approvalDelivery: request.payload.approvalDelivery
           }))
         }))
+      .handle("listApprovalDestinations", () => Effect.gen(function*() {
+        const tenantId = yield* requireTenant
+        return { destinations: yield* orDieStorage(store.listApprovalDestinations(tenantId)) }
+      }))
+      .handle("createApprovalDestination", (request) => Effect.gen(function*() {
+        const tenantId = yield* requireTenant
+        const url = approvalWebhookUrl(request.payload.url)
+        if (url === undefined) return yield* new ApiBadRequest({ error: "Webhook URL must be a public HTTPS URL without embedded credentials" })
+        const signingSecret = generateApprovalSigningSecret()
+        const destination = yield* orDieStorage(store.createApprovalDestination({
+          id: newApprovalDestinationId(), tenantId, name: request.payload.name,
+          url: url.toString(), signingSecret
+        }))
+        return { destination, signingSecret }
+      }))
+      .handle("deleteApprovalDestination", (request) => Effect.gen(function*() {
+        const tenantId = yield* requireTenant
+        yield* orDieStorage(store.deleteApprovalDestination(tenantId, request.params["id"]))
+        return { deleted: true as const }
+      }))
+      .handle("getClientApprovalDestinations", (request) => Effect.gen(function*() {
+        const tenantId = yield* requireTenant
+        const client = yield* orDieStorage(store.findClientById(tenantId, request.params["id"]))
+        if (client === undefined) return yield* new ApiNotFound({ error: `Unknown client ${request.params["id"]}` })
+        return { destinationIds: yield* orDieStorage(store.listClientApprovalDestinationIds(client.id)) }
+      }))
+      .handle("replaceClientApprovalDestinations", (request) => Effect.gen(function*() {
+        const tenantId = yield* requireTenant
+        const client = yield* orDieStorage(store.findClientById(tenantId, request.params["id"]))
+        if (client === undefined) return yield* new ApiNotFound({ error: `Unknown client ${request.params["id"]}` })
+        const available = yield* orDieStorage(store.listApprovalDestinations(tenantId))
+        const selected = new Set(request.payload.destinationIds)
+        if (available.filter((destination) => selected.has(destination.id)).length !== selected.size) {
+          return yield* new ApiBadRequest({ error: "One or more approval destinations do not belong to this tenant" })
+        }
+        return { destinationIds: yield* orDieStorage(store.replaceClientApprovalDestinations(tenantId, client.id, [...selected])) }
+      }))
       .handle("issueKey", (request) =>
         Effect.gen(function*() {
           const tenantId = yield* requireTenant
@@ -352,6 +407,12 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
                 : store.listApprovals(tenantId, status))
           }
         }))
+      .handle("listApprovalDeliveries", (request) => Effect.gen(function*() {
+        const tenantId = yield* requireTenant
+        const approval = yield* orDieStorage(store.getApproval(tenantId, request.params["id"]))
+        if (approval === undefined) return yield* new ApiNotFound({ error: `Unknown approval ${request.params["id"]}` })
+        return { deliveries: yield* orDieStorage(store.listApprovalDeliveries(tenantId, approval.id)) }
+      }))
       .handle("approve", (request) =>
         Effect.gen(function*() {
           const tenantId = yield* requireTenant
@@ -495,7 +556,14 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           }
           return { reports }
         }))
-      .handle("maintenance", () => orDieStorage(runMaintenance(store)))
+      .handle("maintenance", () => Effect.gen(function*() {
+        const report = yield* orDieStorage(runMaintenance(store))
+        yield* orDieStorage(deliverDueApprovalNotifications({
+          store,
+          ...whenPresentMap("dashboardUrl", config.dashboardUrl?.(), (url) => url)
+        }))
+        return report
+      }))
       .handle("audit", (request) =>
         Effect.gen(function*() {
           const tenantId = yield* requireTenant

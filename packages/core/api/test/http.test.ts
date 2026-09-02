@@ -549,18 +549,31 @@ describe("gateway http surface", () => {
     const response = await run(call("POST", `/v1/clients/${clientId}/settings`, {
       body: {
         capabilities: ["provision_connections"],
-        approvalDelivery: {
-          returnLink: false,
-          webhooks: ["https://automation.example/approvals"]
-        }
+        approvalDelivery: { returnLink: false }
       }
     }))
     expect(response.status).toBe(200)
     expect(response.body["capabilities"]).toEqual(["provision_connections"])
-    expect(response.body["approvalDelivery"]).toEqual({
-      returnLink: false,
-      webhooks: ["https://automation.example/approvals"]
-    })
+    expect(response.body["approvalDelivery"]).toEqual({ returnLink: false })
+  })
+
+  test("manages reusable approval destinations and client assignments", async () => {
+    const { call } = await run(setup({ capabilities: ["provision_connections", "administer_gateway"] }))
+    const createdClient = await run(call("POST", "/v1/clients", { body: { name: "notified" } }))
+    const clientId = String(createdClient.body["id"])
+    const created = await run(call("POST", "/v1/approval-destinations", {
+      body: { name: "phone", url: "https://notify.example/approvals" }
+    }))
+    expect(created.status).toBe(201)
+    expect(String(created.body["signingSecret"])).toStartWith("wfs_")
+    const destination = Schema.decodeUnknownSync(Schema.Struct({ id: Schema.String }))(created.body["destination"])
+    const destinationId = destination.id
+    const assigned = await run(call("POST", `/v1/clients/${clientId}/approval-destinations`, {
+      body: { destinationIds: [destinationId] }
+    }))
+    expect(assigned.body["destinationIds"]).toEqual([destinationId])
+    const listed = await run(call("GET", "/v1/approval-destinations"))
+    expect(listed.body["destinations"]).toHaveLength(1)
   })
 
   test("uses a tool's conservative decision when seeding the default policy", async () => {

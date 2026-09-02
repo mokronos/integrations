@@ -6,13 +6,16 @@ import { Context, Effect, Layer } from "effect"
 import type { Encryption } from "./crypto.ts"
 import {
   AccessProfileId,
+  Alias,
   canonicalArguments,
+  ApprovalDestinationId,
   ApprovalPolicyId,
   ClientId,
   defaultApprovalDelivery,
   defaultTenantId,
   SessionTokenHash,
-  TenantId
+  TenantId,
+  ToolName
 } from "./domain.ts"
 import type {
   AuthSession,
@@ -24,7 +27,7 @@ import { applyGatewayMigrations } from "./migrate.ts"
 import {
   millis, toAccessProfile, toAccessProfileTool, toApiKey, toApproval,
   toApprovalPolicy, toApprovalPolicyTool, toAuditRecord, toAuthSession, toClient,
-  toExternalIdentity, toIdentityOAuthState, toLoginHandoff, toLoginRecord,
+  toApprovalDeliveryAttempt, toApprovalDestination, toExternalIdentity, toIdentityOAuthState, toLoginHandoff, toLoginRecord,
   toSnapshot, toSubject, toTenant
 } from "./store-rows.ts"
 export {
@@ -585,6 +588,107 @@ const createGatewayStoreDriver = async (
       )
     },
 
+    createApprovalDestination: async (input) => {
+      await run(
+        `INSERT INTO gateway_approval_destination
+          (id, tenant_id, name, type, url, signing_secret, created_at, deleted_at)
+         VALUES (?, ?, ?, 'webhook', ?, ?, ?, NULL)`,
+        [input.id, input.tenantId, input.name, input.url, sealText(input.signingSecret), now()]
+      )
+      const row = await one("SELECT * FROM gateway_approval_destination WHERE id = ?", [input.id])
+      if (row === undefined) throw new Error(`Failed to store approval destination ${input.id}`)
+      return toApprovalDestination(row)
+    },
+
+    listApprovalDestinations: async (tenantId) =>
+      (await all("SELECT * FROM gateway_approval_destination WHERE tenant_id = ? AND deleted_at IS NULL ORDER BY name", [tenantId]))
+        .map(toApprovalDestination),
+
+    deleteApprovalDestination: async (tenantId, id) => {
+      await run("UPDATE gateway_approval_destination SET deleted_at = ? WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL", [now(), tenantId, id])
+    },
+
+    listClientApprovalDestinationIds: async (clientId) =>
+      (await all("SELECT destination_id FROM gateway_client_approval_destination WHERE client_id = ? ORDER BY destination_id", [clientId]))
+        .map((row) => ApprovalDestinationId.make(String(row["destination_id"]))),
+
+    replaceClientApprovalDestinations: async (tenantId, clientId, ids) => {
+      const statements = [
+        { sql: "DELETE FROM gateway_client_approval_destination WHERE client_id = ?", args: [clientId] },
+        ...ids.map((id) => ({
+          sql: `INSERT INTO gateway_client_approval_destination (client_id, destination_id)
+                SELECT ?, id FROM gateway_approval_destination WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL`,
+          args: [clientId, tenantId, id]
+        }))
+      ]
+      await database.batch(statements, "write")
+      return await (async () =>
+        (await all("SELECT destination_id FROM gateway_client_approval_destination WHERE client_id = ? ORDER BY destination_id", [clientId]))
+          .map((row) => ApprovalDestinationId.make(String(row["destination_id"]))))()
+    },
+
+    listApprovalDeliveries: async (tenantId, approvalId) =>
+      (await all(
+        `SELECT delivery.*, destination.name AS destination_name
+           FROM gateway_approval_delivery AS delivery
+           JOIN gateway_approval_destination AS destination ON destination.id = delivery.destination_id
+           JOIN gateway_pending_approval AS approval ON approval.id = delivery.approval_id
+          WHERE approval.tenant_id = ? AND approval.id = ? ORDER BY destination.name`,
+        [tenantId, approvalId]
+      )).map(toApprovalDeliveryAttempt),
+
+    claimDueApprovalDeliveries: async (at, limit) => {
+      const claimed = await database.execute({
+        sql: `UPDATE gateway_approval_delivery
+                 SET next_attempt_at = ?
+               WHERE id IN (
+                 SELECT delivery.id FROM gateway_approval_delivery AS delivery
+                 JOIN gateway_pending_approval AS approval ON approval.id = delivery.approval_id
+                 WHERE delivery.status IN ('pending', 'retrying') AND delivery.next_attempt_at <= ?
+                   AND approval.status = 'pending' AND approval.expires_at > ?
+                 ORDER BY delivery.next_attempt_at LIMIT ?
+               ) AND next_attempt_at <= ?
+               RETURNING id`,
+        args: [millis(new Date(at.getTime() + 60_000)), millis(at), millis(at), limit, millis(at)]
+      })
+      const ids = claimed.rows.map((row) => String(row["id"]))
+      if (ids.length === 0) return []
+      const placeholders = ids.map(() => "?").join(", ")
+      const rows = await all(
+        `SELECT delivery.*, destination.name AS destination_name, destination.url,
+                destination.signing_secret, approval.tenant_id, approval.client_id,
+                client.name AS client_name, approval.alias, approval.tool, approval.expires_at
+           FROM gateway_approval_delivery AS delivery
+           JOIN gateway_approval_destination AS destination ON destination.id = delivery.destination_id
+           JOIN gateway_pending_approval AS approval ON approval.id = delivery.approval_id
+           JOIN gateway_client AS client ON client.id = approval.client_id
+          WHERE delivery.id IN (${placeholders})`,
+        ids
+      )
+      return rows.map((row) => ({
+        ...toApprovalDeliveryAttempt(row),
+        tenantId: TenantId.make(String(row["tenant_id"])),
+        clientId: ClientId.make(String(row["client_id"])),
+        clientName: String(row["client_name"]),
+        alias: Alias.make(String(row["alias"])),
+        tool: ToolName.make(String(row["tool"])),
+        expiresAt: new Date(Number(row["expires_at"])),
+        url: String(row["url"]),
+        signingSecret: encryption === undefined ? String(row["signing_secret"]) : encryption.open(String(row["signing_secret"]))
+      }))
+    },
+
+    settleApprovalDelivery: async (input) => {
+      await run(
+        `UPDATE gateway_approval_delivery
+            SET status = ?, attempts = attempts + 1, next_attempt_at = ?,
+                delivered_at = CASE WHEN ? = 'delivered' THEN ? ELSE delivered_at END,
+                last_error = ?
+          WHERE id = ?`,
+        [input.status, input.nextAttemptAt === null ? null : millis(input.nextAttemptAt), input.status, now(), input.error, input.id]
+      )
+    },
+
     addApiKey: async (input) => {
       await run(
         "INSERT INTO gateway_api_key (id, client_id, hash, created_at, last_used_at, revoked_at) VALUES (?, ?, ?, ?, NULL, NULL)",
@@ -834,11 +938,11 @@ const createGatewayStoreDriver = async (
       // keyed digest of the canonical text rides alongside, because equality
       // search over randomised ciphertext is impossible by design.
       const canonical = canonicalArguments(input.arguments)
-      await run(
-        `INSERT INTO gateway_pending_approval
+      const createdAt = now()
+      await database.batch([
+        { sql: `INSERT INTO gateway_pending_approval
            (id, tenant_id, client_id, approval_policy_id, access_profile_id, alias, tool, arguments, arguments_lookup, status, created_at, expires_at, decided_at, decided_by, result, error, collected_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, NULL, NULL, NULL, NULL, NULL)`,
-        [
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, NULL, NULL, NULL, NULL, NULL)`, args: [
           input.id,
           input.tenantId,
           input.clientId,
@@ -848,10 +952,16 @@ const createGatewayStoreDriver = async (
           input.tool,
           sealText(canonical),
           encryption === undefined ? null : encryption.lookup(canonical),
-          now(),
+          createdAt,
           millis(input.expiresAt)
-        ]
-      )
+        ] },
+        { sql: `INSERT INTO gateway_approval_delivery
+             (id, approval_id, destination_id, status, attempts, next_attempt_at, delivered_at, last_error)
+           SELECT lower(hex(randomblob(16))), ?, assignment.destination_id, 'pending', 0, ?, NULL, NULL
+             FROM gateway_client_approval_destination AS assignment
+             JOIN gateway_approval_destination AS destination ON destination.id = assignment.destination_id
+            WHERE assignment.client_id = ? AND destination.deleted_at IS NULL`, args: [input.id, createdAt, input.clientId] }
+      ], "write")
       const row = await one("SELECT * FROM gateway_pending_approval WHERE id = ?", [input.id])
       if (row === undefined) throw new Error(`Failed to store approval ${input.id}`)
       return openApproval(row)
@@ -1122,6 +1232,22 @@ const effectStore = (driver: GatewayStoreDriver): GatewayStore => ({
     storeOperation("updateClientSettings", () => driver.updateClientSettings(input)),
   revokeClient: (tenantId, id) =>
     storeOperation("revokeClient", () => driver.revokeClient(tenantId, id)),
+  createApprovalDestination: (input) =>
+    storeOperation("createApprovalDestination", () => driver.createApprovalDestination(input)),
+  listApprovalDestinations: (tenantId) =>
+    storeOperation("listApprovalDestinations", () => driver.listApprovalDestinations(tenantId)),
+  deleteApprovalDestination: (tenantId, id) =>
+    storeOperation("deleteApprovalDestination", () => driver.deleteApprovalDestination(tenantId, id)),
+  listClientApprovalDestinationIds: (clientId) =>
+    storeOperation("listClientApprovalDestinationIds", () => driver.listClientApprovalDestinationIds(clientId)),
+  replaceClientApprovalDestinations: (tenantId, clientId, ids) =>
+    storeOperation("replaceClientApprovalDestinations", () => driver.replaceClientApprovalDestinations(tenantId, clientId, ids)),
+  listApprovalDeliveries: (tenantId, approvalId) =>
+    storeOperation("listApprovalDeliveries", () => driver.listApprovalDeliveries(tenantId, approvalId)),
+  claimDueApprovalDeliveries: (at, limit) =>
+    storeOperation("claimDueApprovalDeliveries", () => driver.claimDueApprovalDeliveries(at, limit)),
+  settleApprovalDelivery: (input) =>
+    storeOperation("settleApprovalDelivery", () => driver.settleApprovalDelivery(input)),
   addApiKey: (input) => storeOperation("addApiKey", () => driver.addApiKey(input)),
   listApiKeys: (clientId) => storeOperation("listApiKeys", () => driver.listApiKeys(clientId)),
   findApiKeyByHash: (hash) =>

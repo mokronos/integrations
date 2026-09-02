@@ -4,7 +4,7 @@ import {
 import { IntegrationsApiService } from "@mokronos/integrations"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import { deliverApprovalNotification } from "@mokronos/gateway-core"
+import { deliverDueApprovalNotifications } from "@mokronos/gateway-core"
 import {
   ApprovalId,
   ToolName
@@ -58,14 +58,10 @@ export const DelegatedLayer = HttpApiBuilder.group(GatewayApi, "delegated", (han
                   ? undefined
                   : `${origin.replace(/\/+$/, "")}/approvals?approval=${encodeURIComponent(approvalId)}`
               },
-              onApprovalCreated: (input) => deliverApprovalNotification({
-                client: input.authorization.client,
-                approvalId: input.approvalId,
-                alias: input.authorization.alias,
-                tool: input.authorization.accessProfileTool.tool,
-                expiresAt: input.expiresAt,
-                ...whenPresentMap("approvalUrl", input.approvalUrl, (url) => url)
-              })
+              onApprovalCreated: () => orDieStorage(deliverDueApprovalNotifications({
+                store,
+                ...whenPresentMap("dashboardUrl", config.dashboardUrl?.(), (url) => url)
+              }))
             },
             {
               secret,

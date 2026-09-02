@@ -7,6 +7,7 @@ import { Toaster } from "@/components/ui/sonner"
 
 const AccountRoute = lazy(() => import("@/routes/account").then((route) => ({ default: route.AccountRoute })))
 const ApprovalsRoute = lazy(() => import("@/routes/approvals").then((route) => ({ default: route.ApprovalsRoute })))
+const ApprovalDestinationsRoute = lazy(() => import("@/routes/approval-destinations").then((route) => ({ default: route.ApprovalDestinationsRoute })))
 const ClientDetailRoute = lazy(() => import("@/routes/client-detail").then((route) => ({ default: route.ClientDetailRoute })))
 const ClientsRoute = lazy(() => import("@/routes/clients").then((route) => ({ default: route.ClientsRoute })))
 const ExecutionsRoute = lazy(() => import("@/routes/executions").then((route) => ({ default: route.ExecutionsRoute })))
@@ -41,6 +42,7 @@ export default function App() {
             <Route path="/approval-policies" element={<ApprovalPoliciesRoute />} />
             <Route path="/approval-policies/:approvalPolicyId" element={<ApprovalPolicyDetailRoute />} />
             <Route path="/approvals" element={<ApprovalsRoute />} />
+            <Route path="/approval-destinations" element={<ApprovalDestinationsRoute />} />
             <Route path="/activity" element={<ExecutionsRoute />} />
             <Route path="/executions" element={<Navigate to="/activity" replace />} />
             <Route path="/workbench" element={<Navigate to="/" replace />} />

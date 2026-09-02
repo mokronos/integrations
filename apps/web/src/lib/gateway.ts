@@ -3,6 +3,10 @@ import { type JsonEncodable, whenPresent, whenPresentFields } from "@mokronos/co
 import { Predicate } from "effect"
 import {
   decodeApprovalDecided,
+  decodeApprovalDeliveries,
+  decodeApprovalDestinations,
+  decodeApprovalDestinationCreated,
+  decodeClientApprovalDestinations,
   decodeAuthProviders,
   decodeApprovals,
   decodeAudit,
@@ -221,6 +225,17 @@ export const updateClientSettings = async (input: {
   { capabilities: input.capabilities, approvalDelivery: input.approvalDelivery }
 ))
 
+export const listApprovalDestinations = async () =>
+  decodeApprovalDestinations(await request("GET", "/v1/approval-destinations")).destinations
+export const createApprovalDestination = async (input: { readonly name: string; readonly url: string }) =>
+  decodeApprovalDestinationCreated(await request("POST", "/v1/approval-destinations", input))
+export const deleteApprovalDestination = async (id: string) =>
+  decodeRemoved(await request("DELETE", `/v1/approval-destinations/${segment(id)}`))
+export const getClientApprovalDestinations = async (clientId: string) =>
+  decodeClientApprovalDestinations(await request("GET", `/v1/clients/${segment(clientId)}/approval-destinations`)).destinationIds
+export const replaceClientApprovalDestinations = async (clientId: string, destinationIds: ReadonlyArray<string>) =>
+  decodeClientApprovalDestinations(await request("POST", `/v1/clients/${segment(clientId)}/approval-destinations`, { destinationIds })).destinationIds
+
 export const issueKey = async (clientId: string) =>
   decodeIssuedKey(await request("POST", `/v1/clients/${segment(clientId)}/keys`))
 
@@ -257,6 +272,8 @@ export const assignApprovalPolicy = async (clientId: string, approvalPolicyId: s
 
 export const listApprovals = async (status?: ApprovalStatus) =>
   decodeApprovals(await request("GET", `/v1/approvals${query({ status })}`)).approvals
+export const listApprovalDeliveries = async (approvalId: string) =>
+  decodeApprovalDeliveries(await request("GET", `/v1/approvals/${segment(approvalId)}/deliveries`)).deliveries
 
 export const approveApproval = async (input: {
   readonly id: string

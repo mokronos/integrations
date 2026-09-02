@@ -247,6 +247,38 @@ export const gatewayPendingApproval = sqliteTable("gateway_pending_approval", {
     .where(sql`collected_at IS NULL`)
 ])
 
+export const gatewayApprovalDestination = sqliteTable("gateway_approval_destination", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().references(() => gatewayTenant.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  type: text("type").notNull(),
+  url: text("url").notNull(),
+  signingSecret: text("signing_secret").notNull(),
+  createdAt: createdAt(),
+  deletedAt: integer("deleted_at")
+}, (table) => [
+  uniqueIndex("gateway_approval_destination_name_tenant").on(table.tenantId, table.name)
+])
+
+export const gatewayClientApprovalDestination = sqliteTable("gateway_client_approval_destination", {
+  clientId: text("client_id").notNull().references(() => gatewayClient.id, { onDelete: "cascade" }),
+  destinationId: text("destination_id").notNull().references(() => gatewayApprovalDestination.id, { onDelete: "cascade" })
+}, (table) => [primaryKey({ columns: [table.clientId, table.destinationId] })])
+
+export const gatewayApprovalDelivery = sqliteTable("gateway_approval_delivery", {
+  id: text("id").primaryKey(),
+  approvalId: text("approval_id").notNull().references(() => gatewayPendingApproval.id, { onDelete: "cascade" }),
+  destinationId: text("destination_id").notNull().references(() => gatewayApprovalDestination.id),
+  status: text("status").notNull(),
+  attempts: integer("attempts").notNull(),
+  nextAttemptAt: integer("next_attempt_at"),
+  deliveredAt: integer("delivered_at"),
+  lastError: text("last_error")
+}, (table) => [
+  uniqueIndex("gateway_approval_delivery_once").on(table.approvalId, table.destinationId),
+  index("gateway_approval_delivery_due").on(table.status, table.nextAttemptAt)
+])
+
 export const gatewayAudit = sqliteTable("gateway_audit", {
   id: text("id").primaryKey(),
   tenantId: text("tenant_id").notNull().references(() => gatewayTenant.id, { onDelete: "cascade" }),

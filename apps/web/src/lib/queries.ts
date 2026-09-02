@@ -20,6 +20,9 @@ export const keys = {
   connections: ["connections"] as const,
   overview: ["overview"] as const,
   clients: ["clients"] as const,
+  approvalDestinations: ["approval-destinations"] as const,
+  clientApprovalDestinations: (id: string) => ["clients", id, "approval-destinations"] as const,
+  approvalDeliveries: (id: string) => ["approvals", id, "deliveries"] as const,
   accessProfiles: ["access-profiles"] as const,
   accessProfile: (id: string) => ["access-profiles", id] as const,
   approvalPolicies: ["approval-policies"] as const,
@@ -59,6 +62,13 @@ export const useClients = () =>
     queryFn: gateway.listClients,
     select: (response) => response.clients
   })
+export const useApprovalDestinations = () => useQuery({ queryKey: keys.approvalDestinations, queryFn: gateway.listApprovalDestinations })
+export const useClientApprovalDestinations = (id: string) => useQuery({
+  queryKey: keys.clientApprovalDestinations(id), queryFn: () => gateway.getClientApprovalDestinations(id)
+})
+export const useApprovalDeliveries = (id: string) => useQuery({
+  queryKey: keys.approvalDeliveries(id), queryFn: () => gateway.listApprovalDeliveries(id), refetchInterval: 5_000
+})
 
 /** The endpoint an MCP client connects to, as the gateway reports it. Shares
  *  the clients query because it is the same fact about the same list. */

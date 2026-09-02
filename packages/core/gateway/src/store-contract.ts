@@ -2,7 +2,8 @@ import { Effect, Schema } from "effect"
 import type { NonNegativeInt, PositiveInt } from "@mokronos/contracts"
 import type {
   AccessProfile, AccessProfileId, AccessProfileTool, Alias, ApiKey, ApiKeyHash,
-  ApiKeyId, ApprovalDelivery, ApprovalId, ApprovalPolicy, ApprovalPolicyId,
+  ApiKeyId, ApprovalDelivery, ApprovalDeliveryAttempt, ApprovalDeliveryId,
+  ApprovalDestination, ApprovalDestinationId, ApprovalId, ApprovalPolicy, ApprovalPolicyId,
   ApprovalPolicyTool, ApprovalStatus, AuditId, AuditOutcome, AuditRecord,
   AuthSession, Client, ClientCapability, ClientId, ConnectionName, ConnectionRef,
   ExternalIdentity, IdentityProvider, IntegrationSlug, Login, LoginHandoff,
@@ -73,6 +74,17 @@ export interface CreateApprovalInput {
   readonly tool: ToolName
   readonly arguments: typeof Schema.Json.Type
   readonly expiresAt: Date
+}
+
+export interface ApprovalDeliveryJob extends ApprovalDeliveryAttempt {
+  readonly tenantId: TenantId
+  readonly clientId: ClientId
+  readonly clientName: string
+  readonly alias: Alias
+  readonly tool: ToolName
+  readonly expiresAt: Date
+  readonly url: string
+  readonly signingSecret: string
 }
 
 /** Which slice of the trail to read. Every field narrows; none of them is
@@ -205,6 +217,26 @@ export interface GatewayStoreDriver {
     readonly approvalDelivery: ApprovalDelivery
   }): Promise<Client>
   revokeClient(tenantId: TenantId, id: ClientId): Promise<void>
+
+  createApprovalDestination(input: {
+    readonly id: ApprovalDestinationId
+    readonly tenantId: TenantId
+    readonly name: string
+    readonly url: string
+    readonly signingSecret: string
+  }): Promise<ApprovalDestination>
+  listApprovalDestinations(tenantId: TenantId): Promise<ReadonlyArray<ApprovalDestination>>
+  deleteApprovalDestination(tenantId: TenantId, id: ApprovalDestinationId): Promise<void>
+  listClientApprovalDestinationIds(clientId: ClientId): Promise<ReadonlyArray<ApprovalDestinationId>>
+  replaceClientApprovalDestinations(tenantId: TenantId, clientId: ClientId, ids: ReadonlyArray<ApprovalDestinationId>): Promise<ReadonlyArray<ApprovalDestinationId>>
+  listApprovalDeliveries(tenantId: TenantId, approvalId: ApprovalId): Promise<ReadonlyArray<ApprovalDeliveryAttempt>>
+  claimDueApprovalDeliveries(now: Date, limit: number): Promise<ReadonlyArray<ApprovalDeliveryJob>>
+  settleApprovalDelivery(input: {
+    readonly id: ApprovalDeliveryId
+    readonly status: "delivered" | "retrying" | "failed"
+    readonly nextAttemptAt: Date | null
+    readonly error: string | null
+  }): Promise<void>
 
   addApiKey(input: { readonly id: ApiKeyId; readonly clientId: ClientId; readonly hash: ApiKeyHash }): Promise<ApiKey>
   listApiKeys(clientId: ClientId): Promise<ReadonlyArray<ApiKey>>

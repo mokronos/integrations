@@ -31,6 +31,9 @@ _Avoid_: Granted tool
 **Approval**:
 A human decision about one frozen invocation with one exact set of arguments. It never creates standing authority.
 
+**Approval destination**:
+A reusable, tenant-owned endpoint that is assigned to clients and notified when one of their invocations needs approval. Receiving a notification never grants authority to decide it.
+
 **Connection**:
 Stored authorization for one external integration account or installation.
 _Avoid_: Client, policy

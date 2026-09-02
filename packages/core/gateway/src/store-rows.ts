@@ -1,12 +1,13 @@
 import type { Row } from "@libsql/client"
 import { Schema } from "effect"
 import {
-  AccessProfileId, Alias, ApiKeyHash, ApiKeyId, ApprovalDelivery, ApprovalId,
+  AccessProfileId, Alias, ApiKeyHash, ApiKeyId, ApprovalDelivery, ApprovalDeliveryId,
+  ApprovalDestinationId, ApprovalId,
   ApprovalPolicyId, AuditId, ClientId, ConnectionName, IntegrationSlug,
   LoginHandoffHash, SessionTokenHash, SubjectId, TenantId, ToolName
 } from "./domain.ts"
 import type {
-  AccessProfile, AccessProfileTool, ApiKey, ApprovalPolicy, ApprovalPolicyTool,
+  AccessProfile, AccessProfileTool, ApiKey, ApprovalDeliveryAttempt, ApprovalDestination, ApprovalPolicy, ApprovalPolicyTool,
   AuditRecord, AuthSession, Client, ConnectionRef, ExternalIdentity, LoginHandoff,
   PendingApproval, Subject, Tenant, ToolSnapshot
 } from "./domain.ts"
@@ -145,6 +146,27 @@ const ApprovalRow = Schema.Struct({
   collected_at: NullableNumber
 })
 
+const ApprovalDestinationRow = Schema.Struct({
+  id: Schema.String,
+  tenant_id: Schema.String,
+  name: Schema.String,
+  type: Schema.Literal("webhook"),
+  url: Schema.String,
+  created_at: Schema.Number
+})
+
+const ApprovalDeliveryRow = Schema.Struct({
+  id: Schema.String,
+  approval_id: Schema.String,
+  destination_id: Schema.String,
+  destination_name: Schema.String,
+  status: Schema.Literals(["pending", "retrying", "delivered", "failed"]),
+  attempts: Schema.Number,
+  next_attempt_at: NullableNumber,
+  delivered_at: NullableNumber,
+  last_error: NullableString
+})
+
 const AuditRow = Schema.Struct({
   id: Schema.String,
   client_id: NullableString,
@@ -251,6 +273,33 @@ export const toClient = (row: Row): Client => {
     approvalDelivery: decodeApprovalDelivery(decoded.approval_delivery),
     createdAt: date(decoded.created_at),
     revokedAt: nullableDate(decoded.revoked_at)
+  }
+}
+
+export const toApprovalDestination = (row: Row): ApprovalDestination => {
+  const decoded = Schema.decodeUnknownSync(ApprovalDestinationRow)(pick(row, ["id", "tenant_id", "name", "type", "url", "created_at"]))
+  return {
+    id: ApprovalDestinationId.make(decoded.id),
+    tenantId: TenantId.make(decoded.tenant_id),
+    name: decoded.name,
+    type: decoded.type,
+    url: decoded.url,
+    createdAt: date(decoded.created_at)
+  }
+}
+
+export const toApprovalDeliveryAttempt = (row: Row): ApprovalDeliveryAttempt => {
+  const decoded = Schema.decodeUnknownSync(ApprovalDeliveryRow)(pick(row, ["id", "approval_id", "destination_id", "destination_name", "status", "attempts", "next_attempt_at", "delivered_at", "last_error"]))
+  return {
+    id: ApprovalDeliveryId.make(decoded.id),
+    approvalId: ApprovalId.make(decoded.approval_id),
+    destinationId: ApprovalDestinationId.make(decoded.destination_id),
+    destinationName: decoded.destination_name,
+    status: decoded.status,
+    attempts: decoded.attempts,
+    nextAttemptAt: nullableDate(decoded.next_attempt_at),
+    deliveredAt: nullableDate(decoded.delivered_at),
+    lastError: decoded.last_error
   }
 }
 

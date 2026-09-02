@@ -7,6 +7,9 @@ import {
 } from "effect/unstable/httpapi"
 import {
   ApprovalDelivery,
+  ApprovalDeliveryAttempt,
+  ApprovalDestination,
+  ApprovalDestinationId,
   ApprovalId,
   ApprovalStatus,
   AuditOutcome,
@@ -73,6 +76,15 @@ const CreateClientBody = Schema.Struct({
 const UpdateClientSettingsBody = Schema.Struct({
   capabilities: Schema.Array(ClientCapability),
   approvalDelivery: ApprovalDelivery
+})
+
+const CreateApprovalDestinationBody = Schema.Struct({
+  name: Schema.String,
+  url: Schema.String
+})
+
+const ReplaceClientApprovalDestinationsBody = Schema.Struct({
+  destinationIds: Schema.Array(ApprovalDestinationId)
 })
 
 const ConfigurationBody = Schema.Struct({
@@ -525,6 +537,28 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
     success: Client,
     error: [ApiNotFoundError, ApiBadRequestError]
   }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.get("listApprovalDestinations", "/v1/approval-destinations", {
+    success: Schema.Struct({ destinations: Schema.Array(ApprovalDestination) })
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.post("createApprovalDestination", "/v1/approval-destinations", {
+    payload: CreateApprovalDestinationBody,
+    success: HttpApiSchema.status(201)(Schema.Struct({ destination: ApprovalDestination, signingSecret: Schema.String })),
+    error: ApiBadRequestError
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.delete("deleteApprovalDestination", "/v1/approval-destinations/:id", {
+    params: { id: ApprovalDestinationId },
+    success: Schema.Struct({ deleted: Schema.Literal(true) })
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.get("getClientApprovalDestinations", "/v1/clients/:id/approval-destinations", {
+    params: { id: ClientId },
+    success: Schema.Struct({ destinationIds: Schema.Array(ApprovalDestinationId) }),
+    error: ApiNotFoundError
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.post("replaceClientApprovalDestinations", "/v1/clients/:id/approval-destinations", {
+    params: { id: ClientId }, payload: ReplaceClientApprovalDestinationsBody,
+    success: Schema.Struct({ destinationIds: Schema.Array(ApprovalDestinationId) }),
+    error: [ApiNotFoundError, ApiBadRequestError]
+  }).annotate(RequiredAccess, "administrative"))
   .add(HttpApiEndpoint.post("issueKey", "/v1/clients/:id/keys", {
     params: { id: ClientId },
     success: HttpApiSchema.status(201)(Schema.Struct({
@@ -651,6 +685,11 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
   .add(HttpApiEndpoint.get("listApprovals", "/v1/approvals", {
     query: { status: Schema.optional(ApprovalStatus) },
     success: Schema.Struct({ approvals: Schema.Array(PendingApproval) })
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.get("listApprovalDeliveries", "/v1/approvals/:id/deliveries", {
+    params: { id: ApprovalId },
+    success: Schema.Struct({ deliveries: Schema.Array(ApprovalDeliveryAttempt) }),
+    error: ApiNotFoundError
   }).annotate(RequiredAccess, "administrative"))
   .add(HttpApiEndpoint.post("approve", "/v1/approvals/:id/approve", {
     params: { id: ApprovalId },

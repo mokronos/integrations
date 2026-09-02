@@ -2,6 +2,7 @@ import { createGatewayService, type GatewayService } from "@mokronos/gateway-api
 import {
   createEncryption,
   GatewayStoreService,
+  deliverDueApprovalNotifications,
   runMaintenance,
   type Encryption
 } from "@mokronos/gateway-core"
@@ -186,5 +187,8 @@ export default {
   async scheduled(_event: ScheduledEventLike, env: Env): Promise<void> {
     const service = await getService(env)
     await Effect.runPromise(runMaintenance(service.store))
+    await Effect.runPromise(env.INTEGRATIONS_PUBLIC_URL === undefined
+      ? deliverDueApprovalNotifications({ store: service.store })
+      : deliverDueApprovalNotifications({ store: service.store, dashboardUrl: env.INTEGRATIONS_PUBLIC_URL }))
   }
 }

@@ -11,7 +11,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { until, when } from "@/lib/format"
 import * as gateway from "@/lib/gateway"
-import { useApprovals, useInvalidate, useMutation } from "@/lib/queries"
+import { useApprovalDeliveries, useApprovals, useInvalidate, useMutation } from "@/lib/queries"
 import { decodeApprovalFilter } from "@/lib/schemas"
 import type { ApprovalStatus, PendingApproval } from "@/lib/schemas"
 
@@ -33,6 +33,7 @@ function ApprovalCard({
 }) {
   const invalidate = useInvalidate()
   const [expired, setExpired] = useState(false)
+  const deliveries = useApprovalDeliveries(approval.id)
 
   useEffect(() => {
     if (approval.status !== "pending") return
@@ -82,6 +83,11 @@ function ApprovalCard({
         {/* The arguments are frozen at propose time — what you approve is
             exactly this call, not a capability to make it again. */}
         <JsonView value={approval.arguments} label="arguments" />
+        {(deliveries.data ?? []).length > 0 ? <div className="flex flex-wrap gap-2">
+          {(deliveries.data ?? []).map((delivery) => <Badge key={delivery.id} variant={delivery.status === "failed" ? "destructive" : "outline"}>
+            {delivery.destinationName}: {delivery.status}{delivery.attempts > 0 ? ` (${delivery.attempts})` : ""}
+          </Badge>)}
+        </div> : null}
         {approval.result === null ? null : <JsonView value={approval.result} label="result" />}
         {approval.error === null
           ? null

@@ -14,6 +14,8 @@ import {
   ApprovalPolicy,
   ApprovalPolicyId,
   ApprovalPolicyTool,
+  ApprovalDestination,
+  ApprovalDeliveryAttempt,
   PolicyDecision as PolicyDecisionSchema,
   PendingApproval
 } from "@mokronos/gateway-core/domain"
@@ -57,6 +59,8 @@ export type {
   PendingApproval
 }
 
+export type { ApprovalDestination, ApprovalDeliveryAttempt }
+
 export { ApprovalStatusSchema, ConnectionRefSchema, PolicyDecisionSchema }
 export type {
   ApprovalStatus,
@@ -66,6 +70,7 @@ export type {
   PolicyDecision,
   AccessProfileId,
   ApprovalPolicyId
+  ,ApprovalDestinationId
 } from "@mokronos/gateway-core/domain"
 
 /** Derives the JSON codec for a schema and returns a decoder for it. Every
@@ -142,6 +147,10 @@ export type ApprovalPolicyToolInput = typeof ApprovalPolicyToolInput.Type
 export const ApprovalsResponse = Schema.Struct({
   approvals: Schema.Array(PendingApproval)
 })
+export const ApprovalDestinationsResponse = Schema.Struct({ destinations: Schema.Array(ApprovalDestination) })
+export const ApprovalDestinationCreated = Schema.Struct({ destination: ApprovalDestination, signingSecret: Schema.String })
+export const ClientApprovalDestinationsResponse = Schema.Struct({ destinationIds: Schema.Array(ApprovalDestination.fields.id) })
+export const ApprovalDeliveriesResponse = Schema.Struct({ deliveries: Schema.Array(ApprovalDeliveryAttempt) })
 
 export const AuditResponse = Schema.Struct({
   records: Schema.Array(AuditRecord),
@@ -257,6 +266,10 @@ export const decodeApprovalPolicyCreated = json(ApprovalPolicy)
 export const decodeApprovalPolicyToolsReplaced = json(ApprovalPolicyToolsReplaced)
 export const decodeEffectiveTools = json(EffectiveToolsResponse)
 export const decodeApprovals = json(ApprovalsResponse)
+export const decodeApprovalDestinations = json(ApprovalDestinationsResponse)
+export const decodeApprovalDestinationCreated = json(ApprovalDestinationCreated)
+export const decodeClientApprovalDestinations = json(ClientApprovalDestinationsResponse)
+export const decodeApprovalDeliveries = json(ApprovalDeliveriesResponse)
 export const decodeAudit = json(AuditResponse)
 export const decodeOverview = json(OverviewResponse)
 export const decodeKeys = json(KeysResponse)

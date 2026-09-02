@@ -8,11 +8,13 @@ import {
   Alias,
   ConnectionName,
   createGatewayStore,
+  deliverDueApprovalNotifications,
   defaultTenantId,
   generateApiKey,
   hashApiKey,
   IntegrationSlug,
   newApprovalId,
+  newApprovalDestinationId,
   newAuditId,
   newClientId,
   newAccessProfileId,
@@ -146,22 +148,47 @@ describe("gateway store", () => {
       name: "policy-check",
       capabilities: []
     }))
-    expect(client.approvalDelivery).toEqual({ returnLink: true, webhooks: [] })
+    expect(client.approvalDelivery).toEqual({ returnLink: true })
 
     const updated = await run(store.updateClientSettings({
       tenantId: defaultTenantId,
       id: client.id,
       capabilities: ["provision_connections"],
-      approvalDelivery: {
-        returnLink: false,
-        webhooks: ["https://automation.example/approval"]
-      }
+      approvalDelivery: { returnLink: false }
     }))
     expect(updated.capabilities).toEqual(["provision_connections"])
-    expect(updated.approvalDelivery).toEqual({
-      returnLink: false,
-      webhooks: ["https://automation.example/approval"]
-    })
+    expect(updated.approvalDelivery).toEqual({ returnLink: false })
+  })
+
+  test("creates durable delivery jobs for a client's destinations", async () => {
+    const store = await run(makeStore())
+    const { client, accessProfile, approvalPolicy } = await run(seedBinding(store))
+    const destination = await run(store.createApprovalDestination({
+      id: newApprovalDestinationId(), tenantId: defaultTenantId,
+      name: "phone", url: "https://notify.example/approvals", signingSecret: "wfs_secret"
+    }))
+    await run(store.replaceClientApprovalDestinations(defaultTenantId, client.id, [destination.id]))
+    const approval = await run(store.createApproval({
+      id: newApprovalId(), tenantId: defaultTenantId, clientId: client.id,
+      approvalPolicyId: approvalPolicy.id, accessProfileId: accessProfile.id,
+      alias: Alias.make("mail"), tool: ToolName.make("sendEmail"), arguments: {},
+      expiresAt: new Date(Date.now() + 60_000)
+    }))
+    expect(await run(store.listApprovalDeliveries(defaultTenantId, approval.id))).toMatchObject([{
+      approvalId: approval.id, destinationId: destination.id, destinationName: "phone",
+      status: "pending", attempts: 0
+    }])
+    let delivered: RequestInit | undefined
+    const doFetch = Object.assign(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      delivered = init
+      return new Response(null, { status: 204 })
+    }, { preconnect: globalThis.fetch.preconnect })
+    await run(deliverDueApprovalNotifications({ store, dashboardUrl: "https://gateway.example", doFetch }))
+    expect(new Headers(delivered?.headers).get("x-integrations-signature")).toStartWith("v1=")
+    expect(String(delivered?.body)).not.toContain("arguments")
+    expect(await run(store.listApprovalDeliveries(defaultTenantId, approval.id))).toMatchObject([{
+      status: "delivered", attempts: 1
+    }])
   })
 
   test("completes and consumes login handoffs and OAuth state once", async () => {

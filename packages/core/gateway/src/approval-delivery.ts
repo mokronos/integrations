@@ -1,75 +1,85 @@
+import { createHmac, timingSafeEqual } from "node:crypto"
 import { Effect, Schema } from "effect"
-import type { ApprovalId, Client } from "./domain.ts"
 import { whenPresent } from "@mokronos/contracts"
+import type { GatewayStore } from "./store-contract.ts"
 
-/** The intentionally sparse outbound contract. Invocation arguments, results,
- * credentials, and human identities never leave through a notification hook. */
 export const ApprovalNotification = Schema.Struct({
-  version: Schema.Literal(1),
-  event: Schema.Literal("approval.pending"),
-  approvalId: Schema.String,
-  clientId: Schema.String,
-  clientName: Schema.String,
-  alias: Schema.String,
-  tool: Schema.String,
-  expiresAt: Schema.String,
+  version: Schema.Literal(1), event: Schema.Literal("approval.pending"),
+  approvalId: Schema.String, clientId: Schema.String, clientName: Schema.String,
+  alias: Schema.String, tool: Schema.String, expiresAt: Schema.String,
   approvalUrl: Schema.optional(Schema.String)
 })
 export type ApprovalNotification = typeof ApprovalNotification.Type
 
-export interface ApprovalDeliveryInput {
-  readonly client: Client
-  readonly approvalId: ApprovalId
-  readonly alias: string
-  readonly tool: string
-  readonly expiresAt: Date
-  readonly approvalUrl?: string
+export const approvalWebhookSignature = (secret: string, timestamp: string, body: string): string =>
+  `v1=${createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex")}`
+
+export const verifyApprovalWebhookSignature = (input: {
+  readonly secret: string; readonly timestamp: string; readonly body: string; readonly signature: string
+}): boolean => {
+  const expected = Buffer.from(approvalWebhookSignature(input.secret, input.timestamp, input.body))
+  const presented = Buffer.from(input.signature)
+  return expected.length === presented.length && timingSafeEqual(expected, presented)
 }
 
-/** Best-effort fan-out. A notification endpoint cannot make an invocation
- * fail or approve it; it only tells another system where a signed-in human can
- * review the frozen call. */
 class ApprovalWebhookError extends Schema.TaggedError<ApprovalWebhookError>()(
-  "ApprovalWebhookError",
-  {
-    url: Schema.String,
-    cause: Schema.Defect()
-  }
+  "ApprovalWebhookError", { message: Schema.String }
 ) {}
 
-export const deliverApprovalNotification = Effect.fn("Approval.deliverNotification")(
-  function*(
-    input: ApprovalDeliveryInput,
-    doFetch: typeof globalThis.fetch = globalThis.fetch
-  ): Effect.fn.Return<void> {
-    if (input.client.approvalDelivery.webhooks.length === 0) return
-    const payload = Schema.decodeUnknownSync(ApprovalNotification)({
-      version: 1,
-      event: "approval.pending",
-      approvalId: input.approvalId,
-      clientId: input.client.id,
-      clientName: input.client.name,
-      alias: input.alias,
-      tool: input.tool,
-      expiresAt: input.expiresAt.toISOString(),
-      ...whenPresent("approvalUrl", input.approvalUrl)
-    })
-    yield* Effect.forEach(input.client.approvalDelivery.webhooks, (url) =>
-      Effect.tryPromise({
+export const deliverDueApprovalNotifications = Effect.fn("Approval.deliverDueNotifications")(
+  function*(input: {
+    readonly store: GatewayStore
+    readonly dashboardUrl?: string
+    readonly limit?: number
+    readonly now?: Date
+    readonly doFetch?: typeof globalThis.fetch
+  }) {
+    const at = input.now ?? new Date()
+    const jobs = yield* input.store.claimDueApprovalDeliveries(at, input.limit ?? 25)
+    const doFetch = input.doFetch ?? globalThis.fetch
+    yield* Effect.forEach(jobs, (job) => Effect.gen(function*() {
+      const approvalUrl = input.dashboardUrl === undefined ? undefined
+        : `${input.dashboardUrl.replace(/\/+$/, "")}/approvals?approval=${encodeURIComponent(job.approvalId)}`
+      const notification: ApprovalNotification = {
+        version: 1, event: "approval.pending", approvalId: job.approvalId,
+        clientId: job.clientId, clientName: job.clientName, alias: job.alias,
+        tool: job.tool, expiresAt: job.expiresAt.toISOString(),
+        ...whenPresent("approvalUrl", approvalUrl)
+      }
+      const body = JSON.stringify(notification)
+      const timestamp = Math.floor(at.getTime() / 1_000).toString()
+      const delivery = Effect.tryPromise({
         try: async () => {
-          const response = await doFetch(url, {
-            method: "POST",
+          const response = await doFetch(job.url, {
+            method: "POST", redirect: "error",
             headers: {
-              "content-type": "application/json",
-              "idempotency-key": input.approvalId,
-              "x-integrations-event": "approval.pending"
+              "content-type": "application/json", "idempotency-key": job.id,
+              "x-integrations-delivery": job.id, "x-integrations-event": "approval.pending",
+              "x-integrations-timestamp": timestamp,
+              "x-integrations-signature": approvalWebhookSignature(job.signingSecret, timestamp, body)
             },
-            body: JSON.stringify(payload),
-            signal: AbortSignal.timeout(5_000)
+            body, signal: AbortSignal.timeout(5_000)
           })
-          if (!response.ok) throw new Error(`Approval webhook returned HTTP ${response.status}`)
+          if (!response.ok) throw new Error(`Webhook returned HTTP ${response.status}`)
         },
-        catch: (cause) => new ApprovalWebhookError({ url, cause })
-      }).pipe(Effect.ignore),
-      { concurrency: "unbounded", discard: true })
-  })
+        catch: (cause) => new ApprovalWebhookError({
+          message: cause instanceof Error ? cause.message : "Webhook delivery failed"
+        })
+      })
+      yield* delivery.pipe(Effect.matchEffect({
+        onSuccess: () => input.store.settleApprovalDelivery({
+          id: job.id, status: "delivered", nextAttemptAt: null, error: null
+        }),
+        onFailure: (error) => {
+          const attempts = job.attempts + 1
+          const next = new Date(at.getTime() + Math.min(60 * 60_000, 2 ** Math.min(attempts, 10) * 1_000))
+          const terminal = attempts >= 8 || next >= job.expiresAt
+          return input.store.settleApprovalDelivery({
+            id: job.id, status: terminal ? "failed" : "retrying",
+            nextAttemptAt: terminal ? null : next, error: error.message
+          })
+        }
+      }))
+    }), { concurrency: 5, discard: true })
+  }
+)
