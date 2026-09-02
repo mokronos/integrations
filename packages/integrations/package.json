@@ -40,6 +40,8 @@
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "test:conformance": "bun test test/conformance/reference",
+    "test:remote": "RUN_REMOTE_INTEGRATION_TESTS=1 bun test test/conformance/remote",
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
