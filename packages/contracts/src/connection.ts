@@ -18,6 +18,8 @@ export const Connection = Schema.Struct({
   oauthClientOwner: Schema.optional(Schema.NullOr(OwnerTier)),
   oauthScope: Schema.optional(Schema.NullOr(Schema.String)),
   missingOAuthScopes: Schema.optional(Schema.Array(Schema.String)),
-  expiresAt: Schema.optional(Schema.NullOr(Schema.Number))
+  expiresAt: Schema.optional(Schema.NullOr(Schema.Number)),
+  status: Schema.Literals(["connected", "reauthorization_required"]),
+  error: Schema.optional(Schema.String)
 })
 export type Connection = typeof Connection.Type

@@ -120,7 +120,12 @@ const toIntegration = (
   ))
 
 const toConnection = (
-  record: ConnectionRecord
+  record: ConnectionRecord,
+  health: {
+    readonly status: "connected" | "reauthorization_required"
+    readonly expiresAt?: number
+    readonly error?: string
+  } = { status: "connected" }
 ): Effect.Effect<Connection, StorageError> =>
   Schema.decodeUnknownEffect(Connection)({
     owner: record.owner,
@@ -139,7 +144,9 @@ const toConnection = (
     oauthClientOwner: record.oauthClientOwner ?? null,
     oauthScope: record.oauthScope ?? null,
     missingOAuthScopes: [],
-    expiresAt: record.expiresAt ?? null
+    expiresAt: health.expiresAt ?? record.expiresAt ?? null,
+    status: health.status,
+    ...whenPresent("error", health.error)
   }).pipe(Effect.mapError((cause) =>
     new StorageError({ message: `Could not describe connection ${record.name}`, cause })
   ))
@@ -352,7 +359,7 @@ export class IntegrationHost extends Context.Service<
               clientOwner,
               client: OAuthClientSlug.make(client)
             })
-            return Option.map(token, (value) => ({ value, placements }))
+            return Option.map(token, (access) => ({ value: access.value, placements }))
           }
 
           const address = connectionAddress({
@@ -671,7 +678,39 @@ export class IntegrationHost extends Context.Service<
             readonly owner?: OwnerTier
           } = {}) {
             const records = yield* store.listConnections(filter)
-            return yield* Effect.forEach(records, toConnection)
+            return yield* Effect.forEach(records, (record) => {
+              if (record.provider !== "oauth") return toConnection(record)
+              const client = record.oauthClient
+              const clientOwner = record.oauthClientOwner
+              if (client === undefined || clientOwner === undefined) {
+                return toConnection(record, {
+                  status: "reauthorization_required",
+                  error: `${record.integration}/${record.name} is an OAuth connection with no client recorded`
+                })
+              }
+              return oauth.accessToken({
+                owner: record.owner,
+                integration: record.integration,
+                connection: record.name,
+                clientOwner,
+                client: OAuthClientSlug.make(client)
+              }).pipe(
+                Effect.flatMap(Option.match({
+                  onNone: () => toConnection(record, {
+                    status: "reauthorization_required",
+                    error: `${record.integration}/${record.name} has no OAuth grant. Connect it again.`
+                  }),
+                  onSome: (access) => toConnection(record, {
+                    status: "connected",
+                    ...whenPresent("expiresAt", access.expiresAt)
+                  })
+                })),
+                Effect.catch((cause) => toConnection(record, {
+                  status: "reauthorization_required",
+                  error: cause.message
+                }))
+              )
+            }, { concurrency: "unbounded" })
           }
         ),
         removeConnection,

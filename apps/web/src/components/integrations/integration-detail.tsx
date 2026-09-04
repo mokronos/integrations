@@ -34,7 +34,7 @@ import { ConnectDialog } from "./connect-dialog"
 import { ConnectionBadge } from "./connection-badge"
 import { IntegrationIcon, integrationHost } from "./integration-icon"
 const isConnected = (integration: IntegrationOverview): boolean =>
-  integration.connections.length > 0
+  integration.connections.some((connection) => connection.status === "connected")
 
 const expiry = (connection: Connection): string =>
   connection.expiresAt === undefined || connection.expiresAt === null
@@ -340,6 +340,9 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
                               ? null
                               : <span>{connection.identityLabel}</span>}
                             <span>{expiry(connection)}</span>
+                            {connection.error === undefined ? null : (
+                              <span className="text-destructive">{connection.error}</span>
+                            )}
                           </ItemDescription>
                         </ItemContent>
                         <ItemActions>
@@ -397,4 +400,3 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
     </div>
   )
 }
-

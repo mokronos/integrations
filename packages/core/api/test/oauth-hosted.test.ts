@@ -45,7 +45,8 @@ const connection = (name: string): Connection => ({
   integration: "google",
   template: "google",
   address: `connections.google.org.${name}`,
-  provider: "google"
+  provider: "google",
+  status: "connected"
 })
 
 interface RecordedFlow {

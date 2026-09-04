@@ -438,7 +438,8 @@ const buildAuth = (host: HostHandle): AuthApi => ({
       oauthClientOwner: record.oauthClientOwner,
       oauthScope: Option.getOrNull(completed.scope),
       expiresAt: Option.getOrNull(completed.expiresAt),
-      missingOAuthScopes: []
+      missingOAuthScopes: [],
+      status: "connected"
     })
   }))
 })

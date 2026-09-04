@@ -65,7 +65,8 @@ const stubConnection = (
   integration: reference.integration,
   template: reference.integration,
   address: `connections.${reference.integration}.user.${reference.name}`,
-  provider: reference.integration
+  provider: reference.integration,
+  status: "connected"
 })
 
 /** Fills in a tool's descriptive fields, which these tests never assert on. */

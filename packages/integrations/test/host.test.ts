@@ -1,7 +1,11 @@
 import { describe, expect, it } from "bun:test"
 import { Effect, Layer, Option } from "effect"
 import { CatalogStore } from "../src/catalog/store.ts"
-import { CredentialStore, connectionCredentialKey } from "../src/storage/credentials.ts"
+import {
+  CredentialStore,
+  connectionCredentialKey,
+  writeTokens
+} from "../src/storage/credentials.ts"
 import { IntegrationHost } from "../src/host.ts"
 import { McpHost } from "../src/mcp/client.ts"
 import { OAuthFlows } from "../src/oauth/flows.ts"
@@ -120,6 +124,100 @@ describe("the catalog", () => {
       return yield* host.findIntegration(IntegrationSlug.make("absent"))
     }))
     expect(Option.isNone(found)).toBe(true)
+  })
+
+  it("reports an expired OAuth connection without a refresh token as requiring authorization", async () => {
+    const connection = await run(Effect.gen(function* () {
+      const store = yield* CatalogStore
+      const credentials = yield* CredentialStore
+      yield* store.putIntegration({
+        slug: notes,
+        name: "Notes",
+        description: "A notebook.",
+        kind: "mcp",
+        endpoint: "https://notes.example.com/mcp",
+        authMethods: [{
+          id: "oauth2",
+          label: "OAuth",
+          kind: "oauth",
+          template: "oauth2"
+        }],
+        createdAt: Date.now()
+      })
+      yield* store.putConnection({
+        owner: "org",
+        integration: notes,
+        name: primary,
+        template: AuthTemplateSlug.make("oauth2"),
+        provider: "oauth",
+        oauthClient: "notes-client",
+        oauthClientOwner: "org",
+        expiresAt: Date.now() - 1,
+        createdAt: Date.now()
+      })
+      yield* writeTokens(
+        credentials,
+        connectionCredentialKey(connectionAddress({
+          owner: "org",
+          integration: notes,
+          connection: primary
+        })),
+        { accessToken: "expired", expiresAt: Date.now() - 1 }
+      )
+      const connections = yield* (yield* IntegrationHost).listConnections()
+      return connections[0]
+    }))
+
+    expect(connection?.status).toBe("reauthorization_required")
+    expect(connection?.error).toContain("no refresh token")
+  })
+
+  it("uses the sealed OAuth grant expiry when reporting connection health", async () => {
+    const tokenExpiry = Date.now() + 3_600_000
+    const connection = await run(Effect.gen(function* () {
+      const store = yield* CatalogStore
+      const credentials = yield* CredentialStore
+      yield* store.putIntegration({
+        slug: notes,
+        name: "Notes",
+        description: "A notebook.",
+        kind: "mcp",
+        endpoint: "https://notes.example.com/mcp",
+        authMethods: [{
+          id: "oauth2",
+          label: "OAuth",
+          kind: "oauth",
+          template: "oauth2"
+        }],
+        createdAt: Date.now()
+      })
+      yield* store.putConnection({
+        owner: "org",
+        integration: notes,
+        name: primary,
+        template: AuthTemplateSlug.make("oauth2"),
+        provider: "oauth",
+        oauthClient: "notes-client",
+        oauthClientOwner: "org",
+        expiresAt: Date.now() - 1,
+        createdAt: Date.now()
+      })
+      yield* writeTokens(
+        credentials,
+        connectionCredentialKey(connectionAddress({
+          owner: "org",
+          integration: notes,
+          connection: primary
+        })),
+        { accessToken: "current", expiresAt: tokenExpiry }
+      )
+      const connections = yield* (yield* IntegrationHost).listConnections()
+      return connections[0]
+    }))
+
+    expect(connection?.status).toBe("connected")
+    expect(connection?.expiresAt).toBe(tokenExpiry)
+    expect(connection?.error).toBeUndefined()
   })
 
   it("takes a connection's tools with it when the integration goes", async () => {

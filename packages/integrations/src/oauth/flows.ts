@@ -169,6 +169,11 @@ export interface CompletedAuthorization {
   readonly expiresAt: Option.Option<number>
 }
 
+export interface OAuthAccess {
+  readonly value: string
+  readonly expiresAt?: number
+}
+
 export class OAuthFlows extends Context.Service<
   OAuthFlows,
   {
@@ -221,7 +226,7 @@ export class OAuthFlows extends Context.Service<
       readonly connection: ConnectionName
       readonly clientOwner: OwnerTier
       readonly client: OAuthClientSlug
-    }) => Effect.Effect<Option.Option<string>, OAuthError | StorageError>
+    }) => Effect.Effect<Option.Option<OAuthAccess>, OAuthError | StorageError>
   }
 >()("@mokronos/integrations/OAuthFlows") {
   static readonly layer: Layer.Layer<
@@ -541,18 +546,24 @@ export class OAuthFlows extends Context.Service<
         })
         const key = connectionCredentialKey(address)
         const held = yield* readTokens(credentials, key)
-        if (Option.isNone(held)) return Option.none<string>()
+        if (Option.isNone(held)) return Option.none<OAuthAccess>()
         const tokens = held.value
 
         const now = yield* Clock.currentTimeMillis
         const spent = tokens.expiresAt !== undefined &&
           tokens.expiresAt - refreshSkewMillis <= now
-        if (!spent) return Option.some(tokens.accessToken)
+        if (!spent) {
+          return Option.some({
+            value: tokens.accessToken,
+            ...whenPresent("expiresAt", tokens.expiresAt)
+          })
+        }
 
         if (tokens.refreshToken === undefined) {
-          // Expired with nothing to refresh from: the stored token is all there
-          // is, so it is returned and the upstream's 401 becomes the report.
-          return Option.some(tokens.accessToken)
+          return yield* new OAuthError({
+            stage: "refresh",
+            detail: "The access token expired and no refresh token is available"
+          })
         }
 
         const client = yield* requireClient({
@@ -586,7 +597,7 @@ export class OAuthFlows extends Context.Service<
         )
 
         // A server that omits a new refresh token means "keep the old one".
-        yield* persistTokens({
+        const stored = yield* persistTokens({
           owner: reference.owner,
           integration: reference.integration,
           connection: reference.connection,
@@ -594,7 +605,10 @@ export class OAuthFlows extends Context.Service<
             ? { ...response, refresh_token: tokens.refreshToken }
             : response
         })
-        return Option.some(response.access_token)
+        return Option.some({
+          value: response.access_token,
+          ...whenPresent("expiresAt", Option.getOrUndefined(stored.expiresAt))
+        })
       })
 
       return {

@@ -423,7 +423,8 @@ describe("what a session may do", () => {
             integration: input.integration,
             template: "token",
             address: `tools.${input.integration}.org.${input.name}`,
-            provider: input.integration
+            provider: input.integration,
+            status: "connected"
           }
         }
       }

@@ -228,7 +228,10 @@ export const integrationsCommand = (runGateway: GatewayTask) => Command.make(
               slug: integration["slug"] ?? null,
               kind: integration["kind"] ?? null,
               name: integration["name"] ?? null,
-              connections: array(integration["connections"]).length
+              connections: array(integration["connections"])
+                .filter((connection) => text(connection["status"]) === "connected").length,
+              reauthorizationRequired: array(integration["connections"])
+                .filter((connection) => text(connection["status"]) === "reauthorization_required").length
             }
         })
       })
