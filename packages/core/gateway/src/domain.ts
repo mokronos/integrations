@@ -43,9 +43,9 @@ export type AuditId = typeof AuditId.Type
  *  second definition produces the *same* TypeScript type while checking
  *  something different. The gateway was minting `IntegrationSlug`s that the
  *  host's own schema would have rejected, and nothing could say so. */
-import { Alias, ConnectionName, IntegrationSlug, ToolName } from "@mokronos/contracts"
+import { Alias, ApprovalStatus, ConnectionName, IntegrationSlug, ToolName } from "@mokronos/contracts"
 
-export { Alias, ConnectionName, IntegrationSlug, ToolName }
+export { Alias, ApprovalStatus, ConnectionName, IntegrationSlug, ToolName }
 
 /** The SHA-256 of an API key. The key itself is shown once at issue and never
  *  stored, so a leaked database yields no usable credential. */
@@ -393,25 +393,21 @@ export const describeAuthorization = (authorization: Authorization): string => {
   }
 }
 
+export const ConfigureClient = Schema.Struct({
+  name: Schema.String.check(Schema.isMinLength(1)),
+  tools: Schema.Array(Schema.Struct({
+    connection: ConnectionRef,
+    tool: ToolName,
+    decision: PolicyDecision
+  })).check(Schema.isMinLength(1))
+})
+export type ConfigureClient = typeof ConfigureClient.Type
+
 // --- approvals --------------------------------------------------------------
 
-export const ApprovalStatus = Schema.Literals([
-  "pending",
-  "approved",
-  "denied",
-  "expired"
-])
-export type ApprovalStatus = typeof ApprovalStatus.Type
 
-/** An invocation frozen awaiting a human. The arguments are captured at propose
- *  time and the gateway performs the call itself on approval, so approving
- *  discharges one specific invocation rather than creating a capability.
- *
- *  One frozen call, not one per attempt: a caller that retries the same
- *  arguments through the same access profile and approval policy meets the approval it already
- *  proposed.
- *  Otherwise a step with `retry: { attempts: 3 }` asks a human three times for
- *  one decision. */
+/** One client's frozen invocation on one connection. Executing is a durable
+ * claim: an interrupted execution is never retried automatically. */
 export const PendingApproval = Schema.Struct({
   id: ApprovalId,
   clientId: ClientId,

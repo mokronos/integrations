@@ -2,7 +2,7 @@
   "name": "@mokronos/integrations-client",
   "version": "0.2.0",
   "type": "module",
-  "description": "Thin client for the integration gateway. Auth, HTTP, decode — no integration logic.",
+  "description": "Thin client for the integration gateway. Auth, HTTP, decode \u2014 no integration logic.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -35,6 +35,12 @@
       "bun": "./src/index.ts",
       "development": "./src/index.ts",
       "default": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "bun": "./src/client.ts",
+      "development": "./src/client.ts",
+      "default": "./dist/client.js"
     }
   },
   "scripts": {

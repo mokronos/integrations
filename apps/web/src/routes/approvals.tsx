@@ -17,6 +17,7 @@ import type { ApprovalStatus, PendingApproval } from "@/lib/schemas"
 
 const statusVariant = {
   pending: "default",
+  executing: "secondary",
   approved: "secondary",
   denied: "destructive",
   expired: "outline"
@@ -47,9 +48,10 @@ function ApprovalCard({
       verdict === "approve"
         ? gateway.approveApproval({ id: approval.id })
         : gateway.denyApproval({ id: approval.id }),
-    onSuccess: (_, verdict) => {
+    onSuccess: (response, verdict) => {
       invalidate(["approvals"], ["audit"])
-      toast.success(verdict === "approve" ? "Approved and performed" : "Denied")
+      if (response.approval?.error) toast.error("Approved, but the call failed", { description: response.approval.error })
+      else toast.success(verdict === "approve" ? "Approved and performed" : "Denied")
     },
     onError: (error: Error) => toast.error("Could not decide", { description: error.message })
   })
@@ -80,8 +82,10 @@ function ApprovalCard({
           </code>
         </div>
 
-        {/* The arguments are frozen at propose time — what you approve is
-            exactly this call, not a capability to make it again. */}
+        {approval.status === "executing" ? <p role="status" className="text-sm text-muted-foreground">
+          Execution has started. If it was interrupted, the action may already have completed.
+          Check the connected service before requesting it again; the gateway will not rerun this approval.
+        </p> : null}
         <JsonView value={approval.arguments} label="arguments" />
         {(deliveries.data ?? []).length > 0 ? <div className="flex flex-wrap gap-2">
           {(deliveries.data ?? []).map((delivery) => <Badge key={delivery.id} variant={delivery.status === "failed" ? "destructive" : "outline"}>
@@ -157,6 +161,7 @@ export function ApprovalsRoute() {
       <Tabs value={filter} onValueChange={(value) => setFilter(decodeApprovalFilter(value))}>
         <TabsList>
           <TabsTrigger value="pending">Pending</TabsTrigger>
+          <TabsTrigger value="executing">Executing</TabsTrigger>
           <TabsTrigger value="approved">Approved</TabsTrigger>
           <TabsTrigger value="denied">Denied</TabsTrigger>
           <TabsTrigger value="expired">Expired</TabsTrigger>

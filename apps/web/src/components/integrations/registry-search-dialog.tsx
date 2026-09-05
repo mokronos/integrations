@@ -34,7 +34,7 @@ const ALL_KINDS = "__all__"
 
 /** Search is deliberately next to discovery: the registry finds an exact
  * installable endpoint, then the existing provisioning path owns installation. */
-export function RegistrySearchDialog() {
+export function RegistrySearchDialog({ onInstalled }: { readonly onInstalled?: (slug: string) => void }) {
   const invalidate = useInvalidate()
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
@@ -68,7 +68,8 @@ export function RegistrySearchDialog() {
           : `Connected with no credential; ${result.tools.length} tools available.`
       })
       setOpen(false)
-      void navigate(`/integrations/${result.integration.slug}`)
+      if (onInstalled === undefined) void navigate(`/integrations/${result.integration.slug}`)
+      else onInstalled(result.integration.slug)
     },
     onSettled: () => setInstalling(undefined)
   })

@@ -71,5 +71,13 @@ export const gatewayMigrations: ReadonlyArray<GatewayMigration> = [
       "CREATE INDEX `gateway_approval_delivery_due` ON `gateway_approval_delivery` (`status`,`next_attempt_at`);",
       "ALTER TABLE `gateway_approval_destination` ADD `deleted_at` integer;"
     ]
+  },
+  {
+    id: 3,
+    name: "0003_chemical_raza",
+    statements: [
+      "DROP INDEX `gateway_pending_approval_retry`;",
+      "CREATE INDEX `gateway_pending_approval_retry` ON `gateway_pending_approval` (`tenant_id`,`client_id`,`alias`,`approval_policy_id`,`access_profile_id`,`tool`,`arguments_lookup`,`arguments`) WHERE collected_at IS NULL;"
+    ]
   }
 ]

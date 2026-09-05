@@ -4,7 +4,7 @@ import {
   whenPresentMap
 } from "@mokronos/contracts"
 import { IntegrationsApiService } from "@mokronos/integrations"
-import { Clock, Effect } from "effect"
+import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
   Alias,
@@ -13,13 +13,13 @@ import {
   type ConnectionRef,
   AccessProfileId,
   ApprovalPolicyId,
-  sameConnectionRef,
   ToolName
 } from "@mokronos/gateway-core"
 import type { DriftReport } from "@mokronos/gateway-core"
 import { refreshIntegrationSnapshot } from "@mokronos/gateway-core"
 import {
-  executeAuthorized,
+  approveApproval,
+  denyApproval,
   listEffectiveTools,
   reconcileDefaults
 } from "@mokronos/gateway-core"
@@ -94,6 +94,31 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
             ...whenPresentMap("mcpUrl", config.mcpUrl?.(), (url) => url)
           }
         }))
+      .handle("createConfiguredClient", (request) => Effect.gen(function*() {
+        const tenantId = yield* requireTenant
+        const { tools } = request.payload
+        const name = request.payload.name.trim()
+        if (name.length === 0) return yield* new ApiBadRequest({ error: "Choose a client name" })
+        const [client, profiles, policies, catalog] = yield* Effect.all([
+          orDieStorage(store.findClientByName(tenantId, name)),
+          orDieStorage(store.listAccessProfiles(tenantId)),
+          orDieStorage(store.listApprovalPolicies(tenantId)),
+          Effect.promise(() => integrationsApi.tools.summaries())
+        ])
+        if (client !== undefined || profiles.some((profile) => profile.name === name) || policies.some((policy) => policy.name === name)) {
+          return yield* new ApiBadRequest({ error: `The name ${name} is already in use. Choose another name or use the existing client.` })
+        }
+        for (const entry of tools) {
+          if (entry.connection.owner !== "org" || !catalog.some((tool) => tool.owner === "org"
+            && tool.integration === entry.connection.integration && tool.connection === entry.connection.name && tool.name === entry.tool)) {
+            return yield* new ApiBadRequest({ error: `The selected tool ${entry.tool} is no longer available. Refresh the connections and try again.` })
+          }
+        }
+        return yield* orDieStorage(store.createConfiguredClient({
+          ...request.payload, name, tenantId,
+          id: newClientId(), accessProfileId: newAccessProfileId(), approvalPolicyId: newApprovalPolicyId()
+        }))
+      }))
       .handle("createClient", (request) =>
         Effect.gen(function*() {
           const tenantId = yield* requireTenant
@@ -413,131 +438,24 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
         if (approval === undefined) return yield* new ApiNotFound({ error: `Unknown approval ${request.params["id"]}` })
         return { deliveries: yield* orDieStorage(store.listApprovalDeliveries(tenantId, approval.id)) }
       }))
-      .handle("approve", (request) =>
-        Effect.gen(function*() {
-          const tenantId = yield* requireTenant
-          const id = request.params["id"]
-          const by = yield* decidedBy
-          const approval = yield* orDieStorage(store.getApproval(tenantId, id))
-          if (approval === undefined) {
-            return yield* new ApiNotFound({ error: `Unknown approval ${id}` })
-          }
-          if (approval.status !== "pending") {
-            return yield* new ApiBadRequest({ error: `Approval ${id} is already ${approval.status}` })
-          }
-          const now = yield* Clock.currentTimeMillis
-          if (approval.expiresAt.getTime() <= now) {
-            yield* orDieStorage(store.settleApproval({
-              tenantId,
-              id,
-              status: "expired",
-              decidedBy: null,
-              result: null,
-              error: "expired before a decision was recorded"
-            }))
-            // Expiry is a decision, not an absence of one.
-            return yield* new ApiBadRequest({ error: `Approval ${id} expired` })
-          }
-
-          const client = yield* orDieStorage(store.findClientById(tenantId, approval.clientId))
-          const accessProfile = yield* orDieStorage(store.findAccessProfile(tenantId, approval.accessProfileId))
-          const approvalPolicy = yield* orDieStorage(store.findApprovalPolicy(tenantId, approval.approvalPolicyId))
-          const accessTools = accessProfile === undefined ? [] : yield* orDieStorage(store.listAccessProfileTools(accessProfile.id))
-          const approvalTools = approvalPolicy === undefined ? [] : yield* orDieStorage(store.listApprovalPolicyTools(approvalPolicy.id))
-          const accessProfileTool = accessTools.find((candidate) => candidate.tool === approval.tool)
-          const approvalPolicyTool = accessProfileTool === undefined ? undefined : approvalTools.find((candidate) =>
-            candidate.tool === approval.tool && sameConnectionRef(candidate.connection, accessProfileTool.connection))
-          if (client === undefined || client.revokedAt !== null
-            || client.accessProfileId !== approval.accessProfileId
-            || client.approvalPolicyId !== approval.approvalPolicyId
-            || accessProfile === undefined || approvalPolicy === undefined
-            || accessProfileTool === undefined || approvalPolicyTool === undefined) {
-            yield* orDieStorage(store.settleApproval({
-              tenantId,
-              id,
-              status: "denied",
-              decidedBy: by,
-              result: null,
-              error: "the client assignments or tool intersection changed while this call was frozen"
-            }))
-            return yield* new ApiBadRequest({ error: `Approval ${id} is no longer authorized` })
-          }
-
-          // The gateway performs the call. The caller is never handed the
-          // ability to perform it, so approving confers no capability.
-          const outcome = yield* orDieStorage(executeAuthorized(
-            {
-              store,
-              integrations: integrationsApi,
-              retentionDays: config.retentionDays
-            },
-            {
-              status: "authorized",
-              client,
-              accessProfile,
-              accessProfileTool,
-              approvalPolicy,
-              approvalPolicyTool,
-              alias: approval.alias,
-              connection: accessProfileTool.connection,
-              subject: accessProfileTool.connection.owner === "user" ? accessProfileTool.connection.subject : null,
-              decision: approvalPolicyTool.decision
-            },
-            approval.arguments
-          ))
-          yield* orDieStorage(store.settleApproval({
-            tenantId,
-            id,
-            status: "approved",
-            decidedBy: by,
-            result: outcome.status === "succeeded" ? outcome.result : null,
-            error: outcome.status === "failed" ? outcome.message : null
-          }))
-          const settled = yield* orDieStorage(store.getApproval(tenantId, id))
-          if (settled === undefined) {
-            return yield* new ApiNotFound({ error: `Unknown approval ${id}` })
-          }
-          if (outcome.status === "succeeded") {
-            return {
-              approval: settled,
-              outcome: { status: "succeeded" as const, result: outcome.result }
-            }
-          }
-          if (outcome.status === "failed") {
-            return {
-              approval: settled,
-              outcome: { status: "failed" as const, message: outcome.message }
-            }
-          }
-          // Unreachable through this path — settlement runs an authorized call,
-          // which never freezes or denies — but the type stays honest.
-          return yield* new ApiBadRequest({
-            error: "Approval settled without a performed call"
-          })
-        }))
-      .handle("deny", (request) =>
-        Effect.gen(function*() {
-          const tenantId = yield* requireTenant
-          const id = request.params["id"]
-          const by = yield* decidedBy
-          const approval = yield* orDieStorage(store.getApproval(tenantId, id))
-          if (approval === undefined) {
-            return yield* new ApiNotFound({ error: `Unknown approval ${id}` })
-          }
-          yield* orDieStorage(store.settleApproval({
-            tenantId,
-            id,
-            status: "denied",
-            decidedBy: by,
-            result: null,
-            error: null
-          }))
-          const settled = yield* orDieStorage(store.getApproval(tenantId, id))
-          if (settled === undefined) {
-            return yield* new ApiNotFound({ error: `Unknown approval ${id}` })
-          }
-          return { approval: settled }
-        }))
+      .handle("approve", (request) => Effect.gen(function*() {
+        return yield* orDieStorage(approveApproval(
+          { store, integrations: integrationsApi, retentionDays: config.retentionDays },
+          { tenantId: yield* requireTenant, id: request.params["id"], decidedBy: yield* decidedBy }
+        )).pipe(
+          Effect.catchTag("ApprovalNotFound", ({ id }) => new ApiNotFound({ error: `Unknown approval ${id}` })),
+          Effect.catchTag("ApprovalConflict", ({ message }) => new ApiBadRequest({ error: message }))
+        )
+      }))
+      .handle("deny", (request) => Effect.gen(function*() {
+        return yield* orDieStorage(denyApproval(
+          store,
+          { tenantId: yield* requireTenant, id: request.params["id"], decidedBy: yield* decidedBy }
+        )).pipe(
+          Effect.catchTag("ApprovalNotFound", ({ id }) => new ApiNotFound({ error: `Unknown approval ${id}` })),
+          Effect.catchTag("ApprovalConflict", ({ message }) => new ApiBadRequest({ error: message }))
+        )
+      }))
       .handle("refreshDrift", (request) =>
         Effect.gen(function*() {
           const tenantId = yield* requireTenant

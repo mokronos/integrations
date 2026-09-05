@@ -15,6 +15,7 @@ import {
   AuditOutcome,
   AuditRecord,
   Client,
+  ConfigureClient,
   ClientCapability,
   ClientId,
   Alias,
@@ -526,10 +527,15 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
       mcpUrl: Schema.optional(Schema.NullOr(Schema.String))
     })
   }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.post("createConfiguredClient", "/v1/clients/configured", {
+    payload: ConfigureClient,
+    success: HttpApiSchema.status(201)(Client),
+    error: ApiBadRequestError
+  }).annotate(RequiredAccess, "administrative"))
   .add(HttpApiEndpoint.post("createClient", "/v1/clients", {
     payload: CreateClientBody,
     success: HttpApiSchema.status(201)(Client),
-    error: ApiBadRequest
+    error: ApiBadRequestError
   }).annotate(RequiredAccess, "administrative"))
   .add(HttpApiEndpoint.post("updateClientSettings", "/v1/clients/:id/settings", {
     params: { id: ClientId },
@@ -702,7 +708,7 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
   .add(HttpApiEndpoint.post("deny", "/v1/approvals/:id/deny", {
     params: { id: ApprovalId },
     success: Schema.Struct({ approval: PendingApproval }),
-    error: ApiNotFoundError
+    error: [ApiNotFoundError, ApiBadRequestError]
   }).annotate(RequiredAccess, "human"))
   .add(HttpApiEndpoint.post("refreshDrift", "/v1/drift/refresh", {
     query: { integration: Schema.optional(Schema.String) },

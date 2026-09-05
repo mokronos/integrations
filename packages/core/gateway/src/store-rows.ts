@@ -1,3 +1,4 @@
+import { ApprovalStatus } from "./domain.ts"
 import type { Row } from "@libsql/client"
 import { Schema } from "effect"
 import {
@@ -136,7 +137,7 @@ const ApprovalRow = Schema.Struct({
   alias: Schema.String,
   tool: Schema.String,
   arguments: Schema.String,
-  status: Schema.Literals(["pending", "approved", "denied", "expired"]),
+  status: ApprovalStatus,
   created_at: Schema.Number,
   expires_at: Schema.Number,
   decided_at: NullableNumber,

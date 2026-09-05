@@ -9,6 +9,7 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import type { IntegrationsApi } from "@mokronos/integrations"
 import type { Connection, Tool } from "@mokronos/contracts"
 import {
+  aliasForConnection,
   ClientId,
   ConnectionName,
   createGatewayHandler,
@@ -91,6 +92,7 @@ const stubTool = (
  *  whether a call happens and with which credential — not what the vendor
  *  returns — so the tests assert on which address was reached. */
 const stubIntegrations = (behaviour: {
+  readonly beforeExecute?: () => Promise<void>
   readonly fail?: boolean
   readonly connections?: ReadonlyArray<{ readonly integration: string; readonly name: string }>
   readonly tools?: ReadonlyArray<{
@@ -109,6 +111,7 @@ const stubIntegrations = (behaviour: {
     tools: {
       execute: async (address, input) => {
         calls.push({ address: String(address), input })
+        await behaviour.beforeExecute?.()
         if (behaviour.fail === true) throw new Error("vendor exploded")
         return { ok: true }
       },
@@ -190,6 +193,7 @@ const stubIntegrations = (behaviour: {
 const setup = async (options: {
   readonly decision?: "allow" | "require_approval"
   readonly capabilities?: ReadonlyArray<"provision_connections" | "administer_gateway">
+  readonly beforeExecute?: () => Promise<void>
   readonly fail?: boolean
   readonly connections?: ReadonlyArray<{ readonly integration: string; readonly name: string }>
   readonly tools?: ReadonlyArray<{
@@ -232,6 +236,7 @@ const setup = async (options: {
   const key = generateApiKey()
   await run(store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash }))
   const stub = stubIntegrations({
+    ...whenPresent("beforeExecute", options.beforeExecute),
     ...whenPresent("fail", options.fail),
     ...whenPresent("connections", options.connections),
     ...whenPresent("tools", options.tools)
@@ -259,7 +264,7 @@ const setup = async (options: {
     method: string,
     pathname: string,
     init: {
-      readonly body?: unknown
+      readonly body?: typeof Schema.Json.Type
       readonly secret?: string | null
       readonly local?: boolean
     } = {}
@@ -302,6 +307,24 @@ const setup = async (options: {
 }
 
 describe("gateway http surface", () => {
+  test("onboarding creates only the selected tools with separate configurations and no administrative power", async () => {
+    const { call, store, accessProfile } = await setup({
+      tools: [{ address: "tools.gmail.org.work.sendEmail", name: "sendEmail", owner: "org" }]
+    })
+    const selected = { connection: { owner: "org", integration: "gmail", name: "work" }, tool: "sendEmail", decision: "require_approval" }
+    const response = await call("POST", "/v1/clients/configured", { local: true, body: { name: "New assistant", tools: [selected] } })
+    expect(response.status).toBe(201)
+    expect(response.body["capabilities"]).toEqual([])
+    expect(response.body["accessProfileId"]).not.toBe(accessProfile.id)
+    const id = String(response.body["id"])
+    const tools = await call("GET", `/v1/clients/${id}/tools`, { local: true })
+    expect(tools.body["tools"]).toMatchObject([{ alias: "org_gmail_work", tool: "sendEmail", decision: "require_approval" }])
+    expect(await run(store.listAccessProfileTools(accessProfile.id))).toHaveLength(1)
+    expect((await call("POST", "/v1/clients/configured", { local: true, body: { name: "New assistant", tools: [selected] } })).status).toBe(400)
+    expect((await call("POST", "/v1/clients/configured", { local: true, body: { name: "Unavailable", tools: [{ ...selected, tool: "missing" }] } })).status).toBe(400)
+    expect(await run(store.findClientByName(defaultTenantId, "Unavailable"))).toBeUndefined()
+  })
+
   test("serves each API key's effective tools over MCP", async () => {
     const { handle, key, calls } = await run(setup())
     const client = new Client({ name: "gateway-test", version: "1.0.0" })
@@ -620,6 +643,100 @@ describe("gateway http surface", () => {
 })
 
 describe("gateway approval settlement", () => {
+  test("simultaneous retries freeze one invocation and record one approval event", async () => {
+    const { call, store } = await setup({ decision: "require_approval" })
+    const body = { alias: aliasForConnection(connection), tool: "sendEmail", arguments: { to: "a@b.c" } }
+    const responses = await Promise.all(Array.from({ length: 8 }, () => call("POST", "/v1/execute", { body })))
+    expect(responses.every((response) => response.status === 200)).toBe(true)
+    expect(new Set(responses.map((response) => response.body["approvalId"])).size).toBe(1)
+    expect(await run(store.listApprovals(defaultTenantId))).toHaveLength(1)
+  })
+
+  test("shared profiles cannot share or collect another client's approval", async () => {
+    const { call, store, accessProfile, approvalPolicy } = await setup({ decision: "require_approval" })
+    const other = await run(store.createClient({
+      id: newClientId(), tenantId: defaultTenantId, accessProfileId: accessProfile.id,
+      approvalPolicyId: approvalPolicy.id, name: "other-agent", capabilities: []
+    }))
+    const key = generateApiKey()
+    await run(store.addApiKey({ id: key.id, clientId: other.id, hash: key.hash }))
+    const body = { alias: aliasForConnection(connection), tool: "sendEmail", arguments: { to: "a@b.c" } }
+    const first = await call("POST", "/v1/execute", { body })
+    const second = await call("POST", "/v1/execute", { body, secret: key.secret })
+    expect(second.body["approvalId"]).not.toBe(first.body["approvalId"])
+    await call("POST", `/v1/approvals/${String(first.body["approvalId"])}/approve`, { body: {}, local: true })
+    const retry = await call("POST", "/v1/execute", { body, secret: key.secret })
+    expect(retry.body["status"]).toBe("pending")
+    expect(retry.body["approvalId"]).toBe(second.body["approvalId"])
+    expect((await call("POST", "/v1/execute", { body })).body["status"]).toBe("succeeded")
+  })
+
+  test("the same tool and arguments on different accounts keep distinct approvals and targets", async () => {
+    const { call, store, accessProfile, approvalPolicy, calls } = await setup({ decision: "require_approval" })
+    const personal = { ...connection, name: ConnectionName.make("personal") }
+    const tools = [connection, personal].map((connection) => ({ connection, tool: ToolName.make("sendEmail") }))
+    await run(store.replaceAccessProfileTools(accessProfile.id, tools))
+    await run(store.replaceApprovalPolicyTools(approvalPolicy.id, tools.map((tool) => ({ ...tool, decision: "require_approval" }))))
+    const first = await call("POST", "/v1/execute", { body: { alias: aliasForConnection(connection), tool: "sendEmail", arguments: { to: "a@b.c" } } })
+    const second = await call("POST", "/v1/execute", { body: { alias: aliasForConnection(personal), tool: "sendEmail", arguments: { to: "a@b.c" } } })
+    expect(second.body["approvalId"]).not.toBe(first.body["approvalId"])
+    const response = await call("POST", `/v1/approvals/${String(second.body["approvalId"])}/approve`, { body: {}, local: true })
+    expect(response.status).toBe(200)
+    expect(calls).toEqual([{ address: "tools.gmail.user.personal.sendEmail", input: { to: "a@b.c" } }])
+  })
+
+  test("concurrent decisions cannot execute twice, deny an executing call, or collect it early", async () => {
+    const started = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const { call, calls, store } = await setup({ decision: "require_approval", beforeExecute: () => {
+      started.resolve()
+      return release.promise
+    } })
+    const body = { alias: aliasForConnection(connection), tool: "sendEmail" }
+    const frozen = await call("POST", "/v1/execute", { body })
+    const id = String(frozen.body["approvalId"])
+    const approving = call("POST", `/v1/approvals/${id}/approve`, { body: {}, local: true })
+    try {
+      await started.promise
+      const [approve, deny, retry] = await Promise.all([
+        call("POST", `/v1/approvals/${id}/approve`, { body: {}, local: true }),
+        call("POST", `/v1/approvals/${id}/deny`, { body: {}, local: true }),
+        call("POST", "/v1/execute", { body })
+      ])
+      expect(approve.status).toBe(400)
+      expect(deny.status).toBe(400)
+      expect(retry.body["approvalId"]).toBe(id)
+      expect(retry.body["status"]).toBe("pending")
+      expect(await run(store.expireApprovals(new Date(Date.now() + 86400000)))).toBe(0)
+      expect(calls).toHaveLength(1)
+    } finally {
+      release.resolve()
+      await approving
+    }
+    expect((await call("POST", "/v1/execute", { body })).body["status"]).toBe("succeeded")
+    expect(calls).toHaveLength(1)
+  })
+
+  test("a durable execution claim survives reopening the store and cannot be replayed", async () => {
+    const { call, store, calls } = await setup({ decision: "require_approval" })
+    const body = { alias: aliasForConnection(connection), tool: "sendEmail" }
+    const frozen = await call("POST", "/v1/execute", { body })
+    const approval = (await run(store.listApprovals(defaultTenantId)))[0]
+    if (approval === undefined) throw new Error("Missing approval")
+    await run(store.claimApproval({ tenantId: defaultTenantId, id: approval.id, decidedBy: "human" }))
+    const reopened = await run(createGatewayStore(store.databasePath))
+    try {
+      expect((await run(reopened.getApproval(defaultTenantId, approval.id)))?.status).toBe("executing")
+      expect(await run(reopened.claimApproval({ tenantId: defaultTenantId, id: approval.id, decidedBy: "human" }))).toBe(false)
+      expect(await run(reopened.collectApproval(defaultTenantId, approval.id))).toBe(false)
+    } finally {
+      await run(reopened.close())
+    }
+    expect((await call("POST", `/v1/approvals/${String(frozen.body["approvalId"])}/approve`, { body: {}, local: true })).status).toBe(400)
+    expect((await call("POST", "/v1/execute", { body })).body["approvalId"]).toBe(approval.id)
+    expect(calls).toHaveLength(0)
+  })
+
   test("an administrative API key cannot make a human approval decision", async () => {
     const { call, calls } = await run(setup({
       decision: "require_approval",

@@ -106,7 +106,7 @@ export const useApprovals = (status: ApprovalStatus | "all") =>
   useQuery({
     queryKey: keys.approvals(status),
     queryFn: () => (status === "all" ? gateway.listApprovals() : gateway.listApprovals(status)),
-    refetchInterval: status === "pending" ? 5_000 : false
+    refetchInterval: status === "pending" || status === "executing" || status === "all" ? 5_000 : false
   })
 
 export const useAudit = (input: AuditQuery) =>

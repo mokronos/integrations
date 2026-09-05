@@ -98,7 +98,7 @@ function DiscoveryResult({
   )
 }
 
-export function DiscoverDialog() {
+export function DiscoverDialog({ onInstalled }: { readonly onInstalled?: (slug: string) => void }) {
   const invalidate = useInvalidate()
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
@@ -197,7 +197,8 @@ export function DiscoverDialog() {
                 <Button onClick={() => {
                   const installedSlug = result.integration.slug
                   changeOpen(false)
-                  void navigate(`/integrations/${installedSlug}`)
+                  if (onInstalled === undefined) void navigate(`/integrations/${installedSlug}`)
+                  else onInstalled(installedSlug)
                 }}>
                   {result.requiresAuthentication ? "Choose authentication" : "View integration"}
                 </Button>

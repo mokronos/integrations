@@ -154,10 +154,9 @@ export const ApprovalDeliveriesResponse = Schema.Struct({ deliveries: Schema.Arr
 
 export const AuditResponse = Schema.Struct({
   records: Schema.Array(AuditRecord),
-  // Optional for rolling upgrades: older gateway processes returned only rows.
-  total: Schema.optional(Schema.Number),
-  limit: Schema.optional(Schema.Number),
-  offset: Schema.optional(Schema.Number)
+  total: Schema.Number,
+  limit: Schema.Number,
+  offset: Schema.Number
 })
 export type AuditResponse = typeof AuditResponse.Type
 

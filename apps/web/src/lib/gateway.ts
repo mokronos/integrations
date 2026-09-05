@@ -249,6 +249,9 @@ export const listClients = async () => {
 export const fetchOverview = async () =>
   decodeOverview(await request("GET", "/v1/overview"))
 
+export const createConfiguredClient = async (input: import("@mokronos/gateway-core/domain").ConfigureClient) =>
+  decodeClient(await request("POST", "/v1/clients/configured", input))
+
 export const createClient = async (input: {
   readonly name: string
   readonly accessProfileId?: string
@@ -357,9 +360,9 @@ export const listAudit = async (input: AuditQuery) => {
   })}`))
   return {
     records: response.records,
-    total: response.total ?? response.records.length,
-    limit: response.limit ?? input.limit,
-    offset: response.offset ?? input.offset
+    total: response.total,
+    limit: response.limit,
+    offset: response.offset
   }
 }
 

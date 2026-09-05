@@ -112,7 +112,7 @@ const listing = <A>(
 export const approvalsCommand = Command.make(
   "approvals",
   {
-    status: Flag.choice("status", ["pending", "approved", "denied", "expired"]).pipe(Flag.optional),
+    status: Flag.choice("status", ["pending", "executing", "approved", "denied", "expired"]).pipe(Flag.optional),
     limit: limitFlag(),
     offset: offsetFlag(),
     verbose: verboseFlag()

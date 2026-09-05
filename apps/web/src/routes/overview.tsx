@@ -1,4 +1,4 @@
-import { Link } from "react-router"
+import { Link, Navigate } from "react-router"
 import {
   Activity,
   ArrowRight,
@@ -11,6 +11,7 @@ import {
   Workflow
 } from "lucide-react"
 
+import { useSession } from "@/components/auth-gate"
 import { LoadingRows, Page, QueryError } from "@/components/page"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -78,12 +79,18 @@ function SetupStep({ complete, children, to }: {
 
 export function OverviewRoute() {
   const overview = useOverview()
+  const session = useSession()
   const connected = overview.data?.connections ?? 0
   const clients = overview.data?.clients ?? 0
   const pending = overview.data?.pendingApprovals ?? 0
   const profiles = overview.data?.accessProfiles ?? 0
   const profileTools = overview.data?.accessProfileTools ?? 0
   const keys = overview.data?.keys ?? 0
+
+  if (overview.data !== undefined && connected === 0 && profileTools === 0
+    && session?.authenticated && localStorage.getItem(`gateway-onboarding:${session.tenantId}`) !== "done") {
+    return <Navigate to="/onboarding" replace />
+  }
 
   return (
     <Page

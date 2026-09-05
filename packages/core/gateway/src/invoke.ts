@@ -88,16 +88,8 @@ const auditFor = (
   }
 })
 
-/** The approval half of an invocation: meet the frozen call this request
- * already belongs to, or freeze a new one.
- *
- * A caller that retries — and the retrying caller is the normal case, because a
- * durable step is how a workflow waits — must not ask a human again for a
- * decision it already asked for. The same (approval policy, access profile, tool, arguments) resolves to the
- * same approval until that approval's outcome has been handed back exactly
- * once. After delivery an identical call is a *new* request, and needs its own
- * decision; replaying an old approval forever would turn one "yes" into
- * standing permission, which this design deliberately refuses to create. */
+/** Retries meet the same client, target, configurations, and frozen arguments
+ * until the result is collected. A later call needs a new approval. */
 const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function*(
   dependencies: {
     readonly store: GatewayStore
@@ -121,14 +113,17 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function*(
       ...whenPresent("approvalUrl", approvalUrl)
     }
   }
-  const existing = yield* store.findUncollectedApproval(
-    authorization.approvalPolicy.id,
-    authorization.accessProfile.id,
-    authorization.accessProfileTool.tool,
-    argumentsValue
-  )
+  const existing = yield* store.findUncollectedApproval({
+    tenantId: authorization.client.tenantId,
+    clientId: authorization.client.id,
+    alias: authorization.alias,
+    approvalPolicyId: authorization.approvalPolicy.id,
+    accessProfileId: authorization.accessProfile.id,
+    tool: authorization.accessProfileTool.tool,
+    arguments: argumentsValue
+  })
 
-  if (existing !== undefined && existing.status === "pending") {
+  if (existing !== undefined && (existing.status === "pending" || existing.status === "executing")) {
     // Deliberately not audited: the frozen call was recorded when it was
     // proposed, and one decision pending is one event, however many times a
     // retry loop looks at it.
@@ -163,8 +158,9 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function*(
     return { status: "denied", reason }
   }
 
+  const id = newApprovalId()
   const approval = yield* store.createApproval({
-    id: newApprovalId(),
+    id,
     tenantId: authorization.client.tenantId,
     clientId: authorization.client.id,
     approvalPolicyId: authorization.approvalPolicy.id,
@@ -174,6 +170,7 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function*(
     arguments: argumentsValue,
     expiresAt: new Date(Date.now() + dependencies.expiryHours * 60 * 60 * 1000)
   })
+  if (approval.id !== id) return pending(approval.id, approval.expiresAt)
   yield* store.recordAudit(
     auditFor(authorization, "pending", `approval ${approval.id}`, argumentsValue, retentionDays)
   )
@@ -267,7 +264,7 @@ export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(funct
   },
   authorization: Extract<Authorization, { status: "authorized" }>,
   argumentsValue: Json
-): Effect.fn.Return<InvocationOutcome, GatewayStoreError> {
+): Effect.fn.Return<Extract<InvocationOutcome, { status: "succeeded" | "failed" }>, GatewayStoreError> {
   const address = boundToolAddress(authorization.connection, authorization.accessProfileTool.tool)
   const invocation = yield* Effect.result(Effect.tryPromise({
     try: () => dependencies.integrations.tools.execute(address, argumentsValue),
@@ -346,11 +343,9 @@ export const listEffectiveTools = Effect.fn("Invocation.listEffectiveTools")(fun
   if (options.schemas !== true || options.integrations === undefined) return base
 
   const integrations = options.integrations
-  return yield* Effect.forEach(base, (entry, index) => {
-    const route = reachable[index]
-    if (route === undefined) return Effect.succeed(entry)
+  return yield* Effect.forEach(base, (entry) => {
     return Effect.tryPromise(() => integrations.tools.describe(
-      boundToolAddress(route.profileTool.connection, route.profileTool.tool)
+      boundToolAddress(entry.connection, entry.tool)
     )).pipe(
       Effect.map((described) => ({
         ...entry,

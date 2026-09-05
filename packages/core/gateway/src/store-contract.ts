@@ -5,7 +5,7 @@ import type {
   ApiKeyId, ApprovalDelivery, ApprovalDeliveryAttempt, ApprovalDeliveryId,
   ApprovalDestination, ApprovalDestinationId, ApprovalId, ApprovalPolicy, ApprovalPolicyId,
   ApprovalPolicyTool, ApprovalStatus, AuditId, AuditOutcome, AuditRecord,
-  AuthSession, Client, ClientCapability, ClientId, ConnectionName, ConnectionRef,
+  AuthSession, Client, ConfigureClient, ClientCapability, ClientId, ConnectionName, ConnectionRef,
   ExternalIdentity, IdentityProvider, IntegrationSlug, Login, LoginHandoff,
   LoginHandoffHash, PendingApproval, PolicyDecision, SessionTokenHash, Subject,
   SubjectId, Tenant, TenantId, ToolName, ToolSnapshot
@@ -205,6 +205,12 @@ export interface GatewayStoreDriver {
    * are intentionally short lived, but abandoned flows must not accumulate. */
   deleteExpiredIdentityFlows(now: Date): Promise<number>
 
+  createConfiguredClient(input: ConfigureClient & {
+    readonly tenantId: TenantId
+    readonly id: ClientId
+    readonly accessProfileId: AccessProfileId
+    readonly approvalPolicyId: ApprovalPolicyId
+  }): Promise<Client>
   createClient(input: CreateClientInput): Promise<Client>
   listClients(tenantId: TenantId): Promise<ReadonlyArray<Client>>
   overviewCounts(tenantId: TenantId): Promise<GatewayOverviewCounts>
@@ -272,26 +278,23 @@ export interface GatewayStoreDriver {
   createApproval(input: CreateApprovalInput): Promise<PendingApproval>
   getApproval(tenantId: TenantId, id: ApprovalId): Promise<PendingApproval | undefined>
   listApprovals(tenantId: TenantId, status?: ApprovalStatus): Promise<ReadonlyArray<PendingApproval>>
-  /** The frozen call a retry of these arguments belongs to, if one is still
-   *  undelivered. This is what makes a retrying step ask a human once. */
-  findUncollectedApproval(
-    approvalPolicyId: ApprovalPolicyId,
-    accessProfileId: AccessProfileId,
-    tool: ToolName,
-    argumentsValue: Schema.Json
-  ): Promise<PendingApproval | undefined>
-  /** Hands a settled approval's outcome to the caller, once. Returns false if
-   *  another attempt collected it first, so concurrent retries cannot both
-   *  claim the same decision. */
+  findUncollectedApproval(input: Pick<CreateApprovalInput,
+    "tenantId" | "clientId" | "approvalPolicyId" | "accessProfileId" | "alias" | "tool" | "arguments"
+  >): Promise<PendingApproval | undefined>
   collectApproval(tenantId: TenantId, id: ApprovalId): Promise<boolean>
+  claimApproval(input: {
+    readonly tenantId: TenantId
+    readonly id: ApprovalId
+    readonly decidedBy: string | null
+  }): Promise<boolean>
   settleApproval(input: {
     readonly tenantId: TenantId
     readonly id: ApprovalId
-    readonly status: ApprovalStatus
+    readonly status: "approved" | "denied" | "expired"
     readonly decidedBy: string | null
     readonly result: typeof Schema.Json.Type | null
     readonly error: string | null
-  }): Promise<void>
+  }): Promise<boolean>
   /** Cancels a revoked client's frozen actions. Key revocation deliberately
    *  does not do this — rotation must not destroy in-flight work. */
   cancelApprovalsForClient(clientId: ClientId): Promise<number>

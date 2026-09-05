@@ -1,3 +1,4 @@
+import { Effect } from "effect"
 import { run, runAll } from "./effect.ts"
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
@@ -85,6 +86,21 @@ const seedBinding = async (store: GatewayStore) => {
 }
 
 describe("gateway store", () => {
+  test("client setup rolls back its configurations when the client cannot be inserted", async () => {
+    const store = await makeStore()
+    const { client } = await seedBinding(store)
+    const accessProfileId = newAccessProfileId()
+    const approvalPolicyId = newApprovalPolicyId()
+    const result = await run(Effect.result(store.createConfiguredClient({
+      id: client.id, tenantId: defaultTenantId, name: "Rollback setup", accessProfileId, approvalPolicyId,
+      tools: [{ connection, tool: ToolName.make("sendEmail"), decision: "require_approval" }]
+    })))
+    expect(result._tag).toBe("Failure")
+    expect(await run(store.findAccessProfile(defaultTenantId, accessProfileId))).toBeUndefined()
+    expect(await run(store.findApprovalPolicy(defaultTenantId, approvalPolicyId))).toBeUndefined()
+    expect(await run(store.findClientById(defaultTenantId, client.id))).toEqual(client)
+  })
+
   test("creates the database directory it was pointed at", async () => {
     const store = await run(makeStore())
     expect(store.databasePath).toContain(path.join("nested", "gateway.sqlite"))
@@ -247,6 +263,7 @@ describe("gateway store", () => {
     expect(approval.status).toBe("pending")
     expect(approval.arguments).toEqual({ to: ["customer@example.com"], subject: "Follow up" })
 
+    await run(store.claimApproval({ tenantId: defaultTenantId, id: approval.id, decidedBy: "sebastian" }))
     await run(store.settleApproval({
       tenantId: defaultTenantId,
       id: approval.id,

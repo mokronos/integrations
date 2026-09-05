@@ -12,6 +12,7 @@ const ClientDetailRoute = lazy(() => import("@/routes/client-detail").then((rout
 const ClientsRoute = lazy(() => import("@/routes/clients").then((route) => ({ default: route.ClientsRoute })))
 const ExecutionsRoute = lazy(() => import("@/routes/executions").then((route) => ({ default: route.ExecutionsRoute })))
 const IntegrationsRoute = lazy(() => import("@/routes/integrations").then((route) => ({ default: route.IntegrationsRoute })))
+const OnboardingRoute = lazy(() => import("@/routes/onboarding").then((route) => ({ default: route.OnboardingRoute })))
 const OverviewRoute = lazy(() => import("@/routes/overview").then((route) => ({ default: route.OverviewRoute })))
 const AccessProfilesRoute = lazy(() => import("@/routes/policies").then((route) => ({ default: route.AccessProfilesRoute })))
 const AccessProfileDetailRoute = lazy(() => import("@/routes/policies").then((route) => ({ default: route.AccessProfileDetailRoute })))
@@ -33,6 +34,7 @@ export default function App() {
         <Routes>
           <Route element={<AppShell dark={dark} onDarkChange={setDark} />}>
             <Route index element={<OverviewRoute />} />
+            <Route path="/onboarding" element={<OnboardingRoute />} />
             <Route path="/integrations" element={<IntegrationsRoute />} />
             <Route path="/integrations/:slug" element={<IntegrationsRoute />} />
             <Route path="/clients" element={<ClientsRoute />} />

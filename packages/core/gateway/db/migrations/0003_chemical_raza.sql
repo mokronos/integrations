@@ -1,0 +1,2 @@
+DROP INDEX `gateway_pending_approval_retry`;--> statement-breakpoint
+CREATE INDEX `gateway_pending_approval_retry` ON `gateway_pending_approval` (`tenant_id`,`client_id`,`alias`,`approval_policy_id`,`access_profile_id`,`tool`,`arguments_lookup`,`arguments`) WHERE collected_at IS NULL;

@@ -215,7 +215,7 @@ describe("the encrypted store", () => {
     expect(storedArguments).not.toContain("customer@example.com")
 
     // ...and the retry still finds its frozen call.
-    const metAgain = await run(store.findUncollectedApproval(approvalPolicy.id, accessProfile.id, ToolName.make("sendEmail"), argumentsValue))
+    const metAgain = await run(store.findUncollectedApproval({ tenantId: defaultTenantId, clientId: client.id, alias: Alias.make("gmail-work"), approvalPolicyId: approvalPolicy.id, accessProfileId: accessProfile.id, tool: ToolName.make("sendEmail"), arguments: argumentsValue }))
     expect(metAgain === undefined ? "" : metAgain.id).toBe(approval.id)
     expect(metAgain?.arguments).toEqual(argumentsValue)
   })
@@ -235,6 +235,7 @@ describe("the encrypted store", () => {
       arguments: {},
       expiresAt: new Date(Date.now() + 60_000)
     }))
+    await run(store.claimApproval({ tenantId: defaultTenantId, id, decidedBy: "sebastian" }))
     await run(store.settleApproval({
       tenantId: defaultTenantId,
       id,
@@ -309,7 +310,7 @@ describe("the encrypted store", () => {
       ]
     ))
 
-    const metAgain = await run(store.findUncollectedApproval(approvalPolicy.id, accessProfile.id, ToolName.make("sendEmail"), { to: "old@example.com" }))
+    const metAgain = await run(store.findUncollectedApproval({ tenantId: defaultTenantId, clientId: client.id, alias: Alias.make("gmail-work"), approvalPolicyId: approvalPolicy.id, accessProfileId: accessProfile.id, tool: ToolName.make("sendEmail"), arguments: { to: "old@example.com" } }))
     expect(metAgain === undefined ? "" : metAgain.id).toBe("legacy-approval")
     expect(metAgain?.arguments).toEqual({ to: "old@example.com" })
   })

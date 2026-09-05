@@ -21,11 +21,15 @@ export function CopyField({ value, label, multiline = false, className }: {
   readonly className?: string
 }) {
   const [copied, setCopied] = useState(false)
-  const copy = () => {
-    void navigator.clipboard.writeText(value)
-    setCopied(true)
-    toast.success(`${label} copied`)
-    setTimeout(() => setCopied(false), 1500)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopied(true)
+      toast.success(`${label} copied`)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      toast.error(`Could not copy ${label.toLowerCase()}`, { description: "Select the text and copy it manually." })
+    }
   }
   return (
     <div className={cn("flex gap-2", multiline ? "items-start" : "items-center", className)}>

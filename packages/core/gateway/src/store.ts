@@ -8,6 +8,7 @@ import {
   AccessProfileId,
   Alias,
   canonicalArguments,
+  connectionSubject,
   ApprovalDestinationId,
   ApprovalPolicyId,
   ClientId,
@@ -204,6 +205,24 @@ const createGatewayStoreDriver = async (
     )
     if (row === undefined) throw new Error(`Failed to store session`)
     return toAuthSession(row)
+  }
+
+  const approvalMatch = (input: Parameters<GatewayStoreDriver["findUncollectedApproval"]>[0]) => {
+    const canonical = canonicalArguments(input.arguments)
+    return {
+      sql: `tenant_id = ? AND client_id = ? AND alias = ?
+        AND approval_policy_id = ? AND access_profile_id = ? AND tool = ?
+        AND ((arguments_lookup IS NOT NULL AND arguments_lookup = ?)
+          OR (arguments_lookup IS NULL AND arguments = ?)) AND collected_at IS NULL`,
+      args: [input.tenantId, input.clientId, input.alias, input.approvalPolicyId, input.accessProfileId,
+        input.tool, encryption === undefined ? canonical : encryption.lookup(canonical), canonical]
+    }
+  }
+
+  const findUncollectedApproval: GatewayStoreDriver["findUncollectedApproval"] = async (input) => {
+    const match = approvalMatch(input)
+    const row = await one(`SELECT * FROM gateway_pending_approval WHERE ${match.sql} ORDER BY created_at DESC LIMIT 1`, match.args)
+    return row === undefined ? undefined : openApproval(row)
   }
 
   return {
@@ -494,6 +513,35 @@ const createGatewayStoreDriver = async (
         args: [expiresAt]
       })
       return Number(states.rowsAffected) + Number(handoffs.rowsAffected)
+    },
+
+    createConfiguredClient: async (input) => {
+      const at = now()
+      await database.batch([
+        {
+          sql: `INSERT INTO gateway_access_profile (id, tenant_id, name, is_default, created_at, updated_at)
+                VALUES (?, ?, ?, 0, ?, ?)`,
+          args: [input.accessProfileId, input.tenantId, input.name, at, at]
+        },
+        {
+          sql: `INSERT INTO gateway_approval_policy (id, tenant_id, name, is_default, created_at, updated_at)
+                VALUES (?, ?, ?, 0, ?, ?)`,
+          args: [input.approvalPolicyId, input.tenantId, input.name, at, at]
+        },
+        ...input.tools.flatMap((entry) => {
+          const route = [entry.connection.owner, connectionSubject(entry.connection) ?? null, entry.connection.integration, entry.connection.name, entry.tool]
+          return [
+            { sql: `INSERT INTO gateway_access_profile_tool (access_profile_id, owner, subject, integration, connection_name, tool) VALUES (?, ?, ?, ?, ?, ?)`, args: [input.accessProfileId, ...route] },
+            { sql: `INSERT INTO gateway_approval_policy_tool (approval_policy_id, owner, subject, integration, connection_name, tool, decision) VALUES (?, ?, ?, ?, ?, ?, ?)`, args: [input.approvalPolicyId, ...route, entry.decision] }
+          ]
+        }),
+        {
+          sql: `INSERT INTO gateway_client (id, tenant_id, access_profile_id, approval_policy_id, name, capabilities, approval_delivery, created_at, revoked_at)
+                VALUES (?, ?, ?, ?, ?, '[]', ?, ?, NULL)`,
+          args: [input.id, input.tenantId, input.accessProfileId, input.approvalPolicyId, input.name, JSON.stringify(defaultApprovalDelivery), at]
+        }
+      ], "write")
+      return requireClient(input.id)
     },
 
     createClient: async (input) => {
@@ -933,6 +981,7 @@ const createGatewayStoreDriver = async (
     },
 
     createApproval: async (input) => {
+      const match = approvalMatch(input)
       // Stored canonically so that the same request, however its JSON was
       // built, matches the frozen call it is a retry of — then sealed. The
       // keyed digest of the canonical text rides alongside, because equality
@@ -942,7 +991,8 @@ const createGatewayStoreDriver = async (
       await database.batch([
         { sql: `INSERT INTO gateway_pending_approval
            (id, tenant_id, client_id, approval_policy_id, access_profile_id, alias, tool, arguments, arguments_lookup, status, created_at, expires_at, decided_at, decided_by, result, error, collected_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, NULL, NULL, NULL, NULL, NULL)`, args: [
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, NULL, NULL, NULL, NULL, NULL
+          WHERE NOT EXISTS (SELECT 1 FROM gateway_pending_approval WHERE ${match.sql})`, args: [
           input.id,
           input.tenantId,
           input.clientId,
@@ -953,45 +1003,29 @@ const createGatewayStoreDriver = async (
           sealText(canonical),
           encryption === undefined ? null : encryption.lookup(canonical),
           createdAt,
-          millis(input.expiresAt)
+          millis(input.expiresAt),
+          ...match.args
         ] },
         { sql: `INSERT INTO gateway_approval_delivery
              (id, approval_id, destination_id, status, attempts, next_attempt_at, delivered_at, last_error)
            SELECT lower(hex(randomblob(16))), ?, assignment.destination_id, 'pending', 0, ?, NULL, NULL
              FROM gateway_client_approval_destination AS assignment
              JOIN gateway_approval_destination AS destination ON destination.id = assignment.destination_id
-            WHERE assignment.client_id = ? AND destination.deleted_at IS NULL`, args: [input.id, createdAt, input.clientId] }
+            WHERE assignment.client_id = ? AND destination.deleted_at IS NULL
+              AND EXISTS (SELECT 1 FROM gateway_pending_approval WHERE id = ?)`, args: [input.id, createdAt, input.clientId, input.id] }
       ], "write")
-      const row = await one("SELECT * FROM gateway_pending_approval WHERE id = ?", [input.id])
-      if (row === undefined) throw new Error(`Failed to store approval ${input.id}`)
-      return openApproval(row)
+      const approval = await findUncollectedApproval(input)
+      if (approval === undefined) throw new Error(`Failed to store approval ${input.id}`)
+      return approval
     },
 
-    findUncollectedApproval: async (approvalPolicyId, accessProfileId, tool, argumentsValue) => {
-      const canonical = canonicalArguments(argumentsValue)
-      const row = await one(
-        `SELECT * FROM gateway_pending_approval
-          WHERE approval_policy_id = ? AND access_profile_id = ? AND tool = ?
-            AND ((arguments_lookup IS NOT NULL AND arguments_lookup = ?)
-              OR (arguments_lookup IS NULL AND arguments = ?))
-            AND collected_at IS NULL
-          ORDER BY created_at DESC LIMIT 1`,
-        [
-          approvalPolicyId,
-          accessProfileId,
-          tool,
-          encryption === undefined ? canonical : encryption.lookup(canonical),
-          canonical
-        ]
-      )
-      return row === undefined ? undefined : openApproval(row)
-    },
+    findUncollectedApproval,
 
     collectApproval: async (tenantId, id) => {
       const result = await database.execute({
         sql: `UPDATE gateway_pending_approval
                 SET collected_at = ?
-              WHERE tenant_id = ? AND id = ? AND collected_at IS NULL AND status <> 'pending'`,
+              WHERE tenant_id = ? AND id = ? AND collected_at IS NULL AND status IN ('approved', 'denied', 'expired')`,
         args: [now(), tenantId, id]
       })
       return Number(result.rowsAffected) > 0
@@ -1016,21 +1050,34 @@ const createGatewayStoreDriver = async (
           [tenantId, status]
         )).map(openApproval),
 
+    claimApproval: async (input) => {
+      const at = now()
+      const result = await database.execute({
+        sql: `UPDATE gateway_pending_approval
+                SET status = 'executing', decided_at = ?, decided_by = ?
+              WHERE tenant_id = ? AND id = ? AND status = 'pending' AND expires_at > ?`,
+        args: [at, input.decidedBy, input.tenantId, input.id, at]
+      })
+      return Number(result.rowsAffected) === 1
+    },
+
     settleApproval: async (input) => {
-      await run(
-        `UPDATE gateway_pending_approval
-            SET status = ?, decided_at = ?, decided_by = ?, result = ?, error = ?
-          WHERE tenant_id = ? AND id = ? AND status = 'pending'`,
-        [
+      const result = await database.execute({
+        sql: `UPDATE gateway_pending_approval
+                SET status = ?, decided_at = ?, decided_by = ?, result = ?, error = ?
+              WHERE tenant_id = ? AND id = ? AND status = ?`,
+        args: [
           input.status,
           now(),
           input.decidedBy,
           input.result === null ? null : sealText(JSON.stringify(input.result)),
           input.error,
           input.tenantId,
-          input.id
+          input.id,
+          input.status === "approved" ? "executing" : "pending"
         ]
-      )
+      })
+      return Number(result.rowsAffected) === 1
     },
 
     cancelApprovalsForClient: async (clientId) => {
@@ -1221,6 +1268,7 @@ const effectStore = (driver: GatewayStoreDriver): GatewayStore => ({
     storeOperation("consumeIdentityOAuthState", () => driver.consumeIdentityOAuthState(stateHash)),
   deleteExpiredIdentityFlows: (at) =>
     storeOperation("deleteExpiredIdentityFlows", () => driver.deleteExpiredIdentityFlows(at)),
+  createConfiguredClient: (input) => storeOperation("createConfiguredClient", () => driver.createConfiguredClient(input)),
   createClient: (input) => storeOperation("createClient", () => driver.createClient(input)),
   listClients: (tenantId) => storeOperation("listClients", () => driver.listClients(tenantId)),
   overviewCounts: (tenantId) => storeOperation("overviewCounts", () => driver.overviewCounts(tenantId)),
@@ -1279,11 +1327,9 @@ const effectStore = (driver: GatewayStoreDriver): GatewayStore => ({
     storeOperation("getApproval", () => driver.getApproval(tenantId, id)),
   listApprovals: (tenantId, status) =>
     storeOperation("listApprovals", () => driver.listApprovals(tenantId, status)),
-  findUncollectedApproval: (approvalPolicyId, accessProfileId, tool, argumentsValue) =>
-    storeOperation(
-      "findUncollectedApproval",
-      () => driver.findUncollectedApproval(approvalPolicyId, accessProfileId, tool, argumentsValue)
-    ),
+  findUncollectedApproval: (input) =>
+    storeOperation("findUncollectedApproval", () => driver.findUncollectedApproval(input)),
+  claimApproval: (input) => storeOperation("claimApproval", () => driver.claimApproval(input)),
   collectApproval: (tenantId, id) =>
     storeOperation("collectApproval", () => driver.collectApproval(tenantId, id)),
   settleApproval: (input) => storeOperation("settleApproval", () => driver.settleApproval(input)),

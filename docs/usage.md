@@ -3,6 +3,38 @@
 This project separates the interfaces an agent uses from the interfaces a
 human operator uses to run and administer the gateway.
 
+## Guided setup
+
+Open the dashboard on a new gateway to start onboarding. Connect a service,
+select tools, and create a client with its own access profile and approval
+policy. Reads can run directly; other selected tools require approval. You can
+also require approval for every call. Client setup is atomic and grants no
+administrative capabilities.
+
+The next steps issue a key, provide MCP and CLI configuration, verify the key's
+delegated access, and show the client's first calls. Copy the key before leaving:
+it is kept only in memory and cannot be retrieved after a reload.
+
+To replay onboarding, open **`/onboarding`** on the dashboard's origin. This route
+is intentionally absent from navigation. It works after completion or skipping,
+and lets you reuse an existing connection and client. Opening it creates nothing
+and never resets accounts, policies, or keys. Issuing another key is an explicit
+action; previous keys remain valid until revoked on the client page.
+
+## Approval execution
+
+Approval retries are scoped to the tenant, client, complete connection alias,
+tool, assigned configurations, and exact arguments. Approval executes against
+that frozen connection. Concurrent decisions compete for one durable database
+claim before any provider call occurs.
+
+An approval in `executing` cannot be approved, denied, expired, or collected.
+If the gateway process stops after claiming it, the provider may already have
+performed the action. The gateway preserves that state rather than retrying.
+Check the provider before requesting the action again. This prevents automatic
+duplicate execution; it does not promise exactly-once delivery across an
+external provider and the gateway database.
+
 ## Agent access
 
 An agent is a delegated caller. It receives an API key and can use only the

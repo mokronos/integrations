@@ -238,6 +238,9 @@ export const gatewayPendingApproval = sqliteTable("gateway_pending_approval", {
   // answer has been collected.
   index("gateway_pending_approval_retry")
     .on(
+      table.tenantId,
+      table.clientId,
+      table.alias,
       table.approvalPolicyId,
       table.accessProfileId,
       table.tool,

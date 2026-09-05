@@ -48,3 +48,6 @@ export const Alias = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_-]*$/))
   Schema.brand("Alias")
 )
 export type Alias = typeof Alias.Type
+
+export const ApprovalStatus = Schema.Literals(["pending", "executing", "approved", "denied", "expired"])
+export type ApprovalStatus = typeof ApprovalStatus.Type
