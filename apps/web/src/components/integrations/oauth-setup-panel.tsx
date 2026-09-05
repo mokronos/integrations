@@ -52,7 +52,7 @@ const providerSetupSteps = {
   other: [
     "Create an OAuth application at the provider's developer console.",
     "Register the redirect URI below on that application.",
-    "Copy the client id and secret it issues."
+    "Copy the client ID and, when the provider issues one, its secret."
   ]
 } as const
 
@@ -101,4 +101,3 @@ export function OAuthSetupPanel({
     </div>
   )
 }
-

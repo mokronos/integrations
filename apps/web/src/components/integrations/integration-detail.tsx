@@ -4,6 +4,9 @@ import { useNavigate } from "react-router"
 import { toast } from "sonner"
 
 import { SchemaView } from "@/components/schema-view"
+import { AuthMethodDetails } from "@/components/integrations/auth-method-details"
+import { OperationError } from "@/components/integrations/operation-feedback"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,6 +43,12 @@ const expiry = (connection: Connection): string =>
   connection.expiresAt === undefined || connection.expiresAt === null
     ? "no expiry"
     : `expires ${when(new Date(connection.expiresAt))}`
+
+const connectionAuthLabel = (
+  integration: IntegrationOverview,
+  connection: Connection
+): string => integration.authMethods.find((method) => method.template === connection.template)?.label
+  ?? `Unavailable method (${connection.template})`
 /** One tool, closed until asked about. The header is the whole click target —
  *  a row that only responds on its words is a row people click twice. */
 function ToolCard({ tool }: { readonly tool: Tool }) {
@@ -254,8 +263,7 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
     onSuccess: () => {
       invalidate(keys.integrations, keys.connections)
       toast.success("Connection removed")
-    },
-    onError: (error: Error) => toast.error("Could not disconnect", { description: error.message })
+    }
   })
 
   const tools = useMemo(() => {
@@ -275,7 +283,7 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
             <IntegrationName integration={integration} />
             <ConnectionBadge integration={integration} />
             <div className="ml-auto flex items-center gap-1">
-              <ConnectDialog integration={integration} />
+              <ConnectDialog key={integration.slug} integration={integration} />
               <RemoveIntegration integration={integration} />
             </div>
           </div>
@@ -291,13 +299,8 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
               <dd>{integration.kind}</dd>
             </div>
             <div className="min-w-0">
-              <dt className="text-muted-foreground text-xs uppercase">Auth</dt>
-              <dd>
-                {integration.authMethods.length === 0
-                  ? "none"
-                  : integration.authMethods.map((method) => `${method.template}:${method.kind}`)
-                    .join(", ")}
-              </dd>
+              <dt className="text-muted-foreground text-xs uppercase">Authentication</dt>
+              <dd>{integration.requiresAuthentication ? "Required" : "Not required"}</dd>
             </div>
           </dl>
 
@@ -320,6 +323,24 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
           <Separator />
 
           <div className="space-y-2">
+            <div>
+              <p className="text-xs uppercase tracking-wide">Authentication options</p>
+              <p className="text-muted-foreground mt-1 text-xs">
+                Discovered from the {integration.kind === "mcp" ? "MCP endpoint" : "OpenAPI document"}. Each connection uses one option.
+              </p>
+            </div>
+            {integration.authMethods.length === 0
+              ? <p className="text-destructive text-sm">No supported authentication option was discovered.</p>
+              : (
+                <div className="grid gap-2 xl:grid-cols-2">
+                  {integration.authMethods.map((method) => <AuthMethodDetails key={method.id} method={method} />)}
+                </div>
+              )}
+          </div>
+
+          <Separator />
+
+          <div className="space-y-2">
             <p className="text-xs uppercase tracking-wide">Connections</p>
             {integration.connections.length === 0
               ? <p className="text-muted-foreground text-sm">Not connected.</p>
@@ -331,8 +352,10 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
                         <ItemContent>
                           <ItemTitle className="flex-wrap">
                             <span>{connection.name}</span>
+                            <Badge variant={connection.status === "connected" ? "default" : "destructive"}>
+                              {connection.status === "connected" ? "connected" : "reauthorization required"}
+                            </Badge>
                             <Badge variant="outline">{connection.owner}</Badge>
-                            <Badge variant="secondary">{connection.template}</Badge>
                           </ItemTitle>
                           <ItemDescription className="flex flex-wrap items-center gap-2">
                             {connection.identityLabel === undefined
@@ -340,10 +363,17 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
                               ? null
                               : <span>{connection.identityLabel}</span>}
                             <span>{expiry(connection)}</span>
-                            {connection.error === undefined ? null : (
-                              <span className="text-destructive">{connection.error}</span>
-                            )}
+                            <span>via {connectionAuthLabel(integration, connection)}</span>
                           </ItemDescription>
+                          {connection.oauthScope === undefined || connection.oauthScope === null
+                            ? null
+                            : <ItemDescription>OAuth scopes: {connection.oauthScope}</ItemDescription>}
+                          {connection.missingOAuthScopes === undefined || connection.missingOAuthScopes.length === 0
+                            ? null
+                            : <ItemDescription className="text-destructive">Missing scopes: {connection.missingOAuthScopes.join(", ")}</ItemDescription>}
+                          {connection.error === undefined ? null : (
+                            <p className="text-destructive mt-1 text-xs">{connection.error}</p>
+                          )}
                         </ItemContent>
                         <ItemActions>
                           <Button
@@ -361,6 +391,9 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
                   ))}
                 </ul>
               )}
+            {disconnect.error === null ? null : (
+              <OperationError title="Disconnect failed" step="Removing the stored connection" error={disconnect.error} />
+            )}
           </div>
         </CardContent>
       </Card>
@@ -382,7 +415,13 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
         </CardHeader>
         <CardContent className="space-y-2">
           {integration.toolError === undefined ? null : (
-            <p className="text-destructive text-sm">{integration.toolError}</p>
+            <Alert variant="destructive">
+              <AlertTitle>Could not refresh tools</AlertTitle>
+              <AlertDescription>
+                <p><span className="font-medium">Stopped at:</span> Reading tools from the live endpoint</p>
+                <p>{integration.toolError}</p>
+              </AlertDescription>
+            </Alert>
           )}
           {integration.tools.length === 0
             ? (

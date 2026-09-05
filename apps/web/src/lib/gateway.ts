@@ -51,14 +51,28 @@ import type {
  */
 
 export class GatewayError extends Error {
-  readonly status: number
+  readonly status: number | undefined
+  readonly method: RequestMethod
+  readonly path: string
+  readonly requestId: string | undefined
 
-  constructor(status: number, message: string) {
-    super(message)
+  constructor(options: {
+    readonly message: string
+    readonly method: RequestMethod
+    readonly path: string
+    readonly status?: number
+    readonly requestId?: string
+  }) {
+    super(options.message)
     this.name = "GatewayError"
-    this.status = status
+    this.status = options.status
+    this.method = options.method
+    this.path = options.path
+    this.requestId = options.requestId
   }
 }
+
+type RequestMethod = "GET" | "POST" | "DELETE"
 
 const messageFrom = (payload: Schema.Json, fallback: string): string => {
   if (Predicate.isObject(payload) && "error" in payload) {
@@ -73,26 +87,54 @@ const messageFrom = (payload: Schema.Json, fallback: string): string => {
 const decodeJsonText = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
 
 const request = async (
-  method: "GET" | "POST" | "DELETE",
+  method: RequestMethod,
   path: string,
   body?: JsonEncodable
 ): Promise<Schema.Json> => {
-  const response = await fetch(path, {
-    method,
-    // Same-origin only. Anything else would not be authenticated anyway.
-    credentials: "same-origin",
-    ...whenPresentFields(body, (present) => ({
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(present)
-    }))
-  })
+  let response: Response
+  try {
+    response = await fetch(path, {
+      method,
+      // Same-origin only. Anything else would not be authenticated anyway.
+      credentials: "same-origin",
+      ...whenPresentFields(body, (present) => ({
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(present)
+      }))
+    })
+  } catch (cause) {
+    throw new GatewayError({
+      method,
+      path,
+      message: cause instanceof Error
+        ? `The dashboard could not reach the gateway: ${cause.message}`
+        : "The dashboard could not reach the gateway."
+    })
+  }
   const text = await response.text()
-  const payload = text.trim().length === 0 ? {} : decodeJsonText(text)
+  const requestId = response.headers.get("x-request-id") ?? undefined
+  let payload: Schema.Json
+  try {
+    payload = text.trim().length === 0 ? {} : decodeJsonText(text)
+  } catch (cause) {
+    throw new GatewayError({
+      method,
+      path,
+      status: response.status,
+      ...whenPresent("requestId", requestId),
+      message: cause instanceof Error
+        ? `The gateway returned an invalid JSON response: ${cause.message}`
+        : "The gateway returned an invalid JSON response."
+    })
+  }
   if (!response.ok) {
-    throw new GatewayError(
-      response.status,
-      messageFrom(payload, `${method} ${path} failed with ${response.status}`)
-    )
+    throw new GatewayError({
+      method,
+      path,
+      status: response.status,
+      ...whenPresent("requestId", requestId),
+      message: messageFrom(payload, `${method} ${path} failed with ${response.status}`)
+    })
   }
   return payload
 }

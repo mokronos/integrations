@@ -1,8 +1,10 @@
 import { whenPresent } from "@mokronos/contracts"
 import { Download, Search } from "lucide-react"
 import { useState } from "react"
+import { useNavigate } from "react-router"
 import { toast } from "sonner"
 
+import { OperationError } from "@/components/integrations/operation-feedback"
 import { IntegrationIcon } from "@/components/integrations/integration-icon"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -34,6 +36,7 @@ const ALL_KINDS = "__all__"
  * installable endpoint, then the existing provisioning path owns installation. */
 export function RegistrySearchDialog() {
   const invalidate = useInvalidate()
+  const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [kind, setKind] = useState<IntegrationSearchKind | typeof ALL_KINDS>(ALL_KINDS)
@@ -46,7 +49,9 @@ export function RegistrySearchDialog() {
       ...whenPresent("kind", kind === ALL_KINDS ? undefined : kind),
       limit: 12
     }),
-    onSuccess: (response) => setResults(response.results),
+    onSuccess: (response) => setResults(response.results.filter((result) =>
+      result.surfaces.some((surface) => surface.type === "mcp" || surface.type === "openapi")
+    )),
     onError: (error: Error) => toast.error("Search failed", { description: error.message })
   })
 
@@ -58,11 +63,13 @@ export function RegistrySearchDialog() {
     onSuccess: (result) => {
       invalidate(keys.integrations, keys.connections)
       toast.success(`Installed ${result.integration.name}`, {
-        description: `${result.tools.length} tools discovered`
+        description: result.requiresAuthentication
+          ? `${result.authMethods.length} authentication ${result.authMethods.length === 1 ? "option" : "options"} found. Choose one to connect.`
+          : `Connected with no credential; ${result.tools.length} tools available.`
       })
       setOpen(false)
+      void navigate(`/integrations/${result.integration.slug}`)
     },
-    onError: (error: Error) => toast.error("Installation failed", { description: error.message }),
     onSettled: () => setInstalling(undefined)
   })
 
@@ -103,14 +110,19 @@ export function RegistrySearchDialog() {
               <SelectItem value={ALL_KINDS}>Any kind</SelectItem>
               <SelectItem value="mcp">MCP</SelectItem>
               <SelectItem value="openapi">OpenAPI</SelectItem>
-              <SelectItem value="graphql">GraphQL</SelectItem>
-              <SelectItem value="cli">CLI</SelectItem>
             </SelectContent>
           </Select>
           <Button type="submit" disabled={query.trim().length === 0 || search.isPending}>
             {search.isPending ? "Searching…" : "Search"}
           </Button>
         </form>
+
+        {search.error === null ? null : (
+          <OperationError title="Registry search failed" step="Searching integrations.sh" error={search.error} />
+        )}
+        {install.error === null ? null : (
+          <OperationError title="Installation failed" step="Inspecting and installing the selected endpoint" error={install.error} />
+        )}
 
         <div className="max-h-[28rem] space-y-2 overflow-y-auto pr-1">
           {!search.isPending && results.length === 0
@@ -121,9 +133,11 @@ export function RegistrySearchDialog() {
             )
             : results.map((result) => {
               const installable = result.surfaces.filter(
-                (surface) => surface.url !== undefined
+                (surface) => surface.url !== undefined && (surface.type === "mcp" || surface.type === "openapi")
               )
-              const kinds = [...new Set(result.surfaces.map((surface) => surface.type))]
+              const kinds = [...new Set(result.surfaces.flatMap((surface) =>
+                surface.type === "mcp" || surface.type === "openapi" ? [surface.type] : []
+              ))]
               return (
                 <div key={result.domain} className="space-y-3 rounded-lg border p-3">
                   <div className="flex items-start gap-3">
