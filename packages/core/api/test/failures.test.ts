@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { Effect } from "effect"
-import { whenPresent } from "@mokronos/contracts"
+import { whenPresent, whenPresentMap } from "@mokronos/contracts"
 import {
   createGatewayHandler,
   createGatewayStore,
@@ -14,7 +14,7 @@ import {
   newClientId
 } from "./gateway.ts"
 import type { GatewayStore } from "./gateway.ts"
-import { stubIntegrations } from "./stubs.ts"
+import { stubHost, stubIntegrations } from "./stubs.ts"
 
 const directories: Array<string> = []
 const stores: Array<GatewayStore> = []
@@ -33,6 +33,9 @@ const driverFailure = "SQLITE_BUSY: database is locked at /srv/secrets/gateway.s
 const setup = async (options: {
   readonly listClientsFails?: boolean
   readonly unreachableUrl?: boolean
+  /** Stands in for whatever a deployment pages on. Told the store operation
+   *  that rejected, and answers the correlation id to quote back. */
+  readonly errorCapture?: (operation: string | undefined) => string
 } = {}) => {
   const directory = await run(mkdtemp(path.join(tmpdir(), "wf-failures-")))
   directories.push(directory)
@@ -78,9 +81,13 @@ const setup = async (options: {
     : integrations
 
   const { handle } = createGatewayHandler({
+    host: stubHost(),
     store: presented,
     integrations: presentedIntegrations,
     retentionDays: 30,
+    ...whenPresentMap("errorCapture", options.errorCapture, (sink) => ({
+      captureException: (_cause, context) => Effect.succeed(sink(context.operation))
+    })),
     oauth: {
       start: () => Effect.die(new Error("not used")),
       get: () => Effect.sync((): undefined => undefined),
@@ -106,9 +113,8 @@ describe("failures nobody declared", () => {
     const { call } = await run(setup({ listClientsFails: true }))
     const response = await run(call("GET", "/v1/clients"))
     expect(response.status).toBe(500)
-    expect(await run(response.json())).toEqual({
-      error: "The gateway could not complete this request"
-    })
+    const body = await run(response.json())
+    expect(body.error).toBe("The gateway could not complete this request")
   })
 
   test("says nothing about the database that broke", async () => {
@@ -116,6 +122,45 @@ describe("failures nobody declared", () => {
     const body = await run((await run(call("GET", "/v1/clients"))).text())
     expect(body).not.toContain("SQLITE")
     expect(body).not.toContain("/srv/secrets")
+  })
+
+  test("hands back the id the failure was recorded under", async () => {
+    const recorded: Array<{ readonly traceId: string; readonly operation?: string }> = []
+    const { call } = await run(setup({
+      listClientsFails: true,
+      errorCapture: (operation) => {
+        const traceId = `trace-${recorded.length}`
+        recorded.push({ traceId, ...whenPresent("operation", operation) })
+        return traceId
+      }
+    }))
+    const body = await run((await run(call("GET", "/v1/clients"))).json())
+    // One event, one id, and the caller is told the same one the sink kept:
+    // quoting it back is what makes the log line findable.
+    expect(recorded).toHaveLength(1)
+    expect(body.traceId).toBe(recorded[0]?.traceId)
+  })
+
+  test("tells the sink which store operation rejected", async () => {
+    const operations: Array<string | undefined> = []
+    const { call } = await run(setup({
+      listClientsFails: true,
+      errorCapture: (operation) => {
+        operations.push(operation)
+        return "trace"
+      }
+    }))
+    await run(call("GET", "/v1/clients"))
+    expect(operations).toEqual(["listClients"])
+  })
+
+  test("a sink that keeps no id leaves the field off rather than sending an empty one", async () => {
+    const { call } = await run(setup({
+      listClientsFails: true,
+      errorCapture: () => ""
+    }))
+    const body = await run((await run(call("GET", "/v1/clients"))).json())
+    expect(body).toEqual({ error: "The gateway could not complete this request" })
   })
 
   test("still refuses a malformed request with 400, not 500", async () => {

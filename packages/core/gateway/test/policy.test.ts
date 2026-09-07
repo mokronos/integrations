@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { Effect } from "effect"
 import { ToolAddress } from "@mokronos/contracts"
-import type { IntegrationsApi } from "@mokronos/integrations"
+import type { IntegrationHost } from "@mokronos/integrations"
 import {
   Alias,
   ClientId,
@@ -32,21 +32,16 @@ const connection = (integration: string, name: string) => ({
 })
 const summary = (integration: string, name: string, tool: string, defaultDecision: "allow" | "require_approval" = "allow") => ({
   address: ToolAddress.make(`tools.${integration}.org.${name}.${tool}`),
-  name: tool,
+  name: ToolName.make(tool),
   description: tool,
-  integration,
+  integration: IntegrationSlug.make(integration),
   owner: "org" as const,
-  connection: name,
+  connection: ConnectionName.make(name),
   defaultDecision
 })
-const catalog = (tools: ReadonlyArray<ReturnType<typeof summary>>): Pick<IntegrationsApi, "tools"> => ({
-  tools: {
-    list: async () => [],
-    summaries: async () => tools,
-    describe: async () => { throw new Error("not used") },
-    execute: async () => ({})
-  }
-})
+const catalog = (tools: ReadonlyArray<ReturnType<typeof summary>>) => ({
+  host: { toolSummaries: () => Effect.succeed(tools) }
+} satisfies { readonly host: Pick<IntegrationHost["Service"], "toolSummaries"> })
 
 afterEach(async () => {
   await Promise.all(stores.splice(0).map((store) => run(store.close())))

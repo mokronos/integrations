@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 import { ToolAddress } from "./address.ts"
-import { OwnerTier } from "./vocabulary.ts"
+import { ConnectionName, IntegrationSlug, OwnerTier, ToolName } from "./vocabulary.ts"
 
 /** A single named operation an integration exposes: the smallest unit that can
  * be invoked, authorized, or approved. */
@@ -14,11 +14,11 @@ import { OwnerTier } from "./vocabulary.ts"
  *  learn which credentials a tool runs under. */
 export const ToolSummary = Schema.Struct({
   address: ToolAddress,
-  name: Schema.String,
+  name: ToolName,
   description: Schema.String,
-  integration: Schema.String,
+  integration: IntegrationSlug,
   owner: OwnerTier,
-  connection: Schema.String,
+  connection: ConnectionName,
   /** The policy decision a newly cataloged tool starts from.
    *
    *  `allow` is reserved for a tool whose own source declares it read-only —

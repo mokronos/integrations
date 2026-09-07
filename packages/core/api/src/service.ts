@@ -22,8 +22,8 @@ import type { OAuthSessionStore } from "@mokronos/gateway-core"
 import { createRateLimiter } from "@mokronos/gateway-core"
 import { generateApiKey, newClientId } from "@mokronos/gateway-core"
 import { integrationsHome } from "./paths.ts"
-import type { HostStorage, IntegrationsApi } from "@mokronos/integrations"
-import { HostHandleService, IntegrationsApiService } from "@mokronos/integrations"
+import type { HostStorage, StorageError } from "@mokronos/integrations"
+import { HostHandleService, IntegrationHost, IntegrationsApiService } from "@mokronos/integrations"
 import type { GatewayStoreOptions } from "@mokronos/gateway-core"
 import type { GatewayStore } from "@mokronos/gateway-core"
 import { GatewayStoreError, GatewayStoreService } from "@mokronos/gateway-core"
@@ -154,7 +154,7 @@ const buildCore = async (
       const tenants = yield* resources.store.listTenants()
       yield* Effect.forEach(tenants, (tenant) => reconcileDefaults({
         store: resources.store,
-        integrations: resources.integrations,
+        integrations: { host: resources.integrationHost },
         tenantId: tenant.id
       }), { discard: true })
     }))
@@ -174,7 +174,10 @@ const buildCore = async (
       const store = yield* GatewayStoreService
       const host = yield* HostHandleService
       const integrations = yield* IntegrationsApiService
-      return { store, host, integrations }
+      // The host's Effect capability, pulled from the same runtime the facade
+      // wraps. Handlers get this one; nothing builds a second host.
+      const integrationHost = yield* Effect.promise(() => host.run(Effect.service(IntegrationHost)))
+      return { store, host, integrations, integrationHost }
     }))
   }
 
@@ -218,7 +221,7 @@ const buildCore = async (
       if (session.bindingTenant === undefined || state.status !== "connected") return
       await Effect.runPromise(reconcileDefaults({
         store: resources.store,
-        integrations: gateway.integrations,
+        integrations: { host: resources.integrationHost },
         tenantId: session.bindingTenant
       }))
     },
@@ -270,6 +273,7 @@ const buildCore = async (
     disposeCore,
     handlerOptions: {
       store: resources.store,
+      host: resources.integrationHost,
       integrations: gateway.integrations,
       retentionDays: options.retentionDays ?? defaultArgumentRetentionDays,
       oauth,
@@ -436,7 +440,7 @@ export const serveGateway = async (options: ServeOptions = {}): Promise<RunningG
     const boundPort = Number(server.port)
     localSecret = await Effect.runPromise(ensureLocalCredential(
       core.store,
-      core.gateway.integrations,
+      core.handlerOptions.host,
       core.home,
       boundPort
     ))
@@ -460,12 +464,12 @@ export const serveGateway = async (options: ServeOptions = {}): Promise<RunningG
  *  recoverable without losing the client's configuration assignments. */
 export const ensureLocalCredential = Effect.fn("Gateway.ensureLocalCredential")(function*(
   store: GatewayStore,
-  integrations: Pick<IntegrationsApi, "tools" | "connections">,
+  host: IntegrationHost["Service"],
   home: string,
   port: number
-): Effect.fn.Return<string, GatewayStoreError> {
+): Effect.fn.Return<string, GatewayStoreError | StorageError> {
   const existing = yield* store.findClientByName(defaultTenantId, localClientName)
-  const defaults = yield* reconcileDefaults({ store, integrations, tenantId: defaultTenantId })
+  const defaults = yield* reconcileDefaults({ store, integrations: { host }, tenantId: defaultTenantId })
   if (defaults.accessProfile === undefined || defaults.approvalPolicy === undefined) {
     return yield* new GatewayStoreError({
       operation: "ensureLocalCredential",

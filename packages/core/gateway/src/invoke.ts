@@ -1,6 +1,6 @@
 import { whenPresent } from "@mokronos/contracts"
 import { Effect, Schema } from "effect"
-import type { IntegrationsApi } from "@mokronos/integrations"
+import type { IntegrationHost } from "@mokronos/integrations"
 import { ToolAddress } from "@mokronos/contracts"
 import { authorizeInvocation } from "./authorize.ts"
 import { defaultApprovalExpiryHours, defaultArgumentRetentionDays } from "./config.ts"
@@ -23,14 +23,6 @@ import type { GatewayStore, GatewayStoreError, RecordAuditInput } from "./store.
 
 type Json = typeof Schema.Json.Type
 
-class IntegrationCallError extends Schema.TaggedError<IntegrationCallError>()(
-  "IntegrationCallError",
-  {
-    message: Schema.String,
-    cause: Schema.Defect()
-  }
-) {}
-
 /** The address is built from the authorized profile tool, never accepted from the caller. That is
  * what makes invocation-by-address safe to expose: a caller naming an address
  * directly still has to pass both assigned configurations. */
@@ -52,7 +44,7 @@ export type InvocationOutcome =
 
 export interface InvokeDependencies {
   readonly store: GatewayStore
-  readonly integrations: Pick<IntegrationsApi, "tools">
+  readonly host: IntegrationHost["Service"]
   readonly argumentRetentionDays?: number
   readonly approvalExpiryHours?: number
   readonly approvalUrlOf?: (approvalId: ApprovalId) => string | undefined
@@ -204,7 +196,7 @@ export const invokeThroughGateway = Effect.fn("Invocation.invokeThroughGateway")
     readonly arguments: Json
   }
 ): Effect.fn.Return<InvocationOutcome, GatewayStoreError> {
-  const { store, integrations } = dependencies
+  const { store, host } = dependencies
   const retentionDays = dependencies.argumentRetentionDays ?? defaultArgumentRetentionDays
   const expiryHours = dependencies.approvalExpiryHours ?? defaultApprovalExpiryHours
 
@@ -247,7 +239,7 @@ export const invokeThroughGateway = Effect.fn("Invocation.invokeThroughGateway")
   }
 
   return yield* executeAuthorized(
-    { store, integrations, retentionDays },
+    { store, host, retentionDays },
     authorization,
     input.arguments
   )
@@ -259,20 +251,17 @@ export const invokeThroughGateway = Effect.fn("Invocation.invokeThroughGateway")
 export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(function*(
   dependencies: {
     readonly store: GatewayStore
-    readonly integrations: Pick<IntegrationsApi, "tools">
+    readonly host: IntegrationHost["Service"]
     readonly retentionDays: number
   },
   authorization: Extract<Authorization, { status: "authorized" }>,
   argumentsValue: Json
 ): Effect.fn.Return<Extract<InvocationOutcome, { status: "succeeded" | "failed" }>, GatewayStoreError> {
   const address = boundToolAddress(authorization.connection, authorization.accessProfileTool.tool)
-  const invocation = yield* Effect.result(Effect.tryPromise({
-    try: () => dependencies.integrations.tools.execute(address, argumentsValue),
-    catch: (cause) => new IntegrationCallError({
-      message: cause instanceof Error ? cause.message : "Integration call failed",
-      cause
-    })
-  }))
+  // The host's failures are typed and each renders itself in a sentence, so
+  // there is nothing left for a wrapper error to add. What used to be an
+  // `unknown` fished out of a rejected promise is now the failure itself.
+  const invocation = yield* Effect.result(dependencies.host.execute(address, argumentsValue))
   if (invocation._tag === "Success") {
     yield* dependencies.store.recordAudit(
       auditFor(authorization, "succeeded", null, argumentsValue, dependencies.retentionDays)
@@ -315,7 +304,7 @@ export const listEffectiveTools = Effect.fn("Invocation.listEffectiveTools")(fun
   clientId: Parameters<GatewayStore["findAccessProfileForClient"]>[0],
   options: {
     readonly schemas?: boolean
-    readonly integrations?: Pick<IntegrationsApi, "tools">
+    readonly host?: IntegrationHost["Service"]
   } = {}
 ): Effect.fn.Return<ReadonlyArray<EffectiveTool>, GatewayStoreError> {
   const [accessProfile, approvalPolicy] = yield* Effect.all([
@@ -340,13 +329,11 @@ export const listEffectiveTools = Effect.fn("Invocation.listEffectiveTools")(fun
     connection: profileTool.connection,
     decision: policyTool.decision
   }))
-  if (options.schemas !== true || options.integrations === undefined) return base
+  if (options.schemas !== true || options.host === undefined) return base
 
-  const integrations = options.integrations
+  const host = options.host
   return yield* Effect.forEach(base, (entry) => {
-    return Effect.tryPromise(() => integrations.tools.describe(
-      boundToolAddress(entry.connection, entry.tool)
-    )).pipe(
+    return host.describeTool(boundToolAddress(entry.connection, entry.tool)).pipe(
       Effect.map((described) => ({
         ...entry,
         ...whenPresent("description", described.description),

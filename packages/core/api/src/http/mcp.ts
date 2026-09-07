@@ -21,7 +21,7 @@ import {
   listEffectiveTools
 } from "@mokronos/gateway-core"
 import type { GatewayStore } from "@mokronos/gateway-core"
-import type { IntegrationsApi } from "@mokronos/integrations"
+import type { IntegrationHost } from "@mokronos/integrations"
 import { Effect } from "effect"
 import { gatewayVersion } from "../version.ts"
 
@@ -64,7 +64,7 @@ const runInvocation = (options: McpGatewayOptions, input: {
 }) => Effect.runPromise(invokeThroughGateway(
   {
     store: options.store,
-    integrations: options.integrations,
+    host: options.host,
     argumentRetentionDays: options.retentionDays,
     approvalUrlOf: (approvalId) => {
       const origin = options.dashboardUrl?.()
@@ -82,7 +82,7 @@ const runInvocation = (options: McpGatewayOptions, input: {
 
 export interface McpGatewayOptions {
   readonly store: GatewayStore
-  readonly integrations: IntegrationsApi
+  readonly host: IntegrationHost["Service"]
   readonly retentionDays: number
   readonly dashboardUrl?: () => string | undefined
 }
@@ -95,7 +95,7 @@ const serverFor = async (
   const server = new McpServer({ name: "integrations-gateway", version: gatewayVersion })
   const tools = await Effect.runPromise(listEffectiveTools(options.store, clientId, {
     schemas: true,
-    integrations: options.integrations
+    host: options.host
   }))
 
   for (const tool of tools) {

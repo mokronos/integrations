@@ -1,12 +1,14 @@
+import { stubHost, stubIntegrations as emptyIntegrations } from "./stubs.ts"
+import { InvocationError } from "@mokronos/integrations"
+import type { IntegrationHost } from "@mokronos/integrations"
 import { run, runAll } from "./effect.ts"
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { ToolAddress, whenPresent } from "@mokronos/contracts"
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client"
-import type { IntegrationsApi } from "@mokronos/integrations"
 import type { Connection, Tool } from "@mokronos/contracts"
 import {
   aliasForConnection,
@@ -49,21 +51,14 @@ interface ExecutedCall {
   readonly input: typeof Schema.Json.Type
 }
 
-/** Members these tests never reach. Throwing is deliberate: a partial fake that
- *  returned `undefined` would let a handler quietly start depending on one of
- *  these and still pass. */
-const notStubbed = (member: string) => () => {
-  throw new Error(`stubIntegrations: ${member} is not stubbed for these tests`)
-}
-
 /** Fills in the fields a vendor connection always carries so a test only has to
  *  name the part it cares about. */
 const stubConnection = (
   reference: { readonly integration: string; readonly name: string }
 ): Connection => ({
   owner: "user",
-  name: reference.name,
-  integration: reference.integration,
+  name: ConnectionName.make(reference.name),
+  integration: IntegrationSlug.make(reference.integration),
   template: reference.integration,
   address: `connections.${reference.integration}.user.${reference.name}`,
   provider: reference.integration,
@@ -80,11 +75,11 @@ const stubTool = (
   }
 ): Tool => ({
   address: ToolAddress.make(tool.address),
-  name: tool.name,
+  name: ToolName.make(tool.name),
   description: "",
-  integration: "gmail",
+  integration: IntegrationSlug.make("gmail"),
   owner: tool.owner ?? "user",
-  connection: "work",
+  connection: ConnectionName.make("work"),
   defaultDecision: tool.defaultDecision ?? "require_approval"
 })
 
@@ -107,87 +102,70 @@ const stubIntegrations = (behaviour: {
   const forgotten: Array<string> = []
   const renamed: Array<{ readonly slug: string; readonly name: string }> = []
   const known = new Set((behaviour.connections ?? []).map((connection) => connection.integration))
-  const integrations: IntegrationsApi = {
-    tools: {
-      execute: async (address, input) => {
-        calls.push({ address: String(address), input })
-        await behaviour.beforeExecute?.()
-        if (behaviour.fail === true) throw new Error("vendor exploded")
-        return { ok: true }
-      },
-      summaries: async () => (behaviour.tools ?? []).map(stubTool),
-      describe: async (address) => ({
-        ...stubTool({
-          address: String(address),
-          name: String(address).split(".").at(-1) ?? "tool"
-        }),
-        description: "Send an email",
-        inputSchema: {
-          type: "object",
-          properties: { to: { type: "string" } },
-          required: ["to"]
-        }
+  // Nothing a handler touches comes through the facade any more — only the
+  // three composites the OAuth and discovery routes still call, which these
+  // tests do not exercise. The rest is the host stub below.
+  const integrations = emptyIntegrations()
+  /** The host as the handlers reach it. The gateway's job is deciding whether a
+   *  call happens and with which credential, not what the vendor answers, so
+   *  everything here is a plausible answer rather than a real one. */
+  const host: IntegrationHost["Service"] = stubHost({
+    execute: (address, input) => {
+      calls.push({ address: String(address), input })
+      return Effect.promise(() => behaviour.beforeExecute?.() ?? Promise.resolve()).pipe(
+        Effect.flatMap(() =>
+          behaviour.fail === true
+            // A vendor that refuses is an `InvocationError`, which is what the
+            // host would really raise; the gateway turns it into a 502.
+            ? Effect.fail(new InvocationError({
+              code: "upstream_error",
+              detail: "vendor exploded"
+            }))
+            : Effect.succeed({ ok: true })
+        )
+      )
+    },
+    toolSummaries: () => Effect.succeed((behaviour.tools ?? []).map(stubTool)),
+    listTools: () => Effect.succeed((behaviour.tools ?? []).map(stubTool)),
+    describeTool: (target) => Effect.succeed({
+      ...stubTool({
+        address: String(target),
+        name: String(target).split(".").at(-1) ?? "tool"
       }),
-      list: async () => (behaviour.tools ?? []).map(stubTool)
-    },
-    connections: {
-      list: async () => (behaviour.connections ?? []).map(stubConnection),
-      remove: async (reference) => {
-        removed.push({ integration: reference.integration, name: reference.name })
-      },
-      create: notStubbed("connections.create"),
-      ensure: notStubbed("connections.ensure")
-    },
-    catalog: {
-      classify: notStubbed("catalog.classify"),
-      list: notStubbed("catalog.list"),
-      // An integration exists here exactly when a connection names it, which is
-      // all these tests need to tell installed from unknown.
-      find: async (slug) =>
-        known.has(slug)
-          ? {
-            slug,
-            name: slug,
-            description: "",
-            kind: "mcp",
-            canRemove: true,
-            canRefresh: true,
-            authMethods: []
-          }
-          : undefined,
-      addMcp: notStubbed("catalog.addMcp"),
-      addOpenApi: notStubbed("catalog.addOpenApi"),
-      rename: async (slug, name) => {
-        renamed.push({ slug, name })
-        return {
+      description: "Send an email",
+      inputSchema: {
+        type: "object",
+        properties: { to: { type: "string" } },
+        required: ["to"]
+      }
+    }),
+    listConnections: () => Effect.succeed((behaviour.connections ?? []).map(stubConnection)),
+    removeConnection: (reference) => Effect.sync(() => {
+      removed.push({ integration: reference.integration, name: reference.name })
+    }),
+    // An integration exists here exactly when a connection names it, which is
+    // all these tests need to tell installed from unknown. A rename shows
+    // through, because the handler re-reads after writing.
+    findIntegration: (slug) => Effect.sync(() =>
+      known.has(slug)
+        ? Option.some({
           slug,
-          name,
+          name: renamed.find((entry) => entry.slug === slug)?.name ?? String(slug),
           description: "",
-          kind: "mcp",
+          kind: "mcp" as const,
           canRemove: true,
           canRefresh: true,
           authMethods: []
-        }
-      },
-      remove: async (slug) => {
-        forgotten.push(slug)
-      }
-    },
-    auth: {
-      probe: notStubbed("auth.probe"),
-      registerClient: notStubbed("auth.registerClient"),
-      createClient: notStubbed("auth.createClient"),
-      start: notStubbed("auth.start"),
-      complete: notStubbed("auth.complete")
-    },
-    provisioning: {
-      install: notStubbed("provisioning.install"),
-      provision: notStubbed("provisioning.provision")
-    },
-    validateIntegrationNode: notStubbed("validateIntegrationNode"),
-    listIntegrationOverviews: async () => []
-  }
-  return { calls, removed, forgotten, renamed, integrations }
+        })
+        : Option.none()),
+    renameIntegration: (slug, name) => Effect.sync(() => {
+      renamed.push({ slug, name })
+    }),
+    removeIntegration: (slug) => Effect.sync(() => {
+      forgotten.push(slug)
+    })
+  })
+  return { calls, removed, forgotten, renamed, integrations, host }
 }
 
 const setup = async (options: {
@@ -244,6 +222,7 @@ const setup = async (options: {
   const { handle } = createGatewayHandler({
     store,
     integrations: stub.integrations,
+    host: stub.host,
     retentionDays: 30,
     // No OAuth flow is exercised here; these tests are about authority.
     oauth: {
@@ -1002,14 +981,14 @@ describe("provisioning surface", () => {
   test("removes a connection by the name it was asked for, not the stored one", async () => {
     const { call, removed } = await run(setup({
       capabilities: ["provision_connections", "administer_gateway"],
-      connections: [{ integration: "gmail", name: "docsDemo" }]
+      connections: [{ integration: "gmail", name: "docs_demo" }]
     }))
 
     const response = await run(call("DELETE", "/v1/connections/gmail/docs-demo"))
 
     expect(response.status).toBe(200)
-    expect(response.body["connection"]).toBe("docsDemo")
-    expect(removed).toEqual([{ integration: "gmail", name: "docsDemo" }])
+    expect(response.body["connection"]).toBe("docs_demo")
+    expect(removed).toEqual([{ integration: "gmail", name: "docs_demo" }])
   })
 
   test("removing an integration takes its connections and their policy rules", async () => {

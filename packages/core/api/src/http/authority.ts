@@ -6,7 +6,6 @@ import { SessionTokenHash } from "@mokronos/gateway-core"
 import { hashSessionToken } from "@mokronos/gateway-core"
 import type { RateLimiter } from "@mokronos/gateway-core"
 import type { GatewayStore } from "@mokronos/gateway-core"
-import { GatewayStoreError } from "@mokronos/gateway-core"
 import {
   Identity,
   Forbidden,
@@ -31,6 +30,7 @@ export {
   requireTenant,
   Unauthorized
 } from "./identity.ts"
+import { capture } from "./observability.ts"
 export type { Caller, Refused } from "./identity.ts"
 
 /** Deciding who a request is, and whether that is enough for the route it is
@@ -42,9 +42,6 @@ export type { Caller, Refused } from "./identity.ts"
  *  so. */
 
 const sessionCookieName = "wf_session"
-
-const orDieStorage = <A, E, R>(effect: Effect.Effect<A, E | GatewayStoreError, R>) =>
-  effect.pipe(Effect.catchTag("GatewayStoreError", Effect.die))
 
 /** Reads one cookie out of the `Cookie` header, if present. */
 export const readSessionCookieValue = (header: string | undefined): Option.Option<string> => {
@@ -182,7 +179,7 @@ const resolveCaller = Effect.fn("authority.resolveCaller")(function*(
 ) {
   const secret = presentedSecret(headers)
   if (Option.isSome(secret)) {
-    const authentication = yield* orDieStorage(authenticateClient(options.store, secret.value)
+    const authentication = yield* capture(authenticateClient(options.store, secret.value)
     )
     if (authentication.status !== "authenticated") {
       return yield* refusedOf(authentication.status)
@@ -192,7 +189,7 @@ const resolveCaller = Effect.fn("authority.resolveCaller")(function*(
 
   const token = readSessionCookieValue(headers["cookie"])
   if (Option.isSome(token)) {
-    const session = yield* orDieStorage(
+    const session = yield* capture(
       options.store.findLiveSession(SessionTokenHash.make(hashSessionToken(token.value)))
     )
     if (session === undefined) return { kind: "anonymous" } satisfies Caller
@@ -207,7 +204,7 @@ const resolveCaller = Effect.fn("authority.resolveCaller")(function*(
 
   const localSecret = context.localSecret
   if (localSecret !== undefined) {
-    const authentication = yield* orDieStorage(authenticateClient(options.store, localSecret)
+    const authentication = yield* capture(authenticateClient(options.store, localSecret)
     )
     if (authentication.status === "authenticated") {
       return { kind: "local", client: authentication.client } satisfies Caller
@@ -260,7 +257,7 @@ const admit = Effect.fn("authority.admit")(function*(
 
   const capability = requiredCapability(access)
   if (capability === undefined) return
-  const authorization = yield* orDieStorage(authorizeClientCapability(options.store, caller.secret, capability)
+  const authorization = yield* capture(authorizeClientCapability(options.store, caller.secret, capability)
   )
   if (authorization.status !== "authorized") {
     return yield* refusedOf(authorization.status)

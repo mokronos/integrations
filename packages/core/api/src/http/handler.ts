@@ -30,9 +30,11 @@ import {
   OAuthFlowSessions,
   SessionPolicy
 } from "./services.ts"
+import { ErrorCapture, traceIdFor } from "./observability.ts"
+import type { ErrorSink } from "./observability.ts"
 import type { GatewaySettings, SignInPolicy } from "./services.ts"
 import { NonNegativeIntFromString, whenPresent, whenPresentMap } from "@mokronos/contracts"
-import { IntegrationsApiService } from "@mokronos/integrations"
+import { IntegrationHost, IntegrationsApiService } from "@mokronos/integrations"
 import type { IntegrationsApi } from "@mokronos/integrations"
 import { GatewayStoreService } from "@mokronos/gateway-core"
 import type { GatewayStore } from "@mokronos/gateway-core"
@@ -55,6 +57,14 @@ export interface GatewayRequestContext {
  *  layer runs on Effect services. */
 export interface GatewayHandlerOptions extends GatewaySettings {
   readonly store: GatewayStore
+  /** The host's own capability, as the handlers use it. A value rather than a
+   *  layer for the same reason the store is: the composition root has already
+   *  built the host — building a second one here would open a second database.
+   *
+   *  Distinct from {@link integrations}, which is the Promise facade the OAuth
+   *  session machinery still speaks. Everything reachable from a handler goes
+   *  through this one. */
+  readonly host: IntegrationHost["Service"]
   readonly integrations: IntegrationsApi
   readonly oauth: OAuthSessions
   readonly sessions?: SignInPolicy
@@ -70,6 +80,11 @@ export interface GatewayHandlerOptions extends GatewaySettings {
   /** Serves the control plane's own files for unmatched non-`/v1` paths. */
   readonly webAssets?: WebAssets
   readonly observabilityLayer?: Layer.Layer<never>
+  /** Where a failure nobody declared is recorded, and what correlation id the
+   *  caller is given for it. Unset logs the cause and mints an id — see
+   *  {@link ErrorCapture.logging}. A hosted deployment points this at whatever
+   *  it already pages on. */
+  readonly errorCapture?: ErrorSink
 }
 
 /** Refuses oversized declared bodies before any handler or authority work.
@@ -97,13 +112,19 @@ const bodyLimitLayer = (maxBytes: number) =>
  *  Two kinds arrive here, and telling them apart is the whole job. A schema
  *  refusal is the caller's — a malformed body, a bad path parameter — and
  *  saying which field is wrong is the useful thing to do. Anything else is
- *  ours: a rejected driver call, a bug. That one is logged and answered
- *  incuriously, because a libsql error carries the database path and a stack
- *  trace carries the layout of the deployment.
+ *  ours: a rejected driver call, a bug. That one is answered incuriously,
+ *  because a libsql error carries the database path and a stack trace carries
+ *  the layout of the deployment.
  *
  *  Both were previously invisible: an undeclared failure reached the router as
  *  a defect and became a 500 with an empty body, which is the one failure shape
- *  no client can read. */
+ *  no client can read.
+ *
+ *  What the caller does get is the correlation id the failure was recorded
+ *  under — minted by `capture` if a handler translated a store failure, and
+ *  here if the defect arrived from somewhere that never passed a sink. It is
+ *  the only detail that crosses: it says nothing about the deployment and it is
+ *  the one thing that makes the log line findable. */
 const failureLayer = () =>
   HttpRouter.use((router) =>
     router.addGlobalMiddleware((httpEffect) =>
@@ -127,12 +148,16 @@ const failureLayer = () =>
               { status: 400 }
             ))
           }
-          return Effect.as(
-            Effect.logError("Unhandled gateway failure", cause),
-            HttpServerResponse.jsonUnsafe(
-              { error: "The gateway could not complete this request" },
-              { status: 500 }
-            )
+          return Effect.map(
+            traceIdFor(cause),
+            (traceId) =>
+              HttpServerResponse.jsonUnsafe(
+                {
+                  error: "The gateway could not complete this request",
+                  ...whenPresent("traceId", traceId === "" ? undefined : traceId)
+                },
+                { status: 500 }
+              )
           )
         }
       )))
@@ -151,10 +176,20 @@ export const gatewayAppLayer = (options: GatewayHandlerOptions) => {
   const optional = <Key extends string, T>(key: Key, value: T | undefined) =>
     whenPresent(key, value)
 
+  // Where `capture` sends a store failure a handler could not act on, and where
+  // the edge sends a defect that reached it uncaptured. One sink for both, so a
+  // failure recorded in a handler and a failure recorded at the edge land in
+  // the same place under ids of the same shape.
+  const errorCapture = options.errorCapture === undefined
+    ? ErrorCapture.logging
+    : Layer.succeed(ErrorCapture, options.errorCapture)
+
   // Everything the handlers ask for, provided once here rather than threaded
   // through six factory calls.
   const dependencies = Layer.mergeAll(
+    errorCapture,
     Layer.succeed(GatewayStoreService, options.store),
+    Layer.succeed(IntegrationHost, options.host),
     Layer.succeed(IntegrationsApiService, options.integrations),
     Layer.succeed(OAuthFlowSessions, options.oauth),
     Layer.succeed(GatewayConfig, {
@@ -190,7 +225,8 @@ export const gatewayAppLayer = (options: GatewayHandlerOptions) => {
   )
   const base = failureLayer().pipe(
     Layer.provideMerge(bodyLimitLayer(options.maxBodyBytes ?? defaultMaxBodyBytes)),
-    Layer.provideMerge(platform)
+    Layer.provideMerge(platform),
+    Layer.provideMerge(errorCapture)
   )
   return base.pipe(
     Layer.provideMerge(groups),
@@ -215,7 +251,7 @@ export interface GatewayHandle {
 export const createGatewayHandler = (options: GatewayHandlerOptions): GatewayHandle => {
   const mcp = createMcpGatewayHandler({
     store: options.store,
-    integrations: options.integrations,
+    host: options.host,
     retentionDays: options.retentionDays,
     ...whenPresent("dashboardUrl", options.dashboardUrl)
   })

@@ -2,15 +2,16 @@ import {
   whenPresent,
   whenPresentMap
 } from "@mokronos/contracts"
-import type { IntegrationsApi } from "@mokronos/integrations"
-import { IntegrationsApiService, searchIntegrations } from "@mokronos/integrations"
-import { Effect, Predicate, Schema } from "effect"
+import { AuthTemplateSlug, IntegrationHost, IntegrationsApiService, searchIntegrations } from "@mokronos/integrations"
+import { Effect, Option, Predicate, Schema } from "effect"
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
   Alias,
   ClientId,
   aliasForConnection,
+  ConnectionName,
+  IntegrationSlug,
   sameConnectionRef,
   ToolName
 } from "@mokronos/gateway-core"
@@ -21,7 +22,7 @@ import {
 } from "@mokronos/gateway-core"
 import { oauthBrowserPage } from "@mokronos/gateway-core"
 import type { GatewayStore } from "@mokronos/gateway-core"
-import { GatewayStoreError, GatewayStoreService } from "@mokronos/gateway-core"
+import { GatewayStoreService } from "@mokronos/gateway-core"
 import {
   ApiBadRequest,
   ApiNotFound,
@@ -32,6 +33,20 @@ import {
   GatewayConfig,
   OAuthFlowSessions
 } from "../services.ts"
+import { capture } from "../observability.ts"
+import { asApiFailure } from "./host-failure.ts"
+
+/** A slug off the wire, as the host addresses them.
+ *
+ *  Anything that is not slug-shaped names no integration, so it is refused here
+ *  with the same 404 an unknown-but-well-formed slug gets. The facade used to
+ *  swallow the decode failure and answer `undefined`, which produced the same
+ *  response by accident rather than on purpose. */
+const requireSlug = (value: string): Effect.Effect<IntegrationSlug, ApiNotFound> =>
+  Option.match(Schema.decodeUnknownOption(IntegrationSlug)(value), {
+    onNone: () => Effect.fail(new ApiNotFound({ error: `Unknown integration ${value}` })),
+    onSome: Effect.succeed
+  })
 
 /** A call that leaves this process — the caller's own URL, the public registry,
  *  a vendor API, an identity provider.
@@ -49,9 +64,6 @@ const reachOut = <A>(what: string, call: () => Promise<A>): Effect.Effect<A, Api
         error: `${what}: ${Predicate.isError(cause) ? cause.message : String(cause)}`
       })
   })
-
-const orDieStorage = <A, E, R>(effect: Effect.Effect<A, E | GatewayStoreError, R>) =>
-  effect.pipe(Effect.catchTag("GatewayStoreError", Effect.die))
 
 /** An HTML page for the OAuth browser flow — one of the few responses here
  *  that really is low-level HTTP rather than a typed endpoint's success value.
@@ -100,7 +112,7 @@ const GatewayNodeSource = Schema.Struct({
 const validateGatewayNode = (
   dependencies: {
     readonly store: GatewayStore
-    readonly integrations: Pick<IntegrationsApi, "tools">
+    readonly host: IntegrationHost["Service"]
   },
   clientId: ClientId | undefined,
   source: { readonly alias: string; readonly tool: string },
@@ -124,16 +136,16 @@ const validateGatewayNode = (
     if (aliasIsWellFormed && live) {
       const accessProfile = clientId === undefined
         ? undefined
-        : yield* orDieStorage(dependencies.store.findAccessProfileForClient(clientId))
+        : yield* capture(dependencies.store.findAccessProfileForClient(clientId))
       const approvalPolicy = clientId === undefined
         ? undefined
-        : yield* orDieStorage(dependencies.store.findApprovalPolicyForClient(clientId))
+        : yield* capture(dependencies.store.findApprovalPolicyForClient(clientId))
       const accessTools = accessProfile === undefined
         ? []
-        : yield* orDieStorage(dependencies.store.listAccessProfileTools(accessProfile.id))
+        : yield* capture(dependencies.store.listAccessProfileTools(accessProfile.id))
       const approvalTools = approvalPolicy === undefined
         ? []
-        : yield* orDieStorage(dependencies.store.listApprovalPolicyTools(approvalPolicy.id))
+        : yield* capture(dependencies.store.listApprovalPolicyTools(approvalPolicy.id))
       const accessTool = accessTools.find((tool) => tool.tool === source.tool && aliasForConnection(tool.connection) === source.alias)
       const approvalTool = accessTool === undefined ? undefined : approvalTools.find((tool) =>
         tool.tool === source.tool && sameConnectionRef(tool.connection, accessTool.connection))
@@ -158,7 +170,7 @@ const validateGatewayNode = (
           message: `${source.alias}.${source.tool} resolves to ${accessTool.connection.integration}/${accessTool.connection.name}`
         })
         const address = boundToolAddress(accessTool.connection, ToolName.make(source.tool))
-        const tools = yield* Effect.promise(() => dependencies.integrations.tools.list())
+        const tools = yield* capture(dependencies.host.listTools())
         findings.push(
           tools.some((candidate) => candidate.address === address)
             ? { severity: "info", check: "catalog", message: `${source.tool} is available` }
@@ -179,6 +191,7 @@ const validateGatewayNode = (
 export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning", (handlers) =>
   Effect.gen(function*() {
     const store = yield* GatewayStoreService
+    const host = yield* IntegrationHost
     const integrationsApi = yield* IntegrationsApiService
     const oauth = yield* OAuthFlowSessions
     const config = yield* GatewayConfig
@@ -201,29 +214,34 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
           })))
       .handle("renameIntegration", (request) =>
         Effect.gen(function*() {
-          const slug = request.params["slug"]
-          const found = yield* Effect.promise(() => integrationsApi.catalog.find(slug))
-          if (found === undefined) {
+          const slug = yield* requireSlug(request.params["slug"])
+          const found = yield* capture(host.findIntegration(slug))
+          if (Option.isNone(found)) {
             return yield* new ApiNotFound({ error: `Unknown integration ${slug}` })
           }
           // Only the display name changes, so nothing addressed elsewhere moves
           // and there is nothing to reconcile.
-          return yield* Effect.promise(() =>
-            integrationsApi.catalog.rename(slug, request.payload.name))
+          yield* capture(host.renameIntegration(slug, request.payload.name))
+          const renamed = yield* capture(host.findIntegration(slug))
+          if (Option.isNone(renamed)) {
+            return yield* new ApiNotFound({ error: `Unknown integration ${slug}` })
+          }
+          return renamed.value
         }))
       .handle("integrationTools", (request) =>
-        Effect.map(
-          Effect.promise(() =>
-            integrationsApi.tools.summaries({ integration: request.params["slug"] })),
-          (tools) => ({ tools })
-        ))
+        Effect.gen(function*() {
+          const slug = yield* requireSlug(request.params["slug"])
+          return { tools: yield* capture(host.toolSummaries({ integration: slug })) }
+        }))
       .handle("describeTool", (request) =>
-        Effect.promise(() =>
-          integrationsApi.tools.describe({
-            integration: request.params["slug"],
+        Effect.gen(function*() {
+          const slug = yield* requireSlug(request.params["slug"])
+          return yield* asApiFailure(host.describeTool({
+            integration: slug,
             name: request.params["tool"],
-            ...whenPresentMap("connection", request.query["connection"], (c) => c)
-          })))
+            ...whenPresentMap("connection", request.query["connection"], (c) => ConnectionName.make(c))
+          }))
+        }))
       .handle("registrySearch", (request) =>
         reachOut("The integration registry could not be searched", () =>
           searchIntegrations(
@@ -239,11 +257,10 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
         // with administration authority can change policy in a separate call, so a
         // check here would be friction rather than a control. The delegated
         // surface has no address form at all. See docs/adr/0002.
-        reachOut(`${request.payload.address} failed`, () =>
-          integrationsApi.tools.execute(
-            request.payload.address,
-            request.payload.arguments ?? {}
-          )))
+        asApiFailure(host.execute(
+          request.payload.address,
+          request.payload.arguments ?? {}
+        )))
       .handle("validate", (request) =>
         Effect.gen(function*() {
           const body = request.payload
@@ -255,7 +272,7 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
               : undefined
             const source = Schema.decodeUnknownSync(GatewayNodeSource)(body.node).source
             return yield* validateGatewayNode(
-              { store: store, integrations: integrationsApi },
+              { store: store, host },
               clientId,
               source,
               body.live ?? true
@@ -265,10 +282,7 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
             integrationsApi.validateIntegrationNode(body.node, { live: body.live ?? true }))
         }))
       .handle("listConnections", () =>
-        Effect.map(
-          Effect.promise(() => integrationsApi.connections.list()),
-          (connections) => ({ connections })
-        ))
+        Effect.map(capture(host.listConnections()), (connections) => ({ connections })))
       .handle("connect", (request) =>
         Effect.gen(function*() {
           // A connection belongs to a tenant, not to whoever asked for it, so
@@ -278,11 +292,12 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
           // anything.
           const tenantId = yield* requireTenant
           const body = request.payload
-          const integration = yield* Effect.promise(() =>
-            integrationsApi.catalog.find(body.integration))
-          if (integration === undefined) {
+          const slug = yield* requireSlug(body.integration)
+          const found = yield* capture(host.findIntegration(slug))
+          if (Option.isNone(found)) {
             return yield* new ApiNotFound({ error: `Unknown integration ${body.integration}` })
           }
+          const integration = found.value
           const method = selectAuthMethod(integration.authMethods, body.template)
           if (method === undefined) {
             return yield* new ApiBadRequest({
@@ -297,36 +312,36 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
           }
           const values = body.values ?? {}
           const names = Object.keys(values)
-          const connection = yield* Effect.promise(() =>
-            integrationsApi.connections.create({
-              integration: integration.slug,
-              name: body.connection ?? "default",
-              template: method.template,
-              ...(names.length === 0
-                ? { value: "" }
-                : names.length === 1 && values["token"] !== undefined
-                  ? { value: values["token"] }
-                  : { values })
-            }))
-          yield* reconcileDefaults({ store, integrations: integrationsApi, tenantId }).pipe(orDieStorage)
+          const connection = yield* asApiFailure(host.createConnection({
+            owner: "org",
+            integration: slug,
+            name: ConnectionName.make(body.connection ?? "default"),
+            template: AuthTemplateSlug.make(method.template),
+            ...(names.length === 0
+              ? { value: "" }
+              : names.length === 1 && values["token"] !== undefined
+                ? { value: values["token"] }
+                : { values })
+          }))
+          yield* reconcileDefaults({ store, integrations: { host }, tenantId }).pipe(capture)
           return {
             connection,
-            tools: yield* Effect.promise(() =>
-              integrationsApi.tools.summaries({
-                integration: integration.slug,
-                connection: connection.name
-              }))
+            tools: yield* capture(host.toolSummaries({
+              integration: slug,
+              connection: connection.name
+            }))
           }
         }))
       .handle("startOAuth", (request) =>
         Effect.gen(function*() {
           const tenantId = yield* requireTenant
           const body = request.payload
-          const integration = yield* Effect.promise(() =>
-            integrationsApi.catalog.find(body.integration))
-          if (integration === undefined) {
+          const slug = yield* requireSlug(body.integration)
+          const found = yield* capture(host.findIntegration(slug))
+          if (Option.isNone(found)) {
             return yield* new ApiNotFound({ error: `Unknown integration ${body.integration}` })
           }
+          const integration = found.value
           const method = integration.authMethods.find((candidate) =>
             body.template === undefined
               ? candidate.kind === "oauth"
@@ -412,13 +427,12 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
       .handle("removeIntegration", (request) =>
         Effect.gen(function*() {
           const tenantId = yield* requireTenant
-          const slug = request.params["slug"]
-          const found = yield* Effect.promise(() => integrationsApi.catalog.find(slug))
-          if (found === undefined) {
+          const slug = yield* requireSlug(request.params["slug"])
+          const found = yield* capture(host.findIntegration(slug))
+          if (Option.isNone(found)) {
             return yield* new ApiNotFound({ error: `Unknown integration ${slug}` })
           }
-          const connections = yield* Effect.promise(() =>
-            integrationsApi.connections.list())
+          const connections = yield* capture(host.listConnections())
           const owned = connections.filter((connection) => connection.integration === slug)
           // The policy rules naming each connection are dropped one at a time,
           // before the catalog forgets which connections there were.
@@ -428,8 +442,8 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
               tenantId,
               integration: slug,
               connection: connection.name
-            }).pipe(orDieStorage))
-          yield* Effect.promise(() => integrationsApi.catalog.remove(slug))
+            }).pipe(capture))
+          yield* capture(host.removeIntegration(slug))
           return {
             removed: true as const,
             integration: slug,
@@ -441,12 +455,12 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
           const tenantId = yield* requireTenant
           const integration = request.params["integration"]
           const requested = request.params["name"]
-          // Connection names are normalised on the way in (`docs-demo` is
-          // stored as `docsDemo`), so removing one by the name you typed has
-          // to resolve through the same normalisation. Otherwise a connection
-          // you just made cannot be deleted by the name you made it with.
-          const connections = yield* Effect.promise(() =>
-            integrationsApi.connections.list())
+          // Connection names are normalised on the way in (`docs-demo` and
+          // `docs_demo` are the same connection), so removing one by the name
+          // you typed has to resolve through the same normalisation. Otherwise
+          // a connection you just made cannot be deleted by the name you made
+          // it with.
+          const connections = yield* capture(host.listConnections())
           const match = connections.find((connection) =>
             connection.integration === integration &&
             (connection.name === requested ||
@@ -462,8 +476,13 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
                 : `${integration} has no connection ${requested}. Known: ${known.join(", ")}`
             })
           }
-          yield* Effect.promise(() =>
-            integrationsApi.connections.remove({ integration, name: match.name }))
+          // `match` came out of the host's own listing, and `Connection` now
+          // carries its brands, so there is nothing left to re-validate.
+          yield* capture(host.removeConnection({
+            owner: match.owner,
+            integration: match.integration,
+            name: match.name
+          }))
           // Rules that named the deleted credential go with it, for every
           // policy in the tenant the caller belongs to.
           yield* forgetConnection({
@@ -471,7 +490,7 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
             tenantId,
             integration,
             connection: match.name
-          }).pipe(orDieStorage)
+          }).pipe(capture)
           return { removed: true as const, integration, connection: match.name }
         }))
   }))

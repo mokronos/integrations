@@ -1,5 +1,5 @@
-import type { IntegrationsApi } from "@mokronos/integrations"
-import { ConnectionName, IntegrationSlug, TenantId, ToolName } from "./domain.ts"
+import type { IntegrationHost } from "@mokronos/integrations"
+import { IntegrationSlug, TenantId } from "./domain.ts"
 import type { DriftEntry, ToolSnapshot } from "./domain.ts"
 import { Effect, Schema } from "effect"
 import type { GatewayStore, GatewayStoreError } from "./store.ts"
@@ -65,7 +65,7 @@ export const diffSnapshots = (
  *  satisfies it honestly, instead of impersonating the whole host surface
  *  and casting the gap away. */
 export interface ToolCatalogReader {
-  readonly tools: Pick<IntegrationsApi["tools"], "list">
+  readonly host: Pick<IntegrationHost["Service"], "listTools">
 }
 
 export type DriftReport = {
@@ -103,14 +103,15 @@ export const refreshIntegrationSnapshot = Effect.fn("Drift.refreshIntegrationSna
   ): Effect.fn.Return<DriftReport, DriftRefreshError | GatewayStoreError> {
     const slug = IntegrationSlug.make(integration)
     const checkedAt = new Date()
-    const tools = yield* Effect.tryPromise({
-      try: () => dependencies.integrations.tools.list({ integration }),
-      catch: (cause) => new DriftRefreshError({ integration, cause })
-    })
+    // The host's own failures are typed, so a re-read that fails names what
+    // went wrong instead of arriving as an opaque rejection.
+    const tools = yield* dependencies.integrations.host.listTools({ integration: slug }).pipe(
+      Effect.mapError((cause) => new DriftRefreshError({ integration, cause }))
+    )
     const current: ReadonlyArray<ToolSnapshot> = tools.map((tool) => ({
       integration: slug,
-      connection: ConnectionName.make(tool.connection),
-      tool: ToolName.make(tool.name),
+      connection: tool.connection,
+      tool: tool.name,
       inputSchema: tool.inputSchema ?? null,
       outputSchema: tool.outputSchema ?? null,
       syncedAt: checkedAt

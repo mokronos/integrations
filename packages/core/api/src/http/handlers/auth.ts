@@ -20,8 +20,8 @@ import {
 } from "@mokronos/gateway-core"
 import { oauthBrowserPage } from "@mokronos/gateway-core"
 import { generateSessionToken, hashPassword, verifyPassword } from "@mokronos/gateway-core"
-import type { GatewayStore, LoginRecord } from "@mokronos/gateway-core"
-import { GatewayStoreError, GatewayStoreService } from "@mokronos/gateway-core"
+import type { GatewayStore, GatewayStoreError, LoginRecord } from "@mokronos/gateway-core"
+import { GatewayStoreService } from "@mokronos/gateway-core"
 import {
   ApiBadRequest,
   ApiNotImplemented,
@@ -43,9 +43,7 @@ import type { SignInPolicy } from "../services.ts"
 import {
   SessionPolicy
 } from "../services.ts"
-
-const orDieStorage = <A, E, R>(effect: Effect.Effect<A, E | GatewayStoreError, R>) =>
-  effect.pipe(Effect.catchTag("GatewayStoreError", Effect.die))
+import { capture } from "../observability.ts"
 
 /** An HTML page for the OAuth browser flow — one of the few responses here
  *  that really is low-level HTTP rather than a typed endpoint's success value.
@@ -107,7 +105,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
       Effect.gen(function*() {
         const token = generateSessionToken()
         const expiresAt = new Date((yield* Clock.currentTimeMillis) + ttlHours * 60 * 60 * 1000)
-        yield* orDieStorage(store.createSession({ tokenHash: token.hash, subjectId, tenantId, expiresAt }))
+        yield* capture(store.createSession({ tokenHash: token.hash, subjectId, tenantId, expiresAt }))
         return { token: token.secret }
       })
 
@@ -121,7 +119,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
     return handlers
       .handle("providers", () =>
         Effect.gen(function*() {
-          const signupOpen = yield* orDieStorage(sessions.signupOpen())
+          const signupOpen = yield* capture(sessions.signupOpen())
           const google = sessions.google
           return {
             signupOpen,
@@ -145,7 +143,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
           }
           const request = generateLoginHandoff()
           const expiresAt = new Date((yield* Clock.currentTimeMillis) + handoffTtlMs)
-          yield* orDieStorage(store.createLoginHandoff({ requestHash: request.hash, expiresAt }))
+          yield* capture(store.createLoginHandoff({ requestHash: request.hash, expiresAt }))
           const start = new URL("/v1/auth/google/start", googleIdentityCallbackUrl(google))
           start.searchParams.set("handoff", request.secret)
           return {
@@ -158,7 +156,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
       .handle("cliPoll", (request) =>
         Effect.gen(function*() {
           const requestHash = hashLoginHandoff(request.params["id"])
-          const handoff = yield* orDieStorage(store.getLoginHandoff(requestHash))
+          const handoff = yield* capture(store.getLoginHandoff(requestHash))
           if (handoff === undefined) {
             return yield* new HandoffUnknown({
               error: "Unknown login handoff",
@@ -183,7 +181,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
           if (subjectId === null || tenantId === null || email === null) {
             return { status: "pending" as const, expiresAt: handoff.expiresAt }
           }
-          if (!(yield* orDieStorage(store.collectLoginHandoff(requestHash)))) {
+          if (!(yield* capture(store.collectLoginHandoff(requestHash)))) {
             return yield* new HandoffCollected({
               error: "Login handoff was collected concurrently",
               code: "login-handoff-collected" as const
@@ -208,7 +206,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
           const handoffSecret = request.query["handoff"]
           const handoffHash = handoffSecret === undefined ? null : hashLoginHandoff(handoffSecret)
           if (handoffHash !== null) {
-            const handoff = yield* orDieStorage(store.getLoginHandoff(handoffHash))
+            const handoff = yield* capture(store.getLoginHandoff(handoffHash))
             const now = yield* Clock.currentTimeMillis
             if (handoff === undefined || handoff.expiresAt.getTime() <= now ||
               handoff.collectedAt !== null) {
@@ -221,7 +219,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
           const state = generateLoginHandoff()
           const returnPath = safeReturnPath(request.query["returnTo"])
           const stateExpiresAtMs = (yield* Clock.currentTimeMillis) + handoffTtlMs
-          yield* orDieStorage(store.createIdentityOAuthState({
+          yield* capture(store.createIdentityOAuthState({
             stateHash: state.hash,
             provider: "google",
             handoffHash,
@@ -250,7 +248,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
               message: "Google did not return a complete sign-in response."
             })
           }
-          const state = yield* orDieStorage(store.consumeIdentityOAuthState(hashLoginHandoff(stateSecret)))
+          const state = yield* capture(store.consumeIdentityOAuthState(hashLoginHandoff(stateSecret)))
           if (state === undefined) {
             return page(400, {
               title: "Sign-in expired",
@@ -281,27 +279,27 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
         }))
       .handle("signup", (request) =>
         Effect.gen(function*() {
-          if (!(yield* orDieStorage(sessions.signupOpen()))) {
+          if (!(yield* capture(sessions.signupOpen()))) {
             return yield* new SignupClosed({
               error: "Signup is closed on this gateway",
               code: "signup-closed" as const
             })
           }
           const body = request.payload
-          if ((yield* orDieStorage(store.findLoginByEmail(body.email))) !== undefined) {
+          if ((yield* capture(store.findLoginByEmail(body.email))) !== undefined) {
             // Stated as taken rather than attempted-and-failed: this is a
             // signup form, not a login oracle.
             return yield* new ApiBadRequest({ error: `An account for ${body.email} already exists` })
           }
           // Open signup mints a fresh partition per account; joining an
           // existing tenant is an operator action, not a self-serve one.
-          const tenant = yield* orDieStorage(store.createTenant({
+          const tenant = yield* capture(store.createTenant({
             id: newTenantId(),
             name: body.tenantName ?? body.email.split("@")[0] ?? body.email
           }))
-          const subject = yield* orDieStorage(store.createSubject({ id: newSubjectId(), tenantId: tenant.id }))
+          const subject = yield* capture(store.createSubject({ id: newSubjectId(), tenantId: tenant.id }))
           const passwordHash = yield* hashPassword(body.password).pipe(Effect.orDie)
-          yield* orDieStorage(store.createLogin({
+          yield* capture(store.createLogin({
             subjectId: subject.id,
             tenantId: tenant.id,
             email: body.email,
@@ -318,7 +316,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
         }))
       .handle("login", (request) =>
         Effect.gen(function*() {
-          const checked = yield* orDieStorage(
+          const checked = yield* capture(
             verifyLoginPassword(store, request.payload.email, request.payload.password))
           if (!checked.accepted) {
             return yield* new InvalidCredentials({
@@ -339,7 +337,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
           // Revoking beats merely forgetting: a stolen cookie stays valid until
           // its row is gone, so logout deletes the session server-side too.
           if (caller.kind === "session") {
-            yield* orDieStorage(store.revokeSession(caller.tokenHash))
+            yield* capture(store.revokeSession(caller.tokenHash))
           }
           yield* clearSessionCookie({ secure: secureCookies })
           return { loggedOut: true }
@@ -348,8 +346,8 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
         Effect.gen(function*() {
           const caller = yield* Identity
           if (caller.kind === "session") {
-            const login = yield* orDieStorage(store.findLoginBySubject(caller.subjectId))
-            const identities = yield* orDieStorage(store.listExternalIdentities(caller.subjectId))
+            const login = yield* capture(store.findLoginBySubject(caller.subjectId))
+            const identities = yield* capture(store.listExternalIdentities(caller.subjectId))
             return {
               authenticated: true as const,
               kind: "session" as const,
@@ -389,7 +387,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
             })
           }
           const body = request.payload
-          const login = yield* orDieStorage(store.findLoginByEmail(caller.email))
+          const login = yield* capture(store.findLoginByEmail(caller.email))
           const passwordHash = login === undefined ? null : login.passwordHash
           const verified = login !== undefined && passwordHash !== null &&
             (yield* verifyPassword(body.password, passwordHash).pipe(Effect.orDie))
@@ -401,10 +399,10 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
           }
           // Same email is a no-op rather than an argument with the schema.
           if (body.email !== login.email &&
-            (yield* orDieStorage(store.findLoginByEmail(body.email))) !== undefined) {
+            (yield* capture(store.findLoginByEmail(body.email))) !== undefined) {
             return yield* new ApiBadRequest({ error: `An account for ${body.email} already exists` })
           }
-          yield* orDieStorage(store.changeLoginEmail(caller.subjectId, body.email))
+          yield* capture(store.changeLoginEmail(caller.subjectId, body.email))
           // The identity travels in the session row's join; sessions survive an
           // email change, so no re-login is forced.
           return { email: body.email }
@@ -419,7 +417,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
             })
           }
           const body = request.payload
-          const login = yield* orDieStorage(store.findLoginByEmail(caller.email))
+          const login = yield* capture(store.findLoginByEmail(caller.email))
           const currentPassword = body.currentPassword
           const passwordHash = login === undefined ? null : login.passwordHash
           const accepted = login !== undefined && (
@@ -435,10 +433,10 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
             })
           }
           const newPasswordHash = yield* hashPassword(body.newPassword).pipe(Effect.orDie)
-          yield* orDieStorage(store.changeLoginPassword(caller.subjectId, newPasswordHash))
+          yield* capture(store.changeLoginPassword(caller.subjectId, newPasswordHash))
           // A password change is a statement that the old one was compromised-
           // adjacent at best; every other device re-authenticates.
-          const revoked = yield* orDieStorage(store.revokeSubjectSessions(caller.subjectId, caller.tokenHash))
+          const revoked = yield* capture(store.revokeSubjectSessions(caller.subjectId, caller.tokenHash))
           return { updated: true as const, revokedSessions: revoked }
         }))
       .handle("deleteAccount", (request) =>
@@ -451,7 +449,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
             })
           }
           const body = request.payload
-          const login = yield* orDieStorage(store.findLoginByEmail(caller.email))
+          const login = yield* capture(store.findLoginByEmail(caller.email))
           const passwordHash = login?.passwordHash ?? null
           if (login !== undefined && passwordHash === null) {
             return yield* new PasswordRequired({
@@ -473,9 +471,9 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
           // and the workspace follows only when nobody is left inside it. A
           // shared tenant survives its member; a solo signup takes its clients,
           // keys, configuration assignments, approvals, and audit rows down with it.
-          yield* orDieStorage(store.deleteSubject(caller.subjectId))
-          if ((yield* orDieStorage(store.countSubjects(caller.tenantId))) === 0) {
-            yield* orDieStorage(store.deleteTenant(caller.tenantId))
+          yield* capture(store.deleteSubject(caller.subjectId))
+          if ((yield* capture(store.countSubjects(caller.tenantId))) === 0) {
+            yield* capture(store.deleteTenant(caller.tenantId))
           }
           // Vendor connections live in the host's own storage keyed by address,
           // outside this store; they are not reclaimed here.
@@ -530,14 +528,14 @@ const completeGoogleSignIn = (
         message: "Google could not be reached to confirm this sign-in. Try again."
       } as const
     }
-    const existingIdentity = yield* orDieStorage(store.findExternalIdentity("google", identity.success.providerSubject))
-    let login = yield* orDieStorage(
+    const existingIdentity = yield* capture(store.findExternalIdentity("google", identity.success.providerSubject))
+    let login = yield* capture(
       existingIdentity === undefined
         ? store.findLoginByEmail(identity.success.email)
         : store.findLoginBySubject(existingIdentity.subjectId))
 
     if (login === undefined) {
-      if (!(yield* orDieStorage(dependencies.sessions.signupOpen()))) {
+      if (!(yield* capture(dependencies.sessions.signupOpen()))) {
         return {
           _tag: "page",
           status: 403,
@@ -545,12 +543,12 @@ const completeGoogleSignIn = (
           message: "This gateway does not allow new accounts. Ask an operator to invite or create yours."
         } as const
       }
-      const tenant = yield* orDieStorage(store.createTenant({
+      const tenant = yield* capture(store.createTenant({
         id: newTenantId(),
         name: identity.success.email.split("@")[0] ?? identity.success.email
       }))
-      const subject = yield* orDieStorage(store.createSubject({ id: newSubjectId(), tenantId: tenant.id }))
-      login = yield* orDieStorage(store.createLogin({
+      const subject = yield* capture(store.createSubject({ id: newSubjectId(), tenantId: tenant.id }))
+      login = yield* capture(store.createLogin({
         subjectId: subject.id,
         tenantId: tenant.id,
         email: identity.success.email,
@@ -558,7 +556,7 @@ const completeGoogleSignIn = (
       }))
     }
 
-    yield* orDieStorage(store.createExternalIdentity({
+    yield* capture(store.createExternalIdentity({
       provider: "google",
       providerSubject: identity.success.providerSubject,
       subjectId: login.subjectId,
@@ -567,7 +565,7 @@ const completeGoogleSignIn = (
     }))
     const handoffHash = state.handoffHash
     if (handoffHash !== null) {
-      const completed = yield* orDieStorage(store.completeLoginHandoff({
+      const completed = yield* capture(store.completeLoginHandoff({
         requestHash: LoginHandoffHash.make(handoffHash),
         subjectId: login.subjectId,
         tenantId: login.tenantId,

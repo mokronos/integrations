@@ -1,3 +1,5 @@
+import { Effect, Option } from "effect"
+import type { IntegrationHost } from "@mokronos/integrations"
 import type { IntegrationsApi } from "@mokronos/integrations"
 
 /** Members a given test never reaches. Throwing is deliberate: a partial fake
@@ -46,3 +48,30 @@ export const stubIntegrations = (): IntegrationsApi => ({
   validateIntegrationNode: notStubbed("validateIntegrationNode"),
   listIntegrationOverviews: async () => []
 })
+
+/** The host as the handlers now reach it: one Effect service instead of the
+ *  four Promise sub-APIs. Members a given test never touches die rather than
+ *  answering, for the same reason {@link notStubbed} throws — a fake that
+ *  returned `[]` would let a handler start depending on it unnoticed. */
+export const stubHost = (
+  overrides: Partial<IntegrationHost["Service"]> = {}
+): IntegrationHost["Service"] => ({
+  listIntegrations: () => Effect.succeed([]),
+  findIntegration: () => Effect.succeed(Option.none()),
+  addMcp: dies("addMcp"),
+  addOpenApi: dies("addOpenApi"),
+  renameIntegration: dies("renameIntegration"),
+  removeIntegration: dies("removeIntegration"),
+  createConnection: dies("createConnection"),
+  listConnections: () => Effect.succeed([]),
+  removeConnection: dies("removeConnection"),
+  refreshConnection: dies("refreshConnection"),
+  toolSummaries: () => Effect.succeed([]),
+  listTools: () => Effect.succeed([]),
+  describeTool: dies("describeTool"),
+  execute: dies("execute"),
+  ...overrides
+})
+
+const dies = (member: string) => () =>
+  Effect.die(new Error(`stubHost: ${member} is not stubbed for these tests`))

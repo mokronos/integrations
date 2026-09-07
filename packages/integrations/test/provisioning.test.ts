@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test"
+import { IntegrationSlug } from "@mokronos/contracts"
 import type { EndpointClassification, Integration } from "@mokronos/contracts"
 import { createIntegrationProvisioning } from "../src/facade/provisioning.ts"
 
@@ -16,7 +17,9 @@ const classification: EndpointClassification = {
 }
 
 const installed = (
-  overrides: Partial<Integration> & { readonly slug: string }
+  // `slug` stays a plain string here so a fixture reads as one; it is branded
+  // on the way out, which is the only place the pattern has to hold.
+  overrides: Omit<Partial<Integration>, "slug"> & { readonly slug: string }
 ): Integration => ({
   name: overrides.slug,
   description: "",
@@ -25,7 +28,8 @@ const installed = (
   canRefresh: true,
   authMethods: [{ id: "none", label: "No authentication", kind: "none", template: "none" }],
   displayUrl: classification.endpoint,
-  ...overrides
+  ...overrides,
+  slug: IntegrationSlug.make(overrides.slug)
 })
 
 const dependencies = (options: {
@@ -64,7 +68,7 @@ describe("provisioning a discovered URL", () => {
     })
 
     expect(added).toEqual([{ slug: "gmail", name: "Gmail" }])
-    expect(result.integration.slug).toBe("gmail")
+    expect(String(result.integration.slug)).toBe("gmail")
   })
 
   it("falls back to what the endpoint said it was", async () => {

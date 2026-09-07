@@ -1,5 +1,7 @@
+import { stubHost } from "./stubs.ts"
 import { run, runAll } from "./effect.ts"
 import { Effect } from "effect"
+import { ConnectionName, IntegrationSlug } from "@mokronos/contracts"
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -41,8 +43,8 @@ const oauthMethod = {
 
 const connection = (name: string): Connection => ({
   owner: "org",
-  name,
-  integration: "google",
+  name: ConnectionName.make(name),
+  integration: IntegrationSlug.make("google"),
   template: "google",
   address: `connections.google.org.${name}`,
   provider: "google",
@@ -224,6 +226,7 @@ describe("the hosted callback route", () => {
   ) => {
     const store = await run(makeStore())
     const { handle } = createGatewayHandler({
+      host: stubHost(),
       store,
       integrations: stubIntegrations(),
       retentionDays: 30,

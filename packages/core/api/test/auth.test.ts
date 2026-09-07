@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { whenPresent } from "@mokronos/contracts"
 import {
   ConnectionName,
@@ -19,7 +19,8 @@ import {
   ToolName
 } from "./gateway.ts"
 import type { ConnectionRef, GatewayStore } from "./gateway.ts"
-import { stubIntegrations } from "./stubs.ts"
+import { stubHost, stubIntegrations } from "./stubs.ts"
+import type { IntegrationHost } from "@mokronos/integrations"
 import type { IntegrationsApi } from "@mokronos/integrations"
 import type { GoogleIdentityOAuth } from "@mokronos/gateway-core"
 
@@ -50,6 +51,7 @@ interface SetupOptions {
   readonly google?: GoogleIdentityOAuth
   /** Replaces the host for a test that reaches past authority into provisioning. */
   readonly integrations?: IntegrationsApi
+  readonly host?: IntegrationHost["Service"]
 }
 
 const setup = async (options: SetupOptions = {}) => {
@@ -85,6 +87,7 @@ const setup = async (options: SetupOptions = {}) => {
   await run(store.addApiKey({ id: apiKey.id, clientId: client.id, hash: apiKey.hash }))
 
   const { handle } = createGatewayHandler({
+    host: options.host ?? stubHost(),
     store,
     integrations: options.integrations ?? stubIntegrations(),
     retentionDays: 30,
@@ -399,37 +402,30 @@ describe("what a session may do", () => {
     // demanded a client key anyway, so the dashboard could not connect
     // anything at all.
     const created: Array<{ readonly integration: string; readonly name: string }> = []
-    const host: IntegrationsApi = {
-      ...stubIntegrations(),
-      catalog: {
-        ...stubIntegrations().catalog,
-        find: async (slug: string) => slug !== "gmail" ? undefined : {
-          slug: "gmail",
-          name: "Gmail",
-          description: "Mail",
-          kind: "openapi",
-          canRemove: true,
-          canRefresh: true,
-          authMethods: [{ id: "token", label: "API token", kind: "apikey", template: "token" }]
+    const host = stubHost({
+      findIntegration: (slug) => Effect.succeed(slug !== "gmail" ? Option.none() : Option.some({
+        slug: IntegrationSlug.make("gmail"),
+        name: "Gmail",
+        description: "Mail",
+        kind: "openapi" as const,
+        canRemove: true,
+        canRefresh: true,
+        authMethods: [{ id: "token", label: "API token", kind: "apikey" as const, template: "token" }]
+      })),
+      createConnection: (input) => Effect.sync(() => {
+        created.push({ integration: input.integration, name: input.name })
+        return {
+          owner: "org" as const,
+          name: input.name,
+          integration: input.integration,
+          template: "token",
+          address: `tools.${input.integration}.org.${input.name}`,
+          provider: input.integration,
+          status: "connected" as const
         }
-      },
-      connections: {
-        ...stubIntegrations().connections,
-        create: async (input: { readonly integration: string; readonly name: string }) => {
-          created.push({ integration: input.integration, name: input.name })
-          return {
-            owner: "org" as const,
-            name: input.name,
-            integration: input.integration,
-            template: "token",
-            address: `tools.${input.integration}.org.${input.name}`,
-            provider: input.integration,
-            status: "connected"
-          }
-        }
-      }
-    }
-    const setup_ = await run(setup({ signupOpen: true, integrations: host }))
+      })
+    })
+    const setup_ = await run(setup({ signupOpen: true, host }))
     const human = await run(signupHuman(setup_))
 
     const response = await run(setup_.call("POST", "/v1/connections", {

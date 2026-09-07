@@ -3,8 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { Effect, Schema } from "effect"
-import { ToolAddress } from "@mokronos/contracts"
-import type { IntegrationsApi } from "@mokronos/integrations"
+import { ConnectionName, IntegrationSlug, ToolAddress } from "@mokronos/contracts"
 import {
   AccessProfileId,
   ApprovalPolicyId,
@@ -17,7 +16,7 @@ import {
   ToolName
 } from "./gateway.ts"
 import type { GatewayStore } from "./gateway.ts"
-import { stubIntegrations } from "./stubs.ts"
+import { stubHost, stubIntegrations } from "./stubs.ts"
 
 const stores: Array<GatewayStore> = []
 const directories: Array<string> = []
@@ -50,19 +49,22 @@ const setup = async () => {
   }))
   const key = generateApiKey()
   await run(store.addApiKey({ id: key.id, clientId: administrator.id, hash: key.hash }))
-  const base = stubIntegrations()
-  const integrations: IntegrationsApi = {
-    ...base,
-    tools: {
-      ...base.tools,
-      summaries: async () => [{
-        address: ToolAddress.make("tools.mail.org.primary.sendEmail"), name: "sendEmail",
-        description: "Send mail", integration: "mail", owner: "org", connection: "primary",
-        defaultDecision: "require_approval"
-      }]
-    }
-  }
+  const integrations = stubIntegrations()
+  // The one catalogued tool the default configurations should pick up. Read
+  // from the host now, which is where the handlers ask for it.
+  const host = stubHost({
+    toolSummaries: () => Effect.succeed([{
+      address: ToolAddress.make("tools.mail.org.primary.sendEmail"),
+      name: ToolName.make("sendEmail"),
+      description: "Send mail",
+      integration: IntegrationSlug.make("mail"),
+      owner: "org",
+      connection: ConnectionName.make("primary"),
+      defaultDecision: "require_approval"
+    }])
+  })
   const { handle } = createGatewayHandler({
+    host,
     store, integrations, retentionDays: 30,
     oauth: {
       start: () => Effect.die(new Error("not used")),

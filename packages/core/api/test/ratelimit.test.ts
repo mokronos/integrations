@@ -14,7 +14,7 @@ import {
   newClientId
 } from "./gateway.ts"
 import type { GatewayStore } from "./gateway.ts"
-import { stubIntegrations } from "./stubs.ts"
+import { stubHost, stubIntegrations } from "./stubs.ts"
 
 const JsonBody = Schema.Record(Schema.String, Schema.Json)
 
@@ -91,6 +91,7 @@ describe("gateway traffic shaping", () => {
     await run(store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash }))
 
     const { handle } = createGatewayHandler({
+      host: stubHost(),
       store,
       integrations: stubIntegrations(),
       retentionDays: 30,

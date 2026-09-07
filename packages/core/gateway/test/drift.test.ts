@@ -1,3 +1,4 @@
+import { Effect } from "effect"
 import { run, runAll } from "./effect.ts"
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
@@ -57,18 +58,18 @@ const snapshot = (tool: string, input: ToolSnapshot["inputSchema"]): ToolSnapsho
 const hostWithTools = (
   tools: ReadonlyArray<{ name: string; input: Tool["inputSchema"] }>
 ): ToolCatalogReader => ({
-  tools: {
-    list: async () =>
-      tools.map((tool) => ({
+  host: {
+    listTools: () =>
+      Effect.succeed(tools.map((tool) => ({
         address: ToolAddress.make(`tools.tickets.org.default.${tool.name}`),
-        name: tool.name,
+        name: ToolName.make(tool.name),
         description: "",
-        integration: "tickets",
+        integration: IntegrationSlug.make("tickets"),
         owner: "org",
-        connection: "default",
+        connection: ConnectionName.make("default"),
         defaultDecision: "require_approval",
         inputSchema: tool.input
-      }))
+      })))
   }
 })
 

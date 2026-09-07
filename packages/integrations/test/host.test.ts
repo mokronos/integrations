@@ -430,7 +430,7 @@ describe("tools", () => {
         shrunk = true
         yield* host.refreshConnection({ owner: "org", integration: notes, name: primary })
         const after = yield* host.toolSummaries({ integration: notes })
-        return { before, after: after.map((tool) => tool.name) }
+        return { before, after: after.map((tool) => String(tool.name)) }
       }),
       shrinking
     )

@@ -404,14 +404,20 @@ const ProvisioningGroup = HttpApiGroup.make("provisioning")
     // is not a spec. Declared here so it answers rather than breaks.
     error: ApiBadRequestError
   }).annotate(RequiredAccess, "provisioning"))
+  // Both name an integration in the path, so both can be asked about one that
+  // does not exist. That used to reach the router as an undeclared defect and
+  // answer 500; the host's failures are typed now, so it is the 404 it always
+  // meant.
   .add(HttpApiEndpoint.get("integrationTools", "/v1/integrations/:slug/tools", {
     params: { slug: Schema.String },
-    success: Schema.Struct({ tools: Schema.Array(ToolSummary) })
+    success: Schema.Struct({ tools: Schema.Array(ToolSummary) }),
+    error: ApiNotFoundError
   }).annotate(RequiredAccess, "provisioning"))
   .add(HttpApiEndpoint.get("describeTool", "/v1/integrations/:slug/tools/:tool", {
     params: { slug: Schema.String, tool: Schema.String },
     query: { connection: Schema.optional(Schema.String) },
-    success: Tool
+    success: Tool,
+    error: [ApiNotFoundError, ApiBadRequestError]
   }).annotate(RequiredAccess, "provisioning"))
   .add(HttpApiEndpoint.get("registrySearch", "/v1/registry/search", {
     query: {
@@ -712,7 +718,10 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
   }).annotate(RequiredAccess, "human"))
   .add(HttpApiEndpoint.post("refreshDrift", "/v1/drift/refresh", {
     query: { integration: Schema.optional(Schema.String) },
-    success: Schema.Struct({ reports: Schema.Array(DriftReport) })
+    success: Schema.Struct({ reports: Schema.Array(DriftReport) }),
+    // Re-reading reaches the integration, and an integration that will not
+    // answer is the operator's to act on — it was a silent 500 before.
+    error: ApiBadRequestError
   }).annotate(RequiredAccess, "administrative"))
   .add(HttpApiEndpoint.post("maintenance", "/v1/maintenance", {
     success: MaintenanceReport

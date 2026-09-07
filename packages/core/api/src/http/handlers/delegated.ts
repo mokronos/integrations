@@ -1,7 +1,7 @@
 import {
   whenPresentMap
 } from "@mokronos/contracts"
-import { IntegrationsApiService } from "@mokronos/integrations"
+import { IntegrationHost } from "@mokronos/integrations"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { deliverDueApprovalNotifications } from "@mokronos/gateway-core"
@@ -10,7 +10,7 @@ import {
   ToolName
 } from "@mokronos/gateway-core"
 import { invokeThroughGateway, listEffectiveTools } from "@mokronos/gateway-core"
-import { GatewayStoreError, GatewayStoreService } from "@mokronos/gateway-core"
+import { GatewayStoreService } from "@mokronos/gateway-core"
 import {
   ApiNotFound,
   GatewayApi
@@ -22,35 +22,33 @@ import {
 import {
   GatewayConfig
 } from "../services.ts"
-
-const orDieStorage = <A, E, R>(effect: Effect.Effect<A, E | GatewayStoreError, R>) =>
-  effect.pipe(Effect.catchTag("GatewayStoreError", Effect.die))
+import { capture } from "../observability.ts"
 
 // --- system -----------------------------------------------------------------
 
 export const DelegatedLayer = HttpApiBuilder.group(GatewayApi, "delegated", (handlers) =>
   Effect.gen(function*() {
     const store = yield* GatewayStoreService
-    const integrationsApi = yield* IntegrationsApiService
+    const host = yield* IntegrationHost
     const config = yield* GatewayConfig
     return handlers
       .handle("listTools", (request) =>
         Effect.gen(function*() {
           const client = yield* requireClient
           return {
-            tools: yield* orDieStorage(listEffectiveTools(store, client.id, {
+            tools: yield* capture(listEffectiveTools(store, client.id, {
               schemas: request.query["schemas"],
-              integrations: integrationsApi
+              host
             }))
           }
         }))
       .handle("execute", (request) =>
         Effect.gen(function*() {
           const secret = yield* requireSecret
-          return yield* orDieStorage(invokeThroughGateway(
+          return yield* capture(invokeThroughGateway(
             {
               store,
-              integrations: integrationsApi,
+              host,
               argumentRetentionDays: config.retentionDays,
               approvalUrlOf: (approvalId) => {
                 const origin = config.dashboardUrl?.()
@@ -58,7 +56,7 @@ export const DelegatedLayer = HttpApiBuilder.group(GatewayApi, "delegated", (han
                   ? undefined
                   : `${origin.replace(/\/+$/, "")}/approvals?approval=${encodeURIComponent(approvalId)}`
               },
-              onApprovalCreated: () => orDieStorage(deliverDueApprovalNotifications({
+              onApprovalCreated: () => capture(deliverDueApprovalNotifications({
                 store,
                 ...whenPresentMap("dashboardUrl", config.dashboardUrl?.(), (url) => url)
               }))
@@ -75,7 +73,7 @@ export const DelegatedLayer = HttpApiBuilder.group(GatewayApi, "delegated", (han
         Effect.gen(function*() {
           const id = ApprovalId.make(request.params["id"])
           const client = yield* requireClient
-          const approval = yield* orDieStorage(store.getApproval(client.tenantId, id))
+          const approval = yield* capture(store.getApproval(client.tenantId, id))
           // Scoped to the caller: one client must not read another's frozen call.
           if (approval === undefined || approval.clientId !== client.id) {
             return yield* new ApiNotFound({ error: `Unknown approval ${id}` })

@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import { IntegrationSlug } from "./vocabulary.ts"
 
 /** What an integration is, and what it will accept as proof of authorization. */
 
@@ -39,7 +40,7 @@ export type AuthMethod = typeof AuthMethod.Type
 
 /** An external system in a tenant's catalog. */
 export const Integration = Schema.Struct({
-  slug: Schema.String,
+  slug: IntegrationSlug,
   name: Schema.String,
   description: Schema.String,
   kind: Schema.String,

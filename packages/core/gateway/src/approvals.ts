@@ -1,5 +1,5 @@
 import { Clock, Effect, Schema } from "effect"
-import type { IntegrationsApi } from "@mokronos/integrations"
+import type { IntegrationHost } from "@mokronos/integrations"
 import {
   aliasForConnection,
   ApprovalId,
@@ -51,7 +51,7 @@ export const denyApproval = Effect.fn("Approvals.deny")(function*(store: Gateway
 export const approveApproval = Effect.fn("Approvals.approve")(function*(
   dependencies: {
     readonly store: GatewayStore
-    readonly integrations: Pick<IntegrationsApi, "tools">
+    readonly host: IntegrationHost["Service"]
     readonly retentionDays: number
   },
   input: typeof ApprovalDecision.Type

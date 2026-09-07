@@ -1,9 +1,7 @@
-import type { IntegrationsApi } from "@mokronos/integrations"
+import type { IntegrationHost, StorageError } from "@mokronos/integrations"
 import { Effect } from "effect"
 import {
-  ConnectionName,
   connectionRefKey,
-  IntegrationSlug,
   type AccessProfile,
   type AccessProfileTool,
   type ApprovalPolicy,
@@ -16,14 +14,14 @@ import {
 import { type GatewayStore, GatewayStoreError } from "./store.ts"
 
 interface ConfigurationCatalog {
-  readonly tools: Pick<IntegrationsApi["tools"], "summaries">
+  readonly host: Pick<IntegrationHost["Service"], "toolSummaries">
 }
 
 const routeKey = (connection: ConnectionRef, tool: string): string =>
   `${connectionRefKey(connection)}\u0000${tool}`
 
 const catalogTools = Effect.fn("Configurations.catalogTools")(function*(integrations: ConfigurationCatalog) {
-  const summaries = yield* Effect.promise(() => integrations.tools.summaries())
+  const summaries = yield* integrations.host.toolSummaries()
   const tools = new Map<string, {
     readonly connection: ConnectionRef
     readonly tool: ToolName
@@ -33,14 +31,14 @@ const catalogTools = Effect.fn("Configurations.catalogTools")(function*(integrat
     if (summary.owner !== "org") continue
     const connection = {
       owner: "org",
-      integration: IntegrationSlug.make(summary.integration),
-      name: ConnectionName.make(summary.connection)
+      integration: summary.integration,
+      name: summary.connection
     } as const
     const key = routeKey(connection, summary.name)
     const existing = tools.get(key)
     tools.set(key, {
       connection,
-      tool: ToolName.make(summary.name),
+      tool: summary.name,
       decision: existing?.decision === "require_approval"
         || summary.defaultDecision === "require_approval"
         ? "require_approval"
@@ -61,7 +59,7 @@ export const reconcileDefaults = Effect.fn("Grants.reconcileDefaults")(function*
   readonly store: GatewayStore
   readonly integrations: ConfigurationCatalog
   readonly tenantId: Client["tenantId"]
-}): Effect.fn.Return<DefaultConfigurations, GatewayStoreError> {
+}): Effect.fn.Return<DefaultConfigurations, GatewayStoreError | StorageError> {
   const [catalog, accessProfile, approvalPolicy] = yield* Effect.all([
     catalogTools(input.integrations),
     input.store.findDefaultAccessProfile(input.tenantId),

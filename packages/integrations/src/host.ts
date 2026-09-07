@@ -234,15 +234,19 @@ export class IntegrationHost extends Context.Service<
       readonly name: ConnectionName
     }) => Effect.Effect<ReadonlyArray<Tool>, HostFailure>
 
+    /** Reads of what was already captured. These never reach an endpoint —
+     *  `refreshConnection` is the only thing that does — so the only way they
+     *  fail is the catalog itself. Declaring the whole {@link HostFailure} here
+     *  made every caller handle an `OAuthError` these cannot raise. */
     readonly toolSummaries: (
       filter?: ToolFilter
-    ) => Effect.Effect<ReadonlyArray<ToolSummary>, HostFailure>
+    ) => Effect.Effect<ReadonlyArray<ToolSummary>, StorageError>
     readonly listTools: (
       filter?: ToolFilter
-    ) => Effect.Effect<ReadonlyArray<Tool>, HostFailure>
+    ) => Effect.Effect<ReadonlyArray<Tool>, StorageError>
     readonly describeTool: (
       target: ToolAddress | ToolTarget
-    ) => Effect.Effect<Tool, HostFailure>
+    ) => Effect.Effect<Tool, StorageError | ToolNotFoundError>
     readonly execute: (
       address: ToolAddress,
       input: Json
