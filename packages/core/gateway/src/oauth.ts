@@ -1,6 +1,13 @@
 import { Deferred, Duration, Effect, Schema } from "effect"
 import type { Scope } from "effect"
-import { type AuthApi } from "@mokronos/integrations"
+import {
+  completeOAuthFlow,
+  createOAuthClient,
+  probeOAuthServer,
+  registerOAuthClient,
+  startOAuthFlow
+} from "@mokronos/integrations"
+import type { CatalogStore, IntegrationHost, OAuthFlows } from "@mokronos/integrations"
 import { AuthMethod, Connection, whenPresent } from "@mokronos/contracts"
 import { oauthSetupGuidance } from "./oauth-guidance.ts"
 
@@ -36,22 +43,21 @@ export class OAuthFlowError extends Schema.TaggedError<OAuthFlowError>()(
   }
 }
 
-/** One call out to the host's OAuth surface. It is still Promise-shaped, so
- *  this is where a rejection becomes a stage-tagged failure instead of an
- *  anonymous one. */
-const step = <A>(
+/** One step of a flow, tagged with where it sits.
+ *
+ *  The host's failures are already typed; this says which half of the
+ *  authorization they happened in, which is what a reader needs first and what
+ *  no single host error could say on its own. */
+const step = <A, E extends { readonly message: string }, R>(
   stage: OAuthFlowError["stage"],
   detail: string,
-  call: () => Promise<A>
-): Effect.Effect<A, OAuthFlowError> =>
-  Effect.tryPromise({
-    try: call,
-    catch: (cause) => new OAuthFlowError({
-      stage,
-      detail: `${detail}: ${cause instanceof Error ? cause.message : String(cause)}`,
-      cause
-    })
-  })
+  effect: Effect.Effect<A, E, R>
+): Effect.Effect<A, OAuthFlowError, R> =>
+  Effect.mapError(effect, (cause) => new OAuthFlowError({
+    stage,
+    detail: `${detail}: ${cause.message}`,
+    cause
+  }))
 
 /** Re-checks the request at the start of a flow.
  *
@@ -85,13 +91,9 @@ const AuthorizationRequest = Schema.Struct({
 })
 type AuthorizationRequest = typeof AuthorizationRequest.Type
 
-/** The slice of the host's OAuth surface a flow needs. Exported so a caller
- *  — or a test — can satisfy it exactly rather than impersonating the whole
- *  auth API. */
-export type OAuthOperations = Pick<
-  AuthApi,
-  "probe" | "registerClient" | "createClient" | "start" | "complete"
->
+/** What an authorization reaches for. Named as one type so a flow's signature
+ *  says which host services it needs rather than requiring the whole host. */
+export type OAuthOperations = IntegrationHost | OAuthFlows | CatalogStore
 
 export const oauthBrowserPage = (options: {
   readonly title: string
@@ -122,12 +124,12 @@ export const oauthBrowserResponse = (options: {
  * back on the gateway's own public URL. */
 const prepareFlow = Effect.fn("OAuth.prepareFlow")(function*(
   input: AuthorizationRequest,
-  redirectUri: string,
-  auth: OAuthOperations
+  redirectUri: string
 ): Effect.fn.Return<
   | { readonly status: "connected"; readonly connection: Connection }
   | { readonly status: "pending"; readonly state: string; readonly authorizationUrl: string },
-  OAuthFlowError
+  OAuthFlowError,
+  OAuthOperations
 > {
   if (input.authMethod.kind !== "oauth" || input.authMethod.oauth === undefined) {
     return yield* new OAuthFlowError({
@@ -138,8 +140,8 @@ const prepareFlow = Effect.fn("OAuth.prepareFlow")(function*(
   const oauth = input.authMethod.oauth
   const discovered = oauth.discoveryUrl === undefined
     ? undefined
-    : yield* step("discover", `Could not read ${oauth.discoveryUrl}`, () =>
-      auth.probe(oauth.discoveryUrl!))
+    : yield* step("discover", `Could not read ${oauth.discoveryUrl}`,
+      probeOAuthServer(oauth.discoveryUrl))
   const authorizationUrl = oauth.authorizationUrl ?? discovered?.authorizationUrl
   const tokenUrl = oauth.tokenUrl ?? discovered?.tokenUrl
   const resource = oauth.resource ?? discovered?.resource
@@ -152,8 +154,8 @@ const prepareFlow = Effect.fn("OAuth.prepareFlow")(function*(
   const clientSlug = `${input.integration}-wf`
   let client: string
   if (input.clientId !== undefined) {
-    client = yield* step("register", `Could not record the OAuth client for ${input.integration}`, () =>
-      auth.createClient({
+    client = yield* step("register", `Could not record the OAuth client for ${input.integration}`,
+      createOAuthClient({
         slug: clientSlug,
         integration: input.integration,
         authorizationUrl,
@@ -179,8 +181,8 @@ const prepareFlow = Effect.fn("OAuth.prepareFlow")(function*(
         })
       })
     }
-    client = yield* step("register", `${input.integration} refused dynamic client registration`, () =>
-      auth.registerClient({
+    client = yield* step("register", `${input.integration} refused dynamic client registration`,
+      registerOAuthClient({
         slug: clientSlug,
         integration: input.integration,
         redirectUri,
@@ -196,8 +198,8 @@ const prepareFlow = Effect.fn("OAuth.prepareFlow")(function*(
         )
       }))
   }
-  const started = yield* step("start", `Could not start authorization for ${input.integration}`, () =>
-    auth.start({
+  const started = yield* step("start", `Could not start authorization for ${input.integration}`,
+    startOAuthFlow({
       client,
       integration: input.integration,
       connection: input.connection,
@@ -223,8 +225,7 @@ export interface HostedAuthorizationFlow {
   readonly authorizationUrl: string
   readonly complete: (input: {
     readonly code: string
-    readonly callbackDomain?: string | null
-  }) => Effect.Effect<Connection, OAuthFlowError>
+  }) => Effect.Effect<Connection, OAuthFlowError, OAuthOperations>
 }
 
 export type HostedAuthorization =
@@ -237,11 +238,10 @@ export type HostedAuthorization =
  *  behind a reverse proxy or on a shared host, binding random local ports is
  *  not something we can do. */
 export const startHostedAuthorization = Effect.fn("OAuth.startHosted")(function*(
-  input: AuthorizationRequest & { readonly publicUrl: string },
-  auth: OAuthOperations
-): Effect.fn.Return<HostedAuthorization, OAuthFlowError> {
+  input: AuthorizationRequest & { readonly publicUrl: string }
+): Effect.fn.Return<HostedAuthorization, OAuthFlowError, OAuthOperations> {
   const options = yield* decodeRequest(input)
-  const prepared = yield* prepareFlow(options, `${input.publicUrl}/v1/oauth/callback`, auth)
+  const prepared = yield* prepareFlow(options, `${input.publicUrl}/v1/oauth/callback`)
   if (prepared.status === "connected") {
     return { status: "connected", connection: prepared.connection }
   }
@@ -250,11 +250,9 @@ export const startHostedAuthorization = Effect.fn("OAuth.startHosted")(function*
     status: "pending",
     state,
     authorizationUrl: prepared.authorizationUrl,
-    complete: ({ code, callbackDomain }) =>
-      // A null callbackDomain is meaningful to some providers (it changes the
-      // host the flow completes against); only absence means "not given".
-      step("exchange", `${input.integration} refused the authorization code`, () =>
-        auth.complete({ state, code, ...whenPresent("callbackDomain", callbackDomain) }))
+    complete: ({ code }) =>
+      step("exchange", `${input.integration} refused the authorization code`,
+        completeOAuthFlow({ state, code }))
   }
 })
 
@@ -281,9 +279,8 @@ export const authorizeInBrowser = Effect.fn("OAuth.authorizeInBrowser")(function
   input: AuthorizationRequest & {
     readonly open?: (url: string) => void | Promise<void>
     readonly onAuthorizationUrl?: (url: string) => void
-  },
-  auth: OAuthOperations
-): Effect.fn.Return<Connection, OAuthFlowError, Scope.Scope> {
+  }
+): Effect.fn.Return<Connection, OAuthFlowError, Scope.Scope | OAuthOperations> {
   const arrived = yield* Deferred.make<CallbackArrival>()
   // The page the human sees. The handler blocks on it so the browser is told
   // what actually happened rather than an optimistic "done".
@@ -362,8 +359,7 @@ export const authorizeInBrowser = Effect.fn("OAuth.authorizeInBrowser")(function
   const options = yield* decodeRequest(input)
   const prepared = yield* prepareFlow(
     options,
-    `http://127.0.0.1:${server.port}/oauth/callback`,
-    auth
+    `http://127.0.0.1:${server.port}/oauth/callback`
   )
   if (prepared.status === "connected") return prepared.connection
 
@@ -371,9 +367,15 @@ export const authorizeInBrowser = Effect.fn("OAuth.authorizeInBrowser")(function
   input.onAuthorizationUrl?.(prepared.authorizationUrl)
   if (input.open !== undefined) {
     const open = input.open
-    yield* step("start", "Could not open the authorization URL", async () => {
-      await open(prepared.authorizationUrl)
-    })
+    yield* step("start", "Could not open the authorization URL",
+      Effect.tryPromise({
+        try: async () => {
+          await open(prepared.authorizationUrl)
+        },
+        catch: (cause) => ({
+          message: cause instanceof Error ? cause.message : String(cause)
+        })
+      }))
   }
 
   const arrival = yield* Deferred.await(arrived).pipe(
@@ -398,11 +400,7 @@ export const authorizeInBrowser = Effect.fn("OAuth.authorizeInBrowser")(function
   const exchanged = yield* Effect.result(step(
     "exchange",
     `${input.integration} refused the authorization code`,
-    () => auth.complete({
-      state: prepared.state,
-      code: arrival.code,
-      callbackDomain: arrival.callbackDomain
-    })
+    completeOAuthFlow({ state: prepared.state, code: arrival.code })
   ))
   if (exchanged._tag === "Failure") {
     rendered.resolve(oauthBrowserResponse({

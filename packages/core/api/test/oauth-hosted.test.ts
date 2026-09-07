@@ -1,12 +1,21 @@
-import { stubHostContext } from "./stubs.ts"
+import { catalogStoreFake, stubHost, stubHostContext } from "./stubs.ts"
 import { run, runAll } from "./effect.ts"
-import { Effect } from "effect"
+import { Context, Effect, Option } from "effect"
 import { ConnectionName, IntegrationSlug } from "@mokronos/contracts"
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import type { AuthApi, IntegrationsApi } from "@mokronos/integrations"
+import {
+  AuthTemplateSlug,
+  CatalogStore,
+  IntegrationHost,
+  OAuthClientSlug,
+  OAuthError,
+  OAuthFlows,
+  OAuthState
+} from "@mokronos/integrations"
+import type { OAuthOperations } from "@mokronos/gateway-core"
 import type { Connection } from "@mokronos/contracts"
 import { createGatewayHandler, createOAuthSessions, createGatewayStore } from "./gateway.ts"
 import type { GatewayStore } from "./gateway.ts"
@@ -65,40 +74,60 @@ const fakeAuth = (behaviour: {
 } = {}) => {
   const record: RecordedFlow = { redirectUri: "(none)" }
   let started = false
-  const auth: Pick<AuthApi, "probe" | "registerClient" | "createClient" | "start" | "complete"> = {
-    probe: async () => {
-      throw new Error("probe is not used when endpoints are explicit")
-    },
-    registerClient: async (options) => {
-      record.redirectUri = options.redirectUri
-      return `client-${options.slug}`
-    },
-    createClient: async () => {
-      throw new Error("createClient is not used without --client-id")
-    },
-    start: async () => {
-      if (started) throw new Error("start called twice")
-      started = true
-      return {
-        status: "redirect",
-        state: "provider-state-1",
-        authorizationUrl: "https://accounts.example/authorize?state=provider-state-1"
-      }
-    },
-    complete: async (options) => {
-      if (behaviour.completeFails === true) throw new Error("token exchange rejected")
-      record.completedState = options.state
-      record.completedCode = options.code
-      return connection("default")
-    }
-  }
-  return { record, auth }
+  const dies = (member: string) => () =>
+    Effect.die(new Error(`${member} is not used by these tests`))
+
+  // The host services an authorization actually reaches. Faking these rather
+  // than a Promise `AuthApi` means the tests run the real `completeOAuthFlow`:
+  // the exchange, the connection record, and the tool re-read all happen.
+  const host: Context.Context<OAuthOperations> = Context.empty().pipe(
+    Context.add(OAuthFlows, {
+      probe: dies("probe"),
+      registerDynamicClient: (options) => {
+        record.redirectUri = options.redirectUri
+        return Effect.succeed(OAuthClientSlug.make(`client-${options.slug}`))
+      },
+      createClient: dies("createClient"),
+      start: () => {
+        if (started) return Effect.die(new Error("start called twice"))
+        started = true
+        return Effect.succeed({
+          authorizationUrl: "https://accounts.example/authorize?state=provider-state-1",
+          state: OAuthState.make("provider-state-1")
+        })
+      },
+      complete: (options) => {
+        if (behaviour.completeFails === true) {
+          return Effect.fail(new OAuthError({
+            stage: "complete",
+            detail: "token exchange rejected"
+          }))
+        }
+        record.completedState = options.state
+        record.completedCode = options.code
+        return Effect.succeed({
+          owner: "org" as const,
+          integration: IntegrationSlug.make("google"),
+          connection: ConnectionName.make("default"),
+          template: AuthTemplateSlug.make("google"),
+          clientOwner: "org" as const,
+          client: OAuthClientSlug.make("client-google-wf"),
+          scope: Option.none(),
+          expiresAt: Option.none()
+        })
+      },
+      accessToken: dies("accessToken")
+    }),
+    Context.add(CatalogStore, catalogStoreFake()),
+    Context.add(IntegrationHost, stubHost({ refreshConnection: () => Effect.succeed([]) }))
+  )
+  return { record, host }
 }
 
 describe("hosted oauth flows", () => {
   test("registers against the public URL instead of a loopback port", async () => {
     const fake = fakeAuth()
-    const sessions = createOAuthSessions({ auth: fake.auth }, {
+    const sessions = createOAuthSessions(fake.host, {
       publicUrl: "https://gw.example.com"
     })
 
@@ -117,7 +146,7 @@ describe("hosted oauth flows", () => {
   test("completes by provider state exactly once", async () => {
     const fake = fakeAuth()
     const completed: Array<string> = []
-    const sessions = createOAuthSessions({ auth: fake.auth }, {
+    const sessions = createOAuthSessions(fake.host, {
       publicUrl: "https://gw.example.com",
       onConnected: async (session) => {
         completed.push(session.id)
@@ -144,7 +173,7 @@ describe("hosted oauth flows", () => {
 
   test("records the failure on the session when the exchange is refused", async () => {
     const fake = fakeAuth({ completeFails: true })
-    const sessions = createOAuthSessions({ auth: fake.auth }, {
+    const sessions = createOAuthSessions(fake.host, {
       publicUrl: "https://gw.example.com"
     })
     await run(sessions.start({
@@ -161,7 +190,7 @@ describe("hosted oauth flows", () => {
 
   test("local mode still owns an ephemeral listener and needs no public URL", async () => {
     const fake = fakeAuth()
-    const sessions = createOAuthSessions({ auth: fake.auth })
+    const sessions = createOAuthSessions(fake.host)
     const session = await run(sessions.start({
       integration: "google",
       connection: "default",
@@ -175,49 +204,10 @@ describe("hosted oauth flows", () => {
 })
 
 
-const notStubbed = (member: string) => () => {
-  throw new Error(`stubIntegrations: ${member} is not stubbed for these tests`)
-}
 
 /** A throwing stand-in for the whole integrations surface. The callback route
  *  never reaches any of these members; a partial fake that returned undefined
  *  would let a handler quietly start depending on one. */
-const stubIntegrations = (): IntegrationsApi => ({
-  tools: {
-    execute: notStubbed("tools.execute"),
-    summaries: async () => [],
-    describe: notStubbed("tools.describe"),
-    list: async () => []
-  },
-  connections: {
-    list: async () => [],
-    remove: notStubbed("connections.remove"),
-    create: notStubbed("connections.create"),
-    ensure: notStubbed("connections.ensure")
-  },
-  catalog: {
-    classify: notStubbed("catalog.classify"),
-    list: notStubbed("catalog.list"),
-    find: notStubbed("catalog.find"),
-    addMcp: notStubbed("catalog.addMcp"),
-    addOpenApi: notStubbed("catalog.addOpenApi"),
-    rename: notStubbed("catalog.rename"),
-    remove: notStubbed("catalog.remove")
-  },
-  auth: {
-    probe: notStubbed("auth.probe"),
-    registerClient: notStubbed("auth.registerClient"),
-    createClient: notStubbed("auth.createClient"),
-    start: notStubbed("auth.start"),
-    complete: notStubbed("auth.complete")
-  },
-  provisioning: {
-    install: notStubbed("provisioning.install"),
-    provision: notStubbed("provisioning.provision")
-  },
-  validateIntegrationNode: notStubbed("validateIntegrationNode"),
-  listIntegrationOverviews: async () => []
-})
 
 describe("the hosted callback route", () => {
 
@@ -228,7 +218,6 @@ describe("the hosted callback route", () => {
     const { handle } = createGatewayHandler({
       hostServices: stubHostContext(),
       store,
-      integrations: stubIntegrations(),
       retentionDays: 30,
       oauth: oauthSessions
     })

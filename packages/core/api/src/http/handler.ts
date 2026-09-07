@@ -34,9 +34,7 @@ import { ErrorCapture, traceIdFor } from "./observability.ts"
 import type { ErrorSink } from "./observability.ts"
 import type { GatewaySettings, SignInPolicy } from "./services.ts"
 import { NonNegativeIntFromString, whenPresent, whenPresentMap } from "@mokronos/contracts"
-import { IntegrationsApiService } from "@mokronos/integrations"
 import type { HostServices } from "@mokronos/integrations"
-import type { IntegrationsApi } from "@mokronos/integrations"
 import { GatewayStoreService } from "@mokronos/gateway-core"
 import type { GatewayStore } from "@mokronos/gateway-core"
 import type { OAuthSessions } from "@mokronos/gateway-core"
@@ -66,7 +64,6 @@ export interface GatewayHandlerOptions extends GatewaySettings {
    *  context rather than a layer because the host is already running — building
    *  a second one here would open a second database. */
   readonly hostServices: Context.Context<HostServices>
-  readonly integrations: IntegrationsApi
   readonly oauth: OAuthSessions
   readonly sessions?: SignInPolicy
   /** Two buckets with distinct key spaces: a per-address limit before
@@ -191,7 +188,6 @@ export const gatewayAppLayer = (options: GatewayHandlerOptions) => {
     errorCapture,
     Layer.succeed(GatewayStoreService, options.store),
     Layer.succeedContext(options.hostServices),
-    Layer.succeed(IntegrationsApiService, options.integrations),
     Layer.succeed(OAuthFlowSessions, options.oauth),
     Layer.succeed(GatewayConfig, {
       retentionDays: options.retentionDays,

@@ -1,54 +1,6 @@
 import { Context, Effect, Option } from "effect"
 import { CatalogStore, IntegrationHost, McpHost, OAuthFlows, OpenApiInvoker, SpecCache } from "@mokronos/integrations"
 import type { HostServices } from "@mokronos/integrations"
-import type { IntegrationsApi } from "@mokronos/integrations"
-
-/** Members a given test never reaches. Throwing is deliberate: a partial fake
- *  that returned `undefined` would let a handler quietly start depending on one
- *  of these and still pass. */
-export const notStubbed = (member: string) => () => {
-  throw new Error(`stubIntegrations: ${member} is not stubbed for these tests`)
-}
-
-/** A host that answers nothing. For tests about the gateway's own behaviour —
- *  authority, sessions, failure handling — where the host is only present
- *  because the handler seam requires one. */
-export const stubIntegrations = (): IntegrationsApi => ({
-  tools: {
-    execute: notStubbed("tools.execute"),
-    summaries: async () => [],
-    describe: notStubbed("tools.describe"),
-    list: async () => []
-  },
-  connections: {
-    list: async () => [],
-    remove: notStubbed("connections.remove"),
-    create: notStubbed("connections.create"),
-    ensure: notStubbed("connections.ensure")
-  },
-  catalog: {
-    classify: notStubbed("catalog.classify"),
-    list: notStubbed("catalog.list"),
-    find: notStubbed("catalog.find"),
-    addMcp: notStubbed("catalog.addMcp"),
-    addOpenApi: notStubbed("catalog.addOpenApi"),
-    rename: notStubbed("catalog.rename"),
-    remove: notStubbed("catalog.remove")
-  },
-  auth: {
-    probe: notStubbed("auth.probe"),
-    registerClient: notStubbed("auth.registerClient"),
-    createClient: notStubbed("auth.createClient"),
-    start: notStubbed("auth.start"),
-    complete: notStubbed("auth.complete")
-  },
-  provisioning: {
-    install: notStubbed("provisioning.install"),
-    provision: notStubbed("provisioning.provision")
-  },
-  validateIntegrationNode: notStubbed("validateIntegrationNode"),
-  listIntegrationOverviews: async () => []
-})
 
 /** The host as the handlers now reach it: one Effect service instead of the
  *  four Promise sub-APIs. Members a given test never touches die rather than
@@ -76,6 +28,16 @@ export const stubHost = (
 
 const dies = (member: string) => () =>
   Effect.die(new Error(`stubHost: ${member} is not stubbed for these tests`))
+
+/** A catalog that refuses everything, with `putConnection` opened up: a
+ *  completed OAuth flow files its connection through it. */
+export const catalogStoreFake = (
+  overrides: Partial<CatalogStore["Service"]> = {}
+): CatalogStore["Service"] => ({
+  ...catalogStore,
+  putConnection: () => Effect.void,
+  ...overrides
+})
 
 const catalogStore: CatalogStore["Service"] = {
   listIntegrations: dies("CatalogStore.listIntegrations"),

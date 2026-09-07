@@ -1,4 +1,5 @@
-import { Layer } from "effect"
+import { Context, Effect, Layer, ManagedRuntime } from "effect"
+import path from "node:path"
 import { CatalogStore } from "./catalog/store.ts"
 import { CredentialStore } from "./storage/credentials.ts"
 import { Database, libsqlLayer, memoryLayer } from "./storage/database.ts"
@@ -95,3 +96,43 @@ export const stubbedLayer = (
     Layer.provideMerge(Layer.mergeAll(clients, HttpTransport.unavailableTestLayer)),
     Layer.provideMerge(Layer.mergeAll(memoryLayer, CredentialStore.memoryLayer))
   )
+
+/** Every service a host operation may reach for. */
+export type HostServices =
+  | IntegrationHost
+  | McpHost
+  | OAuthFlows
+  | OpenApiInvoker
+  | SpecCache
+  | CatalogStore
+
+/** Replaces where a host keeps its rows and its secrets. Everything unset keeps
+ *  the local behaviour: SQLite and a sealed credential file in `directory`. */
+export interface HostStorage {
+  /** Supplies both storage seams — a Cloudflare D1 binding and a master-key
+   *  credential store, for instance. When present, no directory is created. */
+  readonly storage?: Layer.Layer<Database | CredentialStore, StorageError>
+}
+
+/** One host, running.
+ *
+ *  This used to be two runtimes: `createHostHandle` built a `ManagedRuntime`
+ *  inside itself so the Promise facade had something to run against, and the
+ *  gateway built a second one around it. The facade is gone, so there is one
+ *  layer graph and one runtime, and the services are read out of it directly. */
+export const createHostRuntime = (
+  directory: string,
+  storage: HostStorage = {}
+): ManagedRuntime.ManagedRuntime<HostServices, StorageError> =>
+  ManagedRuntime.make(
+    storage.storage === undefined
+      ? localLayer({ directory: path.resolve(directory) })
+      : hostLayer(storage.storage)
+  )
+
+/** The host's services as a context, for a caller that holds plain values —
+ *  the gateway's composition root, which is not itself inside Effect. */
+export const hostServicesOf = (
+  runtime: ManagedRuntime.ManagedRuntime<HostServices, StorageError>
+): Promise<Context.Context<HostServices>> =>
+  runtime.runPromise(Effect.context<HostServices>())

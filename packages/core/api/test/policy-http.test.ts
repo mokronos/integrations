@@ -16,7 +16,7 @@ import {
   ToolName
 } from "./gateway.ts"
 import type { GatewayStore } from "./gateway.ts"
-import { stubHostContext, stubIntegrations } from "./stubs.ts"
+import { stubHostContext } from "./stubs.ts"
 
 const stores: Array<GatewayStore> = []
 const directories: Array<string> = []
@@ -49,7 +49,6 @@ const setup = async () => {
   }))
   const key = generateApiKey()
   await run(store.addApiKey({ id: key.id, clientId: administrator.id, hash: key.hash }))
-  const integrations = stubIntegrations()
   // The one catalogued tool the default configurations should pick up. Read
   // from the host now, which is where the handlers ask for it.
   const hostServices = stubHostContext({
@@ -64,8 +63,8 @@ const setup = async () => {
     }])
   })
   const { handle } = createGatewayHandler({
+    store, retentionDays: 30,
     hostServices,
-    store, integrations, retentionDays: 30,
     oauth: {
       start: () => Effect.die(new Error("not used")),
       get: () => Effect.sync((): undefined => undefined),

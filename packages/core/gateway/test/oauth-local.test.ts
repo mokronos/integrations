@@ -1,7 +1,16 @@
 import { describe, expect, test } from "bun:test"
 import type { AuthMethod, Connection } from "@mokronos/contracts"
 import { ConnectionName, IntegrationSlug } from "@mokronos/contracts"
-import { Cause, Effect, Exit, Result } from "effect"
+import { Cause, Context, Effect, Exit, Option, Result } from "effect"
+import {
+  AuthTemplateSlug,
+  CatalogStore,
+  IntegrationHost,
+  OAuthClientSlug,
+  OAuthError,
+  OAuthFlows,
+  OAuthState
+} from "@mokronos/integrations"
 import { authorizeInBrowser, OAuthFlowError } from "../src/oauth.ts"
 import { createOAuthSessions } from "../src/oauth-sessions.ts"
 import type { OAuthOperations } from "../src/oauth.ts"
@@ -25,41 +34,108 @@ const oauthMethod: AuthMethod = {
   }
 }
 
+/** The connection a completed flow files. Written out rather than trimmed
+ *  because these tests now run the real `completeOAuthFlow` — the exchange, the
+ *  catalog write and the tool re-read — so this is what the system produces,
+ *  not what the test wishes it produced. */
 const connected: Connection = {
   owner: "org",
   name: ConnectionName.make("primary"),
   integration: IntegrationSlug.make("provider"),
   template: "oauth",
-  address: "connections.provider.org.primary",
-  provider: "provider",
+  address: "tools.provider.org.primary",
+  provider: "oauth",
+  oauthClient: "provider-wf",
+  oauthClientOwner: "org",
+  oauthScope: null,
+  expiresAt: null,
+  missingOAuthScopes: [],
   status: "connected"
 }
 
-const notUsed = (member: string) => () => {
-  throw new Error(`${member} is not used by these tests`)
+const notUsed = (member: string) => () =>
+  Effect.die(new Error(`${member} is not used by these tests`))
+
+/** Only the two members a completed flow touches: filing the connection, and
+ *  re-reading the tools it exposes. Everything else dies, so a flow that starts
+ *  reaching further says so rather than quietly getting an empty answer. */
+const catalogStore: CatalogStore["Service"] = {
+  putConnection: () => Effect.void,
+  listIntegrations: notUsed("CatalogStore.listIntegrations"),
+  findIntegration: notUsed("CatalogStore.findIntegration"),
+  putIntegration: notUsed("CatalogStore.putIntegration"),
+  renameIntegration: notUsed("CatalogStore.renameIntegration"),
+  removeIntegration: notUsed("CatalogStore.removeIntegration"),
+  listConnections: notUsed("CatalogStore.listConnections"),
+  removeConnection: notUsed("CatalogStore.removeConnection"),
+  findOAuthClient: notUsed("CatalogStore.findOAuthClient"),
+  putOAuthClient: notUsed("CatalogStore.putOAuthClient"),
+  putOAuthFlow: notUsed("CatalogStore.putOAuthFlow"),
+  takeOAuthFlow: notUsed("CatalogStore.takeOAuthFlow"),
+  listTools: notUsed("CatalogStore.listTools"),
+  findTool: notUsed("CatalogStore.findTool"),
+  replaceTools: notUsed("CatalogStore.replaceTools"),
+  findSpecDocument: notUsed("CatalogStore.findSpecDocument"),
+  putSpecDocument: notUsed("CatalogStore.putSpecDocument")
+}
+
+const integrationHost: IntegrationHost["Service"] = {
+  refreshConnection: () => Effect.succeed([]),
+  listIntegrations: notUsed("IntegrationHost.listIntegrations"),
+  findIntegration: notUsed("IntegrationHost.findIntegration"),
+  addMcp: notUsed("IntegrationHost.addMcp"),
+  addOpenApi: notUsed("IntegrationHost.addOpenApi"),
+  renameIntegration: notUsed("IntegrationHost.renameIntegration"),
+  removeIntegration: notUsed("IntegrationHost.removeIntegration"),
+  createConnection: notUsed("IntegrationHost.createConnection"),
+  listConnections: notUsed("IntegrationHost.listConnections"),
+  removeConnection: notUsed("IntegrationHost.removeConnection"),
+  toolSummaries: notUsed("IntegrationHost.toolSummaries"),
+  listTools: notUsed("IntegrationHost.listTools"),
+  describeTool: notUsed("IntegrationHost.describeTool"),
+  execute: notUsed("IntegrationHost.execute")
 }
 
 /** Records the redirect URI the flow bound, so the test can reach the listener
  *  the same way a provider would. */
 const operations = (behaviour: {
-  readonly onComplete?: () => Promise<Connection>
+  readonly completeFails?: string
 } = {}) => {
   let redirectUri: string | undefined
-  const auth: OAuthOperations = {
-    probe: notUsed("probe"),
-    registerClient: notUsed("registerClient"),
-    createClient: async () => "provider-wf",
-    start: async (input) => {
-      redirectUri = input.redirectUri
-      return {
-        status: "redirect",
-        state: "state-123",
-        authorizationUrl: "https://provider.test/authorize?state=state-123"
-      }
-    },
-    complete: behaviour.onComplete ?? (async () => connected)
-  }
-  return { redirectUriUsed: () => redirectUri, auth }
+  const host: Context.Context<OAuthOperations> = Context.empty().pipe(
+    Context.add(OAuthFlows, {
+      probe: notUsed("probe"),
+      registerDynamicClient: notUsed("registerDynamicClient"),
+      createClient: () => Effect.succeed(OAuthClientSlug.make("provider-wf")),
+      start: (options) => {
+        redirectUri = options.redirectUri
+        return Effect.succeed({
+          authorizationUrl: "https://provider.test/authorize?state=state-123",
+          state: OAuthState.make("state-123")
+        })
+      },
+      complete: () =>
+        behaviour.completeFails === undefined
+          ? Effect.succeed({
+            owner: "org" as const,
+            integration: IntegrationSlug.make("provider"),
+            connection: ConnectionName.make("primary"),
+            template: AuthTemplateSlug.make("oauth"),
+            clientOwner: "org" as const,
+            client: OAuthClientSlug.make("provider-wf"),
+            scope: Option.none(),
+            expiresAt: Option.none()
+          })
+          : Effect.fail(new OAuthError({
+            stage: "complete",
+            detail: behaviour.completeFails
+          })),
+      accessToken: notUsed("accessToken")
+    }),
+    Context.add(CatalogStore, catalogStore),
+    Context.add(IntegrationHost, integrationHost)
+  )
+  return { redirectUriUsed: () => redirectUri, host }
 }
 
 const request = {
@@ -90,9 +166,8 @@ const started = (
 ) => {
   const announced = Promise.withResolvers<string>()
   const exit = Effect.runPromiseExit(Effect.scoped(authorizeInBrowser(
-    { ...request, onAuthorizationUrl: (url) => announced.resolve(url), ...overrides },
-    auth.auth
-  )))
+    { ...request, onAuthorizationUrl: (url) => announced.resolve(url), ...overrides }
+  ).pipe(Effect.provide(auth.host))))
   return { exit, announced: announced.promise }
 }
 
@@ -150,11 +225,7 @@ describe("authorizing through the loopback listener", () => {
   })
 
   test("fails the flow when the token exchange is refused", async () => {
-    const auth = operations({
-      onComplete: async () => {
-        throw new Error("token endpoint said no")
-      }
-    })
+    const auth = operations({ completeFails: "token endpoint said no" })
     const { exit, announced } = started(auth)
     await announced
 
@@ -209,22 +280,8 @@ describe("authorizing through the loopback listener", () => {
 
 describe("shutting down while an authorization is in flight", () => {
   test("stop() cancels the flow and releases its listener", async () => {
-    let redirectUri: string | undefined
-    const auth: OAuthOperations = {
-      probe: notUsed("probe"),
-      registerClient: notUsed("registerClient"),
-      createClient: async () => "provider-wf",
-      start: async (input) => {
-        redirectUri = input.redirectUri
-        return {
-          status: "redirect",
-          state: "state-123",
-          authorizationUrl: "https://provider.test/authorize?state=state-123"
-        }
-      },
-      complete: async () => connected
-    }
-    const sessions = createOAuthSessions({ auth })
+    const auth = operations()
+    const sessions = createOAuthSessions(auth.host)
 
     const session = await Effect.runPromise(sessions.start({
       integration: "provider",
@@ -234,7 +291,7 @@ describe("shutting down while an authorization is in flight", () => {
       clientSecret: "client-secret"
     }))
     expect(session.state.status).toBe("pending")
-    const port = Number(new URL(redirectUri!).port)
+    const port = Number(new URL(auth.redirectUriUsed()!).port)
 
     await Effect.runPromise(sessions.stop())
 

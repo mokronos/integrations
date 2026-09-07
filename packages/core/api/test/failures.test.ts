@@ -14,7 +14,7 @@ import {
   newClientId
 } from "./gateway.ts"
 import type { GatewayStore } from "./gateway.ts"
-import { stubHostContext, stubIntegrations } from "./stubs.ts"
+import { stubHostContext } from "./stubs.ts"
 import { McpError, SpecError } from "@mokronos/integrations"
 
 const directories: Array<string> = []
@@ -93,7 +93,6 @@ const setup = async (options: {
   const { handle } = createGatewayHandler({
     hostServices: stubHostContext({}, unreachable),
     store: presented,
-    integrations: stubIntegrations(),
     retentionDays: 30,
     ...whenPresentMap("errorCapture", options.errorCapture, (sink) => ({
       captureException: (_cause, context) => Effect.succeed(sink(context.operation))

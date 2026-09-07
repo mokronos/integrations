@@ -1,13 +1,15 @@
 import { whenPresent } from "@mokronos/contracts"
 import { randomUUID } from "node:crypto"
-import type { IntegrationsApi } from "@mokronos/integrations"
+
 import type { AuthMethod, Connection } from "@mokronos/contracts"
-import { Deferred, Effect, Exit, Schema, Scope } from "effect"
+import { Context, Deferred, Effect, Exit, Schema, Scope } from "effect"
 import type { TenantId } from "./domain.ts"
+import { completeOAuthFlow } from "@mokronos/integrations"
 import {
   authorizeInBrowser,
   OAuthFlowError,
-  startHostedAuthorization
+  startHostedAuthorization,
+  type OAuthOperations
 } from "./oauth.ts"
 
 export type OAuthSessionState =
@@ -121,7 +123,9 @@ const inMemoryStore = (): OAuthSessionStore & { clear(): void } => {
  *  trip. All reads and writes go through one backend so the flow logic never
  *  knows whether it is talking to maps or a database. */
 export const createOAuthSessions = (
-  integrations: Pick<IntegrationsApi, "auth">,
+  /** The host services an authorization reaches. A context rather than a layer
+   *  because the host is already running by the time sessions exist. */
+  host: Context.Context<OAuthOperations>,
   options: OAuthSessionsOptions = {}
 ): OAuthSessions => {
   // The in-memory backend is always constructed (it is two Maps); it backs
@@ -182,7 +186,7 @@ export const createOAuthSessions = (
           ...whenPresent("clientId", input.clientId),
           ...whenPresent("clientSecret", input.clientSecret),
           ...whenPresent("timeoutMs", input.timeoutMs)
-        }, integrations.auth)
+        }).pipe(Effect.provide(host))
         if (flow.status === "connected") {
           const connected: OAuthSession = {
             id,
@@ -232,7 +236,8 @@ export const createOAuthSessions = (
         onAuthorizationUrl: (url) => {
           Deferred.doneUnsafe(announced, Effect.succeed(url))
         }
-      }, integrations.auth).pipe(
+      }).pipe(
+        Effect.provide(host),
         Effect.matchEffect({
           onSuccess: (connection) =>
             Effect.gen(function*() {
@@ -285,12 +290,9 @@ export const createOAuthSessions = (
       yield* store.deleteState(state)
       const session = yield* store.get(id)
       if (session === undefined || session.state.status !== "pending") return undefined
-      const result = yield* Effect.result(external("completeAuthorization", () =>
-        integrations.auth.complete({
-          state,
-          code: input.code,
-          ...whenPresent("callbackDomain", input.callbackDomain)
-        })))
+      const result = yield* Effect.result(
+        completeOAuthFlow({ state, code: input.code }).pipe(Effect.provide(host))
+      )
       if (result._tag === "Success") {
         yield* finish(id, { status: "connected", connection: result.success })
         const completed = yield* store.get(id)
@@ -298,13 +300,7 @@ export const createOAuthSessions = (
           yield* external("bindConnectedTools", () => options.onConnected!(completed))
         }
       } else {
-        const error = result.failure
-        yield* finish(id, {
-          status: "failed",
-          message: error.cause instanceof Error
-            ? error.cause.message
-            : "OAuth callback could not be verified"
-        })
+        yield* finish(id, { status: "failed", message: result.failure.message })
       }
       return yield* store.get(id)
     }),

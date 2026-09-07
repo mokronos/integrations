@@ -19,10 +19,9 @@ import {
   ToolName
 } from "./gateway.ts"
 import type { ConnectionRef, GatewayStore } from "./gateway.ts"
-import { stubHostContext, stubIntegrations } from "./stubs.ts"
+import { stubHostContext } from "./stubs.ts"
 import type { HostServices } from "@mokronos/integrations"
 import { Context } from "effect"
-import type { IntegrationsApi } from "@mokronos/integrations"
 import type { GoogleIdentityOAuth } from "@mokronos/gateway-core"
 
 const JsonBody = Schema.Record(Schema.String, Schema.Json)
@@ -51,7 +50,6 @@ interface SetupOptions {
   readonly secureCookies?: boolean
   readonly google?: GoogleIdentityOAuth
   /** Replaces the host for a test that reaches past authority into provisioning. */
-  readonly integrations?: IntegrationsApi
   readonly hostServices?: Context.Context<HostServices>
 }
 
@@ -90,7 +88,6 @@ const setup = async (options: SetupOptions = {}) => {
   const { handle } = createGatewayHandler({
     hostServices: options.hostServices ?? stubHostContext(),
     store,
-    integrations: options.integrations ?? stubIntegrations(),
     retentionDays: 30,
     oauth: {
       start: () => Effect.die(new Error("not used")),

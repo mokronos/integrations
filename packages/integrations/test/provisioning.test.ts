@@ -1,7 +1,10 @@
 import { describe, expect, it } from "bun:test"
+import { Cause, Context, Effect, Exit, Option, Result } from "effect"
 import { IntegrationSlug } from "@mokronos/contracts"
+import { IntegrationHost } from "../src/host.ts"
+import { SpecError } from "../src/errors.ts"
 import type { EndpointClassification, Integration } from "@mokronos/contracts"
-import { createIntegrationProvisioning } from "../src/facade/provisioning.ts"
+import { installClassified } from "../src/provision.ts"
 
 /** Installing what a URL turned out to be, under the name the caller chose.
  *
@@ -32,50 +35,67 @@ const installed = (
   slug: IntegrationSlug.make(overrides.slug)
 })
 
-const dependencies = (options: {
+/** The host as installation reaches it. `classify` is not stubbed — these
+ *  tests drive `installClassified` with a classification directly, which is
+ *  what they were always about. */
+const hostWith = (options: {
   readonly existing?: Integration
   readonly added: Array<{ readonly slug: string; readonly name: string }>
-}) => ({
-  catalog: {
-    classify: async () => classification,
-    addMcp: async (input: { readonly slug: string; readonly name: string }) => {
-      options.added.push({ slug: input.slug, name: input.name })
-      return input.slug
-    },
-    addOpenApi: async () => {
-      throw new Error("not an OpenAPI document")
-    },
-    find: async (slug: string) => {
+}): Context.Context<IntegrationHost> => {
+  const dies = (member: string) => () =>
+    Effect.die(new Error(`${member} is not used by these tests`))
+  return Context.make(IntegrationHost, {
+    listIntegrations: dies("listIntegrations"),
+    findIntegration: (slug) => {
       if (options.existing !== undefined && options.existing.slug === slug) {
-        return options.existing
+        return Effect.succeed(Option.some(options.existing))
       }
       const added = options.added.find((entry) => entry.slug === slug)
-      return added === undefined ? undefined : installed(added)
-    }
-  },
-  connections: { ensure: async () => false },
-  tools: { list: async () => [] }
-})
+      return Effect.succeed(added === undefined ? Option.none() : Option.some(installed(added)))
+    },
+    addMcp: (input) => {
+      options.added.push({ slug: input.slug, name: input.name ?? input.slug })
+      return Effect.succeed(input.slug)
+    },
+    addOpenApi: () => Effect.fail(new SpecError({
+      source: classification.endpoint,
+      detail: "not an OpenAPI document"
+    })),
+    renameIntegration: dies("renameIntegration"),
+    removeIntegration: dies("removeIntegration"),
+    createConnection: dies("createConnection"),
+    listConnections: () => Effect.succeed([]),
+    removeConnection: dies("removeConnection"),
+    refreshConnection: dies("refreshConnection"),
+    toolSummaries: () => Effect.succeed([]),
+    listTools: () => Effect.succeed([]),
+    describeTool: dies("describeTool"),
+    execute: dies("execute")
+  })
+}
+
+/** Runs an installation against that host, as an `Exit` so a refusal can be
+ *  read as the typed failure it now is. */
+const install = (
+  classified: typeof classification,
+  host: Context.Context<IntegrationHost>
+) => Effect.runPromiseExit(installClassified(classified).pipe(Effect.provide(host)))
 
 describe("provisioning a discovered URL", () => {
   it("installs under the name and slug the caller chose", async () => {
     const added: Array<{ readonly slug: string; readonly name: string }> = []
-    const provisioning = createIntegrationProvisioning(dependencies({ added }))
-
-    const result = await provisioning.provision(classification.endpoint, {
-      slug: "gmail",
-      name: "Gmail"
-    })
+    const exit = await install(
+      { ...classification, slug: "gmail", name: "Gmail" },
+      hostWith({ added })
+    )
 
     expect(added).toEqual([{ slug: "gmail", name: "Gmail" }])
-    expect(String(result.integration.slug)).toBe("gmail")
+    expect(Exit.isSuccess(exit) && String(exit.value.slug)).toBe("gmail")
   })
 
   it("falls back to what the endpoint said it was", async () => {
     const added: Array<{ readonly slug: string; readonly name: string }> = []
-    const provisioning = createIntegrationProvisioning(dependencies({ added }))
-
-    await provisioning.provision(classification.endpoint, {})
+    await install(classification, hostWith({ added }))
 
     expect(added).toEqual([{ slug: "gmailmcp", name: "Gmailmcp" }])
   })
@@ -83,14 +103,12 @@ describe("provisioning a discovered URL", () => {
   it("is idempotent for the URL already installed under that slug", async () => {
     const added: Array<{ readonly slug: string; readonly name: string }> = []
     const existing = installed({ slug: "gmailmcp", name: "Gmail" })
-    const provisioning = createIntegrationProvisioning(dependencies({ existing, added }))
-
-    const result = await provisioning.provision(classification.endpoint, {})
+    const exit = await install(classification, hostWith({ existing, added }))
 
     // Nothing installed a second time, and the name a human already gave it
     // survives — rediscovery is not a reset.
     expect(added).toEqual([])
-    expect(result.integration.name).toBe("Gmail")
+    expect(Exit.isSuccess(exit) && exit.value.name).toBe("Gmail")
   })
 
   it("refuses a name already taken by a different endpoint", async () => {
@@ -100,15 +118,21 @@ describe("provisioning a discovered URL", () => {
       name: "Gmail",
       displayUrl: "https://mail.example.com/mcp"
     })
-    const provisioning = createIntegrationProvisioning(dependencies({ existing, added }))
-
     // Returning the other integration here would report success for an
-    // endpoint that was never installed.
-    const outcome = await provisioning.provision(classification.endpoint, { slug: "gmail" })
-      .then(() => undefined)
-      .catch((error: Error) => error)
+    // endpoint that was never installed. It is a typed refusal now rather than
+    // a thrown string the caller had to read a message off.
+    const exit = await install(
+      { ...classification, slug: "gmail" },
+      hostWith({ existing, added })
+    )
 
-    expect(outcome?.message).toContain("https://mail.example.com/mcp")
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) {
+      const failure = Cause.findError(exit.cause)
+      expect(Result.isSuccess(failure) && failure.success._tag).toBe("InvalidInputError")
+      expect(Result.isSuccess(failure) && failure.success.message)
+        .toContain("https://mail.example.com/mcp")
+    }
     expect(added).toEqual([])
   })
 })

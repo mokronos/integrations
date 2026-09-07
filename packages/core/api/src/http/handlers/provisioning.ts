@@ -11,7 +11,7 @@ import {
   validateIntegrationNode as validateNode
 } from "@mokronos/integrations"
 import type { HostServices } from "@mokronos/integrations"
-import { Effect, Option, Predicate, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
@@ -54,23 +54,6 @@ const requireSlug = (value: string): Effect.Effect<IntegrationSlug, ApiNotFound>
   Option.match(Schema.decodeUnknownOption(IntegrationSlug)(value), {
     onNone: () => Effect.fail(new ApiNotFound({ error: `Unknown integration ${value}` })),
     onSome: Effect.succeed
-  })
-
-/** A call that leaves this process — the caller's own URL, the public registry,
- *  a vendor API, an identity provider.
- *
- *  Failure out there is routine and almost always the caller's to act on: an
- *  unreachable host, a document that is not an OpenAPI spec, a provider saying
- *  no. Wrapping it in `Effect.promise` made every one of those an undeclared
- *  defect and a 500 that named nothing. This declares it instead, and says what
- *  the far end said. */
-const reachOut = <A>(what: string, call: () => Promise<A>): Effect.Effect<A, ApiBadRequest> =>
-  Effect.tryPromise({
-    try: call,
-    catch: (cause) =>
-      new ApiBadRequest({
-        error: `${what}: ${Predicate.isError(cause) ? cause.message : String(cause)}`
-      })
   })
 
 /** An HTML page for the OAuth browser flow — one of the few responses here
@@ -256,15 +239,17 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
           }))
         }))
       .handle("registrySearch", (request) =>
-        reachOut("The integration registry could not be searched", () =>
-          searchIntegrations(
-            {
-              q: request.query["q"],
-              limit: request.query["limit"],
-              ...whenPresentMap("kind", request.query["kind"], (k) => k)
-            },
-            whenPresent("registryUrl", config.registryUrl)
-          )))
+        // The registry is somebody else's server, so a failure here is the
+        // caller's to see: `InvocationError` already says whether the query was
+        // malformed or the registry would not answer.
+        asApiFailure(searchIntegrations(
+          {
+            q: request.query["q"],
+            limit: request.query["limit"],
+            ...whenPresentMap("kind", request.query["kind"], (k) => k)
+          },
+          whenPresent("registryUrl", config.registryUrl)
+        )))
       .handle("invokeTool", (request) =>
         // Administrative and deliberately not delegated-policy checked: a client
         // with administration authority can change policy in a separate call, so a

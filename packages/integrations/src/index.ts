@@ -41,10 +41,19 @@ export {
 } from "./storage/credentials.ts"
 
 /** Layer composition. */
-export { hostLayer, localLayer, stubbedLayer } from "./runtime.ts"
+export { createHostRuntime, hostLayer, hostServicesOf, localLayer, stubbedLayer } from "./runtime.ts"
+export type { HostServices, HostStorage } from "./runtime.ts"
 export { listIntegrationOverviews } from "./overview.ts"
 export { installClassified, provisionIntegration } from "./provision.ts"
 export { validateIntegrationNode } from "./validate.ts"
+export {
+  completeOAuthFlow,
+  createOAuthClient,
+  probeOAuthServer,
+  registerOAuthClient,
+  startOAuthFlow
+} from "./oauth-connect.ts"
+export type { StartedOAuthFlow } from "./oauth-connect.ts"
 
 /** Errors, so a caller matches on `_tag` rather than on message text. */
 export {
@@ -85,21 +94,3 @@ export { normalizeOutputSchema, normalizeToolResult } from "./mcp/result.ts"
 export { search as searchRegistry, searchIntegrations } from "./registry.ts"
 export type { SearchIntegrationsOptions } from "./registry.ts"
 
-/** The Promise-facing facade the gateway, CLI and dashboard consume. Everything
- *  here exists because those callers are async/await rather than Effect; it is
- *  the one place the two styles meet, and it goes away when they converge. */
-export { createIntegrationsApi, IntegrationsApiService } from "./facade/api.ts"
-export type {
-  AuthApi,
-  CatalogApi,
-  ConnectionsApi,
-  IntegrationsApi,
-  ToolLookup,
-  ToolQuery,
-  ToolsApi
-} from "./facade/api.ts"
-export { createHostHandle, HostClosedError, HostHandleService } from "./facade/lifecycle.ts"
-export type { HostHandle, HostServices, HostStorage } from "./facade/lifecycle.ts"
-export { createIntegrationOverview } from "./facade/overview.ts"
-export { createIntegrationProvisioning } from "./facade/provisioning.ts"
-export { createIntegrationValidation } from "./facade/validation.ts"

@@ -162,8 +162,4 @@ export const search = Effect.fn("registry.search")(function* (
   return { query: text, results } satisfies IntegrationSearchResponse
 })
 
-/** The Promise-facing form, for the gateway's HTTP layer. */
-export const searchIntegrations = (
-  query: IntegrationSearchQuery,
-  options: SearchIntegrationsOptions = {}
-): Promise<IntegrationSearchResponse> => Effect.runPromise(search(query, options))
+export { search as searchIntegrations }

@@ -6,7 +6,6 @@ import {
 import { PositiveInt, PositiveIntFromString, whenPresent } from "@mokronos/contracts"
 import { defaultTenantId } from "@mokronos/gateway-core"
 import { resolveEncryption } from "@mokronos/gateway-core"
-import type { Gateway } from "@mokronos/gateway-core"
 import { Context, Effect, Layer, ManagedRuntime, Option, Schema } from "effect"
 import { isLoopbackAddress, mayBorrowLocalCredential } from "./http/loopback.ts"
 import { createGatewayHandler } from "./http/handler.ts"
@@ -23,8 +22,7 @@ import { createRateLimiter } from "@mokronos/gateway-core"
 import { generateApiKey, newClientId } from "@mokronos/gateway-core"
 import { integrationsHome } from "./paths.ts"
 import type { HostStorage, StorageError } from "@mokronos/integrations"
-import { HostHandleService, IntegrationHost, IntegrationsApiService } from "@mokronos/integrations"
-import type { HostServices } from "@mokronos/integrations"
+import { createHostRuntime, hostServicesOf, IntegrationHost } from "@mokronos/integrations"
 import type { GatewayStoreOptions } from "@mokronos/gateway-core"
 import type { GatewayStore } from "@mokronos/gateway-core"
 import { GatewayStoreError, GatewayStoreService } from "@mokronos/gateway-core"
@@ -40,7 +38,6 @@ export const localClientName = "local"
 export interface GatewayService {
   readonly home: string
   readonly store: GatewayStore
-  readonly gateway: Gateway
   readonly handle: (request: Request, context?: GatewayRequestContext) => Promise<Response>
   close(): Promise<void>
 }
@@ -105,7 +102,6 @@ export interface GatewayServiceOptions {
 interface GatewayCore {
   readonly home: string
   readonly store: GatewayStore
-  readonly gateway: Gateway
   readonly oauth: ReturnType<typeof createOAuthSessions>
   readonly maintenance: MaintenanceLoop | undefined
   readonly handlerOptions: Parameters<typeof createGatewayHandler>[0]
@@ -143,11 +139,14 @@ const buildCore = async (
     ...whenPresent("envValue", process.env["INTEGRATIONS_MASTER_KEY"]),
     keyFile: `${home}/gateway.key`
   })
-  const dependencies = ManagedRuntime.make(Layer.merge(
+  // Two runtimes, one graph each: the gateway's own store, and the integration
+  // host. They were nested before — the host built a `ManagedRuntime` inside
+  // itself for the Promise facade to run against, and this one wrapped it.
+  const storeRuntime = ManagedRuntime.make(
     options.storeLayer ??
-    GatewayStoreService.layer(`${home}/gateway.sqlite`, encryption, options.storeOptions),
-    IntegrationsApiService.layerWithHost(home, options.hostStorage)
-  ))
+    GatewayStoreService.layer(`${home}/gateway.sqlite`, encryption, options.storeOptions)
+  )
+  const hostRuntime = createHostRuntime(home, options.hostStorage ?? {})
   let resources: Awaited<ReturnType<typeof bootResources>>
   try {
     resources = await bootResources()
@@ -160,38 +159,22 @@ const buildCore = async (
       }), { discard: true })
     }))
   } catch (error) {
-    await dependencies.dispose()
+    await Promise.all([storeRuntime.dispose(), hostRuntime.dispose()])
     throw error
   }
 
   /** The one place a service becomes a plain value.
    *
-   *  `Gateway` is an async object the CLI and the dashboard hold and close, so
-   *  something has to leave Effect here. Everything below this line takes
-   *  values; everything above it takes layers, and the HTTP handlers ask the
-   *  context for what they need rather than being handed a bag of these. */
+   *  `GatewayService` is an async object the CLI and the dashboard hold and
+   *  close, so something has to leave Effect here. Everything below this line
+   *  takes values; everything above it takes layers, and the HTTP handlers ask
+   *  the context for what they need rather than being handed a bag of these. */
   async function bootResources() {
-    return await dependencies.runPromise(Effect.gen(function*() {
-      const store = yield* GatewayStoreService
-      const host = yield* HostHandleService
-      const integrations = yield* IntegrationsApiService
-      // The host's Effect capability, pulled from the same runtime the facade
-      // wraps. Handlers get this one; nothing builds a second host.
-      // The host's whole service context, captured once. The HTTP layer needs
-      // more than `IntegrationHost` — reading an unknown endpoint reaches the
-      // MCP client and the spec cache — and pulling them out one at a time
-      // would grow a field per service.
-      const hostServices = yield* Effect.promise(() =>
-        host.run(Effect.context<HostServices>()))
-      return { store, host, integrations, hostServices }
-    }))
-  }
-
-  const gateway: Gateway = {
-    directory: resources.host.directory,
-    host: resources.host,
-    integrations: resources.integrations,
-    close: () => resources.host.close()
+    const [store, hostServices] = await Promise.all([
+      storeRuntime.runPromise(Effect.service(GatewayStoreService)),
+      hostServicesOf(hostRuntime)
+    ])
+    return { store, hostServices }
   }
   // Read at flow-start time, not construction time: the local origin is only
   // known once the caller has decided how the socket is bound. The callback
@@ -206,7 +189,7 @@ const buildCore = async (
     options.googleIdentity?.clientSecret ?? process.env["INTEGRATIONS_GOOGLE_CLIENT_SECRET"]
   )
   if ((googleClientId === undefined) !== (googleClientSecret === undefined)) {
-    await dependencies.dispose()
+    await Promise.all([storeRuntime.dispose(), hostRuntime.dispose()])
     throw new Error(
       "Google sign-in requires both INTEGRATIONS_GOOGLE_CLIENT_ID and INTEGRATIONS_GOOGLE_CLIENT_SECRET"
     )
@@ -220,7 +203,7 @@ const buildCore = async (
         publicUrlOf: resolvePublicUrl,
         ...whenPresent("fetch", options.googleIdentity?.fetch)
       }
-  const oauth = createOAuthSessions(gateway.integrations, {
+  const oauth = createOAuthSessions(resources.hostServices, {
     publicUrlOf: resolvePublicUrl,
     onConnected: async (session) => {
       const state = session.state
@@ -265,7 +248,7 @@ const buildCore = async (
   const disposeCore = async () => {
     maintenance?.stop()
     await Effect.runPromise(oauth.stop())
-    await dependencies.dispose()
+    await Promise.all([storeRuntime.dispose(), hostRuntime.dispose()])
   }
 
   void defaultTenantId
@@ -273,14 +256,12 @@ const buildCore = async (
   return {
     home,
     store: resources.store,
-    gateway,
     oauth,
     maintenance,
     disposeCore,
     handlerOptions: {
       store: resources.store,
       hostServices: resources.hostServices,
-      integrations: gateway.integrations,
       retentionDays: options.retentionDays ?? defaultArgumentRetentionDays,
       oauth,
       oauthCallbackUrl: () => {
@@ -330,7 +311,6 @@ export const createGatewayService = async (
   return {
     home: core.home,
     store: core.store,
-    gateway: core.gateway,
     handle: dispatch,
     close: async () => {
       if (closed) return
@@ -406,8 +386,7 @@ export const serveGateway = async (options: ServeOptions = {}): Promise<RunningG
     const service: GatewayService = {
       home: core.home,
       store: core.store,
-      gateway: core.gateway,
-      handle: (request, context) => handle.handle(request, context),
+        handle: (request, context) => handle.handle(request, context),
       close: async () => {
         if (stopped) return
         stopped = true

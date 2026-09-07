@@ -1,4 +1,4 @@
-import { stubHostContext, stubIntegrations as emptyIntegrations } from "./stubs.ts"
+import { stubHostContext } from "./stubs.ts"
 import { InvocationError } from "@mokronos/integrations"
 import { run, runAll } from "./effect.ts"
 import { afterEach, describe, expect, test } from "bun:test"
@@ -101,10 +101,6 @@ const stubIntegrations = (behaviour: {
   const forgotten: Array<string> = []
   const renamed: Array<{ readonly slug: string; readonly name: string }> = []
   const known = new Set((behaviour.connections ?? []).map((connection) => connection.integration))
-  // Nothing a handler touches comes through the facade any more — only the
-  // three composites the OAuth and discovery routes still call, which these
-  // tests do not exercise. The rest is the host stub below.
-  const integrations = emptyIntegrations()
   /** The host as the handlers reach it. The gateway's job is deciding whether a
    *  call happens and with which credential, not what the vendor answers, so
    *  everything here is a plausible answer rather than a real one. */
@@ -164,7 +160,7 @@ const stubIntegrations = (behaviour: {
       forgotten.push(slug)
     })
   })
-  return { calls, removed, forgotten, renamed, integrations, hostServices }
+  return { calls, removed, forgotten, renamed, hostServices }
 }
 
 const setup = async (options: {
@@ -220,7 +216,6 @@ const setup = async (options: {
   })
   const { handle } = createGatewayHandler({
     store,
-    integrations: stub.integrations,
     hostServices: stub.hostServices,
     retentionDays: 30,
     // No OAuth flow is exercised here; these tests are about authority.
