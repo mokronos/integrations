@@ -2,10 +2,11 @@ import { whenPresent } from "@mokronos/contracts"
 import { randomUUID } from "node:crypto"
 import type { IntegrationsApi } from "@mokronos/integrations"
 import type { AuthMethod, Connection } from "@mokronos/contracts"
-import { Effect, Schema } from "effect"
+import { Deferred, Effect, Exit, Schema, Scope } from "effect"
 import type { TenantId } from "./domain.ts"
 import {
   authorizeInBrowser,
+  OAuthFlowError,
   startHostedAuthorization
 } from "./oauth.ts"
 
@@ -61,7 +62,11 @@ export interface OAuthSessions {
     readonly clientSecret?: string
     readonly timeoutMs?: number
     readonly bindingTenant?: TenantId
-  }): Effect.Effect<OAuthSession, OAuthSessionError>
+    // `OAuthFlowError` rides alongside `OAuthSessionError` rather than being
+    // flattened into it: the two answer different questions. A session error is
+    // the gateway's bookkeeping failing; a flow error says which stage of the
+    // authorization the provider or the configuration broke at.
+  }): Effect.Effect<OAuthSession, OAuthSessionError | OAuthFlowError>
   get(id: string): Effect.Effect<OAuthSession | undefined, OAuthSessionError>
   /** Finishes a hosted flow by the `state` the provider echoed back. Unknown
    *  or already-finished states answer `undefined`, which is what makes a
@@ -126,6 +131,20 @@ export const createOAuthSessions = (
   const store: OAuthSessionStore = options.store ?? memory
   let stopped = false
 
+  /** Where in-flight local flows live. Created on first use rather than at
+   *  construction, so a gateway that never runs a local flow never opens one,
+   *  and closed by {@link OAuthSessions.stop} — which is what finally makes a
+   *  shutdown able to cancel an authorization a human abandoned. */
+  let flowScopeCell: Scope.Closeable | undefined
+  const flowScope = Effect.suspend(() =>
+    flowScopeCell === undefined
+      ? Effect.map(Scope.make(), (made) => {
+        flowScopeCell = made
+        return made
+      })
+      : Effect.succeed(flowScopeCell)
+  )
+
   const finish = Effect.fn("OAuthSession.finish")(function*(
     id: string,
     state: OAuthSessionState
@@ -155,7 +174,7 @@ export const createOAuthSessions = (
       // Hosted mode: register against the public URL and hand back a URL for
       // the human's browser. Completion arrives at the callback route.
       if (publicUrl !== undefined) {
-        const flow = yield* external("startHostedAuthorization", () => startHostedAuthorization({
+        const flow = yield* startHostedAuthorization({
           integration: input.integration,
           connection: input.connection,
           authMethod: input.authMethod,
@@ -163,7 +182,7 @@ export const createOAuthSessions = (
           ...whenPresent("clientId", input.clientId),
           ...whenPresent("clientSecret", input.clientSecret),
           ...whenPresent("timeoutMs", input.timeoutMs)
-        }, integrations.auth))
+        }, integrations.auth)
         if (flow.status === "connected") {
           const connected: OAuthSession = {
             id,
@@ -191,42 +210,59 @@ export const createOAuthSessions = (
       }
 
       // Local mode: the flow owns an ephemeral loopback listener and resolves
-      // through it. Resolves once the provider's authorization URL is known,
-      // which is well before the human finishes authorizing.
-      const announced = Promise.withResolvers<string>()
-      const context = yield* Effect.context<never>()
-      const run = Effect.runPromiseWith(context)
-      const flowPromise = authorizeInBrowser({
+      // through it. `start` returns once the provider's authorization URL is
+      // known, which is well before the human finishes authorizing, so the rest
+      // of the flow runs on a fiber.
+      //
+      // That fiber is forked into a scope this session manager owns, which is
+      // what `stop()` closes. Before, it was a bare `void promise.then(...)`
+      // re-entering Effect through `runPromiseWith`: nothing supervised it, a
+      // shutdown could not cancel it, and a failure inside either `.then` arm
+      // was discarded by the `void`.
+      const parent = yield* flowScope
+      const announced = yield* Deferred.make<string>()
+
+      yield* authorizeInBrowser({
         integration: input.integration,
         connection: input.connection,
         authMethod: input.authMethod,
         ...whenPresent("clientId", input.clientId),
         ...whenPresent("clientSecret", input.clientSecret),
         ...whenPresent("timeoutMs", input.timeoutMs),
-        onAuthorizationUrl: (url) => announced.resolve(url)
-      }, integrations.auth)
-
-      void flowPromise.then(
-        (connection) => {
-          void run(Effect.gen(function*() {
-            yield* finish(id, { status: "connected", connection })
-            const session = yield* store.get(id)
-            if (session !== undefined && options.onConnected !== undefined) {
-              yield* external("bindConnectedTools", () => options.onConnected!(session))
-            }
-          }))
-          // A provider that short-circuits to an existing connection never
-          // announces a URL, so unblock the caller either way.
-          announced.resolve("")
-        },
-        (error) => {
-          const message = error instanceof Error ? error.message : "OAuth authorization failed"
-          void run(finish(id, { status: "failed", message }))
-          announced.resolve("")
+        onAuthorizationUrl: (url) => {
+          Deferred.doneUnsafe(announced, Effect.succeed(url))
         }
+      }, integrations.auth).pipe(
+        Effect.matchEffect({
+          onSuccess: (connection) =>
+            Effect.gen(function*() {
+              yield* finish(id, { status: "connected", connection })
+              const session = yield* store.get(id)
+              if (session !== undefined && options.onConnected !== undefined) {
+                yield* external("bindConnectedTools", () => options.onConnected!(session))
+              }
+            }),
+          onFailure: (failure) => finish(id, { status: "failed", message: failure.message })
+        }),
+        // Recording the outcome is itself fallible — the store can refuse. It
+        // cannot fail the flow (the human has already authorized), so it is
+        // logged rather than dropped.
+        Effect.catch((failure) =>
+          Effect.logError(`OAuth session ${id} could not be settled: ${failure.message}`).pipe(
+            Effect.annotateLogs({ session: id, operation: "OAuthSession.settle" })
+          )),
+        // A provider that short-circuits to an existing connection never
+        // announces a URL, so unblock `start` however this ends.
+        Effect.ensuring(Effect.sync(() => {
+          Deferred.doneUnsafe(announced, Effect.succeed(""))
+        })),
+        // The listener belongs to this flow and is released when it settles;
+        // the fiber belongs to the manager and dies when `stop()` closes it.
+        Effect.scoped,
+        Effect.forkIn(parent)
       )
 
-      const authorizationUrl = yield* external("announceAuthorizationUrl", () => announced.promise)
+      const authorizationUrl = yield* Deferred.await(announced)
       const session = (yield* store.get(id)) ?? {
         id,
         integration: input.integration,
@@ -273,8 +309,15 @@ export const createOAuthSessions = (
       return yield* store.get(id)
     }),
 
-    stop: () => Effect.sync(() => {
+    stop: () => Effect.gen(function*() {
       stopped = true
+      // Closing the scope interrupts every in-flight authorization and, through
+      // each flow's own scope, stops its loopback listener.
+      if (flowScopeCell !== undefined) {
+        const closing = flowScopeCell
+        flowScopeCell = undefined
+        yield* Scope.close(closing, Exit.void)
+      }
       if (options.store === undefined) memory.clear()
     })
   }

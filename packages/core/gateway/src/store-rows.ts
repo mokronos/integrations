@@ -19,7 +19,12 @@ import type { IdentityOAuthStateRecord, LoginRecord } from "./store-contract.ts"
 // libsql rows carry numeric indices and a length alongside the named columns,
 // so fields are picked explicitly rather than spread.
 
-const pick = (row: Row, keys: ReadonlyArray<string>): Record<string, Row[string]> =>
+/** The named columns of one row, as the decoders receive them. A driver row
+ *  carries positional keys and a length alongside the names, so the columns a
+ *  schema expects are picked out rather than spread. */
+type PickedRow = Record<string, Row[string]>
+
+const pick = (row: Row, keys: ReadonlyArray<string>): PickedRow =>
   Object.fromEntries(keys.map((key) => [key, row[key] ?? null]))
 
 const NullableNumber = Schema.NullOr(Schema.Number)
@@ -230,29 +235,71 @@ const snapshotColumns = [
   "integration", "connection_name", "tool", "input_schema", "output_schema", "synced_at"
 ]
 
-const decodeClientRow = Schema.decodeUnknownSync(ClientRow)
-const decodeTenantRow = Schema.decodeUnknownSync(TenantRow)
-const decodeSubjectRow = Schema.decodeUnknownSync(SubjectRow)
-const decodeLoginRow = Schema.decodeUnknownSync(LoginRow)
-const decodeSessionRow = Schema.decodeUnknownSync(SessionRow)
-const decodeExternalIdentityRow = Schema.decodeUnknownSync(ExternalIdentityRow)
-const decodeLoginHandoffRow = Schema.decodeUnknownSync(LoginHandoffRow)
-const decodeIdentityOAuthStateRow = Schema.decodeUnknownSync(IdentityOAuthStateRow)
-const decodeApiKeyRow = Schema.decodeUnknownSync(ApiKeyRow)
-const decodeConfigurationRow = Schema.decodeUnknownSync(ConfigurationRow)
-const decodeAccessProfileToolRow = Schema.decodeUnknownSync(AccessProfileToolRow)
-const decodeApprovalPolicyToolRow = Schema.decodeUnknownSync(ApprovalPolicyToolRow)
-const decodeApprovalRow = Schema.decodeUnknownSync(ApprovalRow)
-const decodeAuditRow = Schema.decodeUnknownSync(AuditRow)
-const decodeSnapshotRow = Schema.decodeUnknownSync(SnapshotRow)
-const decodeJsonText = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
-const decodeCapabilities = Schema.decodeUnknownSync(
+/** A row the gateway itself wrote that no longer decodes.
+ *
+ *  Distinct from a driver failure because the remedy is different: a rejected
+ *  statement is operational and usually transient, while a row that will not
+ *  decode is a schema or migration bug that will fail identically on every
+ *  retry. Both used to arrive at `storeOperation` as an anonymous throw and
+ *  became the same `GatewayStoreError`, so an operator could not tell "the
+ *  database is busy" from "we cannot read what we stored". */
+export class MalformedRowError extends Error {
+  readonly _tag = "MalformedRowError"
+  constructor(readonly table: string, override readonly cause: unknown) {
+    super(`Malformed ${table} row`)
+  }
+}
+
+/** Decodes one row, naming the table so a failure says which one. Sync on
+ *  purpose: the driver methods it serves are Promise-returning, and
+ *  `storeOperation` turns the throw into a typed `GatewayStoreError`. */
+const rowDecoder = <T>(table: string, schema: Schema.ConstraintDecoder<T>) => {
+  const decode = Schema.decodeUnknownSync(schema)
+  return (columns: PickedRow): T => {
+    try {
+      return decode(columns)
+    } catch (cause) {
+      throw new MalformedRowError(table, cause)
+    }
+  }
+}
+
+/** The same, for a column that holds JSON text rather than a row. */
+const jsonDecoder = <T>(column: string, schema: Schema.ConstraintDecoder<T>) => {
+  const decode = Schema.decodeUnknownSync(schema)
+  return (text: string): T => {
+    try {
+      return decode(text)
+    } catch (cause) {
+      throw new MalformedRowError(column, cause)
+    }
+  }
+}
+
+const decodeClientRow = rowDecoder("gateway_client", ClientRow)
+const decodeTenantRow = rowDecoder("gateway_tenant", TenantRow)
+const decodeSubjectRow = rowDecoder("gateway_subject", SubjectRow)
+const decodeLoginRow = rowDecoder("gateway_login", LoginRow)
+const decodeSessionRow = rowDecoder("gateway_session", SessionRow)
+const decodeExternalIdentityRow = rowDecoder("gateway_external_identity", ExternalIdentityRow)
+const decodeLoginHandoffRow = rowDecoder("gateway_login_handoff", LoginHandoffRow)
+const decodeIdentityOAuthStateRow = rowDecoder("gateway_identity_oauth_state", IdentityOAuthStateRow)
+const decodeApiKeyRow = rowDecoder("gateway_api_key", ApiKeyRow)
+const decodeConfigurationRow = rowDecoder("gateway_configuration", ConfigurationRow)
+const decodeAccessProfileToolRow = rowDecoder("gateway_access_profile_tool", AccessProfileToolRow)
+const decodeApprovalPolicyToolRow = rowDecoder("gateway_approval_policy_tool", ApprovalPolicyToolRow)
+const decodeApprovalRow = rowDecoder("gateway_approval", ApprovalRow)
+const decodeAuditRow = rowDecoder("gateway_audit", AuditRow)
+const decodeSnapshotRow = rowDecoder("gateway_tool_snapshot", SnapshotRow)
+const decodeJsonText = jsonDecoder("json column", Schema.fromJsonString(Schema.Json))
+const decodeCapabilities = jsonDecoder(
+  "gateway_client.capabilities",
   Schema.fromJsonString(Schema.Array(Schema.Literals([
     "provision_connections",
     "administer_gateway"
   ])))
 )
-const decodeApprovalDelivery = Schema.decodeUnknownSync(Schema.fromJsonString(ApprovalDelivery))
+const decodeApprovalDelivery = jsonDecoder("gateway_client.approval_delivery", Schema.fromJsonString(ApprovalDelivery))
 
 const parseJsonColumn = (value: string): typeof Schema.Json.Type =>
   decodeJsonText(value)
@@ -278,7 +325,7 @@ export const toClient = (row: Row): Client => {
 }
 
 export const toApprovalDestination = (row: Row): ApprovalDestination => {
-  const decoded = Schema.decodeUnknownSync(ApprovalDestinationRow)(pick(row, ["id", "tenant_id", "name", "type", "url", "created_at"]))
+  const decoded = rowDecoder("gateway_approval_destination", ApprovalDestinationRow)(pick(row, ["id", "tenant_id", "name", "type", "url", "created_at"]))
   return {
     id: ApprovalDestinationId.make(decoded.id),
     tenantId: TenantId.make(decoded.tenant_id),
@@ -290,7 +337,7 @@ export const toApprovalDestination = (row: Row): ApprovalDestination => {
 }
 
 export const toApprovalDeliveryAttempt = (row: Row): ApprovalDeliveryAttempt => {
-  const decoded = Schema.decodeUnknownSync(ApprovalDeliveryRow)(pick(row, ["id", "approval_id", "destination_id", "destination_name", "status", "attempts", "next_attempt_at", "delivered_at", "last_error"]))
+  const decoded = rowDecoder("gateway_approval_delivery", ApprovalDeliveryRow)(pick(row, ["id", "approval_id", "destination_id", "destination_name", "status", "attempts", "next_attempt_at", "delivered_at", "last_error"]))
   return {
     id: ApprovalDeliveryId.make(decoded.id),
     approvalId: ApprovalId.make(decoded.approval_id),

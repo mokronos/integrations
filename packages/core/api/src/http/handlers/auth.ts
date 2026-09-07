@@ -77,7 +77,7 @@ const verifyLoginPassword = Effect.fn("Auth.verifyLoginPassword")(function*(
   const login = yield* store.findLoginByEmail(email)
   const passwordHash = login?.passwordHash
   const accepted = passwordHash !== null && passwordHash !== undefined &&
-    (yield* verifyPassword(password, passwordHash).pipe(Effect.orDie))
+    (yield* capture(verifyPassword(password, passwordHash)))
   return !accepted || login === undefined
     ? { accepted: false }
     : { accepted: true, login }
@@ -298,7 +298,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
             name: body.tenantName ?? body.email.split("@")[0] ?? body.email
           }))
           const subject = yield* capture(store.createSubject({ id: newSubjectId(), tenantId: tenant.id }))
-          const passwordHash = yield* hashPassword(body.password).pipe(Effect.orDie)
+          const passwordHash = yield* capture(hashPassword(body.password))
           yield* capture(store.createLogin({
             subjectId: subject.id,
             tenantId: tenant.id,
@@ -390,7 +390,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
           const login = yield* capture(store.findLoginByEmail(caller.email))
           const passwordHash = login === undefined ? null : login.passwordHash
           const verified = login !== undefined && passwordHash !== null &&
-            (yield* verifyPassword(body.password, passwordHash).pipe(Effect.orDie))
+            (yield* capture(verifyPassword(body.password, passwordHash)))
           if (!verified || login === undefined) {
             return yield* new InvalidCredentials({
               error: "Email or password is not correct",
@@ -424,7 +424,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
             passwordHash === null
               ? currentPassword === undefined
               : currentPassword !== undefined &&
-              (yield* verifyPassword(currentPassword, passwordHash).pipe(Effect.orDie))
+              (yield* capture(verifyPassword(currentPassword, passwordHash)))
           )
           if (!accepted || login === undefined) {
             return yield* new InvalidCredentials({
@@ -432,7 +432,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
               code: "invalid-credentials" as const
             })
           }
-          const newPasswordHash = yield* hashPassword(body.newPassword).pipe(Effect.orDie)
+          const newPasswordHash = yield* capture(hashPassword(body.newPassword))
           yield* capture(store.changeLoginPassword(caller.subjectId, newPasswordHash))
           // A password change is a statement that the old one was compromised-
           // adjacent at best; every other device re-authenticates.
@@ -460,7 +460,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
           const presented = body.password
           const accepted = login !== undefined && passwordHash !== null &&
             presented !== undefined &&
-            (yield* verifyPassword(presented, passwordHash).pipe(Effect.orDie))
+            (yield* capture(verifyPassword(presented, passwordHash)))
           if (!accepted) {
             return yield* new InvalidCredentials({
               error: "Email or password is not correct",

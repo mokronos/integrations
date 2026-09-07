@@ -327,13 +327,38 @@ export interface GatewayStoreDriver {
   close(): Promise<void>
 }
 
+/** Why a store operation did not happen.
+ *
+ *  One tag with a discriminated `kind` rather than three tags, because every
+ *  caller treats all three the same way — the request did not happen — and only
+ *  the operator reading the log needs them apart. Splitting the tag would have
+ *  meant a three-way `catchTag` at ninety call sites that all do one thing.
+ *
+ *  - `driver`        the database rejected the statement or was unreachable.
+ *                    Usually transient; retrying may work.
+ *  - `malformed-row` a row the gateway wrote no longer decodes. A schema or
+ *                    migration bug: it will fail identically forever.
+ *  - `constraint`    a uniqueness or foreign-key rule refused the write. Often
+ *                    provoked by the caller rather than broken infrastructure. */
+export const GatewayStoreFailureKind = Schema.Literals([
+  "driver",
+  "malformed-row",
+  "constraint"
+])
+export type GatewayStoreFailureKind = typeof GatewayStoreFailureKind.Type
+
 export class GatewayStoreError extends Schema.TaggedError<GatewayStoreError>()(
   "GatewayStoreError",
   {
     operation: Schema.String,
+    kind: GatewayStoreFailureKind,
     cause: Schema.Defect()
   }
-) {}
+) {
+  override get message(): string {
+    return `${this.operation} failed (${this.kind})`
+  }
+}
 
 type EffectStoreMember<Member> = Member extends (
   ...args: infer Args

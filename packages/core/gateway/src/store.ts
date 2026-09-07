@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs"
 import path from "node:path"
 import { createClient } from "@libsql/client"
 import type { Client as LibsqlClient, InValue, Row } from "@libsql/client"
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Layer, Predicate } from "effect"
 import type { Encryption } from "./crypto.ts"
 import {
   AccessProfileId,
@@ -28,6 +28,7 @@ import { applyGatewayMigrations } from "./migrate.ts"
 import {
   millis, toAccessProfile, toAccessProfileTool, toApiKey, toApproval,
   toApprovalPolicy, toApprovalPolicyTool, toAuditRecord, toAuthSession, toClient,
+  MalformedRowError,
   toApprovalDeliveryAttempt, toApprovalDestination, toExternalIdentity, toIdentityOAuthState, toLoginHandoff, toLoginRecord,
   toSnapshot, toSubject, toTenant
 } from "./store-rows.ts"
@@ -41,6 +42,7 @@ export {
 } from "./store-contract.ts"
 import {
   GatewayStoreError,
+  type GatewayStoreFailureKind,
   type AuditQuery,
   type GatewayStore,
   type GatewayStoreDriver
@@ -61,7 +63,13 @@ export class GatewayStoreService extends Context.Service<
       GatewayStoreService,
       Effect.acquireRelease(
         createGatewayStore(databasePath, encryption, options),
-        (store) => store.close().pipe(Effect.orDie)
+        // Teardown cannot fail the scope it is closing, but a database that
+        // will not close is worth a line — it is how a leaked handle shows up.
+        (store) =>
+          store.close().pipe(Effect.catch((failure) =>
+            Effect.logWarning(`The gateway store did not close cleanly: ${failure.message}`).pipe(
+              Effect.annotateLogs({ operation: "GatewayStore.close" })
+            )))
       )
     )
 }
@@ -1204,13 +1212,27 @@ const createGatewayStoreDriver = async (
   }
 }
 
+/** Which of the three failure kinds a caught cause is.
+ *
+ *  Classified here rather than guessed at the edge: `MalformedRowError` is
+ *  thrown by the row decoders themselves, and libsql reports a refused rule with
+ *  an `SQLITE_CONSTRAINT*` code. Anything else is the driver. */
+const failureKind = (cause: unknown): GatewayStoreFailureKind => {
+  if (cause instanceof MalformedRowError) return "malformed-row"
+  const code = Predicate.hasProperty(cause, "code") ? String(cause.code) : ""
+  const message = cause instanceof Error ? cause.message : ""
+  return code.startsWith("SQLITE_CONSTRAINT") || message.includes("SQLITE_CONSTRAINT")
+    ? "constraint"
+    : "driver"
+}
+
 const storeOperation = <Success>(
   operation: string,
   run: () => Promise<Success>
 ): Effect.Effect<Success, GatewayStoreError> =>
   Effect.tryPromise({
     try: run,
-    catch: (cause) => new GatewayStoreError({ operation, cause })
+    catch: (cause) => new GatewayStoreError({ operation, kind: failureKind(cause), cause })
   }).pipe(Effect.withSpan(`GatewayStore.${operation}`))
 
 const effectStore = (driver: GatewayStoreDriver): GatewayStore => ({

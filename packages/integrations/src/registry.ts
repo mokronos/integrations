@@ -103,12 +103,23 @@ const fetchText = (url: URL) =>
 
 /** A domain's surfaces. A domain the registry cannot describe contributes no
  *  surfaces rather than failing the whole search: a partial answer is still
- *  useful, and the caller can see which entries have nothing to connect to. */
+ *  useful, and the caller can see which entries have nothing to connect to.
+ *
+ *  Degrading is not the same as not noticing. The failure is logged with the
+ *  domain that produced it, so "this entry has nothing to connect to" and "the
+ *  registry would not answer for this entry" are distinguishable to an operator
+ *  rather than looking identical in the result. */
 const surfacesFor = (registryUrl: string, domain: string) =>
   fetchText(new URL(`/api/${encodeURIComponent(domain)}/surface`, registryUrl)).pipe(
     Effect.flatMap(decodeSurfaces),
     Effect.map((parsed) => parsed.surfaces.map(toSearchSurface)),
-    Effect.orElseSucceed((): ReadonlyArray<IntegrationSearchSurface> => [])
+    Effect.catch((failure): Effect.Effect<ReadonlyArray<IntegrationSearchSurface>> =>
+      Effect.as(
+        Effect.logWarning(`Registry could not describe ${domain}: ${failure.message}`).pipe(
+          Effect.annotateLogs({ domain, operation: "registry.surfacesFor" })
+        ),
+        []
+      ))
   )
 
 /** Searches the registry without touching the persisted catalog, connections,

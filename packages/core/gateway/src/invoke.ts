@@ -340,7 +340,21 @@ export const listEffectiveTools = Effect.fn("Invocation.listEffectiveTools")(fun
         ...whenPresent("inputSchema", described.inputSchema),
         ...whenPresent("outputSchema", described.outputSchema)
       })),
-      Effect.orElseSucceed(() => entry)
+      // A tool the catalog cannot describe still appears, without its schema —
+      // dropping the whole listing because one entry is unreadable would be
+      // worse. It is logged so "this tool has no schema" is distinguishable
+      // from "this tool's schema could not be read".
+      Effect.catch((failure) =>
+        Effect.as(
+          Effect.logWarning(
+            `No schema for ${entry.alias}.${entry.tool}: ${failure.message}`
+          ).pipe(Effect.annotateLogs({
+            alias: entry.alias,
+            tool: entry.tool,
+            operation: "listEffectiveTools.describe"
+          })),
+          entry
+        ))
     )
   }, { concurrency: "unbounded" })
 })

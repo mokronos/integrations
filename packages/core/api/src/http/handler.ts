@@ -253,7 +253,8 @@ export const createGatewayHandler = (options: GatewayHandlerOptions): GatewayHan
     store: options.store,
     host: options.host,
     retentionDays: options.retentionDays,
-    ...whenPresent("dashboardUrl", options.dashboardUrl)
+    ...whenPresent("dashboardUrl", options.dashboardUrl),
+    ...whenPresent("errorCapture", options.errorCapture)
   })
   // The API builder's requirements (groups, router, platform services) are all
   // satisfied by the app layer's outputs, and its outputs keep them.

@@ -97,9 +97,15 @@ export class SpecCache extends Context.Service<
         const text = yield* Option.match(stored, {
           onNone: () => fetchText(source).pipe(
             // Persisting is a cache fill, not the point of the call: a database
-            // that refuses the write should not fail a tool listing.
+            // that refuses the write should not fail a tool listing. It is
+            // logged, because the visible symptom otherwise is only that every
+            // restart refetches several megabytes from a vendor.
             Effect.tap((fetched) =>
-              Effect.ignore(store.putSpecDocument(source, fetched))
+              store.putSpecDocument(source, fetched).pipe(Effect.catch((failure) =>
+                Effect.logWarning(
+                  `Could not cache the specification for ${source}: ${failure.message}`
+                ).pipe(Effect.annotateLogs({ source, operation: "SpecCache.putSpecDocument" }))
+              ))
             )
           ),
           onSome: Effect.succeed

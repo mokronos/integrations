@@ -1,5 +1,6 @@
 import { Effect } from "effect"
 import type { HostFailure } from "@mokronos/integrations"
+import type { OAuthFlowError } from "@mokronos/gateway-core"
 import { ApiBadRequest } from "../api.ts"
 import { capture } from "../observability.ts"
 
@@ -20,7 +21,9 @@ import { capture } from "../observability.ts"
  *  `StorageError` is deliberately absent: it is the host's own storage failing,
  *  the same class of problem as `GatewayStoreError`, so it falls through to
  *  {@link capture} and is recorded and answered as a 500 beside it. */
-export const asApiFailure = <A, E, R>(effect: Effect.Effect<A, E | HostFailure, R>) =>
+export const asApiFailure = <A, E, R>(
+  effect: Effect.Effect<A, E | HostFailure | OAuthFlowError, R>
+) =>
   capture(
     Effect.catchTag(
       effect,
@@ -32,7 +35,11 @@ export const asApiFailure = <A, E, R>(effect: Effect.Effect<A, E | HostFailure, 
         "SpecError",
         "McpError",
         "OAuthError",
-        "InvalidInputError"
+        "InvalidInputError",
+        // Which stage of an authorization broke — a misconfigured OAuth app, a
+        // provider that refused, a human who never finished. Every one of
+        // those is the caller's to act on.
+        "OAuthFlowError"
       ],
       // Every member is a `Schema.TaggedError`, so each is an `Error` with the
       // one-sentence message it renders itself as. The guard is for the

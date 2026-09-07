@@ -473,6 +473,9 @@ export const ensureLocalCredential = Effect.fn("Gateway.ensureLocalCredential")(
   if (defaults.accessProfile === undefined || defaults.approvalPolicy === undefined) {
     return yield* new GatewayStoreError({
       operation: "ensureLocalCredential",
+      // The bootstrap wrote both defaults; their absence is state we cannot
+      // read back, not a statement the database refused.
+      kind: "malformed-row",
       cause: new Error("The default tenant has no default access profile or approval policy")
     })
   }

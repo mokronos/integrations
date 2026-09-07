@@ -1,7 +1,7 @@
 import { Cause, Context, Effect, Layer, Option, Result } from "effect"
 import { whenPresent } from "@mokronos/contracts"
 import { randomUUID } from "node:crypto"
-import { GatewayStoreError } from "@mokronos/gateway-core"
+import { GatewayStoreError, OAuthSessionError, PasswordError } from "@mokronos/gateway-core"
 import { StorageError } from "@mokronos/integrations"
 
 /** What happens to a failure nobody declared.
@@ -29,6 +29,9 @@ import { StorageError } from "@mokronos/integrations"
  *  that is known is that something threw. */
 export interface CaptureContext {
   readonly operation?: string
+  /** Which sort of failure it was, when the failure knows. `driver` and
+   *  `malformed-row` want different people looking at them. */
+  readonly kind?: string
 }
 
 /** Where a recorded failure goes.
@@ -59,7 +62,11 @@ const loggingCapture: ErrorSink = {
     const traceId = newTraceId()
     return Effect.as(
       Effect.logError("Unhandled gateway failure", cause).pipe(
-        Effect.annotateLogs({ traceId, ...whenPresent("operation", context.operation) })
+        Effect.annotateLogs({
+          traceId,
+          ...whenPresent("operation", context.operation),
+          ...whenPresent("kind", context.kind)
+        })
       ),
       traceId
     )
@@ -102,10 +109,11 @@ export class CapturedFailure {
 
 /** The one storage-failure translator.
  *
- *  Wrap a handler body in this and a storage failure — the gateway's own
- *  `GatewayStoreError` or the integration host's `StorageError`, which are the
- *  same problem on either side of the seam — is recorded and turned into a
- *  {@link CapturedFailure} defect. It subtracts those from the error channel and
+ *  Wrap a handler body in this and an infrastructure failure — the gateway's
+ *  own `GatewayStoreError`, the integration host's `StorageError`, or a
+ *  `PasswordError` from the key-derivation itself — is recorded and turned into
+ *  a {@link CapturedFailure} defect. All three are the same kind of thing: the
+ *  request did not happen, and no caller can do anything about it. It subtracts those from the error channel and
  *  adds nothing — the same shape the five `orDieStorage` copies had — so
  *  adopting it is a rename at every call site and no endpoint's declared errors
  *  change.
@@ -115,11 +123,13 @@ export class CapturedFailure {
  *  there is nothing to handle: the request did not happen. The edge renders it;
  *  see `failureLayer` in `handler.ts`. */
 export const capture = <A, E, R>(
-  effect: Effect.Effect<A, E | GatewayStoreError | StorageError, R>
+  effect: Effect.Effect<A, E | GatewayStoreError | StorageError | PasswordError | OAuthSessionError, R>
 ) =>
   effect.pipe(
-    Effect.catchTag(["GatewayStoreError", "StorageError"], (error) =>
-      Effect.flatMap(resolveCapture, (sink) => {
+    Effect.catchTag(
+      ["GatewayStoreError", "StorageError", "PasswordError", "OAuthSessionError"],
+      (error) =>
+        Effect.flatMap(resolveCapture, (sink) => {
         // The tag is what `catchTag` matched on, so this narrows in every real
         // case; the fallback exists because a caller's `E` is unconstrained and
         // could in principle carry a different type under the same tag. A
@@ -128,15 +138,19 @@ export const capture = <A, E, R>(
         // `StorageError` carries a sentence instead, which is the same thing at
         // a coarser grain and is what the sink wants to group on.
         const operation = error instanceof GatewayStoreError
+          || error instanceof PasswordError
+          || error instanceof OAuthSessionError
           ? error.operation
           : error instanceof StorageError
           ? error.message
           : "unknown"
+        const kind = error instanceof GatewayStoreError ? error.kind : undefined
         return Effect.flatMap(
-          sink.captureException(Cause.fail(error), { operation }),
+          sink.captureException(Cause.fail(error), { operation, ...whenPresent("kind", kind) }),
           (traceId) => Effect.die(new CapturedFailure(traceId, operation))
         )
-      }))
+      })
+    )
   )
 
 /** The correlation id for a cause about to be rendered as a 500.

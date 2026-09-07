@@ -63,6 +63,7 @@ const setup = async (options: {
       ...store,
       listClients: () => Effect.fail(new GatewayStoreError({
         operation: "listClients",
+        kind: "driver",
         cause: new Error(driverFailure)
       }))
     }

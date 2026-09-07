@@ -416,13 +416,28 @@ const buildAuth = (host: HostHandle): AuthApi => ({
     // connected whatever happens next. Reading the tool list is a separate
     // conversation with the vendor, and letting its failure fail the flow tells
     // someone who just authorized in a browser that they did not — while the
-    // connection it denies sits in the catalog. The overview reports a capture
-    // that did not work as `toolError`, which is where a reader looks for it.
-    yield* Effect.ignore(integrations.refreshConnection({
+    // connection it denies sits in the catalog.
+    //
+    // So the flow still succeeds, but the failure is not discarded: it is
+    // logged, and it rides back on the connection's own `error` field, which is
+    // where a reader looks for "this is connected but something is wrong".
+    const captured = yield* Effect.result(integrations.refreshConnection({
       owner: record.owner,
       integration: record.integration,
       name: record.name
     }))
+    const captureError = captured._tag === "Failure"
+      ? `Connected, but the tool list could not be read: ${captured.failure.message}`
+      : undefined
+    if (captureError !== undefined) {
+      yield* Effect.logWarning(captureError).pipe(
+        Effect.annotateLogs({
+          integration: record.integration,
+          connection: record.name,
+          operation: "refreshConnection"
+        })
+      )
+    }
     return yield* Schema.decodeUnknownEffect(Connection)({
       owner: record.owner,
       name: record.name,
@@ -439,7 +454,8 @@ const buildAuth = (host: HostHandle): AuthApi => ({
       oauthScope: Option.getOrNull(completed.scope),
       expiresAt: Option.getOrNull(completed.expiresAt),
       missingOAuthScopes: [],
-      status: "connected"
+      status: "connected",
+      ...whenPresent("error", captureError)
     })
   }))
 })

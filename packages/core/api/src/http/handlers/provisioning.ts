@@ -373,7 +373,7 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
         }))
       .handle("oauthSession", (request) =>
         Effect.gen(function*() {
-          const session = yield* oauth.get(request.params["id"]).pipe(Effect.orDie)
+          const session = yield* capture(oauth.get(request.params["id"]))
           if (session === undefined) {
             return yield* new ApiNotFound({ error: "Unknown or expired OAuth session" })
           }
