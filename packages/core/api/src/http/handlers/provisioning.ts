@@ -2,7 +2,15 @@ import {
   whenPresent,
   whenPresentMap
 } from "@mokronos/contracts"
-import { AuthTemplateSlug, IntegrationHost, IntegrationsApiService, searchIntegrations } from "@mokronos/integrations"
+import {
+  AuthTemplateSlug,
+  IntegrationHost,
+  listIntegrationOverviews,
+  provisionIntegration,
+  searchIntegrations,
+  validateIntegrationNode as validateNode
+} from "@mokronos/integrations"
+import type { HostServices } from "@mokronos/integrations"
 import { Effect, Option, Predicate, Schema } from "effect"
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -192,26 +200,31 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
   Effect.gen(function*() {
     const store = yield* GatewayStoreService
     const host = yield* IntegrationHost
-    const integrationsApi = yield* IntegrationsApiService
+    // The host's services, captured once while the group builds. The three
+    // composites below reach past `IntegrationHost` — reading an unknown
+    // endpoint needs the MCP client and the spec cache — and a handler's `R`
+    // channel is a per-request requirement, so they are provided here rather
+    // than becoming something every route has to satisfy.
+    const hostServices = yield* Effect.context<HostServices>()
     const oauth = yield* OAuthFlowSessions
     const config = yield* GatewayConfig
     return handlers
       .handle("listIntegrations", () =>
         Effect.gen(function*() {
-          const integrations = yield* Effect.promise(() =>
-            integrationsApi.listIntegrationOverviews())
+          const integrations = yield* capture(
+            listIntegrationOverviews().pipe(Effect.provide(hostServices))
+          )
           return {
             integrations,
             ...whenPresentMap("oauthCallbackUrl", config.oauthCallbackUrl?.(), (url) => url)
           }
         }))
       .handle("discover", (request) =>
-        reachOut(`Could not read an integration from ${request.payload.url}`, () =>
-          integrationsApi.provisioning.provision(request.payload.url, {
-            ...whenPresent("connection", request.payload.connection),
-            ...whenPresent("slug", request.payload.slug),
-            ...whenPresent("name", request.payload.name)
-          })))
+        asApiFailure(provisionIntegration(request.payload.url, {
+          ...whenPresent("connection", request.payload.connection),
+          ...whenPresent("slug", request.payload.slug),
+          ...whenPresent("name", request.payload.name)
+        }).pipe(Effect.provide(hostServices))))
       .handle("renameIntegration", (request) =>
         Effect.gen(function*() {
           const slug = yield* requireSlug(request.params["slug"])
@@ -278,8 +291,10 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
               body.live ?? true
             )
           }
-          return yield* Effect.promise(() =>
-            integrationsApi.validateIntegrationNode(body.node, { live: body.live ?? true }))
+          return yield* capture(
+            validateNode(body.node, { live: body.live ?? true })
+              .pipe(Effect.provide(hostServices))
+          )
         }))
       .handle("listConnections", () =>
         Effect.map(capture(host.listConnections()), (connections) => ({ connections })))

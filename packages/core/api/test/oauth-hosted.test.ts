@@ -1,4 +1,4 @@
-import { stubHost } from "./stubs.ts"
+import { stubHostContext } from "./stubs.ts"
 import { run, runAll } from "./effect.ts"
 import { Effect } from "effect"
 import { ConnectionName, IntegrationSlug } from "@mokronos/contracts"
@@ -226,7 +226,7 @@ describe("the hosted callback route", () => {
   ) => {
     const store = await run(makeStore())
     const { handle } = createGatewayHandler({
-      host: stubHost(),
+      hostServices: stubHostContext(),
       store,
       integrations: stubIntegrations(),
       retentionDays: 30,

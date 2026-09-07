@@ -22,7 +22,13 @@ import {
 } from "@mokronos/gateway-core"
 import type { InvocationOutcome } from "@mokronos/gateway-core"
 import type { GatewayStore } from "@mokronos/gateway-core"
-import type { IntegrationHost } from "@mokronos/integrations"
+import { IntegrationHost } from "@mokronos/integrations"
+import type { HostServices } from "@mokronos/integrations"
+import { Context } from "effect"
+
+/** The one host service the MCP surface reaches for. */
+const hostOf = (options: McpGatewayOptions): IntegrationHost["Service"] =>
+  Context.get(options.hostServices, IntegrationHost)
 import { Layer, ManagedRuntime } from "effect"
 import { capture, ErrorCapture } from "./observability.ts"
 import type { ErrorSink } from "./observability.ts"
@@ -70,7 +76,7 @@ const invocation = (options: McpGatewayOptions, input: {
 }) => invokeThroughGateway(
   {
     store: options.store,
-    host: options.host,
+    host: hostOf(options),
     argumentRetentionDays: options.retentionDays,
     approvalUrlOf: (approvalId) => {
       const origin = options.dashboardUrl?.()
@@ -91,7 +97,7 @@ const invocation = (options: McpGatewayOptions, input: {
 
 export interface McpGatewayOptions {
   readonly store: GatewayStore
-  readonly host: IntegrationHost["Service"]
+  readonly hostServices: Context.Context<HostServices>
   readonly retentionDays: number
   readonly dashboardUrl?: () => string | undefined
   /** Shared with the HTTP surface, so a failure on the MCP endpoint is recorded
@@ -116,7 +122,7 @@ const serverFor = async (
   const server = new McpServer({ name: "integrations-gateway", version: gatewayVersion })
   const tools = await runtime.runPromise(capture(listEffectiveTools(options.store, clientId, {
     schemas: true,
-    host: options.host
+    host: hostOf(options)
   })))
 
   for (const tool of tools) {

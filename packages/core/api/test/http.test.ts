@@ -1,6 +1,5 @@
-import { stubHost, stubIntegrations as emptyIntegrations } from "./stubs.ts"
+import { stubHostContext, stubIntegrations as emptyIntegrations } from "./stubs.ts"
 import { InvocationError } from "@mokronos/integrations"
-import type { IntegrationHost } from "@mokronos/integrations"
 import { run, runAll } from "./effect.ts"
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
@@ -109,7 +108,7 @@ const stubIntegrations = (behaviour: {
   /** The host as the handlers reach it. The gateway's job is deciding whether a
    *  call happens and with which credential, not what the vendor answers, so
    *  everything here is a plausible answer rather than a real one. */
-  const host: IntegrationHost["Service"] = stubHost({
+  const hostServices = stubHostContext({
     execute: (address, input) => {
       calls.push({ address: String(address), input })
       return Effect.promise(() => behaviour.beforeExecute?.() ?? Promise.resolve()).pipe(
@@ -165,7 +164,7 @@ const stubIntegrations = (behaviour: {
       forgotten.push(slug)
     })
   })
-  return { calls, removed, forgotten, renamed, integrations, host }
+  return { calls, removed, forgotten, renamed, integrations, hostServices }
 }
 
 const setup = async (options: {
@@ -222,7 +221,7 @@ const setup = async (options: {
   const { handle } = createGatewayHandler({
     store,
     integrations: stub.integrations,
-    host: stub.host,
+    hostServices: stub.hostServices,
     retentionDays: 30,
     // No OAuth flow is exercised here; these tests are about authority.
     oauth: {

@@ -14,7 +14,8 @@ import {
   newClientId
 } from "./gateway.ts"
 import type { GatewayStore } from "./gateway.ts"
-import { stubHost, stubIntegrations } from "./stubs.ts"
+import { stubHostContext, stubIntegrations } from "./stubs.ts"
+import { McpError, SpecError } from "@mokronos/integrations"
 
 const directories: Array<string> = []
 const stores: Array<GatewayStore> = []
@@ -69,22 +70,30 @@ const setup = async (options: {
     }
     : store
 
-  // A host whose fetch of the caller's URL fails the way an unreachable one does.
-  const integrations = stubIntegrations()
-  const presentedIntegrations = options.unreachableUrl === true
+  // A host whose reads of the caller's URL fail the way an unreachable one
+  // does. Classification tries both shapes, so both have to refuse before the
+  // gateway can say it is neither.
+  const unreachable = options.unreachableUrl === true
     ? {
-      ...integrations,
-      provisioning: {
-        ...integrations.provisioning,
-        provision: () => Promise.reject(new Error("fetch failed"))
+      mcp: {
+        probe: (endpoint: string) => Effect.fail(new McpError({
+          endpoint,
+          detail: "fetch failed"
+        }))
+      },
+      specs: {
+        compileUrl: (url: string) => Effect.fail(new SpecError({
+          source: url,
+          detail: "fetch failed"
+        }))
       }
     }
-    : integrations
+    : {}
 
   const { handle } = createGatewayHandler({
-    host: stubHost(),
+    hostServices: stubHostContext({}, unreachable),
     store: presented,
-    integrations: presentedIntegrations,
+    integrations: stubIntegrations(),
     retentionDays: 30,
     ...whenPresentMap("errorCapture", options.errorCapture, (sink) => ({
       captureException: (_cause, context) => Effect.succeed(sink(context.operation))

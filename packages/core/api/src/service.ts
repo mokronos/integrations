@@ -7,7 +7,7 @@ import { PositiveInt, PositiveIntFromString, whenPresent } from "@mokronos/contr
 import { defaultTenantId } from "@mokronos/gateway-core"
 import { resolveEncryption } from "@mokronos/gateway-core"
 import type { Gateway } from "@mokronos/gateway-core"
-import { Effect, Layer, ManagedRuntime, Option, Schema } from "effect"
+import { Context, Effect, Layer, ManagedRuntime, Option, Schema } from "effect"
 import { isLoopbackAddress, mayBorrowLocalCredential } from "./http/loopback.ts"
 import { createGatewayHandler } from "./http/handler.ts"
 import type { GatewayHandle, GatewayRequestContext } from "./http/handler.ts"
@@ -24,6 +24,7 @@ import { generateApiKey, newClientId } from "@mokronos/gateway-core"
 import { integrationsHome } from "./paths.ts"
 import type { HostStorage, StorageError } from "@mokronos/integrations"
 import { HostHandleService, IntegrationHost, IntegrationsApiService } from "@mokronos/integrations"
+import type { HostServices } from "@mokronos/integrations"
 import type { GatewayStoreOptions } from "@mokronos/gateway-core"
 import type { GatewayStore } from "@mokronos/gateway-core"
 import { GatewayStoreError, GatewayStoreService } from "@mokronos/gateway-core"
@@ -154,7 +155,7 @@ const buildCore = async (
       const tenants = yield* resources.store.listTenants()
       yield* Effect.forEach(tenants, (tenant) => reconcileDefaults({
         store: resources.store,
-        integrations: { host: resources.integrationHost },
+        integrations: { host: Context.get(resources.hostServices, IntegrationHost) },
         tenantId: tenant.id
       }), { discard: true })
     }))
@@ -176,8 +177,13 @@ const buildCore = async (
       const integrations = yield* IntegrationsApiService
       // The host's Effect capability, pulled from the same runtime the facade
       // wraps. Handlers get this one; nothing builds a second host.
-      const integrationHost = yield* Effect.promise(() => host.run(Effect.service(IntegrationHost)))
-      return { store, host, integrations, integrationHost }
+      // The host's whole service context, captured once. The HTTP layer needs
+      // more than `IntegrationHost` — reading an unknown endpoint reaches the
+      // MCP client and the spec cache — and pulling them out one at a time
+      // would grow a field per service.
+      const hostServices = yield* Effect.promise(() =>
+        host.run(Effect.context<HostServices>()))
+      return { store, host, integrations, hostServices }
     }))
   }
 
@@ -221,7 +227,7 @@ const buildCore = async (
       if (session.bindingTenant === undefined || state.status !== "connected") return
       await Effect.runPromise(reconcileDefaults({
         store: resources.store,
-        integrations: { host: resources.integrationHost },
+        integrations: { host: Context.get(resources.hostServices, IntegrationHost) },
         tenantId: session.bindingTenant
       }))
     },
@@ -273,7 +279,7 @@ const buildCore = async (
     disposeCore,
     handlerOptions: {
       store: resources.store,
-      host: resources.integrationHost,
+      hostServices: resources.hostServices,
       integrations: gateway.integrations,
       retentionDays: options.retentionDays ?? defaultArgumentRetentionDays,
       oauth,
@@ -440,7 +446,7 @@ export const serveGateway = async (options: ServeOptions = {}): Promise<RunningG
     const boundPort = Number(server.port)
     localSecret = await Effect.runPromise(ensureLocalCredential(
       core.store,
-      core.handlerOptions.host,
+      Context.get(core.handlerOptions.hostServices, IntegrationHost),
       core.home,
       boundPort
     ))

@@ -1,5 +1,5 @@
 import { Effect } from "effect"
-import type { HostFailure } from "@mokronos/integrations"
+import type { DetectionError, HostFailure } from "@mokronos/integrations"
 import type { OAuthFlowError } from "@mokronos/gateway-core"
 import { ApiBadRequest } from "../api.ts"
 import { capture } from "../observability.ts"
@@ -22,7 +22,7 @@ import { capture } from "../observability.ts"
  *  the same class of problem as `GatewayStoreError`, so it falls through to
  *  {@link capture} and is recorded and answered as a 500 beside it. */
 export const asApiFailure = <A, E, R>(
-  effect: Effect.Effect<A, E | HostFailure | OAuthFlowError, R>
+  effect: Effect.Effect<A, E | HostFailure | OAuthFlowError | DetectionError, R>
 ) =>
   capture(
     Effect.catchTag(
@@ -36,6 +36,8 @@ export const asApiFailure = <A, E, R>(
         "McpError",
         "OAuthError",
         "InvalidInputError",
+        // A URL that is neither MCP nor OpenAPI is the caller's URL.
+        "DetectionError",
         // Which stage of an authorization broke — a misconfigured OAuth app, a
         // provider that refused, a human who never finished. Every one of
         // those is the caller's to act on.

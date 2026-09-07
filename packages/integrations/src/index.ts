@@ -42,6 +42,9 @@ export {
 
 /** Layer composition. */
 export { hostLayer, localLayer, stubbedLayer } from "./runtime.ts"
+export { listIntegrationOverviews } from "./overview.ts"
+export { installClassified, provisionIntegration } from "./provision.ts"
+export { validateIntegrationNode } from "./validate.ts"
 
 /** Errors, so a caller matches on `_tag` rather than on message text. */
 export {

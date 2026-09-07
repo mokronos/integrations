@@ -19,8 +19,9 @@ import {
   ToolName
 } from "./gateway.ts"
 import type { ConnectionRef, GatewayStore } from "./gateway.ts"
-import { stubHost, stubIntegrations } from "./stubs.ts"
-import type { IntegrationHost } from "@mokronos/integrations"
+import { stubHostContext, stubIntegrations } from "./stubs.ts"
+import type { HostServices } from "@mokronos/integrations"
+import { Context } from "effect"
 import type { IntegrationsApi } from "@mokronos/integrations"
 import type { GoogleIdentityOAuth } from "@mokronos/gateway-core"
 
@@ -51,7 +52,7 @@ interface SetupOptions {
   readonly google?: GoogleIdentityOAuth
   /** Replaces the host for a test that reaches past authority into provisioning. */
   readonly integrations?: IntegrationsApi
-  readonly host?: IntegrationHost["Service"]
+  readonly hostServices?: Context.Context<HostServices>
 }
 
 const setup = async (options: SetupOptions = {}) => {
@@ -87,7 +88,7 @@ const setup = async (options: SetupOptions = {}) => {
   await run(store.addApiKey({ id: apiKey.id, clientId: client.id, hash: apiKey.hash }))
 
   const { handle } = createGatewayHandler({
-    host: options.host ?? stubHost(),
+    hostServices: options.hostServices ?? stubHostContext(),
     store,
     integrations: options.integrations ?? stubIntegrations(),
     retentionDays: 30,
@@ -402,7 +403,7 @@ describe("what a session may do", () => {
     // demanded a client key anyway, so the dashboard could not connect
     // anything at all.
     const created: Array<{ readonly integration: string; readonly name: string }> = []
-    const host = stubHost({
+    const hostServices = stubHostContext({
       findIntegration: (slug) => Effect.succeed(slug !== "gmail" ? Option.none() : Option.some({
         slug: IntegrationSlug.make("gmail"),
         name: "Gmail",
@@ -425,7 +426,7 @@ describe("what a session may do", () => {
         }
       })
     })
-    const setup_ = await run(setup({ signupOpen: true, host }))
+    const setup_ = await run(setup({ signupOpen: true, hostServices }))
     const human = await run(signupHuman(setup_))
 
     const response = await run(setup_.call("POST", "/v1/connections", {

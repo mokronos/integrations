@@ -34,7 +34,8 @@ import { ErrorCapture, traceIdFor } from "./observability.ts"
 import type { ErrorSink } from "./observability.ts"
 import type { GatewaySettings, SignInPolicy } from "./services.ts"
 import { NonNegativeIntFromString, whenPresent, whenPresentMap } from "@mokronos/contracts"
-import { IntegrationHost, IntegrationsApiService } from "@mokronos/integrations"
+import { IntegrationsApiService } from "@mokronos/integrations"
+import type { HostServices } from "@mokronos/integrations"
 import type { IntegrationsApi } from "@mokronos/integrations"
 import { GatewayStoreService } from "@mokronos/gateway-core"
 import type { GatewayStore } from "@mokronos/gateway-core"
@@ -57,14 +58,14 @@ export interface GatewayRequestContext {
  *  layer runs on Effect services. */
 export interface GatewayHandlerOptions extends GatewaySettings {
   readonly store: GatewayStore
-  /** The host's own capability, as the handlers use it. A value rather than a
-   *  layer for the same reason the store is: the composition root has already
-   *  built the host — building a second one here would open a second database.
+  /** Every service the integration host exposes, as the composition root
+   *  already built them.
    *
-   *  Distinct from {@link integrations}, which is the Promise facade the OAuth
-   *  session machinery still speaks. Everything reachable from a handler goes
-   *  through this one. */
-  readonly host: IntegrationHost["Service"]
+   *  A context rather than one service because reading an unknown endpoint
+   *  reaches past `IntegrationHost` to the MCP client and the spec cache, and a
+   *  context rather than a layer because the host is already running — building
+   *  a second one here would open a second database. */
+  readonly hostServices: Context.Context<HostServices>
   readonly integrations: IntegrationsApi
   readonly oauth: OAuthSessions
   readonly sessions?: SignInPolicy
@@ -189,7 +190,7 @@ export const gatewayAppLayer = (options: GatewayHandlerOptions) => {
   const dependencies = Layer.mergeAll(
     errorCapture,
     Layer.succeed(GatewayStoreService, options.store),
-    Layer.succeed(IntegrationHost, options.host),
+    Layer.succeedContext(options.hostServices),
     Layer.succeed(IntegrationsApiService, options.integrations),
     Layer.succeed(OAuthFlowSessions, options.oauth),
     Layer.succeed(GatewayConfig, {
@@ -251,7 +252,7 @@ export interface GatewayHandle {
 export const createGatewayHandler = (options: GatewayHandlerOptions): GatewayHandle => {
   const mcp = createMcpGatewayHandler({
     store: options.store,
-    host: options.host,
+    hostServices: options.hostServices,
     retentionDays: options.retentionDays,
     ...whenPresent("dashboardUrl", options.dashboardUrl),
     ...whenPresent("errorCapture", options.errorCapture)

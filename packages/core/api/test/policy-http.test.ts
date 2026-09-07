@@ -16,7 +16,7 @@ import {
   ToolName
 } from "./gateway.ts"
 import type { GatewayStore } from "./gateway.ts"
-import { stubHost, stubIntegrations } from "./stubs.ts"
+import { stubHostContext, stubIntegrations } from "./stubs.ts"
 
 const stores: Array<GatewayStore> = []
 const directories: Array<string> = []
@@ -52,7 +52,7 @@ const setup = async () => {
   const integrations = stubIntegrations()
   // The one catalogued tool the default configurations should pick up. Read
   // from the host now, which is where the handlers ask for it.
-  const host = stubHost({
+  const hostServices = stubHostContext({
     toolSummaries: () => Effect.succeed([{
       address: ToolAddress.make("tools.mail.org.primary.sendEmail"),
       name: ToolName.make("sendEmail"),
@@ -64,7 +64,7 @@ const setup = async () => {
     }])
   })
   const { handle } = createGatewayHandler({
-    host,
+    hostServices,
     store, integrations, retentionDays: 30,
     oauth: {
       start: () => Effect.die(new Error("not used")),
