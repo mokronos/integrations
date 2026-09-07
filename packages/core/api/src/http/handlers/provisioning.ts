@@ -254,7 +254,7 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
         // Administrative and deliberately not delegated-policy checked: a client
         // with administration authority can change policy in a separate call, so a
         // check here would be friction rather than a control. The delegated
-        // surface has no address form at all. See docs/adr/0002.
+        // surface has no address form at all.
         asApiFailure(host.execute(
           request.payload.address,
           request.payload.arguments ?? {}

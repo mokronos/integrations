@@ -14,5 +14,4 @@ bun add --global @mokronos/integrations-cli
 ii login
 ```
 
-Use the [Integrations CLI documentation](../../../docs/integrations-cli.md)
-for installation, commands, and operational guidance.
+Run `i --help` or `ii --help` for the full command surface.

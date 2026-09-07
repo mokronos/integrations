@@ -4,10 +4,6 @@ The integration gateway. Holds connections and credentials, intersects reusable
 policies with client-specific connection grants, and performs invocations — so callers
 hold only an API key and never a credential.
 
-Vocabulary is defined in [CONTEXT.md](../../../CONTEXT.md). The reusable policy
-boundary is recorded in
-[ADR 0001](../../../docs/adr/0001-reusable-policies-bind-to-distinct-clients.md).
-
 ## Storage
 
 `INTEGRATIONS_HOME`, falling back to `~/.integrations`. The directory

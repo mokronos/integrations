@@ -6,9 +6,7 @@ import { Schema } from "effect"
  *  looks: `Schema.brand("IntegrationSlug")` keys the brand on the string, so two
  *  independent definitions of the same name produce the *same* TypeScript type
  *  while validating differently. One side could then hand the other a value it
- *  would have rejected, and the compiler would say nothing.
- *
- *  Terms are the ones defined in `CONTEXT.md`. */
+ *  would have rejected, and the compiler would say nothing. */
 
 /** Slug-like: lowercase, and free of `.` because a tool address is
  *  dot-delimited and every segment but the last must parse positionally. */

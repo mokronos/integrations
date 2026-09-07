@@ -8,7 +8,7 @@ export const TenantId = Schema.String.pipe(Schema.brand("TenantId"))
 export type TenantId = typeof TenantId.Type
 
 /** A human. Never a client — machines are delegated to, they do not hold
- *  connections. See docs/adr/0001. */
+ *  connections. */
 export const SubjectId = Schema.String.pipe(Schema.brand("SubjectId"))
 export type SubjectId = typeof SubjectId.Type
 
