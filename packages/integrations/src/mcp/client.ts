@@ -1,11 +1,9 @@
-import { Client } from "@modelcontextprotocol/sdk/client/index.js"
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client"
 import {
   discoverAuthorizationServerMetadata,
   discoverOAuthProtectedResourceMetadata,
   extractWWWAuthenticateParams
-} from "@modelcontextprotocol/sdk/client/auth.js"
+} from "@modelcontextprotocol/client"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import { describeCause, McpError } from "../errors.ts"
 import { serviceName, slugify } from "@mokronos/contracts"
@@ -13,14 +11,33 @@ import { whenPresent } from "@mokronos/contracts"
 import { isJsonObject, type Json, type JsonObject } from "@mokronos/contracts"
 import { McpProbe } from "@mokronos/contracts"
 
-/** The MCP half of the host, over the official `@modelcontextprotocol/sdk`.
+/** The MCP half of the host, over `@modelcontextprotocol/client`.
  *
- *  The SDK owns the transports, the JSON-RPC framing, and the initialize
- *  handshake. What lives here is the projection onto this project's shapes and
- *  the decision to resolve credentials ourselves — the transport takes a header
- *  we computed rather than an `authProvider`, because the gateway, not the MCP
- *  client, owns token storage and refresh. */
+ *  The SDK owns the transport, the JSON-RPC framing, and version negotiation.
+ *  What lives here is the projection onto this project's shapes and the
+ *  decision to resolve credentials ourselves — the transport takes a header we
+ *  computed rather than an `authProvider`, because the gateway, not the MCP
+ *  client, owns token storage and refresh.
+ *
+ *  Only protocol revision 2026-07-28 is spoken. That revision has no
+ *  `initialize` handshake: every request carries its version in `_meta` and in
+ *  the `MCP-Protocol-Version` header, and `server/discover` — which servers
+ *  MUST implement — answers identity, capabilities, and supported versions in
+ *  one round trip. Nothing here falls back to the 2025 handshake or to the
+ *  deprecated HTTP+SSE transport. */
 
+const PROTOCOL_VERSION = "2026-07-28"
+
+const clientInfo = { name: "@mokronos/integrations", version: "0.2.0" } as const
+
+/** The reserved `_meta` keys every modern request carries. The SDK attaches
+ *  these itself on a negotiated connection; the discovery probe below is sent
+ *  before there is a connection, so it spells them out. */
+const requestMeta = {
+  "io.modelcontextprotocol/protocolVersion": PROTOCOL_VERSION,
+  "io.modelcontextprotocol/clientInfo": clientInfo,
+  "io.modelcontextprotocol/clientCapabilities": {}
+} as const
 
 const McpToolAnnotations = Schema.Struct({
   title: Schema.optional(Schema.String),
@@ -42,7 +59,6 @@ export const McpToolDefinition = Schema.Struct({
   annotations: Schema.optional(McpToolAnnotations)
 })
 export type McpToolDefinition = typeof McpToolDefinition.Type
-type McpSdkTool = Awaited<ReturnType<Client["listTools"]>>["tools"][number]
 
 const decodeTools = Schema.decodeUnknownEffect(Schema.Array(McpToolDefinition))
 const decodeJson = Schema.decodeUnknownEffect(Schema.Json)
@@ -54,59 +70,38 @@ export interface McpCredential {
   readonly headerValue: string
 }
 
-const requestInit = (credential: Option.Option<McpCredential>): RequestInit =>
+const credentialHeaders = (
+  credential: Option.Option<McpCredential>
+): Record<string, string> =>
   Option.match(credential, {
     onNone: () => ({}),
-    onSome: (present) => ({ headers: { [present.headerName]: present.headerValue } })
+    onSome: (present) => ({ [present.headerName]: present.headerValue })
   })
-
-const clientInfo = { name: "@mokronos/integrations", version: "0.2.0" } as const
 
 /** `tools/call` takes a JSON *object* of arguments or nothing. A tool whose
  *  input schema is an array or a scalar therefore has no arguments to send. */
 const callArguments = (input: Json): JsonObject | undefined =>
   isJsonObject(input) ? input : undefined
 
-/** The one place the MCP SDK's types and this project's
- *  `exactOptionalPropertyTypes` disagree.
- *
- *  Both transports declare `sessionId: string | undefined` while the `Transport`
- *  interface declares it `sessionId?: string`, which are incompatible under
- *  that flag. The values are correct at runtime and the mismatch is entirely
- *  upstream's, so it is acknowledged once, here, instead of being cast away at
- *  every call site — and this stops compiling the moment upstream aligns them. */
-const attach = (
-  client: Client,
-  transport: StreamableHTTPClientTransport | SSEClientTransport
-): Promise<void> =>
-  // @ts-expect-error upstream declares sessionId as `string | undefined`
-  // against an optional `string` on Transport.
-  client.connect(transport)
-
-/** Streamable HTTP is the current transport; SSE is the deprecated one many
- *  deployed servers still speak. Trying it second costs one failed request and
- *  is the difference between working and not for those servers. */
+/** One Streamable HTTP connection, pinned to the one revision this host
+ *  speaks. `{ pin }` makes the SDK's connect-time `server/discover` mandatory
+ *  and refuses to fall back to the 2025 `initialize` sequence, so a server that
+ *  only speaks the legacy era fails loudly here rather than half-working. */
 const connect = (
   endpoint: string,
   credential: Option.Option<McpCredential>
 ): Effect.Effect<Client, McpError> =>
   Effect.tryPromise({
     try: async () => {
-      const url = new URL(endpoint)
-      const init = requestInit(credential)
-      const client = new Client(clientInfo)
-      try {
-        await attach(client, new StreamableHTTPClientTransport(url, { requestInit: init }))
-        return client
-      } catch (streamableCause) {
-        const fallback = new Client(clientInfo)
-        try {
-          await attach(fallback, new SSEClientTransport(url, { requestInit: init }))
-          return fallback
-        } catch {
-          throw streamableCause
-        }
-      }
+      const client = new Client(clientInfo, {
+        versionNegotiation: { mode: { pin: PROTOCOL_VERSION } }
+      })
+      await client.connect(
+        new StreamableHTTPClientTransport(new URL(endpoint), {
+          requestInit: { headers: credentialHeaders(credential) }
+        })
+      )
+      return client
     },
     catch: (cause) => new McpError({
       endpoint,
@@ -146,7 +141,7 @@ interface McpAuthority {
  *
  *  RFC 9728 metadata is published unconditionally, not only behind a challenge,
  *  and reading it only after a 401 misses the servers that most need it read.
- *  Google's Gmail endpoint answers `initialize` and `tools/list` to anybody and
+ *  Google's Gmail endpoint answers discovery and `tools/list` to anybody and
  *  refuses every `tools/call`; it declares its authorization server and scopes
  *  the whole time. Taking the anonymous handshake as the answer files it as
  *  needing no credential, which is true of exactly the two methods nobody
@@ -195,27 +190,101 @@ const inspectAuthority = (
     }
   })
 
-/** A JSON-RPC `initialize` sent by hand. The SDK would throw on a 401 without
- *  surfacing the challenge headers, and the challenge is the whole point. */
-const probeTransport = (endpoint: string): Effect.Effect<Response, McpError> =>
+const ServerInfo = Schema.Struct({
+  name: Schema.String,
+  title: Schema.optional(Schema.String),
+  version: Schema.optional(Schema.String)
+})
+
+/** Only the capabilities this host acts on. A server may declare more. */
+const ServerCapabilities = Schema.Struct({
+  tools: Schema.optional(Schema.Struct({
+    listChanged: Schema.optional(Schema.Boolean)
+  }))
+})
+
+const DiscoverResult = Schema.Struct({
+  supportedVersions: Schema.Array(Schema.String),
+  capabilities: ServerCapabilities,
+  instructions: Schema.optional(Schema.String),
+  _meta: Schema.optional(Schema.Struct({
+    "io.modelcontextprotocol/serverInfo": Schema.optional(ServerInfo)
+  }))
+})
+type DiscoverResult = typeof DiscoverResult.Type
+
+const JsonRpcError = Schema.Struct({
+  code: Schema.Number,
+  message: Schema.optional(Schema.String)
+})
+
+/** A JSON-RPC response to `server/discover`: a result, or an error naming why. */
+const DiscoverResponse = Schema.Struct({
+  result: Schema.optional(DiscoverResult),
+  error: Schema.optional(JsonRpcError)
+})
+
+const decodeDiscoverResponse = Schema.decodeUnknownEffect(DiscoverResponse)
+
+/** Error codes only a server that speaks the modern protocol emits. Seeing one
+ *  is positive evidence of MCP even though the request itself failed — the
+ *  spec's own backward-compatibility rule turns on exactly this distinction. */
+const MODERN_ERROR_CODES: ReadonlyArray<number> = [
+  -32022, // UnsupportedProtocolVersion
+  -32021, // MissingRequiredClientCapability
+  -32020 //  HeaderMismatch
+]
+
+/** A request may be answered with a single JSON object or with an SSE stream
+ *  carrying the response as its final event; clients MUST support both. */
+const readBody = async (response: Response): Promise<Json> => {
+  const body = await response.text()
+  if (!response.headers.get("content-type")?.includes("text/event-stream")) {
+    return JSON.parse(body)
+  }
+  const payloads = body
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trim())
+  const last = payloads[payloads.length - 1]
+  if (last === undefined) throw new Error("the event stream carried no data")
+  return JSON.parse(last)
+}
+
+/** `server/discover` sent by hand, before there is a client.
+ *
+ *  The SDK would throw on a 401 without surfacing the challenge headers, and
+ *  the challenge is what names the authorization server. Sending discovery
+ *  rather than a tool listing is also what makes this a valid identity check:
+ *  a `DiscoverResult` — or a refusal carrying a modern error code — is the
+ *  spec's own evidence that an endpoint speaks MCP. */
+const probeDiscovery = (
+  endpoint: string
+): Effect.Effect<{ readonly response: Response; readonly body: Json }, McpError> =>
   Effect.tryPromise({
-    try: () => fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        accept: "application/json, text/event-stream"
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "initialize",
-        params: {
-          protocolVersion: "2025-06-18",
-          capabilities: {},
-          clientInfo
-        }
+    try: async () => {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+          "MCP-Protocol-Version": PROTOCOL_VERSION,
+          "Mcp-Method": "server/discover"
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "server/discover",
+          params: { _meta: requestMeta }
+        })
       })
-    }),
+      // A challenge has no body worth reading, and reading it would consume the
+      // response the caller needs for `WWW-Authenticate`.
+      if (response.status === 401 || response.status === 403) {
+        return { response, body: null }
+      }
+      return { response, body: await readBody(response) }
+    },
     catch: (cause) => new McpError({
       endpoint,
       detail: describeCause(cause),
@@ -254,24 +323,16 @@ export class McpHost extends Context.Service<
   static readonly layer: Layer.Layer<McpHost> = Layer.effect(
     McpHost,
     Effect.sync(() => {
+      /** `listTools()` with no cursor walks every page itself, and answers with
+       *  an empty list when the server declares no `tools` capability — so a
+       *  resources-only server lists nothing rather than failing. */
       const listTools = Effect.fn("McpHost.listTools")((
         endpoint: string,
         credential: Option.Option<McpCredential>
       ) =>
         withClient(endpoint, credential, (client) =>
           Effect.tryPromise({
-            try: async () => {
-              const collected: Array<McpSdkTool> = []
-              let cursor: string | undefined
-              do {
-                const page = await client.listTools(
-                  cursor === undefined ? {} : { cursor }
-                )
-                collected.push(...page.tools)
-                cursor = page.nextCursor
-              } while (cursor !== undefined)
-              return collected
-            },
+            try: async () => (await client.listTools()).tools,
             catch: (cause) => new McpError({
               endpoint,
               detail: `tools/list failed: ${describeCause(cause)}`,
@@ -290,8 +351,19 @@ export class McpHost extends Context.Service<
           ))
       )
 
+      /** How many tools a server that declares them actually exposes. A server
+       *  declaring no `tools` capability exposes none, and is not asked. */
+      const countTools = Effect.fn("McpHost.countTools")(function*(
+        endpoint: string,
+        capabilities: typeof ServerCapabilities.Type
+      ) {
+        if (capabilities.tools === undefined) return 0
+        const tools = yield* listTools(endpoint, Option.none())
+        return tools.length
+      })
+
       const probe = Effect.fn("McpHost.probe")(function*(endpoint: string) {
-        const response = yield* probeTransport(endpoint)
+        const { response, body } = yield* probeDiscovery(endpoint)
         const name = fallbackName(endpoint)
         const slug = Option.getOrElse(slugify(name), () => "mcp")
 
@@ -322,33 +394,46 @@ export class McpHost extends Context.Service<
           ))
         }
 
-        // Reachable without credentials: a real handshake is now cheap and
-        // tells us what the server calls itself and how much it exposes.
-        const detail = yield* withClient(endpoint, Option.none(), (client) =>
-          Effect.tryPromise({
-            try: async () => {
-              const version = client.getServerVersion()
-              const instructions = client.getInstructions()
-              const tools = await client.listTools({})
-              return {
-                serverName: version?.name ?? null,
-                instructions: instructions ?? null,
-                toolCount: tools.tools.length
-              }
-            },
-            catch: (cause) => new McpError({
+        const answered = yield* decodeDiscoverResponse(body).pipe(
+          Effect.mapError((cause) =>
+            new McpError({
               endpoint,
-              detail: describeCause(cause),
+              detail: "it did not answer server/discover with a JSON-RPC response",
               cause
             })
-          })
+          )
         )
 
+        if (answered.result === undefined) {
+          // A modern error code proves the endpoint speaks MCP — it just does
+          // not speak this revision. Saying so beats reporting "not an MCP
+          // endpoint", which would send the caller looking for the wrong fault.
+          const code = answered.error?.code
+          return yield* new McpError({
+            endpoint,
+            detail: code !== undefined && MODERN_ERROR_CODES.includes(code)
+              ? `it speaks MCP but not protocol revision ${PROTOCOL_VERSION} ` +
+                `(${answered.error?.message ?? `error ${code}`})`
+              : `it refused server/discover (${answered.error?.message ?? "no result"})`
+          })
+        }
+
+        const discovered = answered.result
+        if (!discovered.supportedVersions.includes(PROTOCOL_VERSION)) {
+          return yield* new McpError({
+            endpoint,
+            detail: `it supports protocol revisions ${discovered.supportedVersions.join(", ")}, ` +
+              `and this host speaks only ${PROTOCOL_VERSION}`
+          })
+        }
+
+        const toolCount = yield* countTools(endpoint, discovered.capabilities)
+
         // An anonymous handshake is not a claim that the server is open. Ask it
-        // directly, and believe its own metadata over the two methods it let
+        // directly, and believe its own metadata over the methods it let
         // through.
         const authority = yield* inspectAuthority(endpoint, response)
-        const serverName = detail.serverName
+        const serverName = discovered._meta?.["io.modelcontextprotocol/serverInfo"]?.name ?? null
         return yield* Schema.decodeUnknownEffect(McpProbe)({
           connected: true,
           requiresAuthentication: Option.isSome(authority),
@@ -365,9 +450,9 @@ export class McpHost extends Context.Service<
           slug: serverName === null
             ? slug
             : Option.getOrElse(slugify(serverName), () => slug),
-          toolCount: detail.toolCount,
+          toolCount,
           serverName,
-          instructions: detail.instructions
+          instructions: discovered.instructions ?? null
         }).pipe(Effect.mapError((cause) =>
           new McpError({ endpoint, detail: "Could not describe probe", cause })
         ))

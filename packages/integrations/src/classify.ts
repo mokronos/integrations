@@ -1,4 +1,4 @@
-import { Effect, Option } from "effect"
+import { Effect, Option, Result } from "effect"
 import { serviceName, slugify } from "@mokronos/contracts"
 import type { EndpointClassification } from "@mokronos/contracts"
 import { DetectionError } from "./errors.ts"
@@ -60,10 +60,10 @@ const asOpenApi = (
  *  opening a connection. */
 export const classify = Effect.fn("classify")(function* (url: string) {
   const mcp = yield* Effect.result(asMcp(url))
-  if (mcp._tag === "Success") return mcp.success
+  if (Result.isSuccess(mcp)) return mcp.success
 
   const openapi = yield* Effect.result(asOpenApi(url))
-  if (openapi._tag === "Success") return openapi.success
+  if (Result.isSuccess(openapi)) return openapi.success
 
   return yield* new DetectionError({
     url,

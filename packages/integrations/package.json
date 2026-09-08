@@ -46,11 +46,14 @@
   },
   "dependencies": {
     "@libsql/client": "catalog:",
-    "@modelcontextprotocol/sdk": "catalog:",
-    "@mokronos/core-integrations": "workspace:*",
+    "@modelcontextprotocol/client": "2.0.0",
     "@mokronos/contracts": "workspace:*",
+    "@mokronos/core-integrations": "workspace:*",
     "effect": "catalog:",
     "oas": "catalog:",
     "oas-normalize": "catalog:"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/server": "2.0.0"
   }
 }

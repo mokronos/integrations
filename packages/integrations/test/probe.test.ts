@@ -6,7 +6,7 @@ import { McpHost } from "../src/mcp/client.ts"
  *  reach it, and does it name an authority.
  *
  *  These run against a real server on a real port rather than a stub, because
- *  what is under test is a conversation — the JSON-RPC handshake, the RFC 9728
+ *  what is under test is a conversation — `server/discover`, the RFC 9728
  *  lookup, and the RFC 8414 hop after it — and a stub of that conversation would
  *  only ever agree with whatever this file already believes. */
 
@@ -17,9 +17,10 @@ afterEach(() => {
 })
 
 /** Only what this server dispatches on. The transport also sends notifications,
- *  which carry no id and need no answer. */
+ *  which carry no id and need no answer. JSON-RPC permits a string id, and the
+ *  SDK issues one for its own connect-time probes. */
 const JsonRpcRequest = Schema.Struct({
-  id: Schema.optional(Schema.Number),
+  id: Schema.optional(Schema.Union([Schema.Number, Schema.String])),
   method: Schema.String
 })
 
@@ -30,9 +31,9 @@ const tool = {
 }
 
 /** A stateless MCP server that talks to anybody, in the shape of the servers
- *  that prompted this: `initialize` and `tools/list` are open, and `publishes`
- *  decides whether it also declares an authorization server for the calls it
- *  would refuse. */
+ *  that prompted this: `server/discover` and `tools/list` are open, and
+ *  `publishes` decides whether it also declares an authorization server for the
+ *  calls it would refuse. */
 const startServer = (options: {
   readonly publishes: boolean
   readonly scopes?: ReadonlyArray<string>
@@ -75,21 +76,32 @@ const startServer = (options: {
       const decoded = Schema.decodeUnknownOption(JsonRpcRequest)(await request.json())
       if (Option.isNone(decoded)) return new Response(null, { status: 202 })
       const body = decoded.value
-      if (body.method === "initialize") {
+      if (body.method === "server/discover") {
         return Response.json({
           jsonrpc: "2.0",
           id: body.id,
           result: {
-            protocolVersion: "2025-06-18",
+            // 2026-07-28 requires every result to name its type, and every
+            // cacheable one to say how long it keeps.
+            resultType: "complete",
+            ttlMs: 0,
+            cacheScope: "private",
+            supportedVersions: ["2026-07-28"],
             capabilities: { tools: { listChanged: false } },
-            serverInfo: { name: "StatelessServer", version: "1" }
+            _meta: {
+              "io.modelcontextprotocol/serverInfo": { name: "StatelessServer", version: "1" }
+            }
           }
         })
       }
       if (body.method === "tools/list") {
-        return Response.json({ jsonrpc: "2.0", id: body.id, result: { tools: [tool] } })
+        return Response.json({
+          jsonrpc: "2.0",
+          id: body.id,
+          result: { resultType: "complete", ttlMs: 0, cacheScope: "private", tools: [tool] }
+        })
       }
-      // `notifications/initialized` and anything else without an id.
+      // Anything else without an id.
       return new Response(null, { status: 202 })
     }
   })

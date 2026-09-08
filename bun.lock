@@ -152,12 +152,15 @@
       "version": "0.2.0",
       "dependencies": {
         "@libsql/client": "catalog:",
-        "@modelcontextprotocol/sdk": "catalog:",
+        "@modelcontextprotocol/client": "2.0.0",
         "@mokronos/contracts": "workspace:*",
         "@mokronos/core-integrations": "workspace:*",
         "effect": "catalog:",
         "oas": "catalog:",
         "oas-normalize": "catalog:",
+      },
+      "devDependencies": {
+        "@modelcontextprotocol/server": "2.0.0",
       },
     },
     "packages/observability": {

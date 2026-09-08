@@ -6,7 +6,7 @@ import {
   refreshAuthorization,
   registerClient,
   startAuthorization
-} from "@modelcontextprotocol/sdk/client/auth.js"
+} from "@modelcontextprotocol/client"
 import { Clock, Context, Effect, Layer, Option, Schema } from "effect"
 import { CatalogStore } from "../catalog/store.ts"
 import type { OAuthClientRecord } from "../catalog/store.ts"
@@ -25,7 +25,7 @@ import { AuthTemplateSlug } from "../catalog/ids.ts"
 import { whenPresent } from "@mokronos/contracts"
 import { OAuthServerProbe, OwnerTier } from "@mokronos/contracts"
 
-/** OAuth, over the flow primitives in `@modelcontextprotocol/sdk/client/auth`.
+/** OAuth, over the flow primitives in `@modelcontextprotocol/client`.
  *
  *  Those functions are standalone — metadata discovery (RFC 8414 and RFC 9728),
  *  dynamic client registration (RFC 7591), PKCE authorization, code exchange and
