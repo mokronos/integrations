@@ -30,7 +30,6 @@ afterEach(async () => {
 const start = async (): Promise<RunningGateway> => {
   const home = await run(mkdtemp(path.join(tmpdir(), "wf-gateway-serve-")))
   directories.push(home)
-  // Port 0 lets the OS pick, so tests never collide with a running daemon.
   const gateway = await run(serveGateway({ home, port: 0 }))
   running.push(gateway)
   return gateway
@@ -57,8 +56,6 @@ describe("gateway service", () => {
     expect(config?.apiKey).toStartWith("wfi_")
 
     const local = await run(gateway.service.store.findClientByName(defaultTenantId, localClientName))
-    // The local machine's own key is the admin credential: this is what lets an
-    // agent discover and connect with the human needed only for auth.
     expect(local?.capabilities).toEqual([
       "provision_connections",
       "administer_gateway"
@@ -127,8 +124,6 @@ describe("gateway service", () => {
     const key = generateApiKey()
     await run(gateway.service.store.addApiKey({ id: key.id, clientId: sandbox.id, hash: key.hash }))
 
-    // Same browser-shaped request, but carrying a key of its own: it must be
-    // that client, with that client's limits, and not quietly upgraded.
     const response = await run(fetch(`${gateway.url}/v1/clients`, {
       headers: {
         "sec-fetch-site": "same-origin",
@@ -150,7 +145,6 @@ describe("gateway service", () => {
     }))
 
     expect(fromFile?.url).toBe(gateway.url)
-    // A sandbox is pointed at a remote gateway without touching disk.
     expect(fromEnvironment?.url).toBe("https://gateway.example")
     expect(fromEnvironment?.apiKey).toBe("wfi_remote")
   })

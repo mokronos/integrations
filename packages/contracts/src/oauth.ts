@@ -1,9 +1,6 @@
 import { Schema } from "effect"
 import { Connection } from "./connection.ts"
 
-/** What an authorization server publishes about itself, and where a started
- *  flow got to. */
-
 export const OAuthServerProbe = Schema.Struct({
   issuer: Schema.optional(Schema.NullOr(Schema.String)),
   authorizationUrl: Schema.String,
@@ -16,8 +13,6 @@ export const OAuthServerProbe = Schema.Struct({
 })
 export type OAuthServerProbe = typeof OAuthServerProbe.Type
 
-/** Either the provider short-circuited to a connection that already exists, or
- *  a human has to visit an authorization URL. */
 export const OAuthStart = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("connected"),

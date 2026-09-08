@@ -23,8 +23,6 @@ afterEach(async () => {
   )
 })
 
-/** A file rather than `:memory:`, so a test can reopen the same database and
- *  see what the previous run left in it. */
 const openDatabase = async (): Promise<LibsqlClient> => {
   const directory = await mkdtemp(path.join(tmpdir(), "wf-gateway-migrate-"))
   directories.push(directory)
@@ -113,10 +111,6 @@ describe("applyGatewayMigrations", () => {
   })
 })
 
-// The two index shapes that drizzle-kit only just manages to express are worth
-// asserting against a real engine: a mangled expression or a dropped predicate
-// would still generate, still apply, and only show up as a duplicate row much
-// later.
 describe("the declared schema", () => {
   const insertTenant = (database: LibsqlClient) =>
     database.execute({
@@ -146,8 +140,6 @@ describe("the declared schema", () => {
     await insertProfile(database, "profile", 0)
     await insertTool(database, null)
 
-    // The primary key admits this row — SQLite counts two nulls as two keys.
-    // The coalescing unique index is what refuses it.
     const failure = await insertTool(database, null).then(
       () => undefined,
       (cause: Error) => cause
@@ -192,9 +184,6 @@ describe("the declared schema", () => {
 describe("the embedded migrations", () => {
   const migrationsDirectory = path.join(import.meta.dirname, "..", "db", "migrations")
 
-  /** Regenerating the SQL without re-embedding it would leave the runtime
-   *  applying yesterday's shape while `db/schema.ts` describes today's. Both
-   *  halves of `bun run db:generate` are one step; this is what says so. */
   test("carry exactly what db/migrations holds on disk", () => {
     for (const migration of gatewayMigrations) {
       const onDisk = readFileSync(path.join(migrationsDirectory, `${migration.name}.sql`), "utf8")

@@ -4,13 +4,6 @@ import { CopyField } from "@/components/ui/copy-field"
 import {
   type AuthMethod
 } from "@/lib/schemas"
-/** Credential entry. OAuth is deliberately a different path: the gateway drives
- *  the flow and hosts the callback, because it is what holds the credential.
- *
- *  Providers without dynamic client registration (Google, Microsoft) refuse to
- *  authorize until an OAuth application exists at their console with our
- *  redirect URI in it, so the dialog walks through that setup instead of
- *  failing later with an opaque provider error. */
 type OAuthProvider = "google" | "microsoft" | "other"
 
 const oauthProviderOf = (method: AuthMethod): OAuthProvider => {

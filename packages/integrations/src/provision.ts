@@ -5,8 +5,6 @@ import { classify } from "./classify.ts"
 import type { McpHost } from "./mcp/client.ts"
 import type { SpecCache } from "./openapi/cache.ts"
 
-/** What reading an unknown endpoint needs: an MCP client to try a handshake
- *  with, and the spec cache to try parsing it as OpenAPI. */
 type ClassifyServices = McpHost | SpecCache
 import { IntegrationHost } from "./host.ts"
 import { AuthTemplateSlug } from "./catalog/ids.ts"
@@ -22,18 +20,6 @@ import {
   type IntegrationDiscovery
 } from "@mokronos/contracts"
 
-/** Turning a URL into an installed integration.
- *
- *  Classification says what the endpoint is; this makes it permanent: install
- *  it in the catalog, make sure a connection exists, and list what that
- *  connection exposes.
- *
- *  The two refusals here used to be `throw new Error(...)` inside an async
- *  function, so both reached the HTTP layer as an undeclared rejection and were
- *  guessed back into a 400 by reading `cause.message`. */
-
-/** Installs what a classification describes, or hands back what is already
- *  filed under that slug. */
 export const installClassified = Effect.fn("Integrations.install")(function*(
   classification: EndpointClassification
 ): Effect.fn.Return<Integration, HostFailure, IntegrationHost> {
@@ -47,10 +33,6 @@ export const installClassified = Effect.fn("Integrations.install")(function*(
   const slug = IntegrationSlug.make(decoded.slug)
   const existing = yield* host.findIntegration(slug)
   if (Option.isSome(existing)) {
-    // Discovering the same URL twice is idempotent and returns what is already
-    // installed. A different URL under a name already taken is not the same
-    // act, and handing back the other integration would report success for an
-    // endpoint that was never installed.
     if (
       existing.value.displayUrl !== undefined &&
       existing.value.displayUrl !== decoded.endpoint
@@ -64,9 +46,6 @@ export const installClassified = Effect.fn("Integrations.install")(function*(
     return existing.value
   }
 
-  // The auth method is never passed in: installing re-probes the endpoint and
-  // derives it from how the server actually refuses, so a caller cannot record
-  // a method the server does not offer.
   if (decoded.kind === "mcp") {
     yield* host.addMcp({ endpoint: decoded.endpoint, name: decoded.name, slug })
   } else {
@@ -83,10 +62,6 @@ export const installClassified = Effect.fn("Integrations.install")(function*(
   return installed.value
 })
 
-/** What the endpoint said it was, with what the caller decided to call it.
- *
- *  Applied before installing rather than after, because the slug is what the
- *  install is filed under; renaming afterwards would mean moving it. */
 const named = (
   classification: EndpointClassification,
   options: DiscoverIntegrationsOptions
@@ -96,8 +71,6 @@ const named = (
   ...whenPresent("slug", options.slug)
 })
 
-/** A connection for a freshly installed integration, when one can be made
- *  without a human. Answers whether there is now something to list tools for. */
 const ensureConnection = Effect.fn("Integrations.ensureConnection")(function*(
   integration: Integration,
   connectionName: ConnectionName

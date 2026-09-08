@@ -44,12 +44,10 @@ const connection: ConnectionRef = {
 
 
 interface SetupOptions {
-  /** Defaults to false: an operator who says nothing gets a closed gateway. */
   readonly signupOpen?: boolean
   readonly signupOpenOf?: () => Promise<boolean>
   readonly secureCookies?: boolean
   readonly google?: GoogleIdentityOAuth
-  /** Replaces the host for a test that reaches past authority into provisioning. */
   readonly hostServices?: Context.Context<HostServices>
 }
 
@@ -107,7 +105,6 @@ const setup = async (options: SetupOptions = {}) => {
   interface CallInit {
     readonly body?: unknown
     readonly headers?: Record<string, string>
-    /** Sent raw; a cookie value captured from a previous Set-Cookie. */
     readonly cookie?: string
   }
 
@@ -136,7 +133,6 @@ const setup = async (options: SetupOptions = {}) => {
   return { store, client, apiKey, call, cookieValue, handle }
 }
 
-/** A signed-up human with their cookie, ready to act as the dashboard does. */
 const signupHuman = async (
   setup_: Awaited<ReturnType<typeof setup>>,
   email = "sebastian@example.com",
@@ -195,8 +191,6 @@ describe("signup", () => {
 
     const logins = await run(setup_.store.countLogins())
     expect(logins).toBe(1)
-    // The tenant id came off the wire as a plain string; findTenantById both
-    // re-validates it and proves the partition exists with its subject.
     const tenant = await run(setup_.store.findTenantById(TenantId.make(human.tenantId)))
     expect(tenant).toBeDefined()
     const subjects = await run(setup_.store.listSubjects(TenantId.make(human.tenantId)))
@@ -284,7 +278,6 @@ describe("login", () => {
       body: { email: "nobody@example.com", password: "whatever goes here" }
     }))
 
-    // Telling them apart lets a harvester confirm which emails have accounts.
     expect(wrongPassword.status).toBe(401)
     expect(unknownEmail.status).toBe(401)
     expect(wrongPassword.body["error"]).toBe(unknownEmail.body["error"])
@@ -396,9 +389,6 @@ describe("what a session may do", () => {
   })
 
   test("connects an integration on its own authority, holding no API key", async () => {
-    // The route already admits a signed-in human; before this the handler
-    // demanded a client key anyway, so the dashboard could not connect
-    // anything at all.
     const created: Array<{ readonly integration: string; readonly name: string }> = []
     const hostServices = stubHostContext({
       findIntegration: (slug) => Effect.succeed(slug !== "gmail" ? Option.none() : Option.some({
@@ -441,8 +431,6 @@ describe("what a session may do", () => {
     const human = await run(signupHuman(setup_))
     expect(String((human.tenantId))).not.toBe(defaultTenantId)
 
-    // The local client belongs to the default tenant; a human in another
-    // partition must not see it listed.
     const clients = Schema.decodeUnknownSync(
       Schema.Array(Schema.Record(Schema.String, Schema.Json))
     )(
@@ -489,8 +477,6 @@ describe("cross-site protection for cookie-carried authority", () => {
     }))
     expect(write.status).toBe(201)
 
-    // A browser navigation sends no Sec-Fetch-Site on some paths; reads never
-    // needed the guard because they change nothing.
     const read = await run(setup_.call("GET", "/v1/clients", { cookie: human.cookie }))
     expect(read.status).toBe(200)
   })
@@ -507,7 +493,6 @@ describe("logout", () => {
     }))
     expect(logout.status).toBe(200)
 
-    // A stolen cookie copied before logout stays dead too: the row is gone.
     const replayed = await run(setup_.call("GET", "/v1/auth/me", { cookie: human.cookie }))
     expect(replayed.body).toEqual({ authenticated: false })
     const surface = await run(setup_.call("GET", "/v1/clients", { cookie: human.cookie }))
@@ -539,8 +524,6 @@ describe("credential precedence", () => {
     const setup_ = await run(setup({ signupOpen: true }))
     const human = await run(signupHuman(setup_))
 
-    // Precedence means the bad key speaks: the caller asked to be someone
-    // specific and was refused, so answering as the cookie would hide that.
     const response = await run(setup_.call("GET", "/v1/clients", {
       cookie: human.cookie,
       headers: { authorization: "Bearer wfi_not-a-real-key" }
@@ -555,8 +538,6 @@ describe("attribution", () => {
     const setup_ = await run(setup({ signupOpen: true }))
     const human = await run(signupHuman(setup_))
 
-    // A frozen call inside the human's own partition, so the session is the
-    // authority that settles it.
     const accessProfile = await run(setup_.store.createAccessProfile({
       id: newAccessProfileId(), tenantId: human.tenantId, name: "support-agent"
     }))
@@ -590,7 +571,6 @@ describe("attribution", () => {
     expect(frozen.body["status"]).toBe("pending")
     const approvalId = String(frozen.body["approvalId"])
 
-    // ...and deny it from the dashboard, where the human is known.
     const denied = await run(setup_.call("POST", `/v1/approvals/${approvalId}/deny`, {
       body: { decidedBy: "spoofed@example.com" },
       cookie: human.cookie,

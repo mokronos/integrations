@@ -2,23 +2,12 @@ import { afterEach, describe, expect, it } from "bun:test"
 import { Effect, Option, Schema } from "effect"
 import { McpHost } from "../src/mcp/client.ts"
 
-/** How an MCP endpoint answers the two questions a probe asks: can anybody
- *  reach it, and does it name an authority.
- *
- *  These run against a real server on a real port rather than a stub, because
- *  what is under test is a conversation — `server/discover`, the RFC 9728
- *  lookup, and the RFC 8414 hop after it — and a stub of that conversation would
- *  only ever agree with whatever this file already believes. */
-
 const servers: Array<ReturnType<typeof Bun.serve>> = []
 
 afterEach(() => {
   for (const server of servers.splice(0)) server.stop(true)
 })
 
-/** Only what this server dispatches on. The transport also sends notifications,
- *  which carry no id and need no answer. JSON-RPC permits a string id, and the
- *  SDK issues one for its own connect-time probes. */
 const JsonRpcRequest = Schema.Struct({
   id: Schema.optional(Schema.Union([Schema.Number, Schema.String])),
   method: Schema.String
@@ -30,10 +19,6 @@ const tool = {
   inputSchema: { type: "object", properties: {} }
 }
 
-/** A stateless MCP server that talks to anybody, in the shape of the servers
- *  that prompted this: `server/discover` and `tools/list` are open, and
- *  `publishes` decides whether it also declares an authorization server for the
- *  calls it would refuse. */
 const startServer = (options: {
   readonly publishes: boolean
   readonly scopes?: ReadonlyArray<string>
@@ -62,15 +47,11 @@ const startServer = (options: {
           authorization_endpoint: `${origin}/authorize`,
           token_endpoint: `${origin}/token`,
           response_types_supported: ["code"],
-          // No `registration_endpoint`, like every provider that makes an
-          // operator create the client by hand.
           code_challenge_methods_supported: ["S256"]
         })
       }
 
       if (url.pathname !== "/mcp") return new Response("not found", { status: 404 })
-      // Streamable HTTP opens a GET stream when the server allows one, and this
-      // one does not: everything it has to say fits in the POST responses.
       if (request.method !== "POST") return new Response(null, { status: 405 })
 
       const decoded = Schema.decodeUnknownOption(JsonRpcRequest)(await request.json())
@@ -81,8 +62,6 @@ const startServer = (options: {
           jsonrpc: "2.0",
           id: body.id,
           result: {
-            // 2026-07-28 requires every result to name its type, and every
-            // cacheable one to say how long it keeps.
             resultType: "complete",
             ttlMs: 0,
             cacheScope: "private",
@@ -101,7 +80,6 @@ const startServer = (options: {
           result: { resultType: "complete", ttlMs: 0, cacheScope: "private", tools: [tool] }
         })
       }
-      // Anything else without an id.
       return new Response(null, { status: 202 })
     }
   })
@@ -122,16 +100,12 @@ describe("probing an MCP endpoint", () => {
     const scope = "https://www.googleapis.com/auth/gmail.readonly"
     const found = await probe(startServer({ publishes: true, scopes: [scope] }))
 
-    // Reachable and usable are different answers. The handshake succeeded and
-    // the tools are readable, and none of them can be called without a token.
     expect(found.connected).toBe(true)
     expect(found.toolCount).toBe(1)
     expect(found.serverName).toBe("StatelessServer")
     expect(found.requiresAuthentication).toBe(true)
     expect(found.requiresOAuth).toBe(true)
     expect(found.scopes).toEqual([scope])
-    // The authorization server offers no registration endpoint, so authorizing
-    // will need a client the operator made.
     expect(found.supportsDynamicRegistration).toBe(false)
   })
 

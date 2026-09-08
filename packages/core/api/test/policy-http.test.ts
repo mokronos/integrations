@@ -49,8 +49,6 @@ const setup = async () => {
   }))
   const key = generateApiKey()
   await run(store.addApiKey({ id: key.id, clientId: administrator.id, hash: key.hash }))
-  // The one catalogued tool the default configurations should pick up. Read
-  // from the host now, which is where the handlers ask for it.
   const hostServices = stubHostContext({
     toolSummaries: () => Effect.succeed([{
       address: ToolAddress.make("tools.mail.org.primary.sendEmail"),

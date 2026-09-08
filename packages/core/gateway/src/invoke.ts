@@ -23,9 +23,6 @@ import type { GatewayStore, GatewayStoreError, RecordAuditInput } from "./store.
 
 type Json = typeof Schema.Json.Type
 
-/** The address is built from the authorized profile tool, never accepted from the caller. That is
- * what makes invocation-by-address safe to expose: a caller naming an address
- * directly still has to pass both assigned configurations. */
 export const boundToolAddress = (connection: ConnectionRef, tool: ToolName): ToolAddress =>
   ToolAddress.make(
     `tools.${connection.integration}.${connection.owner}.${connection.name}.${tool}`
@@ -63,8 +60,6 @@ const auditFor = (
   argumentsValue: Json,
   retentionDays: number
 ): RecordAuditInput => ({
-  // The trail belongs to the client's partition, not to whoever happens to be
-  // asking: a tenant reads its own history and nothing else's.
   tenantId: authorization.client.tenantId,
   id: newAuditId(),
   clientId: authorization.client.id,
@@ -80,8 +75,6 @@ const auditFor = (
   }
 })
 
-/** Retries meet the same client, target, configurations, and frozen arguments
- * until the result is collected. A later call needs a new approval. */
 const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function*(
   dependencies: {
     readonly store: GatewayStore
@@ -116,9 +109,6 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function*(
   })
 
   if (existing !== undefined && (existing.status === "pending" || existing.status === "executing")) {
-    // Deliberately not audited: the frozen call was recorded when it was
-    // proposed, and one decision pending is one event, however many times a
-    // retry loop looks at it.
     return pending(existing.id, existing.expiresAt)
   }
 
@@ -127,8 +117,6 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function*(
     && (yield* store.collectApproval(authorization.client.tenantId, existing.id))
   ) {
     if (existing.status === "approved") {
-      // The gateway already performed this call, at approval time. What is
-      // being handed back is that call's result, not a second call.
       yield* store.recordAudit(auditFor(
         authorization,
         existing.error === null ? "succeeded" : "failed",
@@ -181,12 +169,6 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function*(
   return outcome
 })
 
-/** Performs one delegated invocation: authorize, then either execute with
- * injected credentials or freeze the call for a human.
- *
- * Every branch writes an audit record, including the denials that never reached
- * a connection — an audit trail with holes where the refusals were is not much
- * of an audit trail. */
 export const invokeThroughGateway = Effect.fn("Invocation.invokeThroughGateway")(function*(
   dependencies: InvokeDependencies,
   input: {
@@ -207,9 +189,6 @@ export const invokeThroughGateway = Effect.fn("Invocation.invokeThroughGateway")
   })
 
   if (authorization.status !== "authorized") {
-    // No client id: an unknown key names nobody. The reason is still recorded,
-    // under the default tenant — there is nothing else an unauthenticated call
-    // could be filed under.
     yield* store.recordAudit({
       tenantId: defaultTenantId,
       id: newAuditId(),
@@ -245,9 +224,6 @@ export const invokeThroughGateway = Effect.fn("Invocation.invokeThroughGateway")
   )
 })
 
-/** Runs a call that has already cleared policy. Shared by the allow path and by
- * approval settlement, so an approved invocation is performed by the gateway on
- * exactly the same code path — the caller never gains the capability itself. */
 export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(function*(
   dependencies: {
     readonly store: GatewayStore
@@ -258,9 +234,6 @@ export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(funct
   argumentsValue: Json
 ): Effect.fn.Return<Extract<InvocationOutcome, { status: "succeeded" | "failed" }>, GatewayStoreError> {
   const address = boundToolAddress(authorization.connection, authorization.accessProfileTool.tool)
-  // The host's failures are typed and each renders itself in a sentence, so
-  // there is nothing left for a wrapper error to add. What used to be an
-  // `unknown` fished out of a rejected promise is now the failure itself.
   const invocation = yield* Effect.result(dependencies.host.execute(address, argumentsValue))
   if (invocation._tag === "Success") {
     yield* dependencies.store.recordAudit(
@@ -278,10 +251,6 @@ export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(funct
 export type EffectiveTool = {
   readonly alias: Alias
   readonly tool: ToolName
-  /** The connection the alias resolves to, whole. Two aliases can carry the
-   * same vendor tool against different credentials, and the owner tier and
-   * subject are what tell those apart, so the reference travels rather than a
-   * name that would read the same for both. */
   readonly connection: ConnectionRef
   readonly decision: PolicyDecision
   readonly description?: string
@@ -289,16 +258,6 @@ export type EffectiveTool = {
   readonly outputSchema?: Json
 }
 
-/** The tools a client may actually reach: the intersection of its access
- * profile tools and approval-policy decisions. Discovery uses
- * the same intersection invocation does, so an unauthorized tool is invisible
- * rather than visible-then-failing.
- *
- * A tool present in only one assigned resource contributes nothing here.
- *
- * Schemas are opt-in because fetching them costs one catalog read per tool.
- * With them, this listing is exactly what codegen emits — so the generated
- * surface and the authorized surface cannot drift apart. */
 export const listEffectiveTools = Effect.fn("Invocation.listEffectiveTools")(function*(
   store: GatewayStore,
   clientId: Parameters<GatewayStore["findAccessProfileForClient"]>[0],
@@ -340,10 +299,6 @@ export const listEffectiveTools = Effect.fn("Invocation.listEffectiveTools")(fun
         ...whenPresent("inputSchema", described.inputSchema),
         ...whenPresent("outputSchema", described.outputSchema)
       })),
-      // A tool the catalog cannot describe still appears, without its schema —
-      // dropping the whole listing because one entry is unreadable would be
-      // worse. It is logged so "this tool has no schema" is distinguishable
-      // from "this tool's schema could not be read".
       Effect.catch((failure) =>
         Effect.as(
           Effect.logWarning(

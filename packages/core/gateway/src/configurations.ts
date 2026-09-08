@@ -53,8 +53,6 @@ export interface DefaultConfigurations {
   readonly approvalPolicy: ApprovalPolicy | undefined
 }
 
-/** Adds newly catalogued tools to both tenant defaults without rewriting
- * operator choices already present in either resource. */
 export const reconcileDefaults = Effect.fn("Grants.reconcileDefaults")(function*(input: {
   readonly store: GatewayStore
   readonly integrations: ConfigurationCatalog
@@ -91,7 +89,6 @@ export const reconcileDefaults = Effect.fn("Grants.reconcileDefaults")(function*
   return { accessProfile, approvalPolicy }
 })
 
-/** Removes a vanished connection from every reusable configuration. */
 export const forgetConnection = Effect.fn("Grants.forgetConnection")(function*(input: {
   readonly store: GatewayStore
   readonly tenantId: Client["tenantId"]

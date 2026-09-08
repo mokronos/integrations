@@ -24,8 +24,6 @@ import {
 } from "../services.ts"
 import { capture } from "../observability.ts"
 
-// --- system -----------------------------------------------------------------
-
 export const DelegatedLayer = HttpApiBuilder.group(GatewayApi, "delegated", (handlers) =>
   Effect.gen(function*() {
     const store = yield* GatewayStoreService
@@ -74,15 +72,9 @@ export const DelegatedLayer = HttpApiBuilder.group(GatewayApi, "delegated", (han
           const id = ApprovalId.make(request.params["id"])
           const client = yield* requireClient
           const approval = yield* capture(store.getApproval(client.tenantId, id))
-          // Scoped to the caller: one client must not read another's frozen call.
           if (approval === undefined || approval.clientId !== client.id) {
             return yield* new ApiNotFound({ error: `Unknown approval ${id}` })
           }
           return approval
         }))
   }))
-
-// --- provisioning -----------------------------------------------------------
-
-/** Picks the auth method a connect request should use, preferring an explicit
- *  template and otherwise the integration's only sensible option. */

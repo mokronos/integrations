@@ -6,8 +6,6 @@ import type { HttpCall } from "@mokronos/core-integrations"
 import { missingArguments, splitArguments } from "../src/openapi/arguments.ts"
 import { compileSpec } from "../src/openapi/compile.ts"
 
-/** Captured exactly as installing would, because that is what a call sees:
- *  the stored descriptor, never the document it came from. */
 const spec = await Effect.runPromise(compileSpec(
   "https://example.com/openapi.json",
   JSON.stringify({
@@ -71,8 +69,6 @@ describe("splitting a caller's arguments", () => {
   })
 
   it("reports a property the operation does not declare instead of forwarding it", () => {
-    // Forwarding it would default to the query string, turning a caller's typo
-    // into a filter nobody asked for.
     const split = splitArguments(call("listNodes"), { treeId: "t1", invented: "x" })
     expect(split.unknown).toEqual(["invented"])
     expect(split.parameters).toEqual({ treeId: "t1" })

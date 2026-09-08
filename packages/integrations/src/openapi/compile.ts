@@ -16,15 +16,6 @@ import {
   type Json
 } from "@mokronos/contracts"
 
-/** Turning an OpenAPI document into callable tools.
- *
- *  `oas-normalize` parses, upconverts Swagger 2.0, and dereferences; `oas`
- *  projects each operation's parameters and responses into JSON Schema. What
- *  this module owns is the part no library has an opinion about: flattening an
- *  operation's four parameter locations into the single input object a tool
- *  caller sees, and splitting a caller's flat input back apart when the request
- *  is built. */
-
 
 export const HttpMethod = Schema.Literals([
   "get",
@@ -38,8 +29,6 @@ export const HttpMethod = Schema.Literals([
 ])
 export type HttpMethod = typeof HttpMethod.Type
 
-/** Where a flattened input property came from, so the request builder can put
- *  it back. `body` means the property belongs inside the request body. */
 export const ParameterLocation = Schema.Literals([
   "path",
   "query",
@@ -49,10 +38,6 @@ export const ParameterLocation = Schema.Literals([
 ])
 export type ParameterLocation = typeof ParameterLocation.Type
 
-/** One declared parameter, with the serialisation OpenAPI specifies for it.
- *
- *  `style` and `explode` both have location-dependent defaults, so they are
- *  resolved here rather than left for the request builder to re-derive. */
 export interface CompiledParameter {
   readonly name: string
   readonly location: ParameterLocation
@@ -62,7 +47,6 @@ export interface CompiledParameter {
 }
 
 export interface CompiledOperation {
-  /** The tool name this operation is exposed under. */
   readonly name: string
   readonly method: HttpMethod
   readonly path: string
@@ -70,20 +54,13 @@ export interface CompiledOperation {
   readonly description: Option.Option<string>
   readonly tags: ReadonlyArray<string>
   readonly deprecated: boolean
-  /** A safe method is the only thing this host will call read-only. It is a
-   *  property of HTTP, not of a vendor annotation, so it can be trusted. */
   readonly readOnly: boolean
   readonly inputSchema: Json
   readonly outputSchema: Option.Option<Json>
   readonly schemaDefinitions: Record<string, Json>
-  /** Property name to the location it must be sent in. */
   readonly locations: Record<string, ParameterLocation>
-  /** Set when the operation has a request body; names the input property that
-   *  carries it. */
   readonly bodyProperty: Option.Option<string>
-  /** Every declared parameter, for the request builder. */
   readonly parameters: ReadonlyArray<CompiledParameter>
-  /** The media type the request body is sent as. */
   readonly contentType: Option.Option<string>
 }
 
@@ -96,7 +73,6 @@ export interface CompiledSecurityScheme {
   readonly headerName: Option.Option<string>
   readonly description: Option.Option<string>
   readonly openIdConnectUrl: Option.Option<string>
-  /** Every scope the document mentions for this scheme, across all flows. */
   readonly scopes: ReadonlyArray<string>
   readonly authorizationUrl: Option.Option<string>
   readonly tokenUrl: Option.Option<string>
@@ -109,38 +85,27 @@ export interface CompiledSpec {
   readonly servers: ReadonlyArray<{
     readonly url: string
     readonly description: Option.Option<string>
-    /** Default values for the `{variable}` placeholders in `url`. */
     readonly variables: Readonly<Record<string, string>>
   }>
   readonly securitySchemes: ReadonlyArray<CompiledSecurityScheme>
   readonly operations: ReadonlyArray<CompiledOperation>
-  /** The dereferenced document, handed to the request builder unchanged. */
   readonly document: Json
 }
 
-/** `oas` emits draft-04 with OpenAPI's own dialect quirks. Normalising here
- *  keeps every schema this host publishes in one shape, so a caller does not
- *  have to know which document a tool came from. */
 const normalizeSchema = (value: Json): Json => {
   if (Array.isArray(value)) return value.map(normalizeSchema)
   if (!isJsonObject(value)) return value
 
   const result: Record<string, Json> = {}
   for (const [key, entry] of Object.entries(value)) {
-    // Drafts and examples are noise to a caller deciding how to call a tool.
     if (key === "$schema" || key === "example" || key === "examples") continue
     if (key === "nullable") continue
     if ((key === "exclusiveMinimum" || key === "exclusiveMaximum") && isJsonBoolean(entry)) {
-      // Draft-04 spells these as flags on `minimum`/`maximum`; modern drafts
-      // spell them as the bound itself. Dropping the flag is lossy in one
-      // direction only, and it is the direction that keeps the schema valid.
       continue
     }
     result[key] = normalizeSchema(entry)
   }
 
-  // `nullable: true` is OpenAPI's way of widening a type; every modern
-  // consumer expects the union instead.
   const type = result["type"] ?? null
   if (property(value, "nullable") === true && isJsonString(type)) {
     result["type"] = [type, "null"]
@@ -154,8 +119,6 @@ const propertiesOf = (schema: Json): Record<string, Json> =>
 const requiredOf = (schema: Json): ReadonlyArray<string> =>
   stringEntries(property(schema, "required"))
 
-/** The definitions bag `oas` attaches to a body schema, lifted out so it can be
- *  published as the tool's `schemaDefinitions`. */
 const definitionsOf = (schema: Json): Record<string, Json> =>
   objectEntries(property(property(schema, "components"), "schemas"))
 
@@ -168,10 +131,6 @@ const withoutDefinitions = (schema: Json): Json => {
 const componentPointer = "#/components/schemas/"
 const definitionPointer = "#/$defs/"
 
-/** Bundled documents point at `#/components/schemas/X`, which means nothing
- *  once a single operation's schema is lifted out of the document. Re-pointing
- *  at `#/$defs/X` lets the schema carry its own definitions and be validated
- *  standalone. */
 const rewriteDefinitionRefs = (value: Json): Json => {
   if (Array.isArray(value)) return value.map(rewriteDefinitionRefs)
   if (!isJsonObject(value)) return value
@@ -201,9 +160,6 @@ const referencedNames = (value: Json, into: Set<string>): void => {
   }
 }
 
-/** Only the definitions a schema actually reaches, followed transitively. A
- *  Gmail tool references three of the document's fifty-six schemas; publishing
- *  all of them would bury the one a caller needs to read. */
 const reachableDefinitions = (
   roots: ReadonlyArray<Json>,
   available: Record<string, Json>
@@ -225,7 +181,6 @@ const reachableDefinitions = (
   return resolved
 }
 
-/** Attaches a schema's own definitions so it validates on its own. */
 const selfContained = (schema: Json, definitions: Record<string, Json>): Json => {
   if (!isJsonObject(schema)) return schema
   const reachable = reachableDefinitions([schema], definitions)
@@ -234,19 +189,6 @@ const selfContained = (schema: Json, definitions: Record<string, Json>): Json =>
     : { ...schema, $defs: reachable }
 }
 
-/** Merges an operation's parameter groups into the one object a tool caller
- *  fills in.
- *
- *  Path, query, header and cookie parameters take their own names. The request
- *  body always travels whole, under `body`.
- *
- *  Flattening the body's properties alongside the parameters would read more
- *  naturally — `{ userId, raw }` rather than `{ userId, body: { raw } }` — but
- *  only when it is possible, and it is not always: a body behind a `$ref`
- *  exposes no properties to merge, and one whose property collided with a
- *  parameter would have to nest anyway. That makes the shape depend on the
- *  document rather than on the rule, and a caller cannot learn a rule that has
- *  exceptions. One predictable place is worth more than one less level. */
 const flattenParameters = (
   operation: Operation
 ) => {
@@ -265,8 +207,6 @@ const flattenParameters = (
     const schema = rewriteDefinitionRefs(normalizeSchema(withoutDefinitions(rawSchema)))
 
     if (group.type === "body" || group.type === "formData") {
-      // `requestBody` only when a parameter has already claimed `body`, which
-      // is the one case where the usual name is not available.
       const name = "body" in properties ? "requestBody" : "body"
       properties[name] = schema
       locations[name] = "body"
@@ -300,8 +240,6 @@ const flattenParameters = (
   }
 }
 
-/** The success response's schema, when the document declares a readable one.
- *  Preferring the lowest 2xx matches what a caller gets on the happy path. */
 const successSchema = (operation: Operation): Option.Option<Json> => {
   const codes = operation.getResponseStatusCodes()
   const success = codes
@@ -329,8 +267,6 @@ const successSchema = (operation: Operation): Option.Option<Json> => {
 
 const safeMethods = new Set(["get", "head", "options", "trace"])
 
-/** A tool name for an operation that declares no `operationId`. Derived from
- *  method and path so it is stable across refreshes of the same document. */
 const derivedName = (method: string, path: string): string => {
   const segments = path
     .split("/")
@@ -339,8 +275,6 @@ const derivedName = (method: string, path: string): string => {
   return [method, ...segments].join("_")
 }
 
-/** OpenAPI's defaults: `form`/exploded in a query and a cookie, `simple`/not
- *  exploded in a path and a header. */
 const defaultStyle = (location: ParameterLocation): string =>
   location === "query" || location === "cookie" ? "form" : "simple"
 
@@ -412,8 +346,6 @@ const DeclaredSecurityScheme = Schema.Struct({
 
 const compileSecuritySchemes = (document: Json): ReadonlyArray<CompiledSecurityScheme> => {
   const fromComponents = property(property(document, "components"), "securitySchemes")
-  // Swagger 2.0 upconverts to `components`, but a hand-written 2.0 document
-  // that skipped conversion would still carry `securityDefinitions`.
   const raw = isJsonObject(fromComponents)
     ? fromComponents
     : property(document, "securityDefinitions")
@@ -449,9 +381,6 @@ const compileSecuritySchemes = (document: Json): ReadonlyArray<CompiledSecurityS
   )
 }
 
-/** Parses, upconverts and dereferences a document, then projects every
- *  operation. Pure with respect to the network: the caller has already fetched
- *  the text, so this can run against a cached copy. */
 export const compileSpec = (
   source: string,
   text: string
@@ -460,14 +389,6 @@ export const compileSpec = (
     try: async () => {
       const normalized = new OASNormalize(text)
       const version = await normalized.version()
-      // A Swagger 2.0 document has to become OpenAPI 3 before `oas` will look
-      // at it; bundling alone leaves the version untouched.
-      //
-      // `bundle` and not `deref`: a document with a recursive schema — Gmail's
-      // `Message` contains `MessagePart` which contains itself — dereferences
-      // into a cyclic object graph, and `oas` clones schemas through
-      // `JSON.stringify`, so it throws outright on one. Bundling keeps internal
-      // `$ref`s, which both `oas` and the request builder resolve themselves.
       const document = version.specification === "openapi"
         ? await normalized.bundle()
         : await new OASNormalize(await normalized.convert()).bundle()
@@ -482,9 +403,6 @@ export const compileSpec = (
     Effect.flatMap((document) => Effect.try({
       try: (): CompiledSpec => {
         const documentJson = asJson(document)
-        // `Oas.init` is the library's documented entry point for a document it
-        // has not itself typed — which is exactly what `deref` hands back, since
-        // its return type is the Swagger-2-or-OpenAPI-3 union either way.
         const oas = Oas.init(isJsonObject(documentJson) ? { ...documentJson } : {})
         const definition = oas.getDefinition()
         const operations: Array<CompiledOperation> = []
@@ -525,8 +443,6 @@ export const compileSpec = (
     }))
   )
 
-/** The read-only summary the dashboard and CLI show before anything is
- *  installed. */
 export const previewOf = (
   compiled: CompiledSpec
 ): Effect.Effect<OpenApiPreview, SpecError> =>
@@ -567,12 +483,6 @@ export const previewOf = (
   ))
 
 
-/** Where the request should go, given the document's servers and any override
- *  recorded when the integration was installed.
- *
- *  A document may declare a relative server — Swagger's own petstore says
- *  `/api/v3` — which is only resolvable against wherever the document itself
- *  was fetched from. */
 export const resolveServer = (
   compiled: CompiledSpec,
   options: {
@@ -583,9 +493,6 @@ export const resolveServer = (
   if (Option.isSome(options.baseUrl)) return options.baseUrl
   const server = compiled.servers[0]
   if (server === undefined) return options.specSource
-  // A server may template its own host or version — `https://api/{ver}` — and
-  // the declared defaults are the only values we have for them. Filled in here
-  // because this result is stored, and nothing downstream keeps the document.
   const declared = server.url.replace(
     /\{([^{}]+)\}/g,
     (whole, name: string) => server.variables[name] ?? whole
@@ -593,4 +500,3 @@ export const resolveServer = (
   if (/^https?:\/\//.test(declared)) return Option.some(declared)
   return Option.map(options.specSource, (source) => new URL(declared, source).toString())
 }
-

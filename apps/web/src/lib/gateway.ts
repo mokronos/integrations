@@ -42,14 +42,6 @@ import type {
   ApprovalPolicyToolInput
 } from "@/lib/schemas"
 
-/** The gateway's API, as the control plane uses it.
- *
- * There is no API key here and no place to put one: the page is served by the
- * gateway, so the browser's own same-origin request is what authenticates it.
- * See `packages/core/api/src/http/loopback.ts` for why that is safe and
- * where it stops being safe.
- */
-
 export class GatewayError extends Error {
   readonly status: number | undefined
   readonly method: RequestMethod
@@ -82,8 +74,6 @@ const messageFrom = (payload: Schema.Json, fallback: string): string => {
   return fallback
 }
 
-/** The response body is unparsed text off the wire, so it is decoded rather
- *  than trusted before any caller sees it. */
 const decodeJsonText = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
 
 const request = async (
@@ -95,7 +85,6 @@ const request = async (
   try {
     response = await fetch(path, {
       method,
-      // Same-origin only. Anything else would not be authenticated anyway.
       credentials: "same-origin",
       ...whenPresentFields(body, (present) => ({
         headers: { "content-type": "application/json" },
@@ -150,8 +139,6 @@ const query = (parameters: Readonly<Record<string, string | number | undefined>>
 
 const segment = (value: string): string => encodeURIComponent(value)
 
-// --- catalog and connections ------------------------------------------------
-
 export const listIntegrations = async () => {
   const response = decodeIntegrations(await request("GET", "/v1/integrations"))
   return {
@@ -187,8 +174,6 @@ export const searchRegistry = async (input: {
 export const discoverIntegration = async (input: {
   readonly url: string
   readonly connection?: string
-  /** Chosen here or not at all: after discovery the slug is what every tool
-   *  address and alias is made of. */
   readonly slug?: string
   readonly name?: string
 }) => decodeDiscovery(await request("POST", "/v1/integrations/discover", input))
@@ -235,8 +220,6 @@ export const removeConnection = async (input: {
     "DELETE",
     `/v1/connections/${segment(input.integration)}/${segment(input.name)}`
   ))
-
-// --- clients, keys, policies ------------------------------------------------
 
 export const listClients = async () => {
   const response = decodeClients(await request("GET", "/v1/clients"))
@@ -313,8 +296,6 @@ export const cloneApprovalPolicy = async (id: string, name: string) => decodeApp
 export const replaceApprovalPolicyTools = async (id: string, tools: ReadonlyArray<ApprovalPolicyToolInput>) => decodeApprovalPolicyToolsReplaced(await request("POST", `/v1/approval-policies/${segment(id)}/tools`, { tools }))
 export const assignApprovalPolicy = async (clientId: string, approvalPolicyId: string) => decodeClient(await request("POST", `/v1/clients/${segment(clientId)}/approval-policy`, { approvalPolicyId }))
 
-// --- approvals, audit, upkeep -----------------------------------------------
-
 export const listApprovals = async (status?: ApprovalStatus) =>
   decodeApprovals(await request("GET", `/v1/approvals${query({ status })}`)).approvals
 export const listApprovalDeliveries = async (approvalId: string) =>
@@ -369,8 +350,6 @@ export const listAudit = async (input: AuditQuery) => {
 export const refreshDrift = async (integration?: string) =>
   decodeDrift(await request("POST", `/v1/drift/refresh${query({ integration })}`)).reports
 
-// --- who is asking -----------------------------------------------------------
-
 export type Me = ReturnType<typeof decodeMe>
 
 export const fetchMe = async (): Promise<Me> => decodeMe(await request("GET", "/v1/auth/me"))
@@ -398,8 +377,6 @@ export const logOut = async (): Promise<void> => {
   await request("POST", "/v1/auth/logout")
 }
 
-// --- account self-service ----------------------------------------------------
-
 export const changeEmail = async (input: {
   readonly email: string
   readonly password: string
@@ -412,9 +389,6 @@ export const changePassword = async (input: {
 }): Promise<number> =>
   decodePasswordChanged(await request("POST", "/v1/auth/password", input)).revokedSessions
 
-/** Deleting the account is final; the caller confirms out of band. POST
- *  rather than DELETE because the confirmation password rides the body and
- *  the gateway ignores DELETE bodies. */
 export const deleteAccount = async (input: {
   readonly password?: string
 }): Promise<void> => {

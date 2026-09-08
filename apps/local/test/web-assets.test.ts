@@ -13,7 +13,6 @@ afterEach(async () => {
   ))
 })
 
-/** A stand-in for `vite build` output: an entry document and one hashed asset. */
 const buildOutput = async (): Promise<string> => {
   const directory = await run(mkdtemp(path.join(tmpdir(), "wf-web-assets-")))
   directories.push(directory)
@@ -48,7 +47,6 @@ describe("control plane assets", () => {
     const directory = await run(buildOutput())
     const assets = await run(createWebAssets({ directories: [directory] }))
 
-    // /clients/cl_7 exists in the router, never on disk. Reloading it must work.
     const response = await run(assets.respond("/clients/cl_7"))
 
     expect(response?.status).toBe(200)
@@ -59,8 +57,6 @@ describe("control plane assets", () => {
     const directory = await run(buildOutput())
     const assets = await run(createWebAssets({ directories: [directory] }))
 
-    // Serving HTML for a broken script tag turns a build mistake into a blank
-    // page with no explanation.
     expect(await run(assets.respond("/assets/gone.js"))).toBeUndefined()
   })
 

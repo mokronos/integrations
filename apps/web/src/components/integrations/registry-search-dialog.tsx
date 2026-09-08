@@ -32,8 +32,6 @@ import {
 import type { IntegrationSearchKind, IntegrationSearchMatch } from "@mokronos/contracts"
 const ALL_KINDS = "__all__"
 
-/** Search is deliberately next to discovery: the registry finds an exact
- * installable endpoint, then the existing provisioning path owns installation. */
 export function RegistrySearchDialog({ onInstalled }: { readonly onInstalled?: (slug: string) => void }) {
   const invalidate = useInvalidate()
   const navigate = useNavigate()
@@ -178,6 +176,3 @@ export function RegistrySearchDialog({ onInstalled }: { readonly onInstalled?: (
     </Dialog>
   )
 }
-
-/** Discovery is the only way an integration enters the catalog, and it is a
- *  privileged act — it installs whatever the URL turns out to be. */

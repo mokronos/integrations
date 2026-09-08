@@ -1,8 +1,3 @@
-/** The contracts every component of this system agrees on: the shared
- *  vocabulary, the wire shapes, and the helpers used at every boundary.
- *
- *  Depends on `effect` and nothing else, so a browser or a published client can
- *  decode a gateway response without acquiring the host's dependency graph. */
 export * from "./address.ts"
 export * from "./connection.ts"
 export * from "./discovery.ts"

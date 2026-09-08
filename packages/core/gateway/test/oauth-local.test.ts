@@ -15,13 +15,6 @@ import { authorizeInBrowser, OAuthFlowError } from "../src/oauth.ts"
 import { createOAuthSessions } from "../src/oauth-sessions.ts"
 import type { OAuthOperations } from "../src/oauth.ts"
 
-/** The loopback authorization path, which nothing exercised before.
- *
- *  It is testable without a browser: the caller supplies the OAuth operations,
- *  and the redirect URI the flow binds is handed to `start`, so a test can read
- *  the port off it and drive the callback with `fetch`. What a human would do in
- *  a browser is one GET. */
-
 const oauthMethod: AuthMethod = {
   id: "oauth",
   label: "OAuth",
@@ -34,10 +27,6 @@ const oauthMethod: AuthMethod = {
   }
 }
 
-/** The connection a completed flow files. Written out rather than trimmed
- *  because these tests now run the real `completeOAuthFlow` — the exchange, the
- *  catalog write and the tool re-read — so this is what the system produces,
- *  not what the test wishes it produced. */
 const connected: Connection = {
   owner: "org",
   name: ConnectionName.make("primary"),
@@ -56,9 +45,6 @@ const connected: Connection = {
 const notUsed = (member: string) => () =>
   Effect.die(new Error(`${member} is not used by these tests`))
 
-/** Only the two members a completed flow touches: filing the connection, and
- *  re-reading the tools it exposes. Everything else dies, so a flow that starts
- *  reaching further says so rather than quietly getting an empty answer. */
 const catalogStore: CatalogStore["Service"] = {
   putConnection: () => Effect.void,
   listIntegrations: notUsed("CatalogStore.listIntegrations"),
@@ -96,8 +82,6 @@ const integrationHost: IntegrationHost["Service"] = {
   execute: notUsed("IntegrationHost.execute")
 }
 
-/** Records the redirect URI the flow bound, so the test can reach the listener
- *  the same way a provider would. */
 const operations = (behaviour: {
   readonly completeFails?: string
 } = {}) => {
@@ -146,8 +130,6 @@ const request = {
   clientSecret: "client-secret"
 }
 
-/** Drives the callback the provider would hit, once the flow has announced its
- *  authorization URL (which is when the listener is up). */
 const callback = async (
   redirectUri: string,
   query: Record<string, string>
@@ -157,9 +139,6 @@ const callback = async (
   return await fetch(url)
 }
 
-/** Runs the flow to an `Exit` so a test can assert on the typed failure rather
- *  than on a thrown value, and hands back the announcement so it knows when the
- *  listener is up. `Effect.scoped` is what releases the listener. */
 const started = (
   auth: ReturnType<typeof operations>,
   overrides: { readonly timeoutMs?: number } = {}
@@ -171,7 +150,6 @@ const started = (
   return { exit, announced: announced.promise }
 }
 
-/** The typed failure a flow ended with. */
 const failureOf = async (
   exit: Promise<Exit.Exit<Connection, OAuthFlowError>>
 ): Promise<OAuthFlowError> => {
@@ -201,8 +179,6 @@ describe("authorizing through the loopback listener", () => {
 
     const page = await callback(auth.redirectUriUsed()!, { state: "wrong", code: "auth-code" })
 
-    // The page says so, and the flow does not complete — a replayed or forged
-    // callback must not connect an account.
     expect(page.status).toBe(400)
     expect(await page.text()).toContain("state could not be verified")
     expect((await failureOf(exit)).stage).toBe("timeout")
@@ -234,7 +210,6 @@ describe("authorizing through the loopback listener", () => {
     expect(page.status).toBe(400)
     expect(await page.text()).toContain("token endpoint said no")
     const failure = await failureOf(exit)
-    // The stage says which half broke, which the old opaque error could not.
     expect(failure.stage).toBe("exchange")
     expect(failure.detail).toContain("token endpoint said no")
   })
@@ -268,9 +243,6 @@ describe("authorizing through the loopback listener", () => {
     await callback(redirectUri, { state: "state-123", code: "auth-code" })
     await exit
 
-    // The ephemeral port is released; a gateway that leaked one per attempt
-    // would run out. Re-binding it is the direct proof — a still-listening
-    // server would refuse.
     const port = Number(new URL(redirectUri).port)
     const rebound = Bun.serve({ hostname: "127.0.0.1", port, fetch: () => new Response("ok") })
     expect(rebound.port).toBe(port)
@@ -295,9 +267,6 @@ describe("shutting down while an authorization is in flight", () => {
 
     await Effect.runPromise(sessions.stop())
 
-    // Before, the flow was a detached `void promise.then(...)`: nothing held it,
-    // so a shutdown left the human's browser pointing at a listener the gateway
-    // had forgotten. Re-binding the port proves it is really gone.
     const rebound = Bun.serve({ hostname: "127.0.0.1", port, fetch: () => new Response("ok") })
     expect(rebound.port).toBe(port)
     await rebound.stop(true)

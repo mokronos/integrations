@@ -17,13 +17,8 @@ import {
 } from "./service.ts"
 import packageMetadata from "../package.json" with { type: "json" }
 
-/** Starting the gateway is the one command that does not go through a gateway,
- * for the obvious reason. It is here rather than in `wf` because the gateway is
- * the integrations product — `wf` depends on it, not the other way round. */
 class ServeError extends Data.TaggedError("ServeError")<{ readonly message: string }> {}
 
-// A caught value. TypeScript types every catch binding as unknown because
-// JavaScript lets any value be thrown, so there is nothing narrower to accept.
 // oxlint-disable-next-line anti-slop/no-unknown-parameters
 const serveError = (error: unknown): ServeError =>
   new ServeError({ message: error instanceof Error ? error.message : String(error) })
@@ -37,8 +32,6 @@ const loopbackWarning = (host: string): void => {
 }
 
 const runForeground = async (port: number, host: string): Promise<void> => {
-  // Imported lazily so every other command stays independent of the
-  // gateway package — the CLI is a thin client by construction.
   const { serveGateway } = await import("@mokronos/integrations-local")
   const running = await serveGateway({ port, hostname: host })
   await Effect.runPromise(writeStdoutLine(`integrations gateway listening at ${running.url}`))
@@ -85,10 +78,6 @@ const serveCommand = Command.make(
     })
 ).pipe(Command.withDescription("Run the integration gateway, in this terminal or detached"))
 
-/** The control plane is served by the gateway itself, so there is nothing to
- * start here — this only finds it and opens it. It deliberately does not fall
- * back to starting a gateway: a UI that silently launches the thing holding
- * every credential is not a convenience. */
 const dashboardCommand = Command.make(
   "dashboard",
   {
@@ -124,10 +113,6 @@ const dashboardCommand = Command.make(
     })
 ).pipe(Command.withDescription("Open the gateway's control plane in a browser"))
 
-/** The gateway is a machine-level service, not a session tool: a workflow that
- * touches an integration cannot run without it, and the credentials it holds
- * are what everything else waits on. Registering it with the platform's own
- * per-user service manager is the only way it survives a reboot. */
 const installCommand = Command.make(
   "install",
   {
@@ -198,7 +183,6 @@ export const main = async (argv: ReadonlyArray<string>): Promise<void> => {
           : Effect.sync(() => {
             process.exitCode = 1
           })),
-      // No-op unless INTEGRATIONS_OTLP_ENDPOINT points somewhere.
       Effect.provide(Layer.merge(
         BunServices.layer,
         telemetryLayer({ serviceName: "integrations-cli" })

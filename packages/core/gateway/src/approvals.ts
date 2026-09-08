@@ -79,8 +79,6 @@ export const approveApproval = Effect.fn("Approvals.approve")(function*(
     return yield* new ApprovalConflict({ message: `Approval ${id} is no longer authorized` })
   }
 
-  // A durable claim precedes the external side effect. A lost process leaves
-  // it executing; neither a retry nor expiry may execute or deny it again.
   return yield* Effect.gen(function*() {
     const claimed = yield* store.claimApproval({ tenantId, id, decidedBy })
     if (!claimed) return yield* new ApprovalConflict({ message: `Approval ${id} was decided or expired` })

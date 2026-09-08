@@ -5,17 +5,8 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
-/** A value the operator has to move into another program, and the button that
- *  moves it.
- *
- *  Copying is the whole point of showing these, so the button is part of the
- *  field rather than something nearby: an endpoint URL, a redirect URI, a
- *  config block. The tick after a copy is the only feedback that says *this*
- *  field went to the clipboard — a toast alone cannot, when a card shows
- *  three of them. */
 export function CopyField({ value, label, multiline = false, className }: {
   readonly value: string
-  /** Named in the toast, so a copy from a card of several fields says which. */
   readonly label: string
   readonly multiline?: boolean
   readonly className?: string

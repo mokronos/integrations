@@ -4,18 +4,6 @@ import { Slot } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
-/** One row, one affordance.
- *
- * Everything in this dashboard that a person can click and that is bigger than
- * a button is this component: an integration in the sidebar, a connection, a
- * tool, a field in a schema. They share a hover, a focus ring, and a pressed
- * state, so "is this clickable?" is answered by looking rather than by trying.
- *
- * `asChild` is what makes the whole row the target. The row *becomes* the link
- * or the button instead of wrapping one, so the padding, the icon, and the
- * empty space to the right of the text all belong to the same click — which is
- * what a pointer heading for a row expects, and what a screen reader announces
- * as one control rather than a paragraph containing a small link. */
 const itemVariants = cva(
   "group/item relative flex w-full min-w-0 items-center gap-3 rounded-lg border text-left text-sm transition-colors outline-none",
   {
@@ -62,8 +50,6 @@ export function Item({
   )
 }
 
-/** The icon, avatar, or chevron a row leads with. Never the click target
- *  itself — the row already is one. */
 export function ItemMedia({ className, ...props }: React.ComponentProps<"span">) {
   return (
     <span
@@ -77,8 +63,6 @@ export function ItemMedia({ className, ...props }: React.ComponentProps<"span">)
   )
 }
 
-/** The text column. `min-w-0` so a long tool address truncates instead of
- *  pushing the actions off the row. */
 export function ItemContent({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -99,11 +83,6 @@ export function ItemTitle({ className, ...props }: React.ComponentProps<"div">) 
   )
 }
 
-/** The second line of a row.
- *
- * Deliberately a block, not a flex row: `truncate` and `line-clamp-*` both work
- * by setting `display`, and a base that sets its own would silently win over
- * them. Callers that want inline parts ask for `flex` themselves. */
 export function ItemDescription({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -114,11 +93,6 @@ export function ItemDescription({ className, ...props }: React.ComponentProps<"d
   )
 }
 
-/** Controls that do their own thing on a row that is itself clickable.
- *
- * `relative` lifts them above a stretched link, and the stopped propagation
- * keeps a disconnect from also navigating. A row with actions is still one
- * click target for the row's own purpose; these are the exceptions to it. */
 export function ItemActions({ className, onClick, ...props }: React.ComponentProps<"div">) {
   return (
     <div

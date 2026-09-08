@@ -3,20 +3,6 @@ import { SpecError } from "../errors.ts"
 import { isJsonBoolean, isJsonObject, isJsonString, type Json } from "@mokronos/contracts"
 import { whenPresent } from "@mokronos/contracts"
 
-/** Google Discovery to OpenAPI 3.
- *
- *  Google publishes Gmail, Drive and the rest as Discovery documents, not as
- *  OpenAPI, so something has to convert them. The obvious candidate —
- *  `google-discovery-to-swagger` — was last released in 2019 and loses real
- *  information on today's documents: run Gmail through it and
- *  `users.messages.send` comes back with a `message/cpim` content type and an
- *  empty request-body schema, which is the failure mode where a tool looks
- *  callable and is not. Converting directly is a few hundred lines and gets
- *  those two right, so it is worth owning.
- *
- *  The dialects are close: Discovery's schema objects are JSON Schema draft-03
- *  with `$ref` naming a sibling schema rather than a pointer. */
-
 
 const DiscoverySchemaRef = Schema.Struct({
   $ref: Schema.optional(Schema.String)
@@ -47,8 +33,6 @@ const DiscoveryMethod = Schema.Struct({
   request: Schema.optional(DiscoverySchemaRef),
   response: Schema.optional(DiscoverySchemaRef),
   scopes: Schema.optional(Schema.Array(Schema.String)),
-  /** Present on methods that accept a raw upload — Gmail's `messages.send`
-   *  and `messages.import` are the ones that matter here. */
   supportsMediaUpload: Schema.optional(Schema.Boolean),
   mediaUpload: Schema.optional(Schema.Struct({
     accept: Schema.optional(Schema.Array(Schema.String))
@@ -56,7 +40,6 @@ const DiscoveryMethod = Schema.Struct({
 })
 type DiscoveryMethod = typeof DiscoveryMethod.Type
 
-/** A resource node: methods to expose, and nested resources to walk. */
 const DiscoveryResource = Schema.Struct({
   methods: Schema.optional(Schema.Record(Schema.String, Schema.Json)),
   resources: Schema.optional(Schema.Record(Schema.String, Schema.Json))
@@ -86,13 +69,11 @@ const DiscoveryDocument = Schema.Struct({
 })
 type DiscoveryDocument = typeof DiscoveryDocument.Type
 
-/** Recognises the URLs that serve Discovery documents rather than OpenAPI. */
 export const isGoogleDiscoveryUrl = (url: string): boolean =>
   /^https?:\/\/[^/]*googleapis\.com\/discovery\/v1\/apis\//.test(url) ||
   /^https?:\/\/[^/]*\.googleapis\.com\/\$discovery\/rest/.test(url) ||
   /\/discovery\/v1\/apis\/[^/]+\/[^/]+\/rest$/.test(url)
 
-/** Discovery names a sibling schema; OpenAPI wants a pointer into components. */
 const rewriteRefs = (value: Json): Json => {
   if (Array.isArray(value)) return value.map(rewriteRefs)
   if (!isJsonObject(value)) return value
@@ -104,9 +85,6 @@ const rewriteRefs = (value: Json): Json => {
         : `#/components/schemas/${entry}`
       continue
     }
-    // Draft-03 spelled `required` as a boolean on the property itself. OpenAPI
-    // wants the array form on the parent, and a stray boolean makes the schema
-    // invalid, so it is dropped rather than carried.
     if (key === "required" && isJsonBoolean(entry)) continue
     if (key === "annotations" || key === "id") continue
     result[key] = rewriteRefs(entry)
@@ -133,8 +111,6 @@ const openApiParameters = (
   pathTemplate: string
 ): ReadonlyArray<Json> =>
   Object.entries(parameters).flatMap(([name, parameter]) => {
-    // A path parameter the template does not mention cannot be sent; Discovery
-    // lists global parameters against every method regardless of the path.
     const inPath = parameter.location === "path"
     if (inPath && !pathTemplate.includes(`{${name}}`)) return []
     return [{
@@ -146,9 +122,6 @@ const openApiParameters = (
     }]
   })
 
-/** Gmail's `messages.send` accepts either a JSON `Message` or a raw RFC 822
- *  upload. Declaring both is what makes the JSON form — the one a caller can
- *  actually construct — reachable. */
 const requestBody = (method: DiscoveryMethod): Option.Option<Json> => {
   const reference = method.request?.$ref
   if (reference === undefined) return Option.none()
@@ -208,7 +181,6 @@ const convertDocument = (document: DiscoveryDocument): Json => {
   const paths: Record<string, Record<string, Json>> = {}
 
   for (const method of methods) {
-    // Discovery paths are relative to servicePath and carry no leading slash.
     const path = `/${method.path.replace(/^\//, "")}`
     const verb = method.httpMethod.toLowerCase()
     const parameters = openApiParameters(
@@ -247,11 +219,6 @@ const convertDocument = (document: DiscoveryDocument): Json => {
     ])
   )
 
-  // Discovery splits the server across `rootUrl` (with a trailing slash) and
-  // `servicePath` (without a leading one), and either may be empty — Gmail
-  // carries its version in each method's path and leaves `servicePath` blank.
-  // Trimming both sides and joining explicitly is what keeps the separator
-  // from being either doubled or lost.
   const root = document.rootUrl?.replace(/\/+$/, "")
   const servicePath = (document.servicePath ?? "").replace(/^\/+|\/+$/g, "")
   const serverUrl = root === undefined
@@ -297,8 +264,6 @@ const convertDocument = (document: DiscoveryDocument): Json => {
   }
 }
 
-/** Converts Discovery JSON text into an OpenAPI 3 document, ready for the same
- *  compilation path every other specification takes. */
 export const convertGoogleDiscovery = (
   source: string,
   text: string

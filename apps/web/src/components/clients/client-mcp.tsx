@@ -12,13 +12,6 @@ import { CopyField } from "@/components/ui/copy-field"
 import { apiKeyPlaceholder, mcpConfiguration } from "@/lib/mcp"
 import { useMcpUrl } from "@/lib/queries"
 
-/** What an agent needs to reach this client's tools over MCP.
- *
- *  This lives on the client rather than on a page of its own because both
- *  halves of the answer are the client's: the endpoint is the same for
- *  everyone, but what it exposes is this client's effective tools and the
- *  credential that selects them is this client's API key. A copy button
- *  anywhere else would be half an answer. */
 export function ClientMcp({ clientName }: { readonly clientName: string }) {
   const mcpUrl = useMcpUrl()
   const url = mcpUrl.data

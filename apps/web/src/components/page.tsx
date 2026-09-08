@@ -47,11 +47,6 @@ export function ReloadButton({
   )
 }
 
-/** One place where a failed request is rendered.
- *
- * The gateway's errors are written for a person — "This key may not change the
- * catalog", "Approval ap_7 expired" — so they are shown verbatim rather than
- * replaced with a generic apology. */
 export function QueryError({ error }: { readonly error: Error | null | undefined }) {
   if (error === null || error === undefined) return null
   return (

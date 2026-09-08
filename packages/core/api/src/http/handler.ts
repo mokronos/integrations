@@ -42,58 +42,28 @@ import type { WebAssets } from "../web-assets.ts"
 import type { RateLimiter } from "@mokronos/gateway-core"
 import { createMcpGatewayHandler } from "./mcp.ts"
 
-/** What the server knows about a request that the request itself cannot say.
- *  Carried per request through the web-handler seam; the served gateway
- *  derives it instead — see {@link deriveRequestContext}. */
 export interface GatewayRequestContext {
   readonly localSecret?: string
   readonly remoteAddress?: string
 }
 
-/** The seam every embedding takes: the worker, the served gateway, and the
- *  tests all hand over plain values here and this module turns them into the
- *  layers the handlers ask for. Callers should not have to know that the HTTP
- *  layer runs on Effect services. */
 export interface GatewayHandlerOptions extends GatewaySettings {
   readonly store: GatewayStore
-  /** Every service the integration host exposes, as the composition root
-   *  already built them.
-   *
-   *  A context rather than one service because reading an unknown endpoint
-   *  reaches past `IntegrationHost` to the MCP client and the spec cache, and a
-   *  context rather than a layer because the host is already running — building
-   *  a second one here would open a second database. */
   readonly hostServices: Context.Context<HostServices>
   readonly oauth: OAuthSessions
   readonly sessions?: SignInPolicy
-  /** Two buckets with distinct key spaces: a per-address limit before
-   *  authentication protects the credential machinery itself, and a
-   *  per-principal limit after it keeps one misbehaving client from starving
-   *  its neighbours. */
   readonly addressRateLimiter?: RateLimiter
   readonly rateLimiter?: RateLimiter
-  /** Largest accepted JSON body in bytes. Declared sizes are refused before a
-   *  byte is read; defaults to one mebibyte. */
   readonly maxBodyBytes?: number
-  /** Serves the control plane's own files for unmatched non-`/v1` paths. */
   readonly webAssets?: WebAssets
   readonly observabilityLayer?: Layer.Layer<never>
-  /** Where a failure nobody declared is recorded, and what correlation id the
-   *  caller is given for it. Unset logs the cause and mints an id — see
-   *  {@link ErrorCapture.logging}. A hosted deployment points this at whatever
-   *  it already pages on. */
   readonly errorCapture?: ErrorSink
 }
 
-/** Refuses oversized declared bodies before any handler or authority work.
- *  Chunked bodies without a declared length are not bounded here — every real
- *  client (browsers, fetch, the worker runtime) declares one. */
 const bodyLimitLayer = (maxBytes: number) =>
   HttpRouter.use((router) =>
     router.addGlobalMiddleware((httpEffect) =>
       Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) => {
-        // A length that is absent or unreadable is not a length over the limit,
-        // so it falls through to the handler like any undeclared body.
         const declared = Schema.decodeUnknownOption(NonNegativeIntFromString)(
           request.headers["content-length"]
         )
@@ -105,31 +75,11 @@ const bodyLimitLayer = (maxBytes: number) =>
           : httpEffect
       })))
 
-/** The single answer to a request that failed rather than returned.
- *
- *  Two kinds arrive here, and telling them apart is the whole job. A schema
- *  refusal is the caller's — a malformed body, a bad path parameter — and
- *  saying which field is wrong is the useful thing to do. Anything else is
- *  ours: a rejected driver call, a bug. That one is answered incuriously,
- *  because a libsql error carries the database path and a stack trace carries
- *  the layout of the deployment.
- *
- *  Both were previously invisible: an undeclared failure reached the router as
- *  a defect and became a 500 with an empty body, which is the one failure shape
- *  no client can read.
- *
- *  What the caller does get is the correlation id the failure was recorded
- *  under — minted by `capture` if a handler translated a store failure, and
- *  here if the defect arrived from somewhere that never passed a sink. It is
- *  the only detail that crosses: it says nothing about the deployment and it is
- *  the one thing that makes the log line findable. */
 const failureLayer = () =>
   HttpRouter.use((router) =>
     router.addGlobalMiddleware((httpEffect) =>
       Effect.catchCauseIf(
         httpEffect,
-        // Interruption is the server shutting down or a client hanging up.
-        // Neither is a failure to report.
         (cause) => Cause.hasDies(cause) || Cause.hasFails(cause),
         (cause) => {
           const defect = Cause.findDefect(cause)
@@ -160,30 +110,16 @@ const failureLayer = () =>
         }
       )))
 
-/** The one place that decides what an unmatched non-`/v1` path means: on a
- *  deployment with a control plane it is a file, otherwise a JSON 404/405 that
- *  says which paths do exist.
- *
- *  Composition order matters twice over: platform services come before the
- *  groups so group requirements are subtracted against them, and the authority
- *  layer exists before any group builds, because middleware services are
- *  captured from the context a group layer builds in. */
 export const defaultMaxBodyBytes = 1024 * 1024
 
 export const gatewayAppLayer = (options: GatewayHandlerOptions) => {
   const optional = <Key extends string, T>(key: Key, value: T | undefined) =>
     whenPresent(key, value)
 
-  // Where `capture` sends a store failure a handler could not act on, and where
-  // the edge sends a defect that reached it uncaptured. One sink for both, so a
-  // failure recorded in a handler and a failure recorded at the edge land in
-  // the same place under ids of the same shape.
   const errorCapture = options.errorCapture === undefined
     ? ErrorCapture.logging
     : Layer.succeed(ErrorCapture, options.errorCapture)
 
-  // Everything the handlers ask for, provided once here rather than threaded
-  // through six factory calls.
   const dependencies = Layer.mergeAll(
     errorCapture,
     Layer.succeed(GatewayStoreService, options.store),
@@ -211,8 +147,6 @@ export const gatewayAppLayer = (options: GatewayHandlerOptions) => {
     AuthLayer
   ).pipe(Layer.provide(dependencies))
 
-  // The FileSystem stays in the outputs as well: the API builder requires one
-  // even though every response here is JSON.
   const platform = Layer.mergeAll(
     FileSystem.layerNoop({}),
     HttpPlatform.layer.pipe(Layer.provide(FileSystem.layerNoop({}))),
@@ -242,9 +176,6 @@ export interface GatewayHandle {
   dispose(): Promise<void>
 }
 
-/** Builds the API once and answers requests against it without owning a
- *  socket — the seam the Cloudflare Worker, acceptance tests, and any embedded
- *  consumer drive directly. */
 export const createGatewayHandler = (options: GatewayHandlerOptions): GatewayHandle => {
   const mcp = createMcpGatewayHandler({
     store: options.store,
@@ -253,8 +184,6 @@ export const createGatewayHandler = (options: GatewayHandlerOptions): GatewayHan
     ...whenPresent("dashboardUrl", options.dashboardUrl),
     ...whenPresent("errorCapture", options.errorCapture)
   })
-  // The API builder's requirements (groups, router, platform services) are all
-  // satisfied by the app layer's outputs, and its outputs keep them.
   const app = HttpApiBuilder.layer(GatewayApi).pipe(
     Layer.provideMerge(gatewayAppLayer(options))
   )

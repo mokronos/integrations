@@ -6,9 +6,6 @@ import { isJsonObject, property, type Json } from "@mokronos/contracts"
 
 const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> => Effect.runPromise(effect)
 
-/** A document exercising the parts that are easy to get wrong: a relative
- *  server, a recursive schema, a body behind a `$ref`, and parameters in three
- *  locations. */
 const spec = JSON.stringify({
   openapi: "3.0.3",
   info: { title: "Example", version: "2", description: "An example" },
@@ -23,7 +20,6 @@ const spec = JSON.stringify({
         required: ["label"],
         properties: {
           label: { type: "string" },
-          // Recursive: dereferencing this document would produce a cycle.
           children: { type: "array", items: { $ref: "#/components/schemas/Node" } }
         }
       },
@@ -103,8 +99,6 @@ describe("compiling a specification", () => {
     const compiled = await run(compileSpec("https://example.com/openapi.json", spec))
     const add = compiled.operations.find((operation) => operation.name === "addNode")
     const defs = property(add?.inputSchema ?? null, "$defs")
-    // `Node` is reached through the body; `Unused` is not in the document's
-    // reachable set from this operation.
     expect(Object.keys(isJsonObject(defs) ? defs : {})).toEqual(["Node"])
   })
 
@@ -241,15 +235,10 @@ describe("Google Discovery", () => {
     const send = compiled.operations.find(
       (operation) => operation.name === "gmail.users.messages.send"
     )!
-    // The body is the whole point: a converter that loses it produces a tool
-    // that looks callable and is not.
     expect(send.locations["body"]).toBe("body")
     const defs: Json = property(send.inputSchema, "$defs")
     expect(Object.keys(isJsonObject(defs) ? defs : {}).toSorted())
       .toEqual(["Message", "MessagePart"])
-    // Splitting a caller's arguments is exercised against the captured
-    // descriptor in arguments.test.ts; what matters here is that the operation
-    // carries a body location at all.
     expect(Option.getOrNull(send.bodyProperty)).toBe("body")
   })
 
@@ -269,8 +258,6 @@ describe("Google Discovery", () => {
     const send = compiled.operations.find(
       (operation) => operation.name === "gmail.users.messages.send"
     )!
-    // `alt` is a global query parameter and belongs; a stray global *path*
-    // parameter would not be sendable.
     expect(send.locations["alt"]).toBe("query")
   })
 })

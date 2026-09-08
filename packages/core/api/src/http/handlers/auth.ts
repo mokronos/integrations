@@ -45,10 +45,6 @@ import {
 } from "../services.ts"
 import { capture } from "../observability.ts"
 
-/** An HTML page for the OAuth browser flow — one of the few responses here
- *  that really is low-level HTTP rather than a typed endpoint's success value.
- *  It no longer carries headers: a cookie set alongside a page goes through
- *  {@link setSessionCookie} like every other cookie does. */
 const page = (
   status: number,
   content: { readonly title: string; readonly message: string }
@@ -58,10 +54,6 @@ const page = (
     contentType: "text/html; charset=utf-8"
   })
 
-/** The login surface's failures do not distinguish "unknown email" from "wrong
- *  password". The difference is an enumeration oracle for anyone harvesting
- *  credentials, and the human who needs to know already knows which one it
- *  was. */
 const verifyLoginPassword = Effect.fn("Auth.verifyLoginPassword")(function*(
   store: GatewayStore,
   email: string,
@@ -92,8 +84,6 @@ const safeReturnPath = (candidate: string | undefined): string | null => {
     : null
 }
 
-// --- system -----------------------------------------------------------------
-
 export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
   Effect.gen(function*() {
     const store = yield* GatewayStoreService
@@ -109,7 +99,6 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
         return { token: token.secret }
       })
 
-    /** The cookie every sign-in path ends with, whatever shape its response takes. */
     const startSession = (token: string) =>
       setSessionCookie(token, {
         maxAgeSeconds: Math.round(ttlHours * 60 * 60),
@@ -287,12 +276,8 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
           }
           const body = request.payload
           if ((yield* capture(store.findLoginByEmail(body.email))) !== undefined) {
-            // Stated as taken rather than attempted-and-failed: this is a
-            // signup form, not a login oracle.
             return yield* new ApiBadRequest({ error: `An account for ${body.email} already exists` })
           }
-          // Open signup mints a fresh partition per account; joining an
-          // existing tenant is an operator action, not a self-serve one.
           const tenant = yield* capture(store.createTenant({
             id: newTenantId(),
             name: body.tenantName ?? body.email.split("@")[0] ?? body.email
@@ -305,7 +290,6 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
             email: body.email,
             passwordHash
           }))
-          // Signing up is signing in: the first session starts immediately.
           const session = yield* issueSession(subject.id, tenant.id)
           yield* startSession(session.token)
           return {
@@ -334,8 +318,6 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
       .handle("logout", () =>
         Effect.gen(function*() {
           const caller = yield* Identity
-          // Revoking beats merely forgetting: a stolen cookie stays valid until
-          // its row is gone, so logout deletes the session server-side too.
           if (caller.kind === "session") {
             yield* capture(store.revokeSession(caller.tokenHash))
           }
@@ -397,14 +379,11 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
               code: "invalid-credentials" as const
             })
           }
-          // Same email is a no-op rather than an argument with the schema.
           if (body.email !== login.email &&
             (yield* capture(store.findLoginByEmail(body.email))) !== undefined) {
             return yield* new ApiBadRequest({ error: `An account for ${body.email} already exists` })
           }
           yield* capture(store.changeLoginEmail(caller.subjectId, body.email))
-          // The identity travels in the session row's join; sessions survive an
-          // email change, so no re-login is forced.
           return { email: body.email }
         }))
       .handle("changePassword", (request) =>
@@ -434,8 +413,6 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
           }
           const newPasswordHash = yield* capture(hashPassword(body.newPassword))
           yield* capture(store.changeLoginPassword(caller.subjectId, newPasswordHash))
-          // A password change is a statement that the old one was compromised-
-          // adjacent at best; every other device re-authenticates.
           const revoked = yield* capture(store.revokeSubjectSessions(caller.subjectId, caller.tokenHash))
           return { updated: true as const, revokedSessions: revoked }
         }))
@@ -467,16 +444,10 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
               code: "invalid-credentials" as const
             })
           }
-          // The subject goes first — its cascade takes the login and sessions —
-          // and the workspace follows only when nobody is left inside it. A
-          // shared tenant survives its member; a solo signup takes its clients,
-          // keys, configuration assignments, approvals, and audit rows down with it.
           yield* capture(store.deleteSubject(caller.subjectId))
           if ((yield* capture(store.countSubjects(caller.tenantId))) === 0) {
             yield* capture(store.deleteTenant(caller.tenantId))
           }
-          // Vendor connections live in the host's own storage keyed by address,
-          // outside this store; they are not reclaimed here.
           yield* clearSessionCookie({ secure: secureCookies })
           return { deleted: true }
         }))
@@ -484,8 +455,6 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
 
 const defaultSessionTtlHours = 24 * 30
 
-/** How long a browser sign-in link and its OAuth state stay usable. Short on
- *  purpose: the human is standing there. */
 const handoffTtlMs = 10 * 60 * 1000
 
 type GoogleCallbackOutcome = {
@@ -515,8 +484,6 @@ const completeGoogleSignIn = (
 ): Effect.Effect<GoogleCallbackOutcome> =>
   Effect.gen(function*() {
     const store = dependencies.store
-    // Google is the far end here. It being unreachable is not this gateway
-    // breaking, and the human staring at the browser deserves to be told which.
     const identity = yield* Effect.result(
       Effect.tryPromise(() => resolveGoogleIdentity(google, code))
     )

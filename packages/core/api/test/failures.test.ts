@@ -27,15 +27,11 @@ afterEach(async () => {
   ))
 })
 
-/** The message a broken driver would carry: the kind of detail that must reach
- *  the log and must not reach the caller. */
 const driverFailure = "SQLITE_BUSY: database is locked at /srv/secrets/gateway.sqlite"
 
 const setup = async (options: {
   readonly listClientsFails?: boolean
   readonly unreachableUrl?: boolean
-  /** Stands in for whatever a deployment pages on. Told the store operation
-   *  that rejected, and answers the correlation id to quote back. */
   readonly errorCapture?: (operation: string | undefined) => string
 } = {}) => {
   const directory = await run(mkdtemp(path.join(tmpdir(), "wf-failures-")))
@@ -57,8 +53,6 @@ const setup = async (options: {
   const key = generateApiKey()
   await run(store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash }))
 
-  // A store whose one method rejects, standing in for any driver-level failure
-  // no handler declared.
   const presented: GatewayStore = options.listClientsFails === true
     ? {
       ...store,
@@ -70,9 +64,6 @@ const setup = async (options: {
     }
     : store
 
-  // A host whose reads of the caller's URL fail the way an unreachable one
-  // does. Classification tries both shapes, so both have to refuse before the
-  // gateway can say it is neither.
   const unreachable = options.unreachableUrl === true
     ? {
       mcp: {
@@ -144,8 +135,6 @@ describe("failures nobody declared", () => {
       }
     }))
     const body = await run((await run(call("GET", "/v1/clients"))).json())
-    // One event, one id, and the caller is told the same one the sink kept:
-    // quoting it back is what makes the log line findable.
     expect(recorded).toHaveLength(1)
     expect(body.traceId).toBe(recorded[0]?.traceId)
   })

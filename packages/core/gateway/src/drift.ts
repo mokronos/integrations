@@ -4,13 +4,6 @@ import type { DriftEntry, ToolSnapshot } from "./domain.ts"
 import { Effect, Schema } from "effect"
 import type { GatewayStore, GatewayStoreError } from "./store.ts"
 
-/** Pure discovery means tool names and shapes belong to vendors. A rename or a
- * reshaped schema is therefore a normal event, not a bug — but it is one that
- * silently breaks bindings and workflows if nobody is told.
- *
- * The failure direction is already safe: a binding that no longer matches denies
- * rather than allows. What is missing without this is the *signal*, so a
- * workflow does not die at 3am with "tool not found" and no explanation. */
 const schemaFingerprint = (snapshot: Pick<ToolSnapshot, "inputSchema" | "outputSchema">): string =>
   JSON.stringify([snapshot.inputSchema ?? null, snapshot.outputSchema ?? null])
 
@@ -27,8 +20,6 @@ export const diffSnapshots = (
   for (const [identity, snapshot] of after) {
     const existing = before.get(identity)
     if (existing === undefined) {
-      // Newly exposed tools are reported too: under explicit policy rules they are
-      // unreachable until someone delegates them, which makes them easy to miss.
       entries.push({
         kind: "added",
         integration: snapshot.integration,
@@ -60,10 +51,6 @@ export const diffSnapshots = (
   return entries
 }
 
-/** The single host capability drift detection needs: re-reading what a
- *  vendor exposes right now. Naming the narrow contract here means a stand-in
- *  satisfies it honestly, instead of impersonating the whole host surface
- *  and casting the gap away. */
 export interface ToolCatalogReader {
   readonly host: Pick<IntegrationHost["Service"], "listTools">
 }
@@ -72,12 +59,7 @@ export type DriftReport = {
   readonly integration: string
   readonly entries: ReadonlyArray<DriftEntry>
   readonly checkedAt: Date
-  /** True when there was nothing to compare against — the first sync records
-   *  the shape rather than discovering that all of it is new. Reporting fifty
-   *  "added" entries for an integration nobody has synced yet is noise that
-   *  buries the one real change in the next run. */
   readonly baseline: boolean
-  /** How many tools the integration exposes right now. */
   readonly tools: number
 }
 
@@ -89,9 +71,6 @@ export class DriftRefreshError extends Schema.TaggedError<DriftRefreshError>()(
   }
 ) {}
 
-/** Re-reads an integration's tools, reports what moved since the last sync, and
- *  records the new shape as the baseline. Snapshots are per tenant: two tenants
- *  connecting to the same vendor track their drift independently. */
 export const refreshIntegrationSnapshot = Effect.fn("Drift.refreshIntegrationSnapshot")(
   function*(
     dependencies: {
@@ -103,8 +82,6 @@ export const refreshIntegrationSnapshot = Effect.fn("Drift.refreshIntegrationSna
   ): Effect.fn.Return<DriftReport, DriftRefreshError | GatewayStoreError> {
     const slug = IntegrationSlug.make(integration)
     const checkedAt = new Date()
-    // The host's own failures are typed, so a re-read that fails names what
-    // went wrong instead of arriving as an opaque rejection.
     const tools = yield* dependencies.integrations.host.listTools({ integration: slug }).pipe(
       Effect.mapError((cause) => new DriftRefreshError({ integration, cause }))
     )
@@ -120,8 +97,6 @@ export const refreshIntegrationSnapshot = Effect.fn("Drift.refreshIntegrationSna
     const baseline = previous.length === 0
     const entries = baseline ? [] : diffSnapshots(previous, current)
     yield* dependencies.store.putToolSnapshots(tenantId, current)
-    // Removed tools keep their old snapshot row, so the next refresh does not
-    // report the same removal forever.
     yield* dependencies.store.forgetToolSnapshots(
       tenantId,
       entries.filter((entry) => entry.kind === "removed").map((entry) => ({

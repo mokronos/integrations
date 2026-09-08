@@ -41,8 +41,6 @@ export function AccessProfileEditor({ id, storedTools, assignedClientCount }: { 
     return next
   })
   return <ToolEditor title="Enabled tools" description="A connection is enabled when at least one of its tools is on." catalog={catalog} assignedClientCount={assignedClientCount} renderGroup={(tools) => {
-    // The connection switch is on only when every tool under it is on, so
-    // flipping it never hides a half-enabled connection behind an "on" look.
     const toolKeys = tools.map((tool) => keyOf(tool.connection, tool.name))
     const on = toolKeys.filter((key) => enabled.has(key))
     return <ToolSwitch label={`${on.length} of ${toolKeys.length} enabled`} checked={on.length === toolKeys.length} onCheckedChange={(checked) => toggle(toolKeys, checked)} />
@@ -67,18 +65,12 @@ export function ApprovalPolicyEditor({ id, storedTools, assignedClientCount }: {
     onSuccess: () => { invalidate(keys.approvalPolicy(id), keys.approvalPolicies, keys.clients, keys.overview); toast.success("Approval policy saved") },
     onError: (error: Error) => toast.error("Could not save approval policy", { description: error.message })
   })
-  // One state, named, rather than a switch between two labels: the row itself is
-  // the toggle now, and "Allow | Require approval" on either side of it gave a
-  // click near the words no obvious meaning.
   return <ToolEditor title="Approval decisions" description="Choose whether each connected tool runs immediately or waits for human approval." catalog={catalog} assignedClientCount={assignedClientCount} render={(tool) => {
     const value = decision(tool)
     return <ToolSwitch label={value === "require_approval" ? "Requires approval" : "Runs immediately"} checked={value === "require_approval"} onCheckedChange={(checked) => setDecisions((current) => new Map(current).set(keyOf(tool.connection, tool.name), checked ? "require_approval" : "allow"))} />
   }} save={() => save.mutate()} saving={save.isPending} error={integrations.error} />
 }
 
-/** Whether a tool answers what was typed. Connection, name, and description all
- *  count, because "which of these touches mail" and "what was that tool called"
- *  are the same box to the person typing. */
 const matches = (tool: RouteTool, query: string): boolean => {
   const needle = query.trim().toLowerCase()
   if (needle.length === 0) return true
@@ -89,14 +81,10 @@ const matches = (tool: RouteTool, query: string): boolean => {
 
 function ToolEditor({ title, description, catalog, assignedClientCount, render, renderGroup, save, saving, error }: { readonly title: string; readonly description: string; readonly catalog: ReadonlyArray<RouteTool>; readonly assignedClientCount: number; readonly render: (tool: RouteTool) => React.ReactNode; readonly renderGroup?: (tools: ReadonlyArray<RouteTool>) => React.ReactNode; readonly save: () => void; readonly saving: boolean; readonly error: Error | null }) {
   const [query, setQuery] = useState("")
-  // Closed until asked about: a tenant with a dozen connections is hundreds of
-  // rows, and the question is nearly always about one of them.
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
   const searching = query.trim().length > 0
   const groups = [...Map.groupBy(catalog, (tool) => connectionLabel(tool.connection))]
     .map(([connection, tools]) => ({ connection, tools: tools.filter((tool) => matches(tool, query)) }))
-    // A connection with nothing matching is not a collapsed connection, it is
-    // one that has no answer to the question.
     .filter((group) => group.tools.length > 0)
 
   return <div className="space-y-4">
@@ -113,9 +101,6 @@ function ToolEditor({ title, description, catalog, assignedClientCount, render, 
           <Input className="pl-8" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search connections and tools…" aria-label="Search connections and tools" />
         </div>}
         {groups.map(({ connection, tools }) => {
-          // A search that left everything closed would answer nothing, so a
-          // match opens its connection without disturbing what was opened by
-          // hand — clearing the box returns to that.
           const open = searching || expanded.has(connection)
           return <section key={connection} className="space-y-2">
             <div className="flex items-center gap-2 border-b pb-2">
@@ -127,13 +112,9 @@ function ToolEditor({ title, description, catalog, assignedClientCount, render, 
                 })}>
                   <ChevronRight aria-hidden className={cn("size-4 shrink-0 transition-transform", open && "rotate-90")} />
                   <ItemContent><ItemTitle className="font-mono font-medium">{connection}</ItemTitle></ItemContent>
-                  {/* Only when nothing else is counting: the access editor's
-                      group control already reads "N of M enabled". */}
                   {renderGroup === undefined ? <span className="text-muted-foreground shrink-0 text-xs">{pluralise(tools.length, "tool")}</span> : null}
                 </button>
               </Item>
-              {/* The group control acts on what the search has left showing, so
-                  flipping it never reaches a row the operator cannot see. */}
               {renderGroup?.(tools)}
             </div>
             {open ? tools.map((tool) => <Item key={keyOf(tool.connection, tool.name)} asChild interactive variant="plain" size="sm"><label><ItemContent><ItemTitle className="font-mono font-normal">{tool.name}</ItemTitle>{tool.description.length === 0 ? null : <ItemDescription className="line-clamp-2">{tool.description}</ItemDescription>}</ItemContent>{render(tool)}</label></Item>) : null}

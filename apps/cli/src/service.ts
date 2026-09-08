@@ -25,9 +25,6 @@ import {
   type ServiceDescriptor
 } from "./service-descriptors.ts"
 
-/** Whether a service definition exists, so a command can say that the running
- *  gateway is older than the code on disk. Reads the definition rather than
- *  asking the service manager: the file is the registration. */
 export const serviceIsRegistered = async (): Promise<boolean> => {
   const definition = process.platform === "darwin"
     ? path.join(homedir(), "Library", "LaunchAgents", `${serviceLabel}.plist`)
@@ -68,9 +65,6 @@ const unsupportedPlatform = (verb: string): Error =>
     `ii ${verb} currently supports Linux systemd --user and macOS launchd (this is ${process.platform})`
   )
 
-/** The service manager reports success once it has spawned the process. What
- *  the caller asked for is a gateway that answers, so wait for that and point
- *  at the two places the reason would be if it never does. */
 const installedAndReady = async (
   descriptor: ServiceDescriptor,
   previousKey: string | undefined,
@@ -93,13 +87,6 @@ export interface InstallOptions {
   readonly verbose?: boolean
 }
 
-/** Idempotent: reinstalling rewrites the unit and restarts the service, which
- *  is also how you pick up upgraded sources.
- *
- * Returns once the gateway actually answers, not once the service manager
- * accepts the unit: `systemctl restart` returns as soon as the process is
- * spawned, and a client that ran immediately afterwards used to be told there
- * was no gateway. */
 export const installService = async (options: InstallOptions): Promise<ServiceDescriptor> => {
   const home = integrationsHome()
   const verbose = options.verbose ?? false
@@ -127,8 +114,6 @@ export const installService = async (options: InstallOptions): Promise<ServiceDe
     await command("systemctl", ["--user", "daemon-reload"], verbose)
     await command("systemctl", ["--user", "enable", `${serviceLabel}.service`], verbose)
     await command("systemctl", ["--user", "restart", `${serviceLabel}.service`], verbose)
-    // Without lingering the service stops at logout, which defeats the point
-    // for a machine an agent reaches over SSH. Best effort: it needs polkit.
     await command("loginctl", ["enable-linger", userInfo().username], verbose).catch(() => undefined)
     return await installedAndReady(descriptor, previousKey, `systemctl --user status ${serviceLabel}`)
   }
@@ -149,10 +134,6 @@ export const installService = async (options: InstallOptions): Promise<ServiceDe
   throw unsupportedPlatform("install")
 }
 
-/** Stops a registered unit without deregistering it, so the port is free for
- *  whatever starts next and the service manager will not restart it underneath.
- *  Not an error when no unit is registered or it was already stopped: the
- *  postcondition is "this unit is not running". */
 export const stopService = async (verbose = false): Promise<void> => {
   if (process.platform === "linux") {
     await command("systemctl", ["--user", "stop", `${serviceLabel}.service`], verbose)
@@ -167,9 +148,6 @@ export const stopService = async (verbose = false): Promise<void> => {
   throw unsupportedPlatform("stop")
 }
 
-/** Stops and deregisters the service. The home directory is left alone: it
- *  holds the connections and credentials, and removing a service definition is
- *  not consent to delete those. */
 export const uninstallService = async (verbose = false): Promise<void> => {
   if (process.platform === "linux") {
     await command("systemctl", ["--user", "disable", "--now", `${serviceLabel}.service`], verbose)
@@ -190,16 +168,11 @@ export const uninstallService = async (verbose = false): Promise<void> => {
   throw unsupportedPlatform("uninstall")
 }
 
-/** The program to re-execute for a service unit or a detached start. A compiled
- * binary re-executes itself; run from source `process.execPath` is bun, so the
- * entry point has to travel with it. `Bun.main` lives in the virtual filesystem
- * only in the compiled case, which is what distinguishes the two. */
 export const serviceProgram = (): ReadonlyArray<string> =>
   Bun.main.startsWith("/$bunfs/") || Bun.main.startsWith("B:\\~BUN\\")
     ? [process.execPath]
     : [process.execPath, Bun.main]
 
-/** A bind address is not always a reachable address. */
 const probeBase = (host: string, port: number): string =>
   `http://${host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host}:${port}`
 
@@ -208,14 +181,6 @@ const responds = async (base: string): Promise<boolean> => {
   return response !== undefined
 }
 
-/** Listening is not the same as ready: the gateway mints the local key and
- * writes `gateway.json` after the socket opens, and a client that reads the
- * file in between gets the previous run's key.
- *
- * `previousKey` is what the start we are waiting on has to replace. Every start
- * mints a fresh key, so requiring a different one distinguishes *our* gateway
- * from whatever was answering on that port before — a restart that cannot bind
- * fails here instead of being reported as ready. */
 const isReady = async (
   home: string,
   base: string,
@@ -242,13 +207,9 @@ interface WaitOptions {
   readonly home: string
   readonly base: string
   readonly previousKey: string | undefined
-  /** Lets the detached case fail fast when the child is already gone rather
-   *  than waiting out the timeout. */
   readonly exitCode?: () => number | undefined
 }
 
-/** Polls until the gateway answers an authenticated request with a key it minted
- *  on this start. */
 const waitUntilReady = async (options: WaitOptions): Promise<boolean> => {
   for (let waited = 0; waited < readyTimeoutMs; waited += readyIntervalMs) {
     if (options.exitCode?.() !== undefined) return false
@@ -273,10 +234,6 @@ export interface DetachedGateway {
   readonly logPath: string
 }
 
-/** `ii serve --detach` — a background gateway without knowing about
- * `&`. Its lifetime is a plain child process, the same as `&`: it goes away on
- * logout and does not come back after a reboot. `ii install` is the
- * option for that. */
 export const startDetachedGateway = async (options: DetachOptions): Promise<DetachedGateway> => {
   const home = integrationsHome()
   const base = probeBase(options.host, options.port)
@@ -295,11 +252,8 @@ export const startDetachedGateway = async (options: DetachOptions): Promise<Deta
     [...options.program, "serve", "--port", String(options.port), "--host", options.host],
     { cwd: home, stdin: "ignore", stdout, stderr }
   )
-  // The child holds its own copies; the parent is about to exit anyway.
   closeSync(stdout)
   closeSync(stderr)
-  // Detached means the parent must not wait on it, and must not be kept alive
-  // by it either.
   child.unref()
   let exitCode: number | undefined
   void child.exited.then((code) => {
@@ -322,8 +276,6 @@ export const startDetachedGateway = async (options: DetachOptions): Promise<Deta
 export interface StoppedGateway {
   readonly pid: number
   readonly url: string
-  /** SIGTERM was ignored and the process had to be killed. Worth reporting: a
-   *  gateway that will not shut down cleanly may have left a connection open. */
   readonly forced: boolean
 }
 
@@ -331,8 +283,6 @@ const stopTimeoutMs = 10_000
 
 const isAlive = (pid: number): boolean => {
   try {
-    // Signal 0 asks the kernel whether the pid exists without delivering
-    // anything.
     process.kill(pid, 0)
     return true
   } catch {
@@ -356,8 +306,6 @@ const capture = async (
   }
 }
 
-/** Best effort, and read only to refuse a pid that is demonstrably not a
- *  gateway: an unreadable command line is not evidence either way. */
 const processCommand = async (pid: number): Promise<string | undefined> => {
   if (process.platform === "linux") {
     const raw = await Bun.file(`/proc/${pid}/cmdline`).text().catch(() => undefined)
@@ -366,8 +314,6 @@ const processCommand = async (pid: number): Promise<string | undefined> => {
   return (await capture("ps", ["-o", "command=", "-p", String(pid)]))?.trim()
 }
 
-/** For a gateway old enough not to have recorded its own pid. `lsof` covers
- *  both Linux and macOS; `ss` is the fallback for a Linux box without it. */
 const listeningPid = async (port: number): Promise<number | undefined> => {
   const fromLsof = await capture("lsof", ["-ti", `tcp:${port}`, "-sTCP:LISTEN"])
   const firstLine = fromLsof?.trim().split("\n")[0]?.trim()
@@ -385,17 +331,6 @@ const waitUntilStopped = async (base: string): Promise<boolean> => {
   return false
 }
 
-/** Stops the gateway the config file points at, so a restart can pick up
- *  changed sources. Returns `undefined` when nothing was listening, which is
- *  success for a caller that only wants a fresh gateway afterwards.
- *
- *  This signals a process it did not start, so it identifies the target three
- *  ways first — the recorded url answers, the recorded pid is alive, and that
- *  pid's command line is a `serve` — rather than trusting a config file that
- *  may describe a process that exited long ago and a pid the kernel has since
- *  reused. A service-managed gateway is not stopped this way: restarting the
- *  unit is `installService`, and killing its process would leave the unit
- *  looking inactive while an unmanaged gateway held the port. */
 export const stopGateway = async (): Promise<StoppedGateway | undefined> => {
   const home = integrationsHome()
   const config = await readGatewayConfig(home)

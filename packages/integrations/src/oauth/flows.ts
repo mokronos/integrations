@@ -25,17 +25,6 @@ import { AuthTemplateSlug } from "../catalog/ids.ts"
 import { whenPresent } from "@mokronos/contracts"
 import { OAuthServerProbe, OwnerTier } from "@mokronos/contracts"
 
-/** OAuth, over the flow primitives in `@modelcontextprotocol/client`.
- *
- *  Those functions are standalone — metadata discovery (RFC 8414 and RFC 9728),
- *  dynamic client registration (RFC 7591), PKCE authorization, code exchange and
- *  refresh — so they serve an OpenAPI integration just as well as an MCP one.
- *  What is left to own is where the client, the pending flow and the resulting
- *  tokens are kept, and the decision to refresh a token before a call rather
- *  than after a failure. */
-
-/** The metadata this host needs, decoded out of whatever the server published.
- *  Discovery returns a large document; only these fields drive a flow. */
 const ServerMetadata = Schema.Struct({
   issuer: Schema.optional(Schema.String),
   authorization_endpoint: Schema.optional(Schema.String),
@@ -65,11 +54,6 @@ const RegisteredClient = Schema.Struct({
 
 const decodeRegisteredClient = Schema.decodeUnknownEffect(RegisteredClient)
 
-/** Discovers an authorization server starting from a resource URL.
- *
- *  RFC 9728 first: the resource says which authorization servers speak for it.
- *  Falling back to treating the URL itself as the issuer covers the many
- *  providers that publish RFC 8414 metadata and no resource metadata. */
 const discover = (
   url: string
 ): Effect.Effect<{
@@ -109,11 +93,9 @@ const discover = (
     )
   )
 
-/** RFC 8707 wants the resource as a URL; the catalog stores it as text. */
 const resourceUrl = (resource: string | undefined): URL | undefined =>
   resource === undefined ? undefined : new URL(resource)
 
-/** The client metadata this host presents when registering itself. */
 const clientMetadata = (redirectUri: string, scopes: ReadonlyArray<string>) => ({
   client_name: "integrations gateway",
   redirect_uris: [redirectUri],
@@ -123,11 +105,8 @@ const clientMetadata = (redirectUri: string, scopes: ReadonlyArray<string>) => (
   ...whenPresent("scope", scopes.length === 0 ? undefined : scopes.join(" "))
 })
 
-/** Empty because the SDK's flow functions read the redirect from their own
- *  argument rather than from the client record. */
 const noRedirectUris: ReadonlyArray<string> = []
 
-/** How the SDK's flow functions want a client described. */
 const clientInformation = (
   record: OAuthClientRecord,
   secret: Option.Option<string>
@@ -177,9 +156,7 @@ export interface OAuthAccess {
 export class OAuthFlows extends Context.Service<
   OAuthFlows,
   {
-    /** Reads an authorization server's metadata. Changes no stored state. */
     readonly probe: (url: string) => Effect.Effect<OAuthServerProbe, OAuthError>
-    /** Registers this host as a client with the server (RFC 7591). */
     readonly registerDynamicClient: (options: {
       readonly owner: OwnerTier
       readonly slug: OAuthClientSlug
@@ -193,7 +170,6 @@ export class OAuthFlows extends Context.Service<
       readonly scopes: ReadonlyArray<string>
       readonly tokenAuthMethods?: ReadonlyArray<string>
     }) => Effect.Effect<OAuthClientSlug, OAuthError | StorageError>
-    /** Records a client an operator registered by hand. */
     readonly createClient: (options: {
       readonly owner: OwnerTier
       readonly slug: OAuthClientSlug
@@ -205,21 +181,16 @@ export class OAuthFlows extends Context.Service<
       readonly resource?: string
       readonly scopes?: ReadonlyArray<string>
     }) => Effect.Effect<OAuthClientSlug, StorageError>
-    /** Begins an authorization, persisting the PKCE verifier against a
-     *  single-use state value. */
     readonly start: (
       options: StartOptions
     ) => Effect.Effect<
       { readonly authorizationUrl: string; readonly state: OAuthState },
       OAuthError | StorageError
     >
-    /** Exchanges a callback code for tokens and seals them. */
     readonly complete: (options: {
       readonly state: OAuthState
       readonly code: string
     }) => Effect.Effect<CompletedAuthorization, OAuthError | StorageError>
-    /** The access token to send for a connection, refreshed first when it is
-     *  spent. Returns `None` when the connection holds no OAuth grant. */
     readonly accessToken: (reference: {
       readonly owner: OwnerTier
       readonly integration: IntegrationSlug
@@ -239,8 +210,6 @@ export class OAuthFlows extends Context.Service<
       const store = yield* CatalogStore
       const credentials = yield* CredentialStore
 
-      /** A registered client's secret lives beside the tenant's tokens, never
-       *  in the catalog row. */
       const clientSecret = (record: OAuthClientRecord) =>
         credentials.get(oauthClientCredentialKey(record.owner, record.slug))
 
@@ -470,8 +439,6 @@ export class OAuthFlows extends Context.Service<
         const flow = yield* Option.match(pending, {
           onNone: () => Effect.fail(new OAuthError({
             stage: "complete",
-            // A state value is deleted when it is read, so a replay and an
-            // expiry are indistinguishable here — and both mean the same thing.
             detail: "This authorization is not pending; start it again"
           })),
           onSome: Effect.succeed
@@ -528,8 +495,6 @@ export class OAuthFlows extends Context.Service<
         }
       })
 
-      /** Refreshed a minute early: a token that expires while the request is in
-       *  flight fails the call, and a minute costs nothing. */
       const refreshSkewMillis = 60_000
 
       const accessToken = Effect.fn("OAuthFlows.accessToken")(function* (reference: {
@@ -596,7 +561,6 @@ export class OAuthFlows extends Context.Service<
           )
         )
 
-        // A server that omits a new refresh token means "keep the old one".
         const stored = yield* persistTokens({
           owner: reference.owner,
           integration: reference.integration,

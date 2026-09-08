@@ -1,14 +1,3 @@
-/** Copies the generated migrations into a module the runtime can import.
- *
- * `drizzle-kit generate` writes SQL files and a journal to disk, and reading
- * them back at boot is exactly what a Worker cannot do: a D1 deployment has a
- * database binding and a bundle, no filesystem. So the journal's contents are
- * inlined here instead, once, at generate time — the bundle carries the same
- * statements a local file applies, and there is no second code path to keep
- * honest.
- *
- * Runs as the second half of `bun run db:generate`; the output is committed.
- */
 import { readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { Effect, Schema } from "effect"
@@ -17,8 +6,6 @@ const packageRoot = path.resolve(import.meta.dirname, "..")
 const migrationsDirectory = path.join(packageRoot, "db", "migrations")
 const outputPath = path.join(packageRoot, "src", "store-migrations.gen.ts")
 
-/** The slice of drizzle-kit's journal this script depends on. `idx` orders the
- *  migrations and `tag` names the file; the rest is drizzle-kit's business. */
 const Journal = Schema.Struct({
   entries: Schema.Array(Schema.Struct({
     idx: Schema.Int,
@@ -28,8 +15,6 @@ const Journal = Schema.Struct({
 
 const decodeJournal = Schema.decodeUnknownSync(Journal)
 
-/** drizzle-kit separates statements with a marker rather than a bare `;`,
- *  because a `;` inside a string literal or a trigger body is not a boundary. */
 const statementBreakpoint = "--> statement-breakpoint"
 
 const statementsOf = (tag: string): ReadonlyArray<string> =>
@@ -40,7 +25,6 @@ const statementsOf = (tag: string): ReadonlyArray<string> =>
 
 const render = (migrations: ReadonlyArray<{ readonly id: number; readonly name: string }>): string => {
   const entries = migrations.map((migration) => {
-    // JSON, not a template literal: drizzle quotes identifiers with backticks.
     const statements = statementsOf(migration.name)
       .map((statement) => `      ${JSON.stringify(statement)}`)
       .join(",\n")

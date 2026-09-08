@@ -25,14 +25,8 @@ import type { AuthProviders } from "@/lib/schemas"
 
 const SessionContext = createContext<Me | undefined>(undefined)
 
-/** The authenticated identity the gate proved before rendering children.
- *  Undefined outside the gate (or while unauthenticated). */
 export const useSession = (): Me | undefined => useContext(SessionContext)
 
-/** The hosted gateway trusts no network locality, so the browser proves who it
- *  is the ordinary way: a session cookie from /v1/auth/login or the one-time
- *  signup that claims the instance. Everything below the gate assumes that
- *  cookie exists. */
 export function AuthGate({ children }: { readonly children: ReactNode }) {
   const [me, setMe] = useState<Me | "checking">("checking")
 
@@ -40,8 +34,6 @@ export function AuthGate({ children }: { readonly children: ReactNode }) {
     try {
       setMe(await fetchMe())
     } catch (error) {
-      // A reachable-but-unhappy gateway still means "not signed in"; the form
-      // is the honest screen either way.
       console.error("session check failed", error)
       setMe({ authenticated: false })
     }
@@ -212,7 +204,6 @@ function SignUpForm({
       await onAuthenticated()
     } catch (error) {
       if (error instanceof GatewayError && error.status === 403) {
-        // Someone already claimed the instance; only sign-in remains.
         onClosed()
         return
       }

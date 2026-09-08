@@ -40,8 +40,6 @@ describe("sealing", () => {
   it("refuses a tampered envelope", () => {
     const key = randomBytes(32)
     const [version, vector, tag, ciphertext] = sealValue(key, "s3cret").split(".")
-    // Authentication covers the ciphertext, so a flipped payload is detected
-    // rather than decrypted into rubbish.
     const swapped = [version, vector, tag, Buffer.from("other").toString("base64url")].join(".")
     expect(() => openValue(key, swapped)).toThrow()
     expect(() => openValue(key, `v2.${vector}.${tag}.${ciphertext}`)).toThrow()
@@ -89,8 +87,6 @@ describe("the file store", () => {
   })
 
   it("keeps concurrent writes from dropping each other", async () => {
-    // Every mutation is a read-modify-write of the whole file, so without a
-    // permit the last writer would win and the others would vanish.
     const held = await withDirectory((directory) =>
       Effect.runPromise(Effect.gen(function* () {
         const store = yield* CredentialStore
@@ -140,7 +136,6 @@ describe("stored tokens", () => {
       expiresAt: 1000,
       scope: "read"
     })
-    // A refresh rewrites the whole grant, so no stale expiry survives it.
     expect(outcome.second).toEqual({ accessToken: "a2", refreshToken: "r2" })
   })
 

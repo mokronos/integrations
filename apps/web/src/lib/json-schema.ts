@@ -1,16 +1,5 @@
 import { Option, Predicate, Schema } from "effect"
 
-/** The slice of JSON Schema this dashboard renders.
- *
- * A tool's schema arrives as arbitrary JSON — it is written by whoever wrote
- * the MCP server or the OpenAPI document, not by us — so it is parsed here
- * rather than read field by field at the point of rendering. What does not
- * parse is not guessed at: the caller falls back to showing the raw document,
- * which is always truthful, instead of a structured view of something this
- * model does not actually describe.
- *
- * Keywords outside this set (`examples`, `pattern`, `minimum`, …) decode away
- * silently. They constrain values, and this view explains shape. */
 export interface JsonSchemaNode {
   readonly type?: string | ReadonlyArray<string> | undefined
   readonly title?: string | undefined
@@ -54,9 +43,6 @@ export const JsonSchemaNode: Schema.Codec<JsonSchemaNode> = Schema.Struct({
 const decodeNode = Schema.decodeUnknownOption(JsonSchemaNode)
 const decodeDefinitions = Schema.decodeUnknownOption(Schema.Record(Schema.String, JsonSchemaNode))
 
-/** Parses a tool's schema, folding the tool's shared definitions in so a `$ref`
- *  written against them resolves. The gateway carries those separately from the
- *  schema that points at them, and a reader should not have to know that. */
 export const decodeJsonSchema = (
   schema: Schema.Json | undefined,
   definitions?: { readonly [key: string]: Schema.Json }
@@ -73,9 +59,6 @@ export const decodeJsonSchema = (
   ))
 }
 
-/** `items` may be a positional list in older drafts of JSON Schema. This view
- *  renders the single-schema form and treats the tuple form as shapeless, so
- *  the union is resolved once here instead of at every use. */
 const isNode = (
   value: JsonSchemaNode | ReadonlyArray<JsonSchemaNode>
 ): value is JsonSchemaNode => !Array.isArray(value)
@@ -86,16 +69,11 @@ const itemsOf = (schema: JsonSchemaNode): JsonSchemaNode | undefined =>
 const definitionName = (ref: string): string | undefined =>
   /^#\/\$defs\/(.+)$/.exec(ref)?.[1]
 
-/** Follows one `$ref` into the root's definitions. Only local `$defs` refs
- *  resolve: a schema that points at a URL is pointing outside what the gateway
- *  captured, and the type label says so rather than inventing a shape. */
 const dereference = (ref: string, root: JsonSchemaNode): JsonSchemaNode | undefined => {
   const name = definitionName(ref)
   return name === undefined ? undefined : root.$defs?.[name]
 }
 
-/** The concrete shape behind a node: its `$ref` followed, and a union of one
- *  unwrapped, which is how most generators spell "just this". */
 export const resolve = (schema: JsonSchemaNode, root: JsonSchemaNode): JsonSchemaNode => {
   const referenced = schema.$ref === undefined ? undefined : dereference(schema.$ref, root)
   const target = referenced ?? schema
@@ -105,8 +83,6 @@ export const resolve = (schema: JsonSchemaNode, root: JsonSchemaNode): JsonSchem
   return single === undefined ? target : resolve(single, root)
 }
 
-/** `allOf` is intersection; the view shows the one merged object it adds up to
- *  rather than making a reader compose the parts in their head. */
 const composed = (parts: ReadonlyArray<JsonSchemaNode>, root: JsonSchemaNode): JsonSchemaNode =>
   parts.reduce<JsonSchemaNode>((accumulated, part) => {
     const resolved = resolve(part, root)
@@ -117,8 +93,6 @@ const composed = (parts: ReadonlyArray<JsonSchemaNode>, root: JsonSchemaNode): J
     }
   }, { type: "object" })
 
-/** A short, readable stand-in for a value: what an enum member, a const, or a
- *  default actually is. Long values are cut — this is a label, not the value. */
 export const valueLabel = (value: Schema.Json): string => {
   const text = JSON.stringify(value) ?? String(value)
   return text.length > 80 ? `${text.slice(0, 77)}…` : text
@@ -134,8 +108,6 @@ const unionLabel = (variants: ReadonlyArray<JsonSchemaNode>, root: JsonSchemaNod
   return [...labels, ...variants.length > 3 ? ["…"] : []].join(" | ")
 }
 
-/** How a field's type reads in one line. Names a `$ref` by its definition, so a
- *  repeated shape is recognisable as the same shape wherever it appears. */
 export const typeLabel = (schema: JsonSchemaNode, root: JsonSchemaNode): string => {
   if (schema.$ref !== undefined) return definitionName(schema.$ref) ?? "$ref"
   if (schema.const !== undefined) return valueLabel(schema.const)
@@ -176,11 +148,6 @@ export interface SchemaProperty {
   readonly required: boolean
 }
 
-/** What sits one level inside a node.
- *
- * A closed set, decided once here rather than inline while rendering, so every
- * shape the view can meet has exactly one answer and the renderer never asks a
- * second question about the same node. */
 export type SchemaChildren =
   | { readonly kind: "properties"; readonly properties: ReadonlyArray<SchemaProperty> }
   | { readonly kind: "items"; readonly schema: JsonSchemaNode }
@@ -199,8 +166,6 @@ const propertiesOf = (schema: JsonSchemaNode): ReadonlyArray<SchemaProperty> => 
   const required = new Set(schema.required ?? [])
   return Object.entries(schema.properties ?? {})
     .map(([name, property]) => ({ name, schema: property, required: required.has(name) }))
-    // Required first, because those are what a caller has to supply;
-    // alphabetical within each group so a field keeps its place between reads.
     .toSorted((left, right) =>
       left.required === right.required
         ? left.name.localeCompare(right.name)
@@ -223,8 +188,6 @@ export const childrenOf = (schema: JsonSchemaNode, root: JsonSchemaNode): Schema
   const declaredItems = itemsOf(resolved)
   if (declaredItems !== undefined) {
     const items = resolve(declaredItems, root)
-    // An array of objects reads better as those objects' fields than as one row
-    // called "items" that everyone has to open first.
     return hasProperties(items)
       ? { kind: "properties", properties: propertiesOf(items) }
       : { kind: "items", schema: declaredItems }
@@ -246,8 +209,6 @@ export const childrenOf = (schema: JsonSchemaNode, root: JsonSchemaNode): Schema
 export const isExpandable = (schema: JsonSchemaNode, root: JsonSchemaNode): boolean =>
   childrenOf(schema, root).kind !== "none"
 
-/** How many fields the top level offers, for the header's "6 fields". Counted
- *  from the same walk the body renders, so the two cannot disagree. */
 export const fieldCount = (root: JsonSchemaNode): number => {
   const children = childrenOf(root, root)
   switch (children.kind) {

@@ -7,20 +7,10 @@ import { compileSpec } from "./compile.ts"
 import type { CompiledSpec } from "./compile.ts"
 import { HttpTransport } from "../http-transport.ts"
 
-/** Compiled specifications, kept so a tool listing is not a spec download.
- *
- *  There are two levels, because they solve different problems. The database
- *  holds the document's *text*, so a restart does not refetch several megabytes
- *  from a vendor. The process holds the *compiled* form, so listing the tools of
- *  a 79-operation Gmail catalog does not re-parse and re-project it every time.
- *  Compilation is the expensive half, and it is pure, so caching it is safe. */
-
 export class SpecCache extends Context.Service<
   SpecCache,
   {
-    /** The compiled specification for an OpenAPI integration. */
     readonly load: (record: IntegrationRecord) => Effect.Effect<CompiledSpec, SpecError>
-    /** Fetches, converts and compiles a document that is not installed yet. */
     readonly compileUrl: (url: string) => Effect.Effect<CompiledSpec, SpecError>
   }
 >()("@mokronos/integrations/SpecCache") {
@@ -50,8 +40,6 @@ export class SpecCache extends Context.Service<
         })
       )
 
-      /** Google's Discovery dialect is not OpenAPI, so it is converted before
-       *  anything downstream sees it. */
       const toOpenApi = (source: string, text: string) =>
         isGoogleDiscoveryUrl(source)
           ? convertGoogleDiscovery(source, text)
@@ -96,10 +84,6 @@ export class SpecCache extends Context.Service<
         )
         const text = yield* Option.match(stored, {
           onNone: () => fetchText(source).pipe(
-            // Persisting is a cache fill, not the point of the call: a database
-            // that refuses the write should not fail a tool listing. It is
-            // logged, because the visible symptom otherwise is only that every
-            // restart refetches several megabytes from a vendor.
             Effect.tap((fetched) =>
               store.putSpecDocument(source, fetched).pipe(Effect.catch((failure) =>
                 Effect.logWarning(

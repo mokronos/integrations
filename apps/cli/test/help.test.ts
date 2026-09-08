@@ -7,7 +7,6 @@ const repoRoot = path.resolve(import.meta.dir, "../../..")
 const agentCliPath = path.join(repoRoot, "apps", "cli", "src", "agent.ts")
 const operatorCliPath = path.join(repoRoot, "apps", "cli", "src", "main.ts")
 const decoder = new TextDecoder()
-// A throwaway home, so spawning the CLI can never read the real ~/.integrations.
 const testHome = mkdtempSync(path.join(tmpdir(), "integrations-help-"))
 
 const runCli = (cliPath: string, args: ReadonlyArray<string>) => {
@@ -112,9 +111,6 @@ describe("i and ii CLI help", () => {
   }, 30_000)
 
   test("every listing command windows with --limit and --offset", () => {
-    // Listings return everything by default. What they must never do is drop
-    // rows silently — so the window is explicit, and it is the same window on
-    // every listing rather than a different mechanism per command.
     for (
       const command of [
         "integrations", "tools", "connections", "clients", "access-profiles",
@@ -130,8 +126,6 @@ describe("i and ii CLI help", () => {
   }, 30_000)
 
   test("offers a detached start and a service install", () => {
-    // Two ways to get a gateway that stays up: `&` without knowing about `&`,
-    // and a real service that survives a reboot.
     const serve = runOperator(["serve", "--help"])
     expect(serve.exitCode).toBe(0)
     expect(serve.stdout).toContain("--detach")
@@ -164,9 +158,6 @@ describe("i and ii CLI help", () => {
     expect(help.stdout).toContain("query string")
     expect(help.stdout).toContain("--verbose")
     expect(help.stdout).toContain("--kind")
-    // JSON is the only output. A human-readable summary that drops fields is
-    // the failure mode this CLI exists to prevent: an agent acts on what it
-    // sees, and what it saw was missing every discovery URL.
     expect(help.stdout).not.toContain("--text")
   })
 

@@ -8,31 +8,18 @@ import { AuthPlacement } from "@mokronos/contracts"
 import { parseJsonString, type Json } from "@mokronos/contracts"
 import { HttpTransport } from "../http-transport.ts"
 
-/** Performing an OpenAPI call.
- *
- *  The request itself is built next door; what happens here is the rest of a
- *  call: put the tenant's credential where the integration wants it, run the
- *  request under a timeout, and turn the response into the JSON a tool result is
- *  made of. */
 
-
-/** A resolved secret plus the places the integration said to put it. */
 export interface ResolvedCredential {
   readonly value: string
   readonly placements: ReadonlyArray<AuthPlacement>
 }
 
-/** The default when an integration declares no placement: a bearer header. It
- *  is what an OAuth grant and the overwhelming majority of API keys want. */
 const bearerPlacement: AuthPlacement = {
   carrier: "header",
   name: "Authorization",
   prefix: "Bearer "
 }
 
-/** Applies every placement to the built request. `query` placements move the
- *  secret into the URL, which is why a document that offers a header carrier is
- *  always preferred when installing an integration. */
 const applyCredential = (
   request: { readonly url: string; readonly headers: Record<string, string> },
   credential: Option.Option<ResolvedCredential>
@@ -55,10 +42,6 @@ const applyCredential = (
             url.searchParams.set(placement.name, rendered)
             break
           case "env":
-            // An `env` carrier describes a process the host does not run: there
-            // is no child to hand an environment to. Ignored rather than
-            // silently promoted to a header, which would leak the secret to a
-            // place the integration never nominated.
             break
         }
       }
@@ -69,11 +52,6 @@ const applyCredential = (
 const jsonContentType = /^application\/(?:[\w.+-]+\+)?json\b/i
 const ndjsonContentType = /^application\/(?:x-)?nd-?json\b/i
 
-/** Turns a response body into a tool result.
- *
- *  A tool's caller wants data, so a JSON body decodes and anything else comes
- *  back as text rather than failing — an integration that answers `text/csv` is
- *  still answering. */
 const decodeBody = (
   contentType: string,
   body: string
@@ -91,8 +69,6 @@ const decodeBody = (
   return body
 }
 
-/** The upstream's own error text, trimmed to something an audit record can
- *  hold without becoming a dump. */
 const errorDetail = (body: string): string => {
   const trimmed = body.trim()
   if (trimmed.length === 0) return "no response body"
@@ -100,11 +76,8 @@ const errorDetail = (body: string): string => {
 }
 
 export interface OpenApiCall {
-  /** The tool being performed, as captured. */
   readonly call: HttpCall
-  /** Name for error messages; the call itself carries no identity. */
   readonly tool: string
-  /** The absolute server, resolved at capture. */
   readonly server: string
   readonly input: Json
   readonly credential: Option.Option<ResolvedCredential>

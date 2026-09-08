@@ -1,4 +1,3 @@
-/** A timestamp a human reads at a glance, not one they parse. */
 export const when = (value: Date | string | null | undefined): string => {
   if (value === null || value === undefined) return "—"
   const date = value instanceof Date ? value : new Date(value)
@@ -11,8 +10,6 @@ export const when = (value: Date | string | null | undefined): string => {
   })
 }
 
-/** How long until something stops being true. Approvals expire, and "in 3h" is
- *  the number that decides whether you act now. */
 export const until = (value: Date | string): string => {
   const date = value instanceof Date ? value : new Date(value)
   const seconds = Math.round((date.getTime() - Date.now()) / 1000)
@@ -27,7 +24,6 @@ export const until = (value: Date | string): string => {
 export const pluralise = (count: number, one: string, many = `${one}s`): string =>
   `${count} ${count === 1 ? one : many}`
 
-/** Reads a connection back as the address the rest of the system uses. */
 export const connectionLabel = (connection: {
   readonly owner: "org" | "user"
   readonly integration: string

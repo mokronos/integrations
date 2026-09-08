@@ -10,8 +10,6 @@ export class PasswordError extends Schema.TaggedError<PasswordError>()(
 const scrypt = (password: string, salt: Buffer, keylen: number): Effect.Effect<Buffer, PasswordError> =>
   Effect.callback((resume) => {
     scryptCallback(password, salt, keylen, (error, derivedKey) => {
-      // Node signals failure with `null`, Bun with `undefined`; the key's
-      // presence decides, which holds under both.
       if (derivedKey === undefined) {
         resume(Effect.fail(new PasswordError({
           operation: "scrypt",
@@ -23,15 +21,11 @@ const scrypt = (password: string, salt: Buffer, keylen: number): Effect.Effect<B
     })
   })
 
-/** Password hashes are stored in the form this module verifies, so the cost
- *  parameters can move without invalidating stored logins. */
 export const PasswordHash = Schema.String.check(Schema.isStartsWith("scrypt$"))
 export type PasswordHash = typeof PasswordHash.Type
 
 const keyLength = 64
 
-/** scrypt with a per-password salt. Deliberately memory-hard: a leaked login
- *  table must not be cheap to brute-force offline. */
 export const hashPassword = Effect.fn("Password.hash")(function*(
   password: string
 ): Effect.fn.Return<PasswordHash, PasswordError> {
@@ -54,10 +48,7 @@ export const verifyPassword = Effect.fn("Password.verify")(function*(
   return expected.length === actual.length && timingSafeEqual(expected, actual)
 })
 
-/** Sessions are bearer tokens like API keys: shown once, stored only as a
- *  SHA-256, and recognisable in a secret scanner by their prefix. */
 export interface IssuedSessionToken {
-  /** Plaintext. Lives only in the human's cookie. */
   readonly secret: string
   readonly hash: SessionTokenHash
 }

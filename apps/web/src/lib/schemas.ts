@@ -33,15 +33,6 @@ import {
   IntegrationOverview
 } from "@mokronos/contracts"
 
-/** What the gateway's responses decode to.
- *
- * The gateway's own domain schemas are the source of truth — this module does
- * not restate them. `Schema.toCodecJson` derives the JSON form of each one, so
- * an ISO string on the wire arrives here as a `Date`, a branded id stays
- * branded, and a field that changes shape in `domain.ts` fails to decode here
- * rather than rendering as `undefined` somewhere three screens away.
- */
-
 export type {
   AuditRecord,
   AuditOutcome,
@@ -73,9 +64,6 @@ export type {
   ,ApprovalDestinationId
 } from "@mokronos/gateway-core/domain"
 
-/** Derives the JSON codec for a schema and returns a decoder for it. Every
- *  response in this module goes through here, so no shape reaches a component
- *  unparsed. */
 const json = <T, E>(schema: Schema.Codec<T, E>) =>
   Schema.decodeUnknownSync(Schema.toCodecJson(schema))
 
@@ -188,7 +176,6 @@ export const ToolsResponse = Schema.Struct({
   tools: Schema.Array(ToolSummary)
 })
 
-/** The one and only time a key's plaintext exists outside the holder's hands. */
 export const IssuedKey = Schema.Struct({
   id: Schema.String,
   clientId: Schema.String,
@@ -243,8 +230,6 @@ export type Revoked = typeof Revoked.Type
 
 export const Removed = Schema.Struct({ removed: Schema.Boolean })
 
-/** Removing an integration takes its connections with it, and the page says so
- *  rather than leaving the reader to notice. */
 export const IntegrationRemoved = Schema.Struct({
   removed: Schema.Boolean,
   integration: Schema.String,
@@ -286,10 +271,6 @@ export const decodeIntegrationRemoved = json(IntegrationRemoved)
 export const decodeClient = json(Client)
 export const decodeRegistrySearch = json(IntegrationSearchResponse)
 
-/** Values arriving from a widget are strings; these turn them back into the
- * domain's own types rather than asserting them. A Select that somehow yields
- * an unknown value fails loudly here instead of silently sending nonsense to
- * the gateway. */
 export const decodePolicyDecision = Schema.decodeUnknownSync(PolicyDecisionSchema)
 export const decodeAccessProfileId = Schema.decodeUnknownSync(AccessProfileId)
 export const decodeApprovalPolicyId = Schema.decodeUnknownSync(ApprovalPolicyId)
@@ -303,17 +284,12 @@ export const decodeAuditOutcomeFilter = Schema.decodeUnknownSync(
   Schema.Union([AuditOutcome, Schema.Literal("all")])
 )
 
-/** `approve` performs the call, so it answers with both the settled approval
- *  and what the invocation did. */
 export const ApprovalDecided = Schema.Struct({
   approval: Schema.NullOr(PendingApproval),
   outcome: Schema.optional(Schema.Json)
 })
 export const decodeApprovalDecided = json(ApprovalDecided)
 
-/** Who the gateway thinks is asking. A session means a signed-in human; a
- *  client means an API key spoke; neither means the login form belongs on
- *  screen. Mirrors GET /v1/auth/me. */
 export const Me = Schema.Union([
   Schema.Struct({
     authenticated: Schema.Literal(true),
@@ -373,11 +349,6 @@ export const decodeEmailChanged = json(EmailChanged)
 export const decodePasswordChanged = json(PasswordChanged)
 export const decodeAccountDeleted = json(AccountDeleted)
 
-/** A `datetime-local` field's value as an instant, or nothing.
- *
- *  The browser constrains the input, but not enough: a partial or impossible
- *  value still reaches here as a string, and `new Date(...).toISOString()` on
- *  one throws mid-render. Asking the schema turns that into an absent filter. */
 const decodeInstant = Schema.decodeUnknownOption(
   Schema.DateFromString
 )

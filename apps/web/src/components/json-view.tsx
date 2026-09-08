@@ -4,8 +4,6 @@ import { ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
-// Renders whatever an event or result carried. The gateway's event schema
-// leaves those fields unknown, so this cannot name its input either.
 // oxlint-disable-next-line anti-slop/no-unknown-parameters
 const render = (value: unknown): string => {
   try {
@@ -15,9 +13,6 @@ const render = (value: unknown): string => {
   }
 }
 
-/** Payloads here are arguments and results — the things an operator most needs
- *  to actually read before approving. Shown collapsed, because some are large,
- *  but never summarised away. */
 export function JsonView({
   value,
   label = "payload",

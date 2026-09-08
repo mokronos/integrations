@@ -22,9 +22,6 @@ export interface CreateSubjectInput {
   readonly tenantId: TenantId
 }
 
-/** A login as stored: everything {@link Login} carries plus the password hash.
- *  The hash never leaves the store boundary — verification happens through
- *  `findLoginByEmail` returning it, and nothing serialises this type. */
 export interface LoginRecord extends Login {
   readonly passwordHash: PasswordHash | null
 }
@@ -87,8 +84,6 @@ export interface ApprovalDeliveryJob extends ApprovalDeliveryAttempt {
   readonly signingSecret: string
 }
 
-/** Which slice of the trail to read. Every field narrows; none of them is
- *  required, and `limit`/`offset` window whatever is left. */
 export interface AuditQuery {
   readonly limit?: PositiveInt
   readonly offset?: NonNegativeInt
@@ -147,17 +142,10 @@ export interface GatewayStoreDriver {
   findLoginByEmail(email: string): Promise<LoginRecord | undefined>
   findLoginBySubject(subjectId: SubjectId): Promise<LoginRecord | undefined>
   countLogins(): Promise<number>
-  /** Rewrites the login's email. Uniqueness is enforced by the schema; the
-   *  route checks for a friendly message first. */
   changeLoginEmail(subjectId: SubjectId, email: string): Promise<void>
   changeLoginPassword(subjectId: SubjectId, passwordHash: string): Promise<void>
-  /** Removes the subject and, by cascade, its login and every session. */
   deleteSubject(subjectId: SubjectId): Promise<void>
-  /** Removes a workspace and everything scoped to it — clients, keys, policies,
-   *  approvals, audit rows. Only safe once no subjects remain. */
   deleteTenant(id: TenantId): Promise<void>
-  /** Deletes the subject's sessions, keeping at most one (the device asking).
-   *  Returns how many died. */
   revokeSubjectSessions(subjectId: SubjectId, exceptTokenHash?: SessionTokenHash): Promise<number>
 
   createSession(input: {
@@ -166,8 +154,6 @@ export interface GatewayStoreDriver {
     readonly tenantId: TenantId
     readonly expiresAt: Date
   }): Promise<AuthSession>
-  /** A live session, or nothing. Expired sessions read as absent: expiry is
-   *  the same decision revocation is. */
   findLiveSession(tokenHash: SessionTokenHash): Promise<AuthSession | undefined>
   revokeSession(tokenHash: SessionTokenHash): Promise<void>
   deleteExpiredSessions(now: Date): Promise<number>
@@ -201,8 +187,6 @@ export interface GatewayStoreDriver {
   consumeIdentityOAuthState(
     stateHash: LoginHandoffHash
   ): Promise<IdentityOAuthStateRecord | undefined>
-  /** Removes expired browser-login state and terminal handoffs. These values
-   * are intentionally short lived, but abandoned flows must not accumulate. */
   deleteExpiredIdentityFlows(now: Date): Promise<number>
 
   createConfiguredClient(input: ConfigureClient & {
@@ -246,9 +230,6 @@ export interface GatewayStoreDriver {
 
   addApiKey(input: { readonly id: ApiKeyId; readonly clientId: ClientId; readonly hash: ApiKeyHash }): Promise<ApiKey>
   listApiKeys(clientId: ClientId): Promise<ReadonlyArray<ApiKey>>
-  /** Resolves a presented credential to its key *and* the live client behind
-   *  it, in one read. Deliberately not tenant-scoped: the tenant is an output
-   *  of this lookup, not an input — the 256-bit hash is what vouches for it. */
   findApiKeyByHash(hash: ApiKeyHash): Promise<{ readonly key: ApiKey; readonly client: Client } | undefined>
   touchApiKey(id: ApiKeyId): Promise<void>
   revokeApiKey(id: ApiKeyId): Promise<void>
@@ -295,13 +276,9 @@ export interface GatewayStoreDriver {
     readonly result: typeof Schema.Json.Type | null
     readonly error: string | null
   }): Promise<boolean>
-  /** Cancels a revoked client's frozen actions. Key revocation deliberately
-   *  does not do this — rotation must not destroy in-flight work. */
   cancelApprovalsForClient(clientId: ClientId): Promise<number>
 
   recordAudit(input: RecordAuditInput): Promise<void>
-  /** The trail is permanent and therefore unbounded, so it is the one listing
-   *  that is read through a window and a filter rather than whole. */
   listAudit(tenantId: TenantId, options: AuditQuery): Promise<ReadonlyArray<AuditRecord>>
   countAudit(tenantId: TenantId, options: Omit<AuditQuery, "limit" | "offset">): Promise<number>
   expireAuditArguments(now: Date): Promise<number>
@@ -320,26 +297,11 @@ export interface GatewayStoreDriver {
     }>
   ): Promise<void>
 
-  /** Turns approvals nobody decided on into decisions. Expiry means the
-   *  invocation does not happen — it is not an absence of an answer. */
   expireApprovals(now: Date): Promise<number>
 
   close(): Promise<void>
 }
 
-/** Why a store operation did not happen.
- *
- *  One tag with a discriminated `kind` rather than three tags, because every
- *  caller treats all three the same way — the request did not happen — and only
- *  the operator reading the log needs them apart. Splitting the tag would have
- *  meant a three-way `catchTag` at ninety call sites that all do one thing.
- *
- *  - `driver`        the database rejected the statement or was unreachable.
- *                    Usually transient; retrying may work.
- *  - `malformed-row` a row the gateway wrote no longer decodes. A schema or
- *                    migration bug: it will fail identically forever.
- *  - `constraint`    a uniqueness or foreign-key rule refused the write. Often
- *                    provoked by the caller rather than broken infrastructure. */
 export const GatewayStoreFailureKind = Schema.Literals([
   "driver",
   "malformed-row",

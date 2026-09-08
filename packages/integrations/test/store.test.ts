@@ -7,8 +7,6 @@ import { ConnectionName, IntegrationSlug } from "@mokronos/contracts"
 
 const layer = CatalogStore.layer.pipe(Layer.provide(memoryLayer))
 
-/** Providing the layer also surfaces its own construction failure, so the
- *  helper's error channel widens rather than being asserted away. */
 const run = <A, E>(
   operation: Effect.Effect<A, E, CatalogStore>
 ): Promise<A> => Effect.runPromise(operation.pipe(Effect.provide(layer)))
@@ -122,7 +120,6 @@ describe("OAuth flows", () => {
     }))
     const record = Option.getOrThrow(found)
     expect(record).toEqual(client)
-    // The secret lives in the credential store; a database dump is not a spill.
     expect(Object.keys(record)).not.toContain("clientSecret")
   })
 

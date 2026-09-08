@@ -36,8 +36,6 @@ const navigation = [
   { to: "/account", label: "Account", icon: UserRound }
 ] as const
 
-/** The count is the point of the badge: a frozen invocation is a person waiting,
- *  and it expires whether or not anyone looked. */
 function PendingBadge({ compact }: { readonly compact: boolean }) {
   const approvals = useApprovals("pending")
   const count = approvals.data?.length ?? 0
@@ -62,8 +60,6 @@ function SignOutButton() {
       onClick={() => {
         void logOut()
           .then(() => {
-            // A full reload, not a route change: the auth gate re-checks the
-            // (now revoked) session from scratch.
             navigate(0)
           })
           .catch((error: Error) => toast.error("Could not sign out", { description: error.message }))

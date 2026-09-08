@@ -130,9 +130,6 @@ export const loginOperator = async (input: {
   return session
 }
 
-/** Starts an OAuth flow in the system browser and trades its one-time handoff
- * secret for a normal operator session. The browser never learns the CLI's
- * stored session token, and polling a completed handoff consumes it once. */
 export const loginOperatorInBrowser = async (options: {
   readonly noOpen?: boolean
   readonly timeoutSeconds?: number
@@ -267,9 +264,6 @@ export const connectToControlPlane = async (): Promise<ControlPlaneClient> => {
   }
 }
 
-/** Uses the public client method surface with a human session as its transport.
- * This lets `ii` reuse the exact `i` command definitions for dashboard
- * provisioning without giving the public client a generic request escape. */
 export const connectToOperatorGateway = async (): Promise<GatewayClient> => {
   const session = await readOperatorSession()
   if (session === undefined) {

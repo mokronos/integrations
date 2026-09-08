@@ -1,10 +1,3 @@
-/** The integration host: one catalog of MCP endpoints and OpenAPI documents, the
- *  connections that authorize them, and one way to call a tool.
- *
- *  Wire contracts and the shared vocabulary live in `@mokronos/contracts`;
- *  import them from there rather than through this package. */
-
-/** The Effect services. Compose these to build a host. */
 export { IntegrationHost } from "./host.ts"
 export type {
   AddMcpOptions,
@@ -28,7 +21,6 @@ export { SpecCache } from "./openapi/cache.ts"
 export { HttpTransport } from "./http-transport.ts"
 export { classify } from "./classify.ts"
 
-/** The two storage seams, and the layers that satisfy them. */
 export { applySchema, Database, libsqlLayer, memoryLayer, SqlValue } from "./storage/database.ts"
 export type { SqlRow, SqlStatement } from "./storage/database.ts"
 export {
@@ -40,7 +32,6 @@ export {
   StoredTokens
 } from "./storage/credentials.ts"
 
-/** Layer composition. */
 export { createHostRuntime, hostLayer, hostServicesOf, localLayer, stubbedLayer } from "./runtime.ts"
 export type { HostServices, HostStorage } from "./runtime.ts"
 export { listIntegrationOverviews } from "./overview.ts"
@@ -55,7 +46,6 @@ export {
 } from "./oauth-connect.ts"
 export type { StartedOAuthFlow } from "./oauth-connect.ts"
 
-/** Errors, so a caller matches on `_tag` rather than on message text. */
 export {
   ConnectionNotFoundError,
   DetectionError,
@@ -69,10 +59,8 @@ export {
   ToolNotFoundError
 } from "./errors.ts"
 
-/** Host-internal identifiers. */
 export { AuthTemplateSlug, OAuthClientSlug, OAuthState } from "./catalog/ids.ts"
 
-/** Auth-method derivation, shared by both halves of the host. */
 export {
   findAuthMethod,
   mcpAuthMethods,
@@ -80,7 +68,6 @@ export {
   requiresAuthentication
 } from "./catalog/auth-methods.ts"
 
-/** Specification handling. */
 export { compileSpec, previewOf, resolveServer } from "./openapi/compile.ts"
 export type { CompiledSpec } from "./openapi/compile.ts"
 export { splitArguments } from "./openapi/arguments.ts"
@@ -90,7 +77,5 @@ export { buildRequest } from "./openapi/request.ts"
 export { convertGoogleDiscovery, isGoogleDiscoveryUrl } from "./openapi/google-discovery.ts"
 export { normalizeOutputSchema, normalizeToolResult } from "./mcp/result.ts"
 
-/** The public registry. */
 export { search as searchRegistry, searchIntegrations } from "./registry.ts"
 export type { SearchIntegrationsOptions } from "./registry.ts"
-

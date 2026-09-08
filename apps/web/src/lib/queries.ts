@@ -9,11 +9,6 @@ import * as gateway from "@/lib/gateway"
 import type { ApprovalStatus } from "@/lib/schemas"
 import type { AuditQuery } from "@/lib/gateway"
 
-/** Query keys, in one place so an invalidation cannot miss a view.
- *
- * The gateway has no change feed, so every mutation states what it invalidates.
- * Getting that wrong shows up as a stale permission on screen, which is the one
- * kind of staleness this app must not have. */
 export const keys = {
   integrations: ["integrations"] as const,
   integrationTools: (slug: string) => ["integrations", slug, "tools"] as const,
@@ -70,8 +65,6 @@ export const useApprovalDeliveries = (id: string) => useQuery({
   queryKey: keys.approvalDeliveries(id), queryFn: () => gateway.listApprovalDeliveries(id), refetchInterval: 5_000
 })
 
-/** The endpoint an MCP client connects to, as the gateway reports it. Shares
- *  the clients query because it is the same fact about the same list. */
 export const useMcpUrl = () =>
   useQuery({
     queryKey: keys.clients,
@@ -100,8 +93,6 @@ export const useClientTools = (clientId: string | undefined) =>
     enabled: clientId !== undefined
   })
 
-/** Pending approvals are the one thing a human is actively waiting on, and they
- *  expire on a clock, so this view refreshes itself. */
 export const useApprovals = (status: ApprovalStatus | "all") =>
   useQuery({
     queryKey: keys.approvals(status),

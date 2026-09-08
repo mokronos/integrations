@@ -6,10 +6,6 @@ import { gatewayConfigPath } from "@mokronos/integrations-client"
 import { whenPresent } from "@mokronos/contracts"
 import { stopGateway } from "../src/service.ts"
 
-/** `stopGateway` signals a process it did not start, so what matters most is
- *  what it refuses to do. Both cases here point it at something that is *not*
- *  this machine's gateway. */
-
 const directories: Array<string> = []
 const children: Array<Bun.Subprocess> = []
 const previousHome = process.env["INTEGRATIONS_HOME"]
@@ -23,8 +19,6 @@ afterEach(async () => {
   )
 })
 
-/** An isolated home, so a test never reads — or acts on — the developer's own
- *  `gateway.json`. */
 const temporaryHome = async (): Promise<string> => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "integrations-stop-"))
   directories.push(directory)
@@ -55,9 +49,6 @@ const closedPort = async (): Promise<number> => {
   return port
 }
 
-/** Answers HTTP without being a gateway: spawned as a separate process so it
- *  has a pid and a command line of its own, and named so that command line does
- *  not contain "serve". */
 const startImpostor = async (home: string): Promise<{ port: number; pid: number }> => {
   const script = path.join(home, "impostor.ts")
   await writeFile(

@@ -14,19 +14,14 @@ import {
   TenantId
 } from "./domain.ts"
 
-/** Keys are shown once and never stored. The prefix makes a leaked key
- *  greppable in logs and recognisable in a secret scanner. */
 const keyPrefix = "wfi_"
 
 export interface IssuedApiKey {
   readonly id: ApiKeyId
-  /** Plaintext. Returned exactly once, at issue; nothing persists it. */
   readonly secret: string
   readonly hash: ApiKeyHash
 }
 
-/** 256 bits of entropy, so the stored SHA-256 needs no salt — there is no
- *  dictionary to attack, only the full keyspace. */
 export const generateApiKey = (): IssuedApiKey => {
   const secret = `${keyPrefix}${randomBytes(32).toString("base64url")}`
   return {

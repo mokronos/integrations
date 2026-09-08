@@ -6,12 +6,6 @@ import { SpecError } from "../src/errors.ts"
 import type { EndpointClassification, Integration } from "@mokronos/contracts"
 import { installClassified } from "../src/provision.ts"
 
-/** Installing what a URL turned out to be, under the name the caller chose.
- *
- *  The dependencies are hand-built rather than stubbed through the whole host:
- *  what is under test is which name reaches the catalog, so the catalog only
- *  has to record what it was asked for. */
-
 const classification: EndpointClassification = {
   kind: "mcp",
   endpoint: "https://gmailmcp.googleapis.com/mcp/v1",
@@ -20,8 +14,6 @@ const classification: EndpointClassification = {
 }
 
 const installed = (
-  // `slug` stays a plain string here so a fixture reads as one; it is branded
-  // on the way out, which is the only place the pattern has to hold.
   overrides: Omit<Partial<Integration>, "slug"> & { readonly slug: string }
 ): Integration => ({
   name: overrides.slug,
@@ -35,9 +27,6 @@ const installed = (
   slug: IntegrationSlug.make(overrides.slug)
 })
 
-/** The host as installation reaches it. `classify` is not stubbed — these
- *  tests drive `installClassified` with a classification directly, which is
- *  what they were always about. */
 const hostWith = (options: {
   readonly existing?: Integration
   readonly added: Array<{ readonly slug: string; readonly name: string }>
@@ -74,8 +63,6 @@ const hostWith = (options: {
   })
 }
 
-/** Runs an installation against that host, as an `Exit` so a refusal can be
- *  read as the typed failure it now is. */
 const install = (
   classified: typeof classification,
   host: Context.Context<IntegrationHost>
@@ -105,8 +92,6 @@ describe("provisioning a discovered URL", () => {
     const existing = installed({ slug: "gmailmcp", name: "Gmail" })
     const exit = await install(classification, hostWith({ existing, added }))
 
-    // Nothing installed a second time, and the name a human already gave it
-    // survives — rediscovery is not a reset.
     expect(added).toEqual([])
     expect(Exit.isSuccess(exit) && exit.value.name).toBe("Gmail")
   })
@@ -118,9 +103,6 @@ describe("provisioning a discovered URL", () => {
       name: "Gmail",
       displayUrl: "https://mail.example.com/mcp"
     })
-    // Returning the other integration here would report success for an
-    // endpoint that was never installed. It is a typed refusal now rather than
-    // a thrown string the caller had to read a message off.
     const exit = await install(
       { ...classification, slug: "gmail" },
       hostWith({ existing, added })

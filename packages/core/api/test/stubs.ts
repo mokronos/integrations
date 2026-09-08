@@ -2,10 +2,6 @@ import { Context, Effect, Option } from "effect"
 import { CatalogStore, IntegrationHost, McpHost, OAuthFlows, OpenApiInvoker, SpecCache } from "@mokronos/integrations"
 import type { HostServices } from "@mokronos/integrations"
 
-/** The host as the handlers now reach it: one Effect service instead of the
- *  four Promise sub-APIs. Members a given test never touches die rather than
- *  answering, for the same reason {@link notStubbed} throws — a fake that
- *  returned `[]` would let a handler start depending on it unnoticed. */
 export const stubHost = (
   overrides: Partial<IntegrationHost["Service"]> = {}
 ): IntegrationHost["Service"] => ({
@@ -29,8 +25,6 @@ export const stubHost = (
 const dies = (member: string) => () =>
   Effect.die(new Error(`stubHost: ${member} is not stubbed for these tests`))
 
-/** A catalog that refuses everything, with `putConnection` opened up: a
- *  completed OAuth flow files its connection through it. */
 export const catalogStoreFake = (
   overrides: Partial<CatalogStore["Service"]> = {}
 ): CatalogStore["Service"] => ({
@@ -59,16 +53,8 @@ const catalogStore: CatalogStore["Service"] = {
   putSpecDocument: dies("CatalogStore.putSpecDocument")
 }
 
-/** The host's whole service context, as `createGatewayHandler` now takes it.
- *
- *  Only `IntegrationHost` is stubbed with behaviour: the rest are reachable
- *  solely from `/v1/integrations/discover`, and a test that exercises that route
- *  supplies its own. The others die rather than answering, so a handler that
- *  starts depending on one says so. */
 export const stubHostContext = (
   overrides: Partial<IntegrationHost["Service"]> = {},
-  /** Only `/v1/integrations/discover` reaches these, and it reaches both:
-   *  classification tries an MCP handshake, then an OpenAPI parse. */
   reading: {
     readonly mcp?: Partial<McpHost["Service"]>
     readonly specs?: Partial<SpecCache["Service"]>

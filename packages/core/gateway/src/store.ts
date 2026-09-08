@@ -48,8 +48,6 @@ import {
   type GatewayStoreDriver
 } from "./store-contract.ts"
 
-/** Scoped access to the gateway database. Only the private libsql driver is
- * Promise-based; consumers compose typed store failures in Effect. */
 export class GatewayStoreService extends Context.Service<
   GatewayStoreService,
   GatewayStore
@@ -63,8 +61,6 @@ export class GatewayStoreService extends Context.Service<
       GatewayStoreService,
       Effect.acquireRelease(
         createGatewayStore(databasePath, encryption, options),
-        // Teardown cannot fail the scope it is closing, but a database that
-        // will not close is worth a line — it is how a leaked handle shows up.
         (store) =>
           store.close().pipe(Effect.catch((failure) =>
             Effect.logWarning(`The gateway store did not close cleanly: ${failure.message}`).pipe(
@@ -77,10 +73,6 @@ export class GatewayStoreService extends Context.Service<
 const now = (): number => Date.now()
 const identity = (text: string): string => text
 
-/** The tenant a single-user gateway is implicitly working in, and its default
- *  policy. Written on every open because it is cheap and idempotent, and
- *  because a gateway with no tenant has nowhere to put a client. Every other
- *  tenant gets both from `createTenant`. */
 const bootstrapDefaultTenant = async (database: LibsqlClient): Promise<void> => {
   const timestamp = now()
   await database.execute({
@@ -101,10 +93,6 @@ const bootstrapDefaultTenant = async (database: LibsqlClient): Promise<void> => 
   })
 }
 
-/** One filter builder for both the page and its total, so a listing can never
- *  report a count that belongs to a different question than the rows. */
-/** A composed SQL fragment and the values it binds, kept together so a caller
- *  cannot pass one without the other. */
 interface SqlFilter {
   readonly where: string
   readonly args: ReadonlyArray<InValue>
@@ -135,20 +123,13 @@ const auditFilter = (
     clauses.push("created_at >= ?")
     args.push(options.since.getTime())
   }
-  // A bare conjunction rather than a full clause: every reader prepends its
-  // own tenant scoping with `WHERE tenant_id = ?`.
   return {
     where: clauses.length === 0 ? "" : ` AND ${clauses.join(" AND ")}`,
     args
   }
 }
 
-/** Overrides for where the gateway database actually lives. Everything unset
- *  keeps the historical behaviour: one SQLite file under `home`. */
 export interface GatewayStoreOptions {
-  /** A caller-built client. When present, the store skips creating its own
-   *  file-backed client and the engine-level pragmas — the caller owns the
-   *  storage engine and its setup (e.g. a D1 binding on Workers). */
   readonly client?: LibsqlClient
 }
 
@@ -167,9 +148,6 @@ const createGatewayStoreDriver = async (
 ): Promise<GatewayStoreDriver> => {
   const database: LibsqlClient =
     options.client ?? await openFileDatabase(databasePath)
-  // Generated SQL, embedded at generate time, carries this database from
-  // whatever shape it is on to the one db/schema.ts declares. A D1 binding runs
-  // the same statements as a local file — see migrate.ts.
   await applyGatewayMigrations(database)
   await bootstrapDefaultTenant(database)
 
@@ -192,12 +170,6 @@ const createGatewayStoreDriver = async (
     if (row === undefined) throw new Error(`Unknown client ${id}`)
     return toClient(row)
   }
-
-  // --- payload sealing --------------------------------------------------------
-  // Approval arguments/results and audit arguments are where caller data (and
-  // therefore PII) lives. When a master key is configured they are sealed at
-  // rest; reads open them, and rows written before encryption stay readable
-  // because `open` passes plaintext through.
 
   const sealText = (text: string): string =>
     encryption === undefined ? text : encryption.seal(text)
@@ -345,14 +317,10 @@ const createGatewayStoreDriver = async (
     },
 
     deleteSubject: async (subjectId) => {
-      // The cascade takes the login and every session with it — the store's
-      // own DDL declares login and session as children of the subject.
       await run("DELETE FROM gateway_subject WHERE id = ?", [subjectId])
     },
 
     deleteTenant: async (id) => {
-      // Every tenant-scoped table declares ON DELETE CASCADE, so one delete
-      // reclaims clients, keys, policies, bindings, approvals, audit rows, and snapshots.
       await run("DELETE FROM gateway_tenant WHERE id = ?", [id])
     },
 
@@ -378,7 +346,6 @@ const createGatewayStoreDriver = async (
       return await requireSession(input.tokenHash)
     },
 
-    // Joined with the login for the display email; expired rows read as absent.
     findLiveSession: async (tokenHash) => {
       const row = await one(
         `SELECT gateway_session.*, gateway_login.email
@@ -777,8 +744,6 @@ const createGatewayStoreDriver = async (
         key: toApiKey(row),
         client: toClient({
           ...row,
-          // The joined client columns shadow what the key row carries; every
-          // client field must come from its aliased column, including id.
           id: row["client_id"] ?? "",
           tenant_id: row["client_tenant_id"] ?? "",
            access_profile_id: row["client_access_profile_id"] ?? "",
@@ -990,10 +955,6 @@ const createGatewayStoreDriver = async (
 
     createApproval: async (input) => {
       const match = approvalMatch(input)
-      // Stored canonically so that the same request, however its JSON was
-      // built, matches the frozen call it is a retry of — then sealed. The
-      // keyed digest of the canonical text rides alongside, because equality
-      // search over randomised ciphertext is impossible by design.
       const canonical = canonicalArguments(input.arguments)
       const createdAt = now()
       await database.batch([
@@ -1212,11 +1173,6 @@ const createGatewayStoreDriver = async (
   }
 }
 
-/** Which of the three failure kinds a caught cause is.
- *
- *  Classified here rather than guessed at the edge: `MalformedRowError` is
- *  thrown by the row decoders themselves, and libsql reports a refused rule with
- *  an `SQLITE_CONSTRAINT*` code. Anything else is the driver. */
 const failureKind = (cause: unknown): GatewayStoreFailureKind => {
   if (cause instanceof MalformedRowError) return "malformed-row"
   const code = Predicate.hasProperty(cause, "code") ? String(cause.code) : ""

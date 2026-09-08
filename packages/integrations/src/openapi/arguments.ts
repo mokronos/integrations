@@ -2,22 +2,9 @@ import { Option } from "effect"
 import { isJsonObject, type Json } from "@mokronos/contracts"
 import type { HttpCall } from "@mokronos/core-integrations"
 
-/** Splitting a caller's flat arguments back into the parts a request is made
- *  of.
- *
- *  The inverse of the flattening done at capture, driven by the same location
- *  map — which is stored on the call, so this needs neither the specification
- *  nor the compiled operation it came from. */
-
 export interface SplitArguments {
   readonly parameters: Record<string, Json>
   readonly requestBody: Option.Option<Json>
-  /** Properties the operation does not declare.
-   *
-   *  Reported rather than forwarded. Routing an unrecognised property to the
-   *  query string — the obvious default, since most parameters live there —
-   *  means a caller that invents an argument silently sends it upstream, which
-   *  is how a typo becomes a filter nobody asked for. */
   readonly unknown: ReadonlyArray<string>
 }
 
@@ -64,12 +51,6 @@ export const splitArguments = (call: HttpCall, input: Json): SplitArguments => {
   }
 }
 
-/** Required parameters the caller did not supply.
- *
- *  Checked before a request is built: a missing path parameter would otherwise
- *  leave its `{placeholder}` in the URL, and a missing required filter would be
- *  silently dropped — both producing an upstream rejection that names something
- *  other than the real problem. */
 export const missingArguments = (
   call: HttpCall,
   parameters: Readonly<Record<string, Json>>

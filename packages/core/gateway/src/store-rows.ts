@@ -15,13 +15,6 @@ import type {
 import { PasswordHash } from "./passwords.ts"
 import type { IdentityOAuthStateRecord, LoginRecord } from "./store-contract.ts"
 
-// --- row decoding -----------------------------------------------------------
-// libsql rows carry numeric indices and a length alongside the named columns,
-// so fields are picked explicitly rather than spread.
-
-/** The named columns of one row, as the decoders receive them. A driver row
- *  carries positional keys and a length alongside the names, so the columns a
- *  schema expects are picked out rather than spread. */
 type PickedRow = Record<string, Row[string]>
 
 const pick = (row: Row, keys: ReadonlyArray<string>): PickedRow =>
@@ -235,14 +228,6 @@ const snapshotColumns = [
   "integration", "connection_name", "tool", "input_schema", "output_schema", "synced_at"
 ]
 
-/** A row the gateway itself wrote that no longer decodes.
- *
- *  Distinct from a driver failure because the remedy is different: a rejected
- *  statement is operational and usually transient, while a row that will not
- *  decode is a schema or migration bug that will fail identically on every
- *  retry. Both used to arrive at `storeOperation` as an anonymous throw and
- *  became the same `GatewayStoreError`, so an operator could not tell "the
- *  database is busy" from "we cannot read what we stored". */
 export class MalformedRowError extends Error {
   readonly _tag = "MalformedRowError"
   constructor(readonly table: string, override readonly cause: unknown) {
@@ -250,9 +235,6 @@ export class MalformedRowError extends Error {
   }
 }
 
-/** Decodes one row, naming the table so a failure says which one. Sync on
- *  purpose: the driver methods it serves are Promise-returning, and
- *  `storeOperation` turns the throw into a typed `GatewayStoreError`. */
 const rowDecoder = <T>(table: string, schema: Schema.ConstraintDecoder<T>) => {
   const decode = Schema.decodeUnknownSync(schema)
   return (columns: PickedRow): T => {
@@ -264,7 +246,6 @@ const rowDecoder = <T>(table: string, schema: Schema.ConstraintDecoder<T>) => {
   }
 }
 
-/** The same, for a column that holds JSON text rather than a row. */
 const jsonDecoder = <T>(column: string, schema: Schema.ConstraintDecoder<T>) => {
   const decode = Schema.decodeUnknownSync(schema)
   return (text: string): T => {
@@ -424,7 +405,6 @@ export const toAuthSession = (row: Row): AuthSession => {
     tokenHash: SessionTokenHash.make(decoded.token_hash),
     tenantId: TenantId.make(decoded.tenant_id),
     subjectId: SubjectId.make(decoded.subject_id),
-    // Joined from the login; a session always has one.
     email: String(row["email"] ?? ""),
     createdAt: date(decoded.created_at),
     expiresAt: date(decoded.expires_at)
@@ -501,9 +481,6 @@ export const toApprovalPolicyTool = (row: Row): ApprovalPolicyTool => {
   }
 }
 
-/** Reads a stored approval back into the domain. `open` undoes whatever the
- *  write side did to `arguments`/`result`; for plaintext stores it is the
- *  identity, so one reader serves both worlds. */
 export const toApproval = (row: Row, open: (text: string) => string = identity): PendingApproval => {
   const decoded = decodeApprovalRow(pick(row, approvalColumns))
   return {

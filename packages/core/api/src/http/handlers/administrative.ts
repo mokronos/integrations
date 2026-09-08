@@ -63,8 +63,6 @@ const approvalWebhookUrl = (value: string): URL | undefined => {
   }
 }
 
-// --- system -----------------------------------------------------------------
-
 export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrative", (handlers) =>
   Effect.gen(function*() {
     const store = yield* GatewayStoreService
@@ -124,8 +122,6 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           if ((yield* capture(store.findClientByName(tenantId, body.name))) !== undefined) {
             return yield* new ApiBadRequest({ error: `A client named ${body.name} already exists` })
           }
-          // Clients are created inside the caller's partition. There is no way
-          // to provision into another tenant over this surface, by design.
           const defaults = yield* capture(reconcileDefaults({ store, integrations: { host }, tenantId }))
           const accessProfile = body.accessProfileId === undefined
             ? defaults.accessProfile
@@ -214,7 +210,6 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           }
           const key = generateApiKey()
           yield* capture(store.addApiKey({ id: key.id, clientId, hash: key.hash }))
-          // The only time the plaintext exists outside the caller's hands.
           return { id: key.id, clientId, secret: key.secret }
         }))
       .handle("listKeys", (request) =>
@@ -224,8 +219,6 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           if ((yield* capture(store.findClientById(tenantId, clientId))) === undefined) {
             return yield* new ApiNotFound({ error: `Unknown client ${clientId}` })
           }
-          // Hashes stay behind the gateway. What an operator needs is which keys
-          // exist, when each was last used, and which are still live.
           const keys = yield* capture(store.listApiKeys(clientId))
           return {
             keys: keys.map((key) => ({
@@ -241,9 +234,6 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
         Effect.gen(function*() {
           const keyId = request.params["id"]
           yield* capture(store.revokeApiKey(keyId))
-          // Rotation, not containment: a revoked key's frozen calls stay armed
-          // because the client behind them is still trusted. Revoking the
-          // client is what cancels those.
           return { revoked: true as const, key: keyId }
         }))
       .handle("clientTools", (request) =>
@@ -253,9 +243,6 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           if ((yield* capture(store.findClientById(tenantId, clientId))) === undefined) {
             return yield* new ApiNotFound({ error: `Unknown client ${clientId}` })
           }
-          // The same listing `/v1/tools` gives a key about itself, asked about
-          // someone else. Reading what the client you are provisioning can
-          // reach should not require holding its key.
           return {
             tools: yield* capture(listEffectiveTools(store, clientId, {
               schemas: request.query["schemas"],
@@ -271,8 +258,6 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
             return yield* new ApiNotFound({ error: `Unknown client ${clientId}` })
           }
           yield* capture(store.revokeClient(tenantId, clientId))
-          // Revoking a client is done because something is wrong, so its frozen
-          // actions must not stay armed. Revoking a single key does not do this.
           const cancelled = yield* capture(store.cancelApprovalsForClient(clientId))
           return { revoked: true as const, cancelledApprovals: cancelled }
         }))
@@ -464,9 +449,6 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
             : [slug]
           const reports: Array<DriftReport> = []
           for (const integration of slugs) {
-            // Was `.pipe(Effect.orDie)`: a re-read that failed became a 500
-            // that said nothing, even when the reason was an integration whose
-            // endpoint is simply gone. Now the reason survives to the caller.
             reports.push(yield* capture(refreshIntegrationSnapshot(
               { store: store, integrations: { host } },
               integration,
@@ -503,8 +485,6 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           }
           const limit = query["limit"]
           const offset = query["offset"]
-          // The trail is permanent, so the count is what tells a reader whether
-          // the window they asked for is the whole answer.
           return {
             records: yield* capture(store.listAudit(tenantId, { ...filter, limit, offset })),
             total: yield* capture(store.countAudit(tenantId, filter)),
@@ -513,5 +493,3 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           }
         }))
   }))
-
-// --- auth -------------------------------------------------------------------

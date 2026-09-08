@@ -66,9 +66,6 @@ interface RecordedFlow {
   completedCode?: string
 }
 
-/** A stand-in for the integrations's OAuth operations. It records the redirect URI
- *  a flow was registered with — that is the whole point of hosted mode — and
- *  answers completions with a canned connection. */
 const fakeAuth = (behaviour: {
   readonly completeFails?: boolean
 } = {}) => {
@@ -77,9 +74,6 @@ const fakeAuth = (behaviour: {
   const dies = (member: string) => () =>
     Effect.die(new Error(`${member} is not used by these tests`))
 
-  // The host services an authorization actually reaches. Faking these rather
-  // than a Promise `AuthApi` means the tests run the real `completeOAuthFlow`:
-  // the exchange, the connection record, and the tool re-read all happen.
   const host: Context.Context<OAuthOperations> = Context.empty().pipe(
     Context.add(OAuthFlows, {
       probe: dies("probe"),
@@ -165,7 +159,6 @@ describe("hosted oauth flows", () => {
     expect(fake.record.completedCode).toBe("abc")
     expect(completed).toEqual([done.id])
 
-    // A replayed callback is consumed, not a second connection.
     expect(await run(sessions.completeByState("provider-state-1", { code: "abc" }))).toBeUndefined()
     expect(completed).toEqual([done.id])
     expect(await run(sessions.completeByState("never-seen", { code: "abc" }))).toBeUndefined()
@@ -196,7 +189,6 @@ describe("hosted oauth flows", () => {
       connection: "default",
       authMethod: oauthMethod
     }))
-    // The flow was registered against some 127.0.0.1 port this process bound.
     expect(fake.record.redirectUri).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/oauth\/callback$/)
     expect(session.state.status).toBe("pending")
     await run(sessions.stop())
@@ -204,10 +196,6 @@ describe("hosted oauth flows", () => {
 })
 
 
-
-/** A throwing stand-in for the whole integrations surface. The callback route
- *  never reaches any of these members; a partial fake that returned undefined
- *  would let a handler quietly start depending on one. */
 
 describe("the hosted callback route", () => {
 

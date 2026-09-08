@@ -52,12 +52,8 @@ import {
 import { Authority } from "./authority.ts"
 import { ForbiddenError, RequiredAccess, Unmetered } from "./identity.ts"
 
-// --- shared wire shapes -----------------------------------------------------
-
 const Json = Schema.Json
 
-/** An alias arrives on the wire as prose-typed JSON; validating its shape here
- *  turns a malformed one into an automatic 400 instead of a handler defect. */
 const WireAlias = Alias
 
 const ExecuteBody = Schema.Struct({
@@ -113,9 +109,6 @@ const AssignApprovalPolicyBody = Schema.Struct({ approvalPolicyId: ApprovalPolic
 const DiscoverBody = Schema.Struct({
   url: Schema.String,
   connection: Schema.optional(Schema.String),
-  /** Chosen by the caller when the derived name is not what a person would
-   *  say. The slug can only be chosen here, because after this it is what
-   *  every address and alias is made of. */
   slug: Schema.optional(Schema.String),
   name: Schema.optional(Schema.String)
 })
@@ -126,8 +119,6 @@ const ConnectBody = Schema.Struct({
   integration: Schema.String,
   connection: Schema.optional(Schema.String),
   template: Schema.optional(Schema.String),
-  /** Credential values, resolved from the environment by the *client* before
-   *  they get here. The gateway never reads a caller's environment. */
   values: Schema.optional(Schema.Record(Schema.String, Schema.String))
 })
 
@@ -156,8 +147,6 @@ const Email = Schema.String.check(
 
 export const SignupBody = Schema.Struct({
   email: Email,
-  /** The one strength rule enforced structurally; scrypt compensates for
-   *  complexity, never for length. */
   password: Schema.String.check(Schema.isMinLength(8)),
   tenantName: Schema.optional(Schema.String)
 })
@@ -169,8 +158,6 @@ export const LoginBody = Schema.Struct({
 
 export const ChangeEmailBody = Schema.Struct({
   email: Email,
-  /** Re-authentication on the way in: whoever can type the current password
-   *  may redirect the account, and a hijacked tab cannot. */
   password: Schema.String
 })
 
@@ -183,8 +170,6 @@ export const DeleteAccountBody = Schema.Struct({
   password: Schema.optional(Schema.String)
 })
 
-/** An effective tool as `/v1/tools` reports it. Schemas are opt-in because
- * fetching them costs a catalog read per binding. */
 const EffectiveTool = Schema.Struct({
   alias: Alias,
   tool: Schema.String,
@@ -195,10 +180,6 @@ const EffectiveTool = Schema.Struct({
   outputSchema: Schema.optional(Json)
 })
 
-/** One invocation, three endings. A frozen call is not an error: the caller
- *  gets an identifier to poll and suspends rather than failing. The statuses
- *  are part of the answer, declared here so the encoded response cannot drift
- *  from what a caller branches on. */
 const InvokedOk = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("succeeded"),
@@ -276,10 +257,6 @@ const OAuthSessionView = Schema.Struct({
   state: OAuthSessionState
 })
 
-// --- shared errors ----------------------------------------------------------
-
-/** Endpoint-level refusals. Each carries its status as an annotation, so the
- *  encoded response and the documented API cannot disagree. */
 class ApiBadRequest extends Schema.TaggedError<ApiBadRequest>()(
   "ApiBadRequest",
   { error: Schema.String }
@@ -336,11 +313,6 @@ const HandoffCollectedError = HandoffCollected.pipe(HttpApiSchema.status(410))
 
 const HandoffRaceError = HandoffCollected.pipe(HttpApiSchema.status(409))
 
-/** Every endpoint can refuse a caller, so the authority's errors ride on the
- *  groups through its middleware rather than being named endpoint by endpoint. */
-
-// --- system -----------------------------------------------------------------
-
 const SystemGroup = HttpApiGroup.make("system")
   .add(HttpApiEndpoint.get("health", "/v1/health", {
     success: Schema.Struct({ ok: Schema.Literal(true) })
@@ -350,9 +322,6 @@ const SystemGroup = HttpApiGroup.make("system")
   }).annotate(Unmetered, true).annotate(RequiredAccess, "public"))
   .middleware(Authority)
 
-/** Unmatched requests land here instead of the router's bare empty 404, so a
- *  wrong method still says which paths exist and an unknown path answers in
- *  the same JSON dialect as everything else. */
 const FallbackGroup = HttpApiGroup.make("fallback")
   .add(HttpApiEndpoint.make("GET")("unmatchedGet", "/*", {
     params: { "*": Schema.String },
@@ -366,7 +335,7 @@ const FallbackGroup = HttpApiGroup.make("fallback")
     params: { "*": Schema.String },
     success: Schema.Never.pipe(HttpApiSchema.status(404))
   }).annotate(Unmetered, true).annotate(RequiredAccess, "public"))
-  .middleware(Authority)// --- delegated --------------------------------------------------------------
+  .middleware(Authority)
 
 const DelegatedGroup = HttpApiGroup.make("delegated")
   .add(HttpApiEndpoint.get("listTools", "/v1/tools", {
@@ -388,8 +357,6 @@ const DelegatedGroup = HttpApiGroup.make("delegated")
   }).annotate(RequiredAccess, "delegated"))
   .middleware(Authority)
 
-// --- provisioning -----------------------------------------------------------
-
 const ProvisioningGroup = HttpApiGroup.make("provisioning")
   .add(HttpApiEndpoint.get("listIntegrations", "/v1/integrations", {
     success: Schema.Struct({
@@ -400,14 +367,8 @@ const ProvisioningGroup = HttpApiGroup.make("provisioning")
   .add(HttpApiEndpoint.post("discover", "/v1/integrations/discover", {
     payload: DiscoverBody,
     success: HttpApiSchema.status(201)(IntegrationDiscovery),
-    // The URL is the caller's, and so is an unreachable host or a document that
-    // is not a spec. Declared here so it answers rather than breaks.
     error: ApiBadRequestError
   }).annotate(RequiredAccess, "provisioning"))
-  // Both name an integration in the path, so both can be asked about one that
-  // does not exist. That used to reach the router as an undeclared defect and
-  // answer 500; the host's failures are typed now, so it is the 404 it always
-  // meant.
   .add(HttpApiEndpoint.get("integrationTools", "/v1/integrations/:slug/tools", {
     params: { slug: Schema.String },
     success: Schema.Struct({ tools: Schema.Array(ToolSummary) }),
@@ -469,7 +430,6 @@ const ProvisioningGroup = HttpApiGroup.make("provisioning")
       domain: Schema.optional(Schema.String),
       site: Schema.optional(Schema.String)
     },
-    // The provider's redirect lands here; every answer is a page for a human.
     success: Schema.Struct({ rendered: Schema.Literal(true) })
   }).annotate(RequiredAccess, "public"))
   .add(HttpApiEndpoint.post("renameIntegration", "/v1/integrations/:slug/name", {
@@ -483,8 +443,6 @@ const ProvisioningGroup = HttpApiGroup.make("provisioning")
     success: Schema.Struct({
       removed: Schema.Literal(true),
       integration: Schema.String,
-      /** What went with it. Removing an integration is not one deletion, and
-       *  the caller should be able to say what it cost. */
       connections: Schema.Array(Schema.String)
     }),
     error: ApiNotFoundError
@@ -499,8 +457,6 @@ const ProvisioningGroup = HttpApiGroup.make("provisioning")
     error: ApiNotFoundError
   }).annotate(RequiredAccess, "provisioning"))
   .middleware(Authority)
-
-// --- administrative ---------------------------------------------------------
 
 const KeyView = Schema.Struct({
   id: ApiKeyId,
@@ -525,9 +481,6 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
     })
   }).annotate(RequiredAccess, "administrative"))
   .add(HttpApiEndpoint.get("listClients", "/v1/clients", {
-    // Every client in the list reaches the gateway at the same MCP endpoint,
-    // and it is absent rather than invented when this deployment has no public
-    // origin to name.
     success: Schema.Struct({
       clients: Schema.Array(Client),
       mcpUrl: Schema.optional(Schema.NullOr(Schema.String))
@@ -719,8 +672,6 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
   .add(HttpApiEndpoint.post("refreshDrift", "/v1/drift/refresh", {
     query: { integration: Schema.optional(Schema.String) },
     success: Schema.Struct({ reports: Schema.Array(DriftReport) }),
-    // Re-reading reaches the integration, and an integration that will not
-    // answer is the operator's to act on — it was a silent 500 before.
     error: ApiBadRequestError
   }).annotate(RequiredAccess, "administrative"))
   .add(HttpApiEndpoint.post("maintenance", "/v1/maintenance", {
@@ -748,8 +699,6 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
     })
   }).annotate(RequiredAccess, "administrative"))
   .middleware(Authority)
-
-// --- auth -------------------------------------------------------------------
 
 const ProvidersView = Schema.Struct({
   signupOpen: Schema.Boolean,
@@ -808,9 +757,6 @@ const MeView = Schema.Union([
   Schema.Struct({ authenticated: Schema.Literal(false) })
 ])
 
-/** The browser-facing session surface answers with cookies alongside JSON, so
- *  several of these handlers build raw responses; their schemas remain honest
- *  declarations of the shape a successful body carries. */
 const AuthGroup = HttpApiGroup.make("auth")
   .add(HttpApiEndpoint.get("providers", "/v1/auth/providers", {
     success: ProvidersView
@@ -878,7 +824,6 @@ const AuthGroup = HttpApiGroup.make("auth")
   }).annotate(RequiredAccess, "human"))
   .middleware(Authority)
 
-/** The whole gateway surface, as data. */
 export const GatewayApi = HttpApi.make("@mokronos/integrations/gateway")
   .add(SystemGroup)
   .add(FallbackGroup)

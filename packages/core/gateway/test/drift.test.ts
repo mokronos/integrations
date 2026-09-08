@@ -52,9 +52,6 @@ const snapshot = (tool: string, input: ToolSnapshot["inputSchema"]): ToolSnapsho
   syncedAt: new Date()
 })
 
-/** Stands in for a vendor whose catalog we do not control. Satisfying
- *  `ToolCatalogReader` rather than the whole host surface is what lets this
- *  build a real, fully typed tool list without casting. */
 const hostWithTools = (
   tools: ReadonlyArray<{ name: string; input: Tool["inputSchema"] }>
 ): ToolCatalogReader => ({
@@ -109,9 +106,6 @@ describe("catalog drift", () => {
 
   test("surfaces new tools, which explicit policies otherwise make invisible", async () => {
     const store = await run(makeStore())
-    // The first sync has nothing to compare against, so it records the shape
-    // and reports a baseline. Calling an integration's entire surface "added"
-    // would bury the one real change in the run that matters.
     const first = await run(refreshIntegrationSnapshot(
       { store, integrations: hostWithTools([{ name: "create", input: null }]) },
       "tickets",
@@ -132,8 +126,6 @@ describe("catalog drift", () => {
       defaultTenantId
     ))
 
-    // Unreachable until the access profile allows it, which is why it has to be
-    // reported rather than left to be noticed.
     expect(second.entries).toEqual([
       {
         kind: "added",
@@ -223,7 +215,6 @@ describe("gateway maintenance", () => {
     const result = await run(runMaintenance(store))
 
     expect(result.expiredApprovals).toBe(1)
-    // Expiry is a decision: the invocation does not happen.
     expect((await run(store.getApproval(defaultTenantId, stale.id)))?.status).toBe("expired")
     expect((await run(store.getApproval(defaultTenantId, fresh.id)))?.status).toBe("pending")
   })

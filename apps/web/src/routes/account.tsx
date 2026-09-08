@@ -29,8 +29,6 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 
-/** The signed-in human's own page. Agents never see it — they hold client
- *  keys, not accounts — so everything here answers to a password. */
 export function AccountRoute() {
   const session = useSession()
   if (session?.authenticated !== true) return null
@@ -101,7 +99,6 @@ function ChangeEmailCard() {
     setBusy(true)
     try {
       await changeEmail({ email, password })
-      // A full reload re-runs the session check, which reads the new email.
       navigate(0)
     } catch (error) {
       toast.error("Could not change email", {
@@ -243,8 +240,6 @@ function DeleteAccountCard({ hasPassword }: { readonly hasPassword: boolean }) {
     setBusy(true)
     try {
       await deleteAccount(hasPassword ? { password } : {})
-      // Everything this account owned is gone; the reload lands on the login
-      // card because the session went with the subject.
       navigate(0)
     } catch (error) {
       toast.error("Could not delete the account", {

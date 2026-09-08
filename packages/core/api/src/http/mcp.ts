@@ -26,7 +26,6 @@ import { IntegrationHost } from "@mokronos/integrations"
 import type { HostServices } from "@mokronos/integrations"
 import { Context } from "effect"
 
-/** The one host service the MCP surface reaches for. */
 const hostOf = (options: McpGatewayOptions): IntegrationHost["Service"] =>
   Context.get(options.hostServices, IntegrationHost)
 import { Layer, ManagedRuntime } from "effect"
@@ -65,9 +64,6 @@ const toolResult = (outcome: InvocationOutcome) => {
     : { content: [{ type: "text" as const, text }], isError: true }
 }
 
-/** One invocation, as an Effect. Nothing here runs it: the caller runs it on
- *  the handler's own runtime, so a request shares the gateway's error sink and
- *  its tracing rather than starting from nothing. */
 const invocation = (options: McpGatewayOptions, input: {
   readonly secret: string
   readonly alias: Alias
@@ -84,9 +80,6 @@ const invocation = (options: McpGatewayOptions, input: {
         ? undefined
         : `${origin.replace(/\/+$/, "")}/approvals?approval=${encodeURIComponent(approvalId)}`
     },
-    // Was `.pipe(Effect.orDie)`: a notification the gateway could not deliver
-    // vanished. It still must not fail the invocation — the call is authorized
-    // either way — so it is recorded and given a correlation id instead.
     onApprovalCreated: () => capture(deliverDueApprovalNotifications({
       store: options.store,
       ...whenPresentMap("dashboardUrl", options.dashboardUrl?.(), (url) => url)
@@ -100,17 +93,9 @@ export interface McpGatewayOptions {
   readonly hostServices: Context.Context<HostServices>
   readonly retentionDays: number
   readonly dashboardUrl?: () => string | undefined
-  /** Shared with the HTTP surface, so a failure on the MCP endpoint is recorded
-   *  in the same place and under the same shape of id as one on `/v1`. */
   readonly errorCapture?: ErrorSink
 }
 
-/** What the MCP surface runs on.
- *
- *  One runtime for the handler's lifetime rather than a fresh `Effect.runPromise`
- *  per call: the agent-facing endpoint is the busiest path in the gateway, and
- *  every invocation on it now shares one error sink, one set of fiber refs and
- *  one tracing context. `dispose` tears it down with the handler. */
 type McpRuntime = ManagedRuntime.ManagedRuntime<ErrorCapture, never>
 
 const serverFor = async (
@@ -161,10 +146,6 @@ export const createMcpGatewayHandler = (options: McpGatewayOptions): McpGatewayH
       : Layer.succeed(ErrorCapture, options.errorCapture)
   )
   const handler = createMcpHandler(({ authInfo }) => {
-    // `createMcpHandler` only calls this once authentication has produced an
-    // identity, so an absent one is our bug rather than the caller's. It stays
-    // a throw because the SDK's callback is Promise-shaped and this is the one
-    // place the two conventions meet.
     if (authInfo === undefined) throw new Error("Authenticated MCP request has no identity")
     return serverFor(options, runtime, ClientId.make(authInfo.clientId), authInfo.token)
   })

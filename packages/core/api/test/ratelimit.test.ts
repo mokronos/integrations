@@ -41,7 +41,6 @@ describe("the fixed-window limiter", () => {
     now += 1_000
     const refused = limiter.take("k", now)
     expect(refused.allowed).toBe(false)
-    // Counts down to the window's close, not a fixed guess.
     expect(refused.retryAfterSeconds).toBe(59)
   })
 
@@ -51,7 +50,6 @@ describe("the fixed-window limiter", () => {
     expect(limiter.take("k", now).allowed).toBe(true)
     expect(limiter.take("k", now).allowed).toBe(true)
     expect(limiter.take("k", now + 5_000).allowed).toBe(false)
-    // One millisecond past the boundary is a new budget.
     expect(limiter.take("k", now + 10_001).allowed).toBe(true)
   })
 
@@ -118,11 +116,8 @@ describe("gateway traffic shaping", () => {
     const { handle } = await run(setup({ addressLimit: 2 }))
     const attempt = () => handle(new Request("http://gateway.test/v1/tools"))
 
-    // The first two spend the bucket; each reaches authentication and is
-    // refused there for having no key.
     expect((await run(attempt())).status).toBe(401)
     expect((await run(attempt())).status).toBe(401)
-    // The next one never gets that far.
     const refused = await run(attempt())
     expect(refused.status).toBe(429)
     expect(refused.headers.get("retry-after")).toBe("60")
@@ -142,7 +137,6 @@ describe("gateway traffic shaping", () => {
   test("one exhausted principal does not starve another", async () => {
     const { handle, client, key } = await run(setup({
       principalLimit: 2,
-      // Wide open: this test is about principal fairness, not the address.
       addressLimit: 10_000
     }))
 
@@ -175,7 +169,6 @@ describe("gateway traffic shaping", () => {
     expect((await run(as(key.secret))).status).toBe(200)
     expect((await run(as(key.secret))).status).toBe(200)
     expect((await run(as(key.secret))).status).toBe(429)
-    // The neighbour's budget is untouched.
     expect((await run(as(neighbourKey.secret))).status).toBe(200)
   })
 

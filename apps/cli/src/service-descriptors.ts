@@ -1,12 +1,5 @@
 import path from "node:path"
 
-/** Registering the gateway with the platform's per-user service manager.
- *
- * This deliberately repeats the shape of the dashboard's installer rather than
- * sharing it: `wf` depends on the gateway, not the other way round, so the
- * integrations app cannot import from the workflow CLI. The two units are also
- * genuinely different — a different label, home variable, port, and lifetime.
- * The gateway holds every credential and must survive the dashboard. */
 export const serviceLabel = "dev.mokronos.integrations"
 
 export const serviceLogPath = (home: string): string =>
@@ -15,17 +8,11 @@ export const serviceErrorLogPath = (home: string): string =>
   path.join(home, "logs", "integrations.error.log")
 
 export interface ServiceDescriptor {
-  /** A program, not a single path: a compiled binary is one element, while a
-   *  source install is ["<bun>", "<path to main.ts>"]. */
   readonly program: ReadonlyArray<string>
   readonly home: string
   readonly port: number
 }
 
-/** The arguments the unit runs. Loopback is not configurable here: a service
- *  that starts at login and exposes a credential-unlocking port to the network
- *  should be a deliberate `ii serve --host` in a terminal, not a
- *  default someone forgets is running. */
 export const serviceArguments = (descriptor: ServiceDescriptor): ReadonlyArray<string> => [
   ...descriptor.program,
   "serve",
@@ -97,5 +84,3 @@ export const launchdPlist = (descriptor: ServiceDescriptor): string => `<?xml ve
   <key>StandardErrorPath</key><string>${xmlEscape(serviceErrorLogPath(descriptor.home))}</string>
 </dict></plist>
 `
-
-

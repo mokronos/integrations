@@ -49,8 +49,6 @@ const connectionAuthLabel = (
   connection: Connection
 ): string => integration.authMethods.find((method) => method.template === connection.template)?.label
   ?? `Unavailable method (${connection.template})`
-/** One tool, closed until asked about. The header is the whole click target —
- *  a row that only responds on its words is a row people click twice. */
 function ToolCard({ tool }: { readonly tool: Tool }) {
   const [open, setOpen] = useState(false)
   return (
@@ -103,10 +101,6 @@ function ToolCard({ tool }: { readonly tool: Tool }) {
   )
 }
 
-/** Removing an integration is not one deletion, and the confirmation says what
- *  else goes: connections are removed with their credentials, and the policy
- *  rules that named them go too. A reader who only sees the integration's name
- *  cannot weigh that. */
 function RemoveIntegration({ integration }: { readonly integration: IntegrationOverview }) {
   const invalidate = useInvalidate()
   const navigate = useNavigate()
@@ -122,8 +116,6 @@ function RemoveIntegration({ integration }: { readonly integration: IntegrationO
           ? undefined
           : `${pluralise(result.connections.length, "connection")} removed with it.`
       })
-      // The route addressed the integration by slug, and the slug no longer
-      // resolves.
       void navigate("/integrations")
     },
     onError: (error: Error) =>
@@ -179,9 +171,6 @@ function RemoveIntegration({ integration }: { readonly integration: IntegrationO
   )
 }
 
-/** The name is a label and nothing points at it, so editing it in place is
- *  safe. The slug beside it is the identity and stays read-only: it is in every
- *  tool address, every alias, and the key each credential is sealed under. */
 function IntegrationName({ integration }: { readonly integration: IntegrationOverview }) {
   const invalidate = useInvalidate()
   const [editing, setEditing] = useState(false)

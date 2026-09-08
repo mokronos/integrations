@@ -11,15 +11,6 @@ import path from "node:path"
 import { Context, Effect, Layer, Option, Schema, Semaphore } from "effect"
 import { describeCause, StorageError } from "../errors.ts"
 
-/** Where every secret the host holds actually lives.
- *
- *  Nothing else in the host stores a credential: the catalog database keeps
- *  references (which client, which template, which scopes) and this store keeps
- *  the values, sealed. Splitting them is what makes a database dump safe to
- *  read and lets the same catalog run against a different secret backend. */
-
-/** The address a secret is filed under — a connection address for a token, or
- *  `oauth-client:<owner>:<slug>` for a registered client's secret. */
 export const CredentialKey = Schema.String.check(Schema.isMinLength(1)).pipe(
   Schema.brand("CredentialKey")
 )
@@ -33,13 +24,10 @@ export const oauthClientCredentialKey = (
   slug: string
 ): CredentialKey => CredentialKey.make(`oauth-client:${owner}:${slug}`)
 
-/** A stored OAuth grant. Kept as one sealed JSON value so a refresh replaces
- *  access token, refresh token, and expiry atomically. */
 export const StoredTokens = Schema.Struct({
   accessToken: Schema.String,
   tokenType: Schema.optional(Schema.String),
   refreshToken: Schema.optional(Schema.String),
-  /** Epoch milliseconds. Absent means the provider issued no expiry. */
   expiresAt: Schema.optional(Schema.Number),
   scope: Schema.optional(Schema.String)
 })
@@ -56,8 +44,6 @@ export class CredentialStore extends Context.Service<
   static readonly fileLayer = (directory: string): Layer.Layer<CredentialStore> =>
     Layer.effect(CredentialStore, Effect.sync(() => fileCredentialStore(directory)))
 
-  /** Unsealed, process-local. For tests and for probing an endpoint before any
-   *  connection exists. */
   static readonly memoryLayer: Layer.Layer<CredentialStore> = Layer.effect(
     CredentialStore,
     Effect.sync(() => {
@@ -80,8 +66,6 @@ type CredentialFile = typeof CredentialFile.Type
 
 const additionalData = Buffer.from("@mokronos/integrations/credentials/v1")
 
-/** Mints the file key on first use. Written with `wx` so two processes racing
- *  to create it cannot each install a different key. */
 const credentialKey = (directory: string): Buffer => {
   const keyPath = path.join(directory, "credentials.key")
   mkdirSync(directory, { recursive: true, mode: 0o700 })
@@ -139,8 +123,6 @@ export const openValue = (key: Buffer, sealed: string): string => {
 
 const fileCredentialStore = (directory: string): CredentialStore["Service"] => {
   const filePath = path.join(directory, "credentials.json")
-  // One writer at a time: every mutation is read-modify-write of the whole
-  // file, so concurrent sets would otherwise drop each other's entries.
   const writes = Semaphore.makeUnsafe(1)
 
   const readAll = Effect.try({
@@ -209,7 +191,6 @@ const fileCredentialStore = (directory: string): CredentialStore["Service"] => {
   }
 }
 
-/** Reads a connection's stored OAuth grant, if it has one. */
 export const readTokens = (
   store: CredentialStore["Service"],
   key: CredentialKey

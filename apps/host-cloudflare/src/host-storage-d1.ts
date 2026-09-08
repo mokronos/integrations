@@ -3,22 +3,8 @@ import { applySchema, CredentialStore, Database, openValue, sealValue, SqlValue,
 import { Effect, Layer, Option, Predicate, Schema } from "effect"
 import type { D1Cell, D1DatabaseLike } from "./cloudflare.ts"
 
-/**
- * The integration host's storage on Cloudflare, replacing the local pair of a
- * SQLite file and a sealed credential file.
- *
- * The host exposes exactly two storage seams — {@link Database} for rows and
- * {@link CredentialStore} for secrets — so this file is the whole of the
- * Cloudflare port. Nothing above those two seams changes, and there is no ORM
- * runtime-schema layer to reproduce: the host speaks parameterised SQL, which
- * D1 accepts directly.
- */
-
 const decodeRows = Schema.decodeUnknownEffect(Schema.Array(Schema.Record(Schema.String, SqlValue)))
 
-/** D1 returns `ArrayBuffer` for blob columns. The host stores only text,
- *  numbers and nulls, so anything else is a column it did not write and is
- *  rendered rather than dropped. */
 const toSqlValue = (cell: D1Cell | undefined): SqlValue => {
   if (Predicate.isNullish(cell)) return null
   if (Predicate.isString(cell) || Predicate.isNumber(cell)) return cell
@@ -36,7 +22,6 @@ const d1Database = (database: D1DatabaseLike): Database["Service"] => {
     Effect.tryPromise({
       try: async (): Promise<ReadonlyArray<Record<string, SqlValue>>> => {
         const bound = bind(statement, database)
-        // A parameterless statement has no `all`; DDL runs through `run`.
         const result = "all" in bound ? await bound.all() : await bound.run()
         return (result.results ?? []).map((row) =>
           Object.fromEntries(
@@ -60,15 +45,6 @@ const d1Database = (database: D1DatabaseLike): Database["Service"] => {
     )
   )
 
-  /**
-   * Statements run in order but not atomically.
-   *
-   * D1 rejects a raw `BEGIN`, and its batch API is not exposed through the
-   * structural binding this Worker compiles against. The host issues a batch in
-   * exactly two places — removing an integration with its connections, and
-   * nothing else — so a partial failure leaves an orphaned row rather than a
-   * corrupt catalog, and re-running the removal cleans it up.
-   */
   const batch = Effect.fn("D1Database.batch")((statements: ReadonlyArray<SqlStatement>) =>
     Effect.forEach(statements, query, { discard: true })
   )
@@ -76,8 +52,6 @@ const d1Database = (database: D1DatabaseLike): Database["Service"] => {
   return { query, batch }
 }
 
-/** Rows on a D1 binding. The schema is applied on first construction, exactly
- *  as the local layer does. */
 export const d1DatabaseLayer = (
   database: D1DatabaseLike
 ): Layer.Layer<Database, StorageError> =>
@@ -89,14 +63,6 @@ export const d1DatabaseLayer = (
     })
   )
 
-/**
- * Derives the credential key from the gateway's master key.
- *
- * There is no keyfile to mint on Workers, and a second secret to provision
- * would be one more thing to lose. HMAC domain separation keeps this key
- * distinct from every other use of the master key while remaining fully
- * determined by it.
- */
 export const deriveCredentialKey = (masterKey: Buffer): Buffer =>
   createHmac("sha256", masterKey).update("integrations-credentials/v1").digest()
 
@@ -108,13 +74,6 @@ const credentialTable = `CREATE TABLE IF NOT EXISTS credential (
 const SealedRow = Schema.Struct({ sealed: Schema.String })
 const decodeSealed = Schema.decodeUnknownOption(SealedRow)
 
-/** Secrets on the same D1 binding, sealed with the derived key.
- *
- *  The envelope format is the local store's — AES-256-GCM with the same
- *  additional data, so there is one sealing implementation rather than two — but
- *  the *keys* differ: the local store mints a keyfile, and this one derives from
- *  the gateway's master key. A value sealed by one deployment is therefore not
- *  readable by the other, and moving between them means reconnecting. */
 export const d1CredentialLayer = (
   database: D1DatabaseLike,
   masterKey: Buffer
@@ -124,9 +83,6 @@ export const d1CredentialLayer = (
     Effect.gen(function* () {
       const key = deriveCredentialKey(masterKey)
 
-      // The table is created once, when the layer is built, rather than lazily
-      // per call: the layer is constructed inside a request that already has
-      // I/O to spend.
       yield* Effect.tryPromise({
         try: () => database.prepare(credentialTable).run(),
         catch: (cause) => new StorageError({
@@ -188,7 +144,6 @@ export const d1CredentialLayer = (
     })
   )
 
-/** The complete {@link HostStorage} for a D1 deployment. */
 export const d1HostStorage = (
   database: D1DatabaseLike,
   masterKey: Buffer

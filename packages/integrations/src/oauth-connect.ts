@@ -14,16 +14,6 @@ import { InvalidInputError, type StorageError, type OAuthError } from "./errors.
 import { IntegrationHost } from "./host.ts"
 import { OAuthFlows } from "./oauth/flows.ts"
 
-/** Connecting an account through OAuth, as Effects.
- *
- *  This was the `auth` quarter of the Promise facade. Every member was a
- *  `host.run(...)` wrapper whose typed failure became a rejected promise the
- *  gateway then guessed at; the one member with real logic — `complete`, which
- *  exchanges the code *and* files the connection the tokens belong to — is the
- *  reason the quarter could not simply be deleted. */
-
-/** A caller's string, as the catalog addresses it. Identifiers arrive from the
- *  wire, so they are decoded rather than asserted. */
 const decodeId = <A, I>(
   schema: Schema.Codec<A, I, never, never>,
   field: string,
@@ -34,8 +24,6 @@ const decodeId = <A, I>(
       new InvalidInputError({ field, detail: `${String(value)} is not a valid ${field}: ${cause}` }))
   )
 
-/** Everything the host stores for a tenant lives under `org` here; a per-subject
- *  tier exists in the address grammar but nothing issues one yet. */
 const defaultOwner: OwnerTier = "org"
 
 export const probeOAuthServer = (
@@ -143,9 +131,6 @@ export const startOAuthFlow = Effect.fn("OAuthConnect.start")(function*(
   }
 })
 
-/** Finishing a flow both exchanges the code and files the connection the tokens
- *  belong to. A binding without that connection would be unaddressable, so the
- *  two have to happen together. */
 export const completeOAuthFlow = Effect.fn("OAuthConnect.complete")(function*(
   options: { readonly state: string; readonly code: string }
 ) {
@@ -169,15 +154,6 @@ export const completeOAuthFlow = Effect.fn("OAuthConnect.complete")(function*(
   }
   yield* store.putConnection(record)
 
-  // The grant is exchanged, sealed and filed by this point, so the account is
-  // connected whatever happens next. Reading the tool list is a separate
-  // conversation with the vendor, and letting its failure fail the flow tells
-  // someone who just authorized in a browser that they did not — while the
-  // connection it denies sits in the catalog.
-  //
-  // So the flow still succeeds, but the failure is not discarded: it is logged,
-  // and it rides back on the connection's own `error` field, which is where a
-  // reader looks for "this is connected but something is wrong".
   const captured = yield* Effect.result(host.refreshConnection({
     owner: record.owner,
     integration: record.integration,

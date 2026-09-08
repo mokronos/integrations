@@ -5,15 +5,6 @@ import type { Client as LibsqlClient, Value as LibsqlValue } from "@libsql/clien
 import { Context, Effect, Layer, Predicate, Schema } from "effect"
 import { describeCause, StorageError } from "../errors.ts"
 
-/** The single SQL seam the host persists through.
- *
- *  Everything above this service speaks parameterised statements and decoded
- *  rows, so a Cloudflare D1 binding satisfies the same contract as a local
- *  libsql file without any caller knowing which one it got. That replaces the
- *  ORM runtime-schema layer this host used to need. */
-
-/** What a bound parameter and a returned column may hold. Booleans are stored
- *  as 0/1 and structured values as JSON text, so this is the whole set. */
 export const SqlValue = Schema.Union([Schema.String, Schema.Number, Schema.Null])
 export type SqlValue = typeof SqlValue.Type
 
@@ -30,16 +21,11 @@ const decodeRows = Schema.decodeUnknownEffect(Schema.Array(SqlRow))
 export class Database extends Context.Service<
   Database,
   {
-    /** Runs one statement and returns its rows. A write returns no rows. */
     readonly query: (statement: SqlStatement) => Effect.Effect<ReadonlyArray<SqlRow>, StorageError>
-    /** Runs statements in order inside one transaction. */
     readonly batch: (statements: ReadonlyArray<SqlStatement>) => Effect.Effect<void, StorageError>
   }
 >()("@mokronos/integrations/Database") {}
 
-/** Normalises a driver result into plain decodable objects. libsql rows carry
- *  positional keys alongside named ones, so the column list is what makes a row
- *  a record rather than an array. */
 const toRecords = (
   columns: ReadonlyArray<string>,
   rows: ReadonlyArray<ReadonlyArray<SqlValue>>
@@ -48,11 +34,6 @@ const toRecords = (
     Object.fromEntries(columns.map((column, index) => [column, row[index] ?? null]))
   )
 
-/** One value as the driver hands it back, narrowed to what a column may hold.
- *
- *  libsql widens a cell to include `bigint`, `boolean` and buffers even for a
- *  schema that stores none of them, so the driver's union is collapsed here
- *  rather than carried through every read. */
 const cell = (value: LibsqlValue | undefined): SqlValue => {
   if (Predicate.isString(value) || Predicate.isNumber(value)) return value
   if (Predicate.isBigInt(value)) return Number(value)
@@ -109,9 +90,6 @@ const libsqlDatabase = (client: LibsqlClient): Database["Service"] => {
   return { query, batch }
 }
 
-/** The schema every table lives in. Applied on layer construction: a fresh file
- *  and an existing one converge on the same shape, and there is no migration
- *  history to carry because the host owns this database outright. */
 const schemaStatements: ReadonlyArray<string> = [
   `CREATE TABLE IF NOT EXISTS integration (
      slug           TEXT PRIMARY KEY NOT NULL,
@@ -147,12 +125,6 @@ const schemaStatements: ReadonlyArray<string> = [
      PRIMARY KEY (owner, integration, name),
      FOREIGN KEY (integration) REFERENCES integration(slug) ON DELETE CASCADE
    )`,
-  // Tools are captured, not re-derived. An MCP server has to be connected to
-  // before it will list them and an OpenAPI document has to be compiled, so
-  // doing either on every read turns opening a dashboard into one network round
-  // trip per connection. Capturing on connect and refresh makes a listing a
-  // single query, and makes "what changed upstream" a comparison rather than a
-  // guess.
   `CREATE TABLE IF NOT EXISTS tool (
      address          TEXT PRIMARY KEY NOT NULL,
      owner            TEXT NOT NULL,
@@ -201,21 +173,16 @@ const schemaStatements: ReadonlyArray<string> = [
      ON connection (integration, owner)`
 ]
 
-/** Brings a freshly opened database up to the shape above. Runs against the
- *  service value rather than the tag, so a layer can apply it to the handle it
- *  just built without depending on itself. */
 export const applySchema = (
   database: Database["Service"]
 ): Effect.Effect<void, StorageError> =>
   Effect.forEach(schemaStatements, (sql) => database.query({ sql }), { discard: true })
 
 export interface LibsqlDatabaseOptions {
-  /** Directory the SQLite file lives in. Created if absent, owner-only. */
   readonly directory: string
   readonly fileName?: string
 }
 
-/** A local libsql-backed database in a directory the host owns. */
 export const libsqlLayer = (
   options: LibsqlDatabaseOptions
 ): Layer.Layer<Database, StorageError> =>
@@ -251,7 +218,6 @@ export const libsqlLayer = (
     )
   )
 
-/** An in-memory database, for tests and for probing without touching disk. */
 export const memoryLayer: Layer.Layer<Database, StorageError> = Layer.effect(
   Database,
   Effect.acquireRelease(

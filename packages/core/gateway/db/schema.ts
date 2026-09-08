@@ -1,31 +1,8 @@
-// Everything the gateway owns lives here, above the host's own database.
-// Resolving a client's grant is what determines which subject a host instance
-// must be bound to, so these rows have to be readable before that instance
-// exists.
-//
-// This is the whole schema and the single place it is declared. Drizzle is here
-// for exactly one job: `bun run db:generate` diffs this file against the last
-// snapshot and writes the SQL that carries a live database from that shape to
-// this one. Nothing imports this module at runtime — the generated statements
-// are embedded in `src/store-migrations.gen.ts` and applied through the same
-// libsql-shaped client the store queries, so a D1 binding runs the same
-// migrations as a local file without drizzle in the bundle.
-//
-// Hand-editing the generated SQL defeats the snapshot: change a shape here,
-// regenerate, and commit both.
-
 import { sql } from "drizzle-orm"
 import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core"
 
 const createdAt = () => integer("created_at").notNull()
 
-// The route a tool grant lives on, with a null `subject` folded onto one value
-// so the engine can see two unscoped grants for the same route as one key.
-//
-// Written as a CASE rather than `COALESCE(subject, '')` because drizzle-kit
-// squashes an index's columns into a comma-separated string and splits it back
-// out again: an expression containing a comma comes out the far side as two
-// mangled column names. A comma-free expression round-trips intact.
 const unscopedSubject = sql`CASE WHEN subject IS NULL THEN '' ELSE subject END`
 
 export const gatewayTenant = sqliteTable("gateway_tenant", {
@@ -60,9 +37,6 @@ export const gatewaySession = sqliteTable("gateway_session", {
   expiresAt: integer("expires_at").notNull()
 })
 
-// A profile names the tools a client may reach; a policy names which of them
-// stop for a human. Both are tenant-owned and reusable, so each client carries
-// one of each rather than its own copy of either.
 export const gatewayAccessProfile = sqliteTable("gateway_access_profile", {
   id: text("id").primaryKey(),
   tenantId: text("tenant_id").notNull().references(() => gatewayTenant.id, { onDelete: "cascade" }),
@@ -72,17 +46,11 @@ export const gatewayAccessProfile = sqliteTable("gateway_access_profile", {
   updatedAt: integer("updated_at").notNull()
 }, (table) => [
   uniqueIndex("gateway_access_profile_name_tenant").on(table.tenantId, table.name),
-  // One default per tenant, enforced by the engine rather than by whoever
-  // remembers to clear the old flag first.
   uniqueIndex("gateway_access_profile_default_tenant")
     .on(table.tenantId)
     .where(sql`is_default = 1`)
 ])
 
-// `subject` is null for a connection that is not subject-scoped. SQLite counts
-// distinct nulls as distinct keys, so the primary key alone would admit two
-// rows for the same unscoped route; the coalescing index is what actually makes
-// a route unique.
 export const gatewayAccessProfileTool = sqliteTable("gateway_access_profile_tool", {
   accessProfileId: text("access_profile_id").notNull().references(
     () => gatewayAccessProfile.id,
@@ -233,9 +201,6 @@ export const gatewayPendingApproval = sqliteTable("gateway_pending_approval", {
   error: text("error"),
   collectedAt: integer("collected_at")
 }, (table) => [
-  // A retried invocation looks up the approval a human already answered, so the
-  // index covers the whole identity of a frozen call and skips the rows whose
-  // answer has been collected.
   index("gateway_pending_approval_retry")
     .on(
       table.tenantId,
@@ -298,8 +263,6 @@ export const gatewayAudit = sqliteTable("gateway_audit", {
   createdAt: createdAt()
 })
 
-// Audited arguments are caller data, so they expire on their own schedule
-// rather than living as long as the audit row that points at them.
 export const gatewayAuditArguments = sqliteTable("gateway_audit_arguments", {
   auditId: text("audit_id").primaryKey().references(() => gatewayAudit.id, { onDelete: "cascade" }),
   arguments: text("arguments").notNull(),

@@ -48,8 +48,6 @@ describe("normalising a tool result", () => {
   })
 
   it("passes a value that is not an envelope straight through", async () => {
-    // An OpenAPI result goes through the same function, so it must not be
-    // reinterpreted.
     for (const value of [{ total: 2 }, [1, 2, 3], "text", 7, null]) {
       const out = await result(normalizeToolResult("t", value))
       expect(out).toMatchObject({ _tag: "Success", success: value })

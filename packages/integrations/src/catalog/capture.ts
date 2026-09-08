@@ -14,19 +14,6 @@ import type { CompiledSpec } from "../openapi/compile.ts"
 import { Tool } from "@mokronos/core-integrations"
 import type { Tool as IntegrationTool, ToolCall } from "@mokronos/core-integrations"
 
-/** Converting an integration into tools.
- *
- *  This is the whole of the difference between protocols. An MCP server hands
- *  back tools already shaped like tools; an OpenAPI document hands back
- *  operations that have to be projected into the same shape. After this module
- *  runs, nothing downstream can tell which one it was — a tool is a name, a
- *  description, two schemas, a read-only flag, and a descriptor saying how to
- *  perform it.
- *
- *  Capture happens on connect and on refresh, not on read. An MCP server must be
- *  connected to before it will list anything, so doing this per read would make
- *  opening a dashboard one network round trip per connection. */
-
 export interface CaptureTarget {
   readonly owner: OwnerTier
   readonly integration: IntegrationSlug
@@ -66,11 +53,6 @@ const record = (
     new StorageError({ message: `Could not capture tool ${tool.name}`, cause })
   ))
 
-/** MCP tools, as the server describes them.
- *
- *  `readOnlyHint` is the server's own claim and the only thing that earns a tool
- *  an `allow` policy. A server that declares nothing gets `false`, which is the
- *  direction to fail in. */
 export const captureMcpTools = (
   target: CaptureTarget,
   definitions: ReadonlyArray<McpToolDefinition>,
@@ -91,11 +73,6 @@ export const captureMcpTools = (
       call: { kind: "mcp", tool: definition.name }
     }))
 
-/** OpenAPI operations, projected into the same shape.
- *
- *  Read-only here is a safe HTTP method, which is a stronger claim than any
- *  annotation because the protocol defines it rather than the vendor asserting
- *  it. */
 export const captureOpenApiTools = (
   target: CaptureTarget,
   spec: CompiledSpec,

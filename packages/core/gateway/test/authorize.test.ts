@@ -108,7 +108,6 @@ describe("gateway authorization", () => {
     if (result.status !== "authorized") return
     expect(result.accessProfile.id).toBe(accessProfile.id)
     expect(result.connection).toEqual(orgConnection)
-    // An org-tier connection belongs to the tenant, so no human is acted for.
     expect(result.subject).toBeNull()
   })
 
@@ -120,7 +119,6 @@ describe("gateway authorization", () => {
 
     expect(result.status).toBe("authorized")
     if (result.status !== "authorized") return
-    // The delegation lives in the profile route. Nothing in the API key says Sebastian.
     expect(result.subject).toBe(SubjectId.make("sebastian"))
   })
 
@@ -172,8 +170,6 @@ describe("gateway authorization", () => {
 
     await run(store.revokeApiKey(key.id))
 
-    // Rotation is overlap-then-retire: the client sends one key, the gateway
-    // accepts both for a window.
     expect((await run(invoke(store, key.secret))).status).toBe("key-revoked")
     expect((await run(invoke(store, replacement.secret))).status).toBe("authorized")
   })
@@ -194,7 +190,6 @@ describe("gateway authorization", () => {
     const unknownAlias = await run(invoke(store, key.secret, "nothing-here", "getDocument"))
     const unauthorizedTool = await run(invoke(store, key.secret, "org_sharepoint_default", "deleteDocument"))
 
-    // Telling these apart would let a caller enumerate what else is connected.
     expect(unknownAlias.status).toBe(unauthorizedTool.status)
   })
 
@@ -250,8 +245,6 @@ describe("gateway authorization", () => {
     expect(reader.status).toBe("authorized")
     expect(campaign.status).toBe("authorized")
     if (reader.status !== "authorized" || campaign.status !== "authorized") return
-    // Same connection, same tool, different policy — which is the whole point of
-    // keying policy by client rather than by connection.
     expect(reader.decision).toBe("allow")
     expect(campaign.decision).toBe("require_approval")
   })
@@ -265,8 +258,6 @@ describe("gateway authorization", () => {
       integration: IntegrationSlug.make("sharepoint"),
       name: ConnectionName.make("personal")
     } as const
-    // The same operation on two credentials, judged separately: the shared
-    // application connection is allowed outright, the personal one is not.
     const accessProfile = await run(store.findAccessProfile(defaultTenantId, client.accessProfileId))
     const approvalPolicy = await run(store.findApprovalPolicy(defaultTenantId, client.approvalPolicyId))
     if (accessProfile === undefined || approvalPolicy === undefined) throw new Error("missing configuration")
@@ -294,9 +285,6 @@ describe("gateway authorization", () => {
   test("the tenant's connection and one person's own never share an alias", async () => {
     const store = await run(makeStore())
     const { client, key } = await run(seed(store))
-    // Same integration, same connection name, different owner: before the owner
-    // tier and subject were part of the alias these two collided, and a call
-    // meant for one credential resolved to whichever route was stored first.
     const shared = {
       owner: "org",
       integration: IntegrationSlug.make("gmail"),
@@ -322,7 +310,6 @@ describe("gateway authorization", () => {
     expect(tenant.status).toBe("authorized")
     expect(personal.status).toBe("authorized")
     if (tenant.status !== "authorized" || personal.status !== "authorized") return
-    // Each alias reaches its own credential rather than both landing on one.
     expect(tenant.connection).toEqual(shared)
     expect(tenant.subject).toBeNull()
     expect(personal.connection).toEqual(userConnection)
@@ -356,8 +343,6 @@ describe("gateway capability authorization", () => {
     const store = await run(makeStore())
     const { key } = await run(seed(store, { capabilities: ["provision_connections"] }))
 
-    // The request is not makeable, so there is no approval prompt to wave
-    // through — which is the point of a static capability over a runtime gate.
     expect((await run(authorizeClientCapability(
       store,
       key.secret,

@@ -118,9 +118,6 @@ export function ClientKeys({ clientId, clientName, disabled }: {
             <DialogDescription>The gateway stores only its hash. The plaintext cannot be shown again.</DialogDescription>
           </DialogHeader>
           <code className="bg-muted block break-all rounded-md p-3 font-mono text-sm">{secret}</code>
-          {/* The only moment the plaintext exists is also the only moment a
-              ready-to-paste MCP configuration can carry it, so it is offered
-              here rather than left to be assembled by hand afterwards. */}
           {mcpUrl === undefined ? null : (
             <p className="text-muted-foreground text-xs">
               Or take it as MCP client configuration, with the key already in it.

@@ -62,10 +62,6 @@ describe("MCP auth methods", () => {
   })
 
   it("offers OAuth to a server that answers anonymously and still declares one", () => {
-    // Gmail's endpoint: `initialize` and `tools/list` succeed unauthenticated,
-    // every `tools/call` does not, and its protected-resource metadata says so
-    // the whole time. `connected` stays true — it is reachable — but reachable
-    // is not usable.
     const methods = mcpAuthMethods(
       probe({
         connected: true,
@@ -80,8 +76,6 @@ describe("MCP auth methods", () => {
     expect(methods[0]?.oauth?.scopes).toEqual([
       "https://www.googleapis.com/auth/gmail.readonly"
     ])
-    // No `none` alongside it: a connection that authorizes nothing can list
-    // tools and call none of them.
     expect(requiresAuthentication(methods)).toBe(true)
   })
 
@@ -118,8 +112,6 @@ describe("OpenAPI auth methods", () => {
   })
 
   it("declines a scheme it could not satisfy rather than offering it", () => {
-    // A cookie-borne key needs a redirect chain the host does not manage, and
-    // `digest` is not a bearer placement.
     expect(openApiAuthMethods([
       scheme({ name: "session", type: "apiKey", in: Option.some("cookie") })
     ])[0]?.kind).toBe("none")
@@ -129,8 +121,6 @@ describe("OpenAPI auth methods", () => {
   })
 
   it("declines an OAuth scheme with no way to run a flow", () => {
-    // Petstore's `petstore_auth` is exactly this: an implicit flow with an
-    // authorization URL and no token endpoint.
     const methods = openApiAuthMethods([
       scheme({
         name: "petstore_auth",

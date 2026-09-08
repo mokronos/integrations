@@ -4,10 +4,8 @@ import { homedir } from "node:os"
 import path from "node:path"
 import { Schema } from "effect"
 
-/** The dashboard already owns 4787. */
 export const defaultGatewayPort = 4788
 
-/** Where the gateway keeps credentials, the catalog, and its own store. */
 export const integrationsHome = (
   environment: NodeJS.ProcessEnv = process.env
 ): string => {
@@ -17,17 +15,6 @@ export const integrationsHome = (
     : path.resolve(configured)
 }
 
-/** Written by the daemon, read by clients on the same machine. Holds the port
- * and a key, so the local case is zero-configuration and the sandbox case is
- * explicit.
- *
- * This lives in the client package because finding the gateway is a client
- * concern; the gateway depends on it only to record where it is listening.
- *
- * `pid` says which process is listening, so a restart can stop the previous one
- * without hunting the port. It is optional because a config file written by an
- * older gateway does not have it, and a recorded pid is a claim about the past:
- * verify the process is alive and is a gateway before signalling it. */
 export const GatewayConfigFile = Schema.Struct({
   port: Schema.Number,
   url: Schema.String,
@@ -58,8 +45,6 @@ export const writeGatewayConfig = async (
   const location = gatewayConfigPath(home)
   await mkdir(path.dirname(location), { recursive: true, mode: 0o700 })
   await writeFile(location, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 })
-  // writeFile only applies the mode when creating, so an existing file keeps
-  // whatever it had. This file is a credential — re-assert it.
   chmodSync(location, 0o600)
 }
 
@@ -68,9 +53,6 @@ export interface ClientConnection {
   readonly apiKey: string
 }
 
-/** How a client finds the gateway: explicit environment first, then the config
- *  file the local daemon wrote. Environment wins so a sandbox can be pointed at
- *  a remote gateway without touching disk. */
 export const resolveClientConnection = async (
   environment: NodeJS.ProcessEnv = process.env
 ): Promise<ClientConnection | undefined> => {

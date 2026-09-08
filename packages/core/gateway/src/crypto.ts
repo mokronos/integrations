@@ -7,23 +7,11 @@ import {
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"
 
-/** Envelope prefix marking a value this module sealed. Reads accept both
- *  forms: rows written before encryption was enabled stay readable, so
- *  turning a key on is not a migration. */
 const envelopePrefix = "enc.v1$"
 
 export interface Encryption {
-  /** Seals text into `enc.v1$<iv>$<tag>$<ciphertext>`. Randomised per call —
-   *  equal inputs never produce equal ciphertexts. */
   readonly seal: (text: string) => string
-  /** Opens a sealed value; passes anything without the envelope prefix through
-   *  untouched, and throws on a value that claims to be sealed but fails
-   *  authentication (wrong key or tampered ciphertext). */
   readonly open: (text: string) => string
-  /** A deterministic keyed digest for equality lookups. The store needs to
-   *  *find* the frozen call a retry belongs to, which randomised sealing
-   *  forbids; the HMAC answers "is it this one?" without storing either the
-   *  plaintext or a value an offline attacker can recompute. */
   readonly lookup: (text: string) => string
 }
 
@@ -62,20 +50,10 @@ export const createEncryption = (masterKey: Buffer): Encryption => ({
 })
 
 export interface EncryptionSource {
-  /** Base64url of 32 bytes, from INTEGRATIONS_MASTER_KEY. */
   readonly envValue?: string
-  /** A keyfile inside the gateway's home directory, created on first use with
-   *  owner-only permissions when no environment key is given. */
   readonly keyFile?: string
 }
 
-/** Decides where the master key comes from: the environment wins, then an
- *  existing keyfile, then nothing — an unconfigured gateway stores plaintext,
- *  exactly as it always has.
- *
- * Generating the keyfile here rather than asking every operator to mint one
- * keeps the local-to-hosted path zero-configuration; writing it with 0600
- * means a leaked database file alone still yields no keys. */
 export const resolveEncryption = async (
   source: EncryptionSource
 ): Promise<Encryption | undefined> => {
@@ -101,8 +79,6 @@ export const resolveEncryption = async (
     mkdirSync(path.dirname(source.keyFile), { recursive: true, mode: 0o700 })
     const key = randomBytes(32)
     writeFileSync(source.keyFile, key, { mode: 0o600 })
-    // writeFileSync applies the mode only at creation; reassert it so an
-    // unexpected umask cannot leave the key world-readable.
     chmodSync(source.keyFile, 0o600)
     return createEncryption(key)
   }

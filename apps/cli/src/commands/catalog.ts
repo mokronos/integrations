@@ -18,9 +18,6 @@ const verboseFlag = () =>
   Flag.boolean("verbose").pipe(
     Flag.withDefault(false),
     Flag.withAlias("v"),
-    // Says how much of each row to show. It does not say how many rows: a
-    // listing returns all of them either way, so nothing is hidden behind a
-    // flag the reader did not know to pass.
     Flag.withDescription("Show complete objects, pretty-printed")
   )
 
@@ -63,10 +60,6 @@ type GatewayTask = typeof gatewayTask
 const JsonObject = Schema.Record(Schema.String, Schema.Json)
 const JsonArray = Schema.Array(Schema.Json)
 
-/** The gateway's responses arrive as unparsed JSON. These decode a response into
- *  a usable value and fall back to empty rather than failing the command: a
- *  listing that renders nothing is easier for a reader to act on than a crash,
- *  and the gateway is the party responsible for its own response shape. */
 const record = <A>(value: A | undefined): Record<string, typeof Schema.Json.Type> =>
   Option.getOrElse(Schema.decodeUnknownOption(JsonObject)(value), () => ({}))
 
@@ -75,16 +68,11 @@ const array = <A>(value: A | undefined): ReadonlyArray<Record<string, typeof Sch
 
 const text = (value: Schema.Json | undefined): string => value === undefined || value === null ? "" : String(value)
 
-/** Listings are ordered before they are windowed. An offset into an unordered
- *  result addresses different rows on every call, which makes paging worse than
- *  no paging. */
 const sortedBy = <A>(
   items: ReadonlyArray<A>,
   key: (item: A) => string
 ): ReadonlyArray<A> => [...items].sort((left, right) => key(left).localeCompare(key(right)))
 
-/** Prints a listing. Keeping this in one place is what makes `count`, the
- *  window fields, and the hint behave the same on every listing. */
 const listing = <A>(
   result: Page<A>,
   options: {
@@ -106,8 +94,6 @@ const listing = <A>(
     options.verbose
   ))
 
-// --- catalog ----------------------------------------------------------------
-
 export const discoverCommand = (runGateway: GatewayTask) => Command.make(
   "discover",
   {
@@ -117,8 +103,6 @@ export const discoverCommand = (runGateway: GatewayTask) => Command.make(
     connection: connectionFlag(),
     slug: Flag.string("slug").pipe(
       Flag.optional,
-      // Offered here and only here. Afterwards the slug is what every tool
-      // address and alias is made of, and moving it would mean moving them.
       Flag.withDescription("Address it as this instead of a name derived from the URL")
     ),
     name: Flag.string("name").pipe(
@@ -162,8 +146,6 @@ export const searchCommand = (runGateway: GatewayTask) => Command.make(
     ),
     limit: Flag.integer("limit").pipe(
       Flag.withDefault(5),
-      // Not a window over a local listing: this one is asked of the registry,
-      // which ranks by relevance. Reordering it here would throw that away.
       Flag.withDescription("How many results to ask the registry for (default: 5)")
     ),
     verbose: verboseFlag()
@@ -201,8 +183,6 @@ export const renameCommand = (runGateway: GatewayTask) => Command.make(
       )
     )
 ).pipe(Command.withDescription(
-  // Says what it does not do, because a slug is the thing a caller would most
-  // reasonably expect a rename to change.
   "Change an integration's display name. Its slug does not change"
 ))
 
@@ -290,15 +270,9 @@ export const schemaCommand = (runGateway: GatewayTask) => Command.make(
   ({ integration, tool, connection, verbose }) =>
     runGateway(async (client) => ({
       detail: await client.integrationTool({ integration, tool, connection }),
-      // The alias is asked for rather than derived. It belongs to the gateway's
-      // policy, not to the catalog: it carries the owner tier and, for a
-      // personal connection, the subject — neither of which the slug knows.
       effective: await client.effectiveTools()
     })).pipe(Effect.flatMap(({ detail: found, effective }) => {
       const detail = record(found)
-      // Schemas stay objects, whole, at both verbosities. They are the reason
-      // to run this command, and a schema handed back as a truncated string
-      // has to be re-fetched before it can be used for anything.
       const core = Object.fromEntries(
         Object.entries(detail).filter(([key]) =>
           key !== "inputTypeScript" && key !== "outputTypeScript"
@@ -312,9 +286,6 @@ export const schemaCommand = (runGateway: GatewayTask) => Command.make(
       return writeStdoutLine(jsonOutput(
         withNext(
           { ...(verbose ? detail : core), alias: callable?.alias ?? null },
-          // A tool the catalog holds is not automatically a tool this key may
-          // call, and saying so here is the difference between one command and
-          // a denial the reader has to work backwards from.
           callable === undefined
             ? `i connect ${integration}`
             : `i execute ${callable.alias} ${tool} '<json>'`
@@ -323,5 +294,3 @@ export const schemaCommand = (runGateway: GatewayTask) => Command.make(
       ))
     }))
 ).pipe(Command.withDescription("Show one tool's description and input/output schemas"))
-
-// --- connections ------------------------------------------------------------

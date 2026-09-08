@@ -1,11 +1,6 @@
 import { Schema } from "effect"
 import { IntegrationSlug } from "./vocabulary.ts"
 
-/** What an integration is, and what it will accept as proof of authorization. */
-
-/** Where a credential goes on the wire. `env` describes handing a value to a
- *  child process, which the gateway does not run — it is carried so a
- *  description round-trips, not because the gateway can satisfy it. */
 export const AuthPlacement = Schema.Struct({
   carrier: Schema.Literals(["header", "query", "env"]),
   name: Schema.String,
@@ -15,14 +10,10 @@ export const AuthPlacement = Schema.Struct({
 })
 export type AuthPlacement = typeof AuthPlacement.Type
 
-/** One way to authenticate to an integration. Derived from evidence — how an
- *  MCP endpoint refuses an anonymous call, or what an OpenAPI document declares
- *  — never hand-authored. */
 export const AuthMethod = Schema.Struct({
   id: Schema.String,
   label: Schema.String,
   kind: Schema.Literals(["oauth", "apikey", "header", "none"]),
-  /** Which auth shape a connection is created against. */
   template: Schema.String,
   placements: Schema.optional(Schema.Array(AuthPlacement)),
   oauth: Schema.optional(Schema.Struct({
@@ -38,7 +29,6 @@ export const AuthMethod = Schema.Struct({
 })
 export type AuthMethod = typeof AuthMethod.Type
 
-/** An external system in a tenant's catalog. */
 export const Integration = Schema.Struct({
   slug: IntegrationSlug,
   name: Schema.String,
@@ -52,19 +42,11 @@ export const Integration = Schema.Struct({
 })
 export type Integration = typeof Integration.Type
 
-/** What an unauthenticated request to an MCP endpoint revealed.
- *
- *  `connected` and `requiresAuthentication` are separate answers to separate
- *  questions. A server can complete a handshake and list its tools for anybody
- *  and still refuse every call, so reaching it says nothing about being able to
- *  use it. */
 export const McpProbe = Schema.Struct({
   connected: Schema.Boolean,
   requiresAuthentication: Schema.Boolean,
   requiresOAuth: Schema.Boolean,
   supportsDynamicRegistration: Schema.Boolean,
-  /** What the endpoint's protected-resource metadata says it issues tokens for.
-   *  Empty when it published none, which is most servers. */
   scopes: Schema.Array(Schema.String),
   name: Schema.String,
   slug: Schema.String,
@@ -74,8 +56,6 @@ export const McpProbe = Schema.Struct({
 })
 export type McpProbe = typeof McpProbe.Type
 
-/** A read-only summary of an OpenAPI document, shown before anything is
- *  installed. */
 export const OpenApiPreview = Schema.Struct({
   title: Schema.NullOr(Schema.String),
   description: Schema.NullOr(Schema.String),

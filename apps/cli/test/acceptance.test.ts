@@ -13,16 +13,9 @@ const operatorCli = path.join(repoRoot, "apps", "cli", "src", "main.ts")
 
 const servers: Array<ReturnType<typeof Bun.serve>> = []
 const gateways: Array<RunningGateway> = []
-/** Decodes CLI output against the shape a test expects. Using a schema rather
- *  than a cast means the test fails when the CLI's output drifts, which is the
- *  whole point of an acceptance test. Struct ignores excess properties, so a
- *  command is still free to report more than the test names. */
 const parseOutput = <A>(schema: Schema.Codec<A>, text: string): A =>
   Schema.decodeUnknownSync(schema)(JSON.parse(text))
 
-/** The alias the gateway will derive for a connection the CLI just made. Asked
- *  of the gateway's own function rather than spelled out here, so this test
- *  exercises the wire name instead of restating how it is built. */
 const orgAlias = (integration: string, name: string): string =>
   aliasForConnection({
     owner: "org",
@@ -100,8 +93,6 @@ const run = async (
   return { exitCode, stdout, stderr }
 }
 
-/** A vendor: an OpenAPI document plus the endpoint it describes, guarded by an
- *  API key the gateway must inject. */
 const startVendor = () => {
   let invocations = 0
   const seenKeys: Array<string | null> = []
@@ -374,7 +365,6 @@ describe("integrations CLI acceptance", () => {
         JSON.parse(discovered.stdout)
       )
       const slug = discoveredBody.integration.slug
-      // Listings tell an agent what to do next rather than making it guess.
       expect(discoveredBody.next).toBe(`i connect ${slug}`)
 
       const connected = await integrations([
@@ -384,8 +374,6 @@ describe("integrations CLI acceptance", () => {
         "ACCEPTANCE_TOKEN"
       ])
       expect(connected.exitCode, connected.stderr).toBe(0)
-      // The credential was read from this process's environment and handed to
-      // the gateway; it is never echoed back.
       expect(connected.stdout).not.toContain("acceptance-secret")
 
       const tools = await integrations(["tools", slug])
@@ -441,8 +429,6 @@ describe("integrations CLI acceptance", () => {
       ], { ...gateway.environment, INTEGRATIONS_API_KEY: key.secret })
       expect(executed.exitCode, executed.stderr).toBe(0)
       expect(executed.stdout).toContain("pending")
-      // POST starts from the conservative policy default, so the vendor is not
-      // contacted until a human approves the frozen invocation.
       expect(vendor.invocations()).toBe(0)
     },
     30_000
@@ -500,11 +486,8 @@ describe("integrations CLI acceptance", () => {
       INTEGRATIONS_API_KEY: key.secret
     }
 
-    // A sandbox key cannot mint capabilities for itself.
     const escalation = await clientCli(["client", "escalated"], sandbox)
     expect(escalation.exitCode).toBe(1)
-    // Says what was refused and what would fix it, because a capability
-    // refusal is fixed with a different key rather than a different request.
     expect(escalation.stderr).toContain("Unknown subcommand")
 
     const discoverAttempt = await clientCli(["discover", vendor.specUrl], sandbox)
@@ -521,7 +504,6 @@ describe("integrations CLI acceptance", () => {
     expect(executed.stdout).toContain("succeeded")
     expect(vendor.seenKeys()).toEqual(["acceptance-secret"])
 
-    // A tool omitted from the assigned policy is refused on the same binding.
     const refused = await clientCli([
       "execute",
       orgAlias(slug, connectionName),
@@ -544,9 +526,6 @@ describe("integrations CLI acceptance", () => {
     const slug = discovered.integration.slug
     await clientCli(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
 
-    // A tool result is the machine-facing payload. Cutting the document to
-    // save tokens does not make it a smaller answer, it makes it unusable, so
-    // the default output has to parse.
     const direct = await operator([
       "execute",
       "--direct",
@@ -558,8 +537,6 @@ describe("integrations CLI acceptance", () => {
     expect(outcome.status).toBe("succeeded")
     expect(outcome.result.title).toHaveLength(2000)
 
-    // A refusal is an answer, and it arrives as one: parseable, with a
-    // non-zero exit code to say which answer it was.
     const client = parseOutput(IdOutput, (await operator(["client", "sandbox"])).stdout)
     const key = parseOutput(SecretOutput, (await operator(["key", client.id])).stdout)
     const refused = await clientCli(
@@ -581,7 +558,6 @@ describe("integrations CLI acceptance", () => {
     await integrations(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
 
     const whole = parseOutput(ToolsOutput, (await integrations(["tools", slug])).stdout)
-    // Nothing is held back behind a flag the reader did not know to pass.
     expect(whole.tools).toHaveLength(whole.count)
     expect(whole.showing).toBeUndefined()
 

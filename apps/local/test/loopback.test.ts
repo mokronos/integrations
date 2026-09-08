@@ -13,7 +13,6 @@ const bootstrap = (overrides: Partial<LoopbackBootstrap> = {}): LoopbackBootstra
   ...overrides
 })
 
-/** A request as the browser would send it, unless a test says otherwise. */
 const request = (headers: Readonly<Record<string, string>>): Request =>
   new Request("http://127.0.0.1:4788/v1/clients", {
     headers: { "sec-fetch-site": "same-origin", ...headers }
@@ -46,8 +45,6 @@ describe("isLoopbackHostHeader", () => {
   })
 
   test("rejects a rebinding attacker's own name", () => {
-    // Resolves to 127.0.0.1, so the connection really does arrive on loopback —
-    // the Host header is the only thing that gives it away.
     expect(isLoopbackHostHeader("attacker.example.com:4788")).toBe(false)
     expect(isLoopbackHostHeader("localhost.attacker.com")).toBe(false)
     expect(isLoopbackHostHeader(null)).toBe(false)
@@ -76,8 +73,6 @@ describe("mayBorrowLocalCredential", () => {
   })
 
   test("a caller that is not a browser may not: it can carry a key", () => {
-    // curl and the CLI send no Sec-Fetch-Site. Nothing about the API surface
-    // changes for them — bring your own credential, as before.
     const bare = new Request("http://127.0.0.1:4788/v1/clients", {
       headers: { host: "127.0.0.1:4788" }
     })
@@ -122,8 +117,6 @@ describe("mayBorrowLocalCredential", () => {
   })
 
   test("nobody may, once the gateway is bound off loopback", () => {
-    // A proxy on the same box would make every forwarded request look local,
-    // so the whole equivalence argument stops holding.
     expect(mayBorrowLocalCredential(
       request({ host: "127.0.0.1:4788", origin: "http://127.0.0.1:4788" }),
       bootstrap({ boundToLoopback: false })

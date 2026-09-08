@@ -16,17 +16,12 @@ import { Effect } from "effect"
 import type { GatewayStore } from "./store.ts"
 import type { GatewayStoreError } from "./store.ts"
 
-/** Whether a presented key belongs to a live client. Says nothing about what
- *  that client may do. */
 export type ClientAuthentication =
   | { readonly status: "authenticated"; readonly client: Client }
   | { readonly status: "unknown-key" }
   | { readonly status: "key-revoked" }
   | { readonly status: "client-revoked" }
 
-/** Checks in the order they get more expensive: key exists, key live, client
- *  live. The key and its client resolve in one read — the tenant comes *from*
- *  that read — and touching last-used happens only once it is accepted. */
 export const authenticateClient = Effect.fn("Authorization.authenticateClient")(function*(
   store: GatewayStore,
   secret: string
@@ -42,11 +37,6 @@ export const authenticateClient = Effect.fn("Authorization.authenticateClient")(
   return { status: "authenticated", client }
 })
 
-/** Resolves a presented key to what it may invoke.
- *
- * This is the single place invocation authority is decided. Everything
- * downstream — the HTTP surface, the workflow invoker, the CLI — goes through
- * it, so a call that skips it is a bug rather than a shortcut. */
 export const authorizeInvocation = Effect.fn("Authorization.authorizeInvocation")(function*(
   store: GatewayStore,
   input: {
@@ -76,8 +66,6 @@ export const authorizeInvocation = Effect.fn("Authorization.authorizeInvocation"
     : approvalPolicyTools.find((candidate) =>
       candidate.tool === input.tool
       && sameConnectionRef(candidate.connection, accessProfileTool.connection))
-  // One status for every missing side of the intersection: telling them apart
-  // would let a caller enumerate policy or connection state.
   if (
     accessProfile === undefined
     || accessProfileTool === undefined
@@ -108,9 +96,6 @@ export type CapabilityAuthorization =
   | { readonly status: "client-revoked" }
   | { readonly status: "not-permitted" }
 
-/** Whether a client holds one named non-invocation capability. Kept separate
- * from invocation policies: provisioning a connection and deciding what tools may use it
- * are deliberately different powers. */
 export const authorizeClientCapability = Effect.fn("Authorization.authorizeClientCapability")(
   function*(
     store: GatewayStore,

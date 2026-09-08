@@ -9,8 +9,6 @@ import { ConnectionName, IntegrationSlug } from "@mokronos/contracts"
 import type { CompiledSpec } from "../src/openapi/compile.ts"
 import type { Json } from "@mokronos/contracts"
 
-/** A document covering every parameter style OpenAPI allows a caller to use,
- *  plus a templated server. */
 const document = JSON.stringify({
   openapi: "3.0.3",
   info: { title: "Styles", version: "1" },
@@ -98,8 +96,6 @@ const spec: CompiledSpec = await Effect.runPromise(
   compileSpec("https://api.example.com/openapi.json", document)
 )
 
-/** Captured exactly as installing would, so the tests exercise the stored
- *  descriptor rather than the compiled operation it came from. */
 const captured = await Effect.runPromise(captureOpenApiTools(
   {
     owner: "org",
@@ -144,15 +140,11 @@ describe("path and server", () => {
   })
 
   it("percent-encodes a path value so it cannot invent a segment", () => {
-    // A `/` inside a value must not become a path separator.
     expect(build("list", { id: "a/b c" }).url)
       .toBe("https://api.example.com/v2/u/a%2Fb%20c/m")
   })
 
   it("leaves an unsupplied placeholder in place rather than collapsing the path", () => {
-    // Two segments joined into one would reach a different endpoint entirely.
-    // In practice the invoker rejects such a call first, because `id` is
-    // required — the request builder itself stays pure.
     expect(build("list", {}).url).toBe("https://api.example.com/v2/u/{id}/m")
   })
 
@@ -171,8 +163,6 @@ describe("query serialisation", () => {
   })
 
   it("repeats the name for an array that is exploded by default", () => {
-    // `form` is the default style in a query and `form` explodes by default,
-    // so `tags` repeats without the document saying so.
     expect(query({ tags: ["a", "b"] }).getAll("tags")).toEqual(["a", "b"])
   })
 

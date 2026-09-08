@@ -9,18 +9,12 @@ export class IntegrationsCliError extends Data.TaggedError("IntegrationsCliError
 export const cliError = (message: string): IntegrationsCliError =>
   new IntegrationsCliError({ message })
 
-/** Whether a refusal is about what this key *may do* rather than about what it
- *  asked for. Only that one is worth explaining rather than restating, because
- *  the fix is a different key rather than a different request — and saying so
- *  about an ordinary denial sends the reader after the wrong thing. */
 const isCapabilityRefusal = (error: GatewayError): boolean =>
   error.status === 403 &&
   Predicate.isObjectOrArray(error.body) &&
   "code" in error.body &&
   error.body["code"] === "not-permitted"
 
-// A caught value. TypeScript types every catch binding as unknown because
-// JavaScript lets any value be thrown, so there is nothing narrower to accept.
 // oxlint-disable-next-line anti-slop/no-unknown-parameters
 export const describeError = (error: unknown): string => {
   if (error instanceof IntegrationsCliError) return error.message
@@ -32,9 +26,6 @@ export const describeError = (error: unknown): string => {
   return error instanceof Error ? error.message : String(error)
 }
 
-/** Every command goes through the gateway; there is no local fallback. If the
- * daemon is not running there is nothing sensible to do, because the
- * credentials live behind it. */
 export const connectToGateway = async (): Promise<GatewayClient> => {
   const connection = await resolveClientConnection()
   if (connection === undefined) {

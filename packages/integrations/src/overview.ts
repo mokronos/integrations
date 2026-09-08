@@ -5,18 +5,11 @@ import { IntegrationHost } from "./host.ts"
 import type { StorageError } from "./errors.ts"
 import type { IntegrationOverview, Tool } from "@mokronos/contracts"
 
-/** One connection's tools, or why they could not be read. */
 interface ConnectionTools {
   readonly tools: ReadonlyArray<Tool>
   readonly error?: string
 }
 
-/** The full picture of what is connected: every catalog integration with its
- *  connections and the tools each connection exposes.
- *
- *  One integration whose tools cannot be read reports a `toolError` rather than
- *  failing the whole page — a catalog is mostly still useful with one entry
- *  broken. The failure is carried in the answer instead of being swallowed. */
 export const listIntegrationOverviews = Effect.fn("Integrations.listOverviews")(
   function*(): Effect.fn.Return<ReadonlyArray<IntegrationOverview>, StorageError, IntegrationHost> {
     const host = yield* IntegrationHost

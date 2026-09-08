@@ -9,12 +9,6 @@ import {
   type IntegrationValidationReport
 } from "@mokronos/contracts"
 
-/** Whether a workflow's integration node points at something callable.
-
- *  The catalog reads were Promise calls wrapped in a bespoke
- *  `IntegrationValidationToolsError`, which existed only to give the rejection a
- *  tag. The host's own `StorageError` already says what went wrong. */
-
 const finding = (
   severity: IntegrationValidationFinding["severity"],
   check: string,
@@ -25,10 +19,6 @@ const isAddressForm = (
   source: IntegrationNodeSource
 ): source is Extract<IntegrationNodeSource, { readonly address: string }> => "address" in source
 
-/** The live half: does this node point at something callable right now?
- *
- *  This checks the catalog only. Whether a *caller* may reach it is a different
- *  question, answered by the gateway against that caller's policy and bindings. */
 const liveFindings = Effect.fn("integrationValidation.liveFindings")(function*(
   source: IntegrationNodeSource,
   host: IntegrationHost["Service"]
@@ -92,4 +82,3 @@ export const validateIntegrationNode = Effect.fn("integrationValidation.validate
     findings
   } satisfies IntegrationValidationReport
 })
-

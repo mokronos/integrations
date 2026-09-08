@@ -11,8 +11,6 @@ import "@/index.css"
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      // The gateway is on loopback, so a refetch costs nothing and a stale
-      // permission on screen costs a lot.
       staleTime: 5_000,
       retry: false,
       refetchOnWindowFocus: true

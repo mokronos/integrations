@@ -50,8 +50,6 @@ interface ExecutedCall {
   readonly input: typeof Schema.Json.Type
 }
 
-/** Fills in the fields a vendor connection always carries so a test only has to
- *  name the part it cares about. */
 const stubConnection = (
   reference: { readonly integration: string; readonly name: string }
 ): Connection => ({
@@ -64,7 +62,6 @@ const stubConnection = (
   status: "connected"
 })
 
-/** Fills in a tool's descriptive fields, which these tests never assert on. */
 const stubTool = (
   tool: {
     readonly address: string
@@ -82,9 +79,6 @@ const stubTool = (
   defaultDecision: tool.defaultDecision ?? "require_approval"
 })
 
-/** A stand-in for the host's tool surface. The gateway's job is deciding
- *  whether a call happens and with which credential — not what the vendor
- *  returns — so the tests assert on which address was reached. */
 const stubIntegrations = (behaviour: {
   readonly beforeExecute?: () => Promise<void>
   readonly fail?: boolean
@@ -101,17 +95,12 @@ const stubIntegrations = (behaviour: {
   const forgotten: Array<string> = []
   const renamed: Array<{ readonly slug: string; readonly name: string }> = []
   const known = new Set((behaviour.connections ?? []).map((connection) => connection.integration))
-  /** The host as the handlers reach it. The gateway's job is deciding whether a
-   *  call happens and with which credential, not what the vendor answers, so
-   *  everything here is a plausible answer rather than a real one. */
   const hostServices = stubHostContext({
     execute: (address, input) => {
       calls.push({ address: String(address), input })
       return Effect.promise(() => behaviour.beforeExecute?.() ?? Promise.resolve()).pipe(
         Effect.flatMap(() =>
           behaviour.fail === true
-            // A vendor that refuses is an `InvocationError`, which is what the
-            // host would really raise; the gateway turns it into a 502.
             ? Effect.fail(new InvocationError({
               code: "upstream_error",
               detail: "vendor exploded"
@@ -138,9 +127,6 @@ const stubIntegrations = (behaviour: {
     removeConnection: (reference) => Effect.sync(() => {
       removed.push({ integration: reference.integration, name: reference.name })
     }),
-    // An integration exists here exactly when a connection names it, which is
-    // all these tests need to tell installed from unknown. A rename shows
-    // through, because the handler re-reads after writing.
     findIntegration: (slug) => Effect.sync(() =>
       known.has(slug)
         ? Option.some({
@@ -218,7 +204,6 @@ const setup = async (options: {
     store,
     hostServices: stub.hostServices,
     retentionDays: 30,
-    // No OAuth flow is exercised here; these tests are about authority.
     oauth: {
       start: () => Effect.die(new Error("not used")),
       get: () => Effect.sync((): undefined => undefined),
@@ -391,7 +376,6 @@ describe("gateway http surface", () => {
 
     expect(response.status).toBe(200)
     expect(response.body["status"]).toBe("succeeded")
-    // The address is derived from the profile, so a caller cannot forge one.
     expect(calls).toHaveLength(1)
     expect(calls[0]?.address).toBe("tools.gmail.user.work.sendEmail")
   })
@@ -417,7 +401,6 @@ describe("gateway http surface", () => {
     expect(response.status).toBe(200)
     expect(response.body["status"]).toBe("pending")
     expect(response.body["approvalId"]).toBeString()
-    // Nothing reached the vendor: the call is frozen, not attempted.
     expect(calls).toHaveLength(0)
   })
 
@@ -511,7 +494,6 @@ describe("gateway http surface", () => {
 
     expect((await run(call("GET", `/v1/approvals/${approvalId}`))).status).toBe(200)
     const peek = await run(call("GET", `/v1/approvals/${approvalId}`, { secret: otherKey.secret }))
-    // Reported as absent rather than forbidden, so existence does not leak.
     expect(peek.status).toBe(404)
     expect(client.id).not.toBe(other.id)
   })
@@ -746,8 +728,6 @@ describe("gateway approval settlement", () => {
     }))
 
     expect(approved.status).toBe(200)
-    // Approving discharges one frozen invocation. The caller was never handed
-    // the capability, and the frozen arguments are what ran.
     expect(calls).toHaveLength(1)
     expect(calls[0]?.input).toEqual({ to: "a@b.c" })
   })
@@ -848,15 +828,12 @@ describe("frozen calls and retries", () => {
 
     const first = await run(send(call))
     const second = await run(send(call))
-    // Key order is an artefact of how the caller built its JSON, not part of
-    // what it asked for.
     const third = await run(call("POST", "/v1/execute", {
       body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } }
     }))
 
     expect(second.body["approvalId"]).toBe(first.body["approvalId"])
     expect(third.body["approvalId"]).toBe(first.body["approvalId"])
-    // One decision to make, however many times the caller retried.
     expect(await run(store.listApprovals(defaultTenantId, "pending"))).toHaveLength(1)
   })
 
@@ -878,7 +855,6 @@ describe("frozen calls and retries", () => {
       body: {},
       local: true
     }))
-    // The gateway performed it at approval time, not on the caller's behalf.
     expect(calls).toHaveLength(1)
 
     const collected = await run(send(call))
@@ -886,8 +862,6 @@ describe("frozen calls and retries", () => {
     expect(collected.body["result"]).toEqual({ ok: true })
     expect(calls).toHaveLength(1)
 
-    // And the call after that is a new request, so it needs its own decision
-    // rather than replaying a "yes" forever.
     const afterCollection = await run(send(call))
     expect(afterCollection.body["status"]).toBe("pending")
     expect(afterCollection.body["approvalId"]).not.toBe(approvalId)
@@ -991,8 +965,6 @@ describe("provisioning surface", () => {
       connections: [{ integration: "gmail", name: "work" }]
     }))
 
-    // The profile and policy this setup builds both name gmail/work, so there
-    // is something for the removal to clear.
     expect(await run(store.listAccessProfileTools(accessProfile.id))).toHaveLength(1)
     expect(await run(store.listApprovalPolicyTools(approvalPolicy.id))).toHaveLength(1)
 
@@ -1001,8 +973,6 @@ describe("provisioning surface", () => {
     expect(response.status).toBe(200)
     expect(forgotten).toEqual(["gmail"])
     expect(response.body["connections"]).toEqual(["work"])
-    // A rule that names a connection nobody can reach is a rule that would
-    // authorize a call against whatever later takes that name.
     expect(await run(store.listAccessProfileTools(accessProfile.id))).toEqual([])
     expect(await run(store.listApprovalPolicyTools(approvalPolicy.id))).toEqual([])
   })
@@ -1019,8 +989,6 @@ describe("provisioning surface", () => {
 
     expect(response.status).toBe(200)
     expect(response.body["name"]).toBe("Gmail")
-    // The slug is what every address and alias is made of, so a rename must
-    // leave it exactly where it was.
     expect(response.body["slug"]).toBe("statelessserver")
     expect(renamed).toEqual([{ slug: "statelessserver", name: "Gmail" }])
   })
@@ -1096,8 +1064,6 @@ describe("provisioning surface", () => {
     const response = await run(call("GET", "/v1/clients"))
 
     expect(response.status).toBe(200)
-    // Absent rather than null or a guess: the dashboard says so instead of
-    // handing an operator an address that reaches nothing.
     expect(response.body["mcpUrl"]).toBeUndefined()
   })
 

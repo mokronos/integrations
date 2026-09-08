@@ -41,14 +41,6 @@ import {
 import { SpecCache } from "./openapi/cache.ts"
 import { normalizeToolResult } from "./mcp/result.ts"
 
-/** The one place both halves of the host meet.
- *
- *  An MCP endpoint and an OpenAPI document are nothing alike, but a caller
- *  addressing `tools.<integration>.<owner>.<connection>.<tool>` should not have
- *  to know which it got. Everything above this service — the gateway, the CLI,
- *  the dashboard — sees one catalog, one kind of connection, and one way to
- *  call a tool. */
-
 type Json = typeof Schema.Json.Type
 
 export type HostFailure =
@@ -68,8 +60,6 @@ export interface ToolFilter {
   readonly connection?: ConnectionName
 }
 
-/** Either a tool's address, or the integration plus tool name a caller reads
- *  off a listing. */
 export interface ToolTarget {
   readonly integration: IntegrationSlug
   readonly name: string
@@ -99,7 +89,6 @@ export interface CreateConnectionOptions {
   readonly values?: Readonly<Record<string, string>>
 }
 
-/** The projection of a stored integration onto the wire shape. */
 const toIntegration = (
   record: IntegrationRecord
 ): Effect.Effect<Integration, StorageError> =>
@@ -108,9 +97,6 @@ const toIntegration = (
     name: record.name,
     description: record.description,
     kind: record.kind,
-    // Every integration in this catalog was installed by an operator, so every
-    // one of them can be removed and refreshed. The SDK's built-ins, which
-    // could not, no longer exist.
     canRemove: true,
     canRefresh: true,
     authMethods: record.authMethods,
@@ -151,9 +137,6 @@ const toConnection = (
     new StorageError({ message: `Could not describe connection ${record.name}`, cause })
   ))
 
-/** The wire shape of a captured tool. `defaultDecision` is derived here rather
- *  than stored, because it is policy rather than fact: what was captured is
- *  whether the source declares the tool read-only. */
 const toToolSummary = (
   record: IntegrationTool
 ): Effect.Effect<ToolSummary, StorageError> =>
@@ -179,17 +162,6 @@ const toTool = (record: IntegrationTool): Effect.Effect<Tool, StorageError> =>
       new StorageError({ message: `Could not describe tool ${record.name}`, cause })
     )))
 
-/** A newly included policy tool's starting decision.
- *
- *  `allow` is reserved for a tool whose own source declares it read-only. For
- *  MCP that is `readOnlyHint`; for OpenAPI it is a safe HTTP method, which is a
- *  stronger claim than any annotation because it is defined by the protocol
- *  rather than asserted by the vendor.
- *
- *  Everything else needs a human. A source with nothing to declare therefore
- *  gets `require_approval` throughout, which is the direction to fail in: an
- *  operator can widen a policy, but a call that already happened cannot be
- *  narrowed. */
 const defaultDecision = (readOnly: boolean): "allow" | "require_approval" =>
   readOnly ? "allow" : "require_approval"
 
@@ -226,18 +198,12 @@ export class IntegrationHost extends Context.Service<
       readonly integration: IntegrationSlug
       readonly name: ConnectionName
     }) => Effect.Effect<void, StorageError>
-    /** Re-reads what a connection exposes and replaces what was stored for it.
-     *  The only thing that reaches a live endpoint. */
     readonly refreshConnection: (reference: {
       readonly owner: OwnerTier
       readonly integration: IntegrationSlug
       readonly name: ConnectionName
     }) => Effect.Effect<ReadonlyArray<Tool>, HostFailure>
 
-    /** Reads of what was already captured. These never reach an endpoint —
-     *  `refreshConnection` is the only thing that does — so the only way they
-     *  fail is the catalog itself. Declaring the whole {@link HostFailure} here
-     *  made every caller handle an `OAuthError` these cannot raise. */
     readonly toolSummaries: (
       filter?: ToolFilter
     ) => Effect.Effect<ReadonlyArray<ToolSummary>, StorageError>
@@ -311,10 +277,6 @@ export class IntegrationHost extends Context.Service<
         }
       )
 
-      /** The secret to present for a connection, and where to put it.
-       *
-       *  A `none` template resolves to nothing, which is what makes an
-       *  unauthenticated integration callable without a stored credential. */
       const resolveCredential = Effect.fn("IntegrationHost.resolveCredential")(
         function* (
           integration: IntegrationRecord,
@@ -322,13 +284,6 @@ export class IntegrationHost extends Context.Service<
         ) {
           const method = findAuthMethod(integration.authMethods, connection.template)
           if (Option.isNone(method)) {
-            // The connection names a method the integration no longer offers —
-            // a vendor that added a wall, or an endpoint re-probed into a
-            // different shape. Falling through from here would reach the branch
-            // that presents whatever is stored under the connection's key,
-            // which for an OAuth connection is the sealed token record itself:
-            // a bearer token made of JSON, and a refusal that reads as if the
-            // credential were wrong rather than unbuilt.
             return yield* new InvalidInputError({
               field: "connection",
               detail:
@@ -376,8 +331,6 @@ export class IntegrationHost extends Context.Service<
         }
       )
 
-      /** MCP takes its credential as a header, so a placement that names one is
-       *  honoured and anything else becomes a bearer token. */
       const mcpCredential = (
         credential: Option.Option<ResolvedCredential>
       ): Option.Option<McpCredential> =>
@@ -393,11 +346,6 @@ export class IntegrationHost extends Context.Service<
             }
         })
 
-      /** Captures everything one connection exposes, and replaces what was
-       *  stored for it.
-       *
-       *  Both protocols end up in the same shape here; after this point nothing
-       *  downstream knows which one it was. */
       const captureConnection = Effect.fn("IntegrationHost.captureConnection")(
         function* (integration: IntegrationRecord, connection: ConnectionRecord) {
           const credential = yield* resolveCredential(integration, connection)
@@ -483,8 +431,6 @@ export class IntegrationHost extends Context.Service<
           })
           const credential = yield* resolveCredential(integration, connection)
 
-          // The only place a protocol is still visible, on a value read from
-          // the database rather than re-derived from a live endpoint.
           if (tool.call.kind === "mcp") {
             const raw = yield* mcp.callTool(
               yield* requireEndpoint(integration),
@@ -534,10 +480,6 @@ export class IntegrationHost extends Context.Service<
           const now = yield* Clock.currentTimeMillis
           const name = options.name ??
             Option.getOrElse(spec.title, () => new URL(options.spec).hostname)
-          // Resolved once, here, so a call never needs the document again: a
-          // relative server is only meaningful against where the document was
-          // fetched from, and that is knowledge this moment has and later
-          // moments do not.
           const server = resolveServer(spec, {
             baseUrl: Option.fromNullishOr(options.baseUrl),
             specSource: Option.some(options.spec)
@@ -582,8 +524,6 @@ export class IntegrationHost extends Context.Service<
             connection: options.name
           })
 
-          // A multi-valued credential is stored as one JSON document, so a
-          // rotation replaces every part of it at once.
           const secret = options.values === undefined
             ? options.value ?? ""
             : JSON.stringify(options.values)
@@ -601,8 +541,6 @@ export class IntegrationHost extends Context.Service<
             createdAt: now
           }
           yield* store.putConnection(record)
-          // Capture now: a connection whose tools have not been read yet is
-          // indistinguishable from one that exposes none.
           yield* captureConnection(integration, record)
           return yield* toConnection(record)
         }
@@ -633,17 +571,10 @@ export class IntegrationHost extends Context.Service<
             connection: reference.name
           })
           yield* store.removeConnection(reference)
-          // The credential outlives the row unless it is dropped with it.
           yield* credentials.remove(connectionCredentialKey(address))
         }
       )
 
-      /** Removing an integration removes what it was standing for.
-       *
-       *  Every connection goes out through `removeConnection` rather than the
-       *  catalog's own cascade: the cascade is SQL, and a sealed credential
-       *  does not live in the database, so the row would go and the secret
-       *  would stay. */
       const removeIntegration = Effect.fn("IntegrationHost.removeIntegration")(
         function* (slug: IntegrationSlug) {
           const connections = yield* store.listConnections({ integration: slug })

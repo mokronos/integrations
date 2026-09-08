@@ -272,7 +272,6 @@ describe("gateway store", () => {
       result: { id: "msg-1" },
       error: null
     }))
-    // A settled approval is final: a second decision must not overwrite it.
     await run(store.settleApproval({
       tenantId: defaultTenantId,
       id: approval.id,
@@ -336,7 +335,6 @@ describe("gateway store", () => {
     expect(removed).toBe(1)
     const records = await run(store.listAudit(defaultTenantId, { limit: PositiveInt.make(10) }))
     expect(records).toHaveLength(1)
-    // The compliance half survives: who acted for whom, and what was decided.
     expect(records[0]?.subject).toBe(SubjectId.make("sebastian"))
     expect(records[0]?.decision).toBe("allow")
     expect(records[0]?.outcome).toBe("succeeded")
@@ -385,7 +383,6 @@ describe("gateway store", () => {
     const otherSubject = await run(store.createSubject({ id: newSubjectId(), tenantId: other.id }))
     expect(otherSubject.tenantId).toBe(other.id)
 
-    // The same client name is fine in two partitions...
     const mine = await run(store.createClient({
       id: newClientId(),
       tenantId: defaultTenantId,
@@ -403,12 +400,10 @@ describe("gateway store", () => {
     expect(await run(store.listClients(defaultTenantId))).toHaveLength(1)
     expect((await run(store.findClientByName(other.id, "agent")))?.id).toBe(theirs.id)
 
-    // ...but a client of one tenant cannot be reached through the other's.
     expect(await run(store.findClientById(other.id, mine.id))).toBeUndefined()
     await run(expect(run(store.revokeClient(other.id, mine.id))).resolves.toBeUndefined())
     expect((await run(store.findClientById(defaultTenantId, mine.id)))?.revokedAt).toBeNull()
 
-    // Configuration, approvals, audit, and snapshots are partitioned the same way.
     const approval = await run(store.createApproval({
       id: newApprovalId(),
       tenantId: defaultTenantId,

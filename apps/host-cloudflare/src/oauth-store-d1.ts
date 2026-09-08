@@ -4,16 +4,6 @@ import { Connection } from "@mokronos/contracts"
 import { Effect, Schema } from "effect"
 import type { D1DatabaseLike } from "./cloudflare.ts"
 
-/**
- * OAuth flow state on a D1 binding. The local gateway keeps sessions in
- * process memory because a daemon restart kills an in-flight browser trip
- * anyway; a Workers deployment cannot make that bet — the start request and
- * the provider's callback land on independent isolates, so the pending
- * record and the provider's echoed `state` live in shared storage.
- */
-
-/** A browser authorization is decided within minutes; anything older is an
- *  abandoned flow whose provider code has long expired. */
 const sessionTtlMs = 24 * 60 * 60 * 1000
 
 const SessionState = Schema.Union([

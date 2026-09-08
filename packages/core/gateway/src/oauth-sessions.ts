@@ -21,8 +21,6 @@ export type OAuthSession = {
   readonly id: string
   readonly integration: string
   readonly connection: string
-  /** Whose partition the finished connection belongs to. A tenant rather than
-   *  a client, because a signed-in human connects on nobody's key. */
   readonly bindingTenant?: TenantId
   readonly state: OAuthSessionState
 }
@@ -35,23 +33,11 @@ export class OAuthSessionError extends Schema.TaggedError<OAuthSessionError>()(
   }
 ) {}
 
-/** Where sessions live. The default keeps them in process memory — a browser
- *  redirect cannot survive a daemon restart anyway, so persisting them locally
- *  would just create rows that can never complete.
- *
- *  A deployment that can serve two requests from different processes (the
- *  Workers isolate pool) must inject a store: the start request and the
- *  provider's callback land wherever the edge sends them, and only shared
- *  storage lets the callback find its flow. */
 export interface OAuthSessionStore {
-  /** Inserts or overwrites the full session record. */
   put(session: OAuthSession): Effect.Effect<void, OAuthSessionError>
   get(id: string): Effect.Effect<OAuthSession | undefined, OAuthSessionError>
-  /** Records which session a provider-echoed `state` belongs to. */
   putState(state: string, sessionId: string): Effect.Effect<void, OAuthSessionError>
-  /** The session id a callback `state` belongs to, or undefined. */
   findState(state: string): Effect.Effect<string | undefined, OAuthSessionError>
-  /** Consumes a state, so a replayed callback finds nothing here. */
   deleteState(state: string): Effect.Effect<void, OAuthSessionError>
 }
 
@@ -64,15 +50,8 @@ export interface OAuthSessions {
     readonly clientSecret?: string
     readonly timeoutMs?: number
     readonly bindingTenant?: TenantId
-    // `OAuthFlowError` rides alongside `OAuthSessionError` rather than being
-    // flattened into it: the two answer different questions. A session error is
-    // the gateway's bookkeeping failing; a flow error says which stage of the
-    // authorization the provider or the configuration broke at.
   }): Effect.Effect<OAuthSession, OAuthSessionError | OAuthFlowError>
   get(id: string): Effect.Effect<OAuthSession | undefined, OAuthSessionError>
-  /** Finishes a hosted flow by the `state` the provider echoed back. Unknown
-   *  or already-finished states answer `undefined`, which is what makes a
-   *  replayed callback harmless rather than a second connection. */
   completeByState(
     state: string,
     input: { readonly code: string; readonly callbackDomain?: string | null }
@@ -81,23 +60,14 @@ export interface OAuthSessions {
 }
 
 export interface OAuthSessionsOptions {
-  /** The gateway's externally reachable origin. Set on a hosted deployment:
-   *  callbacks then arrive at `${publicUrl}/v1/oauth/callback` instead of an
-   *  ephemeral loopback listener this process may not own. When the origin
-   *  depends on the port the socket actually binds, supply it lazily via
-   *  `publicUrlOf`, which is read at flow-start time. */
   readonly publicUrl?: string
   readonly publicUrlOf?: () => string | undefined
-  /** Shared session storage for deployments that serve requests from more
-   *  than one process. Absent means in-process memory, as always. */
   readonly store?: OAuthSessionStore
   readonly onConnected?: (session: OAuthSession) => Promise<void>
 }
 
 const inMemoryStore = (): OAuthSessionStore & { clear(): void } => {
   const sessions = new Map<string, OAuthSession>()
-  // The provider echoes our state back verbatim; this is how a callback that
-  // arrives without any session context finds its flow.
   const flowsByState = new Map<string, string>()
   return {
     put: (session) => Effect.sync(() => {
@@ -118,27 +88,14 @@ const inMemoryStore = (): OAuthSessionStore & { clear(): void } => {
   }
 }
 
-/** Sessions record where a flow stands; the caller polls, which is what lets
- *  the CLI exit instead of holding a process open across a human's browser
- *  trip. All reads and writes go through one backend so the flow logic never
- *  knows whether it is talking to maps or a database. */
 export const createOAuthSessions = (
-  /** The host services an authorization reaches. A context rather than a layer
-   *  because the host is already running by the time sessions exist. */
   host: Context.Context<OAuthOperations>,
   options: OAuthSessionsOptions = {}
 ): OAuthSessions => {
-  // The in-memory backend is always constructed (it is two Maps); it backs
-  // the sessions unless a shared store was injected, and only then owns
-  // disposable state worth clearing.
   const memory = inMemoryStore()
   const store: OAuthSessionStore = options.store ?? memory
   let stopped = false
 
-  /** Where in-flight local flows live. Created on first use rather than at
-   *  construction, so a gateway that never runs a local flow never opens one,
-   *  and closed by {@link OAuthSessions.stop} — which is what finally makes a
-   *  shutdown able to cancel an authorization a human abandoned. */
   let flowScopeCell: Scope.Closeable | undefined
   const flowScope = Effect.suspend(() =>
     flowScopeCell === undefined
@@ -175,8 +132,6 @@ export const createOAuthSessions = (
       const id = randomUUID()
       const publicUrl = options.publicUrlOf?.() ?? options.publicUrl
 
-      // Hosted mode: register against the public URL and hand back a URL for
-      // the human's browser. Completion arrives at the callback route.
       if (publicUrl !== undefined) {
         const flow = yield* startHostedAuthorization({
           integration: input.integration,
@@ -213,16 +168,6 @@ export const createOAuthSessions = (
         return pending
       }
 
-      // Local mode: the flow owns an ephemeral loopback listener and resolves
-      // through it. `start` returns once the provider's authorization URL is
-      // known, which is well before the human finishes authorizing, so the rest
-      // of the flow runs on a fiber.
-      //
-      // That fiber is forked into a scope this session manager owns, which is
-      // what `stop()` closes. Before, it was a bare `void promise.then(...)`
-      // re-entering Effect through `runPromiseWith`: nothing supervised it, a
-      // shutdown could not cancel it, and a failure inside either `.then` arm
-      // was discarded by the `void`.
       const parent = yield* flowScope
       const announced = yield* Deferred.make<string>()
 
@@ -249,20 +194,13 @@ export const createOAuthSessions = (
             }),
           onFailure: (failure) => finish(id, { status: "failed", message: failure.message })
         }),
-        // Recording the outcome is itself fallible — the store can refuse. It
-        // cannot fail the flow (the human has already authorized), so it is
-        // logged rather than dropped.
         Effect.catch((failure) =>
           Effect.logError(`OAuth session ${id} could not be settled: ${failure.message}`).pipe(
             Effect.annotateLogs({ session: id, operation: "OAuthSession.settle" })
           )),
-        // A provider that short-circuits to an existing connection never
-        // announces a URL, so unblock `start` however this ends.
         Effect.ensuring(Effect.sync(() => {
           Deferred.doneUnsafe(announced, Effect.succeed(""))
         })),
-        // The listener belongs to this flow and is released when it settles;
-        // the fiber belongs to the manager and dies when `stop()` closes it.
         Effect.scoped,
         Effect.forkIn(parent)
       )
@@ -285,8 +223,6 @@ export const createOAuthSessions = (
       if (stopped) return undefined
       const id = yield* store.findState(state)
       if (id === undefined) return undefined
-      // Consumed either way: a state completes once, so a replayed callback
-      // finds nothing here.
       yield* store.deleteState(state)
       const session = yield* store.get(id)
       if (session === undefined || session.state.status !== "pending") return undefined
@@ -307,8 +243,6 @@ export const createOAuthSessions = (
 
     stop: () => Effect.gen(function*() {
       stopped = true
-      // Closing the scope interrupts every in-flight authorization and, through
-      // each flow's own scope, stops its loopback listener.
       if (flowScopeCell !== undefined) {
         const closing = flowScopeCell
         flowScopeCell = undefined

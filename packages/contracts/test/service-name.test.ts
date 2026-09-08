@@ -2,10 +2,6 @@ import { describe, expect, it } from "bun:test"
 import { serviceLabel, serviceName, slugify } from "@mokronos/contracts"
 import { Option } from "effect"
 
-/** Deriving a name from a hostname, for the servers that do not give one.
- *
- *  Every case here is a host this catalog has actually been pointed at or is
- *  plainly going to be. */
 describe("naming a service after its host", () => {
   it("reads past the front door", () => {
     expect(serviceLabel("mcp.linear.app")).toBe("linear")
@@ -14,8 +10,6 @@ describe("naming a service after its host", () => {
   })
 
   it("keeps a specific label rather than the registrable one", () => {
-    // Google hangs every API off one registrable domain, so `googleapis` names
-    // the estate and `gmailmcp` names the service.
     expect(serviceLabel("gmailmcp.googleapis.com")).toBe("gmailmcp")
   })
 
@@ -25,8 +19,6 @@ describe("naming a service after its host", () => {
   })
 
   it("prefers the leftmost label it was not told to ignore", () => {
-    // The rule is positional, not clever: `staging` is more specific than
-    // `acme`, so it wins. Someone who wanted `acme` renames it.
     expect(serviceLabel("staging.acme.com")).toBe("staging")
   })
 

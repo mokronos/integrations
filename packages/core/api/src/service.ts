@@ -30,9 +30,6 @@ import { createWebAssets } from "./web-assets.ts"
 import { telemetryLayer } from "@mokronos/observability"
 import type { GoogleIdentityOAuth } from "@mokronos/gateway-core"
 
-/** The client the local machine uses. Created with both client capabilities so
- *  an agent authoring workflows can discover and connect, with the human needed
- *  only for the one auth step. Keys issued to sandboxes do not get this. */
 export const localClientName = "local"
 
 export interface GatewayService {
@@ -45,57 +42,20 @@ export interface GatewayService {
 export interface GatewayServiceOptions {
   readonly home?: string
   readonly retentionDays?: number
-  /** Overrides integrations.sh for a private or test registry. */
   readonly registryUrl?: string
-  /** The gateway's externally reachable origin, e.g. https://gw.example.com.
-   *  Set on a hosted deployment so OAuth callbacks arrive at the gateway's own
-   *  public URL instead of an ephemeral loopback listener. */
   readonly publicUrl?: string
-  /** OAuth client used for human control-plane sign-in. This is deliberately
-   * separate from vendor integration OAuth credentials. */
   readonly googleIdentity?: Pick<GoogleIdentityOAuth, "clientId" | "clientSecret" | "fetch">
-  /** Loopback origin of this very process, e.g. http://127.0.0.1:4788. Used as
-   *  the OAuth callback origin when no publicUrl is configured, so the redirect
-   *  URI is stable enough to pre-register at providers that demand an exact one
-   *  (Google, Microsoft) before any flow starts. */
   readonly localCallbackOrigin?: string
-  /** Set when the socket is bound off loopback, so session cookies carry
-   *  `Secure` and a stolen cookie is worth less on the wire. */
   readonly secureCookies?: boolean
-  /** Keeps account creation open after the first human has claimed the
-   * instance. Defaults to INTEGRATIONS_ALLOW_SIGNUP=1. */
   readonly allowSignup?: boolean
-  /** Per-principal request budget per minute; falls back to
-   *  INTEGRATIONS_RATE_LIMIT, then {@link defaultRateLimitPerMinute}. */
   readonly rateLimitPerMinute?: number
-  /** Largest accepted JSON body in bytes; defaults to one mebibyte. */
   readonly maxBodyBytes?: number
-  // --- deployment seams ------------------------------------------------------
-  // A gateway whose storage is not a directory on disk — Cloudflare Workers
-  // with a D1 binding, an integration test — supplies these instead of the
-  // file-backed defaults. Everything unset keeps the historical behaviour.
-  /** Replaces the file SQLite store layer entirely. When given, `home` is
-   *  neither created nor read for storage. */
   readonly storeLayer?: Layer.Layer<GatewayStoreService, GatewayStoreError>
-  /** Storage overrides forwarded to the integration host (credential store
-   *  and database). See {@link HostStorage}. */
   readonly hostStorage?: HostStorage
-  /** Shared OAuth session storage for deployments that serve requests from
-   *  more than one process. Absent keeps sessions in memory. */
   readonly oauthStore?: OAuthSessionStore
-  /** Options forwarded to {@link GatewayStoreService.layer} when no explicit
-   *  storeLayer is supplied. */
   readonly storeOptions?: GatewayStoreOptions
-  /** Set on deployments whose clock lives outside the process — a Workers
-   *  cron trigger calls runMaintenance(store) itself — so no in-process
-   *  interval runs. */
   readonly externalMaintenance?: boolean
-  /** OTLP/HTTP base URL for request tracing (e.g. motel's
-   *  http://127.0.0.1:27686). Defaults to INTEGRATIONS_OTLP_ENDPOINT; unset keeps the
-   *  gateway untraced with no exporter built. */
   readonly telemetryEndpoint?: string
-  /** Extra export headers, e.g. hosted-endpoint auth (`authorization: Basic …`).
-   *  Merged over INTEGRATIONS_OTLP_AUTHORIZATION. */
   readonly telemetryHeaders?: Record<string, string>
 }
 
@@ -108,8 +68,6 @@ interface GatewayCore {
   readonly disposeCore: () => Promise<void>
 }
 
-/** Signup is open exactly while the gateway has no humans at all — its first
- *  login claims the instance — or when an operator opts in explicitly. */
 const signupOpen = (
   store: GatewayStore,
   explicitlyAllowed = process.env["INTEGRATIONS_ALLOW_SIGNUP"] === "1"
@@ -121,27 +79,16 @@ const nonBlank = (value: string | undefined): string | undefined => {
   return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed
 }
 
-/** Requests per minute one client or signed-in human may make. The address
- *  bucket that guards unauthenticated traffic is a fraction of this, since a
- *  credential guesser has no principal to be generous to. */
 export const defaultRateLimitPerMinute = 600
 
-/** Boots storage and the host, and derives every plain value the HTTP surface
- *  closes over. Both serving modes start here, so neither duplicates state. */
 const buildCore = async (
   options: GatewayServiceOptions
 ): Promise<GatewayCore> => {
   const home = options.home ?? integrationsHome()
-  // Payloads at rest are sealed when a master key is available: from the
-  // environment, or a keyfile created inside `home` on first start. An
-  // unconfigured local gateway stays plaintext — same behaviour as always.
   const encryption = await resolveEncryption({
     ...whenPresent("envValue", process.env["INTEGRATIONS_MASTER_KEY"]),
     keyFile: `${home}/gateway.key`
   })
-  // Two runtimes, one graph each: the gateway's own store, and the integration
-  // host. They were nested before — the host built a `ManagedRuntime` inside
-  // itself for the Promise facade to run against, and this one wrapped it.
   const storeRuntime = ManagedRuntime.make(
     options.storeLayer ??
     GatewayStoreService.layer(`${home}/gateway.sqlite`, encryption, options.storeOptions)
@@ -163,12 +110,6 @@ const buildCore = async (
     throw error
   }
 
-  /** The one place a service becomes a plain value.
-   *
-   *  `GatewayService` is an async object the CLI and the dashboard hold and
-   *  close, so something has to leave Effect here. Everything below this line
-   *  takes values; everything above it takes layers, and the HTTP handlers ask
-   *  the context for what they need rather than being handed a bag of these. */
   async function bootResources() {
     const [store, hostServices] = await Promise.all([
       storeRuntime.runPromise(Effect.service(GatewayStoreService)),
@@ -176,9 +117,6 @@ const buildCore = async (
     ])
     return { store, hostServices }
   }
-  // Read at flow-start time, not construction time: the local origin is only
-  // known once the caller has decided how the socket is bound. The callback
-  // route is GET /v1/oauth/callback either way.
   const resolvePublicUrl = (): string | undefined =>
     options.publicUrl ?? process.env["INTEGRATIONS_PUBLIC_URL"] ??
     options.localCallbackOrigin
@@ -224,9 +162,6 @@ const buildCore = async (
       })
     })
 
-  // The option carries a number and the environment carries text; a budget is
-  // a positive whole number either way. Anything else — absent, empty, a typo —
-  // is not a budget, and the default stands.
   const perMinute = Option.getOrElse(
     Schema.decodeUnknownOption(Schema.Union([PositiveInt, PositiveIntFromString]))(
       options.rateLimitPerMinute ?? process.env["INTEGRATIONS_RATE_LIMIT"]
@@ -234,9 +169,6 @@ const buildCore = async (
     () => defaultRateLimitPerMinute
   )
   const rateLimiter = createRateLimiter({
-    // The principal bucket is the configured budget; the address bucket that
-    // guards unauthenticated traffic is a fifth of it, floored so a tiny
-    // configured limit still leaves credential guessing meaningfully bounded.
     limit: perMinute,
     windowMs: 60_000
   })
@@ -298,9 +230,6 @@ export const createGatewayService = async (
 ): Promise<GatewayService> => {
   const core = await buildCore(options)
 
-  // Built eagerly as an object but lazily in substance: the API stack compiles
-  // on the first answered request, so a service that never serves HTTP — the
-  // Worker's scheduled trigger, tests poking the store — pays nothing for it.
   const handle = createGatewayHandler(core.handlerOptions)
   const dispatch = async (request: Request, context?: GatewayRequestContext): Promise<Response> => {
     const response = await handle.handle(request, context)
@@ -321,21 +250,12 @@ export const createGatewayService = async (
   }
 }
 
-/** Binds to 127.0.0.1 unless told otherwise. What crosses this wire is a
- *  credential that unlocks every connection a client holds, so exposing it
- *  externally has to be a deliberate act rather than a default. */
 export interface ServeOptions {
   readonly port?: number
   readonly hostname?: string
   readonly home?: string
-  /** Overrides integrations.sh for a private or test registry. */
   readonly registryUrl?: string
-  /** Externally reachable HTTPS origin used for OAuth callbacks in hosted
-   *  deployments. The listening socket may still be plain HTTP behind a TLS
-   *  terminating reverse proxy. */
   readonly publicUrl?: string
-  /** Serve the control plane at `/`. On by default; a headless gateway can turn
-   *  it off so the only thing on the port is the API. */
   readonly web?: boolean
 }
 
@@ -343,8 +263,6 @@ export interface RunningGateway {
   readonly port: number
   readonly url: string
   readonly service: GatewayService
-  /** Where the control plane is being served from, or `undefined` when it is
-   *  not being served at all. */
   readonly web: string | undefined
   stop(): Promise<void>
 }
@@ -352,10 +270,6 @@ export interface RunningGateway {
 export const serveGateway = async (options: ServeOptions = {}): Promise<RunningGateway> => {
   const hostname = options.hostname ?? "127.0.0.1"
   const boundToLoopback = isLoopbackAddress(hostname)
-  // The port is deterministic — the listener fails rather than relocates a
-  // busy port — so the OAuth redirect URI can be computed before binding.
-  // Port 0 means the OS picks, which is unregistrable at providers that want
-  // an exact redirect URI, so no local callback origin applies there.
   const requestedPort = options.port ?? defaultGatewayPort
   const core = await buildCore({
     ...options,
@@ -371,8 +285,6 @@ export const serveGateway = async (options: ServeOptions = {}): Promise<RunningG
   try {
     const web = options.web === false ? undefined : await createWebAssets()
 
-    // The local key is minted below, once the port is known. Until then there
-    // is nothing to borrow and a browser gets the same 401 as anyone else.
     let localSecret: string | undefined
 
     const handle: GatewayHandle = createGatewayHandler({
@@ -443,10 +355,6 @@ export const serveGateway = async (options: ServeOptions = {}): Promise<RunningG
   }
 }
 
-/** Ensures the local client exists and has a live key, then records where the
- *  gateway is listening. Idempotent apart from key issue: a fresh key is minted
- *  whenever the recorded one is missing, so losing the config file is
- *  recoverable without losing the client's configuration assignments. */
 export const ensureLocalCredential = Effect.fn("Gateway.ensureLocalCredential")(function*(
   store: GatewayStore,
   host: IntegrationHost["Service"],
@@ -458,8 +366,6 @@ export const ensureLocalCredential = Effect.fn("Gateway.ensureLocalCredential")(
   if (defaults.accessProfile === undefined || defaults.approvalPolicy === undefined) {
     return yield* new GatewayStoreError({
       operation: "ensureLocalCredential",
-      // The bootstrap wrote both defaults; their absence is state we cannot
-      // read back, not a statement the database refused.
       kind: "malformed-row",
       cause: new Error("The default tenant has no default access profile or approval policy")
     })

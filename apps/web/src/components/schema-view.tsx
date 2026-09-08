@@ -17,21 +17,6 @@ import {
 import { cn } from "@/lib/utils"
 import { pluralise } from "@/lib/format"
 
-/** What a tool takes and what it gives back, read as fields rather than as a
- *  document.
- *
- * The schemas are the part of a tool an operator actually has to understand
- * before allowing it — "what can this call touch" is a question about its
- * arguments — and a pretty-printed JSON blob makes that a reading exercise.
- * Here each field is a row: name, type, whether it is required, what it
- * defaults to, what it is for. Nested shapes open on demand, so a schema with
- * sixty fields costs one screen until someone asks for more.
- *
- * The raw document stays one click away. This view is a reading of the schema;
- * when the two could differ, the document is what the tool actually enforces. */
-
-/** Deep enough for any schema worth reading inline, and a stop for a `$ref`
- *  that points back at its own ancestor. */
 const maxDepth = 8
 
 function SchemaRow({
@@ -51,7 +36,6 @@ function SchemaRow({
 }) {
   const [open, setOpen] = useState(false)
   const expandable = depth < maxDepth && isExpandable(schema, root)
-  // A `$ref`'d field carries its description on the definition it points at.
   const description = schema.description ?? resolve(schema, root).description
 
   const body = (
@@ -227,9 +211,6 @@ export function SchemaView({
     )
   }
 
-  // A schema this view cannot model is shown as what it is. Guessing at a
-  // structured reading of an unrecognised document is the one outcome worse
-  // than the raw JSON, because it looks authoritative.
   if (Option.isNone(decoded)) {
     return (
       <div className="min-w-0 self-start rounded-lg border">

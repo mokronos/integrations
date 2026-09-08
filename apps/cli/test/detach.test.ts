@@ -14,7 +14,6 @@ afterEach(async () => {
     try {
       process.kill(pid, "SIGTERM")
     } catch {
-      // Already gone: the test either killed it or it never came up.
     }
   }
   for (const directory of directories.splice(0)) {
@@ -38,8 +37,6 @@ const run = async (args: ReadonlyArray<string>, home: string) => {
   return { exitCode, stdout, stderr }
 }
 
-/** Asking the OS for a port and releasing it, so a detached gateway on a busy
- *  machine does not collide with the real one on 4788. */
 const freePort = (): number => {
   const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response("") })
   const port = Number(server.port)
@@ -66,8 +63,6 @@ describe("integrations serve --detach", () => {
     started.push(pid)
     expect(detached.stdout).toContain(`http://127.0.0.1:${port}`)
 
-    // The launcher has already exited: the gateway it left behind has to be
-    // both alive and credentialed, which is what --detach promises.
     const listed = await run(["integrations"], home)
     expect(`integrations exit ${listed.exitCode}: ${listed.stderr}`).toBe(
       "integrations exit 0: "

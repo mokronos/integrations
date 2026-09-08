@@ -17,9 +17,6 @@ const verboseFlag = () =>
   Flag.boolean("verbose").pipe(
     Flag.withDefault(false),
     Flag.withAlias("v"),
-    // Says how much of each row to show. It does not say how many rows: a
-    // listing returns all of them either way, so nothing is hidden behind a
-    // flag the reader did not know to pass.
     Flag.withDescription("Show complete objects, pretty-printed")
   )
 
@@ -53,10 +50,6 @@ const controlPlaneTask = <A>(
 
 const JsonObject = Schema.Record(Schema.String, Schema.Json)
 const JsonArray = Schema.Array(Schema.Json)
-/** The gateway's responses arrive as unparsed JSON. These decode a response into
- *  a usable value and fall back to empty rather than failing the command: a
- *  listing that renders nothing is easier for a reader to act on than a crash,
- *  and the gateway is the party responsible for its own response shape. */
 const record = <A>(value: A | undefined): Record<string, typeof Schema.Json.Type> =>
   Option.getOrElse(Schema.decodeUnknownOption(JsonObject)(value), () => ({}))
 
@@ -65,16 +58,11 @@ const array = <A>(value: A | undefined): ReadonlyArray<Record<string, typeof Sch
 
 const text = (value: Schema.Json | undefined): string => value === undefined || value === null ? "" : String(value)
 
-/** Listings are ordered before they are windowed. An offset into an unordered
- *  result addresses different rows on every call, which makes paging worse than
- *  no paging. */
 const sortedBy = <A>(
   items: ReadonlyArray<A>,
   key: (item: A) => string
 ): ReadonlyArray<A> => [...items].sort((left, right) => key(left).localeCompare(key(right)))
 
-/** Prints a listing. Keeping this in one place is what makes `count`, the
- *  window fields, and the hint behave the same on every listing. */
 const listing = <A>(
   result: Page<A>,
   options: {
@@ -95,8 +83,6 @@ const listing = <A>(
     }, options.next),
     options.verbose
   ))
-
-// --- catalog ----------------------------------------------------------------
 
 export const clientsCommand = Command.make(
   "clients",
@@ -155,8 +141,6 @@ export const keyCommand = Command.make(
       client.request("POST", `/v1/clients/${encodeURIComponent(clientId)}/keys`, {})
     ).pipe(Effect.flatMap((result) => {
       const issued = record(result)
-      // Shown once. Nothing stores the plaintext, so a lost key is reissued
-      // rather than recovered.
       return writeStdoutLine(jsonOutput(issued, false))
     }))
 ).pipe(Command.withDescription("Issue an API key for a client. Shown once"))
@@ -231,9 +215,6 @@ export const cloneAccessProfileCommand = Command.make(
     )).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false))))
 ).pipe(Command.withDescription("Clone an access profile and all of its tools"))
 
-/** Which connections one profile or policy tool command writes a rule for. Naming one is explicit;
- * naming none means every org connection currently live for that integration,
- * which is what an operator adding a tool usually means. */
 const targetConnections = async (
   client: ControlPlaneClient,
   integration: string,

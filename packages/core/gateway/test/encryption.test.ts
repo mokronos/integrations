@@ -56,7 +56,6 @@ describe("payload sealing", () => {
   })
 
   test("passes unsealed values through untouched", () => {
-    // Rows written before a key existed stay readable without migration.
     expect(encryption.open(secretText)).toBe(secretText)
   })
 
@@ -121,7 +120,6 @@ describe("master key resolution", () => {
     if (first === undefined || second === undefined) {
       throw new Error("expected both resolutions to produce instances")
     }
-    // A value sealed under one start opens under the next.
     expect(second.open(first.seal("persist"))).toBe("persist")
   })
 
@@ -135,9 +133,7 @@ describe("master key resolution", () => {
     if (encryption === undefined) throw new Error("expected an encryption instance")
     const sealed = encryption.seal("decides")
 
-    // Opens under the environment key...
     expect(createEncryption(Buffer.from(environmentKey, "base64url")).open(sealed)).toBe("decides")
-    // ...and not under the file key it superseded.
     const fileKey = createEncryption((await run(import("node:fs"))).readFileSync(keyFile))
     expect(() => fileKey.open(sealed)).toThrow()
   })
@@ -210,11 +206,9 @@ describe("the encrypted store", () => {
         [approval.id]
       ))).rows[0]?.["arguments"]
     )
-    // Nothing readable where the PII lives...
     expect(storedArguments).toContain("enc.v1$")
     expect(storedArguments).not.toContain("customer@example.com")
 
-    // ...and the retry still finds its frozen call.
     const metAgain = await run(store.findUncollectedApproval({ tenantId: defaultTenantId, clientId: client.id, alias: Alias.make("gmail-work"), approvalPolicyId: approvalPolicy.id, accessProfileId: accessProfile.id, tool: ToolName.make("sendEmail"), arguments: argumentsValue }))
     expect(metAgain === undefined ? "" : metAgain.id).toBe(approval.id)
     expect(metAgain?.arguments).toEqual(argumentsValue)
@@ -291,8 +285,6 @@ describe("the encrypted store", () => {
     const { store, raw } = await run(makeEncryptedStore())
     const { client, accessProfile, approvalPolicy } = await run(seedClient(store))
 
-    // A frozen call from before the master key existed: canonical JSON in the
-    // clear, no lookup digest.
     const canonical = canonicalArguments({ to: "old@example.com" })
     await run(raw.execute(
       `INSERT INTO gateway_pending_approval

@@ -14,9 +14,6 @@ const verboseFlag = () =>
   Flag.boolean("verbose").pipe(
     Flag.withDefault(false),
     Flag.withAlias("v"),
-    // Says how much of each row to show. It does not say how many rows: a
-    // listing returns all of them either way, so nothing is hidden behind a
-    // flag the reader did not know to pass.
     Flag.withDescription("Show complete objects, pretty-printed")
   )
 
@@ -41,10 +38,6 @@ const controlPlaneTask = <A>(
 const JsonObject = Schema.Record(Schema.String, Schema.Json)
 const decodeJsonText = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
 
-/** The gateway's responses arrive as unparsed JSON. These decode a response into
- *  a usable value and fall back to empty rather than failing the command: a
- *  listing that renders nothing is easier for a reader to act on than a crash,
- *  and the gateway is the party responsible for its own response shape. */
 const record = <A>(value: A | undefined): Record<string, typeof Schema.Json.Type> =>
   Option.getOrElse(Schema.decodeUnknownOption(JsonObject)(value), () => ({}))
 
@@ -64,8 +57,6 @@ const readJsonArgument = async (
     )
   }
 }
-
-// --- catalog ----------------------------------------------------------------
 
 const looksLikeAddress = (value: string): boolean => value.startsWith("tools.")
 
@@ -120,8 +111,6 @@ export const operatorExecuteCommand = Command.make(
             })
           } as const
         } catch (error) {
-          // Reported in the same shape as a delegated call, so one reader
-          // handles both. The exit code still says it failed.
           return { status: "failed", message: describeError(error) } as const
         }
       })
@@ -140,8 +129,6 @@ export const operatorExecuteCommand = Command.make(
         })
       })
     return invocation.pipe(Effect.flatMap((outcome) =>
-      // Always whole JSON: this is the machine-facing result, and a document
-      // cut mid-token is not a smaller answer, it is an unusable one.
       writeStdoutLine(
         jsonOutput(Schema.decodeUnknownSync(Schema.Json)(outcome), verbose)
       ).pipe(Effect.flatMap(() =>
@@ -226,8 +213,6 @@ export const validateCommand = (runGateway: GatewayTask) => Command.make(
         : await Bun.file(filePath).text()
       return record(await client.validate({
         node: decodeJsonText(source),
-        // Whether it resolves is the question worth asking, so it is asked by
-        // default, for every input form rather than only for a bare address.
         live: !structural
       }))
     }).pipe(Effect.flatMap((report) =>
@@ -244,5 +229,3 @@ export const validateCommand = (runGateway: GatewayTask) => Command.make(
     "Validate an integration alias, tool address, or node config"
   )
 )
-
-// --- delegation -------------------------------------------------------------

@@ -15,24 +15,14 @@ import {
 import { Tool, ToolCall } from "@mokronos/core-integrations"
 import type { Tool as IntegrationTool } from "@mokronos/core-integrations"
 
-/** The catalog's row layer: every persisted shape the host owns, decoded on the
- *  way out and parameterised on the way in.
- *
- *  No column here ever holds a credential. An OAuth client's secret and a
- *  connection's token both live in the credential store, keyed by address, so a
- *  database dump is not a secret spill. */
-
 export const IntegrationRecord = Schema.Struct({
   slug: IntegrationSlug,
   name: Schema.String,
   description: Schema.String,
   kind: IntegrationKind,
-  /** The MCP endpoint; absent for OpenAPI integrations. */
   endpoint: Schema.optional(Schema.String),
-  /** Where the OpenAPI or Discovery document was loaded from. */
   specSource: Schema.optional(Schema.String),
   specFormat: Schema.optional(Schema.Literals(["openapi", "google-discovery"])),
-  /** Overrides the server the document declares. */
   baseUrl: Schema.optional(Schema.String),
   displayUrl: Schema.optional(Schema.String),
   authMethods: Schema.Array(AuthMethod),
@@ -71,8 +61,6 @@ export const OAuthClientRecord = Schema.Struct({
 })
 export type OAuthClientRecord = typeof OAuthClientRecord.Type
 
-/** One authorization in flight. Holds the PKCE verifier and everything needed
- *  to finish the exchange when the browser comes back with a code. */
 export const OAuthFlowRecord = Schema.Struct({
   state: OAuthState,
   owner: OwnerTier,
@@ -88,8 +76,6 @@ export const OAuthFlowRecord = Schema.Struct({
 })
 export type OAuthFlowRecord = typeof OAuthFlowRecord.Type
 
-/** SQL has no undefined, so absent optionals persist as NULL and read back as
- *  absent rather than as an explicit null. */
 const nullable = (value: string | number | undefined): SqlValue => value ?? null
 
 const text = (row: SqlRow, column: string): string => {
@@ -97,8 +83,6 @@ const text = (row: SqlRow, column: string): string => {
   return Predicate.isString(value) ? value : String(value ?? "")
 }
 
-/** An empty string and a NULL both read as absent: the host never stores a
- *  meaningful empty value in a nullable column. */
 const optionalText = (row: SqlRow, column: string): string | undefined => {
   const value = row[column]
   return Predicate.isString(value) && value.length > 0 ? value : undefined
@@ -294,22 +278,16 @@ export class CatalogStore extends Context.Service<
     readonly putOAuthClient: (record: OAuthClientRecord) => Effect.Effect<void, StorageError>
 
     readonly putOAuthFlow: (record: OAuthFlowRecord) => Effect.Effect<void, StorageError>
-    /** Reads a pending flow and deletes it: a state value is single-use, so
-     *  taking it is what makes a replayed callback fail. */
     readonly takeOAuthFlow: (
       state: OAuthState
     ) => Effect.Effect<Option.Option<OAuthFlowRecord>, StorageError>
 
-    /** Every captured tool a filter selects. A listing is one query. */
     readonly listTools: (
       filter?: ToolFilter
     ) => Effect.Effect<ReadonlyArray<IntegrationTool>, StorageError>
     readonly findTool: (
       address: ToolAddress
     ) => Effect.Effect<Option.Option<IntegrationTool>, StorageError>
-    /** Replaces everything captured for one connection, in one transaction.
-     *  Replacing rather than merging is what makes a tool the upstream dropped
-     *  disappear here too. */
     readonly replaceTools: (
       connection: {
         readonly owner: OwnerTier
@@ -319,7 +297,6 @@ export class CatalogStore extends Context.Service<
       tools: ReadonlyArray<IntegrationTool>
     ) => Effect.Effect<void, StorageError>
 
-    /** The cached text of a fetched specification document. */
     readonly findSpecDocument: (
       source: string
     ) => Effect.Effect<Option.Option<string>, StorageError>
@@ -333,8 +310,6 @@ export class CatalogStore extends Context.Service<
     CatalogStore,
     Effect.gen(function* () {
       const database = yield* Database
-      /** Writes discard the driver's empty row set: callers want completion,
-       *  not rows. */
       const write = (statement: SqlStatement) =>
         Effect.asVoid(database.query(statement))
 
@@ -390,9 +365,6 @@ export class CatalogStore extends Context.Service<
           })
       )
 
-      /** Only the display name. The slug is the identity — it is in every tool
-       *  address, every alias, and the key each sealed credential is stored
-       *  under — so it is chosen once, at discovery, and never edited. */
       const renameIntegration = Effect.fn("CatalogStore.renameIntegration")(
         (slug: IntegrationSlug, name: string) =>
           write({

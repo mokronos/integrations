@@ -13,9 +13,6 @@ const InstallOptions = Schema.Struct({ directory: Schema.String })
 export type InstallOptions = typeof InstallOptions.Type
 
 const packageDirectory = import.meta.dir
-/** Two levels up from `apps/cli`. Derived rather than searched, so moving the
- *  package is a compile-and-test failure rather than a shim that points at the
- *  wrong tree. */
 export const repositoryDirectory = path.resolve(packageDirectory, "../..")
 
 const installables: ReadonlyArray<Installable> = [
@@ -29,9 +26,6 @@ const entryPoint = (name: Installable["name"]): string => {
   return installable.entry
 }
 
-/** The program to run this working tree's `ii`: the checkout's own Bun plus the
- * operator entry point. `serviceProgram()` cannot answer this for a caller that
- * is not itself `ii` — it reports whatever script Bun is running. */
 export const operatorProgram = (): ReadonlyArray<string> => [process.execPath, entryPoint("ii")]
 
 export const usage = `Install this working tree's i and ii binaries onto PATH.
@@ -86,8 +80,6 @@ const managedShim = (contents: string): boolean =>
   contents.includes("Local development install of") &&
   contents.includes("written by: bun run install:local")
 
-/** Replaces only symlinks and shims written by this installer. An unrelated
- * executable with the same name requires an explicit human decision. */
 const clearTarget = async (target: string): Promise<void> => {
   let existing: Awaited<ReturnType<typeof lstat>>
   try {

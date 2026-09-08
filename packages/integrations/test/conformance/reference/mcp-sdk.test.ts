@@ -25,10 +25,6 @@ describe("official MCP SDK reference server", () => {
       expectedTool: "reference_status",
       input: {},
       assertResult: (result) => {
-        // `callTool` hands back the envelope untouched, and 2026-07-28 stamps
-        // the serving server's identity onto every result. Unwrapping happens
-        // a layer up, where `_meta` is dropped along with the rest of the
-        // wrapper.
         expect(result).toEqual({
           content: [{ type: "text", text: "ready" }],
           structuredContent: { status: "ready", implementation: "official-sdk" },
@@ -54,4 +50,3 @@ describe("official MCP SDK reference server", () => {
     expect(probe.toolCount).toBe(1)
   })
 })
-

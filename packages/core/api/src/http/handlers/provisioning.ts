@@ -44,21 +44,12 @@ import {
 import { capture } from "../observability.ts"
 import { asApiFailure } from "./host-failure.ts"
 
-/** A slug off the wire, as the host addresses them.
- *
- *  Anything that is not slug-shaped names no integration, so it is refused here
- *  with the same 404 an unknown-but-well-formed slug gets. The facade used to
- *  swallow the decode failure and answer `undefined`, which produced the same
- *  response by accident rather than on purpose. */
 const requireSlug = (value: string): Effect.Effect<IntegrationSlug, ApiNotFound> =>
   Option.match(Schema.decodeUnknownOption(IntegrationSlug)(value), {
     onNone: () => Effect.fail(new ApiNotFound({ error: `Unknown integration ${value}` })),
     onSome: Effect.succeed
   })
 
-/** An HTML page for the OAuth browser flow — one of the few responses here
- *  that really is low-level HTTP rather than a typed endpoint's success value.
- *  It no longer carries headers; cookies are set through the auth helpers. */
 const page = (
   status: number,
   content: { readonly title: string; readonly message: string }
@@ -68,13 +59,7 @@ const page = (
     contentType: "text/html; charset=utf-8"
   })
 
-/** Compares connection names the way a human means them. The host stores a
- *  normalised name (`docs-demo` becomes `docsDemo`), and rather than reproduce
- *  that transformation — which belongs to the host and may change — this
- *  compares the parts a separator convention cannot alter. */
 const normalizeName = (value: string): string => value.toLowerCase().replace(/[^a-z0-9]/g, "")
-
-// --- system -----------------------------------------------------------------
 
 const selectAuthMethod = (
   methods: ReadonlyArray<{ readonly id: string; readonly template: string; readonly kind: string }>,
@@ -96,10 +81,6 @@ const GatewayNodeSource = Schema.Struct({
   })
 })
 
-/** Answers the question a workflow author is actually asking: will this step
- *  resolve when it runs, as *this* caller? An alias is not a name in the
- *  catalog; it is a client-local binding, so structural validity and
- *  reachability are separate findings. */
 const validateGatewayNode = (
   dependencies: {
     readonly store: GatewayStore
@@ -111,8 +92,6 @@ const validateGatewayNode = (
 ) =>
   Effect.gen(function*() {
     const findings: Array<{ severity: string; check: string; message: string }> = []
-    // The same rule `Alias` already carries, asked rather than restated: a
-    // second copy of the pattern is a second thing to keep in step.
     const aliasIsWellFormed = Schema.is(Alias)(source.alias)
     findings.push(
       aliasIsWellFormed
@@ -150,8 +129,6 @@ const validateGatewayNode = (
         findings.push({
           severity: "error",
           check: "authorization",
-          // Naming the alias but not what else it exposes: a validation report
-          // is not a place to enumerate a caller's other capabilities.
           message: `${source.alias}.${source.tool} is not authorized for this key`
         })
       } else {
@@ -177,17 +154,10 @@ const validateGatewayNode = (
     return { ok: !findings.some((finding) => finding.severity === "error"), findings }
   })
 
-// --- administrative ---------------------------------------------------------
-
 export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning", (handlers) =>
   Effect.gen(function*() {
     const store = yield* GatewayStoreService
     const host = yield* IntegrationHost
-    // The host's services, captured once while the group builds. The three
-    // composites below reach past `IntegrationHost` — reading an unknown
-    // endpoint needs the MCP client and the spec cache — and a handler's `R`
-    // channel is a per-request requirement, so they are provided here rather
-    // than becoming something every route has to satisfy.
     const hostServices = yield* Effect.context<HostServices>()
     const oauth = yield* OAuthFlowSessions
     const config = yield* GatewayConfig
@@ -215,8 +185,6 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
           if (Option.isNone(found)) {
             return yield* new ApiNotFound({ error: `Unknown integration ${slug}` })
           }
-          // Only the display name changes, so nothing addressed elsewhere moves
-          // and there is nothing to reconcile.
           yield* capture(host.renameIntegration(slug, request.payload.name))
           const renamed = yield* capture(host.findIntegration(slug))
           if (Option.isNone(renamed)) {
@@ -239,9 +207,6 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
           }))
         }))
       .handle("registrySearch", (request) =>
-        // The registry is somebody else's server, so a failure here is the
-        // caller's to see: `InvocationError` already says whether the query was
-        // malformed or the registry would not answer.
         asApiFailure(searchIntegrations(
           {
             q: request.query["q"],
@@ -251,10 +216,6 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
           whenPresent("registryUrl", config.registryUrl)
         )))
       .handle("invokeTool", (request) =>
-        // Administrative and deliberately not delegated-policy checked: a client
-        // with administration authority can change policy in a separate call, so a
-        // check here would be friction rather than a control. The delegated
-        // surface has no address form at all.
         asApiFailure(host.execute(
           request.payload.address,
           request.payload.arguments ?? {}
@@ -285,11 +246,6 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
         Effect.map(capture(host.listConnections()), (connections) => ({ connections })))
       .handle("connect", (request) =>
         Effect.gen(function*() {
-          // A connection belongs to a tenant, not to whoever asked for it, so
-          // this needs the partition and nothing more. Demanding a client key
-          // here refused the signed-in human that the route's `provisioning`
-          // access had already admitted — the dashboard could not connect
-          // anything.
           const tenantId = yield* requireTenant
           const body = request.payload
           const slug = yield* requireSlug(body.integration)
@@ -350,8 +306,6 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
           if (method === undefined || method.kind !== "oauth") {
             return yield* new ApiBadRequest({ error: `${integration.slug} has no OAuth auth method` })
           }
-          // The gateway drives the flow and hosts the callback, because it is
-          // what holds credentials. The caller opens a browser and polls.
           return yield* oauth.start({
             integration: integration.slug,
             connection: body.connection ?? "default",
@@ -390,8 +344,6 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
               message: errorDescription ?? "The provider did not return a usable authorization code."
             })
           }
-          // A browser is reading this, so a failure out at the provider becomes
-          // a page rather than the JSON refusal every other surface gets.
           const completed = yield* Effect.catch(
             oauth.completeByState(state, {
               code,
@@ -434,8 +386,6 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
           }
           const connections = yield* capture(host.listConnections())
           const owned = connections.filter((connection) => connection.integration === slug)
-          // The policy rules naming each connection are dropped one at a time,
-          // before the catalog forgets which connections there were.
           yield* Effect.forEach(owned, (connection) =>
             forgetConnection({
               store,
@@ -455,11 +405,6 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
           const tenantId = yield* requireTenant
           const integration = request.params["integration"]
           const requested = request.params["name"]
-          // Connection names are normalised on the way in (`docs-demo` and
-          // `docs_demo` are the same connection), so removing one by the name
-          // you typed has to resolve through the same normalisation. Otherwise
-          // a connection you just made cannot be deleted by the name you made
-          // it with.
           const connections = yield* capture(host.listConnections())
           const match = connections.find((connection) =>
             connection.integration === integration &&
@@ -476,15 +421,11 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
                 : `${integration} has no connection ${requested}. Known: ${known.join(", ")}`
             })
           }
-          // `match` came out of the host's own listing, and `Connection` now
-          // carries its brands, so there is nothing left to re-validate.
           yield* capture(host.removeConnection({
             owner: match.owner,
             integration: match.integration,
             name: match.name
           }))
-          // Rules that named the deleted credential go with it, for every
-          // policy in the tenant the caller belongs to.
           yield* forgetConnection({
             store,
             tenantId,

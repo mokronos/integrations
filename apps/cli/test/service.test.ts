@@ -47,8 +47,6 @@ describe("gateway service definitions", () => {
     expect(plist).toContain("<string>serve</string>")
     expect(plist).toContain("<string>/opt/integrations</string>")
     expect(plist).toContain("<key>INTEGRATIONS_HOME</key><string>/tmp/wf</string>")
-    // Its own label, because the gateway holds the credentials the dashboard
-    // service reads and has to be able to outlive it.
     expect(serviceLabel).not.toBe("dev.mokronos.wf")
   })
 

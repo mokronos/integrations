@@ -17,9 +17,6 @@ const verboseFlag = () =>
   Flag.boolean("verbose").pipe(
     Flag.withDefault(false),
     Flag.withAlias("v"),
-    // Says how much of each row to show. It does not say how many rows: a
-    // listing returns all of them either way, so nothing is hidden behind a
-    // flag the reader did not know to pass.
     Flag.withDescription("Show complete objects, pretty-printed")
   )
 
@@ -62,10 +59,6 @@ type GatewayTask = typeof gatewayTask
 const JsonObject = Schema.Record(Schema.String, Schema.Json)
 const JsonArray = Schema.Array(Schema.Json)
 
-/** The gateway's responses arrive as unparsed JSON. These decode a response into
- *  a usable value and fall back to empty rather than failing the command: a
- *  listing that renders nothing is easier for a reader to act on than a crash,
- *  and the gateway is the party responsible for its own response shape. */
 const record = <A>(value: A | undefined): Record<string, typeof Schema.Json.Type> =>
   Option.getOrElse(Schema.decodeUnknownOption(JsonObject)(value), () => ({}))
 
@@ -74,16 +67,11 @@ const array = <A>(value: A | undefined): ReadonlyArray<Record<string, typeof Sch
 
 const text = (value: Schema.Json | undefined): string => value === undefined || value === null ? "" : String(value)
 
-/** Listings are ordered before they are windowed. An offset into an unordered
- *  result addresses different rows on every call, which makes paging worse than
- *  no paging. */
 const sortedBy = <A>(
   items: ReadonlyArray<A>,
   key: (item: A) => string
 ): ReadonlyArray<A> => [...items].sort((left, right) => key(left).localeCompare(key(right)))
 
-/** Prints a listing. Keeping this in one place is what makes `count`, the
- *  window fields, and the hint behave the same on every listing. */
 const listing = <A>(
   result: Page<A>,
   options: {
@@ -105,8 +93,6 @@ const listing = <A>(
     options.verbose
   ))
 
-// --- catalog ----------------------------------------------------------------
-
 const environmentValue = (name: string): string => {
   const value = process.env[name]
   if (value === undefined) throw cliError(`Environment variable ${name} is not set`)
@@ -126,8 +112,6 @@ const credentialValues = (
       return [variable.trim(), environmentValue(name.trim())]
     }))
   }
-  // Credentials are read from the caller's environment here, never by the
-  // gateway — the gateway has no business reading a client's process.
   return credentialEnv === undefined ? {} : { token: environmentValue(credentialEnv) }
 }
 
@@ -172,8 +156,6 @@ export const connectCommand = (runGateway: GatewayTask) => Command.make(
       )
 
       if (oauthMethod !== undefined && credentialsOffered && template === undefined) {
-        // Silently ignoring the credential and opening a browser is the worst
-        // of both: the caller thinks it authorized with the key it named.
         const alternatives = methods.filter((method) => text(method["kind"]) !== "oauth")
         throw cliError(
           alternatives.length === 0
@@ -203,8 +185,6 @@ export const connectCommand = (runGateway: GatewayTask) => Command.make(
           console.error(`Authorize in your browser:\n${authorizationUrl}`)
           if (!options.noOpen) openBrowser(authorizationUrl)
         }
-        // Poll rather than block on a socket: the gateway owns the flow, and a
-        // human may take minutes.
         const deadline = Date.now() + Math.max(1, options.timeout) * 1000
         while (Date.now() < deadline) {
           const session = record(await client.oauth(sessionId))
@@ -232,8 +212,6 @@ export const connectCommand = (runGateway: GatewayTask) => Command.make(
       const connection = record(result["connection"] ?? result)
       const tools = array(result["tools"])
       const storedName = text(connection["name"])
-      // The stored name is normalised, so say so rather than letting the next
-      // command fail on the name that was typed.
       if (storedName.length > 0 && storedName !== options.connection) {
         console.error(
           `Note: connection stored as "${storedName}", not "${options.connection}". Use that name from here on.`
@@ -276,17 +254,9 @@ export const disconnectCommand = (runGateway: GatewayTask) => Command.make(
   ({ integration, connection }) =>
     runGateway((client) => client.disconnect({ integration, connection })).pipe(
       Effect.flatMap((result) => {
-        // The gateway resolves the name it actually removed, which may differ
-        // from the one typed. Report that one.
         const removed = text(record(result)["connection"] ?? connection)
         return writeStdoutLine(
           jsonOutput({ disconnected: true, integration, connection: removed }, false)
         )
       }))
 ).pipe(Command.withDescription("Delete a connection"))
-
-// --- invocation -------------------------------------------------------------
-
-/** A tool address is recognisable: an alias is lowercase letters, digits, and
- *  dashes, so it can never look like one. `--direct` states the intent
- *  explicitly and fails if the target is not an address. */

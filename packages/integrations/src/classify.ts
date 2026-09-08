@@ -5,16 +5,6 @@ import { DetectionError } from "./errors.ts"
 import { McpHost } from "./mcp/client.ts"
 import { SpecCache } from "./openapi/cache.ts"
 
-/** Deciding what a URL is.
- *
- *  Two questions, asked in order, both of the URL exactly as given: no sibling
- *  path is guessed at and no well-known document is hunted for beyond the one
- *  an MCP handshake itself points at. An `initialize` first, because a server
- *  that answers it — or refuses it with a challenge — is an MCP server;
- *  otherwise the same URL is compiled as an OpenAPI document. A URL that is
- *  neither fails, rather than coming back as a hedge the caller has to rank. */
-
-/** What to call a document that declares no title. */
 const hostNameOf = (url: string): string =>
   Option.getOrElse(
     Option.liftThrowable(() => serviceName(new URL(url).hostname))(),
@@ -56,8 +46,6 @@ const asOpenApi = (
     Effect.mapError((cause) => new DetectionError({ url, detail: cause.detail }))
   )
 
-/** Reads the endpoint without installing anything, storing a credential, or
- *  opening a connection. */
 export const classify = Effect.fn("classify")(function* (url: string) {
   const mcp = yield* Effect.result(asMcp(url))
   if (Result.isSuccess(mcp)) return mcp.success

@@ -17,17 +17,9 @@ import {
   gatewayProtocolVersion
 } from "@mokronos/contracts"
 
-/** The client is deliberately dumb: authenticate, send, decode. Every decision
- * about whether a call may happen, which connection serves it, and whether a
- * human is asked lives behind the gateway.
- *
- * That is the point of the split — a sandbox holding this client holds no
- * authority beyond the access profile and approval policy attached to its client. */
-
 export interface GatewayClientOptions {
   readonly url: string
   readonly apiKey: string
-  /** Injected for tests, or to route through a proxy. */
   readonly fetch?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 }
 
@@ -85,11 +77,6 @@ export const readGatewayMetadata = async (
   return metadata
 }
 
-/** What a delegated call comes back as.
- *
- * `pending` is a first-class outcome rather than an error: the gateway froze
- * the call for a human, and the caller polls instead of blocking. Blocking
- * would hold a sandbox process open across a human's lunch break. */
 export const InvocationOutcome = Schema.Union([
   Schema.Struct({ status: Schema.Literal("succeeded"), result: Schema.Json }),
   Schema.Struct({
@@ -114,16 +101,10 @@ export const ApprovalRecord = Schema.Struct({
   decidedBy: Schema.NullOr(Schema.String),
   result: Schema.NullOr(Schema.Json),
   error: Schema.NullOr(Schema.String),
-  /** When the decision was handed back to the caller. A settled approval is
-   *  delivered through `execute` exactly once; an identical call after that
-   *  asks for a fresh decision rather than replaying an old one. */
   collectedAt: Schema.NullOr(Schema.String)
 })
 export type ApprovalRecord = typeof ApprovalRecord.Type
 
-/** Public response contracts are schemas, not TypeScript-only promises. The
- * same contracts used to build gateway responses decode them here at
- * the client boundary. */
 export const GatewayIntegrationsResponse = Schema.Struct({
   integrations: Schema.Array(IntegrationOverview),
   oauthCallbackUrl: Schema.optional(Schema.NullOr(Schema.String))
@@ -184,19 +165,11 @@ export type RegistrySearchInput = typeof RegistrySearchInput.Type
 export const DiscoverIntegrationInput = Schema.Struct({
   url: Schema.String,
   connection: Schema.optional(Schema.String),
-  /** What to call it. `slug` is accepted here and nowhere else: after this it
-   *  is what every tool address and alias is made of. */
   slug: Schema.optional(Schema.String),
   name: Schema.optional(Schema.String)
 })
 export type DiscoverIntegrationInput = typeof DiscoverIntegrationInput.Type
 
-/** One tool as this key may actually call it.
- *
- *  `alias` is the gateway's own name for the connection behind the tool, and
- *  the only thing `execute` accepts. It is not derivable from the integration
- *  slug — a user-tier connection carries the subject it belongs to — so it is
- *  read from the gateway rather than reconstructed. */
 export const EffectiveTool = Schema.Struct({
   alias: Schema.String,
   tool: Schema.String,
@@ -273,12 +246,10 @@ export interface GatewayClient {
 
   search(input: RegistrySearchInput): Promise<IntegrationSearchResponse>
   discover(input: DiscoverIntegrationInput): Promise<IntegrationDiscovery>
-  /** Changes an integration's display name. Its slug does not move. */
   renameIntegration(input: { readonly integration: string; readonly name: string }): Promise<Integration>
   integrations(): Promise<GatewayIntegrationsResponse>
   integrationTools(integration: string): Promise<IntegrationToolsResponse>
   integrationTool(input: IntegrationToolInput): Promise<Tool>
-  /** What this key may call, and under which alias. */
   effectiveTools(): Promise<EffectiveToolsResponse>
   connect(input: CreateConnectionInput): Promise<ConnectionCreated>
   startOAuth(input: StartOAuthInput): Promise<OAuthSession>
@@ -287,12 +258,6 @@ export interface GatewayClient {
   disconnect(input: DisconnectInput): Promise<DisconnectedConnection>
   validate(input: ValidateInput): Promise<IntegrationValidationReport>
 
-  /** Performs a delegated call.
-   *
-   *  Every authorization answer comes back as a value, `denied` and
-   *  `failed` included: the gateway answered, and which answer it gave is the
-   *  caller's to branch on. A thrown `GatewayError` means the gateway did not
-   *  answer at all — bad key, no route, unreachable. */
   execute(input: {
     readonly alias: string
     readonly tool: string
@@ -334,9 +299,6 @@ export const createGatewayClient = (options: GatewayClientOptions): GatewayClien
   }
 
   const failure = (method: string, path: string, status: number, parsed: Json): GatewayError => {
-    // The gateway states a refusal in `error`; an authorization answer states it in
-    // `reason`. Reading both is what keeps "alias not authorized" from being
-    // reported as the generic "failed with 403".
     const message = Predicate.isObjectOrArray(parsed)
       ? "error" in parsed
         ? String(parsed["error"])
@@ -423,9 +385,6 @@ export const createGatewayClient = (options: GatewayClientOptions): GatewayClien
         tool: input.tool,
         arguments: input.arguments ?? {}
       })
-      // A denial and a vendor failure are answers, carried on 403 and 502 so
-      // that HTTP callers see them too. They decode into the outcome union
-      // rather than throwing, so one branch handles every authorization result.
       if (!response.ok && !isOutcome(response.parsed)) {
         throw failure("POST", "/v1/execute", response.status, response.parsed)
       }

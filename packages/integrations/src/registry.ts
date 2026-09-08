@@ -15,22 +15,12 @@ export {
   IntegrationSearchSurface
 } from "@mokronos/contracts"
 
-/** Searching the public integrations.sh registry.
- *
- *  The one host capability that touches neither the catalog nor a credential: it
- *  asks a public index what exists. Nothing is installed and nothing is stored,
- *  so it needs no service of its own — there is no state to inject and no
- *  alternative implementation to swap in beyond the registry's address. */
-
 export interface SearchIntegrationsOptions {
   readonly registryUrl?: string
 }
 
 const integrationsRegistryUrl = "https://integrations.sh"
 
-/** integrations.sh returns a landing page and a redundant `kinds` summary of
- *  the surfaces it is about to list. Neither is actionable, so neither is
- *  decoded. */
 const RegistrySearchResponse = Schema.Struct({
   results: Schema.Array(Schema.Struct({
     domain: Schema.String,
@@ -62,8 +52,6 @@ const decodeSurfaces = Schema.decodeUnknownEffect(
 )
 const decodeQuery = Schema.decodeUnknownEffect(IntegrationSearchQuery)
 
-/** The registry spreads a surface's address over `url` and `spec`; discovery
- *  takes exactly one. */
 const discoveryUrlFor = (surface: RegistrySurface): string | undefined => {
   switch (surface.type) {
     case "mcp":
@@ -101,14 +89,6 @@ const fetchText = (url: URL) =>
     })
   })
 
-/** A domain's surfaces. A domain the registry cannot describe contributes no
- *  surfaces rather than failing the whole search: a partial answer is still
- *  useful, and the caller can see which entries have nothing to connect to.
- *
- *  Degrading is not the same as not noticing. The failure is logged with the
- *  domain that produced it, so "this entry has nothing to connect to" and "the
- *  registry would not answer for this entry" are distinguishable to an operator
- *  rather than looking identical in the result. */
 const surfacesFor = (registryUrl: string, domain: string) =>
   fetchText(new URL(`/api/${encodeURIComponent(domain)}/surface`, registryUrl)).pipe(
     Effect.flatMap(decodeSurfaces),
@@ -122,8 +102,6 @@ const surfacesFor = (registryUrl: string, domain: string) =>
       ))
   )
 
-/** Searches the registry without touching the persisted catalog, connections,
- *  or credentials. */
 export const search = Effect.fn("registry.search")(function* (
   query: IntegrationSearchQuery,
   options: SearchIntegrationsOptions = {}

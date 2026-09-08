@@ -8,10 +8,6 @@ const hostOf = (url: string | undefined): string | undefined => {
   }
 }
 
-/** Providers that demand a pre-registered OAuth client get provider-specific
- *  steps; everyone else gets the generic recipe. The redirect URI comes first
- *  in every variant, because it is the one value the console asks for that we
- *  already know — everything else the human reads off their own screen. */
 export const oauthSetupGuidance = (input: {
   readonly integration: string
   readonly method: AuthMethod

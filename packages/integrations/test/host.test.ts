@@ -16,8 +16,6 @@ import { AuthTemplateSlug } from "../src/catalog/ids.ts"
 import { ConnectionName, connectionAddress, IntegrationSlug } from "@mokronos/contracts"
 import { ToolAddress } from "@mokronos/contracts"
 
-/** An MCP host that answers from a fixed catalogue, so the tests exercise this
- *  package's own behaviour rather than a vendor's uptime. */
 const stubMcp = (options: {
   readonly readOnly?: boolean
   readonly omitReadOnlyHint?: boolean
@@ -70,8 +68,6 @@ const stubMcp = (options: {
     }))
   )
 
-/** Storage in memory, the MCP client stubbed, and everything between them —
- *  addressing, policy, credential resolution — the real implementation. */
 const testHost = (mcp: Layer.Layer<McpHost>) =>
   stubbedLayer(Layer.mergeAll(mcp, OpenApiInvoker.unavailableTestLayer))
 
@@ -231,11 +227,6 @@ describe("the catalog", () => {
   })
 
   it("refuses to guess a credential for a template the integration dropped", async () => {
-    // A vendor that adds a wall re-probes into different auth methods, and the
-    // connection made under the old one now names nothing. The branch below
-    // this one presents whatever is stored under the connection's key, which
-    // for an OAuth connection is the sealed token record — so guessing here
-    // sends a bearer token made of JSON and reads back as a bad credential.
     const outcome = await run(Effect.result(Effect.gen(function* () {
       const host = yield* IntegrationHost
       const store = yield* CatalogStore
@@ -279,14 +270,10 @@ describe("the catalog", () => {
       }
     }))
     expect(Option.getOrNull(after.name)).toBe("Field Notes")
-    // The slug is the identity, so every address stays exactly where it was.
     expect(after.addresses).toEqual(["tools.notes.org.primary"])
   })
 
   it("takes the credentials of every connection with it too", async () => {
-    // The catalog's cascade is SQL and a sealed credential is not in the
-    // database, so removing the integration has to go out through the
-    // connection path or the row goes and the secret stays.
     const held = await run(Effect.gen(function* () {
       const host = yield* IntegrationHost
       const credentials = yield* CredentialStore
@@ -345,8 +332,6 @@ describe("connections", () => {
         name: "Notes",
         slug: notes
       })
-      // A `none` template is the only one this integration offers, so the
-      // credential is written directly to prove removal clears it.
       const address = connectionAddress({ owner: "org", integration: notes, connection: primary })
       yield* host.createConnection({
         owner: "org",
@@ -366,8 +351,6 @@ describe("connections", () => {
 
 describe("tools", () => {
   it("captures once, so listing never reaches the endpoint again", async () => {
-    // This is the point of storing tools: opening a dashboard used to be one
-    // `tools/list` round trip per connection.
     let listings = 0
     const counted = stubMcp({ onList: () => { listings += 1 } })
     const seen = await run(
@@ -403,7 +386,6 @@ describe("tools", () => {
   })
 
   it("drops a tool the upstream stopped exposing", async () => {
-    // Replacing rather than merging is what makes a withdrawn tool disappear.
     let shrunk = false
     const shrinking = Layer.effect(
       McpHost,
@@ -500,22 +482,16 @@ describe("tools", () => {
     })))
     expect(outcome._tag).toBe("Failure")
     if (outcome._tag === "Failure") {
-      // Tools are captured, so an address that was never captured is unknown
-      // here rather than being forwarded to an endpoint to reject.
       expect(outcome.failure._tag).toBe("ToolNotFoundError")
     }
   })
 
   it("cannot be handed an address that is not addressable", () => {
-    // The brand refuses it, so an unaddressable string never reaches `execute`
-    // in the first place — a stronger guarantee than rejecting it there.
     expect(() => ToolAddress.make("tools.notes.org.primary")).toThrow()
     expect(() => ToolAddress.make("notes.org.primary.search_notes")).toThrow()
   })
 
   it("surfaces a server-reported tool error as a failure", async () => {
-    // A server that refuses a call it does expose must produce a failure, not a
-    // successful result carrying an error payload.
     const failing = Layer.effect(
       McpHost,
       Effect.sync(() => ({
@@ -556,7 +532,6 @@ describe("tools", () => {
     expect(outcome._tag).toBe("Failure")
     if (outcome._tag === "Failure") {
       expect(outcome.failure._tag).toBe("InvocationError")
-      // The server's own words reach the caller, not a generic message.
       expect(outcome.failure.message).toContain("the notebook is locked")
     }
   })
