@@ -21,6 +21,11 @@ This project is in an early stage of development.
 ## After Task Routine
 - refresh the local install of cli + gateway + dashboard, etc. when you finish a task or commit something
 
+## Effect
+
+Don't be afraid to use unstable modules from effect.
+
+
 <!-- effect-solutions:start -->
 ## Effect Best Practices
 
