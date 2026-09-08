@@ -1,9 +1,10 @@
+import { FetchHttpClient } from "effect/unstable/http"
 import { run, runAll } from "./effect.ts"
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { Effect, Option, Schema } from "effect"
+import { Effect, Layer, Option, Schema } from "effect"
 import { whenPresent } from "@mokronos/contracts"
 import {
   ConnectionName,
@@ -84,6 +85,7 @@ const setup = async (options: SetupOptions = {}) => {
   await run(store.addApiKey({ id: apiKey.id, clientId: client.id, hash: apiKey.hash }))
 
   const { handle } = createGatewayHandler({
+    httpClient: options.google === undefined ? FetchHttpClient.layer : googleHttpClient,
     hostServices: options.hostServices ?? stubHostContext(),
     store,
     retentionDays: 30,
@@ -156,8 +158,12 @@ const signupHuman = async (
 const googleIdentity = (): GoogleIdentityOAuth => ({
   clientId: "google-client",
   clientSecret: "google-secret",
-  publicUrlOf: () => "http://gateway.test",
-  fetch: Object.assign(
+  publicUrlOf: () => "http://gateway.test"
+})
+
+const googleHttpClient = FetchHttpClient.layer.pipe(Layer.provide(Layer.succeed(
+  FetchHttpClient.Fetch,
+  Object.assign(
     async (input: Parameters<typeof globalThis.fetch>[0]): Promise<Response> => {
       const url = String(input)
       if (url === "https://oauth2.googleapis.com/token") {
@@ -174,7 +180,7 @@ const googleIdentity = (): GoogleIdentityOAuth => ({
     },
     { preconnect: globalThis.fetch.preconnect }
   )
-})
+)))
 
 const oauthStateFrom = (response: Response): string => {
   const location = response.headers.get("location")

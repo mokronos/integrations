@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
-import { BunServices } from "@effect/platform-bun"
+import { BunHttpClient, BunServices } from "@effect/platform-bun"
 import { Data, Effect, Layer } from "effect"
 import { Command, Flag } from "effect/unstable/cli"
+import { HttpClient } from "effect/unstable/http"
 import { defaultGatewayPort } from "@mokronos/integrations-client"
 import { telemetryLayer } from "@mokronos/observability"
 import { controlPlaneSubcommands, operatorClientSubcommands } from "./commands.ts"
@@ -33,7 +34,7 @@ const loopbackWarning = (host: string): void => {
 
 const runForeground = async (port: number, host: string): Promise<void> => {
   const { serveGateway } = await import("@mokronos/integrations-local")
-  const running = await serveGateway({ port, hostname: host })
+  const running = await serveGateway({ port, hostname: host, httpClient: BunHttpClient.layer })
   await Effect.runPromise(writeStdoutLine(`integrations gateway listening at ${running.url}`))
   loopbackWarning(host)
   await new Promise<void>((resolve) => {
@@ -65,16 +66,18 @@ const serveCommand = Command.make(
     )
   },
   ({ port, host, detach }) =>
-    Effect.tryPromise({
-      try: async () => {
-        if (!detach) return await runForeground(port, host)
-        const started = await startDetachedGateway({ program: serviceProgram(), port, host })
-        loopbackWarning(host)
-        await Effect.runPromise(writeStdoutLine(
-          `integrations gateway listening at ${started.url} (pid ${started.pid})\nlogs: ${started.logPath}\nstop: kill ${started.pid}\nAt login too: ii install`
-        ))
-      },
-      catch: serveError
+    Effect.gen(function*() {
+      if (!detach) {
+        return yield* Effect.tryPromise({
+          try: () => runForeground(port, host),
+          catch: serveError
+        })
+      }
+      const started = yield* startDetachedGateway({ program: serviceProgram(), port, host })
+      loopbackWarning(host)
+      yield* writeStdoutLine(
+        `integrations gateway listening at ${started.url} (pid ${started.pid})\nlogs: ${started.logPath}\nstop: kill ${started.pid}\nAt login too: ii install`
+      )
     })
 ).pipe(Command.withDescription("Run the integration gateway, in this terminal or detached"))
 
@@ -87,29 +90,31 @@ const dashboardCommand = Command.make(
     )
   },
   ({ print }) =>
-    Effect.tryPromise({
-      try: async () => {
-        const { readGatewayConfig, integrationsHome } = await import("@mokronos/integrations-client")
-        const config = await readGatewayConfig(integrationsHome())
-        if (config === undefined) {
-          throw new Error(
-            "No gateway found. Start one with `ii serve`, then try again."
-          )
-        }
-        const healthy = await fetch(`${config.url}/v1/health`).then((response) => response.ok).catch(
-          () => false
-        )
-        if (!healthy) {
-          throw new Error(
-            `Nothing is answering at ${config.url}. Start the gateway with \`ii serve\`.`
-          )
-        }
-        if (!print) openBrowser(config.url)
-        await Effect.runPromise(writeStdoutLine(
-          print ? config.url : `Opening the control plane at ${config.url}`
-        ))
-      },
-      catch: serveError
+    Effect.gen(function*() {
+      const { readGatewayConfig, integrationsHome } = yield* Effect.promise(() =>
+        import("@mokronos/integrations-client")
+      )
+      const config = yield* Effect.promise(() => readGatewayConfig(integrationsHome()))
+      if (config === undefined) {
+        return yield* new ServeError({
+          message: "No gateway found. Start one with `ii serve`, then try again."
+        })
+      }
+      const healthy = yield* HttpClient.get(`${config.url}/v1/health`).pipe(
+        Effect.match({
+          onFailure: () => false,
+          onSuccess: (response) => response.status >= 200 && response.status < 300
+        })
+      )
+      if (!healthy) {
+        return yield* new ServeError({
+          message: `Nothing is answering at ${config.url}. Start the gateway with \`ii serve\`.`
+        })
+      }
+      if (!print) openBrowser(config.url)
+      yield* writeStdoutLine(
+        print ? config.url : `Opening the control plane at ${config.url}`
+      )
     })
 ).pipe(Command.withDescription("Open the gateway's control plane in a browser"))
 
@@ -127,15 +132,13 @@ const installCommand = Command.make(
     )
   },
   ({ port, verbose }) =>
-    Effect.tryPromise({
-      try: async () => {
-        const descriptor = await installService({ program: serviceProgram(), port, verbose })
-        await Effect.runPromise(writeStdoutLine(
+    installService({ program: serviceProgram(), port, verbose }).pipe(
+      Effect.flatMap((descriptor) =>
+        writeStdoutLine(
           `integrations gateway service installed and started as ${serviceLabel} at http://127.0.0.1:${descriptor.port}\nRemove it with: ii uninstall`
-        ))
-      },
-      catch: serveError
-    })
+        )
+      )
+    )
 ).pipe(Command.withDescription("Register and start the gateway as a per-user service"))
 
 const uninstallCommand = Command.make(
@@ -183,8 +186,9 @@ export const main = async (argv: ReadonlyArray<string>): Promise<void> => {
           : Effect.sync(() => {
             process.exitCode = 1
           })),
-      Effect.provide(Layer.merge(
+      Effect.provide(Layer.mergeAll(
         BunServices.layer,
+        BunHttpClient.layer,
         telemetryLayer({ serviceName: "integrations-cli" })
       ))
     )

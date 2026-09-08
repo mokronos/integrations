@@ -8,6 +8,7 @@ import {
 } from "@mokronos/gateway-core"
 import type { AssetsFetcherLike, D1DatabaseLike, ScheduledEventLike } from "./cloudflare.ts"
 import { Effect } from "effect"
+import { FetchHttpClient } from "effect/unstable/http"
 import { D1Client } from "./d1-client.ts"
 import { d1HostStorage } from "./host-storage-d1.ts"
 import { D1OAuthSessionStore } from "./oauth-store-d1.ts"
@@ -92,6 +93,7 @@ const getService = (env: Env): Promise<GatewayService> => {
     const database = env.DB
     return await createGatewayService({
       home: "/integrations-worker",
+      httpClient: FetchHttpClient.layer,
       storeLayer: GatewayStoreService.layer(
         "d1:integrations-gateway",
         encryption,
@@ -157,8 +159,11 @@ export default {
   async scheduled(_event: ScheduledEventLike, env: Env): Promise<void> {
     const service = await getService(env)
     await Effect.runPromise(runMaintenance(service.store))
-    await Effect.runPromise(env.INTEGRATIONS_PUBLIC_URL === undefined
+    await Effect.runPromise((env.INTEGRATIONS_PUBLIC_URL === undefined
       ? deliverDueApprovalNotifications({ store: service.store })
-      : deliverDueApprovalNotifications({ store: service.store, dashboardUrl: env.INTEGRATIONS_PUBLIC_URL }))
+      : deliverDueApprovalNotifications({
+        store: service.store,
+        dashboardUrl: env.INTEGRATIONS_PUBLIC_URL
+      })).pipe(Effect.provide(FetchHttpClient.layer)))
   }
 }

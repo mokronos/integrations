@@ -1,3 +1,4 @@
+import { FetchHttpClient } from "effect/unstable/http"
 import { catalogStoreFake, stubHost, stubHostContext } from "./stubs.ts"
 import { run, runAll } from "./effect.ts"
 import { Context, Effect, Option } from "effect"
@@ -204,6 +205,7 @@ describe("the hosted callback route", () => {
   ) => {
     const store = await run(makeStore())
     const { handle } = createGatewayHandler({
+    httpClient: FetchHttpClient.layer,
       hostServices: stubHostContext(),
       store,
       retentionDays: 30,

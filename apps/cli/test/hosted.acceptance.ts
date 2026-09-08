@@ -1,8 +1,8 @@
-import { Predicate, Schema } from "effect"
+import { Effect, Predicate, Schema } from "effect"
+import { FetchHttpClient, HttpBody, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import {
-  createGatewayClient,
-  GatewayMetadata,
   gatewayProtocolVersion,
+  makeGatewayClient,
   readGatewayMetadata
 } from "@mokronos/integrations-client"
 
@@ -24,7 +24,7 @@ const HostedAcceptanceResult = Schema.Struct({
   oauthCallbackUrl: Schema.String
 })
 const encodeResult = Schema.encodeSync(Schema.fromJsonString(HostedAcceptanceResult))
-const decodeJson = Schema.decodeUnknownPromise(Schema.fromJsonString(Schema.Json))
+const decodeJsonText = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))
 
 const gatewayUrl = Schema.decodeUnknownSync(HostedUrl)(
   process.env["INTEGRATIONS_STAGING_URL"]
@@ -37,90 +37,112 @@ const errorMessage = (body: Schema.Json, fallback: string): string =>
     ? body["error"]
     : fallback
 
-const responseBody = async (response: Response): Promise<Schema.Json> => {
-  const text = await response.text()
-  return text.trim().length === 0 ? {} : await decodeJson(text)
-}
-
-const signup = await fetch(`${gatewayUrl}/v1/auth/signup`, {
-  method: "POST",
-  headers: { "content-type": "application/json" },
-  body: JSON.stringify({ email, password, tenantName: "Hosted acceptance" })
-})
-const signupBody = await responseBody(signup)
-if (!signup.ok) throw new Error(errorMessage(signupBody, `Signup failed with ${signup.status}`))
-const setCookie = signup.headers.get("set-cookie") ?? ""
-if (!setCookie.includes("Secure")) throw new Error("Hosted session cookie is not Secure")
-const cookie = setCookie.split(";", 1)[0] ?? ""
-
-const operatorRequest = async (
+const post = Effect.fn("acceptance.post")(function*(
   route: string,
-  body: Schema.Json
-): Promise<Schema.Json> => {
-  const response = await fetch(`${gatewayUrl}${route}`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      cookie,
-      origin: gatewayUrl
-    },
-    body: JSON.stringify(body)
+  options: { readonly body?: Schema.Json; readonly headers?: Record<string, string> } = {}
+) {
+  const request = HttpClientRequest.post(`${gatewayUrl}${route}`, {
+    headers: options.headers ?? {}
   })
-  const payload = await responseBody(response)
-  if (!response.ok) {
-    throw new Error(errorMessage(payload, `${route} failed with ${response.status}`))
-  }
-  return payload
-}
+  const response = yield* HttpClient.execute(
+    options.body === undefined
+      ? request
+      : HttpClientRequest.setBody(request, HttpBody.jsonUnsafe(options.body))
+  )
+  const text = yield* response.text
+  const payload = text.trim().length === 0
+    ? {}
+    : yield* decodeJsonText(text)
+  return { response, payload }
+})
 
-let metadata: GatewayMetadata | undefined
-let oauthProvider = ""
-try {
-  metadata = await readGatewayMetadata(gatewayUrl)
-  if (metadata.protocolVersion !== gatewayProtocolVersion) {
-    throw new Error("The staging gateway protocol changed during acceptance")
-  }
-
-  const client = Schema.decodeUnknownSync(ClientCreated)(
-    await operatorRequest("/v1/clients", {
-      name: `acceptance-${crypto.randomUUID()}`,
-      capabilities: ["provision_connections"]
+const operatorRequest = (cookie: string) =>
+  Effect.fn("acceptance.operatorRequest")(function*(route: string, body: Schema.Json) {
+    const { response, payload } = yield* post(route, {
+      body,
+      headers: { cookie, origin: gatewayUrl }
     })
-  )
-  const key = Schema.decodeUnknownSync(KeyCreated)(
-    await operatorRequest(`/v1/clients/${encodeURIComponent(client.id)}/keys`, {})
-  )
-  const delegated = createGatewayClient({ url: gatewayUrl, apiKey: key.secret })
-  if ((await delegated.connections()).connections.length !== 0) {
-    throw new Error("A fresh hosted tenant unexpectedly has connections")
-  }
-
-  const administrative = await fetch(`${gatewayUrl}/v1/clients`, {
-    headers: { authorization: `Bearer ${key.secret}` }
+    if (response.status < 200 || response.status >= 300) {
+      return yield* Effect.die(
+        new Error(errorMessage(payload, `${route} failed with ${response.status}`))
+      )
+    }
+    return payload
   })
-  if (administrative.status !== 403) {
-    throw new Error(`Delegated key reached administration with HTTP ${administrative.status}`)
-  }
 
-  const discovery = await delegated.discover({ url: "https://mcp.linear.app/mcp" })
-  const oauth = await delegated.startOAuth({ integration: discovery.integration.slug })
-  if (oauth.state.status !== "pending") {
-    throw new Error(`Linear OAuth did not return a pending authorization: ${oauth.state.status}`)
+const program = Effect.gen(function*() {
+  const signup = yield* post("/v1/auth/signup", {
+    body: { email, password, tenantName: "Hosted acceptance" }
+  })
+  if (signup.response.status < 200 || signup.response.status >= 300) {
+    return yield* Effect.die(
+      new Error(errorMessage(signup.payload, `Signup failed with ${signup.response.status}`))
+    )
   }
-  oauthProvider = new URL(oauth.state.authorizationUrl).hostname
-  if (oauthProvider !== "linear.app" && !oauthProvider.endsWith(".linear.app")) {
-    throw new Error(`Unexpected Linear OAuth provider ${oauthProvider}`)
+  const setCookie = signup.response.headers["set-cookie"] ?? ""
+  if (!setCookie.includes("Secure")) {
+    return yield* Effect.die(new Error("Hosted session cookie is not Secure"))
   }
+  const cookie = setCookie.split(";", 1)[0] ?? ""
+  const request = operatorRequest(cookie)
 
-  const result: typeof HostedAcceptanceResult.Type = {
-    gatewayVersion: metadata.gatewayVersion,
-    protocolVersion: metadata.protocolVersion,
-    delegatedClient: true,
-    administrationRejected: true,
-    oauthProvider,
-    oauthCallbackUrl: `${gatewayUrl}/v1/oauth/callback`
-  }
-  process.stdout.write(`${encodeResult(result)}\n`)
-} finally {
-  await operatorRequest("/v1/auth/account/delete", { password }).catch(() => undefined)
-}
+  return yield* Effect.gen(function*() {
+    const metadata = yield* readGatewayMetadata(gatewayUrl)
+    if (metadata.protocolVersion !== gatewayProtocolVersion) {
+      return yield* Effect.die(
+        new Error("The staging gateway protocol changed during acceptance")
+      )
+    }
+
+    const client = Schema.decodeUnknownSync(ClientCreated)(
+      yield* request("/v1/clients", {
+        name: `acceptance-${crypto.randomUUID()}`,
+        capabilities: ["provision_connections"]
+      })
+    )
+    const key = Schema.decodeUnknownSync(KeyCreated)(
+      yield* request(`/v1/clients/${encodeURIComponent(client.id)}/keys`, {})
+    )
+    const delegated = yield* makeGatewayClient({ url: gatewayUrl, apiKey: key.secret })
+    if ((yield* delegated.connections()).connections.length !== 0) {
+      return yield* Effect.die(new Error("A fresh hosted tenant unexpectedly has connections"))
+    }
+
+    const administrative = yield* HttpClient.get(`${gatewayUrl}/v1/clients`, {
+      headers: { authorization: `Bearer ${key.secret}` }
+    })
+    if (administrative.status !== 403) {
+      return yield* Effect.die(
+        new Error(`Delegated key reached administration with HTTP ${administrative.status}`)
+      )
+    }
+
+    const discovery = yield* delegated.discover({ url: "https://mcp.linear.app/mcp" })
+    const oauth = yield* delegated.startOAuth({ integration: discovery.integration.slug })
+    if (oauth.state.status !== "pending") {
+      return yield* Effect.die(
+        new Error(`Linear OAuth did not return a pending authorization: ${oauth.state.status}`)
+      )
+    }
+    const oauthProvider = new URL(oauth.state.authorizationUrl).hostname
+    if (oauthProvider !== "linear.app" && !oauthProvider.endsWith(".linear.app")) {
+      return yield* Effect.die(new Error(`Unexpected Linear OAuth provider ${oauthProvider}`))
+    }
+
+    return {
+      gatewayVersion: metadata.gatewayVersion,
+      protocolVersion: metadata.protocolVersion,
+      delegatedClient: true,
+      administrationRejected: true,
+      oauthProvider,
+      oauthCallbackUrl: `${gatewayUrl}/v1/oauth/callback`
+    } satisfies typeof HostedAcceptanceResult.Type
+  }).pipe(
+    Effect.ensuring(Effect.ignore(request("/v1/auth/account/delete", { password })))
+  )
+})
+
+const result = await Effect.runPromise(
+  program.pipe(Effect.orDie, Effect.provide(FetchHttpClient.layer))
+)
+process.stdout.write(`${encodeResult(result)}\n`)

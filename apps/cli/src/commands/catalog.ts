@@ -1,5 +1,6 @@
 import { whenPresent } from "@mokronos/contracts"
 import type { GatewayClient } from "@mokronos/integrations-client"
+import type { HttpClient } from "effect/unstable/http"
 import { Effect, Option, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import type { IntegrationsCliError } from "../connection.ts"
@@ -47,13 +48,13 @@ const window = (
   offset: Option.getOrUndefined(offset)
 })
 
-const gatewayTask = <A>(
-  task: (client: GatewayClient) => Promise<A>
-): Effect.Effect<A, IntegrationsCliError> =>
-  Effect.tryPromise({
-    try: async () => await task(await connectToGateway()),
-    catch: (error) => cliError(describeError(error))
-  })
+const gatewayTask = <A, E>(
+  task: (client: GatewayClient) => Effect.Effect<A, E>
+): Effect.Effect<A, IntegrationsCliError, HttpClient.HttpClient> =>
+  connectToGateway().pipe(
+    Effect.flatMap(task),
+    Effect.mapError((error) => cliError(describeError(error)))
+  )
 
 type GatewayTask = typeof gatewayTask
 
@@ -268,10 +269,11 @@ export const schemaCommand = (runGateway: GatewayTask) => Command.make(
     verbose: verboseFlag()
   },
   ({ integration, tool, connection, verbose }) =>
-    runGateway(async (client) => ({
-      detail: await client.integrationTool({ integration, tool, connection }),
-      effective: await client.effectiveTools()
-    })).pipe(Effect.flatMap(({ detail: found, effective }) => {
+    runGateway((client) =>
+      Effect.all({
+        detail: client.integrationTool({ integration, tool, connection }),
+        effective: client.effectiveTools()
+      })).pipe(Effect.flatMap(({ detail: found, effective }) => {
       const detail = record(found)
       const core = Object.fromEntries(
         Object.entries(detail).filter(([key]) =>

@@ -1,3 +1,4 @@
+import { FetchHttpClient } from "effect/unstable/http"
 import { stubHostContext } from "./stubs.ts"
 import { InvocationError } from "@mokronos/integrations"
 import { run, runAll } from "./effect.ts"
@@ -201,6 +202,7 @@ const setup = async (options: {
     ...whenPresent("tools", options.tools)
   })
   const { handle } = createGatewayHandler({
+    httpClient: FetchHttpClient.layer,
     store,
     hostServices: stub.hostServices,
     retentionDays: 30,

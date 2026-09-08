@@ -2,7 +2,13 @@ import { closeSync, openSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
 import { homedir, userInfo } from "node:os"
 import path from "node:path"
+import { Data, Effect } from "effect"
+import { HttpClient } from "effect/unstable/http"
 import { defaultGatewayPort, integrationsHome, readGatewayConfig } from "@mokronos/integrations-client"
+
+export class ServiceError extends Data.TaggedError("ServiceError")<{
+  readonly message: string
+}> {}
 
 export {
   launchdPlist,
@@ -60,26 +66,36 @@ const command = async (
 
 const launchdTarget = (): string => `gui/${process.getuid?.() ?? userInfo().uid}`
 
-const unsupportedPlatform = (verb: string): Error =>
-  new Error(
-    `ii ${verb} currently supports Linux systemd --user and macOS launchd (this is ${process.platform})`
-  )
+const unsupportedPlatform = (verb: string): ServiceError =>
+  new ServiceError({
+    message:
+      `ii ${verb} currently supports Linux systemd --user and macOS launchd (this is ${process.platform})`
+  })
 
-const installedAndReady = async (
+const attempt = <A>(work: () => Promise<A>): Effect.Effect<A, ServiceError> =>
+  Effect.tryPromise({
+    try: work,
+    // oxlint-disable-next-line anti-slop/no-unknown-parameters
+    catch: (cause: unknown) =>
+      new ServiceError({ message: cause instanceof Error ? cause.message : String(cause) })
+  })
+
+const installedAndReady = Effect.fn("service.installedAndReady")(function*(
   descriptor: ServiceDescriptor,
   previousKey: string | undefined,
   statusCommand: string
-): Promise<ServiceDescriptor> => {
-  const ready = await waitUntilReady({
+): Effect.fn.Return<ServiceDescriptor, ServiceError, HttpClient.HttpClient> {
+  const ready = yield* waitUntilReady({
     home: descriptor.home,
     base: probeBase("127.0.0.1", descriptor.port),
     previousKey
   })
   if (ready) return descriptor
-  throw new Error(
-    `${serviceLabel} was registered but did not answer within ${readyTimeoutMs / 1_000}s.\nCheck: ${statusCommand}\nLog: ${serviceErrorLogPath(descriptor.home)}`
-  )
-}
+  return yield* new ServiceError({
+    message:
+      `${serviceLabel} was registered but did not answer within ${readyTimeoutMs / 1_000}s.\nCheck: ${statusCommand}\nLog: ${serviceErrorLogPath(descriptor.home)}`
+  })
+})
 
 export interface InstallOptions {
   readonly program: ReadonlyArray<string>
@@ -87,52 +103,64 @@ export interface InstallOptions {
   readonly verbose?: boolean
 }
 
-export const installService = async (options: InstallOptions): Promise<ServiceDescriptor> => {
+export const installService = Effect.fn("service.install")(function*(
+  options: InstallOptions
+): Effect.fn.Return<ServiceDescriptor, ServiceError, HttpClient.HttpClient> {
   const home = integrationsHome()
   const verbose = options.verbose ?? false
-  await mkdir(path.join(home, "logs"), { recursive: true })
   const descriptor: ServiceDescriptor = {
     program: options.program,
     home,
     port: options.port ?? defaultGatewayPort
   }
-  const previousKey = await recordedKey(home)
+  const previousKey = yield* attempt(async () => {
+    await mkdir(path.join(home, "logs"), { recursive: true })
+    return await recordedKey(home)
+  })
   if (process.platform === "linux") {
-    const unitDirectory = path.join(homedir(), ".config", "systemd", "user")
-    await mkdir(unitDirectory, { recursive: true })
-    await writeFile(
-      path.join(unitDirectory, `${serviceLabel}.service`),
-      systemdUnit({
-        program: serviceArguments(descriptor),
-        environment: { INTEGRATIONS_HOME: home },
-        workingDirectory: home,
-        stdoutPath: serviceLogPath(home),
-        stderrPath: serviceErrorLogPath(home)
-      }),
-      { mode: 0o600 }
+    yield* attempt(async () => {
+      const unitDirectory = path.join(homedir(), ".config", "systemd", "user")
+      await mkdir(unitDirectory, { recursive: true })
+      await writeFile(
+        path.join(unitDirectory, `${serviceLabel}.service`),
+        systemdUnit({
+          program: serviceArguments(descriptor),
+          environment: { INTEGRATIONS_HOME: home },
+          workingDirectory: home,
+          stdoutPath: serviceLogPath(home),
+          stderrPath: serviceErrorLogPath(home)
+        }),
+        { mode: 0o600 }
+      )
+      await command("systemctl", ["--user", "daemon-reload"], verbose)
+      await command("systemctl", ["--user", "enable", `${serviceLabel}.service`], verbose)
+      await command("systemctl", ["--user", "restart", `${serviceLabel}.service`], verbose)
+      await command("loginctl", ["enable-linger", userInfo().username], verbose)
+        .catch(() => undefined)
+    })
+    return yield* installedAndReady(
+      descriptor,
+      previousKey,
+      `systemctl --user status ${serviceLabel}`
     )
-    await command("systemctl", ["--user", "daemon-reload"], verbose)
-    await command("systemctl", ["--user", "enable", `${serviceLabel}.service`], verbose)
-    await command("systemctl", ["--user", "restart", `${serviceLabel}.service`], verbose)
-    await command("loginctl", ["enable-linger", userInfo().username], verbose).catch(() => undefined)
-    return await installedAndReady(descriptor, previousKey, `systemctl --user status ${serviceLabel}`)
   }
   if (process.platform === "darwin") {
-    const agents = path.join(homedir(), "Library", "LaunchAgents")
-    const plist = path.join(agents, `${serviceLabel}.plist`)
-    await mkdir(agents, { recursive: true })
-    await writeFile(plist, launchdPlist(descriptor), { mode: 0o600 })
-    await command("launchctl", ["bootout", `${launchdTarget()}/${serviceLabel}`], verbose)
-      .catch(() => undefined)
-    await command("launchctl", ["bootstrap", launchdTarget(), plist], verbose)
-    return await installedAndReady(
+    const plist = path.join(homedir(), "Library", "LaunchAgents", `${serviceLabel}.plist`)
+    yield* attempt(async () => {
+      await mkdir(path.dirname(plist), { recursive: true })
+      await writeFile(plist, launchdPlist(descriptor), { mode: 0o600 })
+      await command("launchctl", ["bootout", `${launchdTarget()}/${serviceLabel}`], verbose)
+        .catch(() => undefined)
+      await command("launchctl", ["bootstrap", launchdTarget(), plist], verbose)
+    })
+    return yield* installedAndReady(
       descriptor,
       previousKey,
       `launchctl print ${launchdTarget()}/${serviceLabel}`
     )
   }
-  throw unsupportedPlatform("install")
-}
+  return yield* unsupportedPlatform("install")
+})
 
 export const stopService = async (verbose = false): Promise<void> => {
   if (process.platform === "linux") {
@@ -176,24 +204,27 @@ export const serviceProgram = (): ReadonlyArray<string> =>
 const probeBase = (host: string, port: number): string =>
   `http://${host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host}:${port}`
 
-const responds = async (base: string): Promise<boolean> => {
-  const response = await fetch(base, { signal: AbortSignal.timeout(1_000) }).catch(() => undefined)
-  return response !== undefined
-}
+const responds = Effect.fn("service.responds")((base: string) =>
+  HttpClient.get(base).pipe(
+    Effect.timeout(1_000),
+    Effect.match({ onFailure: () => false, onSuccess: () => true })
+  )
+)
 
-const isReady = async (
+const isReady = Effect.fn("service.isReady")(function*(
   home: string,
   base: string,
   previousKey: string | undefined
-): Promise<boolean> => {
-  const config = await readGatewayConfig(home)
+): Effect.fn.Return<boolean, never, HttpClient.HttpClient> {
+  const config = yield* Effect.promise(() => readGatewayConfig(home))
   if (config === undefined || config.apiKey === previousKey) return false
-  const response = await fetch(`${base}/v1/integrations`, {
-    headers: { authorization: `Bearer ${config.apiKey}` },
-    signal: AbortSignal.timeout(1_000)
-  }).catch(() => undefined)
-  return response?.status === 200
-}
+  return yield* HttpClient.get(`${base}/v1/integrations`, {
+    headers: { authorization: `Bearer ${config.apiKey}` }
+  }).pipe(
+    Effect.timeout(1_000),
+    Effect.match({ onFailure: () => false, onSuccess: (response) => response.status === 200 })
+  )
+})
 
 const logTail = async (location: string, lines = 15): Promise<string> => {
   const text = await Bun.file(location).text().catch(() => "")
@@ -210,14 +241,16 @@ interface WaitOptions {
   readonly exitCode?: () => number | undefined
 }
 
-const waitUntilReady = async (options: WaitOptions): Promise<boolean> => {
+const waitUntilReady = Effect.fn("service.waitUntilReady")(function*(
+  options: WaitOptions
+): Effect.fn.Return<boolean, never, HttpClient.HttpClient> {
   for (let waited = 0; waited < readyTimeoutMs; waited += readyIntervalMs) {
     if (options.exitCode?.() !== undefined) return false
-    if (await isReady(options.home, options.base, options.previousKey)) return true
-    await Bun.sleep(readyIntervalMs)
+    if (yield* isReady(options.home, options.base, options.previousKey)) return true
+    yield* Effect.sleep(readyIntervalMs)
   }
   return false
-}
+})
 
 const recordedKey = async (home: string): Promise<string | undefined> =>
   (await readGatewayConfig(home))?.apiKey
@@ -234,44 +267,55 @@ export interface DetachedGateway {
   readonly logPath: string
 }
 
-export const startDetachedGateway = async (options: DetachOptions): Promise<DetachedGateway> => {
+export const startDetachedGateway = Effect.fn("service.startDetached")(function*(
+  options: DetachOptions
+): Effect.fn.Return<DetachedGateway, ServiceError, HttpClient.HttpClient> {
   const home = integrationsHome()
   const base = probeBase(options.host, options.port)
-  if (await responds(base)) {
-    throw new Error(
-      `Something is already listening at ${base}. Stop it, or pass a different --port.`
-    )
+  if (yield* responds(base)) {
+    return yield* new ServiceError({
+      message: `Something is already listening at ${base}. Stop it, or pass a different --port.`
+    })
   }
-  const previousKey = await recordedKey(home)
-  await mkdir(path.join(home, "logs"), { recursive: true })
   const logPath = serviceLogPath(home)
   const errorPath = serviceErrorLogPath(home)
-  const stdout = openSync(logPath, "a")
-  const stderr = openSync(errorPath, "a")
-  const child = Bun.spawn(
-    [...options.program, "serve", "--port", String(options.port), "--host", options.host],
-    { cwd: home, stdin: "ignore", stdout, stderr }
-  )
-  closeSync(stdout)
-  closeSync(stderr)
-  child.unref()
+  const spawned = yield* attempt(async () => {
+    const previousKey = await recordedKey(home)
+    await mkdir(path.join(home, "logs"), { recursive: true })
+    const stdout = openSync(logPath, "a")
+    const stderr = openSync(errorPath, "a")
+    const child = Bun.spawn(
+      [...options.program, "serve", "--port", String(options.port), "--host", options.host],
+      { cwd: home, stdin: "ignore", stdout, stderr }
+    )
+    closeSync(stdout)
+    closeSync(stderr)
+    child.unref()
+    return { child, previousKey }
+  })
   let exitCode: number | undefined
-  void child.exited.then((code) => {
+  void spawned.child.exited.then((code) => {
     exitCode = code
   })
-  if (await waitUntilReady({ home, base, previousKey, exitCode: () => exitCode })) {
-    return { pid: child.pid, url: base, logPath }
-  }
+  const ready = yield* waitUntilReady({
+    home,
+    base,
+    previousKey: spawned.previousKey,
+    exitCode: () => exitCode
+  })
+  if (ready) return { pid: spawned.child.pid, url: base, logPath }
   if (exitCode !== undefined) {
-    const tail = await logTail(errorPath)
-    throw new Error(
-      `The gateway exited immediately (code ${exitCode}).${tail.length === 0 ? "" : `\n${tail}`}`
-    )
+    const tail = yield* Effect.promise(() => logTail(errorPath))
+    return yield* new ServiceError({
+      message:
+        `The gateway exited immediately (code ${exitCode}).${tail.length === 0 ? "" : `\n${tail}`}`
+    })
   }
-  throw new Error(
-    `The gateway did not become ready within ${readyTimeoutMs / 1_000}s. It is still running as pid ${child.pid}; see ${logPath}`
-  )
-}
+  return yield* new ServiceError({
+    message:
+      `The gateway did not become ready within ${readyTimeoutMs / 1_000}s. It is still running as pid ${spawned.child.pid}; see ${logPath}`
+  })
+})
 
 export interface StoppedGateway {
   readonly pid: number
@@ -323,47 +367,57 @@ const listeningPid = async (port: number): Promise<number | undefined> => {
   return matched === undefined ? undefined : Number(matched)
 }
 
-const waitUntilStopped = async (base: string): Promise<boolean> => {
+const waitUntilStopped = Effect.fn("service.waitUntilStopped")(function*(
+  base: string
+): Effect.fn.Return<boolean, never, HttpClient.HttpClient> {
   for (let waited = 0; waited < stopTimeoutMs; waited += readyIntervalMs) {
-    if (!await responds(base)) return true
-    await Bun.sleep(readyIntervalMs)
+    if (!(yield* responds(base))) return true
+    yield* Effect.sleep(readyIntervalMs)
   }
   return false
-}
+})
 
-export const stopGateway = async (): Promise<StoppedGateway | undefined> => {
+export const stopGateway = Effect.fn("service.stopGateway")(function*(): Effect.fn.Return<
+  StoppedGateway | undefined,
+  ServiceError,
+  HttpClient.HttpClient
+> {
   const home = integrationsHome()
-  const config = await readGatewayConfig(home)
+  const config = yield* Effect.promise(() => readGatewayConfig(home))
   const port = config?.port ?? defaultGatewayPort
   const base = config?.url ?? probeBase("127.0.0.1", port)
-  if (!await responds(base)) return undefined
+  if (!(yield* responds(base))) return undefined
 
   const recorded = config?.pid
-  const pid = recorded !== undefined && isAlive(recorded) ? recorded : await listeningPid(port)
+  const pid = recorded !== undefined && isAlive(recorded)
+    ? recorded
+    : yield* Effect.promise(() => listeningPid(port))
   if (pid === undefined) {
-    throw new Error(
-      `A gateway is answering at ${base}, but nothing on this machine could say which process it is. Stop it where you started it, then run this again.`
-    )
+    return yield* new ServiceError({
+      message:
+        `A gateway is answering at ${base}, but nothing on this machine could say which process it is. Stop it where you started it, then run this again.`
+    })
   }
-  const command = await processCommand(pid)
+  const command = yield* Effect.promise(() => processCommand(pid))
   if (command !== undefined && !command.includes("serve")) {
-    throw new Error(
-      `Refusing to stop pid ${pid}: its command line is not a gateway (${command}).`
-    )
+    return yield* new ServiceError({
+      message: `Refusing to stop pid ${pid}: its command line is not a gateway (${command}).`
+    })
   }
 
-  try {
-    process.kill(pid, "SIGTERM")
-  } catch (cause) {
-    throw new Error(
-      `Could not signal pid ${pid}: ${cause instanceof Error ? cause.message : String(cause)}`
-    )
-  }
-  if (await waitUntilStopped(base)) return { pid, url: base, forced: false }
+  yield* Effect.try({
+    try: () => process.kill(pid, "SIGTERM"),
+    // oxlint-disable-next-line anti-slop/no-unknown-parameters
+    catch: (cause: unknown) =>
+      new ServiceError({
+        message: `Could not signal pid ${pid}: ${cause instanceof Error ? cause.message : String(cause)}`
+      })
+  })
+  if (yield* waitUntilStopped(base)) return { pid, url: base, forced: false }
 
   if (isAlive(pid)) process.kill(pid, "SIGKILL")
-  if (await waitUntilStopped(base)) return { pid, url: base, forced: true }
-  throw new Error(
-    `Pid ${pid} was signalled but ${base} is still answering after ${stopTimeoutMs / 1_000}s.`
-  )
-}
+  if (yield* waitUntilStopped(base)) return { pid, url: base, forced: true }
+  return yield* new ServiceError({
+    message: `Pid ${pid} was signalled but ${base} is still answering after ${stopTimeoutMs / 1_000}s.`
+  })
+})

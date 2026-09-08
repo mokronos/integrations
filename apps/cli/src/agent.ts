@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { BunServices } from "@effect/platform-bun"
+import { BunHttpClient, BunServices } from "@effect/platform-bun"
 import { Effect, Layer } from "effect"
 import { Command } from "effect/unstable/cli"
 import { telemetryLayer } from "@mokronos/observability"
@@ -22,8 +22,9 @@ export const main = async (argv: ReadonlyArray<string>): Promise<void> => {
           : Effect.sync(() => {
             process.exitCode = 1
           })),
-      Effect.provide(Layer.merge(
+      Effect.provide(Layer.mergeAll(
         BunServices.layer,
+        BunHttpClient.layer,
         telemetryLayer({ serviceName: "integrations-agent-cli" })
       ))
     )

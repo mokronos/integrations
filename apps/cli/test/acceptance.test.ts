@@ -2,7 +2,11 @@ import { mkdtemp, readFile, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, test } from "bun:test"
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
+import { FetchHttpClient, HttpBody, HttpClient, HttpClientRequest } from "effect/unstable/http"
+
+const http = <A, E>(effect: Effect.Effect<A, E, HttpClient.HttpClient>): Promise<A> =>
+  Effect.runPromise(effect.pipe(Effect.provide(FetchHttpClient.layer)))
 import { serveGateway } from "@mokronos/integrations-local"
 import type { RunningGateway } from "@mokronos/integrations-local"
 import { aliasForConnection, ConnectionName, IntegrationSlug } from "@mokronos/gateway-core"
@@ -188,8 +192,8 @@ const startGateway = async (registryUrl?: string) => {
   const home = await mkdtemp(path.join(os.tmpdir(), "integrations-acceptance-"))
   directories.push(home)
   const gateway = registryUrl === undefined
-    ? await serveGateway({ home, port: 0 })
-    : await serveGateway({ home, port: 0, registryUrl })
+    ? await serveGateway({ home, port: 0, httpClient: FetchHttpClient.layer })
+    : await serveGateway({ home, port: 0, registryUrl, httpClient: FetchHttpClient.layer })
   gateways.push(gateway)
   const config = await readFile(path.join(home, "gateway.json"), "utf8")
   const { apiKey } = parseOutput(ApiKeyConfig, config)
@@ -213,6 +217,7 @@ const startHostedGateway = async () => {
   const clientHome = await mkdtemp(path.join(os.tmpdir(), "integrations-hosted-client-"))
   directories.push(serverHome, clientHome)
   const gateway = await serveGateway({
+    httpClient: FetchHttpClient.layer,
     home: serverHome,
     hostname: "0.0.0.0",
     port: 0,
@@ -260,24 +265,23 @@ describe("integrations CLI acceptance", () => {
     const catalog = await operator(["integrations"])
     expect(catalog.exitCode, catalog.stderr).toBe(0)
 
-    const login = await fetch(`${gateway.url}/v1/auth/login`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    const login = await http(HttpClient.execute(HttpClientRequest.setBody(
+      HttpClientRequest.post(`${gateway.url}/v1/auth/login`),
+      HttpBody.jsonUnsafe({
         email: "hosted@example.com",
         password: "correct horse battery"
       })
-    })
+    )))
     expect(login.status).toBe(200)
-    const setCookie = login.headers.get("set-cookie") ?? ""
+    const setCookie = login.headers["set-cookie"] ?? ""
     expect(setCookie).toContain("Secure")
     const cookie = setCookie.split(";", 1)[0] ?? ""
-    const hostedCatalogResponse = await fetch(`${gateway.url}/v1/integrations`, {
+    const hostedCatalogResponse = await http(HttpClient.get(`${gateway.url}/v1/integrations`, {
       headers: { cookie }
-    })
+    }))
     expect(hostedCatalogResponse.status).toBe(200)
     const hostedCatalog = Schema.decodeUnknownSync(CatalogOutput)(
-      await hostedCatalogResponse.json()
+      await http(hostedCatalogResponse.json)
     )
     expect(hostedCatalog.oauthCallbackUrl).toBe(
       "https://gateway.example/v1/oauth/callback"

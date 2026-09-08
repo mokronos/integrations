@@ -29,6 +29,7 @@ import { Context } from "effect"
 const hostOf = (options: McpGatewayOptions): IntegrationHost["Service"] =>
   Context.get(options.hostServices, IntegrationHost)
 import { Layer, ManagedRuntime } from "effect"
+import type { HttpClient } from "effect/unstable/http"
 import { capture, ErrorCapture } from "./observability.ts"
 import type { ErrorSink } from "./observability.ts"
 import { gatewayVersion } from "../version.ts"
@@ -91,12 +92,13 @@ const invocation = (options: McpGatewayOptions, input: {
 export interface McpGatewayOptions {
   readonly store: GatewayStore
   readonly hostServices: Context.Context<HostServices>
+  readonly httpClient: Layer.Layer<HttpClient.HttpClient>
   readonly retentionDays: number
   readonly dashboardUrl?: () => string | undefined
   readonly errorCapture?: ErrorSink
 }
 
-type McpRuntime = ManagedRuntime.ManagedRuntime<ErrorCapture, never>
+type McpRuntime = ManagedRuntime.ManagedRuntime<ErrorCapture | HttpClient.HttpClient, never>
 
 const serverFor = async (
   options: McpGatewayOptions,
@@ -140,11 +142,12 @@ export interface McpGatewayHandle {
 }
 
 export const createMcpGatewayHandler = (options: McpGatewayOptions): McpGatewayHandle => {
-  const runtime: McpRuntime = ManagedRuntime.make(
+  const runtime: McpRuntime = ManagedRuntime.make(Layer.merge(
     options.errorCapture === undefined
       ? ErrorCapture.logging
-      : Layer.succeed(ErrorCapture, options.errorCapture)
-  )
+      : Layer.succeed(ErrorCapture, options.errorCapture),
+    options.httpClient
+  ))
   const handler = createMcpHandler(({ authInfo }) => {
     if (authInfo === undefined) throw new Error("Authenticated MCP request has no identity")
     return serverFor(options, runtime, ClientId.make(authInfo.clientId), authInfo.token)

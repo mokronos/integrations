@@ -1,3 +1,4 @@
+import { FetchHttpClient } from "effect/unstable/http"
 import { run, runAll } from "./effect.ts"
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
@@ -89,6 +90,7 @@ describe("gateway traffic shaping", () => {
     await run(store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash }))
 
     const { handle } = createGatewayHandler({
+    httpClient: FetchHttpClient.layer,
       hostServices: stubHostContext(),
       store,
       retentionDays: 30,

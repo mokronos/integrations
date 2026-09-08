@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { Effect, Layer, Option } from "effect"
+import { FetchHttpClient } from "effect/unstable/http"
 import { ConnectionName, IntegrationSlug } from "@mokronos/contracts"
 import { captureOpenApiTools } from "../../../src/catalog/capture.ts"
-import { HttpTransport } from "../../../src/http-transport.ts"
 import { compileSpec } from "../../../src/openapi/compile.ts"
 import { OpenApiInvoker } from "../../../src/openapi/invoke.ts"
 import {
@@ -48,7 +48,7 @@ describe("Effect OpenAPI reference server", () => {
         credential: Option.none()
       })
     }).pipe(Effect.provide(
-      OpenApiInvoker.layer.pipe(Layer.provide(HttpTransport.layer))
+      OpenApiInvoker.layer.pipe(Layer.provide(FetchHttpClient.layer))
     )))
 
     expect(result).toEqual({

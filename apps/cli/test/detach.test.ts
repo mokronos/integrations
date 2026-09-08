@@ -2,6 +2,8 @@ import { mkdtemp, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, test } from "bun:test"
+import { Effect, Result } from "effect"
+import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 
 const repoRoot = path.resolve(import.meta.dir, "../../..")
 const cliPath = path.join(repoRoot, "apps", "cli", "src", "main.ts")
@@ -76,6 +78,10 @@ describe("integrations serve --detach", () => {
     process.kill(pid, "SIGTERM")
     started.splice(0)
     await Bun.sleep(500)
-    expect(await fetch(`http://127.0.0.1:${port}`).catch(() => undefined)).toBeUndefined()
+    const reached = await Effect.runPromise(
+      Effect.result(HttpClient.get(`http://127.0.0.1:${port}`))
+        .pipe(Effect.provide(FetchHttpClient.layer))
+    )
+    expect(Result.isFailure(reached)).toBe(true)
   }, 40_000)
 })

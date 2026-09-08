@@ -1,13 +1,11 @@
 import { buildRequest } from "./request.ts"
 import { Context, Effect, Layer, Option } from "effect"
+import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { describeCause, InvocationError, SpecError } from "../errors.ts"
 import type { HttpCall } from "@mokronos/core-integrations"
 import { missingArguments, splitArguments } from "./arguments.ts"
-import { whenPresent } from "@mokronos/contracts"
 import { AuthPlacement } from "@mokronos/contracts"
 import { parseJsonString, type Json } from "@mokronos/contracts"
-import { HttpTransport } from "../http-transport.ts"
-
 
 export interface ResolvedCredential {
   readonly value: string
@@ -94,10 +92,14 @@ export class OpenApiInvoker extends Context.Service<
     ) => Effect.Effect<Json, InvocationError | SpecError>
   }
 >()("@mokronos/integrations/OpenApiInvoker") {
-  static readonly layer: Layer.Layer<OpenApiInvoker, never, HttpTransport> = Layer.effect(
+  static readonly layer: Layer.Layer<
+    OpenApiInvoker,
+    never,
+    HttpClient.HttpClient
+  > = Layer.effect(
     OpenApiInvoker,
     Effect.gen(function* () {
-      const transport = yield* HttpTransport
+      const client = yield* HttpClient.HttpClient
       return {
       call: Effect.fn("OpenApiInvoker.call")(function* (call: OpenApiCall) {
         const split = splitArguments(call.call, call.input)
@@ -134,17 +136,19 @@ export class OpenApiInvoker extends Context.Service<
           call.credential
         )
 
-        const response = yield* Effect.tryPromise({
-          try: () => transport.fetch(prepared.url, {
-            method: built.method,
-            headers: { accept: "application/json, */*", ...prepared.headers },
-            ...whenPresent("body", Option.getOrUndefined(built.body))
-          }),
-          catch: (cause) => new InvocationError({
+        const request = HttpClientRequest.make(built.method)(prepared.url, {
+          headers: { accept: "application/json, */*", ...prepared.headers }
+        })
+
+        const response = yield* client.execute(Option.match(built.body, {
+          onNone: () => request,
+          onSome: (body) =>
+            HttpClientRequest.bodyText(request, body, request.headers["content-type"])
+        })).pipe(
+          Effect.mapError((cause) => new InvocationError({
             code: "transport_error",
             detail: describeCause(cause)
-          })
-        }).pipe(
+          })),
           Effect.timeoutOrElse({
             duration: call.timeoutMillis ?? defaultTimeoutMillis,
             orElse: () => Effect.fail(new InvocationError({
@@ -154,17 +158,16 @@ export class OpenApiInvoker extends Context.Service<
           })
         )
 
-        const contentType = response.headers.get("content-type") ?? ""
-        const body = yield* Effect.tryPromise({
-          try: () => response.text(),
-          catch: (cause) => new InvocationError({
+        const contentType = response.headers["content-type"] ?? ""
+        const body = yield* response.text.pipe(
+          Effect.mapError((cause) => new InvocationError({
             code: "response_error",
             detail: describeCause(cause),
             status: response.status
-          })
-        })
+          }))
+        )
 
-        if (!response.ok) {
+        if (response.status < 200 || response.status >= 300) {
           return yield* new InvocationError({
             code: `http_${response.status}`,
             detail: errorDetail(body),

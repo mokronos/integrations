@@ -1,9 +1,10 @@
 import { useState } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router"
 import { ArrowLeft, ArrowRight, Check, CheckCircle2, KeyRound, Plug, ShieldCheck } from "lucide-react"
-import { Option, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
+import { FetchHttpClient } from "effect/unstable/http"
 import { ConnectionName, IntegrationSlug, ToolName } from "@mokronos/contracts"
-import { createGatewayClient } from "@mokronos/integrations-client/client"
+import { makeGatewayClient } from "@mokronos/integrations-client/client"
 
 import { useSession } from "@/components/auth-gate"
 import { ConnectDialog } from "@/components/integrations/connect-dialog"
@@ -66,7 +67,13 @@ export function OnboardingRoute() {
   const verify = useMutation({
     mutationFn: async () => {
       if (secret === undefined) throw new Error("Issue a key in the previous step to verify access.")
-      return createGatewayClient({ url: window.location.origin, apiKey: secret, fetch: (input, init) => fetch(input, { ...init, credentials: "omit" }) }).effectiveTools()
+      return Effect.runPromise(
+        makeGatewayClient({ url: window.location.origin, apiKey: secret }).pipe(
+          Effect.flatMap((client) => client.effectiveTools()),
+          Effect.provideService(FetchHttpClient.RequestInit, { credentials: "omit" }),
+          Effect.provide(FetchHttpClient.layer)
+        )
+      )
     }
   })
   const activity = useQuery({

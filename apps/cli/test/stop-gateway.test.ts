@@ -4,7 +4,12 @@ import os from "node:os"
 import path from "node:path"
 import { gatewayConfigPath } from "@mokronos/integrations-client"
 import { whenPresent } from "@mokronos/contracts"
+import { Effect, Result } from "effect"
+import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import { stopGateway } from "../src/service.ts"
+
+const run = <A, E>(effect: Effect.Effect<A, E, HttpClient.HttpClient>): Promise<A> =>
+  Effect.runPromise(effect.pipe(Effect.provide(FetchHttpClient.layer)))
 
 const directories: Array<string> = []
 const children: Array<Bun.Subprocess> = []
@@ -70,7 +75,7 @@ describe("stopGateway", () => {
     const home = await temporaryHome()
     await writeConfig(home, { port: await closedPort() })
 
-    expect(await stopGateway()).toBeUndefined()
+    expect(await run(stopGateway())).toBeUndefined()
   })
 
   test("refuses to signal a process whose command line is not a gateway", async () => {
@@ -78,8 +83,12 @@ describe("stopGateway", () => {
     const impostor = await startImpostor(home)
     await writeConfig(home, { port: impostor.port, pid: impostor.pid })
 
-    await expect(stopGateway()).rejects.toThrow(`Refusing to stop pid ${impostor.pid}`)
-    expect(await fetch(`http://127.0.0.1:${impostor.port}`).then((response) => response.ok))
-      .toBe(true)
+    const outcome = await run(Effect.result(stopGateway()))
+    expect(Result.isFailure(outcome)).toBe(true)
+    expect(Result.isFailure(outcome) ? outcome.failure.message : "").toContain(
+      `Refusing to stop pid ${impostor.pid}`
+    )
+    const alive = await run(HttpClient.get(`http://127.0.0.1:${impostor.port}`))
+    expect(alive.status).toBe(200)
   })
 })

@@ -1,11 +1,11 @@
 import { Context, Effect, Layer, Option } from "effect"
+import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { CatalogStore } from "../catalog/store.ts"
 import type { IntegrationRecord } from "../catalog/store.ts"
 import { describeCause, SpecError } from "../errors.ts"
 import { convertGoogleDiscovery, isGoogleDiscoveryUrl } from "./google-discovery.ts"
 import { compileSpec } from "./compile.ts"
 import type { CompiledSpec } from "./compile.ts"
-import { HttpTransport } from "../http-transport.ts"
 
 export class SpecCache extends Context.Service<
   SpecCache,
@@ -14,30 +14,29 @@ export class SpecCache extends Context.Service<
     readonly compileUrl: (url: string) => Effect.Effect<CompiledSpec, SpecError>
   }
 >()("@mokronos/integrations/SpecCache") {
-  static readonly layer: Layer.Layer<SpecCache, never, CatalogStore | HttpTransport> = Layer.effect(
+  static readonly layer: Layer.Layer<
+    SpecCache,
+    never,
+    CatalogStore | HttpClient.HttpClient
+  > = Layer.effect(
     SpecCache,
     Effect.gen(function* () {
       const store = yield* CatalogStore
-      const transport = yield* HttpTransport
+      const client = yield* HttpClient.HttpClient
       const compiled = new Map<string, CompiledSpec>()
 
       const fetchText = Effect.fn("SpecCache.fetchText")((url: string) =>
-        Effect.tryPromise({
-          try: async () => {
-            const response = await transport.fetch(url, {
-              headers: { accept: "application/json, application/yaml, text/yaml, */*" }
-            })
-            if (!response.ok) {
-              throw new Error(`${response.status} ${response.statusText}`)
-            }
-            return await response.text()
-          },
-          catch: (cause) => new SpecError({
+        client.get(url, {
+          headers: { accept: "application/json, application/yaml, text/yaml, */*" }
+        }).pipe(
+          Effect.flatMap(HttpClientResponse.filterStatusOk),
+          Effect.flatMap((response) => response.text),
+          Effect.mapError((cause) => new SpecError({
             source: url,
             detail: describeCause(cause),
             cause
-          })
-        })
+          }))
+        )
       )
 
       const toOpenApi = (source: string, text: string) =>

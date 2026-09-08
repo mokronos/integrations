@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import type { AuthMethod, Connection } from "@mokronos/contracts"
 import { ConnectionName, IntegrationSlug } from "@mokronos/contracts"
 import { Cause, Context, Effect, Exit, Option, Result } from "effect"
+import { FetchHttpClient, HttpClient, type HttpClientResponse } from "effect/unstable/http"
 import {
   AuthTemplateSlug,
   CatalogStore,
@@ -130,13 +131,15 @@ const request = {
   clientSecret: "client-secret"
 }
 
-const callback = async (
+const callback = (
   redirectUri: string,
   query: Record<string, string>
-): Promise<Response> => {
+): Promise<HttpClientResponse.HttpClientResponse> => {
   const url = new URL(redirectUri)
   for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value)
-  return await fetch(url)
+  return Effect.runPromise(
+    HttpClient.get(url).pipe(Effect.provide(FetchHttpClient.layer))
+  )
 }
 
 const started = (
@@ -180,7 +183,7 @@ describe("authorizing through the loopback listener", () => {
     const page = await callback(auth.redirectUriUsed()!, { state: "wrong", code: "auth-code" })
 
     expect(page.status).toBe(400)
-    expect(await page.text()).toContain("state could not be verified")
+    expect(await Effect.runPromise(page.text)).toContain("state could not be verified")
     expect((await failureOf(exit)).stage).toBe("timeout")
   })
 
@@ -208,7 +211,7 @@ describe("authorizing through the loopback listener", () => {
     const page = await callback(auth.redirectUriUsed()!, { state: "state-123", code: "auth-code" })
 
     expect(page.status).toBe(400)
-    expect(await page.text()).toContain("token endpoint said no")
+    expect(await Effect.runPromise(page.text)).toContain("token endpoint said no")
     const failure = await failureOf(exit)
     expect(failure.stage).toBe("exchange")
     expect(failure.detail).toContain("token endpoint said no")

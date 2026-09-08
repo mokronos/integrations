@@ -18,7 +18,6 @@ export { McpHost } from "./mcp/client.ts"
 export { OAuthFlows } from "./oauth/flows.ts"
 export { OpenApiInvoker } from "./openapi/invoke.ts"
 export { SpecCache } from "./openapi/cache.ts"
-export { HttpTransport } from "./http-transport.ts"
 export { classify } from "./classify.ts"
 
 export { applySchema, Database, libsqlLayer, memoryLayer, SqlValue } from "./storage/database.ts"
@@ -32,7 +31,14 @@ export {
   StoredTokens
 } from "./storage/credentials.ts"
 
-export { createHostRuntime, hostLayer, hostServicesOf, localLayer, stubbedLayer } from "./runtime.ts"
+export {
+  createHostRuntime,
+  hostLayer,
+  hostServicesOf,
+  localLayer,
+  stubbedLayer,
+  unavailableHttpClientLayer
+} from "./runtime.ts"
 export type { HostServices, HostStorage } from "./runtime.ts"
 export { listIntegrationOverviews } from "./overview.ts"
 export { installClassified, provisionIntegration } from "./provision.ts"

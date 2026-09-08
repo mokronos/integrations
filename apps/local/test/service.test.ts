@@ -15,7 +15,11 @@ import {
 } from "../index.ts"
 import type { RunningGateway } from "../index.ts"
 import { GatewayMetadata } from "@mokronos/contracts"
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
+import { FetchHttpClient, HttpClient } from "effect/unstable/http"
+
+const http = <A, E>(effect: Effect.Effect<A, E, HttpClient.HttpClient>): Promise<A> =>
+  Effect.runPromise(effect.pipe(Effect.provide(FetchHttpClient.layer)))
 
 const directories: Array<string> = []
 const running: Array<RunningGateway> = []
@@ -30,7 +34,7 @@ afterEach(async () => {
 const start = async (): Promise<RunningGateway> => {
   const home = await run(mkdtemp(path.join(tmpdir(), "wf-gateway-serve-")))
   directories.push(home)
-  const gateway = await run(serveGateway({ home, port: 0 }))
+  const gateway = await run(serveGateway({ home, port: 0, httpClient: FetchHttpClient.layer }))
   running.push(gateway)
   return gateway
 }
@@ -40,12 +44,12 @@ describe("gateway service", () => {
     const gateway = await run(start())
 
     expect(gateway.url).toStartWith("http://127.0.0.1:")
-    const response = await run(fetch(`${gateway.url}/v1/health`))
+    const response = await http(HttpClient.get(`${gateway.url}/v1/health`))
     expect(response.status).toBe(200)
-    const metadataResponse = await run(fetch(`${gateway.url}/v1/metadata`))
-    const metadata = Schema.decodeUnknownSync(GatewayMetadata)(await run(metadataResponse.json()))
+    const metadataResponse = await http(HttpClient.get(`${gateway.url}/v1/metadata`))
+    const metadata = Schema.decodeUnknownSync(GatewayMetadata)(await http(metadataResponse.json))
     expect(metadata.gatewayVersion).toBe("0.2.0")
-    expect(metadataResponse.headers.get("cache-control")).toBe("no-store")
+    expect(metadataResponse.headers["cache-control"]).toBe("no-store")
   })
 
   test("bootstraps a local operator client and records its key", async () => {
@@ -74,7 +78,7 @@ describe("gateway service", () => {
     const gateway = await run(start())
     const config = await run(readGatewayConfig(gateway.service.home))
 
-    const response = await run(fetch(`${gateway.url}/v1/clients`, {
+    const response = await http(HttpClient.get(`${gateway.url}/v1/clients`, {
       headers: { authorization: `Bearer ${config?.apiKey ?? ""}` }
     }))
 
@@ -83,13 +87,13 @@ describe("gateway service", () => {
 
   test("rejects a request with no credential over the wire", async () => {
     const gateway = await run(start())
-    expect((await run(fetch(`${gateway.url}/v1/clients`))).status).toBe(401)
+    expect((await http(HttpClient.get(`${gateway.url}/v1/clients`))).status).toBe(401)
   })
 
   test("the control plane's own page is authenticated without carrying a key", async () => {
     const gateway = await run(start())
 
-    const response = await run(fetch(`${gateway.url}/v1/clients`, {
+    const response = await http(HttpClient.get(`${gateway.url}/v1/clients`, {
       headers: { "sec-fetch-site": "same-origin" }
     }))
 
@@ -99,7 +103,7 @@ describe("gateway service", () => {
   test("a page on another site is not, even reaching the same loopback port", async () => {
     const gateway = await run(start())
 
-    const response = await run(fetch(`${gateway.url}/v1/clients`, {
+    const response = await http(HttpClient.get(`${gateway.url}/v1/clients`, {
       headers: {
         "sec-fetch-site": "cross-site",
         origin: "https://evil.example.com"
@@ -124,7 +128,7 @@ describe("gateway service", () => {
     const key = generateApiKey()
     await run(gateway.service.store.addApiKey({ id: key.id, clientId: sandbox.id, hash: key.hash }))
 
-    const response = await run(fetch(`${gateway.url}/v1/clients`, {
+    const response = await http(HttpClient.get(`${gateway.url}/v1/clients`, {
       headers: {
         "sec-fetch-site": "same-origin",
         authorization: `Bearer ${key.secret}`

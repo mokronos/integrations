@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import { Effect } from "effect"
+import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import { compileSpec } from "../../../src/openapi/compile.ts"
 
 const enabled = process.env["RUN_REMOTE_INTEGRATION_TESTS"] === "1"
@@ -21,9 +22,13 @@ const specifications = [
 remoteDescribe("current production OpenAPI specifications", () => {
   for (const specification of specifications) {
     it(`compiles the latest ${specification.name} document`, async () => {
-      const response = await fetch(specification.url)
-      expect(response.ok).toBe(true)
-      const document = await response.text()
+      const document = await Effect.runPromise(
+        HttpClient.get(specification.url).pipe(
+          Effect.tap((response) => Effect.sync(() => expect(response.status).toBe(200))),
+          Effect.flatMap((response) => response.text),
+          Effect.provide(FetchHttpClient.layer)
+        )
+      )
       const compiled = await Effect.runPromise(compileSpec(specification.url, document))
       expect(compiled.operations.length).toBeGreaterThanOrEqual(
         specification.minimumOperations

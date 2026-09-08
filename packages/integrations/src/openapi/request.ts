@@ -1,13 +1,25 @@
 import { Option } from "effect"
+import type { HttpMethod } from "effect/unstable/http"
 import { isJsonObject, isJsonString, type Json } from "@mokronos/contracts"
-import type { CallParameter, HttpCall } from "@mokronos/core-integrations"
+import type { CallParameter, HttpCall, HttpMethod as CallMethod } from "@mokronos/core-integrations"
 
 export interface BuiltRequest {
   readonly url: string
-  readonly method: string
+  readonly method: HttpMethod.HttpMethod
   readonly headers: Readonly<Record<string, string>>
   readonly body: Option.Option<string>
 }
+
+const requestMethods = {
+  get: "GET",
+  put: "PUT",
+  post: "POST",
+  delete: "DELETE",
+  patch: "PATCH",
+  head: "HEAD",
+  options: "OPTIONS",
+  trace: "TRACE"
+} as const satisfies Record<CallMethod, HttpMethod.HttpMethod>
 
 const scalar = (value: Json): string => {
   if (value === null) return ""
@@ -170,7 +182,7 @@ export const buildRequest = (options: BuildRequestOptions): BuiltRequest => {
   const search = query.toString()
   return {
     url: `${base}${path.startsWith("/") ? path : `/${path}`}${search.length === 0 ? "" : `?${search}`}`,
-    method: call.method.toUpperCase(),
+    method: requestMethods[call.method],
     headers,
     body
   }

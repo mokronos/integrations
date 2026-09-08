@@ -1,3 +1,4 @@
+import type { HttpClient } from "effect/unstable/http"
 import { Effect, Option, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import type { IntegrationsCliError } from "../connection.ts"
@@ -40,13 +41,13 @@ const window = (
   offset: Option.getOrUndefined(offset)
 })
 
-const controlPlaneTask = <A>(
-  task: (client: ControlPlaneClient) => Promise<A>
-): Effect.Effect<A, IntegrationsCliError> =>
-  Effect.tryPromise({
-    try: async () => await task(await connectToControlPlane()),
-    catch: (error) => cliError(describeError(error))
-  })
+const controlPlaneTask = <A, E>(
+  task: (client: ControlPlaneClient) => Effect.Effect<A, E, HttpClient.HttpClient>
+): Effect.Effect<A, IntegrationsCliError, HttpClient.HttpClient> =>
+  connectToControlPlane().pipe(
+    Effect.flatMap(task),
+    Effect.mapError((error) => cliError(describeError(error)))
+  )
 
 const JsonObject = Schema.Record(Schema.String, Schema.Json)
 const JsonArray = Schema.Array(Schema.Json)
@@ -215,18 +216,23 @@ export const cloneAccessProfileCommand = Command.make(
     )).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false))))
 ).pipe(Command.withDescription("Clone an access profile and all of its tools"))
 
-const targetConnections = async (
+const targetConnections = Effect.fn("cli.targetConnections")(function*(
   client: ControlPlaneClient,
   integration: string,
   requested: Option.Option<string>
-): Promise<ReadonlyArray<{ readonly owner: string; readonly name: string }>> => {
+): Effect.fn.Return<
+  ReadonlyArray<{ readonly owner: string; readonly name: string }>,
+  IntegrationsCliError,
+  HttpClient.HttpClient
+> {
   const explicit = Option.getOrUndefined(requested)
   if (explicit !== undefined) return [{ owner: "org", name: explicit }]
-  const listed = array(record(await client.request("GET", "/v1/connections"))["connections"])
+  const connections = yield* client.request("GET", "/v1/connections")
+  const listed = array(record(connections)["connections"])
     .filter((entry) => text(entry["integration"]) === integration && text(entry["owner"]) === "org")
     .map((entry) => ({ owner: "org", name: text(entry["name"]) }))
   return listed.length === 0 ? [{ owner: "org", name: "default" }] : listed
-}
+})
 
 export const accessProfileToolCommand = Command.make(
   "access-profile-tool",
@@ -242,12 +248,12 @@ export const accessProfileToolCommand = Command.make(
     )
   },
   ({ accessProfileId, connection, integration, tool }) =>
-    controlPlaneTask(async (client) => {
-      const detail = record(await client.request(
+    controlPlaneTask((client) => Effect.gen(function*() {
+      const detail = record(yield* client.request(
         "GET",
         `/v1/access-profiles/${encodeURIComponent(accessProfileId)}`
       ))
-      const targets = await targetConnections(client, integration, connection)
+      const targets = yield* targetConnections(client, integration, connection)
       const replaced = new Set(targets.map((target) => `${target.owner}/${target.name}`))
       const tools = array(detail["tools"])
         .filter((entry) => {
@@ -260,7 +266,7 @@ export const accessProfileToolCommand = Command.make(
           connection: record(entry["connection"]),
           tool: text(entry["tool"])
         }))
-      return await client.request(
+      return yield* client.request(
         "POST",
         `/v1/access-profiles/${encodeURIComponent(accessProfileId)}/tools`,
         {
@@ -273,7 +279,7 @@ export const accessProfileToolCommand = Command.make(
           ]
         }
       )
-    }).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false))))
+    })).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false))))
 ).pipe(Command.withDescription("Include one tool in an access profile"))
 
 export const approvalPoliciesCommand = Command.make(
@@ -337,12 +343,12 @@ export const approvalPolicyToolCommand = Command.make(
     )
   },
   ({ approvalPolicyId, connection, integration, mode, tool }) =>
-    controlPlaneTask(async (client) => {
-      const detail = record(await client.request(
+    controlPlaneTask((client) => Effect.gen(function*() {
+      const detail = record(yield* client.request(
         "GET",
         `/v1/approval-policies/${encodeURIComponent(approvalPolicyId)}`
       ))
-      const targets = await targetConnections(client, integration, connection)
+      const targets = yield* targetConnections(client, integration, connection)
       const replaced = new Set(targets.map((target) => `${target.owner}/${target.name}`))
       const tools = array(detail["tools"])
         .filter((entry) => {
@@ -356,7 +362,7 @@ export const approvalPolicyToolCommand = Command.make(
           tool: text(entry["tool"]),
           decision: text(entry["decision"])
         }))
-      return await client.request(
+      return yield* client.request(
         "POST",
         `/v1/approval-policies/${encodeURIComponent(approvalPolicyId)}/tools`,
         {
@@ -370,7 +376,7 @@ export const approvalPolicyToolCommand = Command.make(
           ]
         }
       )
-    }).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false))))
+    })).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false))))
 ).pipe(Command.withDescription("Set one tool's decision in an approval policy"))
 
 export const assignAccessProfileCommand = Command.make(

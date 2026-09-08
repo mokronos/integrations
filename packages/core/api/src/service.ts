@@ -7,6 +7,7 @@ import { PositiveInt, PositiveIntFromString, whenPresent } from "@mokronos/contr
 import { defaultTenantId } from "@mokronos/gateway-core"
 import { resolveEncryption } from "@mokronos/gateway-core"
 import { Context, Effect, Layer, ManagedRuntime, Option, Schema } from "effect"
+import type { HttpClient } from "effect/unstable/http"
 import { isLoopbackAddress, mayBorrowLocalCredential } from "./http/loopback.ts"
 import { createGatewayHandler } from "./http/handler.ts"
 import type { GatewayHandle, GatewayRequestContext } from "./http/handler.ts"
@@ -40,11 +41,12 @@ export interface GatewayService {
 }
 
 export interface GatewayServiceOptions {
+  readonly httpClient: Layer.Layer<HttpClient.HttpClient>
   readonly home?: string
   readonly retentionDays?: number
   readonly registryUrl?: string
   readonly publicUrl?: string
-  readonly googleIdentity?: Pick<GoogleIdentityOAuth, "clientId" | "clientSecret" | "fetch">
+  readonly googleIdentity?: Pick<GoogleIdentityOAuth, "clientId" | "clientSecret">
   readonly localCallbackOrigin?: string
   readonly secureCookies?: boolean
   readonly allowSignup?: boolean
@@ -93,7 +95,7 @@ const buildCore = async (
     options.storeLayer ??
     GatewayStoreService.layer(`${home}/gateway.sqlite`, encryption, options.storeOptions)
   )
-  const hostRuntime = createHostRuntime(home, options.hostStorage ?? {})
+  const hostRuntime = createHostRuntime(home, options.httpClient, options.hostStorage ?? {})
   let resources: Awaited<ReturnType<typeof bootResources>>
   try {
     resources = await bootResources()
@@ -138,8 +140,7 @@ const buildCore = async (
       : {
         clientId: googleClientId,
         clientSecret: googleClientSecret,
-        publicUrlOf: resolvePublicUrl,
-        ...whenPresent("fetch", options.googleIdentity?.fetch)
+        publicUrlOf: resolvePublicUrl
       }
   const oauth = createOAuthSessions(resources.hostServices, {
     publicUrlOf: resolvePublicUrl,
@@ -159,7 +160,7 @@ const buildCore = async (
       afterSweep: () => deliverDueApprovalNotifications({
         store: resources.store,
         ...whenPresent("dashboardUrl", resolvePublicUrl())
-      })
+      }).pipe(Effect.provide(options.httpClient))
     })
 
   const perMinute = Option.getOrElse(
@@ -194,6 +195,7 @@ const buildCore = async (
     handlerOptions: {
       store: resources.store,
       hostServices: resources.hostServices,
+      httpClient: options.httpClient,
       retentionDays: options.retentionDays ?? defaultArgumentRetentionDays,
       oauth,
       oauthCallbackUrl: () => {
@@ -226,7 +228,7 @@ const buildCore = async (
 }
 
 export const createGatewayService = async (
-  options: GatewayServiceOptions = {}
+  options: GatewayServiceOptions
 ): Promise<GatewayService> => {
   const core = await buildCore(options)
 
@@ -251,6 +253,7 @@ export const createGatewayService = async (
 }
 
 export interface ServeOptions {
+  readonly httpClient: Layer.Layer<HttpClient.HttpClient>
   readonly port?: number
   readonly hostname?: string
   readonly home?: string
@@ -267,7 +270,7 @@ export interface RunningGateway {
   stop(): Promise<void>
 }
 
-export const serveGateway = async (options: ServeOptions = {}): Promise<RunningGateway> => {
+export const serveGateway = async (options: ServeOptions): Promise<RunningGateway> => {
   const hostname = options.hostname ?? "127.0.0.1"
   const boundToLoopback = isLoopbackAddress(hostname)
   const requestedPort = options.port ?? defaultGatewayPort

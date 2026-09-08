@@ -1,3 +1,4 @@
+import { FetchHttpClient } from "effect/unstable/http"
 import { run, runAll } from "./effect.ts"
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
@@ -82,6 +83,7 @@ const setup = async (options: {
     : {}
 
   const { handle } = createGatewayHandler({
+    httpClient: FetchHttpClient.layer,
     hostServices: stubHostContext({}, unreachable),
     store: presented,
     retentionDays: 30,

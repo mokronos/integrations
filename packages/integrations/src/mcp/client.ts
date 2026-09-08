@@ -5,10 +5,12 @@ import {
   extractWWWAuthenticateParams
 } from "@modelcontextprotocol/client"
 import { Context, Effect, Layer, Option, Schema } from "effect"
+import { HttpBody, HttpClient, HttpClientResponse } from "effect/unstable/http"
+import type { Headers } from "effect/unstable/http"
 import { describeCause, McpError } from "../errors.ts"
 import { serviceName, slugify } from "@mokronos/contracts"
 import { whenPresent } from "@mokronos/contracts"
-import { isJsonObject, type Json, type JsonObject } from "@mokronos/contracts"
+import { isJsonObject, parseJsonString, type Json, type JsonObject } from "@mokronos/contracts"
 import { McpProbe } from "@mokronos/contracts"
 
 const PROTOCOL_VERSION = "2026-07-28"
@@ -109,10 +111,12 @@ interface McpAuthority {
 
 const inspectAuthority = (
   endpoint: string,
-  response: Response
+  headers: Headers.Headers
 ): Effect.Effect<Option.Option<McpAuthority>> =>
   Effect.promise(async () => {
-    const { resourceMetadataUrl } = extractWWWAuthenticateParams(response)
+    const { resourceMetadataUrl } = extractWWWAuthenticateParams(
+      new Response(null, { headers: { ...headers } })
+    )
     try {
       const discovered = await discoverOAuthProtectedResourceMetadata(
         endpoint,
@@ -182,51 +186,66 @@ const MODERN_ERROR_CODES: ReadonlyArray<number> = [
   -32020
 ]
 
-const readBody = async (response: Response): Promise<Json> => {
-  const body = await response.text()
-  if (!response.headers.get("content-type")?.includes("text/event-stream")) {
-    return JSON.parse(body)
-  }
-  const payloads = body
-    .split(/\r?\n/)
-    .filter((line) => line.startsWith("data:"))
-    .map((line) => line.slice(5).trim())
-  const last = payloads[payloads.length - 1]
-  if (last === undefined) throw new Error("the event stream carried no data")
-  return JSON.parse(last)
-}
+const lastEventData = (body: string): Option.Option<string> =>
+  Option.fromNullishOr(
+    body
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trim())
+      .pop()
+  )
+
+const readBody = (
+  endpoint: string,
+  response: HttpClientResponse.HttpClientResponse
+): Effect.Effect<Json, McpError> =>
+  response.text.pipe(
+    Effect.mapError((cause) =>
+      new McpError({ endpoint, detail: describeCause(cause), cause })
+    ),
+    Effect.flatMap((text) => {
+      const payload = response.headers["content-type"]?.includes("text/event-stream") === true
+        ? lastEventData(text)
+        : Option.some(text)
+      return Option.match(Option.flatMap(payload, parseJsonString), {
+        onNone: () => Effect.fail(new McpError({
+          endpoint,
+          detail: "it answered server/discover with something other than JSON"
+        })),
+        onSome: Effect.succeed
+      })
+    })
+  )
 
 const probeDiscovery = (
+  client: HttpClient.HttpClient,
   endpoint: string
-): Effect.Effect<{ readonly response: Response; readonly body: Json }, McpError> =>
-  Effect.tryPromise({
-    try: async () => {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          accept: "application/json, text/event-stream",
-          "MCP-Protocol-Version": PROTOCOL_VERSION,
-          "Mcp-Method": "server/discover"
-        },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "server/discover",
-          params: { _meta: requestMeta }
-        })
-      })
-      if (response.status === 401 || response.status === 403) {
-        return { response, body: null }
-      }
-      return { response, body: await readBody(response) }
+): Effect.Effect<
+  { readonly response: HttpClientResponse.HttpClientResponse; readonly body: Json },
+  McpError
+> =>
+  client.post(endpoint, {
+    headers: {
+      accept: "application/json, text/event-stream",
+      "MCP-Protocol-Version": PROTOCOL_VERSION,
+      "Mcp-Method": "server/discover"
     },
-    catch: (cause) => new McpError({
-      endpoint,
-      detail: describeCause(cause),
-      cause
+    body: HttpBody.jsonUnsafe({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "server/discover",
+      params: { _meta: requestMeta }
     })
-  })
+  }).pipe(
+    Effect.mapError((cause) =>
+      new McpError({ endpoint, detail: describeCause(cause), cause })
+    ),
+    Effect.flatMap((response) =>
+      response.status === 401 || response.status === 403
+        ? Effect.succeed({ response, body: null })
+        : Effect.map(readBody(endpoint, response), (body) => ({ response, body }))
+    )
+  )
 
 const fallbackName = (endpoint: string): string => {
   const parsed = Option.getOrUndefined(
@@ -251,9 +270,11 @@ export class McpHost extends Context.Service<
     ) => Effect.Effect<Json, McpError>
   }
 >()("@mokronos/integrations/McpHost") {
-  static readonly layer: Layer.Layer<McpHost> = Layer.effect(
+  static readonly layer: Layer.Layer<McpHost, never, HttpClient.HttpClient> = Layer.effect(
     McpHost,
-    Effect.sync(() => {
+    Effect.gen(function* () {
+      const client = yield* HttpClient.HttpClient
+
       const listTools = Effect.fn("McpHost.listTools")((
         endpoint: string,
         credential: Option.Option<McpCredential>
@@ -289,12 +310,12 @@ export class McpHost extends Context.Service<
       })
 
       const probe = Effect.fn("McpHost.probe")(function*(endpoint: string) {
-        const { response, body } = yield* probeDiscovery(endpoint)
+        const { response, body } = yield* probeDiscovery(client, endpoint)
         const name = fallbackName(endpoint)
         const slug = Option.getOrElse(slugify(name), () => "mcp")
 
         if (response.status === 401 || response.status === 403) {
-          const authority = yield* inspectAuthority(endpoint, response)
+          const authority = yield* inspectAuthority(endpoint, response.headers)
           return yield* Schema.decodeUnknownEffect(McpProbe)({
             connected: false,
             requiresAuthentication: true,
@@ -349,7 +370,7 @@ export class McpHost extends Context.Service<
 
         const toolCount = yield* countTools(endpoint, discovered.capabilities)
 
-        const authority = yield* inspectAuthority(endpoint, response)
+        const authority = yield* inspectAuthority(endpoint, response.headers)
         const serverName = discovered._meta?.["io.modelcontextprotocol/serverInfo"]?.name ?? null
         return yield* Schema.decodeUnknownEffect(McpProbe)({
           connected: true,

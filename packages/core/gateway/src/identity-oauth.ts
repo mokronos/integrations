@@ -1,4 +1,5 @@
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
+import { HttpBody, HttpClient, HttpClientResponse } from "effect/unstable/http"
 
 const GoogleTokenResponse = Schema.Struct({
   access_token: Schema.String
@@ -10,18 +11,18 @@ const GoogleIdentityResponse = Schema.Struct({
   email_verified: Schema.Boolean
 })
 
-const decodeGoogleTokenText = Schema.decodeUnknownSync(
-  Schema.fromJsonString(GoogleTokenResponse)
-)
-const decodeGoogleIdentityText = Schema.decodeUnknownSync(
-  Schema.fromJsonString(GoogleIdentityResponse)
-)
+const decodeGoogleToken = Schema.decodeUnknownEffect(GoogleTokenResponse)
+const decodeGoogleIdentity = Schema.decodeUnknownEffect(GoogleIdentityResponse)
+
+export class GoogleIdentityError extends Schema.TaggedError<GoogleIdentityError>()(
+  "GoogleIdentityError",
+  { message: Schema.String }
+) {}
 
 export interface GoogleIdentityOAuth {
   readonly clientId: string
   readonly clientSecret: string
   readonly publicUrlOf: () => string | undefined
-  readonly fetch?: typeof globalThis.fetch
 }
 
 export interface GoogleIdentity {
@@ -55,37 +56,44 @@ export const googleIdentityAuthorizationUrl = (
   return url.toString()
 }
 
-export const resolveGoogleIdentity = async (
+export const resolveGoogleIdentity = Effect.fn("GoogleIdentity.resolve")(function*(
   options: GoogleIdentityOAuth,
   code: string
-): Promise<GoogleIdentity> => {
-  const doFetch = options.fetch ?? globalThis.fetch
-  const tokenResponse = await doFetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
+): Effect.fn.Return<GoogleIdentity, GoogleIdentityError, HttpClient.HttpClient> {
+  const client = yield* HttpClient.HttpClient
+
+  const token = yield* client.post("https://oauth2.googleapis.com/token", {
+    body: HttpBody.urlParams({
       code,
       client_id: options.clientId,
       client_secret: options.clientSecret,
       redirect_uri: googleIdentityCallbackUrl(options),
       grant_type: "authorization_code"
     })
-  })
-  if (!tokenResponse.ok) {
-    throw new Error(`Google rejected the authorization code (HTTP ${tokenResponse.status})`)
-  }
-  const token = decodeGoogleTokenText(await tokenResponse.text())
-
-  const identityResponse = await doFetch(
-    "https://openidconnect.googleapis.com/v1/userinfo",
-    { headers: { authorization: `Bearer ${token.access_token}` } }
+  }).pipe(
+    Effect.flatMap(HttpClientResponse.filterStatusOk),
+    Effect.flatMap((response) => response.json),
+    Effect.flatMap(decodeGoogleToken),
+    Effect.mapError(() =>
+      new GoogleIdentityError({ message: "Google rejected the authorization code" })
+    )
   )
-  if (!identityResponse.ok) {
-    throw new Error(`Google did not return an identity (HTTP ${identityResponse.status})`)
-  }
-  const identity = decodeGoogleIdentityText(await identityResponse.text())
+
+  const identity = yield* client.get("https://openidconnect.googleapis.com/v1/userinfo", {
+    headers: { authorization: `Bearer ${token.access_token}` }
+  }).pipe(
+    Effect.flatMap(HttpClientResponse.filterStatusOk),
+    Effect.flatMap((response) => response.json),
+    Effect.flatMap(decodeGoogleIdentity),
+    Effect.mapError(() =>
+      new GoogleIdentityError({ message: "Google did not return an identity" })
+    )
+  )
+
   if (!identity.email_verified) {
-    throw new Error("Google did not verify this account's email address")
+    return yield* new GoogleIdentityError({
+      message: "Google did not verify this account's email address"
+    })
   }
   return { providerSubject: identity.sub, email: identity.email }
-}
+})

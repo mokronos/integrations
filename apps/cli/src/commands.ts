@@ -1,4 +1,5 @@
 import type { GatewayClient } from "@mokronos/integrations-client"
+import type { HttpClient } from "effect/unstable/http"
 import { Effect } from "effect"
 import { approvalCommand, approvalsCommand, approveCommand, auditCommand, denyCommand, driftCommand, maintenanceCommand } from "./commands/approvals-audit.ts"
 import { discoverCommand, integrationsCommand, renameCommand, schemaCommand, searchCommand, toolsCommand } from "./commands/catalog.ts"
@@ -29,21 +30,21 @@ import {
 } from "./connection.ts"
 import { connectToOperatorGateway } from "./session.ts"
 
-const gatewayTask = <A>(
-  task: (client: GatewayClient) => Promise<A>
-): Effect.Effect<A, IntegrationsCliError> =>
-  Effect.tryPromise({
-    try: async () => await task(await connectToGateway()),
-    catch: (error) => cliError(describeError(error))
-  })
+const gatewayTask = <A, E>(
+  task: (client: GatewayClient) => Effect.Effect<A, E>
+): Effect.Effect<A, IntegrationsCliError, HttpClient.HttpClient> =>
+  connectToGateway().pipe(
+    Effect.flatMap(task),
+    Effect.mapError((error) => cliError(describeError(error)))
+  )
 
-const operatorGatewayTask = <A>(
-  task: (client: GatewayClient) => Promise<A>
-): Effect.Effect<A, IntegrationsCliError> =>
-  Effect.tryPromise({
-    try: async () => await task(await connectToOperatorGateway()),
-    catch: (error) => cliError(describeError(error))
-  })
+const operatorGatewayTask = <A, E>(
+  task: (client: GatewayClient) => Effect.Effect<A, E>
+): Effect.Effect<A, IntegrationsCliError, HttpClient.HttpClient> =>
+  connectToOperatorGateway().pipe(
+    Effect.flatMap(task),
+    Effect.mapError((error) => cliError(describeError(error)))
+  )
 
 export const clientSubcommands = [
   discoverCommand(gatewayTask),

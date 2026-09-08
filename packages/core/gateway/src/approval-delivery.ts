@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
 import { Effect, Schema } from "effect"
+import { FetchHttpClient, HttpBody, HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { whenPresent } from "@mokronos/contracts"
 import type { GatewayStore } from "./store-contract.ts"
 
@@ -32,11 +33,10 @@ export const deliverDueApprovalNotifications = Effect.fn("Approval.deliverDueNot
     readonly dashboardUrl?: string
     readonly limit?: number
     readonly now?: Date
-    readonly doFetch?: typeof globalThis.fetch
   }) {
     const at = input.now ?? new Date()
     const jobs = yield* input.store.claimDueApprovalDeliveries(at, input.limit ?? 25)
-    const doFetch = input.doFetch ?? globalThis.fetch
+    const client = yield* HttpClient.HttpClient
     yield* Effect.forEach(jobs, (job) => Effect.gen(function*() {
       const approvalUrl = input.dashboardUrl === undefined ? undefined
         : `${input.dashboardUrl.replace(/\/+$/, "")}/approvals?approval=${encodeURIComponent(job.approvalId)}`
@@ -48,24 +48,21 @@ export const deliverDueApprovalNotifications = Effect.fn("Approval.deliverDueNot
       }
       const body = JSON.stringify(notification)
       const timestamp = Math.floor(at.getTime() / 1_000).toString()
-      const delivery = Effect.tryPromise({
-        try: async () => {
-          const response = await doFetch(job.url, {
-            method: "POST", redirect: "error",
-            headers: {
-              "content-type": "application/json", "idempotency-key": job.id,
-              "x-integrations-delivery": job.id, "x-integrations-event": "approval.pending",
-              "x-integrations-timestamp": timestamp,
-              "x-integrations-signature": approvalWebhookSignature(job.signingSecret, timestamp, body)
-            },
-            body, signal: AbortSignal.timeout(5_000)
-          })
-          if (!response.ok) throw new Error(`Webhook returned HTTP ${response.status}`)
+      const delivery = client.post(job.url, {
+        headers: {
+          "idempotency-key": job.id,
+          "x-integrations-delivery": job.id, "x-integrations-event": "approval.pending",
+          "x-integrations-timestamp": timestamp,
+          "x-integrations-signature": approvalWebhookSignature(job.signingSecret, timestamp, body)
         },
-        catch: (cause) => new ApprovalWebhookError({
-          message: cause instanceof Error ? cause.message : "Webhook delivery failed"
-        })
-      })
+        body: HttpBody.text(body, "application/json")
+      }).pipe(
+        Effect.provideService(FetchHttpClient.RequestInit, { redirect: "error" }),
+        Effect.timeout(5_000),
+        Effect.flatMap(HttpClientResponse.filterStatusOk),
+        Effect.asVoid,
+        Effect.mapError((cause) => new ApprovalWebhookError({ message: cause.message }))
+      )
       yield* delivery.pipe(Effect.matchEffect({
         onSuccess: () => input.store.settleApprovalDelivery({
           id: job.id, status: "delivered", nextAttemptAt: null, error: null

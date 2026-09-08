@@ -1,4 +1,5 @@
-import { Effect } from "effect"
+import { Effect, Layer } from "effect"
+import { FetchHttpClient } from "effect/unstable/http"
 import { run, runAll } from "./effect.ts"
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
@@ -195,11 +196,17 @@ describe("gateway store", () => {
       status: "pending", attempts: 0
     }])
     let delivered: RequestInit | undefined
-    const doFetch = Object.assign(async (_url: RequestInfo | URL, init?: RequestInit) => {
-      delivered = init
-      return new Response(null, { status: 204 })
-    }, { preconnect: globalThis.fetch.preconnect })
-    await run(deliverDueApprovalNotifications({ store, dashboardUrl: "https://gateway.example", doFetch }))
+    const httpClient = FetchHttpClient.layer.pipe(Layer.provide(Layer.succeed(
+      FetchHttpClient.Fetch,
+      Object.assign(async (_url: RequestInfo | URL, init?: RequestInit) => {
+        delivered = init
+        return new Response(null, { status: 204 })
+      }, { preconnect: globalThis.fetch.preconnect })
+    )))
+    await run(
+      deliverDueApprovalNotifications({ store, dashboardUrl: "https://gateway.example" })
+        .pipe(Effect.provide(httpClient))
+    )
     expect(new Headers(delivered?.headers).get("x-integrations-signature")).toStartWith("v1=")
     expect(String(delivered?.body)).not.toContain("arguments")
     expect(await run(store.listApprovalDeliveries(defaultTenantId, approval.id))).toMatchObject([{

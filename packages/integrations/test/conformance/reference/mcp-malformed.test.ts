@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test"
-import { Effect, Option } from "effect"
+import { Effect, Layer, Option } from "effect"
+import { FetchHttpClient } from "effect/unstable/http"
 import { McpHost } from "../../../src/mcp/client.ts"
 
 const servers: Array<ReturnType<typeof Bun.serve>> = []
@@ -25,7 +26,7 @@ describe("malformed MCP servers", () => {
     }))
     const result = await Effect.runPromiseExit(
       Effect.flatMap(McpHost, (host) => host.listTools(endpoint, Option.none())).pipe(
-        Effect.provide(McpHost.layer)
+        Effect.provide(McpHost.layer.pipe(Layer.provide(FetchHttpClient.layer)))
       )
     )
     expect(result._tag).toBe("Failure")
@@ -35,7 +36,7 @@ describe("malformed MCP servers", () => {
     const endpoint = malformedServer(() => Response.json({ result: { tools: [] } }))
     const result = await Effect.runPromiseExit(
       Effect.flatMap(McpHost, (host) => host.listTools(endpoint, Option.none())).pipe(
-        Effect.provide(McpHost.layer)
+        Effect.provide(McpHost.layer.pipe(Layer.provide(FetchHttpClient.layer)))
       )
     )
     expect(result._tag).toBe("Failure")

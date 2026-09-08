@@ -2,6 +2,7 @@ import { Cause, Context, Effect, Layer, Option, Result, Schema } from "effect"
 import { FileSystem, Path } from "effect"
 import {
   Etag,
+  HttpClient,
   HttpEffect,
   HttpMiddleware,
   HttpPlatform,
@@ -50,6 +51,7 @@ export interface GatewayRequestContext {
 export interface GatewayHandlerOptions extends GatewaySettings {
   readonly store: GatewayStore
   readonly hostServices: Context.Context<HostServices>
+  readonly httpClient: Layer.Layer<HttpClient.HttpClient>
   readonly oauth: OAuthSessions
   readonly sessions?: SignInPolicy
   readonly addressRateLimiter?: RateLimiter
@@ -180,12 +182,14 @@ export const createGatewayHandler = (options: GatewayHandlerOptions): GatewayHan
   const mcp = createMcpGatewayHandler({
     store: options.store,
     hostServices: options.hostServices,
+    httpClient: options.httpClient,
     retentionDays: options.retentionDays,
     ...whenPresent("dashboardUrl", options.dashboardUrl),
     ...whenPresent("errorCapture", options.errorCapture)
   })
   const app = HttpApiBuilder.layer(GatewayApi).pipe(
-    Layer.provideMerge(gatewayAppLayer(options))
+    Layer.provideMerge(gatewayAppLayer(options)),
+    HttpRouter.provideRequest(options.httpClient)
   )
   const web = HttpEffect.toWebHandlerLayerWith(
     app.pipe(Layer.provide(Layer.merge(

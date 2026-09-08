@@ -1,5 +1,6 @@
 import { whenPresent, whenPresentMap } from "@mokronos/contracts"
 import type { GatewayClient } from "@mokronos/integrations-client"
+import type { HttpClient } from "effect/unstable/http"
 import { Effect, Option, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import type { IntegrationsCliError } from "../connection.ts"
@@ -46,13 +47,13 @@ const window = (
   offset: Option.getOrUndefined(offset)
 })
 
-const gatewayTask = <A>(
-  task: (client: GatewayClient) => Promise<A>
-): Effect.Effect<A, IntegrationsCliError> =>
-  Effect.tryPromise({
-    try: async () => await task(await connectToGateway()),
-    catch: (error) => cliError(describeError(error))
-  })
+const gatewayTask = <A, E>(
+  task: (client: GatewayClient) => Effect.Effect<A, E>
+): Effect.Effect<A, IntegrationsCliError, HttpClient.HttpClient> =>
+  connectToGateway().pipe(
+    Effect.flatMap(task),
+    Effect.mapError((error) => cliError(describeError(error)))
+  )
 
 type GatewayTask = typeof gatewayTask
 
@@ -136,13 +137,13 @@ export const connectCommand = (runGateway: GatewayTask) => Command.make(
     verbose: verboseFlag()
   },
   (options) =>
-    runGateway(async (client) => {
-      const catalog = record(await client.integrations())
+    runGateway((client) => Effect.gen(function*() {
+      const catalog = record(yield* client.integrations())
       const integration = array(catalog["integrations"]).find((candidate) =>
         text(candidate["slug"]) === options.integration
       )
       if (integration === undefined) {
-        throw cliError(
+        return yield* cliError(
           `Unknown integration ${options.integration}. Run: i discover <url>`
         )
       }
@@ -157,7 +158,7 @@ export const connectCommand = (runGateway: GatewayTask) => Command.make(
 
       if (oauthMethod !== undefined && credentialsOffered && template === undefined) {
         const alternatives = methods.filter((method) => text(method["kind"]) !== "oauth")
-        throw cliError(
+        return yield* cliError(
           alternatives.length === 0
             ? `${options.integration} only supports OAuth, so --credential-env cannot be used. Drop it and authorize in a browser.`
             : `${options.integration} supports OAuth and ${alternatives.map((method) => text(method["template"])).join(", ")
@@ -167,7 +168,7 @@ export const connectCommand = (runGateway: GatewayTask) => Command.make(
 
       if (oauthMethod !== undefined) {
         const secretName = Option.getOrUndefined(options.clientSecretEnv)
-        const started = record(await client.startOAuth({
+        const started = record(yield* client.startOAuth({
           integration: options.integration,
           connection: options.connection,
           ...whenPresent("template", template),
@@ -187,28 +188,30 @@ export const connectCommand = (runGateway: GatewayTask) => Command.make(
         }
         const deadline = Date.now() + Math.max(1, options.timeout) * 1000
         while (Date.now() < deadline) {
-          const session = record(await client.oauth(sessionId))
+          const session = record(yield* client.oauth(sessionId))
           const current = record(session["state"])
           if (text(current["status"]) === "connected") return record(current["connection"])
           if (text(current["status"]) === "failed") {
-            throw cliError(`Connection failed: ${text(current["message"])}`)
+            return yield* cliError(`Connection failed: ${text(current["message"])}`)
           }
-          await Bun.sleep(500)
+          yield* Effect.sleep(500)
         }
-        throw cliError(`OAuth authorization timed out after ${options.timeout} seconds`)
+        return yield* cliError(
+          `OAuth authorization timed out after ${options.timeout} seconds`
+        )
       }
 
       const values = credentialValues(
         Option.getOrUndefined(options.credentialEnv),
         Option.getOrUndefined(options.credentialValues)
       )
-      return record(await client.connect({
+      return record(yield* client.connect({
         integration: options.integration,
         connection: options.connection,
         ...whenPresent("template", template),
         values
       }))
-    }).pipe(Effect.flatMap((result) => {
+    })).pipe(Effect.flatMap((result) => {
       const connection = record(result["connection"] ?? result)
       const tools = array(result["tools"])
       const storedName = text(connection["name"])

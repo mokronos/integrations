@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
-import { Effect, Option } from "effect"
+import { Effect, Layer, Option } from "effect"
+import { FetchHttpClient } from "effect/unstable/http"
 import { McpHost } from "../../../src/mcp/client.ts"
 import { verifyMcpConformance } from "../support/mcp-conformance.ts"
 import {
@@ -36,13 +37,13 @@ describe("official MCP SDK reference server", () => {
           }
         })
       }
-    }).pipe(Effect.provide(McpHost.layer)))
+    }).pipe(Effect.provide(McpHost.layer.pipe(Layer.provide(FetchHttpClient.layer)))))
   })
 
   it("is identified through a real SDK handshake", async () => {
     const probe = await Effect.runPromise(
       Effect.flatMap(McpHost, (host) => host.probe(reference.endpoint)).pipe(
-        Effect.provide(McpHost.layer)
+        Effect.provide(McpHost.layer.pipe(Layer.provide(FetchHttpClient.layer)))
       )
     )
     expect(probe.connected).toBe(true)

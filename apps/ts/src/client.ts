@@ -1,5 +1,7 @@
-import { ApprovalStatus, whenPresent, whenPresentMap } from "@mokronos/contracts"
-import { Predicate, Schema } from "effect"
+import { ApprovalStatus, whenPresent } from "@mokronos/contracts"
+import { Effect, Predicate, Schema } from "effect"
+import { HttpClient, HttpClientRequest } from "effect/unstable/http"
+import type { HttpMethod } from "effect/unstable/http"
 import {
   Connection,
   Integration,
@@ -20,7 +22,6 @@ import {
 export interface GatewayClientOptions {
   readonly url: string
   readonly apiKey: string
-  readonly fetch?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 }
 
 export class GatewayError extends Error {
@@ -32,6 +33,28 @@ export class GatewayError extends Error {
     this.name = "GatewayError"
     this.status = status
     this.body = body
+  }
+}
+
+export class GatewayTransportError extends Error {
+  readonly method: string
+  readonly path: string
+
+  constructor(method: string, path: string, detail: string) {
+    super(`${method} ${path} could not reach the gateway: ${detail}`)
+    this.name = "GatewayTransportError"
+    this.method = method
+    this.path = path
+  }
+}
+
+export class GatewayDecodeError extends Error {
+  readonly path: string
+
+  constructor(path: string, detail: string) {
+    super(`The gateway's answer to ${path} was unreadable: ${detail}`)
+    this.name = "GatewayDecodeError"
+    this.path = path
   }
 }
 
@@ -51,31 +74,42 @@ export class GatewayProtocolError extends Error {
   }
 }
 
-type Json = typeof Schema.Json.Type
-const decodeJsonText = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
-const decodeGatewayMetadataText = Schema.decodeUnknownSync(
-  Schema.fromJsonString(GatewayMetadata)
-)
+export type GatewayFailure =
+  | GatewayError
+  | GatewayTransportError
+  | GatewayDecodeError
+  | GatewayProtocolError
 
-export const readGatewayMetadata = async (
-  url: string,
-  doFetch: NonNullable<GatewayClientOptions["fetch"]> = globalThis.fetch
-): Promise<GatewayMetadata> => {
-  const response = await doFetch(`${url.replace(/\/+$/, "")}/v1/metadata`)
-  if (!response.ok) {
-    throw new GatewayProtocolError(undefined, `metadata returned HTTP ${response.status}`)
+export type GatewayEffect<A> = Effect.Effect<A, GatewayFailure>
+
+type Json = typeof Schema.Json.Type
+
+const decodeGatewayMetadata = Schema.decodeUnknownEffect(GatewayMetadata)
+
+export const readGatewayMetadata = Effect.fn("GatewayClient.readMetadata")(function*(
+  url: string
+): Effect.fn.Return<GatewayMetadata, GatewayProtocolError, HttpClient.HttpClient> {
+  const response = yield* HttpClient.get(`${url.replace(/\/+$/, "")}/v1/metadata`).pipe(
+    Effect.mapError((cause) =>
+      new GatewayProtocolError(undefined, `metadata could not be read: ${cause.message}`)
+    )
+  )
+  if (response.status < 200 || response.status >= 300) {
+    return yield* Effect.fail(
+      new GatewayProtocolError(undefined, `metadata returned HTTP ${response.status}`)
+    )
   }
-  let metadata: GatewayMetadata
-  try {
-    metadata = decodeGatewayMetadataText(await response.text())
-  } catch {
-    throw new GatewayProtocolError(undefined, "gateway metadata is malformed")
-  }
+  const metadata = yield* response.json.pipe(
+    Effect.flatMap(decodeGatewayMetadata),
+    Effect.mapError(() => new GatewayProtocolError(undefined, "gateway metadata is malformed"))
+  )
   if (metadata.protocolVersion !== gatewayProtocolVersion) {
-    throw new GatewayProtocolError(metadata.protocolVersion, `gateway ${metadata.gatewayVersion}`)
+    return yield* Effect.fail(
+      new GatewayProtocolError(metadata.protocolVersion, `gateway ${metadata.gatewayVersion}`)
+    )
   }
   return metadata
-}
+})
 
 export const InvocationOutcome = Schema.Union([
   Schema.Struct({ status: Schema.Literal("succeeded"), result: Schema.Json }),
@@ -223,184 +257,216 @@ export const ValidateInput = Schema.Struct({
 })
 export type ValidateInput = typeof ValidateInput.Type
 
-const decodeOutcome = Schema.decodeUnknownSync(InvocationOutcome)
-const decodeApproval = Schema.decodeUnknownSync(ApprovalRecord)
-const decodeSearch = Schema.decodeUnknownSync(IntegrationSearchResponse)
-const decodeDiscovery = Schema.decodeUnknownSync(IntegrationDiscovery)
-const decodeIntegrations = Schema.decodeUnknownSync(GatewayIntegrationsResponse)
-const decodeIntegrationTools = Schema.decodeUnknownSync(IntegrationToolsResponse)
-const decodeIntegrationTool = Schema.decodeUnknownSync(Tool)
-const decodeConnectionCreated = Schema.decodeUnknownSync(ConnectionCreated)
-const decodeOAuthSession = Schema.decodeUnknownSync(OAuthSession)
-const decodeConnections = Schema.decodeUnknownSync(ConnectionsResponse)
-const decodeDisconnectedConnection = Schema.decodeUnknownSync(DisconnectedConnection)
-const decodeValidation = Schema.decodeUnknownSync(IntegrationValidationReport)
-const decodeIntegration = Schema.decodeUnknownSync(Integration)
-const decodeEffectiveTools = Schema.decodeUnknownSync(EffectiveToolsResponse)
+const decodeOutcome = Schema.decodeUnknownEffect(InvocationOutcome)
+const decodeApproval = Schema.decodeUnknownEffect(ApprovalRecord)
+const decodeSearch = Schema.decodeUnknownEffect(IntegrationSearchResponse)
+const decodeDiscovery = Schema.decodeUnknownEffect(IntegrationDiscovery)
+const decodeIntegrations = Schema.decodeUnknownEffect(GatewayIntegrationsResponse)
+const decodeIntegrationTools = Schema.decodeUnknownEffect(IntegrationToolsResponse)
+const decodeIntegrationTool = Schema.decodeUnknownEffect(Tool)
+const decodeConnectionCreated = Schema.decodeUnknownEffect(ConnectionCreated)
+const decodeOAuthSession = Schema.decodeUnknownEffect(OAuthSession)
+const decodeConnections = Schema.decodeUnknownEffect(ConnectionsResponse)
+const decodeDisconnectedConnection = Schema.decodeUnknownEffect(DisconnectedConnection)
+const decodeValidation = Schema.decodeUnknownEffect(IntegrationValidationReport)
+const decodeIntegration = Schema.decodeUnknownEffect(Integration)
+const decodeEffectiveTools = Schema.decodeUnknownEffect(EffectiveToolsResponse)
 const isOutcome = Schema.is(InvocationOutcome)
 
 export interface GatewayClient {
   readonly url: string
 
-  metadata(): Promise<GatewayMetadata>
+  metadata(): GatewayEffect<GatewayMetadata>
 
-  search(input: RegistrySearchInput): Promise<IntegrationSearchResponse>
-  discover(input: DiscoverIntegrationInput): Promise<IntegrationDiscovery>
-  renameIntegration(input: { readonly integration: string; readonly name: string }): Promise<Integration>
-  integrations(): Promise<GatewayIntegrationsResponse>
-  integrationTools(integration: string): Promise<IntegrationToolsResponse>
-  integrationTool(input: IntegrationToolInput): Promise<Tool>
-  effectiveTools(): Promise<EffectiveToolsResponse>
-  connect(input: CreateConnectionInput): Promise<ConnectionCreated>
-  startOAuth(input: StartOAuthInput): Promise<OAuthSession>
-  oauth(id: string): Promise<OAuthSession>
-  connections(): Promise<ConnectionsResponse>
-  disconnect(input: DisconnectInput): Promise<DisconnectedConnection>
-  validate(input: ValidateInput): Promise<IntegrationValidationReport>
+  search(input: RegistrySearchInput): GatewayEffect<IntegrationSearchResponse>
+  discover(input: DiscoverIntegrationInput): GatewayEffect<IntegrationDiscovery>
+  renameIntegration(
+    input: { readonly integration: string; readonly name: string }
+  ): GatewayEffect<Integration>
+  integrations(): GatewayEffect<GatewayIntegrationsResponse>
+  integrationTools(integration: string): GatewayEffect<IntegrationToolsResponse>
+  integrationTool(input: IntegrationToolInput): GatewayEffect<Tool>
+  effectiveTools(): GatewayEffect<EffectiveToolsResponse>
+  connect(input: CreateConnectionInput): GatewayEffect<ConnectionCreated>
+  startOAuth(input: StartOAuthInput): GatewayEffect<OAuthSession>
+  oauth(id: string): GatewayEffect<OAuthSession>
+  connections(): GatewayEffect<ConnectionsResponse>
+  disconnect(input: DisconnectInput): GatewayEffect<DisconnectedConnection>
+  validate(input: ValidateInput): GatewayEffect<IntegrationValidationReport>
 
   execute(input: {
     readonly alias: string
     readonly tool: string
     readonly arguments?: Json
-  }): Promise<InvocationOutcome>
-  approval(id: string): Promise<ApprovalRecord>
-  health(): Promise<boolean>
+  }): GatewayEffect<InvocationOutcome>
+  approval(id: string): GatewayEffect<ApprovalRecord>
+  health(): Effect.Effect<boolean>
 }
 
-export const createGatewayClient = (options: GatewayClientOptions): GatewayClient => {
-  const doFetch = options.fetch ?? globalThis.fetch
-  const base = options.url.replace(/\/+$/, "")
-  let metadataRequest: Promise<GatewayMetadata> | undefined
-  const metadata = (): Promise<GatewayMetadata> => {
-    metadataRequest ??= readGatewayMetadata(base, doFetch)
-    return metadataRequest
-  }
+interface RawResponse {
+  readonly ok: boolean
+  readonly status: number
+  readonly parsed: Json
+}
 
-  const send = async (
-    method: string,
+const failure = (method: string, path: string, status: number, parsed: Json): GatewayError => {
+  const message = Predicate.isObjectOrArray(parsed)
+    ? "error" in parsed
+      ? String(parsed["error"])
+      : "reason" in parsed
+      ? String(parsed["reason"])
+      : `${method} ${path} failed with ${status}`
+    : `${method} ${path} failed with ${status}`
+  return new GatewayError(status, parsed, message)
+}
+
+export const makeGatewayClient = Effect.fn("GatewayClient.make")(function*(
+  options: GatewayClientOptions
+): Effect.fn.Return<GatewayClient, never, HttpClient.HttpClient> {
+  const http = yield* HttpClient.HttpClient
+  const base = options.url.replace(/\/+$/, "")
+  const metadata = yield* Effect.cached(
+    readGatewayMetadata(base).pipe(Effect.provideService(HttpClient.HttpClient, http))
+  )
+
+  const send = Effect.fn("GatewayClient.send")(function*(
+    method: HttpMethod.HttpMethod,
     path: string,
     body?: Json
-  ): Promise<{ readonly ok: boolean; readonly status: number; readonly parsed: Json }> => {
-    await metadata()
-    const response = await doFetch(`${base}${path}`, {
-      method,
-      headers: {
-        authorization: `Bearer ${options.apiKey}`,
-        ...whenPresentMap("content-type", body, () => "application/json")
-      },
-      ...whenPresent("body", JSON.stringify(body))
+  ): Effect.fn.Return<RawResponse, GatewayFailure> {
+    yield* metadata
+    const request = HttpClientRequest.make(method)(`${base}${path}`, {
+      headers: { authorization: `Bearer ${options.apiKey}` }
     })
-    const text = await response.text()
+    const response = yield* http.execute(
+      body === undefined ? request : HttpClientRequest.bodyJsonUnsafe(request, body)
+    ).pipe(
+      Effect.mapError((cause) => new GatewayTransportError(method, path, cause.message))
+    )
+    const parsed = yield* response.json.pipe(
+      Effect.mapError((cause) => new GatewayDecodeError(path, cause.message))
+    )
     return {
-      ok: response.ok,
+      ok: response.status >= 200 && response.status < 300,
       status: response.status,
-      parsed: text.trim().length === 0 ? {} : decodeJsonText(text)
+      parsed
     }
-  }
+  })
 
-  const failure = (method: string, path: string, status: number, parsed: Json): GatewayError => {
-    const message = Predicate.isObjectOrArray(parsed)
-      ? "error" in parsed
-        ? String(parsed["error"])
-        : "reason" in parsed
-        ? String(parsed["reason"])
-        : `${method} ${path} failed with ${status}`
-      : `${method} ${path} failed with ${status}`
-    return new GatewayError(status, parsed, message)
-  }
-
-  const request = async (method: string, path: string, body?: Json): Promise<Json> => {
-    const response = await send(method, path, body)
-    if (!response.ok) throw failure(method, path, response.status, response.parsed)
+  const request = Effect.fn("GatewayClient.request")(function*(
+    method: HttpMethod.HttpMethod,
+    path: string,
+    body?: Json
+  ): Effect.fn.Return<Json, GatewayFailure> {
+    const response = yield* send(method, path, body)
+    if (!response.ok) {
+      return yield* Effect.fail(failure(method, path, response.status, response.parsed))
+    }
     return response.parsed
-  }
+  })
+
+  const decoded = <A>(
+    path: string,
+    payload: Effect.Effect<Json, GatewayFailure>,
+    decode: (value: Json) => Effect.Effect<A, Schema.SchemaError>
+  ): GatewayEffect<A> =>
+    Effect.flatMap(payload, (value) =>
+      decode(value).pipe(
+        Effect.mapError((cause) => new GatewayDecodeError(path, cause.message))
+      ))
 
   return {
     url: base,
-    metadata,
-    search: async (input) => {
+    metadata: () => metadata,
+    search: (input) => {
       const parameters = new URLSearchParams({
         q: input.query,
         limit: String(input.limit ?? 5)
       })
       if (input.kind !== undefined) parameters.set("kind", input.kind)
-      return decodeSearch(await request("GET", `/v1/registry/search?${parameters.toString()}`))
+      const path = `/v1/registry/search?${parameters.toString()}`
+      return decoded(path, request("GET", path), decodeSearch)
     },
-    discover: async (input) => decodeDiscovery(await request("POST", "/v1/integrations/discover", {
-      url: input.url,
-      ...whenPresent("connection", input.connection),
-      ...whenPresent("slug", input.slug),
-      ...whenPresent("name", input.name)
-    })),
-    renameIntegration: async (input) =>
-      decodeIntegration(await request(
-        "POST",
-        `/v1/integrations/${encodeURIComponent(input.integration)}/name`,
-        { name: input.name }
-      )),
-    integrations: async () => decodeIntegrations(await request("GET", "/v1/integrations")),
-    effectiveTools: async () => decodeEffectiveTools(await request("GET", "/v1/tools")),
-    integrationTools: async (integration) =>
-      decodeIntegrationTools(
-        await request("GET", `/v1/integrations/${encodeURIComponent(integration)}/tools`)
-      ),
-    integrationTool: async (input) => {
+    discover: (input) =>
+      decoded("/v1/integrations/discover", request("POST", "/v1/integrations/discover", {
+        url: input.url,
+        ...whenPresent("connection", input.connection),
+        ...whenPresent("slug", input.slug),
+        ...whenPresent("name", input.name)
+      }), decodeDiscovery),
+    renameIntegration: (input) => {
+      const path = `/v1/integrations/${encodeURIComponent(input.integration)}/name`
+      return decoded(path, request("POST", path, { name: input.name }), decodeIntegration)
+    },
+    integrations: () =>
+      decoded("/v1/integrations", request("GET", "/v1/integrations"), decodeIntegrations),
+    effectiveTools: () =>
+      decoded("/v1/tools", request("GET", "/v1/tools"), decodeEffectiveTools),
+    integrationTools: (integration) => {
+      const path = `/v1/integrations/${encodeURIComponent(integration)}/tools`
+      return decoded(path, request("GET", path), decodeIntegrationTools)
+    },
+    integrationTool: (input) => {
       const parameters = input.connection === undefined
         ? ""
         : `?connection=${encodeURIComponent(input.connection)}`
-      return decodeIntegrationTool(await request(
-        "GET",
+      const path =
         `/v1/integrations/${encodeURIComponent(input.integration)}/tools/${encodeURIComponent(input.tool)}${parameters}`
-      ))
+      return decoded(path, request("GET", path), decodeIntegrationTool)
     },
-    connect: async (input) => decodeConnectionCreated(await request("POST", "/v1/connections", {
-      integration: input.integration,
-      ...whenPresent("connection", input.connection),
-      ...whenPresent("template", input.template),
-      ...whenPresent("values", input.values)
-    })),
-    startOAuth: async (input) => decodeOAuthSession(await request("POST", "/v1/connections/oauth", {
-      integration: input.integration,
-      ...whenPresent("connection", input.connection),
-      ...whenPresent("template", input.template),
-      ...whenPresent("clientId", input.clientId),
-      ...whenPresent("clientSecret", input.clientSecret),
-      ...whenPresent("timeoutSeconds", input.timeoutSeconds)
-    })),
-    oauth: async (id) =>
-      decodeOAuthSession(await request("GET", `/v1/connections/oauth/${encodeURIComponent(id)}`)),
-    connections: async () => decodeConnections(await request("GET", "/v1/connections")),
-    disconnect: async (input) =>
-      decodeDisconnectedConnection(await request(
-        "DELETE",
+    connect: (input) =>
+      decoded("/v1/connections", request("POST", "/v1/connections", {
+        integration: input.integration,
+        ...whenPresent("connection", input.connection),
+        ...whenPresent("template", input.template),
+        ...whenPresent("values", input.values)
+      }), decodeConnectionCreated),
+    startOAuth: (input) =>
+      decoded("/v1/connections/oauth", request("POST", "/v1/connections/oauth", {
+        integration: input.integration,
+        ...whenPresent("connection", input.connection),
+        ...whenPresent("template", input.template),
+        ...whenPresent("clientId", input.clientId),
+        ...whenPresent("clientSecret", input.clientSecret),
+        ...whenPresent("timeoutSeconds", input.timeoutSeconds)
+      }), decodeOAuthSession),
+    oauth: (id) => {
+      const path = `/v1/connections/oauth/${encodeURIComponent(id)}`
+      return decoded(path, request("GET", path), decodeOAuthSession)
+    },
+    connections: () =>
+      decoded("/v1/connections", request("GET", "/v1/connections"), decodeConnections),
+    disconnect: (input) => {
+      const path =
         `/v1/connections/${encodeURIComponent(input.integration)}/${encodeURIComponent(input.connection)}`
-      )),
-    validate: async (input) => decodeValidation(await request("POST", "/v1/validate", {
-      node: input.node,
-      ...whenPresent("live", input.live)
-    })),
-    execute: async (input) => {
-      const response = await send("POST", "/v1/execute", {
-        alias: input.alias,
-        tool: input.tool,
-        arguments: input.arguments ?? {}
-      })
-      if (!response.ok && !isOutcome(response.parsed)) {
-        throw failure("POST", "/v1/execute", response.status, response.parsed)
-      }
-      return decodeOutcome(response.parsed)
+      return decoded(path, request("DELETE", path), decodeDisconnectedConnection)
     },
-    approval: async (id) => decodeApproval(await request("GET", `/v1/approvals/${id}`)),
-    health: async () => {
-      try {
-        await metadata()
-        return true
-      } catch {
-        return false
-      }
-    }
+    validate: (input) =>
+      decoded("/v1/validate", request("POST", "/v1/validate", {
+        node: input.node,
+        ...whenPresent("live", input.live)
+      }), decodeValidation),
+    execute: (input) =>
+      decoded(
+        "/v1/execute",
+        send("POST", "/v1/execute", {
+          alias: input.alias,
+          tool: input.tool,
+          arguments: input.arguments ?? {}
+        }).pipe(Effect.flatMap((response) =>
+          !response.ok && !isOutcome(response.parsed)
+            ? Effect.fail(failure("POST", "/v1/execute", response.status, response.parsed))
+            : Effect.succeed(response.parsed)
+        )),
+        decodeOutcome
+      ),
+    approval: (id) => {
+      const path = `/v1/approvals/${id}`
+      return decoded(path, request("GET", path), decodeApproval)
+    },
+    health: () => Effect.match(metadata, { onFailure: () => false, onSuccess: () => true })
   }
-}
+})
 
 
 export {

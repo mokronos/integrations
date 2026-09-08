@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test"
-import { Effect, Option, Schema } from "effect"
+import { Effect, Layer, Option, Schema } from "effect"
+import { FetchHttpClient } from "effect/unstable/http"
 import { McpHost } from "../src/mcp/client.ts"
 
 const servers: Array<ReturnType<typeof Bun.serve>> = []
@@ -92,7 +93,7 @@ const probe = (endpoint: string) =>
     Effect.gen(function* () {
       const mcp = yield* McpHost
       return yield* mcp.probe(endpoint)
-    }).pipe(Effect.provide(McpHost.layer))
+    }).pipe(Effect.provide(McpHost.layer.pipe(Layer.provide(FetchHttpClient.layer))))
   )
 
 describe("probing an MCP endpoint", () => {

@@ -1,4 +1,5 @@
 import { Effect, Schema } from "effect"
+import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import {
   IntegrationSearchQuery,
   IntegrationSearchResponse,
@@ -74,20 +75,16 @@ const toSearchSurface = (surface: RegistrySurface): IntegrationSearchSurface => 
   ...whenPresent("command", surface.command)
 })
 
-const fetchText = (url: URL) =>
-  Effect.tryPromise({
-    try: async () => {
-      const response = await fetch(url)
-      if (!response.ok) {
-        throw new Error(`${response.status} ${response.statusText}`)
-      }
-      return await response.text()
-    },
-    catch: (cause) => new InvocationError({
+const fetchText = Effect.fn("registry.fetchText")((url: URL) =>
+  HttpClient.get(url).pipe(
+    Effect.flatMap(HttpClientResponse.filterStatusOk),
+    Effect.flatMap((response) => response.text),
+    Effect.mapError((cause) => new InvocationError({
       code: "registry_error",
       detail: describeCause(cause)
-    })
-  })
+    }))
+  )
+)
 
 const surfacesFor = (registryUrl: string, domain: string) =>
   fetchText(new URL(`/api/${encodeURIComponent(domain)}/surface`, registryUrl)).pipe(

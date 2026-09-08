@@ -1,5 +1,6 @@
 import { Clock, Effect } from "effect"
 import { HttpServerResponse } from "effect/unstable/http"
+import type { HttpClient } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
   LoginHandoffHash,
@@ -481,12 +482,10 @@ const completeGoogleSignIn = (
     subjectId: SubjectId,
     tenantId: TenantId
   ) => Effect.Effect<{ readonly token: string }>
-): Effect.Effect<GoogleCallbackOutcome> =>
+): Effect.Effect<GoogleCallbackOutcome, never, HttpClient.HttpClient> =>
   Effect.gen(function*() {
     const store = dependencies.store
-    const identity = yield* Effect.result(
-      Effect.tryPromise(() => resolveGoogleIdentity(google, code))
-    )
+    const identity = yield* Effect.result(resolveGoogleIdentity(google, code))
     if (identity._tag === "Failure") {
       return {
         _tag: "page",

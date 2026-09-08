@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test"
-import { Effect, Option } from "effect"
+import { Effect, Layer, Option } from "effect"
+import { FetchHttpClient } from "effect/unstable/http"
 import { isJsonObject } from "@mokronos/contracts"
 import { McpHost } from "../../../src/mcp/client.ts"
 import { verifyMcpConformance } from "../support/mcp-conformance.ts"
@@ -24,7 +25,7 @@ remoteDescribe("remote MCP conformance", () => {
         expect(isJsonObject(result)).toBe(true)
         expect(Array.isArray(isJsonObject(result) ? result["content"] : undefined)).toBe(true)
       }
-    }).pipe(Effect.provide(McpHost.layer)))
+    }).pipe(Effect.provide(McpHost.layer.pipe(Layer.provide(FetchHttpClient.layer)))))
   })
 
   const ownedEndpoint = process.env["INTEGRATIONS_TEST_MCP_URL"]?.trim() || undefined
@@ -39,6 +40,6 @@ remoteDescribe("remote MCP conformance", () => {
       assertResult: (result) => {
         expect(isJsonObject(result)).toBe(true)
       }
-    }).pipe(Effect.provide(McpHost.layer)))
+    }).pipe(Effect.provide(McpHost.layer.pipe(Layer.provide(FetchHttpClient.layer)))))
   })
 })

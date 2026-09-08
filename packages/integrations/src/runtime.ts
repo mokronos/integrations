@@ -1,4 +1,5 @@
 import { Context, Effect, Layer, ManagedRuntime } from "effect"
+import { HttpClient } from "effect/unstable/http"
 import path from "node:path"
 import { CatalogStore } from "./catalog/store.ts"
 import { CredentialStore } from "./storage/credentials.ts"
@@ -9,17 +10,22 @@ import { McpHost } from "./mcp/client.ts"
 import { OAuthFlows } from "./oauth/flows.ts"
 import { OpenApiInvoker } from "./openapi/invoke.ts"
 import { SpecCache } from "./openapi/cache.ts"
-import { HttpTransport } from "./http-transport.ts"
 
-const clientsLayer: Layer.Layer<McpHost | OpenApiInvoker> = Layer.mergeAll(
-  McpHost.layer,
-  OpenApiInvoker.layer.pipe(Layer.provide(HttpTransport.layer))
+export const unavailableHttpClientLayer: Layer.Layer<HttpClient.HttpClient> = Layer.succeed(
+  HttpClient.HttpClient,
+  HttpClient.make(() => Effect.die("Unexpected HTTP request"))
 )
+
+const clientsLayer: Layer.Layer<
+  McpHost | OpenApiInvoker,
+  never,
+  HttpClient.HttpClient
+> = Layer.mergeAll(McpHost.layer, OpenApiInvoker.layer)
 
 const capabilitiesLayer: Layer.Layer<
   IntegrationHost | OAuthFlows | SpecCache | CatalogStore,
   never,
-  Database | CredentialStore | HttpTransport | McpHost | OpenApiInvoker
+  Database | CredentialStore | HttpClient.HttpClient | McpHost | OpenApiInvoker
 > = IntegrationHost.layer.pipe(
   Layer.provideMerge(Layer.mergeAll(SpecCache.layer, OAuthFlows.layer)),
   Layer.provideMerge(CatalogStore.layer)
@@ -27,7 +33,8 @@ const capabilitiesLayer: Layer.Layer<
 
 type HostLayer = Layer.Layer<
   IntegrationHost | OAuthFlows | SpecCache | CatalogStore | McpHost | OpenApiInvoker,
-  StorageError
+  StorageError,
+  HttpClient.HttpClient
 >
 
 export interface HostStorageOptions {
@@ -36,7 +43,7 @@ export interface HostStorageOptions {
 
 export const localLayer = (options: HostStorageOptions): HostLayer =>
   capabilitiesLayer.pipe(
-    Layer.provideMerge(Layer.mergeAll(clientsLayer, HttpTransport.layer)),
+    Layer.provideMerge(clientsLayer),
     Layer.provide(Layer.mergeAll(
       libsqlLayer({ directory: options.directory }),
       CredentialStore.fileLayer(options.directory)
@@ -47,10 +54,11 @@ export const hostLayer = <E>(
   storage: Layer.Layer<Database | CredentialStore, E>
 ): Layer.Layer<
   IntegrationHost | OAuthFlows | SpecCache | CatalogStore | McpHost | OpenApiInvoker,
-  E
+  E,
+  HttpClient.HttpClient
 > =>
   capabilitiesLayer.pipe(
-    Layer.provideMerge(Layer.mergeAll(clientsLayer, HttpTransport.layer)),
+    Layer.provideMerge(clientsLayer),
     Layer.provide(storage)
   )
 
@@ -68,7 +76,7 @@ export const stubbedLayer = (
   StorageError
 > =>
   capabilitiesLayer.pipe(
-    Layer.provideMerge(Layer.mergeAll(clients, HttpTransport.unavailableTestLayer)),
+    Layer.provideMerge(Layer.mergeAll(clients, unavailableHttpClientLayer)),
     Layer.provideMerge(Layer.mergeAll(memoryLayer, CredentialStore.memoryLayer))
   )
 
@@ -86,12 +94,13 @@ export interface HostStorage {
 
 export const createHostRuntime = (
   directory: string,
+  httpClient: Layer.Layer<HttpClient.HttpClient>,
   storage: HostStorage = {}
 ): ManagedRuntime.ManagedRuntime<HostServices, StorageError> =>
   ManagedRuntime.make(
-    storage.storage === undefined
+    (storage.storage === undefined
       ? localLayer({ directory: path.resolve(directory) })
-      : hostLayer(storage.storage)
+      : hostLayer(storage.storage)).pipe(Layer.provide(httpClient))
   )
 
 export const hostServicesOf = (

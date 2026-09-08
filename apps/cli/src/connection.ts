@@ -1,5 +1,6 @@
-import { Data, Predicate } from "effect"
-import { createGatewayClient, GatewayError, resolveClientConnection } from "@mokronos/integrations-client"
+import { Data, Effect, Predicate } from "effect"
+import type { HttpClient } from "effect/unstable/http"
+import { GatewayError, makeGatewayClient, resolveClientConnection } from "@mokronos/integrations-client"
 import type { GatewayClient } from "@mokronos/integrations-client"
 
 export class IntegrationsCliError extends Data.TaggedError("IntegrationsCliError")<{
@@ -26,15 +27,19 @@ export const describeError = (error: unknown): string => {
   return error instanceof Error ? error.message : String(error)
 }
 
-export const connectToGateway = async (): Promise<GatewayClient> => {
-  const connection = await resolveClientConnection()
+export const connectToGateway = Effect.fn("cli.connectToGateway")(function*(): Effect.fn.Return<
+  GatewayClient,
+  IntegrationsCliError,
+  HttpClient.HttpClient
+> {
+  const connection = yield* Effect.promise(() => resolveClientConnection())
   if (connection === undefined) {
-    throw cliError(
+    return yield* cliError(
       "No integrations service found. Set INTEGRATIONS_URL and INTEGRATIONS_API_KEY."
     )
   }
-  return createGatewayClient(connection)
-}
+  return yield* makeGatewayClient(connection)
+})
 
 export const openBrowser = (url: string): void => {
   const command = process.platform === "darwin"

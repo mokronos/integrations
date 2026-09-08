@@ -1,5 +1,6 @@
 import { whenPresent } from "@mokronos/contracts"
 import { Effect, Schema } from "effect"
+import type { HttpClient } from "effect/unstable/http"
 import type { IntegrationHost } from "@mokronos/integrations"
 import { ToolAddress } from "@mokronos/contracts"
 import { authorizeInvocation } from "./authorize.ts"
@@ -50,7 +51,7 @@ export interface InvokeDependencies {
     readonly approvalId: ApprovalId
     readonly expiresAt: Date
     readonly approvalUrl?: string
-  }) => Effect.Effect<void>
+  }) => Effect.Effect<void, never, HttpClient.HttpClient>
 }
 
 const auditFor = (
@@ -85,7 +86,7 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function*(
   },
   authorization: Extract<Authorization, { status: "authorized" }>,
   argumentsValue: Json
-): Effect.fn.Return<InvocationOutcome, GatewayStoreError> {
+): Effect.fn.Return<InvocationOutcome, GatewayStoreError, HttpClient.HttpClient> {
   const { store, retentionDays } = dependencies
   const pending = (approvalId: ApprovalId, expiresAt: Date): InvocationOutcome => {
     const approvalUrl = authorization.client.approvalDelivery.returnLink
@@ -177,7 +178,7 @@ export const invokeThroughGateway = Effect.fn("Invocation.invokeThroughGateway")
     readonly tool: ToolName
     readonly arguments: Json
   }
-): Effect.fn.Return<InvocationOutcome, GatewayStoreError> {
+): Effect.fn.Return<InvocationOutcome, GatewayStoreError, HttpClient.HttpClient> {
   const { store, host } = dependencies
   const retentionDays = dependencies.argumentRetentionDays ?? defaultArgumentRetentionDays
   const expiryHours = dependencies.approvalExpiryHours ?? defaultApprovalExpiryHours

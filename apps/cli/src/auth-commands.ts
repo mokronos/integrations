@@ -1,8 +1,10 @@
 import { Effect, Option, Redacted, Schema } from "effect"
+import type { HttpClient } from "effect/unstable/http"
 import { Argument, Command, Flag, Prompt } from "effect/unstable/cli"
 import { whenPresent } from "@mokronos/contracts"
-import { cliError, describeError } from "./connection.ts"
+import { cliError, describeError, IntegrationsCliError } from "./connection.ts"
 import { jsonOutput, writeStdoutLine } from "./output.ts"
+import type { ControlPlaneClient } from "./session.ts"
 import {
   connectToControlPlane,
   loginOperator,
@@ -27,16 +29,16 @@ const password = (
     onSome: (value) => Effect.succeed(Redacted.value(value))
   })
 
-const authTask = <A>(task: () => Promise<A>): Effect.Effect<A, ReturnType<typeof cliError>> =>
-  Effect.tryPromise({
-    try: task,
-    catch: (cause) => cliError(describeError(cause))
-  })
+const authTask = <A, E, R>(
+  task: Effect.Effect<A, E, R>
+): Effect.Effect<A, IntegrationsCliError, R> =>
+  Effect.mapError(task, (cause) => cliError(describeError(cause)))
 
 const controlPlaneTask = (
-  task: (client: Awaited<ReturnType<typeof connectToControlPlane>>) =>
-    Promise<typeof Schema.Json.Type>
-) => authTask(async () => await task(await connectToControlPlane()))
+  task: (client: ControlPlaneClient) =>
+    Effect.Effect<typeof Schema.Json.Type, IntegrationsCliError, HttpClient.HttpClient>
+): Effect.Effect<typeof Schema.Json.Type, IntegrationsCliError, HttpClient.HttpClient> =>
+  authTask(Effect.flatMap(connectToControlPlane(), task))
 
 export const loginCommand = Command.make(
   "login",
@@ -57,7 +59,7 @@ export const loginCommand = Command.make(
       const explicitEmail = Option.getOrUndefined(email)
       const context = yield* Effect.context()
       const session = explicitEmail === undefined
-        ? yield* authTask(() => loginOperatorInBrowser({
+        ? yield* authTask(loginOperatorInBrowser({
           noOpen,
           timeoutSeconds: timeout,
           onAuthorization: (url) => Effect.runPromiseWith(context)(writeStdoutLine(
@@ -66,7 +68,7 @@ export const loginCommand = Command.make(
         }))
         : yield* Effect.gen(function*() {
           const secret = yield* password(provided)
-          return yield* authTask(() => loginOperator({ email: explicitEmail, password: secret }))
+          return yield* authTask(loginOperator({ email: explicitEmail, password: secret }))
         })
       yield* writeStdoutLine(jsonOutput({ authenticated: true, email: session.email }, false))
     })
@@ -90,7 +92,7 @@ export const signupCommand = Command.make(
   ({ email, password: provided, tenant }) =>
     Effect.gen(function*() {
       const secret = yield* password(provided, "Choose a password")
-      const session = yield* authTask(() => signupOperator({
+      const session = yield* authTask(signupOperator({
         email,
         password: secret,
         ...whenPresent("tenantName", Option.getOrUndefined(tenant))
@@ -102,7 +104,7 @@ export const signupCommand = Command.make(
 export const logoutCommand = Command.make(
   "logout",
   {},
-  () => authTask(logoutOperator).pipe(
+  () => authTask(logoutOperator()).pipe(
     Effect.flatMap(() => writeStdoutLine(jsonOutput({ authenticated: false }, false)))
   )
 ).pipe(Command.withDescription("Revoke and forget the saved human session"))
@@ -110,12 +112,12 @@ export const logoutCommand = Command.make(
 export const whoamiCommand = Command.make(
   "whoami",
   {},
-  () => authTask(async () => {
-    const saved = await readOperatorSession()
+  () => authTask(Effect.gen(function*() {
+    const saved = yield* readOperatorSession()
     if (saved === undefined) return { authenticated: false }
-    const client = await connectToControlPlane()
-    return Schema.decodeUnknownSync(Schema.Json)(await client.request("GET", "/v1/auth/me"))
-  }).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(result, false))))
+    const client = yield* connectToControlPlane()
+    return yield* client.request("GET", "/v1/auth/me")
+  })).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(result, false))))
 ).pipe(Command.withDescription("Show the human identity saved for ii"))
 
 const changeEmailCommand = Command.make(
@@ -184,9 +186,7 @@ const deleteAccountCommand = Command.make(
       const result = yield* controlPlaneTask((client) =>
         client.request("POST", "/v1/auth/account/delete", { password: secret })
       )
-      yield* authTask(async () => {
-        await logoutOperator()
-      })
+      yield* authTask(logoutOperator())
       yield* writeStdoutLine(jsonOutput(result, false))
     })
   }

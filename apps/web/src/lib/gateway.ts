@@ -1,4 +1,10 @@
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
+import {
+  FetchHttpClient,
+  HttpBody,
+  HttpClient,
+  HttpClientRequest
+} from "effect/unstable/http"
 import { type JsonEncodable, whenPresent, whenPresentFields } from "@mokronos/contracts"
 import { Predicate } from "effect"
 import {
@@ -74,59 +80,61 @@ const messageFrom = (payload: Schema.Json, fallback: string): string => {
   return fallback
 }
 
-const decodeJsonText = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
+const decodeJsonText = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))
 
-const request = async (
+const call = Effect.fn("dashboard.request")(function*(
   method: RequestMethod,
   path: string,
   body?: JsonEncodable
-): Promise<Schema.Json> => {
-  let response: Response
-  try {
-    response = await fetch(path, {
-      method,
-      credentials: "same-origin",
-      ...whenPresentFields(body, (present) => ({
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(present)
-      }))
-    })
-  } catch (cause) {
-    throw new GatewayError({
-      method,
-      path,
-      message: cause instanceof Error
-        ? `The dashboard could not reach the gateway: ${cause.message}`
-        : "The dashboard could not reach the gateway."
-    })
-  }
-  const text = await response.text()
-  const requestId = response.headers.get("x-request-id") ?? undefined
-  let payload: Schema.Json
-  try {
-    payload = text.trim().length === 0 ? {} : decodeJsonText(text)
-  } catch (cause) {
-    throw new GatewayError({
-      method,
-      path,
-      status: response.status,
-      ...whenPresent("requestId", requestId),
-      message: cause instanceof Error
-        ? `The gateway returned an invalid JSON response: ${cause.message}`
-        : "The gateway returned an invalid JSON response."
-    })
-  }
-  if (!response.ok) {
-    throw new GatewayError({
+): Effect.fn.Return<Schema.Json, GatewayError, HttpClient.HttpClient> {
+  const prepared = HttpClientRequest.make(method)(path, {
+    ...whenPresentFields(body, (present) => ({
+      body: HttpBody.jsonUnsafe(present)
+    }))
+  })
+  const response = yield* HttpClient.execute(prepared).pipe(
+    Effect.provideService(FetchHttpClient.RequestInit, { credentials: "same-origin" }),
+    Effect.mapError((cause) =>
+      new GatewayError({
+        method,
+        path,
+        message: `The dashboard could not reach the gateway: ${cause.message}`
+      })
+    )
+  )
+  const requestId = response.headers["x-request-id"]
+  const payload = yield* response.text.pipe(
+    Effect.flatMap((text) =>
+      text.trim().length === 0 ? Effect.succeed<Schema.Json>({}) : decodeJsonText(text)
+    ),
+    Effect.mapError((cause) =>
+      new GatewayError({
+        method,
+        path,
+        status: response.status,
+        ...whenPresent("requestId", requestId),
+        message: `The gateway returned an invalid JSON response: ${cause.message}`
+      })
+    )
+  )
+  if (response.status < 200 || response.status >= 300) {
+    return yield* Effect.fail(new GatewayError({
       method,
       path,
       status: response.status,
       ...whenPresent("requestId", requestId),
       message: messageFrom(payload, `${method} ${path} failed with ${response.status}`)
-    })
+    }))
   }
   return payload
-}
+})
+
+const request = (
+  method: RequestMethod,
+  path: string,
+  body?: JsonEncodable
+): Promise<Schema.Json> =>
+  Effect.runPromise(call(method, path, body).pipe(Effect.provide(FetchHttpClient.layer)))
 
 const query = (parameters: Readonly<Record<string, string | number | undefined>>): string => {
   const search = new URLSearchParams()

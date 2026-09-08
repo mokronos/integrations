@@ -1,5 +1,6 @@
 import { whenPresent } from "@mokronos/contracts"
 import type { GatewayClient } from "@mokronos/integrations-client"
+import type { HttpClient } from "effect/unstable/http"
 import { Effect, Option, Predicate, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import type { IntegrationsCliError } from "../connection.ts"
@@ -42,21 +43,21 @@ const window = (
   offset: Option.getOrUndefined(offset)
 })
 
-const gatewayTask = <A>(
-  task: (client: GatewayClient) => Promise<A>
-): Effect.Effect<A, IntegrationsCliError> =>
-  Effect.tryPromise({
-    try: async () => await task(await connectToGateway()),
-    catch: (error) => cliError(describeError(error))
-  })
+const gatewayTask = <A, E>(
+  task: (client: GatewayClient) => Effect.Effect<A, E>
+): Effect.Effect<A, IntegrationsCliError, HttpClient.HttpClient> =>
+  connectToGateway().pipe(
+    Effect.flatMap(task),
+    Effect.mapError((error) => cliError(describeError(error)))
+  )
 
-const controlPlaneTask = <A>(
-  task: (client: ControlPlaneClient) => Promise<A>
-): Effect.Effect<A, IntegrationsCliError> =>
-  Effect.tryPromise({
-    try: async () => await task(await connectToControlPlane()),
-    catch: (error) => cliError(describeError(error))
-  })
+const controlPlaneTask = <A, E>(
+  task: (client: ControlPlaneClient) => Effect.Effect<A, E, HttpClient.HttpClient>
+): Effect.Effect<A, IntegrationsCliError, HttpClient.HttpClient> =>
+  connectToControlPlane().pipe(
+    Effect.flatMap(task),
+    Effect.mapError((error) => cliError(describeError(error)))
+  )
 
 const JsonObject = Schema.Record(Schema.String, Schema.Json)
 const JsonArray = Schema.Array(Schema.Json)
