@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
-import { Effect, Schema } from "effect"
+import { Duration, Effect, Random, Schema } from "effect"
 import { FetchHttpClient, HttpBody, HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { whenPresent } from "@mokronos/contracts"
 import type { GatewayStore } from "./store-contract.ts"
@@ -26,6 +26,25 @@ export const verifyApprovalWebhookSignature = (input: {
 class ApprovalWebhookError extends Schema.TaggedError<ApprovalWebhookError>()(
   "ApprovalWebhookError", { message: Schema.String }
 ) {}
+
+/** A delivery that has failed this many times is given up on. */
+const deliveryAttemptLimit = 8
+
+const deliveryBackoffBase = Duration.seconds(1)
+
+/**
+ * How long to wait before the next attempt. A delivery's retry state lives in
+ * the database rather than in a fiber, so the wait is computed for the attempt
+ * at hand rather than driven by a Schedule. The jitter keeps a batch of
+ * deliveries that failed together — a destination going down takes all of its
+ * jobs with it — from coming back in lockstep.
+ */
+const backoffAfter = (attempt: number): Effect.Effect<Duration.Duration> =>
+  Effect.map(Random.next, (random) =>
+    Duration.times(
+      Duration.times(deliveryBackoffBase, 2 ** attempt),
+      0.8 + random * 0.4
+    ))
 
 export const deliverDueApprovalNotifications = Effect.fn("Approval.deliverDueNotifications")(
   function*(input: {
@@ -67,15 +86,18 @@ export const deliverDueApprovalNotifications = Effect.fn("Approval.deliverDueNot
         onSuccess: () => input.store.settleApprovalDelivery({
           id: job.id, status: "delivered", nextAttemptAt: null, error: null
         }),
-        onFailure: (error) => {
-          const attempts = job.attempts + 1
-          const next = new Date(at.getTime() + Math.min(60 * 60_000, 2 ** Math.min(attempts, 10) * 1_000))
-          const terminal = attempts >= 8 || next >= job.expiresAt
-          return input.store.settleApprovalDelivery({
-            id: job.id, status: terminal ? "failed" : "retrying",
-            nextAttemptAt: terminal ? null : next, error: error.message
+        onFailure: (error) =>
+          Effect.gen(function*() {
+            const attempts = job.attempts + 1
+            const next = new Date(
+              at.getTime() + Duration.toMillis(yield* backoffAfter(attempts))
+            )
+            const terminal = attempts >= deliveryAttemptLimit || next >= job.expiresAt
+            return yield* input.store.settleApprovalDelivery({
+              id: job.id, status: terminal ? "failed" : "retrying",
+              nextAttemptAt: terminal ? null : next, error: error.message
+            })
           })
-        }
       }))
     }), { concurrency: 5, discard: true })
   }

@@ -1,4 +1,4 @@
-import { Effect } from "effect"
+import { Effect, Fiber, Schedule } from "effect"
 import type { GatewayStore, GatewayStoreError } from "./store.ts"
 
 export type MaintenanceResult = {
@@ -27,17 +27,17 @@ export interface MaintenanceLoop {
 export const startMaintenanceLoop = (
   store: GatewayStore,
   options: {
-    readonly intervalMs?: number
+    readonly interval?: Schedule.Schedule<unknown>
     readonly onError?: (error: GatewayStoreError) => void
     readonly afterSweep?: () => Effect.Effect<void, GatewayStoreError>
   } = {}
 ): MaintenanceLoop => {
-  const interval = setInterval(() => {
-    Effect.runFork(runMaintenance(store).pipe(
-      Effect.andThen(options.afterSweep?.() ?? Effect.void),
-      Effect.catch((error) => Effect.sync(() => options.onError?.(error)))
-    ))
-  }, options.intervalMs ?? 60_000)
-  interval.unref?.()
-  return { stop: () => clearInterval(interval) }
+  const sweep = runMaintenance(store).pipe(
+    Effect.andThen(options.afterSweep?.() ?? Effect.void),
+    Effect.catch((error) => Effect.sync(() => options.onError?.(error)))
+  )
+  const fiber = Effect.runFork(
+    Effect.repeat(sweep, options.interval ?? Schedule.spaced("1 minute"))
+  )
+  return { stop: () => Effect.runFork(Fiber.interrupt(fiber)) }
 }

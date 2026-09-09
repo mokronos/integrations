@@ -2,7 +2,7 @@ import { closeSync, openSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
 import { homedir, userInfo } from "node:os"
 import path from "node:path"
-import { Data, Effect } from "effect"
+import { Data, Duration, Effect, Schedule } from "effect"
 import { HttpClient } from "effect/unstable/http"
 import { defaultGatewayPort, integrationsHome, readGatewayConfig } from "@mokronos/integrations-client"
 
@@ -93,7 +93,7 @@ const installedAndReady = Effect.fn("service.installedAndReady")(function*(
   if (ready) return descriptor
   return yield* new ServiceError({
     message:
-      `${serviceLabel} was registered but did not answer within ${readyTimeoutMs / 1_000}s.\nCheck: ${statusCommand}\nLog: ${serviceErrorLogPath(descriptor.home)}`
+      `${serviceLabel} was registered but did not answer within ${Duration.toSeconds(readyTimeout)}s.\nCheck: ${statusCommand}\nLog: ${serviceErrorLogPath(descriptor.home)}`
   })
 })
 
@@ -231,8 +231,8 @@ const logTail = async (location: string, lines = 15): Promise<string> => {
   return text.trimEnd().split("\n").slice(-lines).join("\n")
 }
 
-const readyTimeoutMs = 20_000
-const readyIntervalMs = 150
+const readyTimeout = Duration.seconds(20)
+const readyInterval = Duration.millis(150)
 
 interface WaitOptions {
   readonly home: string
@@ -241,15 +241,33 @@ interface WaitOptions {
   readonly exitCode?: () => number | undefined
 }
 
+/** Polls until the predicate holds, giving up after the timeout. */
+const pollUntil = (
+  settled: Effect.Effect<boolean, never, HttpClient.HttpClient>,
+  timeout: Duration.Input
+): Effect.Effect<boolean, never, HttpClient.HttpClient> =>
+  settled.pipe(
+    Effect.repeat({
+      schedule: Schedule.spaced(readyInterval),
+      while: (done) => !done
+    }),
+    Effect.timeoutOrElse({ duration: timeout, orElse: () => Effect.succeed(false) })
+  )
+
 const waitUntilReady = Effect.fn("service.waitUntilReady")(function*(
   options: WaitOptions
 ): Effect.fn.Return<boolean, never, HttpClient.HttpClient> {
-  for (let waited = 0; waited < readyTimeoutMs; waited += readyIntervalMs) {
-    if (options.exitCode?.() !== undefined) return false
-    if (yield* isReady(options.home, options.base, options.previousKey)) return true
-    yield* Effect.sleep(readyIntervalMs)
-  }
-  return false
+  // A gateway that has already exited will never become ready, so settle the
+  // poll on either outcome and let the exit code decide which one it was.
+  const settled = yield* pollUntil(
+    Effect.suspend(() =>
+      options.exitCode?.() === undefined
+        ? isReady(options.home, options.base, options.previousKey)
+        : Effect.succeed(true)
+    ),
+    readyTimeout
+  )
+  return settled && options.exitCode?.() === undefined
 })
 
 const recordedKey = async (home: string): Promise<string | undefined> =>
@@ -313,7 +331,7 @@ export const startDetachedGateway = Effect.fn("service.startDetached")(function*
   }
   return yield* new ServiceError({
     message:
-      `The gateway did not become ready within ${readyTimeoutMs / 1_000}s. It is still running as pid ${spawned.child.pid}; see ${logPath}`
+      `The gateway did not become ready within ${Duration.toSeconds(readyTimeout)}s. It is still running as pid ${spawned.child.pid}; see ${logPath}`
   })
 })
 
@@ -323,7 +341,7 @@ export interface StoppedGateway {
   readonly forced: boolean
 }
 
-const stopTimeoutMs = 10_000
+const stopTimeout = Duration.seconds(10)
 
 const isAlive = (pid: number): boolean => {
   try {
@@ -370,11 +388,7 @@ const listeningPid = async (port: number): Promise<number | undefined> => {
 const waitUntilStopped = Effect.fn("service.waitUntilStopped")(function*(
   base: string
 ): Effect.fn.Return<boolean, never, HttpClient.HttpClient> {
-  for (let waited = 0; waited < stopTimeoutMs; waited += readyIntervalMs) {
-    if (!(yield* responds(base))) return true
-    yield* Effect.sleep(readyIntervalMs)
-  }
-  return false
+  return yield* pollUntil(Effect.map(responds(base), (alive) => !alive), stopTimeout)
 })
 
 export const stopGateway = Effect.fn("service.stopGateway")(function*(): Effect.fn.Return<
@@ -418,6 +432,6 @@ export const stopGateway = Effect.fn("service.stopGateway")(function*(): Effect.
   if (isAlive(pid)) process.kill(pid, "SIGKILL")
   if (yield* waitUntilStopped(base)) return { pid, url: base, forced: true }
   return yield* new ServiceError({
-    message: `Pid ${pid} was signalled but ${base} is still answering after ${stopTimeoutMs / 1_000}s.`
+    message: `Pid ${pid} was signalled but ${base} is still answering after ${Duration.toSeconds(stopTimeout)}s.`
   })
 })
