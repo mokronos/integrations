@@ -6,11 +6,14 @@ import {
   runMaintenance,
   type Encryption
 } from "@mokronos/gateway-core"
+import type { D1Database } from "@cloudflare/workers-types"
 import type { AssetsFetcherLike, D1DatabaseLike, ScheduledEventLike } from "./cloudflare.ts"
+import { Layer } from "effect"
+import { SqlClient } from "effect/unstable/sql"
 import { Effect } from "effect"
 import { decodeBase64UrlField } from "@mokronos/contracts"
 import { FetchHttpClient } from "effect/unstable/http"
-import { D1Client } from "./d1-client.ts"
+import { D1Client } from "@effect/sql-d1"
 import { d1HostStorage } from "./host-storage-d1.ts"
 import { D1OAuthSessionStore } from "./oauth-store-d1.ts"
 
@@ -39,7 +42,7 @@ const resolveMasterKey = async (
 }
 
 export interface Env {
-  readonly DB: D1DatabaseLike
+  readonly DB: D1Database & D1DatabaseLike
   readonly ASSETS?: AssetsFetcherLike
   readonly INTEGRATIONS_MASTER_KEY?: string
   readonly INTEGRATIONS_PUBLIC_URL?: string
@@ -88,6 +91,13 @@ const googleIdentityOption = (
     : {}
 }
 
+/**
+ * The gateway's tables in D1. The binding is supplied by the runtime, so a
+ * configuration failure here is not something the gateway can act on.
+ */
+const d1Layer = (db: D1Database): Layer.Layer<SqlClient.SqlClient> =>
+  Layer.orDie(D1Client.layer({ db }))
+
 const getService = (env: Env): Promise<GatewayService> => {
   servicePromise ??= (async () => {
     const { key, encryption } = await resolveMasterKey(env.INTEGRATIONS_MASTER_KEY)
@@ -98,7 +108,7 @@ const getService = (env: Env): Promise<GatewayService> => {
       storeLayer: GatewayStoreService.layer(
         "d1:integrations-gateway",
         encryption,
-        { client: new D1Client(database) }
+        { sqlClient: d1Layer(database) }
       ),
       hostStorage: d1HostStorage(database, key),
       oauthStore: new D1OAuthSessionStore(database),

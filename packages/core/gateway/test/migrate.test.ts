@@ -3,10 +3,10 @@ import { readFileSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { createClient } from "@libsql/client"
-import type { Client as LibsqlClient } from "@libsql/client"
-import { Schema } from "effect"
+import { Context, Effect, Exit, Layer, Schema, Scope } from "effect"
+import { SqlClient } from "effect/unstable/sql"
 import { applyGatewayMigrations } from "../src/migrate.ts"
+import { libsqlLayer } from "../src/store.ts"
 import { gatewayMigrations } from "../src/store-migrations.gen.ts"
 
 const decodeJournal = Schema.decodeUnknownSync(Schema.Struct({
@@ -14,41 +14,52 @@ const decodeJournal = Schema.decodeUnknownSync(Schema.Struct({
 }))
 
 const directories: Array<string> = []
-const clients: Array<LibsqlClient> = []
+const scopes: Array<Scope.Closeable> = []
 
 afterEach(async () => {
-  for (const client of clients.splice(0)) client.close()
+  await Promise.all(scopes.splice(0).map((scope) =>
+    Effect.runPromise(Scope.close(scope, Exit.void))
+  ))
   await Promise.all(
     directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
   )
 })
 
-const openDatabase = async (): Promise<LibsqlClient> => {
+/** A fresh database, and a way to run statements against it. */
+const openDatabase = async (): Promise<SqlClient.SqlClient> => {
   const directory = await mkdtemp(path.join(tmpdir(), "wf-gateway-migrate-"))
   directories.push(directory)
-  const client = createClient({ url: `file:${path.join(directory, "gateway.sqlite")}` })
-  clients.push(client)
-  await client.execute("PRAGMA foreign_keys = ON")
-  return client
+  const scope = Scope.makeUnsafe()
+  scopes.push(scope)
+  const sql = await Effect.runPromise(Effect.map(
+    Layer.buildWithScope(libsqlLayer(path.join(directory, "gateway.sqlite")), scope),
+    (context) => Context.get(context, SqlClient.SqlClient)
+  ))
+  await Effect.runPromise(sql.unsafe("PRAGMA foreign_keys = ON"))
+  return sql
 }
 
-const tableNames = async (database: LibsqlClient): Promise<ReadonlyArray<string>> => {
-  const result = await database.execute(
+const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> => Effect.runPromise(effect)
+
+const tableNames = async (sql: SqlClient.SqlClient): Promise<ReadonlyArray<string>> => {
+  const rows = await run(sql.unsafe<{ name: string }>(
     "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
-  )
-  return result.rows.map((row) => String(row["name"]))
+  ))
+  return rows.map((row) => String(row.name))
 }
 
-const stampedNames = async (database: LibsqlClient): Promise<ReadonlyArray<string>> => {
-  const result = await database.execute("SELECT name FROM gateway_migration ORDER BY id")
-  return result.rows.map((row) => String(row["name"]))
+const stampedNames = async (sql: SqlClient.SqlClient): Promise<ReadonlyArray<string>> => {
+  const rows = await run(sql.unsafe<{ name: string }>(
+    "SELECT name FROM gateway_migration ORDER BY id"
+  ))
+  return rows.map((row) => String(row.name))
 }
 
 describe("applyGatewayMigrations", () => {
   test("brings a fresh database up to the declared shape and stamps what it ran", async () => {
     const database = await openDatabase()
 
-    const applied = await applyGatewayMigrations(database)
+    const applied = await run(applyGatewayMigrations(database))
 
     expect(applied.map((migration) => migration.name)).toEqual(
       gatewayMigrations.map((migration) => migration.name)
@@ -67,9 +78,9 @@ describe("applyGatewayMigrations", () => {
 
   test("applying an up-to-date database runs nothing", async () => {
     const database = await openDatabase()
-    await applyGatewayMigrations(database)
+    await run(applyGatewayMigrations(database))
 
-    const again = await applyGatewayMigrations(database)
+    const again = await run(applyGatewayMigrations(database))
 
     expect(again).toEqual([])
     expect(await stampedNames(database)).toEqual(
@@ -79,13 +90,13 @@ describe("applyGatewayMigrations", () => {
 
   test("a migration this build does not carry stops the migration rather than guessing", async () => {
     const database = await openDatabase()
-    await applyGatewayMigrations(database)
-    await database.execute({
-      sql: "INSERT INTO gateway_migration (id, name, applied_at) VALUES (?, ?, ?)",
-      args: [9999, "9999_from_a_newer_gateway", Date.now()]
-    })
+    await run(applyGatewayMigrations(database))
+    await run(database.unsafe(
+      "INSERT INTO gateway_migration (id, name, applied_at) VALUES (?, ?, ?)",
+      [9999, "9999_from_a_newer_gateway", Date.now()]
+    ))
 
-    const failure = await applyGatewayMigrations(database).then(
+    const failure = await run(applyGatewayMigrations(database)).then(
       () => undefined,
       (cause: Error) => cause
     )
@@ -96,13 +107,13 @@ describe("applyGatewayMigrations", () => {
 
   test("a renamed applied migration stops the migration", async () => {
     const database = await openDatabase()
-    await applyGatewayMigrations(database)
-    await database.execute({
-      sql: "UPDATE gateway_migration SET name = ? WHERE id = ?",
-      args: ["0000_renamed_after_the_fact", 0]
-    })
+    await run(applyGatewayMigrations(database))
+    await run(database.unsafe(
+      "UPDATE gateway_migration SET name = ? WHERE id = ?",
+      ["0000_renamed_after_the_fact", 0]
+    ))
 
-    const failure = await applyGatewayMigrations(database).then(
+    const failure = await run(applyGatewayMigrations(database)).then(
       () => undefined,
       (cause: Error) => cause
     )
@@ -112,30 +123,30 @@ describe("applyGatewayMigrations", () => {
 })
 
 describe("the declared schema", () => {
-  const insertTenant = (database: LibsqlClient) =>
-    database.execute({
-      sql: "INSERT INTO gateway_tenant (id, name, created_at) VALUES (?, ?, ?)",
-      args: ["tenant", "Tenant", 0]
-    })
+  const insertTenant = (sql: SqlClient.SqlClient) =>
+    run(sql.unsafe(
+      "INSERT INTO gateway_tenant (id, name, created_at) VALUES (?, ?, ?)",
+      ["tenant", "Tenant", 0]
+    ))
 
-  const insertProfile = (database: LibsqlClient, id: string, isDefault: number) =>
-    database.execute({
-      sql: `INSERT INTO gateway_access_profile (id, tenant_id, name, is_default, created_at, updated_at)
-            VALUES (?, 'tenant', ?, ?, 0, 0)`,
-      args: [id, id, isDefault]
-    })
+  const insertProfile = (sql: SqlClient.SqlClient, id: string, isDefault: number) =>
+    run(sql.unsafe(
+      `INSERT INTO gateway_access_profile (id, tenant_id, name, is_default, created_at, updated_at)
+       VALUES (?, 'tenant', ?, ?, 0, 0)`,
+      [id, id, isDefault]
+    ))
 
-  const insertTool = (database: LibsqlClient, subject: string | null) =>
-    database.execute({
-      sql: `INSERT INTO gateway_access_profile_tool
-              (access_profile_id, owner, subject, integration, connection_name, tool)
-            VALUES ('profile', 'user', ?, 'gmail', 'work', 'send')`,
-      args: [subject]
-    })
+  const insertTool = (sql: SqlClient.SqlClient, subject: string | null) =>
+    run(sql.unsafe(
+      `INSERT INTO gateway_access_profile_tool
+         (access_profile_id, owner, subject, integration, connection_name, tool)
+       VALUES ('profile', 'user', ?, 'gmail', 'work', 'send')`,
+      [subject]
+    ))
 
   test("holds one route per tool even when the route has no subject", async () => {
     const database = await openDatabase()
-    await applyGatewayMigrations(database)
+    await run(applyGatewayMigrations(database))
     await insertTenant(database)
     await insertProfile(database, "profile", 0)
     await insertTool(database, null)
@@ -146,13 +157,15 @@ describe("the declared schema", () => {
     )
 
     expect(failure).toBeDefined()
-    const rows = await database.execute("SELECT count(*) AS total FROM gateway_access_profile_tool")
-    expect(rows.rows[0]?.["total"]).toBe(1)
+    const rows = await run(database.unsafe<{ total: number }>(
+      "SELECT count(*) AS total FROM gateway_access_profile_tool"
+    ))
+    expect(rows[0]?.total).toBe(1)
   })
 
   test("keeps subject-scoped routes distinct from the unscoped one", async () => {
     const database = await openDatabase()
-    await applyGatewayMigrations(database)
+    await run(applyGatewayMigrations(database))
     await insertTenant(database)
     await insertProfile(database, "profile", 0)
 
@@ -160,13 +173,15 @@ describe("the declared schema", () => {
     await insertTool(database, "sebastian")
     await insertTool(database, "mokronos")
 
-    const rows = await database.execute("SELECT count(*) AS total FROM gateway_access_profile_tool")
-    expect(rows.rows[0]?.["total"]).toBe(3)
+    const rows = await run(database.unsafe<{ total: number }>(
+      "SELECT count(*) AS total FROM gateway_access_profile_tool"
+    ))
+    expect(rows[0]?.total).toBe(3)
   })
 
   test("holds one default access profile per tenant, and any number of non-defaults", async () => {
     const database = await openDatabase()
-    await applyGatewayMigrations(database)
+    await run(applyGatewayMigrations(database))
     await insertTenant(database)
     await insertProfile(database, "first", 1)
     await insertProfile(database, "second", 0)

@@ -32,6 +32,7 @@
     "db:generate": "drizzle-kit generate && bun run scripts/embed-migrations.ts"
   },
   "dependencies": {
+    "@effect/sql-libsql": "catalog:",
     "@libsql/client": "catalog:",
     "@mokronos/contracts": "workspace:*",
     "@mokronos/integrations": "workspace:*",

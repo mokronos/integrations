@@ -13,7 +13,7 @@
     "tail": "wrangler tail"
   },
   "dependencies": {
-    "@libsql/client": "catalog:",
+    "@effect/sql-d1": "catalog:",
     "@mokronos/gateway-api": "workspace:*",
     "@mokronos/gateway-core": "workspace:*",
     "@mokronos/integrations": "workspace:*",

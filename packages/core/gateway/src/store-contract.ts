@@ -120,43 +120,47 @@ export interface GatewayOverviewCounts {
   readonly pendingApprovals: number
 }
 
-export interface GatewayStoreDriver {
+/**
+ * Everything the gateway keeps. Each member answers with an Effect: the store
+ * runs on a SqlClient, so there is no promise boundary to lift over.
+ */
+export interface GatewayStore {
   readonly databasePath: string
 
-  createTenant(input?: CreateTenantInput): Promise<Tenant>
-  listTenants(): Promise<ReadonlyArray<Tenant>>
-  findTenantById(id: TenantId): Promise<Tenant | undefined>
-  findTenantByName(name: string): Promise<Tenant | undefined>
+  createTenant(input?: CreateTenantInput): Effect.Effect<Tenant, GatewayStoreError>
+  listTenants(): Effect.Effect<ReadonlyArray<Tenant>, GatewayStoreError>
+  findTenantById(id: TenantId): Effect.Effect<Tenant | undefined, GatewayStoreError>
+  findTenantByName(name: string): Effect.Effect<Tenant | undefined, GatewayStoreError>
 
-  createSubject(input: CreateSubjectInput): Promise<Subject>
-  listSubjects(tenantId: TenantId): Promise<ReadonlyArray<Subject>>
-  countSubjects(tenantId: TenantId): Promise<number>
-  findSubjectById(id: SubjectId): Promise<Subject | undefined>
+  createSubject(input: CreateSubjectInput): Effect.Effect<Subject, GatewayStoreError>
+  listSubjects(tenantId: TenantId): Effect.Effect<ReadonlyArray<Subject>, GatewayStoreError>
+  countSubjects(tenantId: TenantId): Effect.Effect<number, GatewayStoreError>
+  findSubjectById(id: SubjectId): Effect.Effect<Subject | undefined, GatewayStoreError>
 
   createLogin(input: {
     readonly subjectId: SubjectId
     readonly tenantId: TenantId
     readonly email: string
     readonly passwordHash: PasswordHash | null
-  }): Promise<LoginRecord>
-  findLoginByEmail(email: string): Promise<LoginRecord | undefined>
-  findLoginBySubject(subjectId: SubjectId): Promise<LoginRecord | undefined>
-  countLogins(): Promise<number>
-  changeLoginEmail(subjectId: SubjectId, email: string): Promise<void>
-  changeLoginPassword(subjectId: SubjectId, passwordHash: string): Promise<void>
-  deleteSubject(subjectId: SubjectId): Promise<void>
-  deleteTenant(id: TenantId): Promise<void>
-  revokeSubjectSessions(subjectId: SubjectId, exceptTokenHash?: SessionTokenHash): Promise<number>
+  }): Effect.Effect<LoginRecord, GatewayStoreError>
+  findLoginByEmail(email: string): Effect.Effect<LoginRecord | undefined, GatewayStoreError>
+  findLoginBySubject(subjectId: SubjectId): Effect.Effect<LoginRecord | undefined, GatewayStoreError>
+  countLogins(): Effect.Effect<number, GatewayStoreError>
+  changeLoginEmail(subjectId: SubjectId, email: string): Effect.Effect<void, GatewayStoreError>
+  changeLoginPassword(subjectId: SubjectId, passwordHash: string): Effect.Effect<void, GatewayStoreError>
+  deleteSubject(subjectId: SubjectId): Effect.Effect<void, GatewayStoreError>
+  deleteTenant(id: TenantId): Effect.Effect<void, GatewayStoreError>
+  revokeSubjectSessions(subjectId: SubjectId, exceptTokenHash?: SessionTokenHash): Effect.Effect<number, GatewayStoreError>
 
   createSession(input: {
     readonly tokenHash: SessionTokenHash
     readonly subjectId: SubjectId
     readonly tenantId: TenantId
     readonly expiresAt: Date
-  }): Promise<AuthSession>
-  findLiveSession(tokenHash: SessionTokenHash): Promise<AuthSession | undefined>
-  revokeSession(tokenHash: SessionTokenHash): Promise<void>
-  deleteExpiredSessions(now: Date): Promise<number>
+  }): Effect.Effect<AuthSession, GatewayStoreError>
+  findLiveSession(tokenHash: SessionTokenHash): Effect.Effect<AuthSession | undefined, GatewayStoreError>
+  revokeSession(tokenHash: SessionTokenHash): Effect.Effect<void, GatewayStoreError>
+  deleteExpiredSessions(now: Date): Effect.Effect<number, GatewayStoreError>
 
   createExternalIdentity(input: {
     readonly provider: IdentityProvider
@@ -164,49 +168,49 @@ export interface GatewayStoreDriver {
     readonly subjectId: SubjectId
     readonly tenantId: TenantId
     readonly email: string
-  }): Promise<ExternalIdentity>
+  }): Effect.Effect<ExternalIdentity, GatewayStoreError>
   findExternalIdentity(
     provider: IdentityProvider,
     providerSubject: string
-  ): Promise<ExternalIdentity | undefined>
-  listExternalIdentities(subjectId: SubjectId): Promise<ReadonlyArray<ExternalIdentity>>
+  ): Effect.Effect<ExternalIdentity | undefined, GatewayStoreError>
+  listExternalIdentities(subjectId: SubjectId): Effect.Effect<ReadonlyArray<ExternalIdentity>, GatewayStoreError>
 
   createLoginHandoff(input: {
     readonly requestHash: LoginHandoffHash
     readonly expiresAt: Date
-  }): Promise<LoginHandoff>
-  getLoginHandoff(requestHash: LoginHandoffHash): Promise<LoginHandoff | undefined>
+  }): Effect.Effect<LoginHandoff, GatewayStoreError>
+  getLoginHandoff(requestHash: LoginHandoffHash): Effect.Effect<LoginHandoff | undefined, GatewayStoreError>
   completeLoginHandoff(input: {
     readonly requestHash: LoginHandoffHash
     readonly subjectId: SubjectId
     readonly tenantId: TenantId
     readonly email: string
-  }): Promise<boolean>
-  collectLoginHandoff(requestHash: LoginHandoffHash): Promise<boolean>
-  createIdentityOAuthState(input: IdentityOAuthStateRecord): Promise<void>
+  }): Effect.Effect<boolean, GatewayStoreError>
+  collectLoginHandoff(requestHash: LoginHandoffHash): Effect.Effect<boolean, GatewayStoreError>
+  createIdentityOAuthState(input: IdentityOAuthStateRecord): Effect.Effect<void, GatewayStoreError>
   consumeIdentityOAuthState(
     stateHash: LoginHandoffHash
-  ): Promise<IdentityOAuthStateRecord | undefined>
-  deleteExpiredIdentityFlows(now: Date): Promise<number>
+  ): Effect.Effect<IdentityOAuthStateRecord | undefined, GatewayStoreError>
+  deleteExpiredIdentityFlows(now: Date): Effect.Effect<number, GatewayStoreError>
 
   createConfiguredClient(input: ConfigureClient & {
     readonly tenantId: TenantId
     readonly id: ClientId
     readonly accessProfileId: AccessProfileId
     readonly approvalPolicyId: ApprovalPolicyId
-  }): Promise<Client>
-  createClient(input: CreateClientInput): Promise<Client>
-  listClients(tenantId: TenantId): Promise<ReadonlyArray<Client>>
-  overviewCounts(tenantId: TenantId): Promise<GatewayOverviewCounts>
-  findClientById(tenantId: TenantId, id: ClientId): Promise<Client | undefined>
-  findClientByName(tenantId: TenantId, name: string): Promise<Client | undefined>
+  }): Effect.Effect<Client, GatewayStoreError>
+  createClient(input: CreateClientInput): Effect.Effect<Client, GatewayStoreError>
+  listClients(tenantId: TenantId): Effect.Effect<ReadonlyArray<Client>, GatewayStoreError>
+  overviewCounts(tenantId: TenantId): Effect.Effect<GatewayOverviewCounts, GatewayStoreError>
+  findClientById(tenantId: TenantId, id: ClientId): Effect.Effect<Client | undefined, GatewayStoreError>
+  findClientByName(tenantId: TenantId, name: string): Effect.Effect<Client | undefined, GatewayStoreError>
   updateClientSettings(input: {
     readonly tenantId: TenantId
     readonly id: ClientId
     readonly capabilities: ReadonlyArray<ClientCapability>
     readonly approvalDelivery: ApprovalDelivery
-  }): Promise<Client>
-  revokeClient(tenantId: TenantId, id: ClientId): Promise<void>
+  }): Effect.Effect<Client, GatewayStoreError>
+  revokeClient(tenantId: TenantId, id: ClientId): Effect.Effect<void, GatewayStoreError>
 
   createApprovalDestination(input: {
     readonly id: ApprovalDestinationId
@@ -214,60 +218,60 @@ export interface GatewayStoreDriver {
     readonly name: string
     readonly url: string
     readonly signingSecret: string
-  }): Promise<ApprovalDestination>
-  listApprovalDestinations(tenantId: TenantId): Promise<ReadonlyArray<ApprovalDestination>>
-  deleteApprovalDestination(tenantId: TenantId, id: ApprovalDestinationId): Promise<void>
-  listClientApprovalDestinationIds(clientId: ClientId): Promise<ReadonlyArray<ApprovalDestinationId>>
-  replaceClientApprovalDestinations(tenantId: TenantId, clientId: ClientId, ids: ReadonlyArray<ApprovalDestinationId>): Promise<ReadonlyArray<ApprovalDestinationId>>
-  listApprovalDeliveries(tenantId: TenantId, approvalId: ApprovalId): Promise<ReadonlyArray<ApprovalDeliveryAttempt>>
-  claimDueApprovalDeliveries(now: Date, limit: number): Promise<ReadonlyArray<ApprovalDeliveryJob>>
+  }): Effect.Effect<ApprovalDestination, GatewayStoreError>
+  listApprovalDestinations(tenantId: TenantId): Effect.Effect<ReadonlyArray<ApprovalDestination>, GatewayStoreError>
+  deleteApprovalDestination(tenantId: TenantId, id: ApprovalDestinationId): Effect.Effect<void, GatewayStoreError>
+  listClientApprovalDestinationIds(clientId: ClientId): Effect.Effect<ReadonlyArray<ApprovalDestinationId>, GatewayStoreError>
+  replaceClientApprovalDestinations(tenantId: TenantId, clientId: ClientId, ids: ReadonlyArray<ApprovalDestinationId>): Effect.Effect<ReadonlyArray<ApprovalDestinationId>, GatewayStoreError>
+  listApprovalDeliveries(tenantId: TenantId, approvalId: ApprovalId): Effect.Effect<ReadonlyArray<ApprovalDeliveryAttempt>, GatewayStoreError>
+  claimDueApprovalDeliveries(now: Date, limit: number): Effect.Effect<ReadonlyArray<ApprovalDeliveryJob>, GatewayStoreError>
   settleApprovalDelivery(input: {
     readonly id: ApprovalDeliveryId
     readonly status: "delivered" | "retrying" | "failed"
     readonly nextAttemptAt: Date | null
     readonly error: string | null
-  }): Promise<void>
+  }): Effect.Effect<void, GatewayStoreError>
 
-  addApiKey(input: { readonly id: ApiKeyId; readonly clientId: ClientId; readonly hash: ApiKeyHash }): Promise<ApiKey>
-  listApiKeys(clientId: ClientId): Promise<ReadonlyArray<ApiKey>>
-  findApiKeyByHash(hash: ApiKeyHash): Promise<{ readonly key: ApiKey; readonly client: Client } | undefined>
-  touchApiKey(id: ApiKeyId): Promise<void>
-  revokeApiKey(id: ApiKeyId): Promise<void>
+  addApiKey(input: { readonly id: ApiKeyId; readonly clientId: ClientId; readonly hash: ApiKeyHash }): Effect.Effect<ApiKey, GatewayStoreError>
+  listApiKeys(clientId: ClientId): Effect.Effect<ReadonlyArray<ApiKey>, GatewayStoreError>
+  findApiKeyByHash(hash: ApiKeyHash): Effect.Effect<{ readonly key: ApiKey; readonly client: Client } | undefined, GatewayStoreError>
+  touchApiKey(id: ApiKeyId): Effect.Effect<void, GatewayStoreError>
+  revokeApiKey(id: ApiKeyId): Effect.Effect<void, GatewayStoreError>
 
-  createAccessProfile(input: CreateAccessProfileInput): Promise<AccessProfile>
-  updateAccessProfile(tenantId: TenantId, id: AccessProfileId, name: string): Promise<AccessProfile>
-  deleteAccessProfile(tenantId: TenantId, id: AccessProfileId): Promise<void>
-  listAccessProfiles(tenantId: TenantId): Promise<ReadonlyArray<AccessProfile>>
-  findAccessProfile(tenantId: TenantId, id: AccessProfileId): Promise<AccessProfile | undefined>
-  findDefaultAccessProfile(tenantId: TenantId): Promise<AccessProfile | undefined>
-  findAccessProfileForClient(clientId: ClientId): Promise<AccessProfile | undefined>
-  listAccessProfileTools(id: AccessProfileId): Promise<ReadonlyArray<AccessProfileTool>>
-  replaceAccessProfileTools(id: AccessProfileId, tools: ReadonlyArray<AccessProfileToolInput>): Promise<ReadonlyArray<AccessProfileTool>>
-  assignAccessProfile(tenantId: TenantId, clientId: ClientId, id: AccessProfileId): Promise<Client>
+  createAccessProfile(input: CreateAccessProfileInput): Effect.Effect<AccessProfile, GatewayStoreError>
+  updateAccessProfile(tenantId: TenantId, id: AccessProfileId, name: string): Effect.Effect<AccessProfile, GatewayStoreError>
+  deleteAccessProfile(tenantId: TenantId, id: AccessProfileId): Effect.Effect<void, GatewayStoreError>
+  listAccessProfiles(tenantId: TenantId): Effect.Effect<ReadonlyArray<AccessProfile>, GatewayStoreError>
+  findAccessProfile(tenantId: TenantId, id: AccessProfileId): Effect.Effect<AccessProfile | undefined, GatewayStoreError>
+  findDefaultAccessProfile(tenantId: TenantId): Effect.Effect<AccessProfile | undefined, GatewayStoreError>
+  findAccessProfileForClient(clientId: ClientId): Effect.Effect<AccessProfile | undefined, GatewayStoreError>
+  listAccessProfileTools(id: AccessProfileId): Effect.Effect<ReadonlyArray<AccessProfileTool>, GatewayStoreError>
+  replaceAccessProfileTools(id: AccessProfileId, tools: ReadonlyArray<AccessProfileToolInput>): Effect.Effect<ReadonlyArray<AccessProfileTool>, GatewayStoreError>
+  assignAccessProfile(tenantId: TenantId, clientId: ClientId, id: AccessProfileId): Effect.Effect<Client, GatewayStoreError>
 
-  createApprovalPolicy(input: CreateApprovalPolicyInput): Promise<ApprovalPolicy>
-  updateApprovalPolicy(tenantId: TenantId, id: ApprovalPolicyId, name: string): Promise<ApprovalPolicy>
-  deleteApprovalPolicy(tenantId: TenantId, id: ApprovalPolicyId): Promise<void>
-  listApprovalPolicies(tenantId: TenantId): Promise<ReadonlyArray<ApprovalPolicy>>
-  findApprovalPolicy(tenantId: TenantId, id: ApprovalPolicyId): Promise<ApprovalPolicy | undefined>
-  findDefaultApprovalPolicy(tenantId: TenantId): Promise<ApprovalPolicy | undefined>
-  findApprovalPolicyForClient(clientId: ClientId): Promise<ApprovalPolicy | undefined>
-  listApprovalPolicyTools(id: ApprovalPolicyId): Promise<ReadonlyArray<ApprovalPolicyTool>>
-  replaceApprovalPolicyTools(id: ApprovalPolicyId, tools: ReadonlyArray<ApprovalPolicyToolInput>): Promise<ReadonlyArray<ApprovalPolicyTool>>
-  assignApprovalPolicy(tenantId: TenantId, clientId: ClientId, id: ApprovalPolicyId): Promise<Client>
+  createApprovalPolicy(input: CreateApprovalPolicyInput): Effect.Effect<ApprovalPolicy, GatewayStoreError>
+  updateApprovalPolicy(tenantId: TenantId, id: ApprovalPolicyId, name: string): Effect.Effect<ApprovalPolicy, GatewayStoreError>
+  deleteApprovalPolicy(tenantId: TenantId, id: ApprovalPolicyId): Effect.Effect<void, GatewayStoreError>
+  listApprovalPolicies(tenantId: TenantId): Effect.Effect<ReadonlyArray<ApprovalPolicy>, GatewayStoreError>
+  findApprovalPolicy(tenantId: TenantId, id: ApprovalPolicyId): Effect.Effect<ApprovalPolicy | undefined, GatewayStoreError>
+  findDefaultApprovalPolicy(tenantId: TenantId): Effect.Effect<ApprovalPolicy | undefined, GatewayStoreError>
+  findApprovalPolicyForClient(clientId: ClientId): Effect.Effect<ApprovalPolicy | undefined, GatewayStoreError>
+  listApprovalPolicyTools(id: ApprovalPolicyId): Effect.Effect<ReadonlyArray<ApprovalPolicyTool>, GatewayStoreError>
+  replaceApprovalPolicyTools(id: ApprovalPolicyId, tools: ReadonlyArray<ApprovalPolicyToolInput>): Effect.Effect<ReadonlyArray<ApprovalPolicyTool>, GatewayStoreError>
+  assignApprovalPolicy(tenantId: TenantId, clientId: ClientId, id: ApprovalPolicyId): Effect.Effect<Client, GatewayStoreError>
 
-  createApproval(input: CreateApprovalInput): Promise<PendingApproval>
-  getApproval(tenantId: TenantId, id: ApprovalId): Promise<PendingApproval | undefined>
-  listApprovals(tenantId: TenantId, status?: ApprovalStatus): Promise<ReadonlyArray<PendingApproval>>
+  createApproval(input: CreateApprovalInput): Effect.Effect<PendingApproval, GatewayStoreError>
+  getApproval(tenantId: TenantId, id: ApprovalId): Effect.Effect<PendingApproval | undefined, GatewayStoreError>
+  listApprovals(tenantId: TenantId, status?: ApprovalStatus): Effect.Effect<ReadonlyArray<PendingApproval>, GatewayStoreError>
   findUncollectedApproval(input: Pick<CreateApprovalInput,
     "tenantId" | "clientId" | "approvalPolicyId" | "accessProfileId" | "alias" | "tool" | "arguments"
-  >): Promise<PendingApproval | undefined>
-  collectApproval(tenantId: TenantId, id: ApprovalId): Promise<boolean>
+  >): Effect.Effect<PendingApproval | undefined, GatewayStoreError>
+  collectApproval(tenantId: TenantId, id: ApprovalId): Effect.Effect<boolean, GatewayStoreError>
   claimApproval(input: {
     readonly tenantId: TenantId
     readonly id: ApprovalId
     readonly decidedBy: string | null
-  }): Promise<boolean>
+  }): Effect.Effect<boolean, GatewayStoreError>
   settleApproval(input: {
     readonly tenantId: TenantId
     readonly id: ApprovalId
@@ -275,19 +279,19 @@ export interface GatewayStoreDriver {
     readonly decidedBy: string | null
     readonly result: typeof Schema.Json.Type | null
     readonly error: string | null
-  }): Promise<boolean>
-  cancelApprovalsForClient(clientId: ClientId): Promise<number>
+  }): Effect.Effect<boolean, GatewayStoreError>
+  cancelApprovalsForClient(clientId: ClientId): Effect.Effect<number, GatewayStoreError>
 
-  recordAudit(input: RecordAuditInput): Promise<void>
-  listAudit(tenantId: TenantId, options: AuditQuery): Promise<ReadonlyArray<AuditRecord>>
-  countAudit(tenantId: TenantId, options: Omit<AuditQuery, "limit" | "offset">): Promise<number>
-  expireAuditArguments(now: Date): Promise<number>
+  recordAudit(input: RecordAuditInput): Effect.Effect<void, GatewayStoreError>
+  listAudit(tenantId: TenantId, options: AuditQuery): Effect.Effect<ReadonlyArray<AuditRecord>, GatewayStoreError>
+  countAudit(tenantId: TenantId, options: Omit<AuditQuery, "limit" | "offset">): Effect.Effect<number, GatewayStoreError>
+  expireAuditArguments(now: Date): Effect.Effect<number, GatewayStoreError>
 
-  putToolSnapshots(tenantId: TenantId, snapshots: ReadonlyArray<ToolSnapshot>): Promise<void>
+  putToolSnapshots(tenantId: TenantId, snapshots: ReadonlyArray<ToolSnapshot>): Effect.Effect<void, GatewayStoreError>
   listToolSnapshots(
     tenantId: TenantId,
     integration: IntegrationSlug
-  ): Promise<ReadonlyArray<ToolSnapshot>>
+  ): Effect.Effect<ReadonlyArray<ToolSnapshot>, GatewayStoreError>
   forgetToolSnapshots(
     tenantId: TenantId,
     keys: ReadonlyArray<{
@@ -295,11 +299,11 @@ export interface GatewayStoreDriver {
       readonly connection: ConnectionName
       readonly tool: ToolName
     }>
-  ): Promise<void>
+  ): Effect.Effect<void, GatewayStoreError>
 
-  expireApprovals(now: Date): Promise<number>
+  expireApprovals(now: Date): Effect.Effect<number, GatewayStoreError>
 
-  close(): Promise<void>
+  close(): Effect.Effect<void, GatewayStoreError>
 }
 
 export const GatewayStoreFailureKind = Schema.Literals([
@@ -322,12 +326,3 @@ export class GatewayStoreError extends Schema.TaggedError<GatewayStoreError>()(
   }
 }
 
-type EffectStoreMember<Member> = Member extends (
-  ...args: infer Args
-) => Promise<infer Success>
-  ? (...args: Args) => Effect.Effect<Success, GatewayStoreError>
-  : Member
-
-export type GatewayStore = {
-  readonly [Key in keyof GatewayStoreDriver]: EffectStoreMember<GatewayStoreDriver[Key]>
-}
