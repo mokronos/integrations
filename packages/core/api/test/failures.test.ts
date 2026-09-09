@@ -16,7 +16,7 @@ import {
 } from "./gateway.ts"
 import type { GatewayStore } from "./gateway.ts"
 import { stubHostContext } from "./stubs.ts"
-import { McpError, SpecError } from "@integrations/host"
+import { McpError, SpecError } from "@integrations/integrations"
 
 const directories: Array<string> = []
 const stores: Array<GatewayStore> = []

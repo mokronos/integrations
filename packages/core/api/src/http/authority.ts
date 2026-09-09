@@ -114,7 +114,7 @@ export interface RequestContext {
 }
 
 export const CurrentRequestContext = Context.Reference<RequestContext>(
-  "@integrations/host/RequestContext",
+  "@integrations/gateway-api/RequestContext",
   { defaultValue: (): RequestContext => ({}) }
 )
 

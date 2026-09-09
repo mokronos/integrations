@@ -91,7 +91,7 @@ export class OpenApiInvoker extends Context.Service<
       call: OpenApiCall
     ) => Effect.Effect<Json, InvocationError | SpecError>
   }
->()("@integrations/host/OpenApiInvoker") {
+>()("@integrations/integrations/OpenApiInvoker") {
   static readonly layer: Layer.Layer<
     OpenApiInvoker,
     never,

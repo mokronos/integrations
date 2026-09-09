@@ -11,7 +11,7 @@ import {
   OAuthError,
   OAuthFlows,
   OAuthState
-} from "@integrations/host"
+} from "@integrations/integrations"
 import { authorizeInBrowser, OAuthFlowError } from "../src/oauth.ts"
 import { createOAuthSessions } from "../src/oauth-sessions.ts"
 import type { OAuthOperations } from "../src/oauth.ts"

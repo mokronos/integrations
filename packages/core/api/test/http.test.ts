@@ -1,6 +1,6 @@
 import { FetchHttpClient } from "effect/unstable/http"
 import { stubHostContext } from "./stubs.ts"
-import { InvocationError } from "@integrations/host"
+import { InvocationError } from "@integrations/integrations"
 import { run, runAll } from "./effect.ts"
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"

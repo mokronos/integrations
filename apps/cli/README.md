@@ -1,4 +1,4 @@
-# @integrations/host
+# @integrations/integrations
 
 One package installs two deliberate command surfaces:
 
@@ -10,7 +10,7 @@ One package installs two deliberate command surfaces:
   gateway lifecycle commands.
 
 ```bash
-bun add --global @integrations/host
+bun add --global @integrations/integrations
 ii login
 ```
 

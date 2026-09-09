@@ -218,7 +218,7 @@ export class IntegrationHost extends Context.Service<
       input: Json
     ) => Effect.Effect<Json, HostFailure>
   }
->()("@integrations/host/IntegrationHost") {
+>()("@integrations/integrations/IntegrationHost") {
   static readonly layer: Layer.Layer<
     IntegrationHost,
     never,

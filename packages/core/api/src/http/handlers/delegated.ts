@@ -1,7 +1,7 @@
 import {
   whenPresentMap
 } from "@integrations/contracts"
-import { IntegrationHost } from "@integrations/host"
+import { IntegrationHost } from "@integrations/integrations"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { deliverDueApprovalNotifications } from "@integrations/gateway-core"

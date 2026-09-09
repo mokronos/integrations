@@ -86,7 +86,7 @@ describe("published CLI package", () => {
       "@integrations/gateway-api": `file:${gatewayApi}`,
       "@mokronos/integrations": `file:${local}`,
       "@mokronos/integrations-client": `file:${client}`,
-      "@integrations/host": `file:${host}`,
+      "@integrations/integrations": `file:${host}`,
       "@integrations/observability": `file:${observability}`,
       "@integrations/contracts": `file:${contracts}`
     }

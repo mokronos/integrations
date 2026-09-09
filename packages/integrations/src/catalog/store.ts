@@ -305,7 +305,7 @@ export class CatalogStore extends Context.Service<
       content: string
     ) => Effect.Effect<void, StorageError>
   }
->()("@integrations/host/CatalogStore") {
+>()("@integrations/integrations/CatalogStore") {
   static readonly layer: Layer.Layer<CatalogStore, never, Database> = Layer.effect(
     CatalogStore,
     Effect.gen(function* () {

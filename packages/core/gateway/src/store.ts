@@ -51,7 +51,7 @@ import {
 export class GatewayStoreService extends Context.Service<
   GatewayStoreService,
   GatewayStore
->()("@integrations/host/GatewayStore") {
+>()("@integrations/gateway-core/GatewayStore") {
   static readonly layer = (
     databasePath: string,
     encryption?: Encryption,

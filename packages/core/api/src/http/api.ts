@@ -770,7 +770,7 @@ const AuthGroup = HttpApiGroup.make("auth")
   }).annotate(RequiredAccess, "human"))
   .middleware(Authority)
 
-export const GatewayApi = HttpApi.make("@integrations/host/gateway")
+export const GatewayApi = HttpApi.make("@integrations/gateway-api/gateway")
   .add(SystemGroup)
   .add(FallbackGroup)
   .add(DelegatedGroup)

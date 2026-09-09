@@ -32,7 +32,7 @@
     "@effect/sql-libsql": "catalog:",
     "@libsql/client": "catalog:",
     "@integrations/contracts": "workspace:*",
-    "@integrations/host": "workspace:*",
+    "@integrations/integrations": "workspace:*",
     "@mokronos/integrations-client": "workspace:*",
     "effect": "catalog:"
   },

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { Crypto, Effect } from "effect"
 import { ToolAddress } from "@integrations/contracts"
-import type { IntegrationHost } from "@integrations/host"
+import type { IntegrationHost } from "@integrations/integrations"
 import {
   Alias,
   ClientId,

@@ -32,7 +32,7 @@
     "@modelcontextprotocol/server": "^2.0.0",
     "@integrations/contracts": "workspace:*",
     "@integrations/gateway-core": "workspace:*",
-    "@integrations/host": "workspace:*",
+    "@integrations/integrations": "workspace:*",
     "@mokronos/integrations-client": "workspace:*",
     "@integrations/observability": "workspace:*",
     "effect": "catalog:"

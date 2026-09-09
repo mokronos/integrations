@@ -6,8 +6,8 @@ import {
   probeOAuthServer,
   registerOAuthClient,
   startOAuthFlow
-} from "@integrations/host"
-import type { CatalogStore, IntegrationHost, OAuthFlows } from "@integrations/host"
+} from "@integrations/integrations"
+import type { CatalogStore, IntegrationHost, OAuthFlows } from "@integrations/integrations"
 import { AuthMethod, Connection, whenPresent } from "@integrations/contracts"
 import { oauthSetupGuidance } from "./oauth-guidance.ts"
 

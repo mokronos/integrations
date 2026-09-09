@@ -15,7 +15,7 @@ import {
   OAuthError,
   OAuthFlows,
   OAuthState
-} from "@integrations/host"
+} from "@integrations/integrations"
 import type { OAuthOperations } from "@integrations/gateway-core"
 import type { Connection } from "@integrations/contracts"
 import { createGatewayHandler, createOAuthSessions, createGatewayStore } from "./gateway.ts"

@@ -16,7 +16,7 @@
     "@effect/sql-d1": "catalog:",
     "@integrations/gateway-api": "workspace:*",
     "@integrations/gateway-core": "workspace:*",
-    "@integrations/host": "workspace:*",
+    "@integrations/integrations": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

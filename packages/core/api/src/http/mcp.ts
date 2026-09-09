@@ -22,8 +22,8 @@ import {
 } from "@integrations/gateway-core"
 import type { InvocationOutcome } from "@integrations/contracts"
 import type { GatewayStore } from "@integrations/gateway-core"
-import { IntegrationHost } from "@integrations/host"
-import type { HostServices } from "@integrations/host"
+import { IntegrationHost } from "@integrations/integrations"
+import type { HostServices } from "@integrations/integrations"
 import { Context } from "effect"
 
 const hostOf = (options: McpGatewayOptions): IntegrationHost["Service"] =>

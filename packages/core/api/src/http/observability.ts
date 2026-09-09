@@ -2,7 +2,7 @@ import { Cause, Context, Effect, Layer, Option, Result } from "effect"
 import { webCrypto } from "@integrations/contracts"
 import { whenPresent } from "@integrations/contracts"
 import { GatewayStoreError, OAuthSessionError, PasswordError } from "@integrations/gateway-core"
-import { StorageError } from "@integrations/host"
+import { StorageError } from "@integrations/integrations"
 
 export interface CaptureContext {
   readonly operation?: string
@@ -37,7 +37,7 @@ const loggingCapture: ErrorSink = {
 }
 
 export class ErrorCapture extends Context.Service<ErrorCapture, ErrorSink>()(
-  "@integrations/host/ErrorCapture"
+  "@integrations/gateway-api/ErrorCapture"
 ) {
   static readonly logging: Layer.Layer<ErrorCapture> = Layer.succeed(ErrorCapture, loggingCapture)
 

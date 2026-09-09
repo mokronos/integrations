@@ -54,12 +54,12 @@ export type Access =
   | "human"
 
 export const RequiredAccess = Context.Reference<Access>(
-  "@integrations/host/RequiredAccess",
+  "@integrations/gateway-api/RequiredAccess",
   { defaultValue: (): Access => "public" }
 )
 
 export const Unmetered = Context.Reference<boolean>(
-  "@integrations/host/Unmetered",
+  "@integrations/gateway-api/Unmetered",
   { defaultValue: (): boolean => false }
 )
 
@@ -76,7 +76,7 @@ export type Caller =
   }
 
 export class Identity extends Context.Service<Identity, Caller>()(
-  "@integrations/host/Identity"
+  "@integrations/gateway-api/Identity"
 ) {}
 
 export const requireClient: Effect.Effect<Client, Forbidden, Identity> = Effect.flatMap(

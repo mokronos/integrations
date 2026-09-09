@@ -5,7 +5,7 @@ import type { AuthMethod } from "@integrations/contracts"
 import { Context, Deferred, Effect, Exit, Schema, Scope } from "effect"
 import type { TenantId } from "./domain.ts"
 import { webCrypto } from "@integrations/contracts"
-import { completeOAuthFlow } from "@integrations/host"
+import { completeOAuthFlow } from "@integrations/integrations"
 import {
   authorizeInBrowser,
   OAuthFlowError,

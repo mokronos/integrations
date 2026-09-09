@@ -41,7 +41,7 @@ export class CredentialStore extends Context.Service<
     readonly set: (key: CredentialKey, value: string) => Effect.Effect<void, StorageError>
     readonly remove: (key: CredentialKey) => Effect.Effect<void, StorageError>
   }
->()("@integrations/host/CredentialStore") {
+>()("@integrations/integrations/CredentialStore") {
   static readonly fileLayer = (directory: string): Layer.Layer<CredentialStore> =>
     Layer.effect(CredentialStore, Effect.sync(() => fileCredentialStore(directory)))
 
@@ -65,7 +65,7 @@ export class CredentialStore extends Context.Service<
 const CredentialFile = Schema.Record(Schema.String, Schema.String)
 type CredentialFile = typeof CredentialFile.Type
 
-const additionalData = utf8Bytes("@integrations/host/credentials/v1")
+const additionalData = utf8Bytes("@integrations/integrations/credentials/v1")
 
 const credentialKey = (directory: string): Uint8Array => {
   const keyPath = path.join(directory, "credentials.key")

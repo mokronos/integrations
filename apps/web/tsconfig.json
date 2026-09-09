@@ -15,7 +15,7 @@
       "@integrations/gateway-core": ["../../packages/core/gateway/src/index.ts"],
       "@integrations/gateway-core/domain": ["../../packages/core/gateway/src/domain.ts"],
       "@integrations/gateway-api/definition": ["../../packages/core/api/src/http/api.ts"],
-      "@integrations/host": ["../../packages/integrations/src/index.ts"],
+      "@integrations/integrations": ["../../packages/integrations/src/index.ts"],
       "@mokronos/integrations-client": ["../../apps/ts/src/index.ts"],
       "@mokronos/integrations-client/client": ["../../apps/ts/src/client.ts"]
     },

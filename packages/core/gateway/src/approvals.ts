@@ -1,5 +1,5 @@
 import { Clock, Effect, Schema } from "effect"
-import type { IntegrationHost } from "@integrations/host"
+import type { IntegrationHost } from "@integrations/integrations"
 import {
   aliasForConnection,
   ApprovalId,

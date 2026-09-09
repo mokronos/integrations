@@ -12,7 +12,7 @@ export interface SignInPolicy {
 }
 
 export class SessionPolicy extends Context.Service<SessionPolicy, SignInPolicy>()(
-  "@integrations/host/SessionPolicy"
+  "@integrations/gateway-api/SessionPolicy"
 ) {
   static readonly closed: Layer.Layer<SessionPolicy> = Layer.succeed(SessionPolicy, {
     signupOpen: () => Effect.succeed(false),
@@ -21,7 +21,7 @@ export class SessionPolicy extends Context.Service<SessionPolicy, SignInPolicy>(
 }
 
 export class OAuthFlowSessions extends Context.Service<OAuthFlowSessions, OAuthSessions>()(
-  "@integrations/host/OAuthFlowSessions"
+  "@integrations/gateway-api/OAuthFlowSessions"
 ) {}
 
 export interface GatewaySettings {
@@ -33,13 +33,13 @@ export interface GatewaySettings {
 }
 
 export class GatewayConfig extends Context.Service<GatewayConfig, GatewaySettings>()(
-  "@integrations/host/GatewayConfig"
+  "@integrations/gateway-api/GatewayConfig"
 ) {}
 
 export class ControlPlaneAssets extends Context.Service<
   ControlPlaneAssets,
   { readonly assets: WebAssets | undefined }
->()("@integrations/host/ControlPlaneAssets") {
+>()("@integrations/gateway-api/ControlPlaneAssets") {
   static readonly layerOf = (assets: WebAssets | undefined): Layer.Layer<ControlPlaneAssets> =>
     Layer.succeed(ControlPlaneAssets, { assets })
 }

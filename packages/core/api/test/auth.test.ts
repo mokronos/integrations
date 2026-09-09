@@ -21,7 +21,7 @@ import {
 } from "./gateway.ts"
 import type { ConnectionRef, GatewayStore } from "./gateway.ts"
 import { stubHostContext } from "./stubs.ts"
-import type { HostServices } from "@integrations/host"
+import type { HostServices } from "@integrations/integrations"
 import { Context } from "effect"
 import type { GoogleIdentityOAuth } from "@integrations/gateway-core"
 

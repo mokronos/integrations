@@ -1,4 +1,4 @@
-import type { IntegrationHost, StorageError } from "@integrations/host"
+import type { IntegrationHost, StorageError } from "@integrations/integrations"
 import { Effect } from "effect"
 import {
   connectionRefKey,

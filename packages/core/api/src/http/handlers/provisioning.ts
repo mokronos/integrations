@@ -9,8 +9,8 @@ import {
   provisionIntegration,
   searchIntegrations,
   validateIntegrationNode as validateNode
-} from "@integrations/host"
-import type { HostServices } from "@integrations/host"
+} from "@integrations/integrations"
+import type { HostServices } from "@integrations/integrations"
 import { Effect, Option, Schema } from "effect"
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"

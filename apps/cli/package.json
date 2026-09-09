@@ -39,7 +39,7 @@
     "@integrations/gateway-api": "workspace:*",
     "@integrations/gateway-core": "workspace:*",
     "@mokronos/integrations-client": "workspace:*",
-    "@integrations/host": "workspace:*",
+    "@integrations/integrations": "workspace:*",
     "@integrations/observability": "workspace:*",
     "effect": "catalog:"
   }

@@ -15,7 +15,7 @@ import { McpProbe } from "@integrations/contracts"
 
 const PROTOCOL_VERSION = "2026-07-28"
 
-const clientInfo = { name: "@integrations/host", version: "0.2.0" } as const
+const clientInfo = { name: "@integrations/integrations", version: "0.2.0" } as const
 
 const requestMeta = {
   "io.modelcontextprotocol/protocolVersion": PROTOCOL_VERSION,
@@ -269,7 +269,7 @@ export class McpHost extends Context.Service<
       input: Json
     ) => Effect.Effect<Json, McpError>
   }
->()("@integrations/host/McpHost") {
+>()("@integrations/integrations/McpHost") {
   static readonly layer: Layer.Layer<McpHost, never, HttpClient.HttpClient> = Layer.effect(
     McpHost,
     Effect.gen(function* () {

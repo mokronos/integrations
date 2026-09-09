@@ -199,7 +199,7 @@ export class OAuthFlows extends Context.Service<
       readonly client: OAuthClientSlug
     }) => Effect.Effect<Option.Option<OAuthAccess>, OAuthError | StorageError>
   }
->()("@integrations/host/OAuthFlows") {
+>()("@integrations/integrations/OAuthFlows") {
   static readonly layer: Layer.Layer<
     OAuthFlows,
     never,
