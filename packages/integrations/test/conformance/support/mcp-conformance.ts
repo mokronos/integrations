@@ -1,7 +1,7 @@
 import { expect } from "bun:test"
 import { Effect, Option } from "effect"
 import type { Json } from "@integrations/contracts"
-import { McpHost, type McpCredential } from "../../../src/mcp/client.ts"
+import { McpClient, type McpCredential } from "../../../src/mcp/client.ts"
 
 export interface McpConformanceTarget {
   readonly endpoint: string
@@ -13,9 +13,9 @@ export interface McpConformanceTarget {
 
 export const verifyMcpConformance = (
   target: McpConformanceTarget
-): Effect.Effect<void, Error, McpHost> =>
+): Effect.Effect<void, Error, McpClient> =>
   Effect.gen(function*() {
-    const host = yield* McpHost
+    const host = yield* McpClient
     const tools = yield* host.listTools(target.endpoint, target.credential)
     const names = tools.map((tool) => tool.name)
 

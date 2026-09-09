@@ -4,13 +4,13 @@ import {
 } from "@integrations/contracts"
 import {
   AuthTemplateSlug,
-  IntegrationHost,
+  Integrations,
   listIntegrationOverviews,
   provisionIntegration,
   searchIntegrations,
   validateIntegrationNode as validateNode
 } from "@integrations/integrations"
-import type { HostServices } from "@integrations/integrations"
+import type { IntegrationServices } from "@integrations/integrations"
 import { Effect, Option, Schema } from "effect"
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -84,7 +84,7 @@ const GatewayNodeSource = Schema.Struct({
 const validateGatewayNode = (
   dependencies: {
     readonly store: GatewayStore
-    readonly host: IntegrationHost["Service"]
+    readonly integrations: Integrations["Service"]
   },
   clientId: ClientId | undefined,
   source: { readonly alias: string; readonly tool: string },
@@ -138,7 +138,7 @@ const validateGatewayNode = (
           message: `${source.alias}.${source.tool} resolves to ${accessTool.connection.integration}/${accessTool.connection.name}`
         })
         const address = boundToolAddress(accessTool.connection, ToolName.make(source.tool))
-        const tools = yield* capture(dependencies.host.listTools())
+        const tools = yield* capture(dependencies.integrations.listTools())
         findings.push(
           tools.some((candidate) => candidate.address === address)
             ? { severity: "info", check: "catalog", message: `${source.tool} is available` }
@@ -157,15 +157,15 @@ const validateGatewayNode = (
 export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning", (handlers) =>
   Effect.gen(function*() {
     const store = yield* GatewayStoreService
-    const host = yield* IntegrationHost
-    const hostServices = yield* Effect.context<HostServices>()
+    const integrations = yield* Integrations
+    const integrationServices = yield* Effect.context<IntegrationServices>()
     const oauth = yield* OAuthFlowSessions
     const config = yield* GatewayConfig
     return handlers
       .handle("listIntegrations", () =>
         Effect.gen(function*() {
           const integrations = yield* capture(
-            listIntegrationOverviews().pipe(Effect.provide(hostServices))
+            listIntegrationOverviews().pipe(Effect.provide(integrationServices))
           )
           return {
             integrations,
@@ -177,16 +177,16 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
           ...whenPresent("connection", request.payload.connection),
           ...whenPresent("slug", request.payload.slug),
           ...whenPresent("name", request.payload.name)
-        }).pipe(Effect.provide(hostServices))))
+        }).pipe(Effect.provide(integrationServices))))
       .handle("renameIntegration", (request) =>
         Effect.gen(function*() {
           const slug = yield* requireSlug(request.params["slug"])
-          const found = yield* capture(host.findIntegration(slug))
+          const found = yield* capture(integrations.findIntegration(slug))
           if (Option.isNone(found)) {
             return yield* new ApiNotFound({ error: `Unknown integration ${slug}` })
           }
-          yield* capture(host.renameIntegration(slug, request.payload.name))
-          const renamed = yield* capture(host.findIntegration(slug))
+          yield* capture(integrations.renameIntegration(slug, request.payload.name))
+          const renamed = yield* capture(integrations.findIntegration(slug))
           if (Option.isNone(renamed)) {
             return yield* new ApiNotFound({ error: `Unknown integration ${slug}` })
           }
@@ -195,12 +195,12 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
       .handle("integrationTools", (request) =>
         Effect.gen(function*() {
           const slug = yield* requireSlug(request.params["slug"])
-          return { tools: yield* capture(host.toolSummaries({ integration: slug })) }
+          return { tools: yield* capture(integrations.toolSummaries({ integration: slug })) }
         }))
       .handle("describeTool", (request) =>
         Effect.gen(function*() {
           const slug = yield* requireSlug(request.params["slug"])
-          return yield* asApiFailure(host.describeTool({
+          return yield* asApiFailure(integrations.describeTool({
             integration: slug,
             name: request.params["tool"],
             ...whenPresentMap("connection", request.query["connection"], (c) => ConnectionName.make(c))
@@ -226,7 +226,7 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
               : undefined
             const source = Schema.decodeUnknownSync(GatewayNodeSource)(body.node).source
             return yield* validateGatewayNode(
-              { store: store, host },
+              { store: store, integrations },
               clientId,
               source,
               body.live ?? true
@@ -234,17 +234,17 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
           }
           return yield* capture(
             validateNode(body.node, { live: body.live ?? true })
-              .pipe(Effect.provide(hostServices))
+              .pipe(Effect.provide(integrationServices))
           )
         }))
       .handle("listConnections", () =>
-        Effect.map(capture(host.listConnections()), (connections) => ({ connections })))
+        Effect.map(capture(integrations.listConnections()), (connections) => ({ connections })))
       .handle("connect", (request) =>
         Effect.gen(function*() {
           const tenantId = yield* requireTenant
           const body = request.payload
           const slug = yield* requireSlug(body.integration)
-          const found = yield* capture(host.findIntegration(slug))
+          const found = yield* capture(integrations.findIntegration(slug))
           if (Option.isNone(found)) {
             return yield* new ApiNotFound({ error: `Unknown integration ${body.integration}` })
           }
@@ -263,7 +263,7 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
           }
           const values = body.values ?? {}
           const names = Object.keys(values)
-          const connection = yield* asApiFailure(host.createConnection({
+          const connection = yield* asApiFailure(integrations.createConnection({
             owner: "org",
             integration: slug,
             name: ConnectionName.make(body.connection ?? "default"),
@@ -274,10 +274,10 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
                 ? { value: values["token"] }
                 : { values })
           }))
-          yield* reconcileDefaults({ store, integrations: { host }, tenantId }).pipe(capture)
+          yield* reconcileDefaults({ store, integrations, tenantId }).pipe(capture)
           return {
             connection,
-            tools: yield* capture(host.toolSummaries({
+            tools: yield* capture(integrations.toolSummaries({
               integration: slug,
               connection: connection.name
             }))
@@ -288,7 +288,7 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
           const tenantId = yield* requireTenant
           const body = request.payload
           const slug = yield* requireSlug(body.integration)
-          const found = yield* capture(host.findIntegration(slug))
+          const found = yield* capture(integrations.findIntegration(slug))
           if (Option.isNone(found)) {
             return yield* new ApiNotFound({ error: `Unknown integration ${body.integration}` })
           }
@@ -375,11 +375,11 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
         Effect.gen(function*() {
           const tenantId = yield* requireTenant
           const slug = yield* requireSlug(request.params["slug"])
-          const found = yield* capture(host.findIntegration(slug))
+          const found = yield* capture(integrations.findIntegration(slug))
           if (Option.isNone(found)) {
             return yield* new ApiNotFound({ error: `Unknown integration ${slug}` })
           }
-          const connections = yield* capture(host.listConnections())
+          const connections = yield* capture(integrations.listConnections())
           const owned = connections.filter((connection) => connection.integration === slug)
           yield* Effect.forEach(owned, (connection) =>
             forgetConnection({
@@ -388,7 +388,7 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
               integration: slug,
               connection: connection.name
             }).pipe(capture))
-          yield* capture(host.removeIntegration(slug))
+          yield* capture(integrations.removeIntegration(slug))
           return {
             removed: true as const,
             integration: slug,
@@ -400,7 +400,7 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
           const tenantId = yield* requireTenant
           const integration = request.params["integration"]
           const requested = request.params["name"]
-          const connections = yield* capture(host.listConnections())
+          const connections = yield* capture(integrations.listConnections())
           const match = connections.find((connection) =>
             connection.integration === integration &&
             (connection.name === requested ||
@@ -416,7 +416,7 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
                 : `${integration} has no connection ${requested}. Known: ${known.join(", ")}`
             })
           }
-          yield* capture(host.removeConnection({
+          yield* capture(integrations.removeConnection({
             owner: match.owner,
             integration: match.integration,
             name: match.name

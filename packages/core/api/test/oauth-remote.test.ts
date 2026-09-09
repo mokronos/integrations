@@ -1,5 +1,5 @@
 import { FetchHttpClient } from "effect/unstable/http"
-import { catalogStoreFake, stubHost, stubHostContext } from "./stubs.ts"
+import { catalogStoreFake, stubIntegrations, stubIntegrationsContext } from "./stubs.ts"
 import { run, runAll } from "./effect.ts"
 import { Context, Effect, Option } from "effect"
 import { ConnectionName, IntegrationSlug } from "@integrations/contracts"
@@ -10,7 +10,7 @@ import path from "node:path"
 import {
   AuthTemplateSlug,
   CatalogStore,
-  IntegrationHost,
+  Integrations,
   OAuthClientSlug,
   OAuthError,
   OAuthFlows,
@@ -114,12 +114,12 @@ const fakeAuth = (behaviour: {
       accessToken: dies("accessToken")
     }),
     Context.add(CatalogStore, catalogStoreFake()),
-    Context.add(IntegrationHost, stubHost({ refreshConnection: () => Effect.succeed([]) }))
+    Context.add(Integrations, stubIntegrations({ refreshConnection: () => Effect.succeed([]) }))
   )
   return { record, host }
 }
 
-describe("hosted oauth flows", () => {
+describe("remote oauth flows", () => {
   test("registers against the public URL instead of a loopback port", async () => {
     const fake = fakeAuth()
     const sessions = createOAuthSessions(fake.host, {
@@ -198,7 +198,7 @@ describe("hosted oauth flows", () => {
 
 
 
-describe("the hosted callback route", () => {
+describe("the remote callback route", () => {
 
   const setup = async (
     oauthSessions: Parameters<typeof createGatewayHandler>[0]["oauth"]
@@ -206,7 +206,7 @@ describe("the hosted callback route", () => {
     const store = await run(makeStore())
     const { handle } = createGatewayHandler({
     httpClient: FetchHttpClient.layer,
-      hostServices: stubHostContext(),
+      integrationServices: stubIntegrationsContext(),
       store,
       retentionDays: 30,
       oauth: oauthSessions

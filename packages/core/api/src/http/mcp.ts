@@ -22,12 +22,12 @@ import {
 } from "@integrations/gateway-core"
 import type { InvocationOutcome } from "@integrations/contracts"
 import type { GatewayStore } from "@integrations/gateway-core"
-import { IntegrationHost } from "@integrations/integrations"
-import type { HostServices } from "@integrations/integrations"
+import { Integrations } from "@integrations/integrations"
+import type { IntegrationServices } from "@integrations/integrations"
 import { Context } from "effect"
 
-const hostOf = (options: McpGatewayOptions): IntegrationHost["Service"] =>
-  Context.get(options.hostServices, IntegrationHost)
+const integrationsOf = (options: McpGatewayOptions): Integrations["Service"] =>
+  Context.get(options.integrationServices, Integrations)
 import { Crypto, Layer, ManagedRuntime } from "effect"
 import { webCryptoLayer } from "@integrations/contracts"
 import type { HttpClient } from "effect/unstable/http"
@@ -74,7 +74,7 @@ const invocation = (options: McpGatewayOptions, input: {
 }) => invokeThroughGateway(
   {
     store: options.store,
-    host: hostOf(options),
+    integrations: integrationsOf(options),
     argumentRetentionDays: options.retentionDays,
     approvalUrlOf: (approvalId) => {
       const origin = options.dashboardUrl?.()
@@ -92,7 +92,7 @@ const invocation = (options: McpGatewayOptions, input: {
 
 export interface McpGatewayOptions {
   readonly store: GatewayStore
-  readonly hostServices: Context.Context<HostServices>
+  readonly integrationServices: Context.Context<IntegrationServices>
   readonly httpClient: Layer.Layer<HttpClient.HttpClient>
   readonly retentionDays: number
   readonly dashboardUrl?: () => string | undefined
@@ -113,7 +113,7 @@ const serverFor = async (
   const server = new McpServer({ name: "integrations-gateway", version: gatewayVersion })
   const tools = await runtime.runPromise(capture(listEffectiveTools(options.store, clientId, {
     schemas: true,
-    host: hostOf(options)
+    integrations: integrationsOf(options)
   })))
 
   for (const tool of tools) {

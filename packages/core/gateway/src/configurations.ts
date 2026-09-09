@@ -1,4 +1,4 @@
-import type { IntegrationHost, StorageError } from "@integrations/integrations"
+import type { Integrations, StorageError } from "@integrations/integrations"
 import { Effect } from "effect"
 import {
   connectionRefKey,
@@ -13,15 +13,13 @@ import {
 } from "./domain.ts"
 import { type GatewayStore, GatewayStoreError } from "./store.ts"
 
-interface ConfigurationCatalog {
-  readonly host: Pick<IntegrationHost["Service"], "toolSummaries">
-}
+type ConfigurationCatalog = Pick<Integrations["Service"], "toolSummaries">
 
 const routeKey = (connection: ConnectionRef, tool: string): string =>
   `${connectionRefKey(connection)}\u0000${tool}`
 
 const catalogTools = Effect.fn("Configurations.catalogTools")(function*(integrations: ConfigurationCatalog) {
-  const summaries = yield* integrations.host.toolSummaries()
+  const summaries = yield* integrations.toolSummaries()
   const tools = new Map<string, {
     readonly connection: ConnectionRef
     readonly tool: ToolName

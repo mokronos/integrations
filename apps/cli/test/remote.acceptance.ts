@@ -6,7 +6,7 @@ import {
   readGatewayMetadata
 } from "@mokronos/integrations-client"
 
-const HostedUrl = Schema.String.pipe(Schema.refine((value): value is string => {
+const RemoteUrl = Schema.String.pipe(Schema.refine((value): value is string => {
   try {
     return new URL(value).protocol === "https:"
   } catch {
@@ -15,7 +15,7 @@ const HostedUrl = Schema.String.pipe(Schema.refine((value): value is string => {
 }))
 const ClientCreated = Schema.Struct({ id: Schema.String })
 const KeyCreated = Schema.Struct({ secret: Schema.String })
-const HostedAcceptanceResult = Schema.Struct({
+const RemoteAcceptanceResult = Schema.Struct({
   gatewayVersion: Schema.String,
   protocolVersion: Schema.Number,
   delegatedClient: Schema.Boolean,
@@ -23,10 +23,10 @@ const HostedAcceptanceResult = Schema.Struct({
   oauthProvider: Schema.String,
   oauthCallbackUrl: Schema.String
 })
-const encodeResult = Schema.encodeSync(Schema.fromJsonString(HostedAcceptanceResult))
+const encodeResult = Schema.encodeSync(Schema.fromJsonString(RemoteAcceptanceResult))
 const decodeJsonText = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))
 
-const gatewayUrl = Schema.decodeUnknownSync(HostedUrl)(
+const gatewayUrl = Schema.decodeUnknownSync(RemoteUrl)(
   process.env["INTEGRATIONS_STAGING_URL"]
 ).replace(/\/+$/, "")
 const password = `staging-${crypto.randomUUID()}-${crypto.randomUUID()}`
@@ -72,7 +72,7 @@ const operatorRequest = (cookie: string) =>
 
 const program = Effect.gen(function*() {
   const signup = yield* post("/v1/auth/signup", {
-    body: { email, password, tenantName: "Hosted acceptance" }
+    body: { email, password, tenantName: "Remote acceptance" }
   })
   if (signup.response.status < 200 || signup.response.status >= 300) {
     return yield* Effect.die(
@@ -81,7 +81,7 @@ const program = Effect.gen(function*() {
   }
   const setCookie = signup.response.headers["set-cookie"] ?? ""
   if (!setCookie.includes("Secure")) {
-    return yield* Effect.die(new Error("Hosted session cookie is not Secure"))
+    return yield* Effect.die(new Error("Remote session cookie is not Secure"))
   }
   const cookie = setCookie.split(";", 1)[0] ?? ""
   const request = operatorRequest(cookie)
@@ -105,7 +105,7 @@ const program = Effect.gen(function*() {
     )
     const delegated = yield* makeGatewayClient({ url: gatewayUrl, apiKey: key.secret })
     if ((yield* delegated.provisioning.listConnections()).connections.length !== 0) {
-      return yield* Effect.die(new Error("A fresh hosted tenant unexpectedly has connections"))
+      return yield* Effect.die(new Error("A fresh remote tenant unexpectedly has connections"))
     }
 
     const administrative = yield* HttpClient.get(`${gatewayUrl}/v1/clients`, {
@@ -140,7 +140,7 @@ const program = Effect.gen(function*() {
       administrationRejected: true,
       oauthProvider,
       oauthCallbackUrl: `${gatewayUrl}/v1/oauth/callback`
-    } satisfies typeof HostedAcceptanceResult.Type
+    } satisfies typeof RemoteAcceptanceResult.Type
   }).pipe(
     Effect.ensuring(Effect.ignore(request("/v1/auth/account/delete", { password })))
   )

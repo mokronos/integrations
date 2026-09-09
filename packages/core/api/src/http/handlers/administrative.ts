@@ -3,7 +3,7 @@ import {
   PositiveInt,
   whenPresentMap
 } from "@integrations/contracts"
-import { IntegrationHost } from "@integrations/integrations"
+import { Integrations } from "@integrations/integrations"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
@@ -66,7 +66,7 @@ const approvalWebhookUrl = (value: string): URL | undefined => {
 export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrative", (handlers) =>
   Effect.gen(function*() {
     const store = yield* GatewayStoreService
-    const host = yield* IntegrationHost
+    const integrations = yield* Integrations
     const config = yield* GatewayConfig
     return handlers
       .handle("overview", () =>
@@ -74,7 +74,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           const tenantId = yield* requireTenant
           const [counts, connections, recentActivity] = yield* Effect.all([
             capture(store.overviewCounts(tenantId)),
-            capture(host.listConnections()),
+            capture(integrations.listConnections()),
             capture(store.listAudit(tenantId, {
               limit: PositiveInt.make(5),
               offset: NonNegativeInt.make(0)
@@ -99,7 +99,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           capture(store.findClientByName(tenantId, name)),
           capture(store.listAccessProfiles(tenantId)),
           capture(store.listApprovalPolicies(tenantId)),
-          capture(host.toolSummaries())
+          capture(integrations.toolSummaries())
         ])
         if (client !== undefined || profiles.some((profile) => profile.name === name) || policies.some((policy) => policy.name === name)) {
           return yield* new ApiBadRequest({ error: `The name ${name} is already in use. Choose another name or use the existing client.` })
@@ -122,7 +122,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           if ((yield* capture(store.findClientByName(tenantId, body.name))) !== undefined) {
             return yield* new ApiBadRequest({ error: `A client named ${body.name} already exists` })
           }
-          const defaults = yield* capture(reconcileDefaults({ store, integrations: { host }, tenantId }))
+          const defaults = yield* capture(reconcileDefaults({ store, integrations, tenantId }))
           const accessProfile = body.accessProfileId === undefined
             ? defaults.accessProfile
             : yield* capture(store.findAccessProfile(tenantId, body.accessProfileId))
@@ -246,7 +246,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           return {
             tools: yield* capture(listEffectiveTools(store, clientId, {
               schemas: request.query["schemas"],
-              host
+              integrations
             }))
           }
         }))
@@ -423,7 +423,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
       }))
       .handle("approve", (request) => Effect.gen(function*() {
         return yield* capture(approveApproval(
-          { store, host, retentionDays: config.retentionDays },
+          { store, integrations, retentionDays: config.retentionDays },
           { tenantId: yield* requireTenant, id: request.params["id"], decidedBy: yield* decidedBy }
         )).pipe(
           Effect.catchTag("ApprovalNotFound", ({ id }) => new ApiNotFound({ error: `Unknown approval ${id}` })),
@@ -444,13 +444,13 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           const tenantId = yield* requireTenant
           const slug = request.query["integration"]
           const slugs = slug === undefined
-            ? (yield* capture(host.listIntegrations()))
+            ? (yield* capture(integrations.listIntegrations()))
               .map((entry) => entry.slug)
             : [slug]
           const reports: Array<DriftReport> = []
           for (const integration of slugs) {
             reports.push(yield* capture(refreshIntegrationSnapshot(
-              { store: store, integrations: { host } },
+              { store: store, integrations },
               integration,
               tenantId
             )).pipe(Effect.catchTag("DriftRefreshError", (failure) =>

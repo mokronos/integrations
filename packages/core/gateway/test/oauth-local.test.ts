@@ -6,7 +6,7 @@ import { FetchHttpClient, HttpClient, type HttpClientResponse } from "effect/uns
 import {
   AuthTemplateSlug,
   CatalogStore,
-  IntegrationHost,
+  Integrations,
   OAuthClientSlug,
   OAuthError,
   OAuthFlows,
@@ -66,21 +66,21 @@ const catalogStore: CatalogStore["Service"] = {
   putSpecDocument: notUsed("CatalogStore.putSpecDocument")
 }
 
-const integrationHost: IntegrationHost["Service"] = {
+const integrations: Integrations["Service"] = {
   refreshConnection: () => Effect.succeed([]),
-  listIntegrations: notUsed("IntegrationHost.listIntegrations"),
-  findIntegration: notUsed("IntegrationHost.findIntegration"),
-  addMcp: notUsed("IntegrationHost.addMcp"),
-  addOpenApi: notUsed("IntegrationHost.addOpenApi"),
-  renameIntegration: notUsed("IntegrationHost.renameIntegration"),
-  removeIntegration: notUsed("IntegrationHost.removeIntegration"),
-  createConnection: notUsed("IntegrationHost.createConnection"),
-  listConnections: notUsed("IntegrationHost.listConnections"),
-  removeConnection: notUsed("IntegrationHost.removeConnection"),
-  toolSummaries: notUsed("IntegrationHost.toolSummaries"),
-  listTools: notUsed("IntegrationHost.listTools"),
-  describeTool: notUsed("IntegrationHost.describeTool"),
-  execute: notUsed("IntegrationHost.execute")
+  listIntegrations: notUsed("Integrations.listIntegrations"),
+  findIntegration: notUsed("Integrations.findIntegration"),
+  addMcp: notUsed("Integrations.addMcp"),
+  addOpenApi: notUsed("Integrations.addOpenApi"),
+  renameIntegration: notUsed("Integrations.renameIntegration"),
+  removeIntegration: notUsed("Integrations.removeIntegration"),
+  createConnection: notUsed("Integrations.createConnection"),
+  listConnections: notUsed("Integrations.listConnections"),
+  removeConnection: notUsed("Integrations.removeConnection"),
+  toolSummaries: notUsed("Integrations.toolSummaries"),
+  listTools: notUsed("Integrations.listTools"),
+  describeTool: notUsed("Integrations.describeTool"),
+  execute: notUsed("Integrations.execute")
 }
 
 const operations = (behaviour: {
@@ -118,7 +118,7 @@ const operations = (behaviour: {
       accessToken: notUsed("accessToken")
     }),
     Context.add(CatalogStore, catalogStore),
-    Context.add(IntegrationHost, integrationHost)
+    Context.add(Integrations, integrations)
   )
   return { redirectUriUsed: () => redirectUri, host }
 }

@@ -17,7 +17,7 @@ import {
   ToolName
 } from "./gateway.ts"
 import type { GatewayStore } from "./gateway.ts"
-import { stubHostContext } from "./stubs.ts"
+import { stubIntegrationsContext } from "./stubs.ts"
 
 const stores: Array<GatewayStore> = []
 const directories: Array<string> = []
@@ -54,7 +54,7 @@ const setup = async () => {
   }))
   const key = (await run(generateApiKey))
   await run(store.addApiKey({ id: key.id, clientId: administrator.id, hash: key.hash }))
-  const hostServices = stubHostContext({
+  const integrationServices = stubIntegrationsContext({
     toolSummaries: () => Effect.succeed([{
       address: ToolAddress.make("tools.mail.org.primary.sendEmail"),
       name: ToolName.make("sendEmail"),
@@ -68,7 +68,7 @@ const setup = async () => {
   const { handle } = createGatewayHandler({
     httpClient: FetchHttpClient.layer,
     store, retentionDays: 30,
-    hostServices,
+    integrationServices,
     oauth: {
       start: () => Effect.die(new Error("not used")),
       get: () => Effect.sync((): undefined => undefined),

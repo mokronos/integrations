@@ -1,7 +1,7 @@
 import {
   whenPresentMap
 } from "@integrations/contracts"
-import { IntegrationHost } from "@integrations/integrations"
+import { Integrations } from "@integrations/integrations"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { deliverDueApprovalNotifications } from "@integrations/gateway-core"
@@ -27,7 +27,7 @@ import { capture } from "../observability.ts"
 export const DelegatedLayer = HttpApiBuilder.group(GatewayApi, "delegated", (handlers) =>
   Effect.gen(function*() {
     const store = yield* GatewayStoreService
-    const host = yield* IntegrationHost
+    const integrations = yield* Integrations
     const config = yield* GatewayConfig
     return handlers
       .handle("listTools", (request) =>
@@ -36,7 +36,7 @@ export const DelegatedLayer = HttpApiBuilder.group(GatewayApi, "delegated", (han
           return {
             tools: yield* capture(listEffectiveTools(store, client.id, {
               schemas: request.query["schemas"],
-              host
+              integrations
             }))
           }
         }))
@@ -46,7 +46,7 @@ export const DelegatedLayer = HttpApiBuilder.group(GatewayApi, "delegated", (han
           return yield* capture(invokeThroughGateway(
             {
               store,
-              host,
+              integrations,
               argumentRetentionDays: config.retentionDays,
               approvalUrlOf: (approvalId) => {
                 const origin = config.dashboardUrl?.()

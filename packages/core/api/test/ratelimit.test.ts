@@ -14,7 +14,7 @@ import {
   newClientId
 } from "./gateway.ts"
 import type { GatewayStore } from "./gateway.ts"
-import { stubHostContext } from "./stubs.ts"
+import { stubIntegrationsContext } from "./stubs.ts"
 
 const JsonBody = Schema.Record(Schema.String, Schema.Json)
 
@@ -56,7 +56,7 @@ describe("gateway traffic shaping", () => {
 
     const { handle } = createGatewayHandler({
     httpClient: FetchHttpClient.layer,
-      hostServices: stubHostContext(),
+      integrationServices: stubIntegrationsContext(),
       store,
       retentionDays: 30,
       oauth: {

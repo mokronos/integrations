@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto"
-import { applySchema, CredentialStore, Database, openValue, sealValue, SqlValue, StorageError, type HostStorage, type SqlRow, type SqlStatement } from "@integrations/integrations"
+import { applySchema, CredentialStore, Database, openValue, sealValue, SqlValue, StorageError, type IntegrationStorage, type SqlRow, type SqlStatement } from "@integrations/integrations"
 import { Effect, Layer, Option, Predicate, Schema } from "effect"
 import type { D1Cell, D1DatabaseLike } from "./cloudflare.ts"
 
@@ -144,10 +144,10 @@ export const d1CredentialLayer = (
     })
   )
 
-export const d1HostStorage = (
+export const d1IntegrationStorage = (
   database: D1DatabaseLike,
   masterKey: Uint8Array
-): HostStorage => ({
+): IntegrationStorage => ({
   storage: Layer.mergeAll(
     d1DatabaseLayer(database),
     d1CredentialLayer(database, masterKey)

@@ -86,7 +86,7 @@ describe("i and ii CLI help", () => {
     }
   }, 30_000)
 
-  test("ii is a strict superset of i and includes operator, account, and host commands", () => {
+  test("ii is a strict superset of i and includes operator, account, and service commands", () => {
     const agent = runAgent(["--help"])
     const operator = runOperator(["--help"])
     const agentCommands = agent.stdout

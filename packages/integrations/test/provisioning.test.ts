@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import { Cause, Context, Effect, Exit, Option, Result } from "effect"
 import { IntegrationSlug } from "@integrations/contracts"
-import { IntegrationHost } from "../src/host.ts"
+import { Integrations } from "../src/integrations.ts"
 import { SpecError } from "../src/errors.ts"
 import type { EndpointClassification, Integration } from "@integrations/contracts"
 import { installClassified } from "../src/provision.ts"
@@ -27,13 +27,13 @@ const installed = (
   slug: IntegrationSlug.make(overrides.slug)
 })
 
-const hostWith = (options: {
+const integrationsWith = (options: {
   readonly existing?: Integration
   readonly added: Array<{ readonly slug: string; readonly name: string }>
-}): Context.Context<IntegrationHost> => {
+}): Context.Context<Integrations> => {
   const dies = (member: string) => () =>
     Effect.die(new Error(`${member} is not used by these tests`))
-  return Context.make(IntegrationHost, {
+  return Context.make(Integrations, {
     listIntegrations: dies("listIntegrations"),
     findIntegration: (slug) => {
       if (options.existing !== undefined && options.existing.slug === slug) {
@@ -65,7 +65,7 @@ const hostWith = (options: {
 
 const install = (
   classified: typeof classification,
-  host: Context.Context<IntegrationHost>
+  host: Context.Context<Integrations>
 ) => Effect.runPromiseExit(installClassified(classified).pipe(Effect.provide(host)))
 
 describe("provisioning a discovered URL", () => {
@@ -73,7 +73,7 @@ describe("provisioning a discovered URL", () => {
     const added: Array<{ readonly slug: string; readonly name: string }> = []
     const exit = await install(
       { ...classification, slug: "gmail", name: "Gmail" },
-      hostWith({ added })
+      integrationsWith({ added })
     )
 
     expect(added).toEqual([{ slug: "gmail", name: "Gmail" }])
@@ -82,7 +82,7 @@ describe("provisioning a discovered URL", () => {
 
   it("falls back to what the endpoint said it was", async () => {
     const added: Array<{ readonly slug: string; readonly name: string }> = []
-    await install(classification, hostWith({ added }))
+    await install(classification, integrationsWith({ added }))
 
     expect(added).toEqual([{ slug: "gmailmcp", name: "Gmailmcp" }])
   })
@@ -90,7 +90,7 @@ describe("provisioning a discovered URL", () => {
   it("is idempotent for the URL already installed under that slug", async () => {
     const added: Array<{ readonly slug: string; readonly name: string }> = []
     const existing = installed({ slug: "gmailmcp", name: "Gmail" })
-    const exit = await install(classification, hostWith({ existing, added }))
+    const exit = await install(classification, integrationsWith({ existing, added }))
 
     expect(added).toEqual([])
     expect(Exit.isSuccess(exit) && exit.value.name).toBe("Gmail")
@@ -105,7 +105,7 @@ describe("provisioning a discovered URL", () => {
     })
     const exit = await install(
       { ...classification, slug: "gmail" },
-      hostWith({ existing, added })
+      integrationsWith({ existing, added })
     )
 
     expect(Exit.isFailure(exit)).toBe(true)

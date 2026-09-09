@@ -1,12 +1,12 @@
-export { IntegrationHost } from "./host.ts"
+export { Integrations } from "./integrations.ts"
 export type {
   AddMcpOptions,
   AddOpenApiOptions,
   CreateConnectionOptions,
-  HostFailure,
+  IntegrationFailure,
   ToolFilter,
   ToolTarget
-} from "./host.ts"
+} from "./integrations.ts"
 export { CatalogStore } from "./catalog/store.ts"
 export type {
   ConnectionRecord,
@@ -14,7 +14,7 @@ export type {
   OAuthClientRecord,
   OAuthFlowRecord
 } from "./catalog/store.ts"
-export { McpHost } from "./mcp/client.ts"
+export { McpClient } from "./mcp/client.ts"
 export { OAuthFlows } from "./oauth/flows.ts"
 export { OpenApiInvoker } from "./openapi/invoke.ts"
 export { SpecCache } from "./openapi/cache.ts"
@@ -32,14 +32,14 @@ export {
 } from "./storage/credentials.ts"
 
 export {
-  createHostRuntime,
-  hostLayer,
-  hostServicesOf,
+  createIntegrationRuntime,
+  integrationLayer,
+  integrationServicesOf,
   localLayer,
   stubbedLayer,
   unavailableHttpClientLayer
 } from "./runtime.ts"
-export type { HostServices, HostStorage } from "./runtime.ts"
+export type { IntegrationServices, IntegrationStorage } from "./runtime.ts"
 export { listIntegrationOverviews } from "./overview.ts"
 export { installClassified, provisionIntegration } from "./provision.ts"
 export { validateIntegrationNode } from "./validate.ts"

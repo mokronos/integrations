@@ -36,7 +36,7 @@ import { ErrorCapture, traceIdFor } from "./observability.ts"
 import type { ErrorSink } from "./observability.ts"
 import type { GatewaySettings, SignInPolicy } from "./services.ts"
 import { NonNegativeIntFromString, whenPresent } from "@integrations/contracts"
-import type { HostServices } from "@integrations/integrations"
+import type { IntegrationServices } from "@integrations/integrations"
 import { GatewayStoreService } from "@integrations/gateway-core"
 import { webCryptoLayer } from "@integrations/contracts"
 import type { GatewayStore } from "@integrations/gateway-core"
@@ -51,7 +51,7 @@ export interface GatewayRequestContext {
 
 export interface GatewayHandlerOptions extends GatewaySettings {
   readonly store: GatewayStore
-  readonly hostServices: Context.Context<HostServices>
+  readonly integrationServices: Context.Context<IntegrationServices>
   readonly httpClient: Layer.Layer<HttpClient.HttpClient>
   readonly oauth: OAuthSessions
   readonly sessions?: SignInPolicy
@@ -125,7 +125,7 @@ export const gatewayAppLayer = (options: GatewayHandlerOptions) => {
   const dependencies = Layer.mergeAll(
     errorCapture,
     Layer.succeed(GatewayStoreService, options.store),
-    Layer.succeedContext(options.hostServices),
+    Layer.succeedContext(options.integrationServices),
     Layer.succeed(OAuthFlowSessions, options.oauth),
     Layer.succeed(GatewayConfig, {
       retentionDays: options.retentionDays,
@@ -180,7 +180,7 @@ export interface GatewayHandle {
 export const createGatewayHandler = (options: GatewayHandlerOptions): GatewayHandle => {
   const mcp = createMcpGatewayHandler({
     store: options.store,
-    hostServices: options.hostServices,
+    integrationServices: options.integrationServices,
     httpClient: options.httpClient,
     retentionDays: options.retentionDays,
     ...whenPresent("dashboardUrl", options.dashboardUrl),

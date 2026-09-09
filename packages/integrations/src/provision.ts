@@ -2,15 +2,15 @@ import { Effect, Option, Schema } from "effect"
 import { whenPresent } from "@integrations/contracts"
 import { requiresAuthentication } from "./catalog/auth-methods.ts"
 import { classify } from "./classify.ts"
-import type { McpHost } from "./mcp/client.ts"
+import type { McpClient } from "./mcp/client.ts"
 import type { SpecCache } from "./openapi/cache.ts"
 
-type ClassifyServices = McpHost | SpecCache
-import { IntegrationHost } from "./host.ts"
+type ClassifyServices = McpClient | SpecCache
+import { Integrations } from "./integrations.ts"
 import { AuthTemplateSlug } from "./catalog/ids.ts"
 import { InvalidInputError } from "./errors.ts"
 import type { DetectionError } from "./errors.ts"
-import type { HostFailure } from "./host.ts"
+import type { IntegrationFailure } from "./integrations.ts"
 import {
   ConnectionName,
   EndpointClassification,
@@ -22,8 +22,8 @@ import {
 
 export const installClassified = Effect.fn("Integrations.install")(function*(
   classification: EndpointClassification
-): Effect.fn.Return<Integration, HostFailure, IntegrationHost> {
-  const host = yield* IntegrationHost
+): Effect.fn.Return<Integration, IntegrationFailure, Integrations> {
+  const host = yield* Integrations
   const decoded = yield* Schema.decodeUnknownEffect(EndpointClassification)(classification).pipe(
     Effect.mapError((cause) => new InvalidInputError({
       field: "classification",
@@ -74,8 +74,8 @@ const named = (
 const ensureConnection = Effect.fn("Integrations.ensureConnection")(function*(
   integration: Integration,
   connectionName: ConnectionName
-): Effect.fn.Return<boolean, HostFailure, IntegrationHost> {
-  const host = yield* IntegrationHost
+): Effect.fn.Return<boolean, IntegrationFailure, Integrations> {
+  const host = yield* Integrations
   const existing = yield* host.listConnections({ integration: integration.slug })
   if (existing.some((connection) => connection.name === connectionName)) return true
 
@@ -96,10 +96,10 @@ export const provisionIntegration = Effect.fn("Integrations.provision")(function
   options: DiscoverIntegrationsOptions = {}
 ): Effect.fn.Return<
   IntegrationDiscovery,
-  HostFailure | DetectionError,
-  IntegrationHost | ClassifyServices
+  IntegrationFailure | DetectionError,
+  Integrations | ClassifyServices
 > {
-  const host = yield* IntegrationHost
+  const host = yield* Integrations
   const classification = named(yield* classify(url), options)
   const integration = yield* installClassified(classification)
   const connectionName = ConnectionName.make(options.connection ?? "default")

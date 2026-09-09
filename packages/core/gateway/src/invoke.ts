@@ -2,7 +2,7 @@ import { whenPresent } from "@integrations/contracts"
 import type { InvocationOutcome } from "@integrations/contracts"
 import { Crypto, DateTime, Duration, Effect, Schema } from "effect"
 import type { HttpClient } from "effect/unstable/http"
-import type { IntegrationHost } from "@integrations/integrations"
+import type { Integrations } from "@integrations/integrations"
 import { ToolAddress } from "@integrations/contracts"
 import { authorizeInvocation } from "./authorize.ts"
 import { defaultApprovalExpiryHours, defaultArgumentRetentionDays } from "./config.ts"
@@ -31,7 +31,7 @@ export const boundToolAddress = (connection: ConnectionRef, tool: ToolName): Too
 
 export interface InvokeDependencies {
   readonly store: GatewayStore
-  readonly host: IntegrationHost["Service"]
+  readonly integrations: Integrations["Service"]
   readonly argumentRetentionDays?: number
   readonly approvalExpiryHours?: number
   readonly approvalUrlOf?: (approvalId: ApprovalId) => string | undefined
@@ -171,7 +171,7 @@ export const invokeThroughGateway = Effect.fn("Invocation.invokeThroughGateway")
     readonly arguments: Json
   }
 ): Effect.fn.Return<InvocationOutcome, GatewayStoreError, Crypto.Crypto | HttpClient.HttpClient> {
-  const { store, host } = dependencies
+  const { store, integrations } = dependencies
   const retentionDays = dependencies.argumentRetentionDays ?? defaultArgumentRetentionDays
   const expiryHours = dependencies.approvalExpiryHours ?? defaultApprovalExpiryHours
 
@@ -212,7 +212,7 @@ export const invokeThroughGateway = Effect.fn("Invocation.invokeThroughGateway")
   }
 
   return yield* executeAuthorized(
-    { store, host, retentionDays },
+    { store, integrations, retentionDays },
     authorization,
     input.arguments
   )
@@ -221,7 +221,7 @@ export const invokeThroughGateway = Effect.fn("Invocation.invokeThroughGateway")
 export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(function*(
   dependencies: {
     readonly store: GatewayStore
-    readonly host: IntegrationHost["Service"]
+    readonly integrations: Integrations["Service"]
     readonly retentionDays: number
   },
   authorization: Extract<Authorization, { status: "authorized" }>,
@@ -232,7 +232,7 @@ export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(funct
   Crypto.Crypto
 > {
   const address = boundToolAddress(authorization.connection, authorization.accessProfileTool.tool)
-  const invocation = yield* Effect.result(dependencies.host.execute(address, argumentsValue))
+  const invocation = yield* Effect.result(dependencies.integrations.execute(address, argumentsValue))
   if (invocation._tag === "Success") {
     yield* dependencies.store.recordAudit(
       yield* auditFor(authorization, "succeeded", null, argumentsValue, dependencies.retentionDays)
@@ -261,7 +261,7 @@ export const listEffectiveTools = Effect.fn("Invocation.listEffectiveTools")(fun
   clientId: Parameters<GatewayStore["findAccessProfileForClient"]>[0],
   options: {
     readonly schemas?: boolean
-    readonly host?: IntegrationHost["Service"]
+    readonly integrations?: Integrations["Service"]
   } = {}
 ): Effect.fn.Return<ReadonlyArray<EffectiveTool>, GatewayStoreError> {
   const [accessProfile, approvalPolicy] = yield* Effect.all([
@@ -286,9 +286,9 @@ export const listEffectiveTools = Effect.fn("Invocation.listEffectiveTools")(fun
     connection: profileTool.connection,
     decision: policyTool.decision
   }))
-  if (options.schemas !== true || options.host === undefined) return base
+  if (options.schemas !== true || options.integrations === undefined) return base
 
-  const host = options.host
+  const host = options.integrations
   return yield* Effect.forEach(base, (entry) => {
     return host.describeTool(boundToolAddress(entry.connection, entry.tool)).pipe(
       Effect.map((described) => ({

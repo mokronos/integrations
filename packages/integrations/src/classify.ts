@@ -2,7 +2,7 @@ import { Effect, Option, Result } from "effect"
 import { serviceName, slugify } from "@integrations/contracts"
 import type { EndpointClassification } from "@integrations/contracts"
 import { DetectionError } from "./errors.ts"
-import { McpHost } from "./mcp/client.ts"
+import { McpClient } from "./mcp/client.ts"
 import { SpecCache } from "./openapi/cache.ts"
 
 const hostNameOf = (url: string): string =>
@@ -13,9 +13,9 @@ const hostNameOf = (url: string): string =>
 
 const asMcp = (
   url: string
-): Effect.Effect<EndpointClassification, DetectionError, McpHost> =>
+): Effect.Effect<EndpointClassification, DetectionError, McpClient> =>
   Effect.gen(function* () {
-    const mcp = yield* McpHost
+    const mcp = yield* McpClient
     const probe = yield* mcp.probe(url)
     const classified: EndpointClassification = {
       kind: "mcp",

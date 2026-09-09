@@ -6,8 +6,8 @@ import {
   connectionCredentialKey,
   writeTokens
 } from "../src/storage/credentials.ts"
-import { IntegrationHost } from "../src/host.ts"
-import { McpHost } from "../src/mcp/client.ts"
+import { Integrations } from "../src/integrations.ts"
+import { McpClient } from "../src/mcp/client.ts"
 import { OAuthFlows } from "../src/oauth/flows.ts"
 import { OpenApiInvoker } from "../src/openapi/invoke.ts"
 import { SpecCache } from "../src/openapi/cache.ts"
@@ -21,9 +21,9 @@ const stubMcp = (options: {
   readonly omitReadOnlyHint?: boolean
   readonly onCall?: (tool: string, credential: Option.Option<string>) => void
   readonly onList?: () => void
-} = {}): Layer.Layer<McpHost> =>
+} = {}): Layer.Layer<McpClient> =>
   Layer.effect(
-    McpHost,
+    McpClient,
     Effect.sync(() => ({
       probe: () => Effect.succeed({
         connected: true,
@@ -68,24 +68,24 @@ const stubMcp = (options: {
     }))
   )
 
-const testHost = (mcp: Layer.Layer<McpHost>) =>
+const testIntegrations = (mcp: Layer.Layer<McpClient>) =>
   stubbedLayer(Layer.mergeAll(mcp, OpenApiInvoker.unavailableTestLayer))
 
 const run = <A, E>(
   operation: Effect.Effect<
     A,
     E,
-    IntegrationHost | CatalogStore | CredentialStore | McpHost | OAuthFlows | OpenApiInvoker | SpecCache
+    Integrations | CatalogStore | CredentialStore | McpClient | OAuthFlows | OpenApiInvoker | SpecCache
   >,
-  mcp: Layer.Layer<McpHost> = stubMcp()
+  mcp: Layer.Layer<McpClient> = stubMcp()
 ): Promise<A> =>
-  Effect.runPromise(operation.pipe(Effect.provide(testHost(mcp))))
+  Effect.runPromise(operation.pipe(Effect.provide(testIntegrations(mcp))))
 
 const notes = IntegrationSlug.make("notes")
 const primary = ConnectionName.make("primary")
 
 const install = Effect.fn("install")(function* () {
-  const host = yield* IntegrationHost
+  const host = yield* Integrations
   yield* host.addMcp({
     endpoint: "https://notes.example.com/mcp",
     name: "Notes",
@@ -102,7 +102,7 @@ const install = Effect.fn("install")(function* () {
 describe("the catalog", () => {
   it("records what a probe found, and calls it removable", async () => {
     const integrations = await run(Effect.gen(function* () {
-      const host = yield* IntegrationHost
+      const host = yield* Integrations
       yield* install()
       return yield* host.listIntegrations()
     }))
@@ -116,7 +116,7 @@ describe("the catalog", () => {
 
   it("answers nothing for a slug it does not hold", async () => {
     const found = await run(Effect.gen(function* () {
-      const host = yield* IntegrationHost
+      const host = yield* Integrations
       return yield* host.findIntegration(IntegrationSlug.make("absent"))
     }))
     expect(Option.isNone(found)).toBe(true)
@@ -160,7 +160,7 @@ describe("the catalog", () => {
         })),
         { accessToken: "expired", expiresAt: Date.now() - 1 }
       )
-      const connections = yield* (yield* IntegrationHost).listConnections()
+      const connections = yield* (yield* Integrations).listConnections()
       return connections[0]
     }))
 
@@ -207,7 +207,7 @@ describe("the catalog", () => {
         })),
         { accessToken: "current", expiresAt: tokenExpiry }
       )
-      const connections = yield* (yield* IntegrationHost).listConnections()
+      const connections = yield* (yield* Integrations).listConnections()
       return connections[0]
     }))
 
@@ -218,7 +218,7 @@ describe("the catalog", () => {
 
   it("takes a connection's tools with it when the integration goes", async () => {
     const remaining = await run(Effect.gen(function* () {
-      const host = yield* IntegrationHost
+      const host = yield* Integrations
       yield* install()
       yield* host.removeIntegration(notes)
       return yield* host.listConnections()
@@ -228,7 +228,7 @@ describe("the catalog", () => {
 
   it("refuses to guess a credential for a template the integration dropped", async () => {
     const outcome = await run(Effect.result(Effect.gen(function* () {
-      const host = yield* IntegrationHost
+      const host = yield* Integrations
       const store = yield* CatalogStore
       yield* install()
       const found = yield* store.findIntegration(notes)
@@ -259,7 +259,7 @@ describe("the catalog", () => {
 
   it("renames an integration without moving what addresses it", async () => {
     const after = await run(Effect.gen(function* () {
-      const host = yield* IntegrationHost
+      const host = yield* Integrations
       yield* install()
       yield* host.renameIntegration(notes, "Field Notes")
       const found = yield* host.findIntegration(notes)
@@ -275,7 +275,7 @@ describe("the catalog", () => {
 
   it("takes the credentials of every connection with it too", async () => {
     const held = await run(Effect.gen(function* () {
-      const host = yield* IntegrationHost
+      const host = yield* Integrations
       const credentials = yield* CredentialStore
       yield* host.addMcp({
         endpoint: "https://notes.example.com/mcp",
@@ -302,7 +302,7 @@ describe("the catalog", () => {
 describe("connections", () => {
   it("refuses a template the integration does not offer", async () => {
     const outcome = await run(Effect.result(Effect.gen(function* () {
-      const host = yield* IntegrationHost
+      const host = yield* Integrations
       yield* install()
       return yield* host.createConnection({
         owner: "org",
@@ -325,7 +325,7 @@ describe("connections", () => {
 
   it("drops the credential with the connection", async () => {
     const held = await run(Effect.gen(function* () {
-      const host = yield* IntegrationHost
+      const host = yield* Integrations
       const credentials = yield* CredentialStore
       yield* host.addMcp({
         endpoint: "https://notes.example.com/mcp",
@@ -355,7 +355,7 @@ describe("tools", () => {
     const counted = stubMcp({ onList: () => { listings += 1 } })
     const seen = await run(
       Effect.gen(function* () {
-        const host = yield* IntegrationHost
+        const host = yield* Integrations
         yield* install()
         const afterConnect = listings
         yield* host.listTools({ integration: notes })
@@ -375,7 +375,7 @@ describe("tools", () => {
     const counted = stubMcp({ onList: () => { listings += 1 } })
     const seen = await run(
       Effect.gen(function* () {
-        const host = yield* IntegrationHost
+        const host = yield* Integrations
         yield* install()
         yield* host.refreshConnection({ owner: "org", integration: notes, name: primary })
         return listings
@@ -388,7 +388,7 @@ describe("tools", () => {
   it("drops a tool the upstream stopped exposing", async () => {
     let shrunk = false
     const shrinking = Layer.effect(
-      McpHost,
+      McpClient,
       Effect.sync(() => ({
         probe: () => Effect.succeed({
           connected: true, requiresAuthentication: false, requiresOAuth: false,
@@ -406,7 +406,7 @@ describe("tools", () => {
     )
     const names = await run(
       Effect.gen(function* () {
-        const host = yield* IntegrationHost
+        const host = yield* Integrations
         yield* install()
         const before = (yield* host.toolSummaries({ integration: notes })).length
         shrunk = true
@@ -421,7 +421,7 @@ describe("tools", () => {
 
   it("addresses every tool a connection exposes", async () => {
     const tools = await run(Effect.gen(function* () {
-      const host = yield* IntegrationHost
+      const host = yield* Integrations
       yield* install()
       return yield* host.listTools({ integration: notes })
     }))
@@ -433,7 +433,7 @@ describe("tools", () => {
 
   it("allows only a tool its own source declares read-only", async () => {
     const decisions = await run(Effect.gen(function* () {
-      const host = yield* IntegrationHost
+      const host = yield* Integrations
       yield* install()
       const tools = yield* host.toolSummaries({ integration: notes })
       return Object.fromEntries(tools.map((tool) => [tool.name, tool.defaultDecision]))
@@ -447,7 +447,7 @@ describe("tools", () => {
   it("requires approval when a source declares no read-only hint at all", async () => {
     const decisions = await run(
       Effect.gen(function* () {
-        const host = yield* IntegrationHost
+        const host = yield* Integrations
         yield* install()
         const tools = yield* host.toolSummaries({ integration: notes })
         return tools.map((tool) => tool.defaultDecision)
@@ -459,7 +459,7 @@ describe("tools", () => {
 
   it("resolves a tool by integration and name as well as by address", async () => {
     const both = await run(Effect.gen(function* () {
-      const host = yield* IntegrationHost
+      const host = yield* Integrations
       yield* install()
       const byName = yield* host.describeTool({ integration: notes, name: "search_notes" })
       const byAddress = yield* host.describeTool(byName.address)
@@ -473,7 +473,7 @@ describe("tools", () => {
 
   it("rejects an address it holds no tool for", async () => {
     const outcome = await run(Effect.result(Effect.gen(function* () {
-      const host = yield* IntegrationHost
+      const host = yield* Integrations
       yield* install()
       return yield* host.execute(
         ToolAddress.make("tools.notes.org.absent.search_notes"),
@@ -493,7 +493,7 @@ describe("tools", () => {
 
   it("surfaces a server-reported tool error as a failure", async () => {
     const failing = Layer.effect(
-      McpHost,
+      McpClient,
       Effect.sync(() => ({
         probe: () => Effect.succeed({
           connected: true,
@@ -520,7 +520,7 @@ describe("tools", () => {
     )
     const outcome = await run(
       Effect.result(Effect.gen(function* () {
-        const host = yield* IntegrationHost
+        const host = yield* Integrations
         yield* install()
         return yield* host.execute(
           ToolAddress.make("tools.notes.org.primary.search_notes"),
@@ -538,7 +538,7 @@ describe("tools", () => {
 
   it("unwraps an MCP envelope on the way out", async () => {
     const out = await run(Effect.gen(function* () {
-      const host = yield* IntegrationHost
+      const host = yield* Integrations
       yield* install()
       return yield* host.execute(
         ToolAddress.make("tools.notes.org.primary.search_notes"),
@@ -552,7 +552,7 @@ describe("tools", () => {
     const seen: Array<Option.Option<string>> = []
     await run(
       Effect.gen(function* () {
-        const host = yield* IntegrationHost
+        const host = yield* Integrations
         yield* install()
         yield* host.execute(
           ToolAddress.make("tools.notes.org.primary.search_notes"),

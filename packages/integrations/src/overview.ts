@@ -1,7 +1,7 @@
 import { Effect } from "effect"
 import { whenPresent } from "@integrations/contracts"
 import { requiresAuthentication } from "./catalog/auth-methods.ts"
-import { IntegrationHost } from "./host.ts"
+import { Integrations } from "./integrations.ts"
 import type { StorageError } from "./errors.ts"
 import type { IntegrationOverview, Tool } from "@integrations/contracts"
 
@@ -11,8 +11,8 @@ interface ConnectionTools {
 }
 
 export const listIntegrationOverviews = Effect.fn("Integrations.listOverviews")(
-  function*(): Effect.fn.Return<ReadonlyArray<IntegrationOverview>, StorageError, IntegrationHost> {
-    const host = yield* IntegrationHost
+  function*(): Effect.fn.Return<ReadonlyArray<IntegrationOverview>, StorageError, Integrations> {
+    const host = yield* Integrations
     const [integrations, connections] = yield* Effect.all([
       host.listIntegrations(),
       host.listConnections()

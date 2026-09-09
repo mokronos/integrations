@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { Crypto, Effect } from "effect"
 import { ToolAddress } from "@integrations/contracts"
-import type { IntegrationHost } from "@integrations/integrations"
+import type { Integrations } from "@integrations/integrations"
 import {
   Alias,
   ClientId,
@@ -44,8 +44,8 @@ const summary = (integration: string, name: string, tool: string, defaultDecisio
   defaultDecision
 })
 const catalog = (tools: ReadonlyArray<ReturnType<typeof summary>>) => ({
-  host: { toolSummaries: () => Effect.succeed(tools) }
-} satisfies { readonly host: Pick<IntegrationHost["Service"], "toolSummaries"> })
+  toolSummaries: () => Effect.succeed(tools)
+} satisfies Pick<Integrations["Service"], "toolSummaries">)
 
 afterEach(async () => {
   await Promise.all(stores.splice(0).map((store) => run(store.close())))

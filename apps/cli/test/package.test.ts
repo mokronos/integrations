@@ -64,7 +64,7 @@ describe("published CLI package", () => {
     await mkdir(tarballs)
     await mkdir(project)
 
-    const host = await pack(
+    const integrations = await pack(
       path.join(repoRoot, "packages", "integrations"),
       tarballs
     )
@@ -86,7 +86,7 @@ describe("published CLI package", () => {
       "@integrations/gateway-api": `file:${gatewayApi}`,
       "@mokronos/integrations": `file:${local}`,
       "@mokronos/integrations-client": `file:${client}`,
-      "@integrations/integrations": `file:${host}`,
+      "@integrations/integrations": `file:${integrations}`,
       "@integrations/observability": `file:${observability}`,
       "@integrations/contracts": `file:${contracts}`
     }

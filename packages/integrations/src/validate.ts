@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import { IntegrationHost } from "./host.ts"
+import { Integrations } from "./integrations.ts"
 import type { StorageError } from "./errors.ts"
 import {
   IntegrationNodeConfig,
@@ -21,7 +21,7 @@ const isAddressForm = (
 
 const liveFindings = Effect.fn("integrationValidation.liveFindings")(function*(
   source: IntegrationNodeSource,
-  host: IntegrationHost["Service"]
+  host: Integrations["Service"]
 ) {
   if (isAddressForm(source)) {
     const tool = (yield* host.listTools()).find(
@@ -50,8 +50,8 @@ const liveFindings = Effect.fn("integrationValidation.liveFindings")(function*(
 export const validateIntegrationNode = Effect.fn("integrationValidation.validate")(function*(
   config: typeof Schema.Json.Type,
   options: { readonly live?: boolean } = {}
-): Effect.fn.Return<IntegrationValidationReport, StorageError, IntegrationHost> {
-  const host = yield* IntegrationHost
+): Effect.fn.Return<IntegrationValidationReport, StorageError, Integrations> {
+  const host = yield* Integrations
   const decoded = yield* Effect.result(Schema.decodeUnknownEffect(IntegrationNodeConfig)(config))
   if (decoded._tag === "Failure") {
     return {

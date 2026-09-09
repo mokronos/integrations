@@ -52,22 +52,20 @@ const snapshot = (tool: string, input: ToolSnapshot["inputSchema"]): ToolSnapsho
   syncedAt: new Date()
 })
 
-const hostWithTools = (
+const integrationsWithTools = (
   tools: ReadonlyArray<{ name: string; input: Tool["inputSchema"] }>
 ): ToolCatalogReader => ({
-  host: {
-    listTools: () =>
-      Effect.succeed(tools.map((tool) => ({
-        address: ToolAddress.make(`tools.tickets.org.default.${tool.name}`),
-        name: ToolName.make(tool.name),
-        description: "",
-        integration: IntegrationSlug.make("tickets"),
-        owner: "org",
-        connection: ConnectionName.make("default"),
-        defaultDecision: "require_approval",
-        inputSchema: tool.input
-      })))
-  }
+  listTools: () =>
+    Effect.succeed(tools.map((tool) => ({
+      address: ToolAddress.make(`tools.tickets.org.default.${tool.name}`),
+      name: ToolName.make(tool.name),
+      description: "",
+      integration: IntegrationSlug.make("tickets"),
+      owner: "org",
+      connection: ConnectionName.make("default"),
+      defaultDecision: "require_approval",
+      inputSchema: tool.input
+    })))
 })
 
 describe("catalog drift", () => {
@@ -107,7 +105,7 @@ describe("catalog drift", () => {
   test("surfaces new tools, which explicit policies otherwise make invisible", async () => {
     const store = await run(makeStore())
     const first = await run(refreshIntegrationSnapshot(
-      { store, integrations: hostWithTools([{ name: "create", input: null }]) },
+      { store, integrations: integrationsWithTools([{ name: "create", input: null }]) },
       "tickets",
       defaultTenantId
     ))
@@ -117,7 +115,7 @@ describe("catalog drift", () => {
     const second = await run(refreshIntegrationSnapshot(
       {
         store,
-        integrations: hostWithTools([
+        integrations: integrationsWithTools([
           { name: "create", input: null },
           { name: "deleteEverything", input: null }
         ])
@@ -141,7 +139,7 @@ describe("catalog drift", () => {
     await run(refreshIntegrationSnapshot(
       {
         store,
-        integrations: hostWithTools([
+        integrations: integrationsWithTools([
           { name: "create", input: null },
           { name: "legacy", input: null }
         ])
@@ -151,12 +149,12 @@ describe("catalog drift", () => {
     ))
 
     const removal = await run(refreshIntegrationSnapshot(
-      { store, integrations: hostWithTools([{ name: "create", input: null }]) },
+      { store, integrations: integrationsWithTools([{ name: "create", input: null }]) },
       "tickets",
       defaultTenantId
     ))
     const afterwards = await run(refreshIntegrationSnapshot(
-      { store, integrations: hostWithTools([{ name: "create", input: null }]) },
+      { store, integrations: integrationsWithTools([{ name: "create", input: null }]) },
       "tickets",
       defaultTenantId
     ))

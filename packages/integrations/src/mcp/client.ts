@@ -254,8 +254,8 @@ const fallbackName = (endpoint: string): string => {
   return parsed === undefined ? endpoint : serviceName(parsed.hostname)
 }
 
-export class McpHost extends Context.Service<
-  McpHost,
+export class McpClient extends Context.Service<
+  McpClient,
   {
     readonly probe: (endpoint: string) => Effect.Effect<McpProbe, McpError>
     readonly listTools: (
@@ -269,13 +269,13 @@ export class McpHost extends Context.Service<
       input: Json
     ) => Effect.Effect<Json, McpError>
   }
->()("@integrations/integrations/McpHost") {
-  static readonly layer: Layer.Layer<McpHost, never, HttpClient.HttpClient> = Layer.effect(
-    McpHost,
+>()("@integrations/integrations/McpClient") {
+  static readonly layer: Layer.Layer<McpClient, never, HttpClient.HttpClient> = Layer.effect(
+    McpClient,
     Effect.gen(function* () {
       const client = yield* HttpClient.HttpClient
 
-      const listTools = Effect.fn("McpHost.listTools")((
+      const listTools = Effect.fn("McpClient.listTools")((
         endpoint: string,
         credential: Option.Option<McpCredential>
       ) =>
@@ -300,7 +300,7 @@ export class McpHost extends Context.Service<
           ))
       )
 
-      const countTools = Effect.fn("McpHost.countTools")(function*(
+      const countTools = Effect.fn("McpClient.countTools")(function*(
         endpoint: string,
         capabilities: typeof ServerCapabilities.Type
       ) {
@@ -309,7 +309,7 @@ export class McpHost extends Context.Service<
         return tools.length
       })
 
-      const probe = Effect.fn("McpHost.probe")(function*(endpoint: string) {
+      const probe = Effect.fn("McpClient.probe")(function*(endpoint: string) {
         const { response, body } = yield* probeDiscovery(client, endpoint)
         const name = fallbackName(endpoint)
         const slug = Option.getOrElse(slugify(name), () => "mcp")
@@ -396,7 +396,7 @@ export class McpHost extends Context.Service<
         ))
       })
 
-      const callTool = Effect.fn("McpHost.callTool")((
+      const callTool = Effect.fn("McpClient.callTool")((
         endpoint: string,
         credential: Option.Option<McpCredential>,
         tool: string,

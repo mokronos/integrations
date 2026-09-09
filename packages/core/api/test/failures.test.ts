@@ -15,7 +15,7 @@ import {
   newClientId
 } from "./gateway.ts"
 import type { GatewayStore } from "./gateway.ts"
-import { stubHostContext } from "./stubs.ts"
+import { stubIntegrationsContext } from "./stubs.ts"
 import { McpError, SpecError } from "@integrations/integrations"
 
 const directories: Array<string> = []
@@ -84,7 +84,7 @@ const setup = async (options: {
 
   const { handle } = createGatewayHandler({
     httpClient: FetchHttpClient.layer,
-    hostServices: stubHostContext({}, unreachable),
+    integrationServices: stubIntegrationsContext({}, unreachable),
     store: presented,
     retentionDays: 30,
     ...whenPresentMap("errorCapture", options.errorCapture, (sink) => ({

@@ -7,7 +7,7 @@ import {
   registerOAuthClient,
   startOAuthFlow
 } from "@integrations/integrations"
-import type { CatalogStore, IntegrationHost, OAuthFlows } from "@integrations/integrations"
+import type { CatalogStore, Integrations, OAuthFlows } from "@integrations/integrations"
 import { AuthMethod, Connection, whenPresent } from "@integrations/contracts"
 import { oauthSetupGuidance } from "./oauth-guidance.ts"
 
@@ -64,7 +64,7 @@ const AuthorizationRequest = Schema.Struct({
 })
 type AuthorizationRequest = typeof AuthorizationRequest.Type
 
-export type OAuthOperations = IntegrationHost | OAuthFlows | CatalogStore
+export type OAuthOperations = Integrations | OAuthFlows | CatalogStore
 
 export const oauthBrowserPage = (options: {
   readonly title: string
@@ -176,7 +176,7 @@ const prepareFlow = Effect.fn("OAuth.prepareFlow")(function*(
   }
 })
 
-export interface HostedAuthorizationFlow {
+export interface RemoteAuthorizationFlow {
   readonly status: "pending"
   readonly state: string
   readonly authorizationUrl: string
@@ -185,13 +185,13 @@ export interface HostedAuthorizationFlow {
   }) => Effect.Effect<Connection, OAuthFlowError, OAuthOperations>
 }
 
-export type HostedAuthorization =
-  | HostedAuthorizationFlow
+export type RemoteAuthorization =
+  | RemoteAuthorizationFlow
   | { readonly status: "connected"; readonly connection: Connection }
 
-export const startHostedAuthorization = Effect.fn("OAuth.startHosted")(function*(
+export const startRemoteAuthorization = Effect.fn("OAuth.startRemote")(function*(
   input: AuthorizationRequest & { readonly publicUrl: string }
-): Effect.fn.Return<HostedAuthorization, OAuthFlowError, OAuthOperations> {
+): Effect.fn.Return<RemoteAuthorization, OAuthFlowError, OAuthOperations> {
   const options = yield* decodeRequest(input)
   const prepared = yield* prepareFlow(options, `${input.publicUrl}/v1/oauth/callback`)
   if (prepared.status === "connected") {

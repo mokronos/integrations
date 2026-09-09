@@ -1,4 +1,4 @@
-import type { IntegrationHost } from "@integrations/integrations"
+import type { Integrations } from "@integrations/integrations"
 import { IntegrationSlug, TenantId } from "./domain.ts"
 import type { DriftEntry, ToolSnapshot } from "./domain.ts"
 import { DateTime, Effect, Schema } from "effect"
@@ -51,9 +51,7 @@ export const diffSnapshots = (
   return entries
 }
 
-export interface ToolCatalogReader {
-  readonly host: Pick<IntegrationHost["Service"], "listTools">
-}
+export type ToolCatalogReader = Pick<Integrations["Service"], "listTools">
 
 export type DriftReport = {
   readonly integration: string
@@ -82,7 +80,7 @@ export const refreshIntegrationSnapshot = Effect.fn("Drift.refreshIntegrationSna
   ): Effect.fn.Return<DriftReport, DriftRefreshError | GatewayStoreError> {
     const slug = IntegrationSlug.make(integration)
     const checkedAt = yield* DateTime.nowAsDate
-    const tools = yield* dependencies.integrations.host.listTools({ integration: slug }).pipe(
+    const tools = yield* dependencies.integrations.listTools({ integration: slug }).pipe(
       Effect.mapError((cause) => new DriftRefreshError({ integration, cause }))
     )
     const current: ReadonlyArray<ToolSnapshot> = tools.map((tool) => ({

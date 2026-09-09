@@ -30,7 +30,7 @@
     "README.md"
   ],
   "scripts": {
-    "test:hosted": "bun run test/hosted.acceptance.ts",
+    "test:remote": "bun run test/remote.acceptance.ts",
     "typecheck": "tsc -p ../../../tsconfig.json --noEmit"
   },
   "dependencies": {

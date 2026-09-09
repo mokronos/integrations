@@ -1,10 +1,10 @@
 import { Context, Effect, Option } from "effect"
-import { CatalogStore, IntegrationHost, McpHost, OAuthFlows, OpenApiInvoker, SpecCache } from "@integrations/integrations"
-import type { HostServices } from "@integrations/integrations"
+import { CatalogStore, Integrations, McpClient, OAuthFlows, OpenApiInvoker, SpecCache } from "@integrations/integrations"
+import type { IntegrationServices } from "@integrations/integrations"
 
-export const stubHost = (
-  overrides: Partial<IntegrationHost["Service"]> = {}
-): IntegrationHost["Service"] => ({
+export const stubIntegrations = (
+  overrides: Partial<Integrations["Service"]> = {}
+): Integrations["Service"] => ({
   listIntegrations: () => Effect.succeed([]),
   findIntegration: () => Effect.succeed(Option.none()),
   addMcp: dies("addMcp"),
@@ -23,7 +23,7 @@ export const stubHost = (
 })
 
 const dies = (member: string) => () =>
-  Effect.die(new Error(`stubHost: ${member} is not stubbed for these tests`))
+  Effect.die(new Error(`stubIntegrations: ${member} is not stubbed for these tests`))
 
 export const catalogStoreFake = (
   overrides: Partial<CatalogStore["Service"]> = {}
@@ -53,19 +53,19 @@ const catalogStore: CatalogStore["Service"] = {
   putSpecDocument: dies("CatalogStore.putSpecDocument")
 }
 
-export const stubHostContext = (
-  overrides: Partial<IntegrationHost["Service"]> = {},
+export const stubIntegrationsContext = (
+  overrides: Partial<Integrations["Service"]> = {},
   reading: {
-    readonly mcp?: Partial<McpHost["Service"]>
+    readonly mcp?: Partial<McpClient["Service"]>
     readonly specs?: Partial<SpecCache["Service"]>
   } = {}
-): Context.Context<HostServices> =>
+): Context.Context<IntegrationServices> =>
   Context.empty().pipe(
-    Context.add(IntegrationHost, stubHost(overrides)),
-    Context.add(McpHost, {
-      probe: dies("McpHost.probe"),
-      listTools: dies("McpHost.listTools"),
-      callTool: dies("McpHost.callTool"),
+    Context.add(Integrations, stubIntegrations(overrides)),
+    Context.add(McpClient, {
+      probe: dies("McpClient.probe"),
+      listTools: dies("McpClient.listTools"),
+      callTool: dies("McpClient.callTool"),
       ...reading.mcp
     }),
     Context.add(SpecCache, {

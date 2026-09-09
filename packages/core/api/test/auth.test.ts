@@ -20,8 +20,8 @@ import {
   ToolName
 } from "./gateway.ts"
 import type { ConnectionRef, GatewayStore } from "./gateway.ts"
-import { stubHostContext } from "./stubs.ts"
-import type { HostServices } from "@integrations/integrations"
+import { stubIntegrationsContext } from "./stubs.ts"
+import type { IntegrationServices } from "@integrations/integrations"
 import { Context } from "effect"
 import type { GoogleIdentityOAuth } from "@integrations/gateway-core"
 
@@ -49,7 +49,7 @@ interface SetupOptions {
   readonly signupOpenOf?: () => Promise<boolean>
   readonly secureCookies?: boolean
   readonly google?: GoogleIdentityOAuth
-  readonly hostServices?: Context.Context<HostServices>
+  readonly integrationServices?: Context.Context<IntegrationServices>
 }
 
 const setup = async (options: SetupOptions = {}) => {
@@ -86,7 +86,7 @@ const setup = async (options: SetupOptions = {}) => {
 
   const { handle } = createGatewayHandler({
     httpClient: options.google === undefined ? FetchHttpClient.layer : googleHttpClient,
-    hostServices: options.hostServices ?? stubHostContext(),
+    integrationServices: options.integrationServices ?? stubIntegrationsContext(),
     store,
     retentionDays: 30,
     oauth: {
@@ -397,7 +397,7 @@ describe("what a session may do", () => {
 
   test("connects an integration on its own authority, holding no API key", async () => {
     const created: Array<{ readonly integration: string; readonly name: string }> = []
-    const hostServices = stubHostContext({
+    const integrationServices = stubIntegrationsContext({
       findIntegration: (slug) => Effect.succeed(slug !== "gmail" ? Option.none() : Option.some({
         slug: IntegrationSlug.make("gmail"),
         name: "Gmail",
@@ -420,7 +420,7 @@ describe("what a session may do", () => {
         }
       })
     })
-    const setup_ = await run(setup({ signupOpen: true, hostServices }))
+    const setup_ = await run(setup({ signupOpen: true, integrationServices }))
     const human = await run(signupHuman(setup_))
 
     const response = await run(setup_.call("POST", "/v1/connections", {

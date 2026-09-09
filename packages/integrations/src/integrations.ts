@@ -23,7 +23,7 @@ import {
 import { OAuthClientSlug } from "./catalog/ids.ts"
 import { connectionAddress, ConnectionName, IntegrationSlug } from "@integrations/contracts"
 import { AuthTemplateSlug } from "./catalog/ids.ts"
-import { McpHost } from "./mcp/client.ts"
+import { McpClient } from "./mcp/client.ts"
 import type { McpCredential } from "./mcp/client.ts"
 import { OAuthFlows } from "./oauth/flows.ts"
 import { resolveServer } from "./openapi/compile.ts"
@@ -43,7 +43,7 @@ import { normalizeToolResult } from "./mcp/result.ts"
 
 type Json = typeof Schema.Json.Type
 
-export type HostFailure =
+export type IntegrationFailure =
   | StorageError
   | IntegrationNotFoundError
   | ConnectionNotFoundError
@@ -165,8 +165,8 @@ const toTool = (record: IntegrationTool): Effect.Effect<Tool, StorageError> =>
 const defaultDecision = (readOnly: boolean): "allow" | "require_approval" =>
   readOnly ? "allow" : "require_approval"
 
-export class IntegrationHost extends Context.Service<
-  IntegrationHost,
+export class Integrations extends Context.Service<
+  Integrations,
   {
     readonly listIntegrations: () => Effect.Effect<
       ReadonlyArray<Integration>,
@@ -175,10 +175,10 @@ export class IntegrationHost extends Context.Service<
     readonly findIntegration: (
       slug: IntegrationSlug
     ) => Effect.Effect<Option.Option<Integration>, StorageError>
-    readonly addMcp: (options: AddMcpOptions) => Effect.Effect<IntegrationSlug, HostFailure>
+    readonly addMcp: (options: AddMcpOptions) => Effect.Effect<IntegrationSlug, IntegrationFailure>
     readonly addOpenApi: (
       options: AddOpenApiOptions
-    ) => Effect.Effect<IntegrationSlug, HostFailure>
+    ) => Effect.Effect<IntegrationSlug, IntegrationFailure>
     readonly renameIntegration: (
       slug: IntegrationSlug,
       name: string
@@ -189,7 +189,7 @@ export class IntegrationHost extends Context.Service<
 
     readonly createConnection: (
       options: CreateConnectionOptions
-    ) => Effect.Effect<Connection, HostFailure>
+    ) => Effect.Effect<Connection, IntegrationFailure>
     readonly listConnections: (
       filter?: { readonly integration?: IntegrationSlug; readonly owner?: OwnerTier }
     ) => Effect.Effect<ReadonlyArray<Connection>, StorageError>
@@ -202,7 +202,7 @@ export class IntegrationHost extends Context.Service<
       readonly owner: OwnerTier
       readonly integration: IntegrationSlug
       readonly name: ConnectionName
-    }) => Effect.Effect<ReadonlyArray<Tool>, HostFailure>
+    }) => Effect.Effect<ReadonlyArray<Tool>, IntegrationFailure>
 
     readonly toolSummaries: (
       filter?: ToolFilter
@@ -216,24 +216,24 @@ export class IntegrationHost extends Context.Service<
     readonly execute: (
       address: ToolAddress,
       input: Json
-    ) => Effect.Effect<Json, HostFailure>
+    ) => Effect.Effect<Json, IntegrationFailure>
   }
->()("@integrations/integrations/IntegrationHost") {
+>()("@integrations/integrations/Integrations") {
   static readonly layer: Layer.Layer<
-    IntegrationHost,
+    Integrations,
     never,
-    CatalogStore | CredentialStore | McpHost | OAuthFlows | OpenApiInvoker | SpecCache
+    CatalogStore | CredentialStore | McpClient | OAuthFlows | OpenApiInvoker | SpecCache
   > = Layer.effect(
-    IntegrationHost,
+    Integrations,
     Effect.gen(function* () {
       const store = yield* CatalogStore
       const credentials = yield* CredentialStore
-      const mcp = yield* McpHost
+      const mcp = yield* McpClient
       const oauth = yield* OAuthFlows
       const invoker = yield* OpenApiInvoker
       const specs = yield* SpecCache
 
-      const requireIntegration = Effect.fn("IntegrationHost.requireIntegration")(
+      const requireIntegration = Effect.fn("Integrations.requireIntegration")(
         function* (slug: IntegrationSlug) {
           const found = yield* store.findIntegration(slug)
           return yield* Option.match(found, {
@@ -243,7 +243,7 @@ export class IntegrationHost extends Context.Service<
         }
       )
 
-      const requireEndpoint = Effect.fn("IntegrationHost.requireEndpoint")(
+      const requireEndpoint = Effect.fn("Integrations.requireEndpoint")(
         function* (integration: IntegrationRecord) {
           if (integration.endpoint === undefined) {
             return yield* new InvalidInputError({
@@ -255,7 +255,7 @@ export class IntegrationHost extends Context.Service<
         }
       )
 
-      const requireConnection = Effect.fn("IntegrationHost.requireConnection")(
+      const requireConnection = Effect.fn("Integrations.requireConnection")(
         function* (reference: {
           readonly owner: OwnerTier
           readonly integration: IntegrationSlug
@@ -277,7 +277,7 @@ export class IntegrationHost extends Context.Service<
         }
       )
 
-      const resolveCredential = Effect.fn("IntegrationHost.resolveCredential")(
+      const resolveCredential = Effect.fn("Integrations.resolveCredential")(
         function* (
           integration: IntegrationRecord,
           connection: ConnectionRecord
@@ -346,7 +346,7 @@ export class IntegrationHost extends Context.Service<
             }
         })
 
-      const captureConnection = Effect.fn("IntegrationHost.captureConnection")(
+      const captureConnection = Effect.fn("Integrations.captureConnection")(
         function* (integration: IntegrationRecord, connection: ConnectionRecord) {
           const credential = yield* resolveCredential(integration, connection)
           const capturedAt = yield* Clock.currentTimeMillis
@@ -379,21 +379,21 @@ export class IntegrationHost extends Context.Service<
         }
       )
 
-      const listTools = Effect.fn("IntegrationHost.listTools")(
+      const listTools = Effect.fn("Integrations.listTools")(
         function* (filter: ToolFilter = {}) {
           const records = yield* store.listTools(filter)
           return yield* Effect.forEach(records, toTool)
         }
       )
 
-      const toolSummaries = Effect.fn("IntegrationHost.toolSummaries")(
+      const toolSummaries = Effect.fn("Integrations.toolSummaries")(
         function* (filter: ToolFilter = {}) {
           const records = yield* store.listTools(filter)
           return yield* Effect.forEach(records, toToolSummary)
         }
       )
 
-      const describeTool = Effect.fn("IntegrationHost.describeTool")(
+      const describeTool = Effect.fn("Integrations.describeTool")(
         function* (target: ToolAddress | ToolTarget) {
           if (Predicate.isString(target)) {
             const found = yield* store.findTool(target)
@@ -416,7 +416,7 @@ export class IntegrationHost extends Context.Service<
         }
       )
 
-      const execute = Effect.fn("IntegrationHost.execute")(
+      const execute = Effect.fn("Integrations.execute")(
         function* (address: ToolAddress, input: Json) {
           const found = yield* store.findTool(address)
           if (Option.isNone(found)) {
@@ -458,7 +458,7 @@ export class IntegrationHost extends Context.Service<
         }
       )
 
-      const addMcp = Effect.fn("IntegrationHost.addMcp")(function* (options: AddMcpOptions) {
+      const addMcp = Effect.fn("Integrations.addMcp")(function* (options: AddMcpOptions) {
         const probe = yield* mcp.probe(options.endpoint)
         const now = yield* Clock.currentTimeMillis
         yield* store.putIntegration({
@@ -474,7 +474,7 @@ export class IntegrationHost extends Context.Service<
         return options.slug
       })
 
-      const addOpenApi = Effect.fn("IntegrationHost.addOpenApi")(
+      const addOpenApi = Effect.fn("Integrations.addOpenApi")(
         function* (options: AddOpenApiOptions) {
           const spec = yield* specs.compileUrl(options.spec)
           const now = yield* Clock.currentTimeMillis
@@ -507,7 +507,7 @@ export class IntegrationHost extends Context.Service<
         }
       )
 
-      const createConnection = Effect.fn("IntegrationHost.createConnection")(
+      const createConnection = Effect.fn("Integrations.createConnection")(
         function* (options: CreateConnectionOptions) {
           const integration = yield* requireIntegration(options.integration)
           const method = findAuthMethod(integration.authMethods, options.template)
@@ -546,7 +546,7 @@ export class IntegrationHost extends Context.Service<
         }
       )
 
-      const refreshConnection = Effect.fn("IntegrationHost.refreshConnection")(
+      const refreshConnection = Effect.fn("Integrations.refreshConnection")(
         function* (reference: {
           readonly owner: OwnerTier
           readonly integration: IntegrationSlug
@@ -559,7 +559,7 @@ export class IntegrationHost extends Context.Service<
         }
       )
 
-      const removeConnection = Effect.fn("IntegrationHost.removeConnection")(
+      const removeConnection = Effect.fn("Integrations.removeConnection")(
         function* (reference: {
           readonly owner: OwnerTier
           readonly integration: IntegrationSlug
@@ -575,7 +575,7 @@ export class IntegrationHost extends Context.Service<
         }
       )
 
-      const removeIntegration = Effect.fn("IntegrationHost.removeIntegration")(
+      const removeIntegration = Effect.fn("Integrations.removeIntegration")(
         function* (slug: IntegrationSlug) {
           const connections = yield* store.listConnections({ integration: slug })
           yield* Effect.forEach(connections, (connection) =>
@@ -589,11 +589,11 @@ export class IntegrationHost extends Context.Service<
       )
 
       return {
-        listIntegrations: Effect.fn("IntegrationHost.listIntegrations")(function* () {
+        listIntegrations: Effect.fn("Integrations.listIntegrations")(function* () {
           const records = yield* store.listIntegrations()
           return yield* Effect.forEach(records, toIntegration)
         }),
-        findIntegration: Effect.fn("IntegrationHost.findIntegration")(
+        findIntegration: Effect.fn("Integrations.findIntegration")(
           function* (slug: IntegrationSlug) {
             const found = yield* store.findIntegration(slug)
             return yield* Option.match(found, {
@@ -607,7 +607,7 @@ export class IntegrationHost extends Context.Service<
         renameIntegration: store.renameIntegration,
         removeIntegration,
         createConnection,
-        listConnections: Effect.fn("IntegrationHost.listConnections")(
+        listConnections: Effect.fn("Integrations.listConnections")(
           function* (filter: {
             readonly integration?: IntegrationSlug
             readonly owner?: OwnerTier

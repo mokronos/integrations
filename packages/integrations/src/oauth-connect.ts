@@ -11,7 +11,7 @@ import {
 import { AuthTemplateSlug, OAuthClientSlug, OAuthState } from "./catalog/ids.ts"
 import { CatalogStore } from "./catalog/store.ts"
 import { InvalidInputError, type StorageError, type OAuthError } from "./errors.ts"
-import { IntegrationHost } from "./host.ts"
+import { Integrations } from "./integrations.ts"
 import { OAuthFlows } from "./oauth/flows.ts"
 
 const decodeId = <A, I>(
@@ -134,7 +134,7 @@ export const startOAuthFlow = Effect.fn("OAuthConnect.start")(function*(
 export const completeOAuthFlow = Effect.fn("OAuthConnect.complete")(function*(
   options: { readonly state: string; readonly code: string }
 ) {
-  const host = yield* IntegrationHost
+  const host = yield* Integrations
   const oauth = yield* OAuthFlows
   const store = yield* CatalogStore
   const state = yield* decodeId(OAuthState, "state", options.state)

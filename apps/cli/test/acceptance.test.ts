@@ -208,9 +208,9 @@ const startGateway = async (registryUrl?: string) => {
   }
 }
 
-const startHostedGateway = async () => {
-  const serverHome = await mkdtemp(path.join(os.tmpdir(), "integrations-hosted-server-"))
-  const clientHome = await mkdtemp(path.join(os.tmpdir(), "integrations-hosted-client-"))
+const startRemoteGateway = async () => {
+  const serverHome = await mkdtemp(path.join(os.tmpdir(), "integrations-remote-server-"))
+  const clientHome = await mkdtemp(path.join(os.tmpdir(), "integrations-remote-client-"))
   directories.push(serverHome, clientHome)
   const gateway = await serveGateway({
     httpClient: FetchHttpClient.layer,
@@ -245,8 +245,8 @@ const loginOperator = async (
 }
 
 describe("integrations CLI acceptance", () => {
-  test("hosted ii uses a login session while i uses only its delegated API key", async () => {
-    const gateway = await startHostedGateway()
+  test("a remote ii uses a login session while i uses only its delegated API key", async () => {
+    const gateway = await startRemoteGateway()
     const operator = (args: ReadonlyArray<string>) =>
       run(operatorCli, args, gateway.environment)
 
@@ -254,7 +254,7 @@ describe("integrations CLI acceptance", () => {
       "signup",
       "--password",
       "correct horse battery",
-      "hosted@example.com"
+      "remote@example.com"
     ])
     expect(signedUp.exitCode, signedUp.stderr).toBe(0)
 
@@ -264,7 +264,7 @@ describe("integrations CLI acceptance", () => {
     const login = await http(HttpClient.execute(HttpClientRequest.setBody(
       HttpClientRequest.post(`${gateway.url}/v1/auth/login`),
       HttpBody.jsonUnsafe({
-        email: "hosted@example.com",
+        email: "remote@example.com",
         password: "correct horse battery"
       })
     )))
@@ -272,14 +272,14 @@ describe("integrations CLI acceptance", () => {
     const setCookie = login.headers["set-cookie"] ?? ""
     expect(setCookie).toContain("Secure")
     const cookie = setCookie.split(";", 1)[0] ?? ""
-    const hostedCatalogResponse = await http(HttpClient.get(`${gateway.url}/v1/integrations`, {
+    const remoteCatalogResponse = await http(HttpClient.get(`${gateway.url}/v1/integrations`, {
       headers: { cookie }
     }))
-    expect(hostedCatalogResponse.status).toBe(200)
-    const hostedCatalog = Schema.decodeUnknownSync(CatalogOutput)(
-      await http(hostedCatalogResponse.json)
+    expect(remoteCatalogResponse.status).toBe(200)
+    const remoteCatalog = Schema.decodeUnknownSync(CatalogOutput)(
+      await http(remoteCatalogResponse.json)
     )
-    expect(hostedCatalog.oauthCallbackUrl).toBe(
+    expect(remoteCatalog.oauthCallbackUrl).toBe(
       "https://gateway.example/v1/oauth/callback"
     )
 

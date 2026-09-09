@@ -22,8 +22,8 @@ import {
 import type { OAuthSessionStore } from "@integrations/gateway-core"
 import { generateApiKey, newClientId } from "@integrations/gateway-core"
 import { integrationsHome } from "./paths.ts"
-import type { HostStorage, StorageError } from "@integrations/integrations"
-import { createHostRuntime, hostServicesOf, IntegrationHost } from "@integrations/integrations"
+import type { IntegrationStorage, StorageError } from "@integrations/integrations"
+import { createIntegrationRuntime, integrationServicesOf, Integrations } from "@integrations/integrations"
 import type { GatewayStoreOptions } from "@integrations/gateway-core"
 import type { GatewayStore } from "@integrations/gateway-core"
 import { GatewayStoreError, GatewayStoreService } from "@integrations/gateway-core"
@@ -55,7 +55,7 @@ export interface GatewayServiceOptions {
   readonly rateLimitPerMinute?: number
   readonly maxBodyBytes?: number
   readonly storeLayer?: Layer.Layer<GatewayStoreService, GatewayStoreError>
-  readonly hostStorage?: HostStorage
+  readonly integrationStorage?: IntegrationStorage
   readonly oauthStore?: OAuthSessionStore
   readonly storeOptions?: GatewayStoreOptions
   readonly externalMaintenance?: boolean
@@ -91,7 +91,7 @@ const buildCore = async (
     options.storeLayer ??
     GatewayStoreService.layer(`${home}/gateway.sqlite`, encryption, options.storeOptions)
   )
-  const hostRuntime = createHostRuntime(home, options.httpClient, options.hostStorage ?? {})
+  const integrationRuntime = createIntegrationRuntime(home, options.httpClient, options.integrationStorage ?? {})
   let resources: Awaited<ReturnType<typeof bootResources>>
   try {
     resources = await bootResources()
@@ -99,21 +99,21 @@ const buildCore = async (
       const tenants = yield* resources.store.listTenants()
       yield* Effect.forEach(tenants, (tenant) => reconcileDefaults({
         store: resources.store,
-        integrations: { host: Context.get(resources.hostServices, IntegrationHost) },
+        integrations: Context.get(resources.integrationServices, Integrations),
         tenantId: tenant.id
       }), { discard: true })
     }))
   } catch (error) {
-    await Promise.all([storeRuntime.dispose(), hostRuntime.dispose()])
+    await Promise.all([storeRuntime.dispose(), integrationRuntime.dispose()])
     throw error
   }
 
   async function bootResources() {
-    const [store, hostServices] = await Promise.all([
+    const [store, integrationServices] = await Promise.all([
       storeRuntime.runPromise(Effect.service(GatewayStoreService)),
-      hostServicesOf(hostRuntime)
+      integrationServicesOf(integrationRuntime)
     ])
-    return { store, hostServices }
+    return { store, integrationServices }
   }
   const resolvePublicUrl = (): string | undefined =>
     options.publicUrl ?? Option.getOrUndefined(environment.publicUrl) ??
@@ -130,14 +130,14 @@ const buildCore = async (
         clientSecret: googleClientSecret,
         publicUrlOf: resolvePublicUrl
       }
-  const oauth = createOAuthSessions(resources.hostServices, {
+  const oauth = createOAuthSessions(resources.integrationServices, {
     publicUrlOf: resolvePublicUrl,
     onConnected: async (session) => {
       const state = session.state
       if (session.bindingTenant === undefined || state.status !== "connected") return
       await Effect.runPromise(reconcileDefaults({
         store: resources.store,
-        integrations: { host: Context.get(resources.hostServices, IntegrationHost) },
+        integrations: Context.get(resources.integrationServices, Integrations),
         tenantId: session.bindingTenant
       }))
     },
@@ -161,7 +161,7 @@ const buildCore = async (
   const disposeCore = async () => {
     maintenance?.stop()
     await Effect.runPromise(oauth.stop())
-    await Promise.all([storeRuntime.dispose(), hostRuntime.dispose()])
+    await Promise.all([storeRuntime.dispose(), integrationRuntime.dispose()])
   }
 
   void defaultTenantId
@@ -174,7 +174,7 @@ const buildCore = async (
     disposeCore,
     handlerOptions: {
       store: resources.store,
-      hostServices: resources.hostServices,
+      integrationServices: resources.integrationServices,
       httpClient: options.httpClient,
       retentionDays: options.retentionDays ?? defaultArgumentRetentionDays,
       oauth,
@@ -323,7 +323,7 @@ export const serveGateway = async (options: ServeOptions): Promise<RunningGatewa
     localSecret = await Effect.runPromise(Effect.provide(
       ensureLocalCredential(
         core.store,
-        Context.get(core.handlerOptions.hostServices, IntegrationHost),
+        Context.get(core.handlerOptions.integrationServices, Integrations),
         core.home,
         boundPort
       ),
@@ -345,12 +345,12 @@ export const serveGateway = async (options: ServeOptions): Promise<RunningGatewa
 
 export const ensureLocalCredential = Effect.fn("Gateway.ensureLocalCredential")(function*(
   store: GatewayStore,
-  host: IntegrationHost["Service"],
+  integrations: Integrations["Service"],
   home: string,
   port: number
 ): Effect.fn.Return<string, GatewayStoreError | StorageError, Crypto.Crypto> {
   const existing = yield* store.findClientByName(defaultTenantId, localClientName)
-  const defaults = yield* reconcileDefaults({ store, integrations: { host }, tenantId: defaultTenantId })
+  const defaults = yield* reconcileDefaults({ store, integrations, tenantId: defaultTenantId })
   if (defaults.accessProfile === undefined || defaults.approvalPolicy === undefined) {
     return yield* new GatewayStoreError({
       operation: "ensureLocalCredential",

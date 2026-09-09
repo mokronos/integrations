@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test"
 import { Effect, Layer, Option } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
-import { McpHost } from "../../../src/mcp/client.ts"
+import { McpClient } from "../../../src/mcp/client.ts"
 
 const servers: Array<ReturnType<typeof Bun.serve>> = []
 
@@ -25,8 +25,8 @@ describe("malformed MCP servers", () => {
       headers: { "content-type": "application/json" }
     }))
     const result = await Effect.runPromiseExit(
-      Effect.flatMap(McpHost, (host) => host.listTools(endpoint, Option.none())).pipe(
-        Effect.provide(McpHost.layer.pipe(Layer.provide(FetchHttpClient.layer)))
+      Effect.flatMap(McpClient, (host) => host.listTools(endpoint, Option.none())).pipe(
+        Effect.provide(McpClient.layer.pipe(Layer.provide(FetchHttpClient.layer)))
       )
     )
     expect(result._tag).toBe("Failure")
@@ -35,8 +35,8 @@ describe("malformed MCP servers", () => {
   it("rejects an invalid JSON-RPC envelope", async () => {
     const endpoint = malformedServer(() => Response.json({ result: { tools: [] } }))
     const result = await Effect.runPromiseExit(
-      Effect.flatMap(McpHost, (host) => host.listTools(endpoint, Option.none())).pipe(
-        Effect.provide(McpHost.layer.pipe(Layer.provide(FetchHttpClient.layer)))
+      Effect.flatMap(McpClient, (host) => host.listTools(endpoint, Option.none())).pipe(
+        Effect.provide(McpClient.layer.pipe(Layer.provide(FetchHttpClient.layer)))
       )
     )
     expect(result._tag).toBe("Failure")

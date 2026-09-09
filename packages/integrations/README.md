@@ -9,12 +9,11 @@ vocabulary come from `@integrations/contracts`.
 | Directory | Holds |
 | --- | --- |
 | `storage/` | The two swappable seams: `Database` (rows) and `CredentialStore` (sealed secrets) |
-| `catalog/` | What is installed — the row store, auth-method derivation, host-internal ids |
+| `catalog/` | What is installed — the row store, auth-method derivation, package-internal ids |
 | `mcp/` | The MCP client, and reading its result envelope |
 | `openapi/` | Compiling a document, building a request, invoking, Google Discovery, the spec cache |
 | `oauth/` | Discovery, registration, PKCE, refresh |
-| `facade/` | The Promise surface the gateway consumes. Transitional — see below |
-| `host.ts` | The one service where both halves meet |
+| `integrations.ts` | The one service where both halves meet: `Integrations` |
 | `runtime.ts` | Layer composition |
 
 ## What it is built on
@@ -28,12 +27,6 @@ vocabulary come from `@integrations/contracts`.
 
 Request building, the Google Discovery converter, persistence and credential
 sealing are ours.
-
-## The facade
-
-`facade/` exists because the gateway, CLI and dashboard are async/await while
-this package is Effect throughout. It is the one place the two styles meet, and
-it should be deleted when they converge — nothing in it adds behaviour.
 
 ## Storage
 

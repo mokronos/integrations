@@ -14,7 +14,7 @@ import { Effect } from "effect"
 import { decodeBase64UrlField } from "@integrations/contracts"
 import { FetchHttpClient } from "effect/unstable/http"
 import { D1Client } from "@effect/sql-d1"
-import { d1HostStorage } from "./host-storage-d1.ts"
+import { d1IntegrationStorage } from "./integration-storage-d1.ts"
 import { D1OAuthSessionStore } from "./oauth-store-d1.ts"
 
 export const masterKeyFromEnv = (envValue: string | undefined): Uint8Array => {
@@ -110,7 +110,7 @@ const getService = (env: Env): Promise<GatewayService> => {
         encryption,
         { sqlClient: d1Layer(database) }
       ),
-      hostStorage: d1HostStorage(database, key),
+      integrationStorage: d1IntegrationStorage(database, key),
       oauthStore: new D1OAuthSessionStore(database),
       externalMaintenance: true,
       secureCookies: true,

@@ -1,5 +1,5 @@
 import { FetchHttpClient } from "effect/unstable/http"
-import { stubHostContext } from "./stubs.ts"
+import { stubIntegrationsContext } from "./stubs.ts"
 import { InvocationError } from "@integrations/integrations"
 import { run, runAll } from "./effect.ts"
 import { afterEach, describe, expect, test } from "bun:test"
@@ -96,7 +96,7 @@ const stubIntegrations = (behaviour: {
   const forgotten: Array<string> = []
   const renamed: Array<{ readonly slug: string; readonly name: string }> = []
   const known = new Set((behaviour.connections ?? []).map((connection) => connection.integration))
-  const hostServices = stubHostContext({
+  const integrationServices = stubIntegrationsContext({
     execute: (address, input) => {
       calls.push({ address: String(address), input })
       return Effect.promise(() => behaviour.beforeExecute?.() ?? Promise.resolve()).pipe(
@@ -147,7 +147,7 @@ const stubIntegrations = (behaviour: {
       forgotten.push(slug)
     })
   })
-  return { calls, removed, forgotten, renamed, hostServices }
+  return { calls, removed, forgotten, renamed, integrationServices }
 }
 
 const setup = async (options: {
@@ -204,7 +204,7 @@ const setup = async (options: {
   const { handle } = createGatewayHandler({
     httpClient: FetchHttpClient.layer,
     store,
-    hostServices: stub.hostServices,
+    integrationServices: stub.integrationServices,
     retentionDays: 30,
     oauth: {
       start: () => Effect.die(new Error("not used")),

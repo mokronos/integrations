@@ -1,6 +1,6 @@
 import type { AuthMethod } from "@integrations/contracts"
 
-const hostOf = (url: string | undefined): string | undefined => {
+const integrationsOf = (url: string | undefined): string | undefined => {
   try {
     return new URL(url ?? "").hostname.toLowerCase()
   } catch {
@@ -14,9 +14,9 @@ export const oauthSetupGuidance = (input: {
   readonly redirectUri: string
 }): string => {
   const oauth = input.method.oauth ?? {}
-  const host = hostOf(oauth.authorizationUrl) ??
-    hostOf(oauth.discoveryUrl) ??
-    hostOf(oauth.tokenUrl)
+  const host = integrationsOf(oauth.authorizationUrl) ??
+    integrationsOf(oauth.discoveryUrl) ??
+    integrationsOf(oauth.tokenUrl)
   const scopes = oauth.scopes ?? []
   const scopeLines = scopes.length === 0
     ? []

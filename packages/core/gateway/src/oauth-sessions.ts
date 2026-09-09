@@ -9,7 +9,7 @@ import { completeOAuthFlow } from "@integrations/integrations"
 import {
   authorizeInBrowser,
   OAuthFlowError,
-  startHostedAuthorization,
+  startRemoteAuthorization,
   type OAuthOperations
 } from "./oauth.ts"
 
@@ -129,7 +129,7 @@ export const createOAuthSessions = (
       const publicUrl = options.publicUrlOf?.() ?? options.publicUrl
 
       if (publicUrl !== undefined) {
-        const flow = yield* startHostedAuthorization({
+        const flow = yield* startRemoteAuthorization({
           integration: input.integration,
           connection: input.connection,
           authMethod: input.authMethod,

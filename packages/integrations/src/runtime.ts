@@ -5,8 +5,8 @@ import { CatalogStore } from "./catalog/store.ts"
 import { CredentialStore } from "./storage/credentials.ts"
 import { Database, libsqlLayer, memoryLayer } from "./storage/database.ts"
 import type { StorageError } from "./errors.ts"
-import { IntegrationHost } from "./host.ts"
-import { McpHost } from "./mcp/client.ts"
+import { Integrations } from "./integrations.ts"
+import { McpClient } from "./mcp/client.ts"
 import { OAuthFlows } from "./oauth/flows.ts"
 import { OpenApiInvoker } from "./openapi/invoke.ts"
 import { SpecCache } from "./openapi/cache.ts"
@@ -17,31 +17,31 @@ export const unavailableHttpClientLayer: Layer.Layer<HttpClient.HttpClient> = La
 )
 
 const clientsLayer: Layer.Layer<
-  McpHost | OpenApiInvoker,
+  McpClient | OpenApiInvoker,
   never,
   HttpClient.HttpClient
-> = Layer.mergeAll(McpHost.layer, OpenApiInvoker.layer)
+> = Layer.mergeAll(McpClient.layer, OpenApiInvoker.layer)
 
 const capabilitiesLayer: Layer.Layer<
-  IntegrationHost | OAuthFlows | SpecCache | CatalogStore,
+  Integrations | OAuthFlows | SpecCache | CatalogStore,
   never,
-  Database | CredentialStore | HttpClient.HttpClient | McpHost | OpenApiInvoker
-> = IntegrationHost.layer.pipe(
+  Database | CredentialStore | HttpClient.HttpClient | McpClient | OpenApiInvoker
+> = Integrations.layer.pipe(
   Layer.provideMerge(Layer.mergeAll(SpecCache.layer, OAuthFlows.layer)),
   Layer.provideMerge(CatalogStore.layer)
 )
 
-type HostLayer = Layer.Layer<
-  IntegrationHost | OAuthFlows | SpecCache | CatalogStore | McpHost | OpenApiInvoker,
+type IntegrationLayer = Layer.Layer<
+  Integrations | OAuthFlows | SpecCache | CatalogStore | McpClient | OpenApiInvoker,
   StorageError,
   HttpClient.HttpClient
 >
 
-export interface HostStorageOptions {
+export interface IntegrationStorageOptions {
   readonly directory: string
 }
 
-export const localLayer = (options: HostStorageOptions): HostLayer =>
+export const localLayer = (options: IntegrationStorageOptions): IntegrationLayer =>
   capabilitiesLayer.pipe(
     Layer.provideMerge(clientsLayer),
     Layer.provide(Layer.mergeAll(
@@ -50,10 +50,10 @@ export const localLayer = (options: HostStorageOptions): HostLayer =>
     ))
   )
 
-export const hostLayer = <E>(
+export const integrationLayer = <E>(
   storage: Layer.Layer<Database | CredentialStore, E>
 ): Layer.Layer<
-  IntegrationHost | OAuthFlows | SpecCache | CatalogStore | McpHost | OpenApiInvoker,
+  Integrations | OAuthFlows | SpecCache | CatalogStore | McpClient | OpenApiInvoker,
   E,
   HttpClient.HttpClient
 > =>
@@ -63,13 +63,13 @@ export const hostLayer = <E>(
   )
 
 export const stubbedLayer = (
-  clients: Layer.Layer<McpHost | OpenApiInvoker>
+  clients: Layer.Layer<McpClient | OpenApiInvoker>
 ): Layer.Layer<
-  | IntegrationHost
+  | Integrations
   | OAuthFlows
   | SpecCache
   | CatalogStore
-  | McpHost
+  | McpClient
   | OpenApiInvoker
   | Database
   | CredentialStore,
@@ -80,30 +80,30 @@ export const stubbedLayer = (
     Layer.provideMerge(Layer.mergeAll(memoryLayer, CredentialStore.memoryLayer))
   )
 
-export type HostServices =
-  | IntegrationHost
-  | McpHost
+export type IntegrationServices =
+  | Integrations
+  | McpClient
   | OAuthFlows
   | OpenApiInvoker
   | SpecCache
   | CatalogStore
 
-export interface HostStorage {
+export interface IntegrationStorage {
   readonly storage?: Layer.Layer<Database | CredentialStore, StorageError>
 }
 
-export const createHostRuntime = (
+export const createIntegrationRuntime = (
   directory: string,
   httpClient: Layer.Layer<HttpClient.HttpClient>,
-  storage: HostStorage = {}
-): ManagedRuntime.ManagedRuntime<HostServices, StorageError> =>
+  storage: IntegrationStorage = {}
+): ManagedRuntime.ManagedRuntime<IntegrationServices, StorageError> =>
   ManagedRuntime.make(
     (storage.storage === undefined
       ? localLayer({ directory: path.resolve(directory) })
-      : hostLayer(storage.storage)).pipe(Layer.provide(httpClient))
+      : integrationLayer(storage.storage)).pipe(Layer.provide(httpClient))
   )
 
-export const hostServicesOf = (
-  runtime: ManagedRuntime.ManagedRuntime<HostServices, StorageError>
-): Promise<Context.Context<HostServices>> =>
-  runtime.runPromise(Effect.context<HostServices>())
+export const integrationServicesOf = (
+  runtime: ManagedRuntime.ManagedRuntime<IntegrationServices, StorageError>
+): Promise<Context.Context<IntegrationServices>> =>
+  runtime.runPromise(Effect.context<IntegrationServices>())
