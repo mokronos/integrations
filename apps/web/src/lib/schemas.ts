@@ -9,25 +9,18 @@ import {
   DriftEntry,
   ConnectionRef as ConnectionRefSchema,
   AccessProfile,
-  AccessProfileId,
   AccessProfileTool,
   ApprovalPolicy,
-  ApprovalPolicyId,
   ApprovalPolicyTool,
   ApprovalDestination,
   ApprovalDeliveryAttempt,
   PolicyDecision as PolicyDecisionSchema,
   PendingApproval
 } from "@mokronos/gateway-core/domain"
-import { IntegrationDiscovery } from "@mokronos/contracts"
-import {
-  IntegrationSearchKind,
-  IntegrationSearchResponse
-} from "@mokronos/contracts"
+import { IntegrationSearchKind } from "@mokronos/contracts"
 import {
   AuthMethod,
   Connection,
-  Integration,
   Tool,
   ToolSummary,
   IntegrationOverview
@@ -59,27 +52,11 @@ export type {
   ClientId,
   ConnectionRef,
   PolicyDecision,
-  AccessProfileId,
-  ApprovalPolicyId
-  ,ApprovalDestinationId
+  ApprovalDestinationId
 } from "@mokronos/gateway-core/domain"
 
-const json = <T, E>(schema: Schema.Codec<T, E>) =>
-  Schema.decodeUnknownSync(Schema.toCodecJson(schema))
 
-export const IntegrationsResponse = Schema.Struct({
-  integrations: Schema.Array(IntegrationOverview),
-  oauthCallbackUrl: Schema.optional(Schema.NullOr(Schema.String))
-})
 
-export const ConnectionsResponse = Schema.Struct({
-  connections: Schema.Array(Connection)
-})
-
-export const ClientsResponse = Schema.Struct({
-  clients: Schema.Array(Client),
-  mcpUrl: Schema.optional(Schema.NullOr(Schema.String))
-})
 
 export const AccessProfileSummary = Schema.Struct({
   accessProfile: AccessProfile,
@@ -89,16 +66,6 @@ export const AccessProfileSummary = Schema.Struct({
   assignedClientCount: Schema.Number
 })
 export type AccessProfileSummary = typeof AccessProfileSummary.Type
-export const AccessProfilesResponse = Schema.Struct({ accessProfiles: Schema.Array(AccessProfileSummary) })
-export const AccessProfileDetail = Schema.Struct({
-  accessProfile: AccessProfile,
-  tools: Schema.Array(AccessProfileTool),
-  assignedClients: Schema.Array(Client)
-})
-export const AccessProfileToolsReplaced = Schema.Struct({
-  accessProfile: AccessProfile,
-  tools: Schema.Array(AccessProfileTool)
-})
 
 export const ApprovalPolicySummary = Schema.Struct({
   approvalPolicy: ApprovalPolicy,
@@ -108,9 +75,6 @@ export const ApprovalPolicySummary = Schema.Struct({
   assignedClientCount: Schema.Number
 })
 export type ApprovalPolicySummary = typeof ApprovalPolicySummary.Type
-export const ApprovalPoliciesResponse = Schema.Struct({ approvalPolicies: Schema.Array(ApprovalPolicySummary) })
-export const ApprovalPolicyDetail = Schema.Struct({ approvalPolicy: ApprovalPolicy, tools: Schema.Array(ApprovalPolicyTool), assignedClients: Schema.Array(Client) })
-export const ApprovalPolicyToolsReplaced = Schema.Struct({ approvalPolicy: ApprovalPolicy, tools: Schema.Array(ApprovalPolicyTool) })
 
 export const EffectiveTool = Schema.Struct({
   alias: Alias,
@@ -122,7 +86,6 @@ export const EffectiveTool = Schema.Struct({
 })
 export type EffectiveTool = typeof EffectiveTool.Type
 
-export const EffectiveToolsResponse = Schema.Struct({ tools: Schema.Array(EffectiveTool) })
 
 export const AccessProfileToolInput = Schema.Struct({
   connection: ConnectionRefSchema,
@@ -132,13 +95,6 @@ export type AccessProfileToolInput = typeof AccessProfileToolInput.Type
 export const ApprovalPolicyToolInput = Schema.Struct({ connection: ConnectionRefSchema, tool: Schema.String, decision: PolicyDecisionSchema })
 export type ApprovalPolicyToolInput = typeof ApprovalPolicyToolInput.Type
 
-export const ApprovalsResponse = Schema.Struct({
-  approvals: Schema.Array(PendingApproval)
-})
-export const ApprovalDestinationsResponse = Schema.Struct({ destinations: Schema.Array(ApprovalDestination) })
-export const ApprovalDestinationCreated = Schema.Struct({ destination: ApprovalDestination, signingSecret: Schema.String })
-export const ClientApprovalDestinationsResponse = Schema.Struct({ destinationIds: Schema.Array(ApprovalDestination.fields.id) })
-export const ApprovalDeliveriesResponse = Schema.Struct({ deliveries: Schema.Array(ApprovalDeliveryAttempt) })
 
 export const AuditResponse = Schema.Struct({
   records: Schema.Array(AuditRecord),
@@ -170,11 +126,7 @@ export const ApiKeySummary = Schema.Struct({
 })
 export type ApiKeySummary = typeof ApiKeySummary.Type
 
-export const KeysResponse = Schema.Struct({ keys: Schema.Array(ApiKeySummary) })
 
-export const ToolsResponse = Schema.Struct({
-  tools: Schema.Array(ToolSummary)
-})
 
 export const IssuedKey = Schema.Struct({
   id: Schema.String,
@@ -218,9 +170,6 @@ export const DriftReport = Schema.Struct({
 })
 export type DriftReport = typeof DriftReport.Type
 
-export const DriftResponse = Schema.Struct({
-  reports: Schema.Array(DriftReport)
-})
 
 export const Revoked = Schema.Struct({
   revoked: Schema.Boolean,
@@ -228,7 +177,6 @@ export const Revoked = Schema.Struct({
 })
 export type Revoked = typeof Revoked.Type
 
-export const Removed = Schema.Struct({ removed: Schema.Boolean })
 
 export const IntegrationRemoved = Schema.Struct({
   removed: Schema.Boolean,
@@ -237,43 +185,7 @@ export const IntegrationRemoved = Schema.Struct({
 })
 export type IntegrationRemoved = typeof IntegrationRemoved.Type
 
-export const decodeIntegrations = json(IntegrationsResponse)
-export const decodeConnections = json(ConnectionsResponse)
-export const decodeClients = json(ClientsResponse)
-export const decodeAccessProfiles = json(AccessProfilesResponse)
-export const decodeAccessProfile = json(AccessProfileDetail)
-export const decodeAccessProfileCreated = json(AccessProfile)
-export const decodeAccessProfileToolsReplaced = json(AccessProfileToolsReplaced)
-export const decodeApprovalPolicies = json(ApprovalPoliciesResponse)
-export const decodeApprovalPolicy = json(ApprovalPolicyDetail)
-export const decodeApprovalPolicyCreated = json(ApprovalPolicy)
-export const decodeApprovalPolicyToolsReplaced = json(ApprovalPolicyToolsReplaced)
-export const decodeEffectiveTools = json(EffectiveToolsResponse)
-export const decodeApprovals = json(ApprovalsResponse)
-export const decodeApprovalDestinations = json(ApprovalDestinationsResponse)
-export const decodeApprovalDestinationCreated = json(ApprovalDestinationCreated)
-export const decodeClientApprovalDestinations = json(ClientApprovalDestinationsResponse)
-export const decodeApprovalDeliveries = json(ApprovalDeliveriesResponse)
-export const decodeAudit = json(AuditResponse)
-export const decodeOverview = json(OverviewResponse)
-export const decodeKeys = json(KeysResponse)
-export const decodeTools = json(ToolsResponse)
-export const decodeTool = json(Tool)
-export const decodeIssuedKey = json(IssuedKey)
-export const decodeConnectionCreated = json(ConnectionCreated)
-export const decodeOAuthSession = json(OAuthSession)
-export const decodeDiscovery = json(IntegrationDiscovery)
-export const decodeDrift = json(DriftResponse)
-export const decodeRevoked = json(Revoked)
-export const decodeRemoved = json(Removed)
-export const decodeIntegration = json(Integration)
-export const decodeIntegrationRemoved = json(IntegrationRemoved)
-export const decodeClient = json(Client)
-export const decodeRegistrySearch = json(IntegrationSearchResponse)
 
-export const decodePolicyDecision = Schema.decodeUnknownSync(PolicyDecisionSchema)
-export const decodeAccessProfileId = Schema.decodeUnknownSync(AccessProfileId)
-export const decodeApprovalPolicyId = Schema.decodeUnknownSync(ApprovalPolicyId)
 export const decodeApprovalFilter = Schema.decodeUnknownSync(
   Schema.Union([ApprovalStatusSchema, Schema.Literal("all")])
 )
@@ -284,11 +196,6 @@ export const decodeAuditOutcomeFilter = Schema.decodeUnknownSync(
   Schema.Union([AuditOutcome, Schema.Literal("all")])
 )
 
-export const ApprovalDecided = Schema.Struct({
-  approval: Schema.NullOr(PendingApproval),
-  outcome: Schema.optional(Schema.Json)
-})
-export const decodeApprovalDecided = json(ApprovalDecided)
 
 export const Me = Schema.Union([
   Schema.Struct({
@@ -322,7 +229,6 @@ export const Me = Schema.Union([
 ])
 export type Me = typeof Me.Type
 
-export const decodeMe = json(Me)
 
 export const AuthProviders = Schema.Struct({
   signupOpen: Schema.Boolean,
@@ -336,18 +242,8 @@ export const AuthProviders = Schema.Struct({
   ])
 })
 export type AuthProviders = typeof AuthProviders.Type
-export const decodeAuthProviders = json(AuthProviders)
 
-export const EmailChanged = Schema.Struct({ email: Schema.String })
-export const PasswordChanged = Schema.Struct({
-  updated: Schema.Literal(true),
-  revokedSessions: Schema.Number
-})
-export const AccountDeleted = Schema.Struct({ deleted: Schema.Literal(true) })
 
-export const decodeEmailChanged = json(EmailChanged)
-export const decodePasswordChanged = json(PasswordChanged)
-export const decodeAccountDeleted = json(AccountDeleted)
 
 const decodeInstant = Schema.decodeUnknownOption(
   Schema.DateFromString

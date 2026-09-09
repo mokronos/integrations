@@ -1,46 +1,17 @@
-import { Effect, Schema } from "effect"
+import { Effect, Predicate } from "effect"
+import { FetchHttpClient, HttpClientError } from "effect/unstable/http"
+import { HttpApiClient } from "effect/unstable/httpapi"
+import { GatewayApi } from "@mokronos/gateway-api/definition"
+import { NonNegativeInt, PositiveInt, whenPresent } from "@mokronos/contracts"
 import {
-  FetchHttpClient,
-  HttpBody,
-  HttpClient,
-  HttpClientRequest
-} from "effect/unstable/http"
-import { type JsonEncodable, whenPresent, whenPresentFields } from "@mokronos/contracts"
-import { Predicate } from "effect"
-import {
-  decodeApprovalDecided,
-  decodeApprovalDeliveries,
-  decodeApprovalDestinations,
-  decodeApprovalDestinationCreated,
-  decodeClientApprovalDestinations,
-  decodeAuthProviders,
-  decodeApprovals,
-  decodeAudit,
-  decodeAccessProfile, decodeAccessProfileCreated, decodeAccessProfiles, decodeAccessProfileToolsReplaced,
-  decodeApprovalPolicy, decodeApprovalPolicyCreated, decodeApprovalPolicies, decodeApprovalPolicyToolsReplaced,
-  decodeClient,
-  decodeClients,
-  decodeConnectionCreated,
-  decodeConnections,
-  decodeDiscovery,
-  decodeDrift,
-  decodeEffectiveTools,
-  decodeIntegrations,
-  decodeIssuedKey,
-  decodeEmailChanged,
-  decodeMe,
-  decodePasswordChanged,
-  decodeKeys,
-  decodeOAuthSession,
-  decodeOverview,
-  decodeIntegration,
-  decodeIntegrationRemoved,
-  decodeRemoved,
-  decodeRegistrySearch,
-  decodeRevoked,
-  decodeTool,
-  decodeTools
-} from "@/lib/schemas"
+  AccessProfileId,
+  ApiKeyId,
+  ApprovalDestinationId,
+  ApprovalId,
+  ApprovalPolicyId,
+  ClientId
+} from "@mokronos/gateway-core/domain"
+import { Alias } from "@mokronos/contracts"
 import type {
   ApprovalDelivery,
   ApprovalStatus,
@@ -48,18 +19,23 @@ import type {
   ApprovalPolicyToolInput
 } from "@/lib/schemas"
 
+/**
+ * What the dashboard shows when a call fails. The endpoints fail with the
+ * error each route declares, which is what the code acts on; this is the
+ * shape the alert renders.
+ */
 export class GatewayError extends Error {
   readonly status: number | undefined
-  readonly method: RequestMethod
-  readonly path: string
+  readonly method: string | undefined
+  readonly path: string | undefined
   readonly requestId: string | undefined
 
   constructor(options: {
     readonly message: string
-    readonly method: RequestMethod
-    readonly path: string
-    readonly status?: number
-    readonly requestId?: string
+    readonly method?: string | undefined
+    readonly path?: string | undefined
+    readonly status?: number | undefined
+    readonly requestId?: string | undefined
   }) {
     super(options.message)
     this.name = "GatewayError"
@@ -70,85 +46,51 @@ export class GatewayError extends Error {
   }
 }
 
-type RequestMethod = "GET" | "POST" | "DELETE"
+/**
+ * The errors the routes declare carry their human-readable text in `error`,
+ * and leave `message` empty; everything else is an ordinary Error.
+ */
+const explains = (failure: Error): failure is Error & { readonly error: string } =>
+  "error" in failure && Predicate.isString(failure.error) && failure.error.length > 0
 
-const messageFrom = (payload: Schema.Json, fallback: string): string => {
-  if (Predicate.isObject(payload) && "error" in payload) {
-    const error = payload["error"]
-    if (Predicate.isString(error) && error.length > 0) return error
+const messageOf = (failure: Error): string =>
+  explains(failure) ? failure.error : failure.message
+
+const asGatewayError = (failure: Error): GatewayError => {
+  if (HttpClientError.isHttpClientError(failure)) {
+    const response = "response" in failure ? failure.response : undefined
+    return new GatewayError({
+      message: failure.message,
+      method: failure.request.method,
+      path: failure.request.url,
+      ...whenPresent("status", response?.status),
+      ...whenPresent("requestId", response?.headers["x-request-id"])
+    })
   }
-  return fallback
+  return new GatewayError({ message: messageOf(failure) })
 }
 
-const decodeJsonText = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))
-
-const call = Effect.fn("dashboard.request")(function*(
-  method: RequestMethod,
-  path: string,
-  body?: JsonEncodable
-): Effect.fn.Return<Schema.Json, GatewayError, HttpClient.HttpClient> {
-  const prepared = HttpClientRequest.make(method)(path, {
-    ...whenPresentFields(body, (present) => ({
-      body: HttpBody.jsonUnsafe(present)
-    }))
-  })
-  const response = yield* HttpClient.execute(prepared).pipe(
+/**
+ * The dashboard is served by the gateway it talks to, so calls go to the same
+ * origin and carry the session cookie.
+ */
+const endpoints = Effect.runSync(
+  HttpApiClient.make(GatewayApi, { baseUrl: window.location.origin }).pipe(
     Effect.provideService(FetchHttpClient.RequestInit, { credentials: "same-origin" }),
-    Effect.mapError((cause) =>
-      new GatewayError({
-        method,
-        path,
-        message: `The dashboard could not reach the gateway: ${cause.message}`
-      })
+    Effect.provide(FetchHttpClient.layer)
+  )
+)
+
+const run = <A, E extends Error>(effect: Effect.Effect<A, E>): Promise<A> =>
+  Effect.runPromise(
+    effect.pipe(
+      Effect.provideService(FetchHttpClient.RequestInit, { credentials: "same-origin" }),
+      Effect.mapError(asGatewayError)
     )
   )
-  const requestId = response.headers["x-request-id"]
-  const payload = yield* response.text.pipe(
-    Effect.flatMap((text) =>
-      text.trim().length === 0 ? Effect.succeed<Schema.Json>({}) : decodeJsonText(text)
-    ),
-    Effect.mapError((cause) =>
-      new GatewayError({
-        method,
-        path,
-        status: response.status,
-        ...whenPresent("requestId", requestId),
-        message: `The gateway returned an invalid JSON response: ${cause.message}`
-      })
-    )
-  )
-  if (response.status < 200 || response.status >= 300) {
-    return yield* Effect.fail(new GatewayError({
-      method,
-      path,
-      status: response.status,
-      ...whenPresent("requestId", requestId),
-      message: messageFrom(payload, `${method} ${path} failed with ${response.status}`)
-    }))
-  }
-  return payload
-})
-
-const request = (
-  method: RequestMethod,
-  path: string,
-  body?: JsonEncodable
-): Promise<Schema.Json> =>
-  Effect.runPromise(call(method, path, body).pipe(Effect.provide(FetchHttpClient.layer)))
-
-const query = (parameters: Readonly<Record<string, string | number | undefined>>): string => {
-  const search = new URLSearchParams()
-  for (const [key, value] of Object.entries(parameters)) {
-    if (value !== undefined) search.set(key, String(value))
-  }
-  const rendered = search.toString()
-  return rendered.length === 0 ? "" : `?${rendered}`
-}
-
-const segment = (value: string): string => encodeURIComponent(value)
 
 export const listIntegrations = async () => {
-  const response = decodeIntegrations(await request("GET", "/v1/integrations"))
+  const response = await run(endpoints.provisioning.listIntegrations())
   return {
     integrations: response.integrations,
     oauthCallbackUrl: response.oauthCallbackUrl ?? undefined
@@ -156,55 +98,56 @@ export const listIntegrations = async () => {
 }
 
 export const listIntegrationTools = async (slug: string) =>
-  decodeTools(await request("GET", `/v1/integrations/${segment(slug)}/tools`)).tools
+  (await run(endpoints.provisioning.integrationTools({ params: { slug } }))).tools
 
 export const describeTool = async (input: {
   readonly integration: string
   readonly tool: string
   readonly connection?: string
 }) =>
-  decodeTool(await request(
-    "GET",
-    `/v1/integrations/${segment(input.integration)}/tools/${segment(input.tool)}${
-      query({ connection: input.connection })
-    }`
-  ))
+  await run(endpoints.provisioning.describeTool({
+    params: { slug: input.integration, tool: input.tool },
+    query: { connection: input.connection }
+  }))
 
 export const searchRegistry = async (input: {
   readonly query: string
   readonly kind?: "mcp" | "openapi" | "graphql" | "cli"
   readonly limit?: number
-}) => decodeRegistrySearch(await request(
-  "GET",
-  `/v1/registry/search${query({ q: input.query, kind: input.kind, limit: input.limit })}`
-))
+}) =>
+  await run(endpoints.provisioning.registrySearch({
+    query: {
+      q: input.query,
+      ...whenPresent("kind", input.kind),
+      limit: PositiveInt.make(input.limit ?? 5)
+    }
+  }))
 
 export const discoverIntegration = async (input: {
   readonly url: string
   readonly connection?: string
   readonly slug?: string
   readonly name?: string
-}) => decodeDiscovery(await request("POST", "/v1/integrations/discover", input))
+}) => await run(endpoints.provisioning.discover({ payload: input }))
 
 export const renameIntegration = async (input: {
   readonly slug: string
   readonly name: string
 }) =>
-  decodeIntegration(await request(
-    "POST",
-    `/v1/integrations/${segment(input.slug)}/name`,
-    { name: input.name }
-  ))
+  await run(endpoints.provisioning.renameIntegration({
+    params: { slug: input.slug },
+    payload: { name: input.name }
+  }))
 
 export const listConnections = async () =>
-  decodeConnections(await request("GET", "/v1/connections")).connections
+  (await run(endpoints.provisioning.listConnections())).connections
 
 export const createConnection = async (input: {
   readonly integration: string
   readonly connection?: string
   readonly template?: string
   readonly values?: Readonly<Record<string, string>>
-}) => decodeConnectionCreated(await request("POST", "/v1/connections", input))
+}) => await run(endpoints.provisioning.connect({ payload: input }))
 
 export const startOAuth = async (input: {
   readonly integration: string
@@ -212,36 +155,32 @@ export const startOAuth = async (input: {
   readonly template?: string
   readonly clientId?: string
   readonly clientSecret?: string
-}) => decodeOAuthSession(await request("POST", "/v1/connections/oauth", input))
+}) => await run(endpoints.provisioning.startOAuth({ payload: input }))
 
 export const pollOAuth = async (id: string) =>
-  decodeOAuthSession(await request("GET", `/v1/connections/oauth/${segment(id)}`))
+  await run(endpoints.provisioning.oauthSession({ params: { id } }))
 
 export const removeIntegration = async (slug: string) =>
-  decodeIntegrationRemoved(await request("DELETE", `/v1/integrations/${segment(slug)}`))
+  await run(endpoints.provisioning.removeIntegration({ params: { slug } }))
 
 export const removeConnection = async (input: {
   readonly integration: string
   readonly name: string
 }) =>
-  decodeRemoved(await request(
-    "DELETE",
-    `/v1/connections/${segment(input.integration)}/${segment(input.name)}`
-  ))
+  await run(endpoints.provisioning.removeConnection({
+    params: { integration: input.integration, name: input.name }
+  }))
 
 export const listClients = async () => {
-  const response = decodeClients(await request("GET", "/v1/clients"))
-  return {
-    clients: response.clients,
-    mcpUrl: response.mcpUrl ?? undefined
-  }
+  const response = await run(endpoints.administrative.listClients())
+  return { clients: response.clients, mcpUrl: response.mcpUrl ?? undefined }
 }
 
-export const fetchOverview = async () =>
-  decodeOverview(await request("GET", "/v1/overview"))
+export const fetchOverview = async () => await run(endpoints.administrative.overview())
 
-export const createConfiguredClient = async (input: import("@mokronos/gateway-core/domain").ConfigureClient) =>
-  decodeClient(await request("POST", "/v1/clients/configured", input))
+export const createConfiguredClient = async (
+  input: import("@mokronos/gateway-core/domain").ConfigureClient
+) => await run(endpoints.administrative.createConfiguredClient({ payload: input }))
 
 export const createClient = async (input: {
   readonly name: string
@@ -249,83 +188,150 @@ export const createClient = async (input: {
   readonly approvalPolicyId?: string
   readonly capabilities: ReadonlyArray<"provision_connections" | "administer_gateway">
   readonly approvalDelivery: ApprovalDelivery
-}) => decodeClient(await request("POST", "/v1/clients", input))
+}) =>
+  await run(endpoints.administrative.createClient({
+    payload: {
+      name: input.name,
+      capabilities: input.capabilities,
+      approvalDelivery: input.approvalDelivery,
+      ...whenPresent(
+        "accessProfileId",
+        input.accessProfileId === undefined ? undefined : AccessProfileId.make(input.accessProfileId)
+      ),
+      ...whenPresent(
+        "approvalPolicyId",
+        input.approvalPolicyId === undefined ? undefined : ApprovalPolicyId.make(input.approvalPolicyId)
+      )
+    }
+  }))
 
 export const updateClientSettings = async (input: {
   readonly clientId: string
   readonly capabilities: ReadonlyArray<"provision_connections" | "administer_gateway">
   readonly approvalDelivery: ApprovalDelivery
-}) => decodeClient(await request(
-  "POST",
-  `/v1/clients/${segment(input.clientId)}/settings`,
-  { capabilities: input.capabilities, approvalDelivery: input.approvalDelivery }
-))
+}) =>
+  await run(endpoints.administrative.updateClientSettings({
+    params: { id: ClientId.make(input.clientId) },
+    payload: { capabilities: input.capabilities, approvalDelivery: input.approvalDelivery }
+  }))
 
 export const listApprovalDestinations = async () =>
-  decodeApprovalDestinations(await request("GET", "/v1/approval-destinations")).destinations
-export const createApprovalDestination = async (input: { readonly name: string; readonly url: string }) =>
-  decodeApprovalDestinationCreated(await request("POST", "/v1/approval-destinations", input))
+  (await run(endpoints.administrative.listApprovalDestinations())).destinations
+
+export const createApprovalDestination = async (
+  input: { readonly name: string; readonly url: string }
+) => await run(endpoints.administrative.createApprovalDestination({ payload: input }))
+
 export const deleteApprovalDestination = async (id: string) =>
-  decodeRemoved(await request("DELETE", `/v1/approval-destinations/${segment(id)}`))
+  await run(endpoints.administrative.deleteApprovalDestination({ params: { id: ApprovalDestinationId.make(id) } }))
+
 export const getClientApprovalDestinations = async (clientId: string) =>
-  decodeClientApprovalDestinations(await request("GET", `/v1/clients/${segment(clientId)}/approval-destinations`)).destinationIds
-export const replaceClientApprovalDestinations = async (clientId: string, destinationIds: ReadonlyArray<string>) =>
-  decodeClientApprovalDestinations(await request("POST", `/v1/clients/${segment(clientId)}/approval-destinations`, { destinationIds })).destinationIds
+  (await run(endpoints.administrative.getClientApprovalDestinations({
+    params: { id: ClientId.make(clientId) }
+  }))).destinationIds
+
+export const replaceClientApprovalDestinations = async (
+  clientId: string,
+  destinationIds: ReadonlyArray<string>
+) =>
+  (await run(endpoints.administrative.replaceClientApprovalDestinations({
+    params: { id: ClientId.make(clientId) },
+    payload: { destinationIds: destinationIds.map((id) => ApprovalDestinationId.make(id)) }
+  }))).destinationIds
 
 export const issueKey = async (clientId: string) =>
-  decodeIssuedKey(await request("POST", `/v1/clients/${segment(clientId)}/keys`))
+  await run(endpoints.administrative.issueKey({ params: { id: ClientId.make(clientId) } }))
 
 export const listKeys = async (clientId: string) =>
-  decodeKeys(await request("GET", `/v1/clients/${segment(clientId)}/keys`)).keys
+  (await run(endpoints.administrative.listKeys({ params: { id: ClientId.make(clientId) } }))).keys
 
 export const revokeKey = async (keyId: string) =>
-  decodeRevoked(await request("POST", `/v1/keys/${segment(keyId)}/revoke`))
+  await run(endpoints.administrative.revokeKey({ params: { id: ApiKeyId.make(keyId) } }))
 
 export const listClientTools = async (clientId: string, schemas = false) =>
-  decodeEffectiveTools(await request(
-    "GET",
-    `/v1/clients/${segment(clientId)}/tools${query({ schemas: schemas ? "true" : undefined })}`
-  )).tools
+  (await run(endpoints.administrative.clientTools({
+    params: { id: ClientId.make(clientId) },
+    query: { schemas }
+  }))).tools
 
 export const revokeClient = async (clientId: string) =>
-  decodeRevoked(await request("POST", `/v1/clients/${segment(clientId)}/revoke`))
+  await run(endpoints.administrative.revokeClient({ params: { id: ClientId.make(clientId) } }))
 
-export const listAccessProfiles = async () => decodeAccessProfiles(await request("GET", "/v1/access-profiles")).accessProfiles
-export const getAccessProfile = async (id: string) => decodeAccessProfile(await request("GET", `/v1/access-profiles/${segment(id)}`))
-export const createAccessProfile = async (name: string) => decodeAccessProfileCreated(await request("POST", "/v1/access-profiles", { name }))
-export const cloneAccessProfile = async (id: string, name: string) => decodeAccessProfileToolsReplaced(await request("POST", `/v1/access-profiles/${segment(id)}/clone`, { name }))
-export const replaceAccessProfileTools = async (id: string, tools: ReadonlyArray<AccessProfileToolInput>) => decodeAccessProfileToolsReplaced(await request("POST", `/v1/access-profiles/${segment(id)}/tools`, { tools }))
-export const assignAccessProfile = async (clientId: string, accessProfileId: string) => decodeClient(await request("POST", `/v1/clients/${segment(clientId)}/access-profile`, { accessProfileId }))
+export const listAccessProfiles = async () =>
+  (await run(endpoints.administrative.listAccessProfiles())).accessProfiles
 
-export const listApprovalPolicies = async () => decodeApprovalPolicies(await request("GET", "/v1/approval-policies")).approvalPolicies
-export const getApprovalPolicy = async (id: string) => decodeApprovalPolicy(await request("GET", `/v1/approval-policies/${segment(id)}`))
-export const createApprovalPolicy = async (name: string) => decodeApprovalPolicyCreated(await request("POST", "/v1/approval-policies", { name }))
-export const cloneApprovalPolicy = async (id: string, name: string) => decodeApprovalPolicyToolsReplaced(await request("POST", `/v1/approval-policies/${segment(id)}/clone`, { name }))
-export const replaceApprovalPolicyTools = async (id: string, tools: ReadonlyArray<ApprovalPolicyToolInput>) => decodeApprovalPolicyToolsReplaced(await request("POST", `/v1/approval-policies/${segment(id)}/tools`, { tools }))
-export const assignApprovalPolicy = async (clientId: string, approvalPolicyId: string) => decodeClient(await request("POST", `/v1/clients/${segment(clientId)}/approval-policy`, { approvalPolicyId }))
+export const getAccessProfile = async (id: string) =>
+  await run(endpoints.administrative.getAccessProfile({ params: { id: AccessProfileId.make(id) } }))
+
+export const createAccessProfile = async (name: string) =>
+  await run(endpoints.administrative.createAccessProfile({ payload: { name } }))
+
+export const cloneAccessProfile = async (id: string, name: string) =>
+  await run(endpoints.administrative.cloneAccessProfile({
+    params: { id: AccessProfileId.make(id) },
+    payload: { name }
+  }))
+
+export const replaceAccessProfileTools = async (
+  id: string,
+  tools: ReadonlyArray<AccessProfileToolInput>
+) =>
+  await run(endpoints.administrative.replaceAccessProfileTools({
+    params: { id: AccessProfileId.make(id) },
+    payload: { tools }
+  }))
+
+export const assignAccessProfile = async (clientId: string, accessProfileId: string) =>
+  await run(endpoints.administrative.assignAccessProfile({
+    params: { id: ClientId.make(clientId) },
+    payload: { accessProfileId: AccessProfileId.make(accessProfileId) }
+  }))
+
+export const listApprovalPolicies = async () =>
+  (await run(endpoints.administrative.listApprovalPolicies())).approvalPolicies
+
+export const getApprovalPolicy = async (id: string) =>
+  await run(endpoints.administrative.getApprovalPolicy({ params: { id: ApprovalPolicyId.make(id) } }))
+
+export const createApprovalPolicy = async (name: string) =>
+  await run(endpoints.administrative.createApprovalPolicy({ payload: { name } }))
+
+export const cloneApprovalPolicy = async (id: string, name: string) =>
+  await run(endpoints.administrative.cloneApprovalPolicy({
+    params: { id: ApprovalPolicyId.make(id) },
+    payload: { name }
+  }))
+
+export const replaceApprovalPolicyTools = async (
+  id: string,
+  tools: ReadonlyArray<ApprovalPolicyToolInput>
+) =>
+  await run(endpoints.administrative.replaceApprovalPolicyTools({
+    params: { id: ApprovalPolicyId.make(id) },
+    payload: { tools }
+  }))
+
+export const assignApprovalPolicy = async (clientId: string, approvalPolicyId: string) =>
+  await run(endpoints.administrative.assignApprovalPolicy({
+    params: { id: ClientId.make(clientId) },
+    payload: { approvalPolicyId: ApprovalPolicyId.make(approvalPolicyId) }
+  }))
 
 export const listApprovals = async (status?: ApprovalStatus) =>
-  decodeApprovals(await request("GET", `/v1/approvals${query({ status })}`)).approvals
+  (await run(endpoints.administrative.listApprovals({
+    query: { ...whenPresent("status", status) }
+  }))).approvals
+
 export const listApprovalDeliveries = async (approvalId: string) =>
-  decodeApprovalDeliveries(await request("GET", `/v1/approvals/${segment(approvalId)}/deliveries`)).deliveries
+  (await run(endpoints.administrative.listApprovalDeliveries({
+    params: { id: ApprovalId.make(approvalId) }
+  }))).deliveries
 
-export const approveApproval = async (input: {
-  readonly id: string
-}) =>
-  decodeApprovalDecided(await request(
-    "POST",
-    `/v1/approvals/${segment(input.id)}/approve`,
-    {}
-  ))
+export const approveApproval = async (input: { readonly id: string }) =>
+  await run(endpoints.administrative.approve({ params: { id: ApprovalId.make(input.id) } }))
 
-export const denyApproval = async (input: {
-  readonly id: string
-}) =>
-  decodeApprovalDecided(await request(
-    "POST",
-    `/v1/approvals/${segment(input.id)}/deny`,
-    {}
-  ))
+export const denyApproval = async (input: { readonly id: string }) =>
+  await run(endpoints.administrative.deny({ params: { id: ApprovalId.make(input.id) } }))
 
 export type AuditQuery = {
   readonly limit: number
@@ -338,15 +344,17 @@ export type AuditQuery = {
 }
 
 export const listAudit = async (input: AuditQuery) => {
-  const response = decodeAudit(await request("GET", `/v1/audit${query({
-    limit: input.limit,
-    offset: input.offset,
-    clientId: input.clientId,
-    alias: input.alias,
-    tool: input.tool,
-    outcome: input.outcome,
-    since: input.since
-  })}`))
+  const response = await run(endpoints.administrative.audit({
+    query: {
+      limit: PositiveInt.make(input.limit),
+      offset: NonNegativeInt.make(input.offset),
+      ...whenPresent("clientId", input.clientId === undefined ? undefined : ClientId.make(input.clientId)),
+      ...whenPresent("alias", input.alias === undefined ? undefined : Alias.make(input.alias)),
+      ...whenPresent("tool", input.tool),
+      ...whenPresent("outcome", input.outcome),
+      ...whenPresent("since", input.since === undefined ? undefined : new Date(input.since))
+    }
+  }))
   return {
     records: response.records,
     total: response.total,
@@ -356,49 +364,54 @@ export const listAudit = async (input: AuditQuery) => {
 }
 
 export const refreshDrift = async (integration?: string) =>
-  decodeDrift(await request("POST", `/v1/drift/refresh${query({ integration })}`)).reports
+  (await run(endpoints.administrative.refreshDrift({
+    query: { ...whenPresent("integration", integration) }
+  }))).reports
 
-export type Me = ReturnType<typeof decodeMe>
+export type Me = Awaited<ReturnType<typeof fetchMe>>
 
-export const fetchMe = async (): Promise<Me> => decodeMe(await request("GET", "/v1/auth/me"))
+export const fetchMe = async () => await run(endpoints.auth.whoami())
 
-export const fetchAuthProviders = async () =>
-  decodeAuthProviders(await request("GET", "/v1/auth/providers"))
+export const fetchAuthProviders = async () => await run(endpoints.auth.providers())
 
 export const signUp = async (input: {
   readonly email: string
   readonly password: string
   readonly tenantName?: string | undefined
 }): Promise<void> => {
-  await request("POST", "/v1/auth/signup", {
-    email: input.email,
-    password: input.password,
-    ...whenPresent("tenantName", input.tenantName)
-  })
+  await run(endpoints.auth.signup({
+    payload: {
+      email: input.email,
+      password: input.password,
+      ...whenPresent("tenantName", input.tenantName)
+    }
+  }))
 }
 
-export const logIn = async (input: { readonly email: string; readonly password: string }): Promise<void> => {
-  await request("POST", "/v1/auth/login", input)
+export const logIn = async (
+  input: { readonly email: string; readonly password: string }
+): Promise<void> => {
+  await run(endpoints.auth.login({ payload: input }))
 }
 
 export const logOut = async (): Promise<void> => {
-  await request("POST", "/v1/auth/logout")
+  await run(endpoints.auth.logout())
 }
 
 export const changeEmail = async (input: {
   readonly email: string
   readonly password: string
 }): Promise<string> =>
-  decodeEmailChanged(await request("POST", "/v1/auth/email", input)).email
+  (await run(endpoints.auth.changeEmail({ payload: input }))).email
 
 export const changePassword = async (input: {
   readonly currentPassword?: string
   readonly newPassword: string
 }): Promise<number> =>
-  decodePasswordChanged(await request("POST", "/v1/auth/password", input)).revokedSessions
+  (await run(endpoints.auth.changePassword({ payload: input }))).revokedSessions
 
 export const deleteAccount = async (input: {
   readonly password?: string
 }): Promise<void> => {
-  await request("POST", "/v1/auth/account/delete", input)
+  await run(endpoints.auth.deleteAccount({ payload: input }))
 }
