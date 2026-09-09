@@ -35,6 +35,12 @@
       "bun": "./src/index.ts",
       "development": "./src/index.ts",
       "default": "./dist/index.js"
+    },
+    "./gateway-config": {
+      "types": "./dist/gateway-config.d.ts",
+      "bun": "./src/gateway-config.ts",
+      "development": "./src/gateway-config.ts",
+      "default": "./dist/gateway-config.js"
     }
   },
   "scripts": {

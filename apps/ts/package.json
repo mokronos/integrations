@@ -49,6 +49,7 @@
   },
   "dependencies": {
     "@mokronos/contracts": "workspace:*",
+    "@mokronos/gateway-api": "workspace:*",
     "effect": "catalog:"
   }
 }

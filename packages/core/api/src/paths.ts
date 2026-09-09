@@ -1,5 +1,5 @@
 import path from "node:path"
-import { integrationsHome } from "@mokronos/integrations-client"
+import { integrationsHome } from "@mokronos/contracts/gateway-config"
 
 export { integrationsHome }
 

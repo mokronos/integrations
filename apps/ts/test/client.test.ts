@@ -52,7 +52,10 @@ describe("gateway protocol compatibility", () => {
       transport,
       "https://gateway.example",
       (client) =>
-        Effect.all([Effect.result(client.connections()), Effect.result(client.connections())])
+        Effect.all([
+          Effect.result(client.provisioning.listConnections()),
+          Effect.result(client.provisioning.listConnections())
+        ])
     )
 
     for (const attempt of attempts) {
@@ -72,9 +75,9 @@ describe("gateway protocol compatibility", () => {
       "https://gateway.example/",
       (client) =>
         Effect.all({
-          metadata: client.metadata(),
-          connections: client.connections(),
-          health: client.health()
+          metadata: client.metadata,
+          connections: client.provisioning.listConnections(),
+          health: client.health
         })
     )
 

@@ -2,6 +2,8 @@ import type { GatewayClient } from "@mokronos/integrations-client"
 import type { HttpClient } from "effect/unstable/http"
 import { Effect, Option, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
+import { Alias } from "@mokronos/contracts"
+import { ExecuteOutcome } from "@mokronos/gateway-api"
 import type { IntegrationsCliError } from "../connection.ts"
 import { cliError, connectToGateway, describeError } from "../connection.ts"
 import {
@@ -36,11 +38,10 @@ const controlPlaneTask = <A, E>(
     Effect.mapError((error) => cliError(describeError(error)))
   )
 
-const JsonObject = Schema.Record(Schema.String, Schema.Json)
 const decodeJsonText = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
 
-const record = <A>(value: A | undefined): Record<string, typeof Schema.Json.Type> =>
-  Option.getOrElse(Schema.decodeUnknownOption(JsonObject)(value), () => ({}))
+/** Printed as it travelled: the decoded outcome carries a Date, JSON does not. */
+const encodeOutcome = Schema.encodeSync(ExecuteOutcome)
 
 const readJsonArgument = Effect.fn("cli.readJsonArgument")(function*(
   inline_: string | undefined,
@@ -134,15 +135,15 @@ export const operatorExecuteCommand = Command.make(
             Option.getOrUndefined(third),
             Option.getOrUndefined(file)
           )
-          return yield* client.execute({
-            alias: target,
+          return yield* client.delegated.execute({ payload: {
+            alias: Alias.make(target),
             tool: second.value,
             arguments: payload
-          })
+          } })
         }))
     return invocation.pipe(Effect.flatMap((outcome) =>
       writeStdoutLine(
-        jsonOutput(Schema.decodeUnknownSync(Schema.Json)(outcome), verbose)
+        jsonOutput(encodeOutcome(outcome), verbose)
       ).pipe(Effect.flatMap(() =>
         outcome.status === "succeeded" || outcome.status === "pending"
           ? Effect.void
@@ -183,11 +184,13 @@ export const clientExecuteCommand = Command.make(
         Option.getOrUndefined(json),
         Option.getOrUndefined(file)
       ).pipe(Effect.flatMap((arguments_) =>
-        client.execute({ alias, tool, arguments: arguments_ })
+        client.delegated.execute({
+          payload: { alias: Alias.make(alias), tool, arguments: arguments_ }
+        })
       ))
     ).pipe(Effect.flatMap((outcome) =>
       writeStdoutLine(
-        jsonOutput(Schema.decodeUnknownSync(Schema.Json)(outcome), verbose)
+        jsonOutput(encodeOutcome(outcome), verbose)
       ).pipe(Effect.flatMap(() =>
         outcome.status === "succeeded" || outcome.status === "pending"
           ? Effect.void
@@ -226,10 +229,10 @@ export const validateCommand = (runGateway: GatewayTask) => Command.make(
             // oxlint-disable-next-line anti-slop/no-unknown-parameters
             catch: (cause: unknown) => cliError(describeError(cause))
           })
-        return record(yield* client.validate({
+        return yield* client.provisioning.validate({ payload: {
           node: decodeJsonText(source),
           live: !structural
-        }))
+        } })
       })).pipe(Effect.flatMap((report) =>
       writeStdoutLine(jsonOutput(report, verbose)).pipe(
         Effect.flatMap(() =>

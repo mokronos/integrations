@@ -8,7 +8,11 @@
     "access": "public",
     "registry": "https://registry.npmjs.org"
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "src",
+    "dist",
+    "README.md"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

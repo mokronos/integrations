@@ -180,7 +180,7 @@ const EffectiveTool = Schema.Struct({
   outputSchema: Schema.optional(Json)
 })
 
-const InvokedOk = Schema.Union([
+export const InvokedOk = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("succeeded"),
     result: Json
@@ -192,11 +192,11 @@ const InvokedOk = Schema.Union([
     approvalUrl: Schema.optional(Schema.String)
   })
 ])
-const InvokedDenied = Schema.Struct({
+export const InvokedDenied = Schema.Struct({
   status: Schema.Literal("denied"),
   reason: Schema.String
 }).pipe(HttpApiSchema.status(403))
-const InvokedFailed = Schema.Struct({
+export const InvokedFailed = Schema.Struct({
   status: Schema.Literal("failed"),
   message: Schema.String
 }).pipe(HttpApiSchema.status(502))
@@ -823,6 +823,9 @@ const AuthGroup = HttpApiGroup.make("auth")
     error: [ForbiddenError, PasswordRequiredError, InvalidCredentialsError]
   }).annotate(RequiredAccess, "human"))
   .middleware(Authority)
+
+/** What `execute` answers with, in the shape it goes over the wire. */
+export const ExecuteOutcome = Schema.Union([InvokedOk, InvokedDenied, InvokedFailed])
 
 export const GatewayApi = HttpApi.make("@mokronos/integrations/gateway")
   .add(SystemGroup)

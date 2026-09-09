@@ -4,8 +4,14 @@
   "type": "module",
   "description": "Protocol-neutral integration domain models.",
   "license": "MIT",
-  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org" },
-  "files": ["dist"],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -14,7 +20,9 @@
       "default": "./dist/index.js"
     }
   },
-  "scripts": { "build": "rm -rf dist && tsc -p tsconfig.build.json" },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json"
+  },
   "dependencies": {
     "@mokronos/contracts": "workspace:*",
     "effect": "catalog:"

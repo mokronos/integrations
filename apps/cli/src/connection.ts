@@ -1,7 +1,8 @@
-import { Data, Effect, Predicate } from "effect"
+import { Data, Effect } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import type { HttpClient } from "effect/unstable/http"
-import { GatewayError, makeGatewayClient, resolveClientConnection } from "@mokronos/integrations-client"
+import { makeGatewayClient, resolveClientConnection } from "@mokronos/integrations-client"
+import { Forbidden } from "@mokronos/gateway-api"
 import type { GatewayClient } from "@mokronos/integrations-client"
 
 export class IntegrationsCliError extends Data.TaggedError("IntegrationsCliError")<{
@@ -11,19 +12,13 @@ export class IntegrationsCliError extends Data.TaggedError("IntegrationsCliError
 export const cliError = (message: string): IntegrationsCliError =>
   new IntegrationsCliError({ message })
 
-const isCapabilityRefusal = (error: GatewayError): boolean =>
-  error.status === 403 &&
-  Predicate.isObjectOrArray(error.body) &&
-  "code" in error.body &&
-  error.body["code"] === "not-permitted"
-
 // oxlint-disable-next-line anti-slop/no-unknown-parameters
 export const describeError = (error: unknown): string => {
   if (error instanceof IntegrationsCliError) return error.message
-  if (error instanceof GatewayError) {
-    return isCapabilityRefusal(error)
-      ? `${error.message} (use a client or human session with the required capability)`
-      : error.message
+  // A capability refusal is the one gateway error worth explaining: the
+  // credential was accepted, it just is not allowed to do this.
+  if (error instanceof Forbidden && error.code === "not-permitted") {
+    return `${error.error} (use a client or human session with the required capability)`
   }
   return error instanceof Error ? error.message : String(error)
 }

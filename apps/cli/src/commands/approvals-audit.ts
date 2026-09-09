@@ -3,6 +3,7 @@ import type { GatewayClient } from "@mokronos/integrations-client"
 import type { HttpClient } from "effect/unstable/http"
 import { Effect, Option, Predicate, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
+import { ApprovalId } from "@mokronos/gateway-core/domain"
 import type { IntegrationsCliError } from "../connection.ts"
 import { cliError, connectToGateway, describeError } from "../connection.ts"
 import type { Page, Window } from "../output.ts"
@@ -129,7 +130,7 @@ export const approvalCommand = Command.make(
   "approval",
   { id: Argument.string("approval-id"), verbose: verboseFlag() },
   ({ id, verbose }) =>
-    gatewayTask((client) => client.approval(id)).pipe(Effect.flatMap((approval) =>
+    gatewayTask((client) => client.delegated.approval({ params: { id: ApprovalId.make(id) } })).pipe(Effect.flatMap((approval) =>
       writeStdoutLine(jsonOutput(approval, verbose))
     ))
 ).pipe(Command.withDescription("Read one frozen invocation, as the caller that proposed it"))

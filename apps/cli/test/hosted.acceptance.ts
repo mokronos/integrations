@@ -104,7 +104,7 @@ const program = Effect.gen(function*() {
       yield* request(`/v1/clients/${encodeURIComponent(client.id)}/keys`, {})
     )
     const delegated = yield* makeGatewayClient({ url: gatewayUrl, apiKey: key.secret })
-    if ((yield* delegated.connections()).connections.length !== 0) {
+    if ((yield* delegated.provisioning.listConnections()).connections.length !== 0) {
       return yield* Effect.die(new Error("A fresh hosted tenant unexpectedly has connections"))
     }
 
@@ -117,8 +117,12 @@ const program = Effect.gen(function*() {
       )
     }
 
-    const discovery = yield* delegated.discover({ url: "https://mcp.linear.app/mcp" })
-    const oauth = yield* delegated.startOAuth({ integration: discovery.integration.slug })
+    const discovery = yield* delegated.provisioning.discover({
+      payload: { url: "https://mcp.linear.app/mcp" }
+    })
+    const oauth = yield* delegated.provisioning.startOAuth({
+      payload: { integration: discovery.integration.slug }
+    })
     if (oauth.state.status !== "pending") {
       return yield* Effect.die(
         new Error(`Linear OAuth did not return a pending authorization: ${oauth.state.status}`)

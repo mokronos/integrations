@@ -3,6 +3,7 @@ import type { GatewayClient } from "@mokronos/integrations-client"
 import type { HttpClient } from "effect/unstable/http"
 import { Effect, Option, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
+import { PositiveInt } from "@mokronos/contracts"
 import type { IntegrationsCliError } from "../connection.ts"
 import { cliError, connectToGateway, describeError } from "../connection.ts"
 import type { Page, Window } from "../output.ts"
@@ -114,12 +115,12 @@ export const discoverCommand = (runGateway: GatewayTask) => Command.make(
   },
   ({ url, connection, slug: chosenSlug, name, verbose }) =>
     runGateway((client) =>
-      client.discover({
+      client.provisioning.discover({ payload: {
         url,
         connection,
         ...whenPresent("slug", Option.getOrUndefined(chosenSlug)),
         ...whenPresent("name", Option.getOrUndefined(name))
-      }))
+      } }))
       .pipe(Effect.flatMap((result) => {
         const body = record(result)
         const integration = record(body["integration"])
@@ -152,11 +153,11 @@ export const searchCommand = (runGateway: GatewayTask) => Command.make(
     verbose: verboseFlag()
   },
   ({ query, kind, limit, verbose }) =>
-    runGateway((client) => client.search({
-      query,
-      limit,
+    runGateway((client) => client.provisioning.registrySearch({ query: {
+      q: query,
+      limit: PositiveInt.make(limit),
       ...whenPresent("kind", Option.getOrUndefined(kind))
-    })).pipe(Effect.flatMap((result) => {
+    } })).pipe(Effect.flatMap((result) => {
       const body = record(result)
       const results = array(body["results"])
       return writeStdoutLine(jsonOutput(
@@ -178,7 +179,8 @@ export const renameCommand = (runGateway: GatewayTask) => Command.make(
     verbose: verboseFlag()
   },
   ({ integration, name, verbose }) =>
-    runGateway((client) => client.renameIntegration({ integration, name })).pipe(
+    runGateway((client) =>
+      client.provisioning.renameIntegration({ params: { slug: integration }, payload: { name } })).pipe(
       Effect.flatMap((result) =>
         writeStdoutLine(jsonOutput(record(result), verbose))
       )
@@ -195,7 +197,7 @@ export const integrationsCommand = (runGateway: GatewayTask) => Command.make(
     verbose: verboseFlag()
   },
   ({ limit, offset, verbose }) =>
-    runGateway((client) => client.integrations()).pipe(
+    runGateway((client) => client.provisioning.listIntegrations()).pipe(
       Effect.flatMap((result) => {
         const all = sortedBy(array(record(result)["integrations"]), (entry) => text(entry["slug"]))
         return listing(page(all, window(limit, offset)), {
@@ -232,7 +234,7 @@ export const toolsCommand = (runGateway: GatewayTask) => Command.make(
     verbose: verboseFlag()
   },
   ({ integration, filter, limit, offset, verbose }) =>
-    runGateway((client) => client.integrationTools(integration)).pipe(Effect.flatMap((result) => {
+    runGateway((client) => client.provisioning.integrationTools({ params: { slug: integration } })).pipe(Effect.flatMap((result) => {
       const term = Option.getOrUndefined(filter)?.toLowerCase()
       const all = array(record(result)["tools"])
       const matching = term === undefined
@@ -271,8 +273,11 @@ export const schemaCommand = (runGateway: GatewayTask) => Command.make(
   ({ integration, tool, connection, verbose }) =>
     runGateway((client) =>
       Effect.all({
-        detail: client.integrationTool({ integration, tool, connection }),
-        effective: client.effectiveTools()
+        detail: client.provisioning.describeTool({
+          params: { slug: integration, tool },
+          query: { connection }
+        }),
+        effective: client.delegated.listTools({ query: { schemas: false } })
       })).pipe(Effect.flatMap(({ detail: found, effective }) => {
       const detail = record(found)
       const core = Object.fromEntries(

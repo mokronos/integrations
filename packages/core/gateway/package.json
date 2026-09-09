@@ -9,6 +9,7 @@
     "registry": "https://registry.npmjs.org"
   },
   "files": [
+    "src",
     "dist",
     "README.md"
   ],

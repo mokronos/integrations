@@ -352,22 +352,7 @@ export const connectToOperatorGateway = Effect.fn("session.connectToOperatorGate
         `The saved session belongs to ${session.url}, but the selected gateway is ${selectedUrl}. Run \`ii login\` again.`
       )
     }
-    return yield* makeGatewayClient({
-      url: session.url,
-      apiKey: "operator-session-transport"
-    }).pipe(
-      Effect.provideService(
-        HttpClient.HttpClient,
-        HttpClient.mapRequest(
-          yield* HttpClient.HttpClient,
-          (request) =>
-            HttpClientRequest.setHeaders(
-              HttpClientRequest.removeHeader(request, "authorization"),
-              { cookie: `wf_session=${session.token}`, origin: session.url }
-            )
-        )
-      )
-    )
+    return yield* makeGatewayClient({ url: session.url, sessionToken: session.token })
   }
 )
 

@@ -5,7 +5,6 @@ import { Duration, Effect, Option, Schedule, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import type { IntegrationsCliError } from "../connection.ts"
 import { cliError, connectToGateway, describeError, openBrowser } from "../connection.ts"
-import type { GatewayFailure } from "@mokronos/integrations-client"
 import type { Page, Window } from "../output.ts"
 import {
   jsonOutput,
@@ -139,7 +138,7 @@ export const connectCommand = (runGateway: GatewayTask) => Command.make(
   },
   (options) =>
     runGateway((client) => Effect.gen(function*() {
-      const catalog = record(yield* client.integrations())
+      const catalog = yield* client.provisioning.listIntegrations()
       const integration = array(catalog["integrations"]).find((candidate) =>
         text(candidate["slug"]) === options.integration
       )
@@ -169,7 +168,7 @@ export const connectCommand = (runGateway: GatewayTask) => Command.make(
 
       if (oauthMethod !== undefined) {
         const secretName = Option.getOrUndefined(options.clientSecretEnv)
-        const started = record(yield* client.startOAuth({
+        const started = yield* client.provisioning.startOAuth({ payload: {
           integration: options.integration,
           connection: options.connection,
           ...whenPresent("template", template),
@@ -179,7 +178,7 @@ export const connectCommand = (runGateway: GatewayTask) => Command.make(
           }),
           ...whenPresentMap("clientSecret", secretName, environmentValue),
           timeoutSeconds: options.timeout
-        }))
+        } })
         const sessionId = text(started["id"])
         const state = record(started["state"])
         const authorizationUrl = text(state["authorizationUrl"])
@@ -187,11 +186,8 @@ export const connectCommand = (runGateway: GatewayTask) => Command.make(
           console.error(`Authorize in your browser:\n${authorizationUrl}`)
           if (!options.noOpen) yield* openBrowser(authorizationUrl)
         }
-        const poll: Effect.Effect<
-          typeof JsonObject.Type | undefined,
-          IntegrationsCliError | GatewayFailure
-        > = Effect.gen(function*() {
-          const session = record(yield* client.oauth(sessionId))
+        const poll = Effect.gen(function*() {
+          const session = yield* client.provisioning.oauthSession({ params: { id: sessionId } })
           const current = record(session["state"])
           if (text(current["status"]) === "connected") return record(current["connection"])
           if (text(current["status"]) === "failed") {
@@ -219,12 +215,12 @@ export const connectCommand = (runGateway: GatewayTask) => Command.make(
         Option.getOrUndefined(options.credentialEnv),
         Option.getOrUndefined(options.credentialValues)
       )
-      return record(yield* client.connect({
+      return yield* client.provisioning.connect({ payload: {
         integration: options.integration,
         connection: options.connection,
         ...whenPresent("template", template),
         values
-      }))
+      } })
     })).pipe(Effect.flatMap((result) => {
       const connection = record(result["connection"] ?? result)
       const tools = array(result["tools"])
@@ -248,7 +244,7 @@ export const connectionsCommand = (runGateway: GatewayTask) => Command.make(
   "connections",
   { limit: limitFlag(), offset: offsetFlag(), verbose: verboseFlag() },
   ({ limit, offset, verbose }) =>
-    runGateway((client) => client.connections()).pipe(
+    runGateway((client) => client.provisioning.listConnections()).pipe(
       Effect.flatMap((result) => {
         const all = sortedBy(
           array(record(result)["connections"]),
@@ -269,7 +265,8 @@ export const disconnectCommand = (runGateway: GatewayTask) => Command.make(
   "disconnect",
   { integration: Argument.string("integration"), connection: connectionFlag() },
   ({ integration, connection }) =>
-    runGateway((client) => client.disconnect({ integration, connection })).pipe(
+    runGateway((client) =>
+      client.provisioning.removeConnection({ params: { integration, name: connection } })).pipe(
       Effect.flatMap((result) => {
         const removed = text(record(result)["connection"] ?? connection)
         return writeStdoutLine(

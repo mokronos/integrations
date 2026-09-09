@@ -1,4 +1,4 @@
-export type { ClientConnection } from "@mokronos/integrations-client"
+export type { ClientConnection } from "@mokronos/contracts/gateway-config"
 export {
   defaultGatewayPort,
   GatewayConfigFile,
@@ -6,7 +6,7 @@ export {
   readGatewayConfig,
   resolveClientConnection,
   writeGatewayConfig
-} from "@mokronos/integrations-client"
+} from "@mokronos/contracts/gateway-config"
 
 export const defaultArgumentRetentionDays = 30
 
