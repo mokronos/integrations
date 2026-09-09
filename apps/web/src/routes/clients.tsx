@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { whenPresent } from "@mokronos/contracts"
+import { whenPresent } from "@integrations/contracts"
 import { toast } from "sonner"
 import { LoadingRows, Page, QueryError, ReloadButton } from "@/components/page"
 import { RowLink, rowNavigates } from "@/components/ui/row-link"

@@ -1,6 +1,6 @@
 import { Option } from "effect"
-import { isJsonObject, type Json } from "@mokronos/contracts"
-import type { HttpCall } from "@mokronos/core-integrations"
+import { isJsonObject, type Json } from "@integrations/contracts"
+import type { HttpCall } from "../tool.ts"
 
 export interface SplitArguments {
   readonly parameters: Record<string, Json>

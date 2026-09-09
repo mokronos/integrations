@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import { Option } from "effect"
-import { ConnectionName, connectionAddress, IntegrationSlug, parseToolAddress, slugify, ToolName, toolAddress } from "@mokronos/contracts"
+import { ConnectionName, connectionAddress, IntegrationSlug, parseToolAddress, slugify, ToolName, toolAddress } from "@integrations/contracts"
 
 describe("tool addresses", () => {
   const parts = {

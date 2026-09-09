@@ -1,6 +1,6 @@
 import { Effect } from "effect"
-import type { DetectionError, HostFailure } from "@mokronos/integrations"
-import type { OAuthFlowError } from "@mokronos/gateway-core"
+import type { DetectionError, HostFailure } from "@integrations/host"
+import type { OAuthFlowError } from "@integrations/gateway-core"
 import { ApiBadRequest } from "../api.ts"
 import { capture } from "../observability.ts"
 

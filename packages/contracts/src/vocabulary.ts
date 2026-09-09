@@ -27,3 +27,9 @@ export type Alias = typeof Alias.Type
 
 export const ApprovalStatus = Schema.Literals(["pending", "executing", "approved", "denied", "expired"])
 export type ApprovalStatus = typeof ApprovalStatus.Type
+
+export const ParameterLocation = Schema.Literals(["path", "query", "header", "cookie", "body"])
+export type ParameterLocation = typeof ParameterLocation.Type
+
+export const HttpMethod = Schema.Literals(["get", "put", "post", "delete", "patch", "head", "options", "trace"])
+export type HttpMethod = typeof HttpMethod.Type

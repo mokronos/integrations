@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { Effect, Layer, Option } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
-import { ConnectionName, IntegrationSlug } from "@mokronos/contracts"
+import { ConnectionName, IntegrationSlug } from "@integrations/contracts"
 import { captureOpenApiTools } from "../../../src/catalog/capture.ts"
 import { compileSpec } from "../../../src/openapi/compile.ts"
 import { OpenApiInvoker } from "../../../src/openapi/invoke.ts"

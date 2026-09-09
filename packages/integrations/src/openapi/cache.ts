@@ -16,7 +16,7 @@ export class SpecCache extends Context.Service<
     readonly load: (record: IntegrationRecord) => Effect.Effect<CompiledSpec, SpecError>
     readonly compileUrl: (url: string) => Effect.Effect<CompiledSpec, SpecError>
   }
->()("@mokronos/integrations/SpecCache") {
+>()("@integrations/host/SpecCache") {
   static readonly layer: Layer.Layer<
     SpecCache,
     never,

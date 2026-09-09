@@ -1,9 +1,9 @@
 import { describe, expect, it } from "bun:test"
 import { Cause, Context, Effect, Exit, Option, Result } from "effect"
-import { IntegrationSlug } from "@mokronos/contracts"
+import { IntegrationSlug } from "@integrations/contracts"
 import { IntegrationHost } from "../src/host.ts"
 import { SpecError } from "../src/errors.ts"
-import type { EndpointClassification, Integration } from "@mokronos/contracts"
+import type { EndpointClassification, Integration } from "@integrations/contracts"
 import { installClassified } from "../src/provision.ts"
 
 const classification: EndpointClassification = {

@@ -1,21 +1,17 @@
-import { whenPresent } from "@mokronos/contracts"
+import { whenPresent } from "@integrations/contracts"
+import type { OAuthSessionState } from "@integrations/contracts"
 
-import type { AuthMethod, Connection } from "@mokronos/contracts"
+import type { AuthMethod } from "@integrations/contracts"
 import { Context, Deferred, Effect, Exit, Schema, Scope } from "effect"
 import type { TenantId } from "./domain.ts"
-import { webCrypto } from "@mokronos/contracts"
-import { completeOAuthFlow } from "@mokronos/integrations"
+import { webCrypto } from "@integrations/contracts"
+import { completeOAuthFlow } from "@integrations/host"
 import {
   authorizeInBrowser,
   OAuthFlowError,
   startHostedAuthorization,
   type OAuthOperations
 } from "./oauth.ts"
-
-export type OAuthSessionState =
-  | { readonly status: "pending"; readonly authorizationUrl: string }
-  | { readonly status: "connected"; readonly connection: Connection }
-  | { readonly status: "failed"; readonly message: string }
 
 export type OAuthSession = {
   readonly id: string

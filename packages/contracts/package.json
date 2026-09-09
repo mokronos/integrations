@@ -1,6 +1,7 @@
 {
-  "name": "@mokronos/contracts",
+  "name": "@integrations/contracts",
   "version": "0.2.0",
+  "private": true,
   "type": "module",
   "description": "The shared vocabulary and wire contracts every component agrees on.",
   "license": "MIT",
@@ -19,10 +20,6 @@
   ],
   "engines": {
     "bun": ">=1.2"
-  },
-  "publishConfig": {
-    "access": "public",
-    "registry": "https://registry.npmjs.org"
   },
   "files": [
     "src",

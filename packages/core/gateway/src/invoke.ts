@@ -1,14 +1,14 @@
-import { whenPresent } from "@mokronos/contracts"
+import { whenPresent } from "@integrations/contracts"
+import type { InvocationOutcome } from "@integrations/contracts"
 import { Crypto, DateTime, Duration, Effect, Schema } from "effect"
 import type { HttpClient } from "effect/unstable/http"
-import type { IntegrationHost } from "@mokronos/integrations"
-import { ToolAddress } from "@mokronos/contracts"
+import type { IntegrationHost } from "@integrations/host"
+import { ToolAddress } from "@integrations/contracts"
 import { authorizeInvocation } from "./authorize.ts"
 import { defaultApprovalExpiryHours, defaultArgumentRetentionDays } from "./config.ts"
 import {
   aliasForConnection,
   defaultTenantId,
-  describeAuthorization,
   sameConnectionRef
 } from "./domain.ts"
 import type {
@@ -28,17 +28,6 @@ export const boundToolAddress = (connection: ConnectionRef, tool: ToolName): Too
   ToolAddress.make(
     `tools.${connection.integration}.${connection.owner}.${connection.name}.${tool}`
   )
-
-export type InvocationOutcome =
-  | { readonly status: "succeeded"; readonly result: Json }
-  | {
-    readonly status: "pending"
-    readonly approvalId: ApprovalId
-    readonly expiresAt: Date
-    readonly approvalUrl?: string
-  }
-  | { readonly status: "denied"; readonly reason: string }
-  | { readonly status: "failed"; readonly message: string }
 
 export interface InvokeDependencies {
   readonly store: GatewayStore
@@ -193,6 +182,7 @@ export const invokeThroughGateway = Effect.fn("Invocation.invokeThroughGateway")
   })
 
   if (authorization.status !== "authorized") {
+    const reason = authorization.message
     yield* store.recordAudit({
       tenantId: defaultTenantId,
       id: (yield* newAuditId),
@@ -202,9 +192,9 @@ export const invokeThroughGateway = Effect.fn("Invocation.invokeThroughGateway")
       connection: null,
       decision: null,
       outcome: "denied",
-      message: describeAuthorization(authorization)
+      message: reason
     })
-    return { status: "denied", reason: describeAuthorization(authorization) }
+    return { status: "denied", reason }
   }
 
   if (authorization.decision === "require_approval") {

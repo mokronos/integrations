@@ -1,6 +1,6 @@
-import { OAuthSessionError } from "@mokronos/gateway-core"
-import type { OAuthSession, OAuthSessionStore } from "@mokronos/gateway-core"
-import { Connection } from "@mokronos/contracts"
+import { OAuthSessionError } from "@integrations/gateway-core"
+import type { OAuthSession, OAuthSessionStore } from "@integrations/gateway-core"
+import { Connection } from "@integrations/contracts"
 import { Effect, Schema } from "effect"
 import type { D1DatabaseLike } from "./cloudflare.ts"
 

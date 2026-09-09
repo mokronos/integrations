@@ -2,7 +2,7 @@
 import { BunHttpClient, BunServices } from "@effect/platform-bun"
 import { Effect, Layer } from "effect"
 import { Command } from "effect/unstable/cli"
-import { telemetryLayer } from "@mokronos/observability"
+import { telemetryLayer } from "@integrations/observability"
 import { clientSubcommands } from "./commands.ts"
 import packageMetadata from "../package.json" with { type: "json" }
 

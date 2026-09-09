@@ -1,13 +1,10 @@
 {
-  "name": "@mokronos/gateway-core",
+  "name": "@integrations/gateway-core",
   "version": "0.2.0",
+  "private": true,
   "type": "module",
   "description": "Gateway domain, persistence, authorization, and execution policy.",
   "license": "MIT",
-  "publishConfig": {
-    "access": "public",
-    "registry": "https://registry.npmjs.org"
-  },
   "files": [
     "src",
     "dist",
@@ -34,8 +31,8 @@
   "dependencies": {
     "@effect/sql-libsql": "catalog:",
     "@libsql/client": "catalog:",
-    "@mokronos/contracts": "workspace:*",
-    "@mokronos/integrations": "workspace:*",
+    "@integrations/contracts": "workspace:*",
+    "@integrations/host": "workspace:*",
     "@mokronos/integrations-client": "workspace:*",
     "effect": "catalog:"
   },

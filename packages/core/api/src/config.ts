@@ -1,4 +1,4 @@
-import { optionalText, PositiveInt, PositiveIntFromString, whenPresent } from "@mokronos/contracts"
+import { optionalText, PositiveInt, PositiveIntFromString, whenPresent } from "@integrations/contracts"
 import { Config, Effect, Option, Schema } from "effect"
 
 export const defaultRateLimitPerMinute = PositiveInt.make(600)

@@ -12,7 +12,7 @@ import {
   decodeBase64Field,
   decodeBase64UrlField,
   utf8Text
-} from "@mokronos/contracts"
+} from "@integrations/contracts"
 
 const envelopePrefix = "enc.v1$"
 

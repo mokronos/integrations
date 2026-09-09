@@ -1,6 +1,6 @@
 import { Option, Schema } from "effect"
 import {
-  ApiKey,
+  ApiKeyView,
   Alias,
   ApprovalStatus as ApprovalStatusSchema,
   AuditRecord,
@@ -16,15 +16,15 @@ import {
   ApprovalDeliveryAttempt,
   PolicyDecision as PolicyDecisionSchema,
   PendingApproval
-} from "@mokronos/gateway-core/domain"
-import { IntegrationSearchKind } from "@mokronos/contracts"
+} from "@integrations/contracts"
+import { IntegrationSearchKind } from "@integrations/contracts"
 import {
   AuthMethod,
   Connection,
   Tool,
   ToolSummary,
   IntegrationOverview
-} from "@mokronos/contracts"
+} from "@integrations/contracts"
 
 export type {
   AuditRecord,
@@ -53,7 +53,7 @@ export type {
   ConnectionRef,
   PolicyDecision,
   ApprovalDestinationId
-} from "@mokronos/gateway-core/domain"
+} from "@integrations/contracts"
 
 
 
@@ -117,13 +117,7 @@ export const OverviewResponse = Schema.Struct({
 })
 export type OverviewResponse = typeof OverviewResponse.Type
 
-export const ApiKeySummary = Schema.Struct({
-  id: ApiKey.fields.id,
-  clientId: ApiKey.fields.clientId,
-  createdAt: ApiKey.fields.createdAt,
-  lastUsedAt: ApiKey.fields.lastUsedAt,
-  revokedAt: ApiKey.fields.revokedAt
-})
+export const ApiKeySummary = ApiKeyView
 export type ApiKeySummary = typeof ApiKeySummary.Type
 
 

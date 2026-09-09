@@ -14,7 +14,7 @@ import type { GatewayClient } from "@mokronos/integrations-client"
 import { cliError, IntegrationsCliError } from "./connection.ts"
 import { openBrowser } from "./connection.ts"
 import type { ChildProcessSpawner } from "effect/unstable/process"
-import { optionalText, whenPresentMap } from "@mokronos/contracts"
+import { optionalText, whenPresentMap } from "@integrations/contracts"
 
 const OperatorSession = Schema.Struct({
   url: Schema.String,
@@ -88,7 +88,9 @@ export const clearOperatorSession = Effect.fn("session.clear")(() =>
 const decodeJsonText = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))
 
 const messageFrom = (payload: typeof Schema.Json.Type, fallback: string): string => {
-  if (Predicate.isObject(payload) && "error" in payload) {
+  if (Predicate.isObject(payload)) {
+    const message = payload["message"]
+    if (Predicate.isString(message) && message.length > 0) return message
     const error = payload["error"]
     if (Predicate.isString(error) && error.length > 0) return error
   }

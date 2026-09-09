@@ -7,7 +7,7 @@ import {
 import { captureMcpTools, captureOpenApiTools } from "./catalog/capture.ts"
 import { CatalogStore } from "./catalog/store.ts"
 import type { ConnectionRecord, IntegrationRecord } from "./catalog/store.ts"
-import type { Tool as IntegrationTool } from "@mokronos/core-integrations"
+import type { Tool as IntegrationTool } from "./tool.ts"
 import { connectionCredentialKey, CredentialStore } from "./storage/credentials.ts"
 import {
   ConnectionNotFoundError,
@@ -21,7 +21,7 @@ import {
   ToolNotFoundError
 } from "./errors.ts"
 import { OAuthClientSlug } from "./catalog/ids.ts"
-import { connectionAddress, ConnectionName, IntegrationSlug } from "@mokronos/contracts"
+import { connectionAddress, ConnectionName, IntegrationSlug } from "@integrations/contracts"
 import { AuthTemplateSlug } from "./catalog/ids.ts"
 import { McpHost } from "./mcp/client.ts"
 import type { McpCredential } from "./mcp/client.ts"
@@ -29,7 +29,7 @@ import { OAuthFlows } from "./oauth/flows.ts"
 import { resolveServer } from "./openapi/compile.ts"
 import { OpenApiInvoker } from "./openapi/invoke.ts"
 import type { ResolvedCredential } from "./openapi/invoke.ts"
-import { whenPresent } from "@mokronos/contracts"
+import { whenPresent } from "@integrations/contracts"
 import {
   Connection,
   Integration,
@@ -37,7 +37,7 @@ import {
   Tool,
   ToolAddress,
   ToolSummary
-} from "@mokronos/contracts"
+} from "@integrations/contracts"
 import { SpecCache } from "./openapi/cache.ts"
 import { normalizeToolResult } from "./mcp/result.ts"
 
@@ -218,7 +218,7 @@ export class IntegrationHost extends Context.Service<
       input: Json
     ) => Effect.Effect<Json, HostFailure>
   }
->()("@mokronos/integrations/IntegrationHost") {
+>()("@integrations/host/IntegrationHost") {
   static readonly layer: Layer.Layer<
     IntegrationHost,
     never,

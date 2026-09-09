@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test"
 import { Effect, Option } from "effect"
 import { compileSpec, previewOf, resolveServer } from "../src/openapi/compile.ts"
 import { convertGoogleDiscovery, isGoogleDiscoveryUrl } from "../src/openapi/google-discovery.ts"
-import { isJsonObject, property, type Json } from "@mokronos/contracts"
+import { isJsonObject, property, type Json } from "@integrations/contracts"
 
 const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> => Effect.runPromise(effect)
 

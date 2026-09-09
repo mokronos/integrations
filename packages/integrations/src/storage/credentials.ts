@@ -9,7 +9,7 @@ import {
 } from "node:fs"
 import path from "node:path"
 import { Context, Effect, Encoding, Layer, Option, Schema, Semaphore } from "effect"
-import { concatBytes, decodeBase64UrlField, utf8Bytes, utf8Text } from "@mokronos/contracts"
+import { concatBytes, decodeBase64UrlField, utf8Bytes, utf8Text } from "@integrations/contracts"
 import { describeCause, StorageError } from "../errors.ts"
 
 export const CredentialKey = Schema.String.check(Schema.isMinLength(1)).pipe(
@@ -41,7 +41,7 @@ export class CredentialStore extends Context.Service<
     readonly set: (key: CredentialKey, value: string) => Effect.Effect<void, StorageError>
     readonly remove: (key: CredentialKey) => Effect.Effect<void, StorageError>
   }
->()("@mokronos/integrations/CredentialStore") {
+>()("@integrations/host/CredentialStore") {
   static readonly fileLayer = (directory: string): Layer.Layer<CredentialStore> =>
     Layer.effect(CredentialStore, Effect.sync(() => fileCredentialStore(directory)))
 
@@ -65,7 +65,7 @@ export class CredentialStore extends Context.Service<
 const CredentialFile = Schema.Record(Schema.String, Schema.String)
 type CredentialFile = typeof CredentialFile.Type
 
-const additionalData = utf8Bytes("@mokronos/integrations/credentials/v1")
+const additionalData = utf8Bytes("@integrations/host/credentials/v1")
 
 const credentialKey = (directory: string): Uint8Array => {
   const keyPath = path.join(directory, "credentials.key")

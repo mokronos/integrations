@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { serviceLabel, serviceName, slugify } from "@mokronos/contracts"
+import { serviceLabel, serviceName, slugify } from "@integrations/contracts"
 import { Option } from "effect"
 
 describe("naming a service after its host", () => {

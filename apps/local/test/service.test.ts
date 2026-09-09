@@ -14,7 +14,7 @@ import {
   serveGateway
 } from "../index.ts"
 import type { RunningGateway } from "../index.ts"
-import { GatewayMetadata } from "@mokronos/contracts"
+import { GatewayMetadata } from "@integrations/contracts"
 import { Effect, Schema } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 

@@ -1,37 +1,16 @@
 import { Schema } from "effect"
 import {
   ConnectionName,
+  HttpMethod,
   IntegrationSlug,
   OwnerTier,
+  ParameterLocation,
   ToolAddress
-} from "@mokronos/contracts"
+} from "@integrations/contracts"
+export { HttpMethod, ParameterLocation } from "@integrations/contracts"
 
-export const McpCall = Schema.Struct({
-  kind: Schema.Literal("mcp"),
-  tool: Schema.String
-})
+export const McpCall = Schema.Struct({ kind: Schema.Literal("mcp"), tool: Schema.String })
 export type McpCall = typeof McpCall.Type
-
-export const ParameterLocation = Schema.Literals([
-  "path",
-  "query",
-  "header",
-  "cookie",
-  "body"
-])
-export type ParameterLocation = typeof ParameterLocation.Type
-
-export const HttpMethod = Schema.Literals([
-  "get",
-  "put",
-  "post",
-  "delete",
-  "patch",
-  "head",
-  "options",
-  "trace"
-])
-export type HttpMethod = typeof HttpMethod.Type
 
 export const CallParameter = Schema.Struct({
   name: Schema.String,

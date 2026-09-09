@@ -1,16 +1,16 @@
 import {
   whenPresentMap
-} from "@mokronos/contracts"
-import { IntegrationHost } from "@mokronos/integrations"
+} from "@integrations/contracts"
+import { IntegrationHost } from "@integrations/host"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import { deliverDueApprovalNotifications } from "@mokronos/gateway-core"
+import { deliverDueApprovalNotifications } from "@integrations/gateway-core"
 import {
   ApprovalId,
   ToolName
-} from "@mokronos/gateway-core"
-import { invokeThroughGateway, listEffectiveTools } from "@mokronos/gateway-core"
-import { GatewayStoreService } from "@mokronos/gateway-core"
+} from "@integrations/contracts"
+import { invokeThroughGateway, listEffectiveTools } from "@integrations/gateway-core"
+import { GatewayStoreService } from "@integrations/gateway-core"
 import {
   ApiNotFound,
   GatewayApi

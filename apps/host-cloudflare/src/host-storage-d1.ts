@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto"
-import { applySchema, CredentialStore, Database, openValue, sealValue, SqlValue, StorageError, type HostStorage, type SqlRow, type SqlStatement } from "@mokronos/integrations"
+import { applySchema, CredentialStore, Database, openValue, sealValue, SqlValue, StorageError, type HostStorage, type SqlRow, type SqlStatement } from "@integrations/host"
 import { Effect, Layer, Option, Predicate, Schema } from "effect"
 import type { D1Cell, D1DatabaseLike } from "./cloudflare.ts"
 

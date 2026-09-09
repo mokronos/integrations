@@ -1,15 +1,15 @@
 import { FetchHttpClient } from "effect/unstable/http"
 import { stubHostContext } from "./stubs.ts"
-import { InvocationError } from "@mokronos/integrations"
+import { InvocationError } from "@integrations/host"
 import { run, runAll } from "./effect.ts"
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { Effect, Option, Schema } from "effect"
-import { ToolAddress, whenPresent } from "@mokronos/contracts"
+import { ToolAddress, whenPresent } from "@integrations/contracts"
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client"
-import type { Connection, Tool } from "@mokronos/contracts"
+import type { Connection, Tool } from "@integrations/contracts"
 import {
   aliasForConnection,
   ClientId,

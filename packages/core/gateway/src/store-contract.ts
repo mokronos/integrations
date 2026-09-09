@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import type { NonNegativeInt, PositiveInt } from "@mokronos/contracts"
+import type { NonNegativeInt, PositiveInt } from "@integrations/contracts"
 import type {
   AccessProfile, AccessProfileId, AccessProfileTool, Alias, ApiKey, ApiKeyHash,
   ApiKeyId, ApprovalDelivery, ApprovalDeliveryAttempt, ApprovalDeliveryId,

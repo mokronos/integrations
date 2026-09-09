@@ -1,13 +1,10 @@
 {
-  "name": "@mokronos/gateway-api",
+  "name": "@integrations/gateway-api",
   "version": "0.2.0",
+  "private": true,
   "type": "module",
   "description": "Gateway HTTP API definitions, handlers, and server assembly.",
   "license": "MIT",
-  "publishConfig": {
-    "access": "public",
-    "registry": "https://registry.npmjs.org"
-  },
   "files": [
     "src",
     "dist",
@@ -33,11 +30,11 @@
   "dependencies": {
     "@effect/platform-bun": "catalog:",
     "@modelcontextprotocol/server": "^2.0.0",
-    "@mokronos/contracts": "workspace:*",
-    "@mokronos/gateway-core": "workspace:*",
-    "@mokronos/integrations": "workspace:*",
+    "@integrations/contracts": "workspace:*",
+    "@integrations/gateway-core": "workspace:*",
+    "@integrations/host": "workspace:*",
     "@mokronos/integrations-client": "workspace:*",
-    "@mokronos/observability": "workspace:*",
+    "@integrations/observability": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

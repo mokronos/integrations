@@ -1,7 +1,7 @@
 import { Option } from "effect"
 import type { CompiledSecurityScheme } from "../openapi/compile.ts"
-import { whenPresent } from "@mokronos/contracts"
-import type { AuthMethod, AuthPlacement, McpProbe } from "@mokronos/contracts"
+import { whenPresent } from "@integrations/contracts"
+import type { AuthMethod, AuthPlacement, McpProbe } from "@integrations/contracts"
 
 const bearerPlacements: ReadonlyArray<AuthPlacement> = [{
   carrier: "header",

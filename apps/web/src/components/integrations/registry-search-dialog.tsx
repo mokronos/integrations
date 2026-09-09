@@ -1,4 +1,4 @@
-import { whenPresent } from "@mokronos/contracts"
+import { whenPresent } from "@integrations/contracts"
 import { Download, Search } from "lucide-react"
 import { useState } from "react"
 import { useNavigate } from "react-router"
@@ -29,7 +29,7 @@ import { keys, useInvalidate, useMutation } from "@/lib/queries"
 import {
   decodeIntegrationSearchFilter
 } from "@/lib/schemas"
-import type { IntegrationSearchKind, IntegrationSearchMatch } from "@mokronos/contracts"
+import type { IntegrationSearchKind, IntegrationSearchMatch } from "@integrations/contracts"
 const ALL_KINDS = "__all__"
 
 export function RegistrySearchDialog({ onInstalled }: { readonly onInstalled?: (slug: string) => void }) {

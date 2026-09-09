@@ -1,6 +1,6 @@
 import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto"
 import { Crypto, Effect, Encoding, Schema } from "effect"
-import { decodeBase64Field } from "@mokronos/contracts"
+import { decodeBase64Field } from "@integrations/contracts"
 import { sessionSecret, sha256Hex } from "./keys.ts"
 import { SessionTokenHash } from "./domain.ts"
 

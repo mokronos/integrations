@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import type { AuthMethod, Connection } from "@mokronos/contracts"
-import { ConnectionName, IntegrationSlug } from "@mokronos/contracts"
+import type { AuthMethod, Connection } from "@integrations/contracts"
+import { ConnectionName, IntegrationSlug } from "@integrations/contracts"
 import { Cause, Context, Effect, Exit, Option, Result } from "effect"
 import { FetchHttpClient, HttpClient, type HttpClientResponse } from "effect/unstable/http"
 import {
@@ -11,7 +11,7 @@ import {
   OAuthError,
   OAuthFlows,
   OAuthState
-} from "@mokronos/integrations"
+} from "@integrations/host"
 import { authorizeInBrowser, OAuthFlowError } from "../src/oauth.ts"
 import { createOAuthSessions } from "../src/oauth-sessions.ts"
 import type { OAuthOperations } from "../src/oauth.ts"

@@ -2,7 +2,7 @@ import { FetchHttpClient } from "effect/unstable/http"
 import { catalogStoreFake, stubHost, stubHostContext } from "./stubs.ts"
 import { run, runAll } from "./effect.ts"
 import { Context, Effect, Option } from "effect"
-import { ConnectionName, IntegrationSlug } from "@mokronos/contracts"
+import { ConnectionName, IntegrationSlug } from "@integrations/contracts"
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -15,9 +15,9 @@ import {
   OAuthError,
   OAuthFlows,
   OAuthState
-} from "@mokronos/integrations"
-import type { OAuthOperations } from "@mokronos/gateway-core"
-import type { Connection } from "@mokronos/contracts"
+} from "@integrations/host"
+import type { OAuthOperations } from "@integrations/gateway-core"
+import type { Connection } from "@integrations/contracts"
 import { createGatewayHandler, createOAuthSessions, createGatewayStore } from "./gateway.ts"
 import type { GatewayStore } from "./gateway.ts"
 

@@ -1,7 +1,7 @@
 import { ChevronRight, Search } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
-import { ConnectionName, IntegrationSlug } from "@mokronos/contracts"
+import { ConnectionName, IntegrationSlug } from "@integrations/contracts"
 
 import { QueryError } from "@/components/page"
 import { Alert, AlertDescription } from "@/components/ui/alert"

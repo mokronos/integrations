@@ -7,7 +7,7 @@ import path from "node:path"
 import { randomBytes } from "node:crypto"
 import { createClient as openRawDatabase } from "@libsql/client"
 import { Encoding } from "effect"
-import { decodeBase64Field, decodeBase64UrlField } from "@mokronos/contracts"
+import { decodeBase64Field, decodeBase64UrlField } from "@integrations/contracts"
 import {
   Alias,
   ConnectionName,

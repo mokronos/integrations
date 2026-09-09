@@ -3,8 +3,9 @@ import type { Operation } from "oas/operation"
 import OASNormalize from "oas-normalize"
 import { Effect, Option, Schema } from "effect"
 import { describeCause, SpecError } from "../errors.ts"
-import { whenPresent } from "@mokronos/contracts"
-import { OpenApiPreview } from "@mokronos/contracts"
+import { HttpMethod, ParameterLocation, whenPresent } from "@integrations/contracts"
+import type { HttpMethod as HttpMethodType, ParameterLocation as ParameterLocationType } from "@integrations/contracts"
+import { OpenApiPreview } from "@integrations/contracts"
 import {
   asJson,
   isJsonBoolean,
@@ -14,33 +15,11 @@ import {
   property,
   stringEntries,
   type Json
-} from "@mokronos/contracts"
-
-
-export const HttpMethod = Schema.Literals([
-  "get",
-  "put",
-  "post",
-  "delete",
-  "patch",
-  "head",
-  "options",
-  "trace"
-])
-export type HttpMethod = typeof HttpMethod.Type
-
-export const ParameterLocation = Schema.Literals([
-  "path",
-  "query",
-  "header",
-  "cookie",
-  "body"
-])
-export type ParameterLocation = typeof ParameterLocation.Type
+} from "@integrations/contracts"
 
 export interface CompiledParameter {
   readonly name: string
-  readonly location: ParameterLocation
+  readonly location: ParameterLocationType
   readonly style: string
   readonly explode: boolean
   readonly required: boolean
@@ -48,7 +27,7 @@ export interface CompiledParameter {
 
 export interface CompiledOperation {
   readonly name: string
-  readonly method: HttpMethod
+  readonly method: HttpMethodType
   readonly path: string
   readonly summary: Option.Option<string>
   readonly description: Option.Option<string>
@@ -58,7 +37,7 @@ export interface CompiledOperation {
   readonly inputSchema: Json
   readonly outputSchema: Option.Option<Json>
   readonly schemaDefinitions: Record<string, Json>
-  readonly locations: Record<string, ParameterLocation>
+  readonly locations: Record<string, ParameterLocationType>
   readonly bodyProperty: Option.Option<string>
   readonly parameters: ReadonlyArray<CompiledParameter>
   readonly contentType: Option.Option<string>
@@ -195,7 +174,7 @@ const flattenParameters = (
   const groups = operation.getParametersAsJSONSchema() ?? []
   const properties: Record<string, Json> = {}
   const required: Array<string> = []
-  const locations: Record<string, ParameterLocation> = {}
+  const locations: Record<string, ParameterLocationType> = {}
   const schemaDefinitions: Record<string, Json> = {}
   let bodyProperty = Option.none<string>()
 
@@ -217,7 +196,7 @@ const flattenParameters = (
 
     const location = Option.getOrElse(
       Schema.decodeUnknownOption(ParameterLocation)(group.type),
-      (): ParameterLocation => "query"
+      (): ParameterLocationType => "query"
     )
     for (const [name, value] of Object.entries(propertiesOf(schema))) {
       properties[name] = value
@@ -275,7 +254,7 @@ const derivedName = (method: string, path: string): string => {
   return [method, ...segments].join("_")
 }
 
-const defaultStyle = (location: ParameterLocation): string =>
+const defaultStyle = (location: ParameterLocationType): string =>
   location === "query" || location === "cookie" ? "form" : "simple"
 
 const defaultExplode = (style: string): boolean => style === "form"
@@ -297,7 +276,7 @@ const compileParameters = (operation: Operation): ReadonlyArray<CompiledParamete
   })
 
 const compileOperation = (
-  method: HttpMethod,
+  method: HttpMethodType,
   path: string,
   operation: Operation
 ): CompiledOperation => {

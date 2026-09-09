@@ -54,7 +54,7 @@ running across a change serves the older wire shape to newly started clients.
 Or install the published command package with Bun:
 
 ```bash
-bun add --global @mokronos/integrations-cli
+bun add --global @integrations/host
 ii login
 ```
 

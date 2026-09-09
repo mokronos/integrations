@@ -1,6 +1,6 @@
 import { expect } from "bun:test"
 import { Effect, Option } from "effect"
-import type { Json } from "@mokronos/contracts"
+import type { Json } from "@integrations/contracts"
 import { McpHost, type McpCredential } from "../../../src/mcp/client.ts"
 
 export interface McpConformanceTarget {

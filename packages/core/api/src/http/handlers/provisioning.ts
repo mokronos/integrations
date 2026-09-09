@@ -1,7 +1,7 @@
 import {
   whenPresent,
   whenPresentMap
-} from "@mokronos/contracts"
+} from "@integrations/contracts"
 import {
   AuthTemplateSlug,
   IntegrationHost,
@@ -9,8 +9,8 @@ import {
   provisionIntegration,
   searchIntegrations,
   validateIntegrationNode as validateNode
-} from "@mokronos/integrations"
-import type { HostServices } from "@mokronos/integrations"
+} from "@integrations/host"
+import type { HostServices } from "@integrations/host"
 import { Effect, Option, Schema } from "effect"
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -22,15 +22,15 @@ import {
   IntegrationSlug,
   sameConnectionRef,
   ToolName
-} from "@mokronos/gateway-core"
-import { boundToolAddress } from "@mokronos/gateway-core"
+} from "@integrations/contracts"
+import { boundToolAddress } from "@integrations/gateway-core"
 import {
   forgetConnection,
   reconcileDefaults
-} from "@mokronos/gateway-core"
-import { oauthBrowserPage } from "@mokronos/gateway-core"
-import type { GatewayStore } from "@mokronos/gateway-core"
-import { GatewayStoreService } from "@mokronos/gateway-core"
+} from "@integrations/gateway-core"
+import { oauthBrowserPage } from "@integrations/gateway-core"
+import type { GatewayStore } from "@integrations/gateway-core"
+import { GatewayStoreService } from "@integrations/gateway-core"
 import {
   ApiBadRequest,
   ApiNotFound,
@@ -214,11 +214,6 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
             ...whenPresentMap("kind", request.query["kind"], (k) => k)
           },
           whenPresent("registryUrl", config.registryUrl)
-        )))
-      .handle("invokeTool", (request) =>
-        asApiFailure(host.execute(
-          request.payload.address,
-          request.payload.arguments ?? {}
         )))
       .handle("validate", (request) =>
         Effect.gen(function*() {

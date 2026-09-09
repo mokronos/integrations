@@ -1,6 +1,7 @@
 {
-  "name": "@mokronos/observability",
+  "name": "@integrations/observability",
   "version": "0.2.0",
+  "private": true,
   "type": "module",
   "description": "Shared OTLP tracing and logging for the integrations gateway and CLIs.",
   "license": "MIT",
@@ -23,10 +24,6 @@
   "engines": {
     "bun": ">=1.2"
   },
-  "publishConfig": {
-    "access": "public",
-    "registry": "https://registry.npmjs.org"
-  },
   "files": [
     "src",
     "dist",
@@ -44,7 +41,7 @@
     "build": "rm -rf dist && tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@mokronos/contracts": "workspace:*",
+    "@integrations/contracts": "workspace:*",
     "effect": "catalog:"
   }
 }

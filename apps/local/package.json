@@ -1,5 +1,5 @@
 {
-  "name": "@mokronos/integrations-local",
+  "name": "@mokronos/integrations",
   "version": "0.2.0",
   "type": "module",
   "description": "Local Bun host for the integrations gateway.",
@@ -26,7 +26,6 @@
     "registry": "https://registry.npmjs.org"
   },
   "files": [
-    "src",
     "dist",
     "web",
     "README.md"
@@ -34,25 +33,17 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "bun": "./index.ts",
-      "development": "./index.ts",
       "default": "./dist/index.js"
-    },
-    "./domain": {
-      "types": "./dist/domain.d.ts",
-      "bun": "./src/domain.ts",
-      "development": "./src/domain.ts",
-      "default": "./dist/domain.js"
     }
   },
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && bun run build:web",
     "build:web": "bun run --cwd ../web build && rm -rf web && cp -R ../web/dist web",
-    "prepublishOnly": "bun run build && bun run build:web"
+    "prepublishOnly": "bun run build"
   },
   "dependencies": {
-    "@mokronos/gateway-api": "workspace:*",
-    "@mokronos/gateway-core": "workspace:*",
+    "@integrations/gateway-api": "workspace:*",
+    "@integrations/gateway-core": "workspace:*",
     "@mokronos/integrations-client": "workspace:*",
     "effect": "catalog:"
   }

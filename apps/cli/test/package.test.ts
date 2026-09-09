@@ -74,24 +74,21 @@ describe("published CLI package", () => {
     )
     const client = await pack(path.join(repoRoot, "apps", "ts"), tarballs)
     const observability = await pack(path.join(repoRoot, "packages", "observability"), tarballs)
-    const coreIntegrations = await pack(
-      path.join(repoRoot, "packages", "core", "integrations"),
-      tarballs
-    )
     const gatewayCore = await pack(path.join(repoRoot, "packages", "core", "gateway"), tarballs)
     const gatewayApi = await pack(path.join(repoRoot, "packages", "core", "api"), tarballs)
+    const localBuild = await run([process.execPath, "run", "build"], path.join(repoRoot, "apps", "local"))
+    expect(localBuild.exitCode, localBuild.stderr).toBe(0)
     const local = await pack(path.join(repoRoot, "apps", "local"), tarballs)
     const cli = await pack(path.join(repoRoot, "apps", "cli"), tarballs)
 
     const localPackages = {
-      "@mokronos/gateway-core": `file:${gatewayCore}`,
-      "@mokronos/gateway-api": `file:${gatewayApi}`,
-      "@mokronos/integrations-local": `file:${local}`,
+      "@integrations/gateway-core": `file:${gatewayCore}`,
+      "@integrations/gateway-api": `file:${gatewayApi}`,
+      "@mokronos/integrations": `file:${local}`,
       "@mokronos/integrations-client": `file:${client}`,
-      "@mokronos/integrations": `file:${host}`,
-      "@mokronos/core-integrations": `file:${coreIntegrations}`,
-      "@mokronos/observability": `file:${observability}`,
-      "@mokronos/contracts": `file:${contracts}`
+      "@integrations/host": `file:${host}`,
+      "@integrations/observability": `file:${observability}`,
+      "@integrations/contracts": `file:${contracts}`
     }
     await Bun.write(path.join(project, "package.json"), `${encodeSmokeManifest({
       name: "integrations-package-smoke",

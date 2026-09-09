@@ -2,36 +2,36 @@ import {
   defaultArgumentRetentionDays,
   defaultGatewayPort,
   writeGatewayConfig
-} from "@mokronos/gateway-core"
-import { whenPresent } from "@mokronos/contracts"
-import { defaultTenantId } from "@mokronos/gateway-core"
-import { resolveEncryption } from "@mokronos/gateway-core"
+} from "@integrations/gateway-core"
+import { whenPresent } from "@integrations/contracts"
+import { defaultTenantId } from "@integrations/gateway-core"
+import { resolveEncryption } from "@integrations/gateway-core"
 import { Context, Crypto, Effect, Layer, ManagedRuntime, Option } from "effect"
 import type { HttpClient } from "effect/unstable/http"
 import { isLoopbackAddress, mayBorrowLocalCredential } from "./http/loopback.ts"
 import { createGatewayHandler } from "./http/handler.ts"
 import type { GatewayHandle, GatewayRequestContext } from "./http/handler.ts"
 import type { RateLimits } from "./http/authority.ts"
-import { startMaintenanceLoop } from "@mokronos/gateway-core"
-import { deliverDueApprovalNotifications } from "@mokronos/gateway-core"
-import type { MaintenanceLoop } from "@mokronos/gateway-core"
-import { createOAuthSessions } from "@mokronos/gateway-core"
+import { startMaintenanceLoop } from "@integrations/gateway-core"
+import { deliverDueApprovalNotifications } from "@integrations/gateway-core"
+import type { MaintenanceLoop } from "@integrations/gateway-core"
+import { createOAuthSessions } from "@integrations/gateway-core"
 import {
   reconcileDefaults
-} from "@mokronos/gateway-core"
-import type { OAuthSessionStore } from "@mokronos/gateway-core"
-import { generateApiKey, newClientId } from "@mokronos/gateway-core"
+} from "@integrations/gateway-core"
+import type { OAuthSessionStore } from "@integrations/gateway-core"
+import { generateApiKey, newClientId } from "@integrations/gateway-core"
 import { integrationsHome } from "./paths.ts"
-import type { HostStorage, StorageError } from "@mokronos/integrations"
-import { createHostRuntime, hostServicesOf, IntegrationHost } from "@mokronos/integrations"
-import type { GatewayStoreOptions } from "@mokronos/gateway-core"
-import type { GatewayStore } from "@mokronos/gateway-core"
-import { GatewayStoreError, GatewayStoreService } from "@mokronos/gateway-core"
-import { webCryptoLayer } from "@mokronos/contracts"
+import type { HostStorage, StorageError } from "@integrations/host"
+import { createHostRuntime, hostServicesOf, IntegrationHost } from "@integrations/host"
+import type { GatewayStoreOptions } from "@integrations/gateway-core"
+import type { GatewayStore } from "@integrations/gateway-core"
+import { GatewayStoreError, GatewayStoreService } from "@integrations/gateway-core"
+import { webCryptoLayer } from "@integrations/contracts"
 import { createWebAssets } from "./web-assets.ts"
 import { defaultRateLimitPerMinute, gatewayEnvironment } from "./config.ts"
-import { telemetryLayer } from "@mokronos/observability"
-import type { GoogleIdentityOAuth } from "@mokronos/gateway-core"
+import { telemetryLayer } from "@integrations/observability"
+import type { GoogleIdentityOAuth } from "@integrations/gateway-core"
 
 export const localClientName = "local"
 
@@ -239,6 +239,7 @@ export interface ServeOptions {
   readonly registryUrl?: string
   readonly publicUrl?: string
   readonly web?: boolean
+  readonly webDirectory?: string
 }
 
 export interface RunningGateway {
@@ -265,7 +266,14 @@ export const serveGateway = async (options: ServeOptions): Promise<RunningGatewa
   })
 
   try {
-    const web = options.web === false ? undefined : await Effect.runPromise(createWebAssets())
+    const web = options.web === false
+      ? undefined
+      : await Effect.runPromise(createWebAssets({
+        ...whenPresent(
+          "directories",
+          options.webDirectory === undefined ? undefined : [options.webDirectory]
+        )
+      }))
 
     let localSecret: string | undefined
 

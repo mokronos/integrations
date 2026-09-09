@@ -1,4 +1,4 @@
-import type { AuthMethod } from "@mokronos/contracts"
+import type { AuthMethod } from "@integrations/contracts"
 
 const hostOf = (url: string | undefined): string | undefined => {
   try {

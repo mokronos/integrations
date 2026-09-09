@@ -1,5 +1,5 @@
 import { Crypto, Effect } from "effect"
-import { webCryptoLayer } from "@mokronos/contracts"
+import { webCryptoLayer } from "@integrations/contracts"
 
 /**
  * Identifiers and secrets are minted through the Crypto service, so the test

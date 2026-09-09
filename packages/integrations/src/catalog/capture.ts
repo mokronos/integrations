@@ -6,13 +6,13 @@ import {
   ToolName,
   toolAddress,
   whenPresent
-} from "@mokronos/contracts"
+} from "@integrations/contracts"
 import { StorageError } from "../errors.ts"
 import type { McpToolDefinition } from "../mcp/client.ts"
 import { normalizeOutputSchema } from "../mcp/result.ts"
 import type { CompiledSpec } from "../openapi/compile.ts"
-import { Tool } from "@mokronos/core-integrations"
-import type { Tool as IntegrationTool, ToolCall } from "@mokronos/core-integrations"
+import { Tool } from "../tool.ts"
+import type { Tool as IntegrationTool, ToolCall } from "../tool.ts"
 
 export interface CaptureTarget {
   readonly owner: OwnerTier

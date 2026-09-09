@@ -1,2 +1,2 @@
-export * from "@mokronos/gateway-api"
-export * from "@mokronos/gateway-core"
+export * from "@integrations/gateway-api"
+export * from "@integrations/gateway-core"

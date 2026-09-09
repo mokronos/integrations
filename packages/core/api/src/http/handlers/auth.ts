@@ -2,27 +2,24 @@ import { Crypto, DateTime, Duration, Effect } from "effect"
 import { HttpServerResponse } from "effect/unstable/http"
 import type { HttpClient } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import {
-  LoginHandoffHash,
-  SubjectId,
-  TenantId
-} from "@mokronos/gateway-core"
-import type { GoogleIdentityOAuth } from "@mokronos/gateway-core"
+import { SubjectId, TenantId } from "@integrations/contracts"
+import { LoginHandoffHash } from "@integrations/gateway-core"
+import type { GoogleIdentityOAuth } from "@integrations/gateway-core"
 import {
   googleIdentityAuthorizationUrl,
   googleIdentityCallbackUrl,
   resolveGoogleIdentity
-} from "@mokronos/gateway-core"
+} from "@integrations/gateway-core"
 import {
   generateLoginHandoff,
   hashLoginHandoff,
   newSubjectId,
   newTenantId
-} from "@mokronos/gateway-core"
-import { oauthBrowserPage } from "@mokronos/gateway-core"
-import { generateSessionToken, hashPassword, verifyPassword } from "@mokronos/gateway-core"
-import type { GatewayStore, GatewayStoreError, LoginRecord } from "@mokronos/gateway-core"
-import { GatewayStoreService } from "@mokronos/gateway-core"
+} from "@integrations/gateway-core"
+import { oauthBrowserPage } from "@integrations/gateway-core"
+import { generateSessionToken, hashPassword, verifyPassword } from "@integrations/gateway-core"
+import type { GatewayStore, GatewayStoreError, LoginRecord } from "@integrations/gateway-core"
+import { GatewayStoreService } from "@integrations/gateway-core"
 import {
   ApiBadRequest,
   ApiNotImplemented,
@@ -373,10 +370,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
         Effect.gen(function*() {
           const caller = yield* Identity
           if (caller.kind !== "session") {
-            return yield* new Forbidden({
-              code: "not-permitted",
-              error: "Only a signed-in human may change account details"
-            })
+            return yield* Forbidden.of("not-permitted")
           }
           const body = request.payload
           const login = yield* capture(store.findLoginByEmail(caller.email))
@@ -400,10 +394,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
         Effect.gen(function*() {
           const caller = yield* Identity
           if (caller.kind !== "session") {
-            return yield* new Forbidden({
-              code: "not-permitted",
-              error: "Only a signed-in human may change account details"
-            })
+            return yield* Forbidden.of("not-permitted")
           }
           const body = request.payload
           const login = yield* capture(store.findLoginByEmail(caller.email))
@@ -430,10 +421,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
         Effect.gen(function*() {
           const caller = yield* Identity
           if (caller.kind !== "session") {
-            return yield* new Forbidden({
-              code: "not-permitted",
-              error: "Only a signed-in human may change account details"
-            })
+            return yield* Forbidden.of("not-permitted")
           }
           const body = request.payload
           const login = yield* capture(store.findLoginByEmail(caller.email))

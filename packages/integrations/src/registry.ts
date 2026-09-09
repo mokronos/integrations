@@ -4,9 +4,9 @@ import {
   IntegrationSearchQuery,
   IntegrationSearchResponse,
   IntegrationSearchSurface
-} from "@mokronos/contracts"
+} from "@integrations/contracts"
 import { describeCause, InvocationError } from "./errors.ts"
-import { whenPresent } from "@mokronos/contracts"
+import { whenPresent } from "@integrations/contracts"
 
 export {
   IntegrationSearchKind,
@@ -14,7 +14,7 @@ export {
   IntegrationSearchQuery,
   IntegrationSearchResponse,
   IntegrationSearchSurface
-} from "@mokronos/contracts"
+} from "@integrations/contracts"
 
 export interface SearchIntegrationsOptions {
   readonly registryUrl?: string

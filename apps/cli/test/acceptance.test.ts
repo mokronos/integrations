@@ -7,9 +7,9 @@ import { FetchHttpClient, HttpBody, HttpClient, HttpClientRequest } from "effect
 
 const http = <A, E>(effect: Effect.Effect<A, E, HttpClient.HttpClient>): Promise<A> =>
   Effect.runPromise(effect.pipe(Effect.provide(FetchHttpClient.layer)))
-import { serveGateway } from "@mokronos/integrations-local"
-import type { RunningGateway } from "@mokronos/integrations-local"
-import { aliasForConnection, ConnectionName, IntegrationSlug } from "@mokronos/gateway-core"
+import { serveGateway } from "@mokronos/integrations"
+import type { RunningGateway } from "@mokronos/integrations"
+import { aliasForConnection, ConnectionName, IntegrationSlug } from "@integrations/gateway-core"
 
 const repoRoot = path.resolve(import.meta.dir, "../../..")
 const agentCli = path.join(repoRoot, "apps", "cli", "src", "agent.ts")
@@ -37,10 +37,6 @@ const DiscoveredOutput = Schema.Struct({
 })
 const ConnectionsOutput = Schema.Struct({
   connections: Schema.Array(Schema.Struct({ address: Schema.String, name: Schema.String }))
-})
-const DirectOutcome = Schema.Struct({
-  status: Schema.String,
-  result: Schema.Struct({ title: Schema.String })
 })
 const ToolsOutput = Schema.Struct({
   count: Schema.Number,
@@ -529,17 +525,6 @@ describe("integrations CLI acceptance", () => {
     const discovered = parseOutput(DiscoveredOutput, (await clientCli(["discover", vendor.specUrl])).stdout)
     const slug = discovered.integration.slug
     await clientCli(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
-
-    const direct = await operator([
-      "execute",
-      "--direct",
-      `tools.${slug}.org.default.tickets.create`,
-      JSON.stringify({ body: { title: "x".repeat(2000) } })
-    ])
-    expect(direct.exitCode, direct.stderr).toBe(0)
-    const outcome = parseOutput(DirectOutcome, direct.stdout)
-    expect(outcome.status).toBe("succeeded")
-    expect(outcome.result.title).toHaveLength(2000)
 
     const client = parseOutput(IdOutput, (await operator(["client", "sandbox"])).stdout)
     const key = parseOutput(SecretOutput, (await operator(["key", client.id])).stdout)

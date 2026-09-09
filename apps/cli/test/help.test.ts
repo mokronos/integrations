@@ -168,10 +168,4 @@ describe("i and ii CLI help", () => {
     expect(result.stderr).toContain("No integrations service found")
   })
 
-  test("agent execution cannot request operator authority", () => {
-    const agentExecute = runAgent(["execute", "--help"])
-    const operatorExecute = runOperator(["execute", "--help"])
-    expect(agentExecute.stdout).not.toContain("--direct")
-    expect(operatorExecute.stdout).toContain("--direct")
-  })
 })

@@ -1,6 +1,6 @@
 import { Context, Effect, Option } from "effect"
-import { CatalogStore, IntegrationHost, McpHost, OAuthFlows, OpenApiInvoker, SpecCache } from "@mokronos/integrations"
-import type { HostServices } from "@mokronos/integrations"
+import { CatalogStore, IntegrationHost, McpHost, OAuthFlows, OpenApiInvoker, SpecCache } from "@integrations/host"
+import type { HostServices } from "@integrations/host"
 
 export const stubHost = (
   overrides: Partial<IntegrationHost["Service"]> = {}

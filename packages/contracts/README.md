@@ -1,4 +1,4 @@
-# @mokronos/contracts
+# @integrations/contracts
 
 The shared vocabulary and wire contracts every component of this system agrees
 on. Depends on `effect` and nothing else, so a browser or a published client can

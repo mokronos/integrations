@@ -3,8 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { Crypto, Effect } from "effect"
-import { ToolAddress } from "@mokronos/contracts"
-import type { IntegrationHost } from "@mokronos/integrations"
+import { ToolAddress } from "@integrations/contracts"
+import type { IntegrationHost } from "@integrations/host"
 import {
   Alias,
   ClientId,
@@ -24,7 +24,7 @@ import type { AccessProfileId, ApprovalPolicyId, GatewayStore } from "../src/ind
 
 const directories: Array<string> = []
 const stores: Array<GatewayStore> = []
-import { webCryptoLayer } from "@mokronos/contracts"
+import { webCryptoLayer } from "@integrations/contracts"
 
 /** Minting identifiers needs the platform's Crypto, as it does in the gateway. */
 const run = <A, E>(effect: Effect.Effect<A, E, Crypto.Crypto>): Promise<A> =>

@@ -2,8 +2,8 @@ import {
   NonNegativeInt,
   PositiveInt,
   whenPresentMap
-} from "@mokronos/contracts"
-import { IntegrationHost } from "@mokronos/integrations"
+} from "@integrations/contracts"
+import { IntegrationHost } from "@integrations/host"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
@@ -14,15 +14,15 @@ import {
   AccessProfileId,
   ApprovalPolicyId,
   ToolName
-} from "@mokronos/gateway-core"
-import type { DriftReport } from "@mokronos/gateway-core"
-import { refreshIntegrationSnapshot } from "@mokronos/gateway-core"
+} from "@integrations/contracts"
+import type { DriftReport } from "@integrations/gateway-core"
+import { refreshIntegrationSnapshot } from "@integrations/gateway-core"
 import {
   approveApproval,
   denyApproval,
   listEffectiveTools,
   reconcileDefaults
-} from "@mokronos/gateway-core"
+} from "@integrations/gateway-core"
 import {
   generateApiKey,
   generateApprovalSigningSecret,
@@ -30,10 +30,10 @@ import {
   newApprovalDestinationId,
   newApprovalPolicyId,
   newClientId
-} from "@mokronos/gateway-core"
-import { runMaintenance } from "@mokronos/gateway-core"
-import { deliverDueApprovalNotifications } from "@mokronos/gateway-core"
-import { GatewayStoreService } from "@mokronos/gateway-core"
+} from "@integrations/gateway-core"
+import { runMaintenance } from "@integrations/gateway-core"
+import { deliverDueApprovalNotifications } from "@integrations/gateway-core"
+import { GatewayStoreService } from "@integrations/gateway-core"
 import {
   ApiBadRequest,
   ApiNotFound,

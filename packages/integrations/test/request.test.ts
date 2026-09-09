@@ -4,10 +4,10 @@ import { compileSpec, resolveServer } from "../src/openapi/compile.ts"
 import { splitArguments } from "../src/openapi/arguments.ts"
 import { buildRequest } from "../src/openapi/request.ts"
 import { captureOpenApiTools } from "../src/catalog/capture.ts"
-import type { HttpCall } from "@mokronos/core-integrations"
-import { ConnectionName, IntegrationSlug } from "@mokronos/contracts"
+import type { HttpCall } from "../src/tool.ts"
+import { ConnectionName, IntegrationSlug } from "@integrations/contracts"
 import type { CompiledSpec } from "../src/openapi/compile.ts"
-import type { Json } from "@mokronos/contracts"
+import type { Json } from "@integrations/contracts"
 
 const document = JSON.stringify({
   openapi: "3.0.3",

@@ -24,7 +24,7 @@ export class Database extends Context.Service<
     readonly query: (statement: SqlStatement) => Effect.Effect<ReadonlyArray<SqlRow>, StorageError>
     readonly batch: (statements: ReadonlyArray<SqlStatement>) => Effect.Effect<void, StorageError>
   }
->()("@mokronos/integrations/Database") {}
+>()("@integrations/host/Database") {}
 
 const toRecords = (
   columns: ReadonlyArray<string>,

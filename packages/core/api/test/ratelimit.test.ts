@@ -5,7 +5,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { Effect, Schema } from "effect"
-import { whenPresent } from "@mokronos/contracts"
+import { whenPresent } from "@integrations/contracts"
 import {
   createGatewayHandler,
   createGatewayStore,

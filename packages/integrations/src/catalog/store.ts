@@ -11,9 +11,9 @@ import {
   OwnerTier,
   ToolAddress,
   whenPresent
-} from "@mokronos/contracts"
-import { Tool, ToolCall } from "@mokronos/core-integrations"
-import type { Tool as IntegrationTool } from "@mokronos/core-integrations"
+} from "@integrations/contracts"
+import { Tool, ToolCall } from "../tool.ts"
+import type { Tool as IntegrationTool } from "../tool.ts"
 
 export const IntegrationRecord = Schema.Struct({
   slug: IntegrationSlug,
@@ -305,7 +305,7 @@ export class CatalogStore extends Context.Service<
       content: string
     ) => Effect.Effect<void, StorageError>
   }
->()("@mokronos/integrations/CatalogStore") {
+>()("@integrations/host/CatalogStore") {
   static readonly layer: Layer.Layer<CatalogStore, never, Database> = Layer.effect(
     CatalogStore,
     Effect.gen(function* () {

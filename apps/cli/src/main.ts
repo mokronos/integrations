@@ -4,7 +4,7 @@ import { Data, Effect, Layer } from "effect"
 import { Command, Flag } from "effect/unstable/cli"
 import { HttpClient } from "effect/unstable/http"
 import { defaultGatewayPort } from "@mokronos/integrations-client"
-import { telemetryLayer } from "@mokronos/observability"
+import { telemetryLayer } from "@integrations/observability"
 import { controlPlaneSubcommands, operatorClientSubcommands } from "./commands.ts"
 import { authenticationSubcommands } from "./auth-commands.ts"
 import { openBrowser } from "./connection.ts"
@@ -33,7 +33,7 @@ const loopbackWarning = (host: string): void => {
 }
 
 const runForeground = async (port: number, host: string): Promise<void> => {
-  const { serveGateway } = await import("@mokronos/integrations-local")
+  const { serveGateway } = await import("@mokronos/integrations")
   const running = await serveGateway({ port, hostname: host, httpClient: BunHttpClient.layer })
   await Effect.runPromise(writeStdoutLine(`integrations gateway listening at ${running.url}`))
   loopbackWarning(host)

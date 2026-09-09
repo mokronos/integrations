@@ -5,7 +5,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { Effect } from "effect"
-import { whenPresent, whenPresentMap } from "@mokronos/contracts"
+import { whenPresent, whenPresentMap } from "@integrations/contracts"
 import {
   createGatewayHandler,
   createGatewayStore,
@@ -16,7 +16,7 @@ import {
 } from "./gateway.ts"
 import type { GatewayStore } from "./gateway.ts"
 import { stubHostContext } from "./stubs.ts"
-import { McpError, SpecError } from "@mokronos/integrations"
+import { McpError, SpecError } from "@integrations/host"
 
 const directories: Array<string> = []
 const stores: Array<GatewayStore> = []

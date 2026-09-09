@@ -5,7 +5,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { Effect, Layer, Option, Schema } from "effect"
-import { whenPresent } from "@mokronos/contracts"
+import { whenPresent } from "@integrations/contracts"
 import {
   ConnectionName,
   createGatewayHandler,
@@ -21,9 +21,9 @@ import {
 } from "./gateway.ts"
 import type { ConnectionRef, GatewayStore } from "./gateway.ts"
 import { stubHostContext } from "./stubs.ts"
-import type { HostServices } from "@mokronos/integrations"
+import type { HostServices } from "@integrations/host"
 import { Context } from "effect"
-import type { GoogleIdentityOAuth } from "@mokronos/gateway-core"
+import type { GoogleIdentityOAuth } from "@integrations/gateway-core"
 
 const JsonBody = Schema.Record(Schema.String, Schema.Json)
 
@@ -385,6 +385,7 @@ describe("what a session may do", () => {
     const tools = await run(setup_.call("GET", "/v1/tools", { cookie: human.cookie }))
     expect(tools.status).toBe(403)
     expect(tools.body["code"]).toBe("not-permitted")
+    expect(tools.body["message"]).toBe("This credential does not hold the required permission")
 
     const execute = await run(setup_.call("POST", "/v1/execute", {
       body: { alias: "org_gmail_work", tool: "sendEmail" },
@@ -457,6 +458,7 @@ describe("cross-site protection for cookie-carried authority", () => {
     }))
     expect(response.status).toBe(403)
     expect(response.body["code"]).toBe("cross-site")
+    expect(response.body["message"]).toBe("Cross-site requests are not permitted")
   })
 
   test("blocks a write whose Origin names another site", async () => {
@@ -536,6 +538,7 @@ describe("credential precedence", () => {
     }))
     expect(response.status).toBe(401)
     expect(response.body["code"]).toBe("unknown-key")
+    expect(response.body["message"]).toBe("This API key is not known to the server")
   })
 })
 

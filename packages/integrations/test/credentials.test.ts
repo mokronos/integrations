@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { randomBytes } from "node:crypto"
 import { Effect, Encoding, Option } from "effect"
-import { utf8Bytes } from "@mokronos/contracts"
+import { utf8Bytes } from "@integrations/contracts"
 import {
   connectionCredentialKey,
   CredentialStore,

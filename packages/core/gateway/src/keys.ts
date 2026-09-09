@@ -1,5 +1,5 @@
 import { Crypto, Effect, Encoding } from "effect"
-import { utf8Bytes } from "@mokronos/contracts"
+import { utf8Bytes } from "@integrations/contracts"
 import {
   ApiKeyHash,
   ApiKeyId,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import { Effect, Layer, Option } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
-import { isJsonObject } from "@mokronos/contracts"
+import { isJsonObject } from "@integrations/contracts"
 import { McpHost } from "../../../src/mcp/client.ts"
 import { verifyMcpConformance } from "../support/mcp-conformance.ts"
 

@@ -1,5 +1,5 @@
 import { Effect, Option, Schema } from "effect"
-import { whenPresent } from "@mokronos/contracts"
+import { whenPresent } from "@integrations/contracts"
 import { requiresAuthentication } from "./catalog/auth-methods.ts"
 import { classify } from "./classify.ts"
 import type { McpHost } from "./mcp/client.ts"
@@ -18,7 +18,7 @@ import {
   type DiscoverIntegrationsOptions,
   type Integration,
   type IntegrationDiscovery
-} from "@mokronos/contracts"
+} from "@integrations/contracts"
 
 export const installClassified = Effect.fn("Integrations.install")(function*(
   classification: EndpointClassification

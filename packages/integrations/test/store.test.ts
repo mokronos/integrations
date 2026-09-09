@@ -3,7 +3,7 @@ import { Effect, Layer, Option } from "effect"
 import { CatalogStore } from "../src/catalog/store.ts"
 import { memoryLayer } from "../src/storage/database.ts"
 import { AuthTemplateSlug, OAuthClientSlug, OAuthState } from "../src/catalog/ids.ts"
-import { ConnectionName, IntegrationSlug } from "@mokronos/contracts"
+import { ConnectionName, IntegrationSlug } from "@integrations/contracts"
 
 const layer = CatalogStore.layer.pipe(Layer.provide(memoryLayer))
 

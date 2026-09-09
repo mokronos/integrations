@@ -1,4 +1,4 @@
-# @mokronos/integrations-cli
+# @integrations/host
 
 One package installs two deliberate command surfaces:
 
@@ -10,7 +10,7 @@ One package installs two deliberate command surfaces:
   gateway lifecycle commands.
 
 ```bash
-bun add --global @mokronos/integrations-cli
+bun add --global @integrations/host
 ii login
 ```
 

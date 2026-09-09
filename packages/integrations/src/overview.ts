@@ -1,9 +1,9 @@
 import { Effect } from "effect"
-import { whenPresent } from "@mokronos/contracts"
+import { whenPresent } from "@integrations/contracts"
 import { requiresAuthentication } from "./catalog/auth-methods.ts"
 import { IntegrationHost } from "./host.ts"
 import type { StorageError } from "./errors.ts"
-import type { IntegrationOverview, Tool } from "@mokronos/contracts"
+import type { IntegrationOverview, Tool } from "@integrations/contracts"
 
 interface ConnectionTools {
   readonly tools: ReadonlyArray<Tool>

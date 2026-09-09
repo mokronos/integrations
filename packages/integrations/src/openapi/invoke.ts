@@ -2,10 +2,10 @@ import { buildRequest } from "./request.ts"
 import { Context, Effect, Layer, Option } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { describeCause, InvocationError, SpecError } from "../errors.ts"
-import type { HttpCall } from "@mokronos/core-integrations"
+import type { HttpCall } from "../tool.ts"
 import { missingArguments, splitArguments } from "./arguments.ts"
-import { AuthPlacement } from "@mokronos/contracts"
-import { parseJsonString, type Json } from "@mokronos/contracts"
+import { AuthPlacement } from "@integrations/contracts"
+import { parseJsonString, type Json } from "@integrations/contracts"
 
 export interface ResolvedCredential {
   readonly value: string
@@ -91,7 +91,7 @@ export class OpenApiInvoker extends Context.Service<
       call: OpenApiCall
     ) => Effect.Effect<Json, InvocationError | SpecError>
   }
->()("@mokronos/integrations/OpenApiInvoker") {
+>()("@integrations/host/OpenApiInvoker") {
   static readonly layer: Layer.Layer<
     OpenApiInvoker,
     never,

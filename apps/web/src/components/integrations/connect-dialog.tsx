@@ -1,4 +1,4 @@
-import { whenPresent } from "@mokronos/contracts"
+import { whenPresent } from "@integrations/contracts"
 import { Check, ExternalLink, LoaderCircle } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 

@@ -4,8 +4,8 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { PositiveInt, ToolAddress } from "@mokronos/contracts"
-import type { Tool } from "@mokronos/contracts"
+import { PositiveInt, ToolAddress } from "@integrations/contracts"
+import type { Tool } from "@integrations/contracts"
 import {
   Alias,
   ConnectionName,

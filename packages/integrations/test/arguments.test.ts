@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test"
 import { Effect, Option } from "effect"
-import { ConnectionName, IntegrationSlug } from "@mokronos/contracts"
+import { ConnectionName, IntegrationSlug } from "@integrations/contracts"
 import { captureOpenApiTools } from "../src/catalog/capture.ts"
-import type { HttpCall } from "@mokronos/core-integrations"
+import type { HttpCall } from "../src/tool.ts"
 import { missingArguments, splitArguments } from "../src/openapi/arguments.ts"
 import { compileSpec } from "../src/openapi/compile.ts"
 

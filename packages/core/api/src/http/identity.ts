@@ -1,54 +1,41 @@
 import { Context, Effect, Option, Schema } from "effect"
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiSchema } from "effect/unstable/httpapi"
-import type { Client, ClientCapability, SubjectId, TenantId } from "@mokronos/gateway-core/domain"
-import { SessionTokenHash } from "@mokronos/gateway-core/domain"
+import { RefusalReason, refusalReason } from "@integrations/contracts"
+import type { Client, ClientCapability, SubjectId, TenantId } from "@integrations/contracts"
+// By subpath: the API definition is imported by browser clients, and the
+// gateway-core index reaches the store.
+import { SessionTokenHash } from "@integrations/gateway-core/domain"
 
-export const RefusalReason = Schema.Literals([
-  "unknown-key",
-  "key-revoked",
-  "client-revoked",
-  "not-permitted",
-  "cross-site"
-])
-export type RefusalReason = typeof RefusalReason.Type
-
-const refusalMessage = {
-  "unknown-key": "This API key is not known to the gateway",
-  "key-revoked": "This API key was revoked",
-  "client-revoked": "The client this key belongs to was revoked",
-  "not-permitted": "This credential does not hold the capability required by this route",
-  "cross-site": "Cross-site requests are not permitted"
-} satisfies Record<RefusalReason, string>
-
-type UnauthorizedReason = Extract<RefusalReason, "unknown-key" | "key-revoked">
+type UnauthorizedReason = Extract<RefusalReason, { readonly code: "unknown-key" | "key-revoked" }>
 type ForbiddenReason = Exclude<RefusalReason, UnauthorizedReason>
 
 export class Unauthorized extends Schema.TaggedError<Unauthorized>()(
   "Unauthorized",
-  { code: Schema.Literals(["unknown-key", "key-revoked"]), error: Schema.String }
+  { code: Schema.Literals(["unknown-key", "key-revoked"]), message: Schema.String }
 ) {
-  static readonly of = (code: UnauthorizedReason): Unauthorized =>
-    new Unauthorized({ code, error: refusalMessage[code] })
+  static readonly of = (code: UnauthorizedReason["code"]): Unauthorized => {
+    return new Unauthorized({ code, message: refusalReason(code).message })
+  }
 }
 
 export const UnauthorizedError = Unauthorized.pipe(HttpApiSchema.status(401))
 
 export class Forbidden extends Schema.TaggedError<Forbidden>()(
   "Forbidden",
-  { code: Schema.Literals(["client-revoked", "not-permitted", "cross-site"]), error: Schema.String }
+  { code: Schema.Literals(["client-revoked", "not-permitted", "cross-site"]), message: Schema.String }
 ) {
-  static readonly of = (code: ForbiddenReason): Forbidden =>
-    new Forbidden({ code, error: refusalMessage[code] })
+  static readonly of = (code: ForbiddenReason["code"]): Forbidden => {
+    return new Forbidden({ code, message: refusalReason(code).message })
+  }
 }
 
 export const ForbiddenError = Forbidden.pipe(HttpApiSchema.status(403))
 
-export type Refused =
-  | Unauthorized
-  | Forbidden
+export const Refused = Schema.Union([Unauthorized, Forbidden])
+export type Refused = typeof Refused.Type
 
-export const refusedOf = (code: RefusalReason): Refused =>
+export const refusedOf = (code: RefusalReason["code"]): Refused =>
   code === "unknown-key" || code === "key-revoked"
     ? Unauthorized.of(code)
     : Forbidden.of(code)
@@ -67,12 +54,12 @@ export type Access =
   | "human"
 
 export const RequiredAccess = Context.Reference<Access>(
-  "@mokronos/integrations/RequiredAccess",
+  "@integrations/host/RequiredAccess",
   { defaultValue: (): Access => "public" }
 )
 
 export const Unmetered = Context.Reference<boolean>(
-  "@mokronos/integrations/Unmetered",
+  "@integrations/host/Unmetered",
   { defaultValue: (): boolean => false }
 )
 
@@ -89,7 +76,7 @@ export type Caller =
   }
 
 export class Identity extends Context.Service<Identity, Caller>()(
-  "@mokronos/integrations/Identity"
+  "@integrations/host/Identity"
 ) {}
 
 export const requireClient: Effect.Effect<Client, Forbidden, Identity> = Effect.flatMap(

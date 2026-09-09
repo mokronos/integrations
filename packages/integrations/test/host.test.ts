@@ -13,8 +13,8 @@ import { OpenApiInvoker } from "../src/openapi/invoke.ts"
 import { SpecCache } from "../src/openapi/cache.ts"
 import { stubbedLayer } from "../src/runtime.ts"
 import { AuthTemplateSlug } from "../src/catalog/ids.ts"
-import { ConnectionName, connectionAddress, IntegrationSlug } from "@mokronos/contracts"
-import { ToolAddress } from "@mokronos/contracts"
+import { ConnectionName, connectionAddress, IntegrationSlug } from "@integrations/contracts"
+import { ToolAddress } from "@integrations/contracts"
 
 const stubMcp = (options: {
   readonly readOnly?: boolean

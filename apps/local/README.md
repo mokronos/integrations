@@ -1,4 +1,4 @@
-# @mokronos/integrations-local
+# @mokronos/integrations
 
 The integration gateway. Holds connections and credentials, intersects reusable
 policies with client-specific connection grants, and performs invocations — so callers
@@ -12,14 +12,11 @@ holds the integration catalog, sealed credentials, and the gateway's own store
 
 ## The control plane
 
-`serveGateway` also serves the browser control plane built from
-`apps/integrations/web`, at the root of the same port. Assets are resolved from
-disk in this order:
+`serveGateway` also serves the browser control plane at the root of the same
+port. `bun run build` builds the dashboard and places it in this package's
+`web/` directory, so the published package contains the complete local product.
 
-1. `INTEGRATIONS_WEB_DIR`
-2. `<this package>/web` — the published layout, written by `bun run build:web`
-3. `../web/dist` — the source checkout, so `vite build` is enough in a working
-   tree
+`bun run refresh` builds that same artifact before restarting the local gateway.
 
 Pass `{ web: false }` to `serveGateway` for a headless gateway with nothing but
 the API on the port.

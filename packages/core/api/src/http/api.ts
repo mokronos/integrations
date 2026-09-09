@@ -18,6 +18,7 @@ import {
   ClientCapability,
   ClientId,
   ApiKeyId,
+  ApiKeyView,
   ConnectionRef,
   AccessProfile,
   AccessProfileId,
@@ -27,8 +28,9 @@ import {
   ApprovalPolicyTool,
   PolicyDecision,
   PendingApproval,
-  SubjectId
-} from "@mokronos/gateway-core/domain"
+  SubjectId,
+  OAuthSessionView
+} from "@integrations/contracts"
 import {
   Alias,
   ApprovalStatus,
@@ -41,14 +43,17 @@ import {
   IntegrationSearchResponse,
   IntegrationValidationReport,
   IntegrationOverview,
+  InvocationSucceeded,
+  InvocationPending,
+  InvocationDenied,
+  InvocationFailed,
   NonNegativeInt,
   NonNegativeIntFromString,
   PositiveInt,
   PositiveIntFromString,
   Tool,
-  ToolAddress,
   ToolSummary
-} from "@mokronos/contracts"
+} from "@integrations/contracts"
 import { Authority } from "./middleware.ts"
 import { ForbiddenError, RequiredAccess, Unmetered } from "./identity.ts"
 
@@ -131,11 +136,6 @@ const OAuthStartBody = Schema.Struct({
   timeoutSeconds: Schema.optional(Schema.Number)
 })
 
-const InvokeAddressBody = Schema.Struct({
-  address: ToolAddress,
-  arguments: Schema.optional(Json)
-})
-
 const ValidateBody = Schema.Struct({
   node: Json,
   live: Schema.optional(Schema.Boolean)
@@ -180,31 +180,11 @@ const EffectiveTool = Schema.Struct({
   outputSchema: Schema.optional(Json)
 })
 
-export const InvokedOk = Schema.Union([
-  Schema.Struct({
-    status: Schema.Literal("succeeded"),
-    result: Json
-  }),
-  Schema.Struct({
-    status: Schema.Literal("pending"),
-    approvalId: ApprovalId,
-    expiresAt: Schema.Date,
-    approvalUrl: Schema.optional(Schema.String)
-  })
-])
-export const InvokedDenied = Schema.Struct({
-  status: Schema.Literal("denied"),
-  reason: Schema.String
-}).pipe(HttpApiSchema.status(403))
-export const InvokedFailed = Schema.Struct({
-  status: Schema.Literal("failed"),
-  message: Schema.String
-}).pipe(HttpApiSchema.status(502))
+const InvokedOk = Schema.Union([InvocationSucceeded, InvocationPending])
+const InvokedDenied = InvocationDenied.pipe(HttpApiSchema.status(403))
+const InvokedFailed = InvocationFailed.pipe(HttpApiSchema.status(502))
 
-const SettledOutcome = Schema.Union([
-  Schema.Struct({ status: Schema.Literal("succeeded"), result: Json }),
-  Schema.Struct({ status: Schema.Literal("failed"), message: Schema.String })
-])
+const SettledOutcome = Schema.Union([InvocationSucceeded, InvocationFailed])
 
 const ValidationFinding = Schema.Struct({
   severity: Schema.String,
@@ -234,27 +214,6 @@ const MaintenanceReport = Schema.Struct({
   expiredAuditArguments: Schema.Number,
   deletedSessions: Schema.Number,
   expiredIdentityFlows: Schema.Number
-})
-
-const OAuthSessionState = Schema.Union([
-  Schema.Struct({
-    status: Schema.Literal("pending"),
-    authorizationUrl: Schema.String
-  }),
-  Schema.Struct({
-    status: Schema.Literal("connected"),
-    connection: Connection
-  }),
-  Schema.Struct({
-    status: Schema.Literal("failed"),
-    message: Schema.String
-  })
-])
-const OAuthSessionView = Schema.Struct({
-  id: Schema.String,
-  integration: Schema.String,
-  connection: Schema.String,
-  state: OAuthSessionState
 })
 
 class ApiBadRequest extends Schema.TaggedError<ApiBadRequest>()(
@@ -391,11 +350,6 @@ const ProvisioningGroup = HttpApiGroup.make("provisioning")
     success: IntegrationSearchResponse,
     error: ApiBadRequestError
   }).annotate(RequiredAccess, "provisioning"))
-  .add(HttpApiEndpoint.post("invokeTool", "/v1/tools/invoke", {
-    payload: InvokeAddressBody,
-    success: Json,
-    error: ApiBadRequestError
-  }).annotate(RequiredAccess, "administrative"))
   .add(HttpApiEndpoint.post("validate", "/v1/validate", {
     payload: ValidateBody,
     success: Schema.Union([ValidationReport, IntegrationValidationReport])
@@ -457,14 +411,6 @@ const ProvisioningGroup = HttpApiGroup.make("provisioning")
     error: ApiNotFoundError
   }).annotate(RequiredAccess, "provisioning"))
   .middleware(Authority)
-
-const KeyView = Schema.Struct({
-  id: ApiKeyId,
-  clientId: ClientId,
-  createdAt: Schema.Date,
-  lastUsedAt: Schema.NullOr(Schema.Date),
-  revokedAt: Schema.NullOr(Schema.Date)
-})
 
 const AdministrativeGroup = HttpApiGroup.make("administrative")
   .add(HttpApiEndpoint.get("overview", "/v1/overview", {
@@ -535,7 +481,7 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
   }).annotate(RequiredAccess, "administrative"))
   .add(HttpApiEndpoint.get("listKeys", "/v1/clients/:id/keys", {
     params: { id: ClientId },
-    success: Schema.Struct({ keys: Schema.Array(KeyView) }),
+    success: Schema.Struct({ keys: Schema.Array(ApiKeyView) }),
     error: ApiNotFoundError
   }).annotate(RequiredAccess, "administrative"))
   .add(HttpApiEndpoint.post("revokeKey", "/v1/keys/:id/revoke", {
@@ -824,10 +770,7 @@ const AuthGroup = HttpApiGroup.make("auth")
   }).annotate(RequiredAccess, "human"))
   .middleware(Authority)
 
-/** What `execute` answers with, in the shape it goes over the wire. */
-export const ExecuteOutcome = Schema.Union([InvokedOk, InvokedDenied, InvokedFailed])
-
-export const GatewayApi = HttpApi.make("@mokronos/integrations/gateway")
+export const GatewayApi = HttpApi.make("@integrations/host/gateway")
   .add(SystemGroup)
   .add(FallbackGroup)
   .add(DelegatedGroup)

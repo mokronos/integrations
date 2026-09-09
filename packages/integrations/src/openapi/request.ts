@@ -1,7 +1,7 @@
 import { Option } from "effect"
 import type { HttpMethod } from "effect/unstable/http"
-import { isJsonObject, isJsonString, type Json } from "@mokronos/contracts"
-import type { CallParameter, HttpCall, HttpMethod as CallMethod } from "@mokronos/core-integrations"
+import { isJsonObject, isJsonString, type Json } from "@integrations/contracts"
+import type { CallParameter, HttpCall, HttpMethod as CallMethod } from "../tool.ts"
 
 export interface BuiltRequest {
   readonly url: string

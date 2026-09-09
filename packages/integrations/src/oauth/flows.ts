@@ -17,13 +17,13 @@ import {
   writeTokens
 } from "../storage/credentials.ts"
 import type { StoredTokens } from "../storage/credentials.ts"
-import { webCrypto } from "@mokronos/contracts"
+import { webCrypto } from "@integrations/contracts"
 import { describeCause, OAuthError, StorageError } from "../errors.ts"
 import { OAuthClientSlug, OAuthState } from "../catalog/ids.ts"
-import { connectionAddress, ConnectionName, IntegrationSlug } from "@mokronos/contracts"
+import { connectionAddress, ConnectionName, IntegrationSlug } from "@integrations/contracts"
 import { AuthTemplateSlug } from "../catalog/ids.ts"
-import { whenPresent } from "@mokronos/contracts"
-import { OAuthServerProbe, OwnerTier } from "@mokronos/contracts"
+import { whenPresent } from "@integrations/contracts"
+import { OAuthServerProbe, OwnerTier } from "@integrations/contracts"
 
 const ServerMetadata = Schema.Struct({
   issuer: Schema.optional(Schema.String),
@@ -199,7 +199,7 @@ export class OAuthFlows extends Context.Service<
       readonly client: OAuthClientSlug
     }) => Effect.Effect<Option.Option<OAuthAccess>, OAuthError | StorageError>
   }
->()("@mokronos/integrations/OAuthFlows") {
+>()("@integrations/host/OAuthFlows") {
   static readonly layer: Layer.Layer<
     OAuthFlows,
     never,

@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
 import { DateTime, Duration, Effect, Random, Schema } from "effect"
 import { FetchHttpClient, HttpBody, HttpClient, HttpClientResponse } from "effect/unstable/http"
-import { utf8Bytes, whenPresent } from "@mokronos/contracts"
+import { utf8Bytes, whenPresent } from "@integrations/contracts"
 import type { GatewayStore } from "./store-contract.ts"
 
 export const ApprovalNotification = Schema.Struct({

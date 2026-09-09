@@ -25,3 +25,14 @@ export const OAuthStart = Schema.Union([
   })
 ])
 export type OAuthStart = typeof OAuthStart.Type
+
+export const OAuthSessionPending = Schema.Struct({ status: Schema.Literal("pending"), authorizationUrl: Schema.String })
+export type OAuthSessionPending = typeof OAuthSessionPending.Type
+export const OAuthSessionConnected = Schema.Struct({ status: Schema.Literal("connected"), connection: Connection })
+export type OAuthSessionConnected = typeof OAuthSessionConnected.Type
+export const OAuthSessionFailed = Schema.Struct({ status: Schema.Literal("failed"), message: Schema.String })
+export type OAuthSessionFailed = typeof OAuthSessionFailed.Type
+export const OAuthSessionState = Schema.Union([OAuthSessionPending, OAuthSessionConnected, OAuthSessionFailed])
+export type OAuthSessionState = typeof OAuthSessionState.Type
+export const OAuthSessionView = Schema.Struct({ id: Schema.String, integration: Schema.String, connection: Schema.String, state: OAuthSessionState })
+export type OAuthSessionView = typeof OAuthSessionView.Type

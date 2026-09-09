@@ -1,17 +1,17 @@
-import { createGatewayService, type GatewayService } from "@mokronos/gateway-api"
+import { createGatewayService, type GatewayService } from "@integrations/gateway-api"
 import {
   createEncryption,
   GatewayStoreService,
   deliverDueApprovalNotifications,
   runMaintenance,
   type Encryption
-} from "@mokronos/gateway-core"
+} from "@integrations/gateway-core"
 import type { D1Database } from "@cloudflare/workers-types"
 import type { AssetsFetcherLike, D1DatabaseLike, ScheduledEventLike } from "./cloudflare.ts"
 import { Layer } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { Effect } from "effect"
-import { decodeBase64UrlField } from "@mokronos/contracts"
+import { decodeBase64UrlField } from "@integrations/contracts"
 import { FetchHttpClient } from "effect/unstable/http"
 import { D1Client } from "@effect/sql-d1"
 import { d1HostStorage } from "./host-storage-d1.ts"

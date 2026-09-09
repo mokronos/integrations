@@ -6,7 +6,7 @@ import { Context, Effect, Exit, Layer, Scope } from "effect"
 import { Reactivity } from "effect/unstable/reactivity"
 import { SqlClient, SqlError } from "effect/unstable/sql"
 import type { Encryption } from "./crypto.ts"
-import { webCrypto } from "@mokronos/contracts"
+import { webCrypto } from "@integrations/contracts"
 import {
   AccessProfileId,
   Alias,
@@ -51,7 +51,7 @@ import {
 export class GatewayStoreService extends Context.Service<
   GatewayStoreService,
   GatewayStore
->()("@mokronos/integrations/GatewayStore") {
+>()("@integrations/host/GatewayStore") {
   static readonly layer = (
     databasePath: string,
     encryption?: Encryption,

@@ -5,6 +5,7 @@ import {
 } from "@modelcontextprotocol/server"
 import {
   Alias,
+  ClientId,
   asJson,
   type Json,
   isJsonObject,
@@ -12,24 +13,23 @@ import {
   ToolName,
   whenPresent,
   whenPresentMap
-} from "@mokronos/contracts"
+} from "@integrations/contracts"
 import {
   authenticateClient,
-  ClientId,
   deliverDueApprovalNotifications,
   invokeThroughGateway,
   listEffectiveTools
-} from "@mokronos/gateway-core"
-import type { InvocationOutcome } from "@mokronos/gateway-core"
-import type { GatewayStore } from "@mokronos/gateway-core"
-import { IntegrationHost } from "@mokronos/integrations"
-import type { HostServices } from "@mokronos/integrations"
+} from "@integrations/gateway-core"
+import type { InvocationOutcome } from "@integrations/contracts"
+import type { GatewayStore } from "@integrations/gateway-core"
+import { IntegrationHost } from "@integrations/host"
+import type { HostServices } from "@integrations/host"
 import { Context } from "effect"
 
 const hostOf = (options: McpGatewayOptions): IntegrationHost["Service"] =>
   Context.get(options.hostServices, IntegrationHost)
 import { Crypto, Layer, ManagedRuntime } from "effect"
-import { webCryptoLayer } from "@mokronos/contracts"
+import { webCryptoLayer } from "@integrations/contracts"
 import type { HttpClient } from "effect/unstable/http"
 import { capture, ErrorCapture } from "./observability.ts"
 import type { ErrorSink } from "./observability.ts"

@@ -1,8 +1,8 @@
 import { Effect, Predicate } from "effect"
 import { FetchHttpClient, HttpClientError } from "effect/unstable/http"
 import { HttpApiClient } from "effect/unstable/httpapi"
-import { GatewayApi } from "@mokronos/gateway-api/definition"
-import { NonNegativeInt, PositiveInt, whenPresent } from "@mokronos/contracts"
+import { GatewayApi } from "@integrations/gateway-api/definition"
+import { NonNegativeInt, PositiveInt, whenPresent } from "@integrations/contracts"
 import {
   AccessProfileId,
   ApiKeyId,
@@ -10,8 +10,8 @@ import {
   ApprovalId,
   ApprovalPolicyId,
   ClientId
-} from "@mokronos/gateway-core/domain"
-import { Alias } from "@mokronos/contracts"
+} from "@integrations/contracts"
+import { Alias } from "@integrations/contracts"
 import type {
   ApprovalDelivery,
   ApprovalStatus,
@@ -47,14 +47,14 @@ export class GatewayError extends Error {
 }
 
 /**
- * The errors the routes declare carry their human-readable text in `error`,
- * and leave `message` empty; everything else is an ordinary Error.
+ * The routes carry their human-readable text in `message`. `error` is the
+ * older spelling, kept as a fallback for anything still sending it.
  */
 const explains = (failure: Error): failure is Error & { readonly error: string } =>
   "error" in failure && Predicate.isString(failure.error) && failure.error.length > 0
 
 const messageOf = (failure: Error): string =>
-  explains(failure) ? failure.error : failure.message
+  failure.message.length > 0 ? failure.message : explains(failure) ? failure.error : ""
 
 const asGatewayError = (failure: Error): GatewayError => {
   if (HttpClientError.isHttpClientError(failure)) {
@@ -179,7 +179,7 @@ export const listClients = async () => {
 export const fetchOverview = async () => await run(endpoints.administrative.overview())
 
 export const createConfiguredClient = async (
-  input: import("@mokronos/gateway-core/domain").ConfigureClient
+  input: import("@integrations/contracts").ConfigureClient
 ) => await run(endpoints.administrative.createConfiguredClient({ payload: input }))
 
 export const createClient = async (input: {

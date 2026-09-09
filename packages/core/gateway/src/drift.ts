@@ -1,4 +1,4 @@
-import type { IntegrationHost } from "@mokronos/integrations"
+import type { IntegrationHost } from "@integrations/host"
 import { IntegrationSlug, TenantId } from "./domain.ts"
 import type { DriftEntry, ToolSnapshot } from "./domain.ts"
 import { DateTime, Effect, Schema } from "effect"

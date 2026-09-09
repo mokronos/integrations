@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { connectionLabel, when } from "@/lib/format"
 import type { AuditQuery } from "@/lib/gateway"
-import { whenPresent } from "@mokronos/contracts"
+import { whenPresent } from "@integrations/contracts"
 import { useAudit } from "@/lib/queries"
 import { decodeAuditOutcomeFilter, instantFilter } from "@/lib/schemas"
 import type { AuditOutcome, AuditRecord } from "@/lib/schemas"
