@@ -63,7 +63,7 @@ export const d1DatabaseLayer = (
     })
   )
 
-export const deriveCredentialKey = (masterKey: Buffer): Buffer =>
+export const deriveCredentialKey = (masterKey: Uint8Array): Uint8Array =>
   createHmac("sha256", masterKey).update("integrations-credentials/v1").digest()
 
 const credentialTable = `CREATE TABLE IF NOT EXISTS credential (
@@ -76,7 +76,7 @@ const decodeSealed = Schema.decodeUnknownOption(SealedRow)
 
 export const d1CredentialLayer = (
   database: D1DatabaseLike,
-  masterKey: Buffer
+  masterKey: Uint8Array
 ): Layer.Layer<CredentialStore, StorageError> =>
   Layer.effect(
     CredentialStore,
@@ -146,7 +146,7 @@ export const d1CredentialLayer = (
 
 export const d1HostStorage = (
   database: D1DatabaseLike,
-  masterKey: Buffer
+  masterKey: Uint8Array
 ): HostStorage => ({
   storage: Layer.mergeAll(
     d1DatabaseLayer(database),

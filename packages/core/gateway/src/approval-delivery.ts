@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
 import { Duration, Effect, Random, Schema } from "effect"
 import { FetchHttpClient, HttpBody, HttpClient, HttpClientResponse } from "effect/unstable/http"
-import { whenPresent } from "@mokronos/contracts"
+import { utf8Bytes, whenPresent } from "@mokronos/contracts"
 import type { GatewayStore } from "./store-contract.ts"
 
 export const ApprovalNotification = Schema.Struct({
@@ -18,8 +18,8 @@ export const approvalWebhookSignature = (secret: string, timestamp: string, body
 export const verifyApprovalWebhookSignature = (input: {
   readonly secret: string; readonly timestamp: string; readonly body: string; readonly signature: string
 }): boolean => {
-  const expected = Buffer.from(approvalWebhookSignature(input.secret, input.timestamp, input.body))
-  const presented = Buffer.from(input.signature)
+  const expected = utf8Bytes(approvalWebhookSignature(input.secret, input.timestamp, input.body))
+  const presented = utf8Bytes(input.signature)
   return expected.length === presented.length && timingSafeEqual(expected, presented)
 }
 

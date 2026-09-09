@@ -3,7 +3,8 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { randomBytes } from "node:crypto"
-import { Effect, Option } from "effect"
+import { Effect, Encoding, Option } from "effect"
+import { utf8Bytes } from "@mokronos/contracts"
 import {
   connectionCredentialKey,
   CredentialStore,
@@ -40,7 +41,7 @@ describe("sealing", () => {
   it("refuses a tampered envelope", () => {
     const key = randomBytes(32)
     const [version, vector, tag, ciphertext] = sealValue(key, "s3cret").split(".")
-    const swapped = [version, vector, tag, Buffer.from("other").toString("base64url")].join(".")
+    const swapped = [version, vector, tag, Encoding.encodeBase64Url(utf8Bytes("other"))].join(".")
     expect(() => openValue(key, swapped)).toThrow()
     expect(() => openValue(key, `v2.${vector}.${tag}.${ciphertext}`)).toThrow()
   })

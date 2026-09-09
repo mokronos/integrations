@@ -8,12 +8,13 @@ import {
 } from "@mokronos/gateway-core"
 import type { AssetsFetcherLike, D1DatabaseLike, ScheduledEventLike } from "./cloudflare.ts"
 import { Effect } from "effect"
+import { decodeBase64UrlField } from "@mokronos/contracts"
 import { FetchHttpClient } from "effect/unstable/http"
 import { D1Client } from "./d1-client.ts"
 import { d1HostStorage } from "./host-storage-d1.ts"
 import { D1OAuthSessionStore } from "./oauth-store-d1.ts"
 
-export const masterKeyFromEnv = (envValue: string | undefined): Buffer => {
+export const masterKeyFromEnv = (envValue: string | undefined): Uint8Array => {
   if (envValue === undefined || envValue.length === 0) {
     throw new Error(
       "INTEGRATIONS_MASTER_KEY is not set. A hosted gateway seals payloads at rest; " +
@@ -21,7 +22,7 @@ export const masterKeyFromEnv = (envValue: string | undefined): Buffer => {
       "(base64url of 32 bytes, e.g. openssl rand -base64 32)"
     )
   }
-  const key = Buffer.from(envValue, "base64url")
+  const key = decodeBase64UrlField("INTEGRATIONS_MASTER_KEY", envValue)
   if (key.length !== 32) {
     throw new Error(
       `INTEGRATIONS_MASTER_KEY must decode to 32 bytes, got ${key.length}`
@@ -32,7 +33,7 @@ export const masterKeyFromEnv = (envValue: string | undefined): Buffer => {
 
 const resolveMasterKey = async (
   envValue: string | undefined
-): Promise<{ readonly key: Buffer; readonly encryption: Encryption }> => {
+): Promise<{ readonly key: Uint8Array; readonly encryption: Encryption }> => {
   const key = masterKeyFromEnv(envValue)
   return { key, encryption: createEncryption(key) }
 }

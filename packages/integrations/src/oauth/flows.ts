@@ -7,7 +7,7 @@ import {
   registerClient,
   startAuthorization
 } from "@modelcontextprotocol/client"
-import { Clock, Context, Effect, Layer, Option, Schema } from "effect"
+import { Clock, Context, Effect, Encoding, Layer, Option, Schema } from "effect"
 import { CatalogStore } from "../catalog/store.ts"
 import type { OAuthClientRecord } from "../catalog/store.ts"
 import {
@@ -361,7 +361,7 @@ export class OAuthFlows extends Context.Service<
           slug: options.client
         })
         const secret = yield* clientSecret(client)
-        const state = OAuthState.make(randomBytes(32).toString("base64url"))
+        const state = OAuthState.make(Encoding.encodeBase64Url(randomBytes(32)))
 
         const began = yield* Effect.tryPromise({
           try: () => startAuthorization(client.authorizationUrl, {

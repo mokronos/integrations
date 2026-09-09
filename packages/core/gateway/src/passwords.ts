@@ -1,5 +1,6 @@
 import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto"
-import { Effect, Schema } from "effect"
+import { Effect, Encoding, Schema } from "effect"
+import { decodeBase64Field, utf8Bytes } from "@mokronos/contracts"
 import { SessionTokenHash } from "./domain.ts"
 
 export class PasswordError extends Schema.TaggedError<PasswordError>()(
@@ -7,7 +8,7 @@ export class PasswordError extends Schema.TaggedError<PasswordError>()(
   { operation: Schema.String, cause: Schema.Defect() }
 ) {}
 
-const scrypt = (password: string, salt: Buffer, keylen: number): Effect.Effect<Buffer, PasswordError> =>
+const scrypt = (password: string, salt: Uint8Array, keylen: number): Effect.Effect<Buffer, PasswordError> =>
   Effect.callback((resume) => {
     scryptCallback(password, salt, keylen, (error, derivedKey) => {
       if (derivedKey === undefined) {
@@ -34,7 +35,9 @@ export const hashPassword = Effect.fn("Password.hash")(function*(
     catch: (cause) => new PasswordError({ operation: "randomBytes", cause })
   })
   const derived = yield* scrypt(password, salt, keyLength)
-  return PasswordHash.make(`scrypt$${salt.toString("base64")}$${derived.toString("base64")}`)
+  return PasswordHash.make(
+    `scrypt$${Encoding.encodeBase64(salt)}$${Encoding.encodeBase64(derived)}`
+  )
 })
 
 export const verifyPassword = Effect.fn("Password.verify")(function*(
@@ -43,8 +46,12 @@ export const verifyPassword = Effect.fn("Password.verify")(function*(
 ): Effect.fn.Return<boolean, PasswordError> {
   const [scheme, saltText, hashText] = stored.split("$")
   if (scheme !== "scrypt" || saltText === undefined || hashText === undefined) return false
-  const expected = Buffer.from(hashText, "base64")
-  const actual = yield* scrypt(password, Buffer.from(saltText, "base64"), expected.length)
+  const expected = decodeBase64Field("stored password hash", hashText)
+  const actual = yield* scrypt(
+    password,
+    decodeBase64Field("stored password salt", saltText),
+    expected.length
+  )
   return expected.length === actual.length && timingSafeEqual(expected, actual)
 })
 
@@ -54,9 +61,9 @@ export interface IssuedSessionToken {
 }
 
 export const generateSessionToken = (): IssuedSessionToken => {
-  const secret = `wfs_${randomBytes(32).toString("base64url")}`
+  const secret = `wfs_${Encoding.encodeBase64Url(randomBytes(32))}`
   return { secret, hash: hashSessionToken(secret) }
 }
 
 export const hashSessionToken = (secret: string): SessionTokenHash =>
-  SessionTokenHash.make(createHash("sha256").update(secret, "utf8").digest("hex"))
+  SessionTokenHash.make(createHash("sha256").update(utf8Bytes(secret)).digest("hex"))

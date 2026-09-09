@@ -6,6 +6,8 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { randomBytes } from "node:crypto"
 import { createClient as openRawDatabase } from "@libsql/client"
+import { Encoding } from "effect"
+import { decodeBase64Field, decodeBase64UrlField } from "@mokronos/contracts"
 import {
   Alias,
   ConnectionName,
@@ -67,10 +69,10 @@ describe("payload sealing", () => {
     if (parts[0] !== "enc.v1" || ivText === undefined || tagText === undefined || data === undefined) {
       throw new Error("test produced a malformed envelope")
     }
-    const bytes = Buffer.from(data, "base64")
+    const bytes = decodeBase64Field("ciphertext", data)
     const lastIndex = bytes.length - 1
     bytes[lastIndex] = (bytes[lastIndex] ?? 0) ^ 0xff
-    const tampered = `enc.v1$${ivText}$${tagText}$${bytes.toString("base64")}`
+    const tampered = `enc.v1$${ivText}$${tagText}$${Encoding.encodeBase64(bytes)}`
     expect(() => encryption.open(tampered)).toThrow()
   })
 
@@ -127,13 +129,13 @@ describe("master key resolution", () => {
     const directory = await run(tempDir())
     const keyFile = path.join(directory, "gateway.key")
     await run(resolveEncryption({ keyFile }))
-    const environmentKey = randomBytes(32).toString("base64url")
+    const environmentKey = Encoding.encodeBase64Url(randomBytes(32))
 
     const encryption = await run(resolveEncryption({ envValue: environmentKey, keyFile }))
     if (encryption === undefined) throw new Error("expected an encryption instance")
     const sealed = encryption.seal("decides")
 
-    expect(createEncryption(Buffer.from(environmentKey, "base64url")).open(sealed)).toBe("decides")
+    expect(createEncryption(decodeBase64UrlField("key", environmentKey)).open(sealed)).toBe("decides")
     const fileKey = createEncryption((await run(import("node:fs"))).readFileSync(keyFile))
     expect(() => fileKey.open(sealed)).toThrow()
   })

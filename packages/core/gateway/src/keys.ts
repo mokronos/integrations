@@ -1,4 +1,6 @@
 import { createHash, randomUUID, randomBytes } from "node:crypto"
+import { Encoding } from "effect"
+import { utf8Bytes } from "@mokronos/contracts"
 import {
   ApiKeyHash,
   ApiKeyId,
@@ -23,7 +25,7 @@ export interface IssuedApiKey {
 }
 
 export const generateApiKey = (): IssuedApiKey => {
-  const secret = `${keyPrefix}${randomBytes(32).toString("base64url")}`
+  const secret = `${keyPrefix}${Encoding.encodeBase64Url(randomBytes(32))}`
   return {
     id: ApiKeyId.make(randomUUID()),
     secret,
@@ -32,7 +34,7 @@ export const generateApiKey = (): IssuedApiKey => {
 }
 
 export const hashApiKey = (secret: string): ApiKeyHash =>
-  ApiKeyHash.make(createHash("sha256").update(secret, "utf8").digest("hex"))
+  ApiKeyHash.make(createHash("sha256").update(utf8Bytes(secret)).digest("hex"))
 
 export interface IssuedLoginHandoff {
   readonly secret: string
@@ -40,12 +42,12 @@ export interface IssuedLoginHandoff {
 }
 
 export const generateLoginHandoff = (): IssuedLoginHandoff => {
-  const secret = `wfl_${randomBytes(32).toString("base64url")}`
+  const secret = `wfl_${Encoding.encodeBase64Url(randomBytes(32))}`
   return { secret, hash: hashLoginHandoff(secret) }
 }
 
 export const hashLoginHandoff = (secret: string): LoginHandoffHash =>
-  LoginHandoffHash.make(createHash("sha256").update(secret, "utf8").digest("hex"))
+  LoginHandoffHash.make(createHash("sha256").update(utf8Bytes(secret)).digest("hex"))
 
 export const newClientId = (): ClientId => ClientId.make(randomUUID())
 export const newAccessProfileId = (): AccessProfileId => AccessProfileId.make(randomUUID())
@@ -53,7 +55,8 @@ export const newApprovalPolicyId = (): ApprovalPolicyId => ApprovalPolicyId.make
 export const newApprovalId = (): ApprovalId => ApprovalId.make(randomUUID())
 export const newApprovalDestinationId = (): ApprovalDestinationId => ApprovalDestinationId.make(randomUUID())
 export const newApprovalDeliveryId = (): ApprovalDeliveryId => ApprovalDeliveryId.make(randomUUID())
-export const generateApprovalSigningSecret = (): string => `wfs_${randomBytes(32).toString("base64url")}`
+export const generateApprovalSigningSecret = (): string =>
+  `wfs_${Encoding.encodeBase64Url(randomBytes(32))}`
 export const newAuditId = (): AuditId => AuditId.make(randomUUID())
 export const newTenantId = (): TenantId => TenantId.make(randomUUID())
 export const newSubjectId = (): SubjectId => SubjectId.make(randomUUID())

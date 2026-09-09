@@ -8,7 +8,8 @@ import {
   writeFileSync
 } from "node:fs"
 import path from "node:path"
-import { Context, Effect, Layer, Option, Schema, Semaphore } from "effect"
+import { Context, Effect, Encoding, Layer, Option, Schema, Semaphore } from "effect"
+import { concatBytes, decodeBase64UrlField, utf8Bytes, utf8Text } from "@mokronos/contracts"
 import { describeCause, StorageError } from "../errors.ts"
 
 export const CredentialKey = Schema.String.check(Schema.isMinLength(1)).pipe(
@@ -64,9 +65,9 @@ export class CredentialStore extends Context.Service<
 const CredentialFile = Schema.Record(Schema.String, Schema.String)
 type CredentialFile = typeof CredentialFile.Type
 
-const additionalData = Buffer.from("@mokronos/integrations/credentials/v1")
+const additionalData = utf8Bytes("@mokronos/integrations/credentials/v1")
 
-const credentialKey = (directory: string): Buffer => {
+const credentialKey = (directory: string): Uint8Array => {
   const keyPath = path.join(directory, "credentials.key")
   mkdirSync(directory, { recursive: true, mode: 0o700 })
   if (!existsSync(keyPath)) {
@@ -84,20 +85,20 @@ const credentialKey = (directory: string): Buffer => {
   return key
 }
 
-export const sealValue = (key: Buffer, value: string): string => {
+export const sealValue = (key: Uint8Array, value: string): string => {
   const initializationVector = randomBytes(12)
   const cipher = createCipheriv("aes-256-gcm", key, initializationVector)
   cipher.setAAD(additionalData)
-  const ciphertext = Buffer.concat([cipher.update(value, "utf8"), cipher.final()])
+  const ciphertext = concatBytes([cipher.update(value, "utf8"), cipher.final()])
   return [
     "v1",
-    initializationVector.toString("base64url"),
-    cipher.getAuthTag().toString("base64url"),
-    ciphertext.toString("base64url")
+    Encoding.encodeBase64Url(initializationVector),
+    Encoding.encodeBase64Url(cipher.getAuthTag()),
+    Encoding.encodeBase64Url(ciphertext)
   ].join(".")
 }
 
-export const openValue = (key: Buffer, sealed: string): string => {
+export const openValue = (key: Uint8Array, sealed: string): string => {
   const [version, encodedVector, encodedTag, encodedCiphertext, extra] = sealed.split(".")
   if (
     version !== "v1" ||
@@ -111,14 +112,14 @@ export const openValue = (key: Buffer, sealed: string): string => {
   const decipher = createDecipheriv(
     "aes-256-gcm",
     key,
-    Buffer.from(encodedVector, "base64url")
+    decodeBase64UrlField("initialisation vector", encodedVector)
   )
   decipher.setAAD(additionalData)
-  decipher.setAuthTag(Buffer.from(encodedTag, "base64url"))
-  return Buffer.concat([
-    decipher.update(Buffer.from(encodedCiphertext, "base64url")),
+  decipher.setAuthTag(decodeBase64UrlField("authentication tag", encodedTag))
+  return utf8Text(concatBytes([
+    decipher.update(decodeBase64UrlField("ciphertext", encodedCiphertext)),
     decipher.final()
-  ]).toString("utf8")
+  ]))
 }
 
 const fileCredentialStore = (directory: string): CredentialStore["Service"] => {
