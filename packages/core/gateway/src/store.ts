@@ -320,33 +320,30 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
       return row === undefined ? 0 : Number(row["total"] ?? 0)
     })),
 
-    changeLoginEmail: (subjectId, email) => operation("changeLoginEmail", Effect.gen(function*() {
-      yield* run("UPDATE gateway_login SET email = ? WHERE subject_id = ?", [email, subjectId])
-    })),
+    changeLoginEmail: (subjectId, email) =>
+      operation("changeLoginEmail", run("UPDATE gateway_login SET email = ? WHERE subject_id = ?", [email, subjectId])),
 
-    changeLoginPassword: (subjectId, passwordHash) => operation("changeLoginPassword", Effect.gen(function*() {
-      yield* run("UPDATE gateway_login SET password_hash = ? WHERE subject_id = ?", [
-        passwordHash,
-        subjectId
-      ])
-    })),
+    changeLoginPassword: (subjectId, passwordHash) =>
+      operation(
+        "changeLoginPassword",
+        run("UPDATE gateway_login SET password_hash = ? WHERE subject_id = ?", [passwordHash, subjectId])
+      ),
 
-    deleteSubject: (subjectId) => operation("deleteSubject", Effect.gen(function*() {
-      yield* run("DELETE FROM gateway_subject WHERE id = ?", [subjectId])
-    })),
+    deleteSubject: (subjectId) =>
+      operation("deleteSubject", run("DELETE FROM gateway_subject WHERE id = ?", [subjectId])),
 
-    deleteTenant: (id) => operation("deleteTenant", Effect.gen(function*() {
-      yield* run("DELETE FROM gateway_tenant WHERE id = ?", [id])
-    })),
+    deleteTenant: (id) => operation("deleteTenant", run("DELETE FROM gateway_tenant WHERE id = ?", [id])),
 
-    revokeSubjectSessions: (subjectId, exceptTokenHash) => operation("revokeSubjectSessions", Effect.gen(function*() {
-      return yield* exceptTokenHash === undefined
-        ? changed("DELETE FROM gateway_session WHERE subject_id = ? RETURNING token_hash", [subjectId])
-        : changed(
-          "DELETE FROM gateway_session WHERE subject_id = ? AND token_hash != ? RETURNING token_hash",
-          [subjectId, exceptTokenHash]
-        )
-    })),
+    revokeSubjectSessions: (subjectId, exceptTokenHash) =>
+      operation(
+        "revokeSubjectSessions",
+        exceptTokenHash === undefined
+          ? changed("DELETE FROM gateway_session WHERE subject_id = ? RETURNING token_hash", [subjectId])
+          : changed(
+            "DELETE FROM gateway_session WHERE subject_id = ? AND token_hash != ? RETURNING token_hash",
+            [subjectId, exceptTokenHash]
+          )
+      ),
 
     createSession: (input) => operation("createSession", Effect.gen(function*() {
       yield* run(
@@ -366,16 +363,14 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
       return row === undefined ? undefined : toAuthSession(row)
     })),
 
-    revokeSession: (tokenHash) => operation("revokeSession", Effect.gen(function*() {
-      yield* run("DELETE FROM gateway_session WHERE token_hash = ?", [tokenHash])
-    })),
+    revokeSession: (tokenHash) =>
+      operation("revokeSession", run("DELETE FROM gateway_session WHERE token_hash = ?", [tokenHash])),
 
-    deleteExpiredSessions: (at) => operation("deleteExpiredSessions", Effect.gen(function*() {
-      return yield* changed(
-        "DELETE FROM gateway_session WHERE expires_at <= ? RETURNING token_hash",
-        [millis(at)]
-      )
-    })),
+    deleteExpiredSessions: (at) =>
+      operation(
+        "deleteExpiredSessions",
+        changed("DELETE FROM gateway_session WHERE expires_at <= ? RETURNING token_hash", [millis(at)])
+      ),
 
     createExternalIdentity: (input) => operation("createExternalIdentity", Effect.gen(function*() {
       yield* run(
@@ -458,20 +453,22 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
       )) > 0
     })),
 
-    createIdentityOAuthState: (input) => operation("createIdentityOAuthState", Effect.gen(function*() {
-      yield* run(
-        `INSERT INTO gateway_identity_oauth_state
+    createIdentityOAuthState: (input) =>
+      operation(
+        "createIdentityOAuthState",
+        run(
+          `INSERT INTO gateway_identity_oauth_state
            (state_hash, provider, handoff_hash, return_path, expires_at)
          VALUES (?, ?, ?, ?, ?)`,
-        [
-          input.stateHash,
-          input.provider,
-          input.handoffHash,
-          input.returnPath,
-          millis(input.expiresAt)
-        ]
-      )
-    })),
+          [
+            input.stateHash,
+            input.provider,
+            input.handoffHash,
+            input.returnPath,
+            millis(input.expiresAt)
+          ]
+        )
+      ),
 
     consumeIdentityOAuthState: (stateHash) => operation("consumeIdentityOAuthState", Effect.gen(function*() {
       const row = yield* one(
@@ -614,12 +611,14 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
       return yield* requireClient(input.id)
     })),
 
-    revokeClient: (tenantId, id) => operation("revokeClient", Effect.gen(function*() {
-      yield* run(
-        "UPDATE gateway_client SET revoked_at = ? WHERE tenant_id = ? AND id = ? AND revoked_at IS NULL",
-        [now(), tenantId, id]
-      )
-    })),
+    revokeClient: (tenantId, id) =>
+      operation(
+        "revokeClient",
+        run(
+          "UPDATE gateway_client SET revoked_at = ? WHERE tenant_id = ? AND id = ? AND revoked_at IS NULL",
+          [now(), tenantId, id]
+        )
+      ),
 
     createApprovalDestination: (input) => operation("createApprovalDestination", Effect.gen(function*() {
       yield* run(
@@ -638,9 +637,11 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
         .map(toApprovalDestination)
     })),
 
-    deleteApprovalDestination: (tenantId, id) => operation("deleteApprovalDestination", Effect.gen(function*() {
-      yield* run("UPDATE gateway_approval_destination SET deleted_at = ? WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL", [now(), tenantId, id])
-    })),
+    deleteApprovalDestination: (tenantId, id) =>
+      operation(
+        "deleteApprovalDestination",
+        run("UPDATE gateway_approval_destination SET deleted_at = ? WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL", [now(), tenantId, id])
+      ),
 
     listClientApprovalDestinationIds: (clientId) => operation("listClientApprovalDestinationIds", Effect.gen(function*() {
       return (yield* all("SELECT destination_id FROM gateway_client_approval_destination WHERE client_id = ? ORDER BY destination_id", [clientId]))
@@ -716,16 +717,18 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
       }))
     })),
 
-    settleApprovalDelivery: (input) => operation("settleApprovalDelivery", Effect.gen(function*() {
-      yield* run(
-        `UPDATE gateway_approval_delivery
+    settleApprovalDelivery: (input) =>
+      operation(
+        "settleApprovalDelivery",
+        run(
+          `UPDATE gateway_approval_delivery
             SET status = ?, attempts = attempts + 1, next_attempt_at = ?,
                 delivered_at = CASE WHEN ? = 'delivered' THEN ? ELSE delivered_at END,
                 last_error = ?
           WHERE id = ?`,
-        [input.status, input.nextAttemptAt === null ? null : millis(input.nextAttemptAt), input.status, now(), input.error, input.id]
-      )
-    })),
+          [input.status, input.nextAttemptAt === null ? null : millis(input.nextAttemptAt), input.status, now(), input.error, input.id]
+        )
+      ),
 
     addApiKey: (input) => operation("addApiKey", Effect.gen(function*() {
       yield* run(
@@ -773,13 +776,14 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
       }
     })),
 
-    touchApiKey: (id) => operation("touchApiKey", Effect.gen(function*() {
-      yield* run("UPDATE gateway_api_key SET last_used_at = ? WHERE id = ?", [now(), id])
-    })),
+    touchApiKey: (id) =>
+      operation("touchApiKey", run("UPDATE gateway_api_key SET last_used_at = ? WHERE id = ?", [now(), id])),
 
-    revokeApiKey: (id) => operation("revokeApiKey", Effect.gen(function*() {
-      yield* run("UPDATE gateway_api_key SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL", [now(), id])
-    })),
+    revokeApiKey: (id) =>
+      operation(
+        "revokeApiKey",
+        run("UPDATE gateway_api_key SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL", [now(), id])
+      ),
 
     createAccessProfile: (input) => operation("createAccessProfile", Effect.gen(function*() {
       const timestamp = now()
@@ -1078,15 +1082,17 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
       )) === 1
     })),
 
-    cancelApprovalsForClient: (clientId) => operation("cancelApprovalsForClient", Effect.gen(function*() {
-      return yield* changed(
-        `UPDATE gateway_pending_approval
+    cancelApprovalsForClient: (clientId) =>
+      operation(
+        "cancelApprovalsForClient",
+        changed(
+          `UPDATE gateway_pending_approval
             SET status = 'denied', decided_at = ?, decided_by = 'client-revoked'
           WHERE client_id = ? AND status = 'pending'
           RETURNING id`,
-        [now(), clientId]
-      )
-    })),
+          [now(), clientId]
+        )
+      ),
 
     recordAudit: (input) => operation("recordAudit", Effect.gen(function*() {
       const connection = input.connection
@@ -1139,12 +1145,11 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
       return row === undefined ? 0 : Number(row["total"] ?? 0)
     })),
 
-    expireAuditArguments: (at) => operation("expireAuditArguments", Effect.gen(function*() {
-      return yield* changed(
-        "DELETE FROM gateway_audit_arguments WHERE expires_at <= ? RETURNING audit_id",
-        [millis(at)]
-      )
-    })),
+    expireAuditArguments: (at) =>
+      operation(
+        "expireAuditArguments",
+        changed("DELETE FROM gateway_audit_arguments WHERE expires_at <= ? RETURNING audit_id", [millis(at)])
+      ),
 
     putToolSnapshots: (tenantId, snapshots) => operation("putToolSnapshots", Effect.gen(function*() {
       for (const snapshot of snapshots) {
@@ -1186,16 +1191,18 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
       }
     })),
 
-    expireApprovals: (at) => operation("expireApprovals", Effect.gen(function*() {
-      return yield* changed(
-        `UPDATE gateway_pending_approval
+    expireApprovals: (at) =>
+      operation(
+        "expireApprovals",
+        changed(
+          `UPDATE gateway_pending_approval
             SET status = 'expired', decided_at = ?,
                 error = 'expired before a decision was recorded'
           WHERE status = 'pending' AND expires_at <= ?
           RETURNING id`,
-        [now(), millis(at)]
-      )
-    })),
+          [now(), millis(at)]
+        )
+      ),
 
     // The SqlClient owns the connection; closing it is the scope's business.
     close: () => operation("close", Effect.void)
