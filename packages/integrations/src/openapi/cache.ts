@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Option } from "effect"
+import { Cache, Context, Effect, Layer, Option } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { CatalogStore } from "../catalog/store.ts"
 import type { IntegrationRecord } from "../catalog/store.ts"
@@ -6,6 +6,9 @@ import { describeCause, SpecError } from "../errors.ts"
 import { convertGoogleDiscovery, isGoogleDiscoveryUrl } from "./google-discovery.ts"
 import { compileSpec } from "./compile.ts"
 import type { CompiledSpec } from "./compile.ts"
+
+/** How many compiled specifications to hold in memory at once. */
+const capacity = 128
 
 export class SpecCache extends Context.Service<
   SpecCache,
@@ -23,7 +26,6 @@ export class SpecCache extends Context.Service<
     Effect.gen(function* () {
       const store = yield* CatalogStore
       const client = yield* HttpClient.HttpClient
-      const compiled = new Map<string, CompiledSpec>()
 
       const fetchText = Effect.fn("SpecCache.fetchText")((url: string) =>
         client.get(url, {
@@ -44,34 +46,8 @@ export class SpecCache extends Context.Service<
           ? convertGoogleDiscovery(source, text)
           : Effect.succeed(text)
 
-      const compileText = Effect.fn("SpecCache.compileText")(function* (
-        source: string,
-        text: string
-      ) {
-        const openapi = yield* toOpenApi(source, text)
-        const spec = yield* compileSpec(source, openapi)
-        compiled.set(source, spec)
-        return spec
-      })
-
-      const compileUrl = Effect.fn("SpecCache.compileUrl")(function* (url: string) {
-        const held = compiled.get(url)
-        if (held !== undefined) return held
-        const text = yield* fetchText(url)
-        return yield* compileText(url, text)
-      })
-
-      const load = Effect.fn("SpecCache.load")(function* (record: IntegrationRecord) {
-        const source = record.specSource
-        if (source === undefined) {
-          return yield* new SpecError({
-            source: record.slug,
-            detail: "This integration records no specification source"
-          })
-        }
-        const held = compiled.get(source)
-        if (held !== undefined) return held
-
+      /** Reads the stored document if we have one, otherwise fetches and stores it. */
+      const textOf = Effect.fn("SpecCache.textOf")(function* (source: string) {
         const stored = yield* store.findSpecDocument(source).pipe(
           Effect.mapError((cause) =>
             new SpecError({
@@ -81,7 +57,7 @@ export class SpecCache extends Context.Service<
             })
           )
         )
-        const text = yield* Option.match(stored, {
+        return yield* Option.match(stored, {
           onNone: () => fetchText(source).pipe(
             Effect.tap((fetched) =>
               store.putSpecDocument(source, fetched).pipe(Effect.catch((failure) =>
@@ -93,10 +69,39 @@ export class SpecCache extends Context.Service<
           ),
           onSome: Effect.succeed
         })
-        return yield* compileText(source, text)
       })
 
-      return { load, compileUrl }
+      const compiled = yield* Cache.make({
+        capacity,
+        lookup: Effect.fn("SpecCache.compile")(function* (source: string) {
+          const openapi = yield* toOpenApi(source, yield* textOf(source))
+          return yield* compileSpec(source, openapi)
+        })
+      })
+
+      /**
+       * A Cache holds the lookup's exit, so a failed compile would otherwise
+       * stay failed. Dropping the entry keeps a transient fetch error from
+       * outliving the request that hit it, while concurrent callers still
+       * share the one in-flight lookup.
+       */
+      const get = (source: string) =>
+        Cache.get(compiled, source).pipe(
+          Effect.tapError(() => Cache.invalidate(compiled, source))
+        )
+
+      const load = Effect.fn("SpecCache.load")(function* (record: IntegrationRecord) {
+        const source = record.specSource
+        if (source === undefined) {
+          return yield* new SpecError({
+            source: record.slug,
+            detail: "This integration records no specification source"
+          })
+        }
+        return yield* get(source)
+      })
+
+      return { load, compileUrl: get }
     })
   )
 }
