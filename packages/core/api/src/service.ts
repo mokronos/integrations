@@ -3,10 +3,10 @@ import {
   defaultGatewayPort,
   writeGatewayConfig
 } from "@mokronos/gateway-core"
-import { PositiveInt, PositiveIntFromString, whenPresent } from "@mokronos/contracts"
+import { whenPresent } from "@mokronos/contracts"
 import { defaultTenantId } from "@mokronos/gateway-core"
 import { resolveEncryption } from "@mokronos/gateway-core"
-import { Context, Effect, Layer, ManagedRuntime, Option, Schema } from "effect"
+import { Context, Effect, Layer, ManagedRuntime, Option } from "effect"
 import type { HttpClient } from "effect/unstable/http"
 import { isLoopbackAddress, mayBorrowLocalCredential } from "./http/loopback.ts"
 import { createGatewayHandler } from "./http/handler.ts"
@@ -28,6 +28,7 @@ import type { GatewayStoreOptions } from "@mokronos/gateway-core"
 import type { GatewayStore } from "@mokronos/gateway-core"
 import { GatewayStoreError, GatewayStoreService } from "@mokronos/gateway-core"
 import { createWebAssets } from "./web-assets.ts"
+import { defaultRateLimitPerMinute, gatewayEnvironment } from "./config.ts"
 import { telemetryLayer } from "@mokronos/observability"
 import type { GoogleIdentityOAuth } from "@mokronos/gateway-core"
 
@@ -72,23 +73,17 @@ interface GatewayCore {
 
 const signupOpen = (
   store: GatewayStore,
-  explicitlyAllowed = process.env["INTEGRATIONS_ALLOW_SIGNUP"] === "1"
+  explicitlyAllowed: boolean
 ): Effect.Effect<boolean, GatewayStoreError> =>
   explicitlyAllowed ? Effect.succeed(true) : store.countLogins().pipe(Effect.map((count) => count === 0))
-
-const nonBlank = (value: string | undefined): string | undefined => {
-  const trimmed = value?.trim()
-  return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed
-}
-
-export const defaultRateLimitPerMinute = 600
 
 const buildCore = async (
   options: GatewayServiceOptions
 ): Promise<GatewayCore> => {
+  const environment = await Effect.runPromise(gatewayEnvironment)
   const home = options.home ?? integrationsHome()
   const encryption = await resolveEncryption({
-    ...whenPresent("envValue", process.env["INTEGRATIONS_MASTER_KEY"]),
+    ...whenPresent("envValue", Option.getOrUndefined(environment.masterKey)),
     keyFile: `${home}/gateway.key`
   })
   const storeRuntime = ManagedRuntime.make(
@@ -120,20 +115,12 @@ const buildCore = async (
     return { store, hostServices }
   }
   const resolvePublicUrl = (): string | undefined =>
-    options.publicUrl ?? process.env["INTEGRATIONS_PUBLIC_URL"] ??
+    options.publicUrl ?? Option.getOrUndefined(environment.publicUrl) ??
     options.localCallbackOrigin
-  const googleClientId = nonBlank(
-    options.googleIdentity?.clientId ?? process.env["INTEGRATIONS_GOOGLE_CLIENT_ID"]
-  )
-  const googleClientSecret = nonBlank(
-    options.googleIdentity?.clientSecret ?? process.env["INTEGRATIONS_GOOGLE_CLIENT_SECRET"]
-  )
-  if ((googleClientId === undefined) !== (googleClientSecret === undefined)) {
-    await Promise.all([storeRuntime.dispose(), hostRuntime.dispose()])
-    throw new Error(
-      "Google sign-in requires both INTEGRATIONS_GOOGLE_CLIENT_ID and INTEGRATIONS_GOOGLE_CLIENT_SECRET"
-    )
-  }
+  const googleClientId = options.googleIdentity?.clientId ??
+    Option.getOrUndefined(environment.googleClientId)
+  const googleClientSecret = options.googleIdentity?.clientSecret ??
+    Option.getOrUndefined(environment.googleClientSecret)
   const googleIdentity: GoogleIdentityOAuth | undefined =
     googleClientId === undefined || googleClientSecret === undefined
       ? undefined
@@ -163,12 +150,8 @@ const buildCore = async (
       }).pipe(Effect.provide(options.httpClient))
     })
 
-  const perMinute = Option.getOrElse(
-    Schema.decodeUnknownOption(Schema.Union([PositiveInt, PositiveIntFromString]))(
-      options.rateLimitPerMinute ?? process.env["INTEGRATIONS_RATE_LIMIT"]
-    ),
-    () => defaultRateLimitPerMinute
-  )
+  const perMinute = options.rateLimitPerMinute ??
+    Option.getOrElse(environment.rateLimitPerMinute, () => defaultRateLimitPerMinute)
   const rateLimits: RateLimits = {
     principalPerMinute: perMinute,
     addressPerMinute: Math.max(20, Math.floor(perMinute / 5))
@@ -213,7 +196,7 @@ const buildCore = async (
       }),
       ...whenPresent("maxBodyBytes", options.maxBodyBytes),
       sessions: {
-        signupOpen: () => signupOpen(resources.store, options.allowSignup),
+        signupOpen: () => signupOpen(resources.store, options.allowSignup ?? environment.allowSignup),
         secureCookies: options.secureCookies ?? false,
         ...whenPresent("google", googleIdentity)
       },

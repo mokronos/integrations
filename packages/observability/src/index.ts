@@ -1,8 +1,8 @@
 export {
+  telemetryAuthorization,
   telemetryAuthorizationEnvVar,
-  telemetryAuthorizationFromEnv,
+  telemetryEndpoint,
   telemetryEndpointEnvVar,
-  telemetryEndpointFromEnv,
   telemetryLayer
 } from "./telemetry.ts"
 export type { TelemetryOptions } from "./telemetry.ts"

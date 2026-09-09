@@ -1,6 +1,6 @@
 import { chmod, mkdir, rm } from "node:fs/promises"
 import path from "node:path"
-import { Effect, Predicate, Schema } from "effect"
+import { Config, Effect, Option, Predicate, Schema } from "effect"
 import { HttpBody, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import type { HttpClientResponse, HttpMethod } from "effect/unstable/http"
 import {
@@ -13,7 +13,7 @@ import {
 import type { GatewayClient } from "@mokronos/integrations-client"
 import { cliError, IntegrationsCliError } from "./connection.ts"
 import { openBrowser } from "./connection.ts"
-import { whenPresentMap } from "@mokronos/contracts"
+import { optionalText, whenPresentMap } from "@mokronos/contracts"
 
 const OperatorSession = Schema.Struct({
   url: Schema.String,
@@ -29,12 +29,9 @@ const encodeOperatorSession = Schema.encodeSync(OperatorSessionJson)
 export const operatorSessionPath = (): string =>
   path.join(integrationsHome(), "operator-session.json")
 
-const configuredUrl = (): string | undefined => {
-  const value = process.env["INTEGRATIONS_URL"]?.trim()
-  return value === undefined || value.length === 0
-    ? undefined
-    : value.replace(/\/+$/, "")
-}
+const configuredUrl = optionalText("INTEGRATIONS_URL").pipe(
+  Config.map(Option.map((value) => value.replace(/\/+$/, "")))
+)
 
 const attempt = <A>(work: () => Promise<A>): Effect.Effect<A, IntegrationsCliError> =>
   Effect.tryPromise({
@@ -48,8 +45,8 @@ const attempt = <A>(work: () => Promise<A>): Effect.Effect<A, IntegrationsCliErr
 
 export const resolveGatewayUrl = Effect.fn("session.resolveGatewayUrl")(function*(): Effect.fn
   .Return<string, IntegrationsCliError> {
-  const explicit = configuredUrl()
-  if (explicit !== undefined) return explicit
+  const explicit = yield* Effect.orDie(configuredUrl)
+  if (Option.isSome(explicit)) return explicit.value
   const config = yield* attempt(() => readGatewayConfig(integrationsHome()))
   if (config !== undefined) return config.url.replace(/\/+$/, "")
   return yield* cliError(

@@ -4,7 +4,7 @@ import path from "node:path"
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
 import * as BunHttpPlatform from "@effect/platform-bun/BunHttpPlatform"
 import * as BunPath from "@effect/platform-bun/BunPath"
-import { Effect, FileSystem, Layer, Result } from "effect"
+import { Config, Effect, FileSystem, Layer, Option, Result } from "effect"
 import {
   HttpServerError,
   HttpServerRequest,
@@ -53,9 +53,10 @@ export const createWebAssets = (
   options: WebAssetsOptions = {}
 ): Effect.Effect<WebAssets> =>
   Effect.gen(function*() {
+    const configured = yield* Config.option(Config.string("INTEGRATIONS_WEB_DIR"))
     const directory =
       options.directories?.[0] ??
-      process.env["INTEGRATIONS_WEB_DIR"] ??
+      Option.getOrUndefined(configured) ??
       webAssetsDirectory()
 
     const fileSystem = yield* FileSystem.FileSystem

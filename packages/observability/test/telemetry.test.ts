@@ -1,55 +1,52 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
+import { ConfigProvider, Effect, Option } from "effect"
+import type { Config } from "effect"
 import {
+  telemetryAuthorization,
   telemetryAuthorizationEnvVar,
-  telemetryAuthorizationFromEnv,
-  telemetryEndpointEnvVar,
-  telemetryEndpointFromEnv
+  telemetryEndpoint,
+  telemetryEndpointEnvVar
 } from "../src/telemetry.ts"
 
-const setEnv = (name: string, value: string | undefined): void => {
-  if (value === undefined) delete process.env[name]
-  else process.env[name] = value
-}
+/** Reads a setting against a fixed environment, without touching the real one. */
+const read = (
+  config: Config.Config<Option.Option<string>>,
+  env: Record<string, string>
+): string | undefined =>
+  Effect.runSync(
+    config.pipe(
+      Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv({ env })),
+      Effect.map(Option.getOrUndefined)
+    )
+  )
 
-const setEndpoint = (value: string | undefined): void =>
-  setEnv(telemetryEndpointEnvVar, value)
-
-const setAuthorization = (value: string | undefined): void =>
-  setEnv(telemetryAuthorizationEnvVar, value)
-
-describe("telemetryEndpointFromEnv", () => {
-  afterEach(() => setEndpoint(undefined))
-
+describe("the telemetry endpoint setting", () => {
   test("reads a configured endpoint", () => {
-    setEndpoint("http://127.0.0.1:27686")
-    expect(telemetryEndpointFromEnv()).toBe("http://127.0.0.1:27686")
+    expect(read(telemetryEndpoint, { [telemetryEndpointEnvVar]: "http://127.0.0.1:27686" }))
+      .toBe("http://127.0.0.1:27686")
   })
 
   test("trims surrounding whitespace", () => {
-    setEndpoint("  http://127.0.0.1:27686  ")
-    expect(telemetryEndpointFromEnv()).toBe("http://127.0.0.1:27686")
+    expect(read(telemetryEndpoint, { [telemetryEndpointEnvVar]: "  http://127.0.0.1:27686  " }))
+      .toBe("http://127.0.0.1:27686")
   })
 
   test("treats unset and blank as off", () => {
-    expect(telemetryEndpointFromEnv()).toBeUndefined()
-    setEndpoint("   ")
-    expect(telemetryEndpointFromEnv()).toBeUndefined()
+    expect(read(telemetryEndpoint, {})).toBeUndefined()
+    expect(read(telemetryEndpoint, { [telemetryEndpointEnvVar]: "   " })).toBeUndefined()
   })
 })
 
-describe("telemetryAuthorizationFromEnv", () => {
-  afterEach(() => setAuthorization(undefined))
-
+describe("the telemetry authorization setting", () => {
   test("reads a raw authorization header value", () => {
-    setAuthorization("Basic dXNlcjpwYXNz")
-    expect(telemetryAuthorizationFromEnv()).toBe("Basic dXNlcjpwYXNz")
+    expect(read(telemetryAuthorization, { [telemetryAuthorizationEnvVar]: "Basic dXNlcjpwYXNz" }))
+      .toBe("Basic dXNlcjpwYXNz")
   })
 
   test("trims and tolerates absence", () => {
-    expect(telemetryAuthorizationFromEnv()).toBeUndefined()
-    setAuthorization("  Basic dXNlcjpwYXNz  ")
-    expect(telemetryAuthorizationFromEnv()).toBe("Basic dXNlcjpwYXNz")
-    setAuthorization("")
-    expect(telemetryAuthorizationFromEnv()).toBeUndefined()
+    expect(read(telemetryAuthorization, {})).toBeUndefined()
+    expect(read(telemetryAuthorization, { [telemetryAuthorizationEnvVar]: "  Basic dXNlcjpwYXNz  " }))
+      .toBe("Basic dXNlcjpwYXNz")
+    expect(read(telemetryAuthorization, { [telemetryAuthorizationEnvVar]: "" })).toBeUndefined()
   })
 })
