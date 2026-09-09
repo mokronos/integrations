@@ -17,6 +17,7 @@ import {
   Authority,
   CurrentRequestContext
 } from "./authority.ts"
+import type { RateLimits } from "./authority.ts"
 import {
   AdministrativeLayer,
   AuthLayer,
@@ -34,13 +35,12 @@ import {
 import { ErrorCapture, traceIdFor } from "./observability.ts"
 import type { ErrorSink } from "./observability.ts"
 import type { GatewaySettings, SignInPolicy } from "./services.ts"
-import { NonNegativeIntFromString, whenPresent, whenPresentMap } from "@mokronos/contracts"
+import { NonNegativeIntFromString, whenPresent } from "@mokronos/contracts"
 import type { HostServices } from "@mokronos/integrations"
 import { GatewayStoreService } from "@mokronos/gateway-core"
 import type { GatewayStore } from "@mokronos/gateway-core"
 import type { OAuthSessions } from "@mokronos/gateway-core"
 import type { WebAssets } from "../web-assets.ts"
-import type { RateLimiter } from "@mokronos/gateway-core"
 import { createMcpGatewayHandler } from "./mcp.ts"
 
 export interface GatewayRequestContext {
@@ -54,8 +54,7 @@ export interface GatewayHandlerOptions extends GatewaySettings {
   readonly httpClient: Layer.Layer<HttpClient.HttpClient>
   readonly oauth: OAuthSessions
   readonly sessions?: SignInPolicy
-  readonly addressRateLimiter?: RateLimiter
-  readonly rateLimiter?: RateLimiter
+  readonly rateLimits?: RateLimits
   readonly maxBodyBytes?: number
   readonly webAssets?: WebAssets
   readonly observabilityLayer?: Layer.Layer<never>
@@ -165,8 +164,7 @@ export const gatewayAppLayer = (options: GatewayHandlerOptions) => {
     Layer.provideMerge(groups),
     Layer.provideMerge(Authority.layer({
       store: options.store,
-      ...whenPresentMap("addressRateLimiter", options.addressRateLimiter, (l) => l),
-      ...whenPresentMap("rateLimiter", options.rateLimiter, (l) => l)
+      ...whenPresent("rateLimits", options.rateLimits)
     }))
   )
 }

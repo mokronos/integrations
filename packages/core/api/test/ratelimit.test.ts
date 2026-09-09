@@ -9,7 +9,6 @@ import { whenPresent } from "@mokronos/contracts"
 import {
   createGatewayHandler,
   createGatewayStore,
-  createRateLimiter,
   defaultTenantId,
   generateApiKey,
   newClientId
@@ -27,40 +26,6 @@ afterEach(async () => {
   await run(Promise.all(
     directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
   ))
-})
-
-describe("the fixed-window limiter", () => {
-  test("allows the limit and refuses the next request in the window", () => {
-    const limiter = createRateLimiter({ limit: 3, windowMs: 60_000 })
-    let now = 1_000_000
-
-    expect(limiter.take("k", now).allowed).toBe(true)
-    expect(limiter.take("k", now).allowed).toBe(true)
-    const lastAllowed = limiter.take("k", now)
-    expect(lastAllowed.allowed).toBe(true)
-
-    now += 1_000
-    const refused = limiter.take("k", now)
-    expect(refused.allowed).toBe(false)
-    expect(refused.retryAfterSeconds).toBe(59)
-  })
-
-  test("opens a fresh window when the old one closes", () => {
-    const limiter = createRateLimiter({ limit: 2, windowMs: 10_000 })
-    let now = 0
-    expect(limiter.take("k", now).allowed).toBe(true)
-    expect(limiter.take("k", now).allowed).toBe(true)
-    expect(limiter.take("k", now + 5_000).allowed).toBe(false)
-    expect(limiter.take("k", now + 10_001).allowed).toBe(true)
-  })
-
-  test("keys are independent", () => {
-    const limiter = createRateLimiter({ limit: 1, windowMs: 60_000 })
-    expect(limiter.take("a", 0).allowed).toBe(true)
-    expect(limiter.take("b", 0).allowed).toBe(true)
-    expect(limiter.take("a", 0).allowed).toBe(false)
-  })
-
 })
 
 describe("gateway traffic shaping", () => {
@@ -100,14 +65,10 @@ describe("gateway traffic shaping", () => {
         completeByState: () => Effect.sync((): undefined => undefined),
         stop: () => Effect.void
       },
-      addressRateLimiter: createRateLimiter({
-        limit: options.addressLimit ?? 3,
-        windowMs: 60_000
-      }),
-      rateLimiter: createRateLimiter({
-        limit: options.principalLimit ?? 1000,
-        windowMs: 60_000
-      }),
+      rateLimits: {
+        addressPerMinute: options.addressLimit ?? 3,
+        principalPerMinute: options.principalLimit ?? 1000
+      },
       ...whenPresent("maxBodyBytes", options.maxBodyBytes)
     })
 

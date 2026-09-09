@@ -11,6 +11,7 @@ import type { HttpClient } from "effect/unstable/http"
 import { isLoopbackAddress, mayBorrowLocalCredential } from "./http/loopback.ts"
 import { createGatewayHandler } from "./http/handler.ts"
 import type { GatewayHandle, GatewayRequestContext } from "./http/handler.ts"
+import type { RateLimits } from "./http/authority.ts"
 import { startMaintenanceLoop } from "@mokronos/gateway-core"
 import { deliverDueApprovalNotifications } from "@mokronos/gateway-core"
 import type { MaintenanceLoop } from "@mokronos/gateway-core"
@@ -19,7 +20,6 @@ import {
   reconcileDefaults
 } from "@mokronos/gateway-core"
 import type { OAuthSessionStore } from "@mokronos/gateway-core"
-import { createRateLimiter } from "@mokronos/gateway-core"
 import { generateApiKey, newClientId } from "@mokronos/gateway-core"
 import { integrationsHome } from "./paths.ts"
 import type { HostStorage, StorageError } from "@mokronos/integrations"
@@ -169,14 +169,10 @@ const buildCore = async (
     ),
     () => defaultRateLimitPerMinute
   )
-  const rateLimiter = createRateLimiter({
-    limit: perMinute,
-    windowMs: 60_000
-  })
-  const addressRateLimiter = createRateLimiter({
-    limit: Math.max(20, Math.floor(perMinute / 5)),
-    windowMs: 60_000
-  })
+  const rateLimits: RateLimits = {
+    principalPerMinute: perMinute,
+    addressPerMinute: Math.max(20, Math.floor(perMinute / 5))
+  }
 
   const disposeCore = async () => {
     maintenance?.stop()
@@ -209,8 +205,7 @@ const buildCore = async (
         return origin === undefined ? undefined : `${origin.replace(/\/+$/, "")}/mcp`
       },
       dashboardUrl: resolvePublicUrl,
-      rateLimiter,
-      addressRateLimiter,
+      rateLimits,
       observabilityLayer: telemetryLayer({
         serviceName: "integrations-gateway",
         ...whenPresent("endpoint", options.telemetryEndpoint),

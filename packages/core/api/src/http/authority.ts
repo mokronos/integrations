@@ -1,10 +1,10 @@
 import { Context, Duration, Effect, Layer, Option } from "effect"
+import { RateLimiter } from "effect/unstable/persistence"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { authenticateClient, authorizeClientCapability } from "@mokronos/gateway-core"
 import { SessionTokenHash } from "@mokronos/gateway-core"
 import { hashSessionToken } from "@mokronos/gateway-core"
-import type { RateLimiter } from "@mokronos/gateway-core"
 import type { GatewayStore } from "@mokronos/gateway-core"
 import {
   Identity,
@@ -119,10 +119,14 @@ export const CurrentRequestContext = Context.Reference<RequestContext>(
   { defaultValue: (): RequestContext => ({}) }
 )
 
+export interface RateLimits {
+  readonly addressPerMinute: number
+  readonly principalPerMinute: number
+}
+
 export interface AuthorityOptions {
   readonly store: GatewayStore
-  readonly addressRateLimiter?: RateLimiter
-  readonly rateLimiter?: RateLimiter
+  readonly rateLimits?: RateLimits
 }
 
 const resolveCaller = Effect.fn("authority.resolveCaller")(function*(
@@ -217,6 +221,17 @@ const principalKey = (caller: Caller): Option.Option<string> => {
   }
 }
 
+const rateLimitWindow = Duration.minutes(1)
+
+const refusalOf = (
+  error: RateLimiter.RateLimiterError
+): Effect.Effect<Option.Option<HttpServerResponse.HttpServerResponse>> =>
+  error.reason._tag === "RateLimitExceeded"
+    ? Effect.succeed(Option.some(rateLimitedResponse(
+      Math.max(1, Math.ceil(Duration.toMillis(error.reason.retryAfter) / 1_000))
+    )))
+    : Effect.die(error)
+
 export class Authority extends HttpApiMiddleware.Service<Authority, {
   provides: Identity
 }>()("@mokronos/integrations/Authority", {
@@ -225,47 +240,55 @@ export class Authority extends HttpApiMiddleware.Service<Authority, {
   static readonly layer = (options: AuthorityOptions): Layer.Layer<Authority> =>
     Layer.effect(
       Authority,
-      Effect.sync(() => (httpEffect, { endpoint }) =>
-        Effect.gen(function*() {
-          const request = yield* HttpServerRequest.HttpServerRequest
-          const context = yield* CurrentRequestContext
-          const headers = request.headers
-          const unmetered = Context.get(endpoint.annotations, Unmetered)
+      Effect.gen(function*() {
+        const limits = options.rateLimits
+        const limiter = yield* RateLimiter.RateLimiter
+        const meter = (key: string, limit: number) =>
+          limiter.consume({ key, limit, window: rateLimitWindow }).pipe(
+            Effect.as(Option.none<HttpServerResponse.HttpServerResponse>()),
+            Effect.catch(refusalOf)
+          )
 
-          if (!unmetered && options.addressRateLimiter !== undefined) {
-            const verdict = options.addressRateLimiter.take(
-              `addr:${context.remoteAddress ?? "unknown"}`
-            )
-            if (!verdict.allowed) {
-              return rateLimitedResponse(verdict.retryAfterSeconds)
+        return (httpEffect, { endpoint }) =>
+          Effect.gen(function*() {
+            const request = yield* HttpServerRequest.HttpServerRequest
+            const context = yield* CurrentRequestContext
+            const headers = request.headers
+            const unmetered = Context.get(endpoint.annotations, Unmetered)
+
+            if (!unmetered && limits !== undefined) {
+              const refused = yield* meter(
+                `addr:${context.remoteAddress ?? "unknown"}`,
+                limits.addressPerMinute
+              )
+              if (Option.isSome(refused)) return refused.value
             }
-          }
 
-          const caller = unmetered
-            ? ({ kind: "anonymous" } satisfies Caller)
-            : yield* resolveCaller(options, headers, context)
+            const caller = unmetered
+              ? ({ kind: "anonymous" } satisfies Caller)
+              : yield* resolveCaller(options, headers, context)
 
-          if (!unmetered && options.rateLimiter !== undefined) {
-            const key = principalKey(caller)
-            if (Option.isSome(key)) {
-              const verdict = options.rateLimiter.take(key.value)
-              if (!verdict.allowed) {
-                return rateLimitedResponse(verdict.retryAfterSeconds)
+            if (!unmetered && limits !== undefined) {
+              const key = principalKey(caller)
+              if (Option.isSome(key)) {
+                const refused = yield* meter(key.value, limits.principalPerMinute)
+                if (Option.isSome(refused)) return refused.value
               }
             }
-          }
 
-          if (!unmetered) {
-            const access = Context.getOrElse(
-              endpoint.annotations,
-              RequiredAccess,
-              () => RequiredAccess.defaultValue()
-            )
-            yield* admit(options, caller, access, request.method, headers)
-          }
+            if (!unmetered) {
+              const access = Context.getOrElse(
+                endpoint.annotations,
+                RequiredAccess,
+                () => RequiredAccess.defaultValue()
+              )
+              yield* admit(options, caller, access, request.method, headers)
+            }
 
-          return yield* Effect.provideService(httpEffect, Identity, caller)
-        })
-      )
+            return yield* Effect.provideService(httpEffect, Identity, caller)
+          })
+      })
+    ).pipe(
+      Layer.provide(RateLimiter.layer.pipe(Layer.provide(RateLimiter.layerStoreMemory)))
     )
 }
