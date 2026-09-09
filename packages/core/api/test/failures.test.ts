@@ -44,14 +44,14 @@ const setup = async (options: {
   if (accessProfile === undefined || approvalPolicy === undefined) throw new Error("missing defaults")
 
   const client = await run(store.createClient({
-    id: newClientId(),
+    id: (await run(newClientId)),
     tenantId: defaultTenantId,
     accessProfileId: accessProfile.id,
     approvalPolicyId: approvalPolicy.id,
     name: "operator",
     capabilities: ["administer_gateway", "provision_connections"]
   }))
-  const key = generateApiKey()
+  const key = (await run(generateApiKey))
   await run(store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash }))
 
   const presented: GatewayStore = options.listClientsFails === true

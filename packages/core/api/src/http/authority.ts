@@ -1,10 +1,11 @@
-import { Context, Duration, Effect, Layer, Option } from "effect"
+import { Context, Crypto, Duration, Effect, Layer, Option } from "effect"
 import { RateLimiter } from "effect/unstable/persistence"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { authenticateClient, authorizeClientCapability } from "@mokronos/gateway-core"
 import { SessionTokenHash } from "@mokronos/gateway-core"
 import { hashSessionToken } from "@mokronos/gateway-core"
+import { webCryptoLayer } from "@mokronos/contracts"
 import type { GatewayStore } from "@mokronos/gateway-core"
 import {
   Identity,
@@ -147,7 +148,7 @@ const resolveCaller = Effect.fn("authority.resolveCaller")(function*(
   const token = readSessionCookieValue(headers["cookie"])
   if (Option.isSome(token)) {
     const session = yield* capture(
-      options.store.findLiveSession(SessionTokenHash.make(hashSessionToken(token.value)))
+      options.store.findLiveSession(SessionTokenHash.make((yield* hashSessionToken(token.value))))
     )
     if (session === undefined) return { kind: "anonymous" } satisfies Caller
     return {
@@ -242,6 +243,7 @@ export class Authority extends HttpApiMiddleware.Service<Authority, {
       Authority,
       Effect.gen(function*() {
         const limits = options.rateLimits
+        const crypto = yield* Crypto.Crypto
         const limiter = yield* RateLimiter.RateLimiter
         const meter = (key: string, limit: number) =>
           limiter.consume({ key, limit, window: rateLimitWindow }).pipe(
@@ -286,9 +288,10 @@ export class Authority extends HttpApiMiddleware.Service<Authority, {
             }
 
             return yield* Effect.provideService(httpEffect, Identity, caller)
-          })
+          }).pipe(Effect.provideService(Crypto.Crypto, crypto))
       })
     ).pipe(
-      Layer.provide(RateLimiter.layer.pipe(Layer.provide(RateLimiter.layerStoreMemory)))
+      Layer.provide(RateLimiter.layer.pipe(Layer.provide(RateLimiter.layerStoreMemory))),
+      Layer.provide(webCryptoLayer)
     )
 }

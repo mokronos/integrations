@@ -1,4 +1,4 @@
-import { Clock, Effect } from "effect"
+import { Clock, Crypto, Effect } from "effect"
 import { HttpServerResponse } from "effect/unstable/http"
 import type { HttpClient } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -94,7 +94,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
 
     const issueSession = (subjectId: SubjectId, tenantId: TenantId) =>
       Effect.gen(function*() {
-        const token = generateSessionToken()
+        const token = (yield* generateSessionToken)
         const expiresAt = new Date((yield* Clock.currentTimeMillis) + ttlHours * 60 * 60 * 1000)
         yield* capture(store.createSession({ tokenHash: token.hash, subjectId, tenantId, expiresAt }))
         return { token: token.secret }
@@ -131,7 +131,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
               code: "identity-provider-unavailable" as const
             })
           }
-          const request = generateLoginHandoff()
+          const request = (yield* generateLoginHandoff)
           const expiresAt = new Date((yield* Clock.currentTimeMillis) + handoffTtlMs)
           yield* capture(store.createLoginHandoff({ requestHash: request.hash, expiresAt }))
           const start = new URL("/v1/auth/google/start", googleIdentityCallbackUrl(google))
@@ -145,7 +145,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
         }))
       .handle("cliPoll", (request) =>
         Effect.gen(function*() {
-          const requestHash = hashLoginHandoff(request.params["id"])
+          const requestHash = (yield* hashLoginHandoff(request.params["id"]))
           const handoff = yield* capture(store.getLoginHandoff(requestHash))
           if (handoff === undefined) {
             return yield* new HandoffUnknown({
@@ -194,7 +194,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
             })
           }
           const handoffSecret = request.query["handoff"]
-          const handoffHash = handoffSecret === undefined ? null : hashLoginHandoff(handoffSecret)
+          const handoffHash = handoffSecret === undefined ? null : (yield* hashLoginHandoff(handoffSecret))
           if (handoffHash !== null) {
             const handoff = yield* capture(store.getLoginHandoff(handoffHash))
             const now = yield* Clock.currentTimeMillis
@@ -206,7 +206,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
               })
             }
           }
-          const state = generateLoginHandoff()
+          const state = (yield* generateLoginHandoff)
           const returnPath = safeReturnPath(request.query["returnTo"])
           const stateExpiresAtMs = (yield* Clock.currentTimeMillis) + handoffTtlMs
           yield* capture(store.createIdentityOAuthState({
@@ -238,7 +238,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
               message: "Google did not return a complete sign-in response."
             })
           }
-          const state = yield* capture(store.consumeIdentityOAuthState(hashLoginHandoff(stateSecret)))
+          const state = yield* capture(store.consumeIdentityOAuthState((yield* hashLoginHandoff(stateSecret))))
           if (state === undefined) {
             return page(400, {
               title: "Sign-in expired",
@@ -280,10 +280,10 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
             return yield* new ApiBadRequest({ error: `An account for ${body.email} already exists` })
           }
           const tenant = yield* capture(store.createTenant({
-            id: newTenantId(),
+            id: (yield* newTenantId),
             name: body.tenantName ?? body.email.split("@")[0] ?? body.email
           }))
-          const subject = yield* capture(store.createSubject({ id: newSubjectId(), tenantId: tenant.id }))
+          const subject = yield* capture(store.createSubject({ id: (yield* newSubjectId), tenantId: tenant.id }))
           const passwordHash = yield* capture(hashPassword(body.password))
           yield* capture(store.createLogin({
             subjectId: subject.id,
@@ -481,8 +481,8 @@ const completeGoogleSignIn = (
   issueSession: (
     subjectId: SubjectId,
     tenantId: TenantId
-  ) => Effect.Effect<{ readonly token: string }>
-): Effect.Effect<GoogleCallbackOutcome, never, HttpClient.HttpClient> =>
+  ) => Effect.Effect<{ readonly token: string }, never, Crypto.Crypto>
+): Effect.Effect<GoogleCallbackOutcome, never, Crypto.Crypto | HttpClient.HttpClient> =>
   Effect.gen(function*() {
     const store = dependencies.store
     const identity = yield* Effect.result(resolveGoogleIdentity(google, code))
@@ -510,10 +510,10 @@ const completeGoogleSignIn = (
         } as const
       }
       const tenant = yield* capture(store.createTenant({
-        id: newTenantId(),
+        id: (yield* newTenantId),
         name: identity.success.email.split("@")[0] ?? identity.success.email
       }))
-      const subject = yield* capture(store.createSubject({ id: newSubjectId(), tenantId: tenant.id }))
+      const subject = yield* capture(store.createSubject({ id: (yield* newSubjectId), tenantId: tenant.id }))
       login = yield* capture(store.createLogin({
         subjectId: subject.id,
         tenantId: tenant.id,

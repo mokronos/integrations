@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto"
 import {
   discoverAuthorizationServerMetadata,
   discoverOAuthProtectedResourceMetadata,
@@ -18,6 +17,7 @@ import {
   writeTokens
 } from "../storage/credentials.ts"
 import type { StoredTokens } from "../storage/credentials.ts"
+import { webCrypto } from "@mokronos/contracts"
 import { describeCause, OAuthError, StorageError } from "../errors.ts"
 import { OAuthClientSlug, OAuthState } from "../catalog/ids.ts"
 import { connectionAddress, ConnectionName, IntegrationSlug } from "@mokronos/contracts"
@@ -361,7 +361,9 @@ export class OAuthFlows extends Context.Service<
           slug: options.client
         })
         const secret = yield* clientSecret(client)
-        const state = OAuthState.make(Encoding.encodeBase64Url(randomBytes(32)))
+        const state = OAuthState.make(
+          Encoding.encodeBase64Url(yield* Effect.orDie(webCrypto.randomBytes(32)))
+        )
 
         const began = yield* Effect.tryPromise({
           try: () => startAuthorization(client.authorizationUrl, {

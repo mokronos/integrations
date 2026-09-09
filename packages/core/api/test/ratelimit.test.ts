@@ -44,14 +44,14 @@ describe("gateway traffic shaping", () => {
     const approvalPolicy = await run(store.findDefaultApprovalPolicy(defaultTenantId))
     if (accessProfile === undefined || approvalPolicy === undefined) throw new Error("missing defaults")
     const client = await run(store.createClient({
-      id: newClientId(),
+      id: (await run(newClientId)),
       tenantId: defaultTenantId,
       accessProfileId: accessProfile.id,
       approvalPolicyId: approvalPolicy.id,
       name: "local",
       capabilities: ["provision_connections", "administer_gateway"]
     }))
-    const key = generateApiKey()
+    const key = (await run(generateApiKey))
     await run(store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash }))
 
     const { handle } = createGatewayHandler({
@@ -109,14 +109,14 @@ describe("gateway traffic shaping", () => {
     const neighbourApprovalPolicy = await run(otherStore.findDefaultApprovalPolicy(defaultTenantId))
     if (neighbourAccessProfile === undefined || neighbourApprovalPolicy === undefined) throw new Error("missing defaults")
     const neighbour = await run(otherStore.createClient({
-      id: newClientId(),
+      id: (await run(newClientId)),
       tenantId: defaultTenantId,
       accessProfileId: neighbourAccessProfile.id,
       approvalPolicyId: neighbourApprovalPolicy.id,
       name: "neighbour",
       capabilities: ["provision_connections"]
     }))
-    const neighbourKey = generateApiKey()
+    const neighbourKey = (await run(generateApiKey))
     await run(otherStore.addApiKey({
       id: neighbourKey.id,
       clientId: neighbour.id,

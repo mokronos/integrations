@@ -38,6 +38,7 @@ import type { GatewaySettings, SignInPolicy } from "./services.ts"
 import { NonNegativeIntFromString, whenPresent } from "@mokronos/contracts"
 import type { HostServices } from "@mokronos/integrations"
 import { GatewayStoreService } from "@mokronos/gateway-core"
+import { webCryptoLayer } from "@mokronos/contracts"
 import type { GatewayStore } from "@mokronos/gateway-core"
 import type { OAuthSessions } from "@mokronos/gateway-core"
 import type { WebAssets } from "../web-assets.ts"
@@ -187,7 +188,7 @@ export const createGatewayHandler = (options: GatewayHandlerOptions): GatewayHan
   })
   const app = HttpApiBuilder.layer(GatewayApi).pipe(
     Layer.provideMerge(gatewayAppLayer(options)),
-    HttpRouter.provideRequest(options.httpClient)
+    HttpRouter.provideRequest(Layer.merge(options.httpClient, webCryptoLayer))
   )
   const web = HttpEffect.toWebHandlerLayerWith(
     app.pipe(Layer.provide(Layer.merge(

@@ -58,24 +58,24 @@ const seed = async (store: GatewayStore, options: {
   readonly decision?: "allow" | "require_approval"
 } = {}) => {
   const accessProfile = await run(store.createAccessProfile({
-    id: newAccessProfileId(),
+    id: (await run(newAccessProfileId)),
     tenantId: defaultTenantId,
     name: `access-${crypto.randomUUID()}`
   }))
   const approvalPolicy = await run(store.createApprovalPolicy({
-    id: newApprovalPolicyId(),
+    id: (await run(newApprovalPolicyId)),
     tenantId: defaultTenantId,
     name: `approval-${crypto.randomUUID()}`
   }))
   const client = await run(store.createClient({
-    id: newClientId(),
+    id: (await run(newClientId)),
     tenantId: defaultTenantId,
     accessProfileId: accessProfile.id,
     approvalPolicyId: approvalPolicy.id,
     name: "support-agent",
     capabilities: options.capabilities ?? ["provision_connections"]
   }))
-  const key = generateApiKey()
+  const key = (await run(generateApiKey))
   await run(store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash }))
   const policyConnection = options.connection ?? orgConnection
   await run(store.replaceAccessProfileTools(accessProfile.id, [{
@@ -153,7 +153,7 @@ describe("gateway authorization", () => {
   test("denies every key of a revoked client", async () => {
     const store = await run(makeStore())
     const { client, key } = await run(seed(store))
-    const second = generateApiKey()
+    const second = (await run(generateApiKey))
     await run(store.addApiKey({ id: second.id, clientId: client.id, hash: second.hash }))
 
     await run(store.revokeClient(defaultTenantId, client.id))
@@ -165,7 +165,7 @@ describe("gateway authorization", () => {
   test("a second live key keeps working while the first is rotated out", async () => {
     const store = await run(makeStore())
     const { client, key } = await run(seed(store))
-    const replacement = generateApiKey()
+    const replacement = (await run(generateApiKey))
     await run(store.addApiKey({ id: replacement.id, clientId: client.id, hash: replacement.hash }))
 
     await run(store.revokeApiKey(key.id))
@@ -217,20 +217,20 @@ describe("gateway authorization", () => {
     const store = await run(makeStore())
     const { key: readerKey } = await run(seed(store))
     const writerAccess = await run(store.createAccessProfile({
-      id: newAccessProfileId(), tenantId: defaultTenantId, name: "writer access"
+      id: (await run(newAccessProfileId)), tenantId: defaultTenantId, name: "writer access"
     }))
     const writerApproval = await run(store.createApprovalPolicy({
-      id: newApprovalPolicyId(), tenantId: defaultTenantId, name: "writer approval"
+      id: (await run(newApprovalPolicyId)), tenantId: defaultTenantId, name: "writer approval"
     }))
     const writer = await run(store.createClient({
-      id: newClientId(),
+      id: (await run(newClientId)),
       tenantId: defaultTenantId,
       accessProfileId: writerAccess.id,
       approvalPolicyId: writerApproval.id,
       name: "sales-campaign",
       capabilities: ["provision_connections"]
     }))
-    const writerKey = generateApiKey()
+    const writerKey = (await run(generateApiKey))
     await run(store.addApiKey({ id: writerKey.id, clientId: writer.id, hash: writerKey.hash }))
     await run(store.replaceAccessProfileTools(writerAccess.id, [{
       connection: orgConnection, tool: ToolName.make("getDocument")

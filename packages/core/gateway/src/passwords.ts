@@ -1,6 +1,7 @@
-import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto"
-import { Effect, Encoding, Schema } from "effect"
-import { decodeBase64Field, utf8Bytes } from "@mokronos/contracts"
+import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto"
+import { Crypto, Effect, Encoding, Schema } from "effect"
+import { decodeBase64Field } from "@mokronos/contracts"
+import { sessionSecret, sha256Hex } from "./keys.ts"
 import { SessionTokenHash } from "./domain.ts"
 
 export class PasswordError extends Schema.TaggedError<PasswordError>()(
@@ -60,10 +61,16 @@ export interface IssuedSessionToken {
   readonly hash: SessionTokenHash
 }
 
-export const generateSessionToken = (): IssuedSessionToken => {
-  const secret = `wfs_${Encoding.encodeBase64Url(randomBytes(32))}`
-  return { secret, hash: hashSessionToken(secret) }
-}
+export const generateSessionToken: Effect.Effect<
+  IssuedSessionToken,
+  never,
+  Crypto.Crypto
+> = Effect.gen(function*() {
+  const secret = yield* sessionSecret
+  return { secret, hash: yield* hashSessionToken(secret) }
+})
 
-export const hashSessionToken = (secret: string): SessionTokenHash =>
-  SessionTokenHash.make(createHash("sha256").update(utf8Bytes(secret)).digest("hex"))
+export const hashSessionToken = (
+  secret: string
+): Effect.Effect<SessionTokenHash, never, Crypto.Crypto> =>
+  Effect.map(sha256Hex(secret), SessionTokenHash.make)

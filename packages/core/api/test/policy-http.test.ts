@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { Effect, Schema } from "effect"
+import { Crypto, Effect, Schema } from "effect"
 import { ConnectionName, IntegrationSlug, ToolAddress } from "@mokronos/contracts"
 import {
   AccessProfileId,
@@ -21,7 +21,11 @@ import { stubHostContext } from "./stubs.ts"
 
 const stores: Array<GatewayStore> = []
 const directories: Array<string> = []
-const run = Effect.runPromise
+import { webCryptoLayer } from "@mokronos/contracts"
+
+/** Minting identifiers needs the platform's Crypto, as it does in the gateway. */
+const run = <A, E>(effect: Effect.Effect<A, E, Crypto.Crypto>): Promise<A> =>
+  Effect.runPromise(Effect.provide(effect, webCryptoLayer))
 const ClientBody = Schema.decodeUnknownSync(Schema.Struct({
   id: ClientId, accessProfileId: AccessProfileId, approvalPolicyId: ApprovalPolicyId
 }))
@@ -45,10 +49,10 @@ const setup = async () => {
   const approvalPolicy = await run(store.findDefaultApprovalPolicy(defaultTenantId))
   if (accessProfile === undefined || approvalPolicy === undefined) throw new Error("missing defaults")
   const administrator = await run(store.createClient({
-    id: newClientId(), tenantId: defaultTenantId, accessProfileId: accessProfile.id,
+    id: (await run(newClientId)), tenantId: defaultTenantId, accessProfileId: accessProfile.id,
     approvalPolicyId: approvalPolicy.id, name: "administrator", capabilities: ["administer_gateway"]
   }))
-  const key = generateApiKey()
+  const key = (await run(generateApiKey))
   await run(store.addApiKey({ id: key.id, clientId: administrator.id, hash: key.hash }))
   const hostServices = stubHostContext({
     toolSummaries: () => Effect.succeed([{

@@ -171,14 +171,14 @@ const setup = async (options: {
   stores.push(store)
 
   const accessProfile = await run(store.createAccessProfile({
-    id: newAccessProfileId(), tenantId: defaultTenantId, name: `access-${crypto.randomUUID()}`
+    id: (await run(newAccessProfileId)), tenantId: defaultTenantId, name: `access-${crypto.randomUUID()}`
   }))
   await run(store.replaceAccessProfileTools(accessProfile.id, [{
       connection,
       tool: ToolName.make("sendEmail")
     }]))
   const approvalPolicy = await run(store.createApprovalPolicy({
-    id: newApprovalPolicyId(), tenantId: defaultTenantId, name: `approval-${crypto.randomUUID()}`
+    id: (await run(newApprovalPolicyId)), tenantId: defaultTenantId, name: `approval-${crypto.randomUUID()}`
   }))
   await run(store.replaceApprovalPolicyTools(approvalPolicy.id, [{
       connection,
@@ -186,14 +186,14 @@ const setup = async (options: {
       decision: options.decision ?? "allow"
     }]))
   const client = await run(store.createClient({
-    id: newClientId(),
+    id: (await run(newClientId)),
     tenantId: defaultTenantId,
     accessProfileId: accessProfile.id,
     approvalPolicyId: approvalPolicy.id,
     name: "support-agent",
     capabilities: options.capabilities ?? ["provision_connections"]
   }))
-  const key = generateApiKey()
+  const key = (await run(generateApiKey))
   await run(store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash }))
   const stub = stubIntegrations({
     ...whenPresent("beforeExecute", options.beforeExecute),
@@ -484,14 +484,14 @@ describe("gateway http surface", () => {
     const approvalId = String(frozen.body["approvalId"])
 
     const other = await run(store.createClient({
-      id: newClientId(),
+      id: (await run(newClientId)),
       tenantId: defaultTenantId,
       accessProfileId: accessProfile.id,
       approvalPolicyId: approvalPolicy.id,
       name: "someone-else",
       capabilities: ["provision_connections"]
     }))
-    const otherKey = generateApiKey()
+    const otherKey = (await run(generateApiKey))
     await run(store.addApiKey({ id: otherKey.id, clientId: other.id, hash: otherKey.hash }))
 
     expect((await run(call("GET", `/v1/approvals/${approvalId}`))).status).toBe(200)
@@ -612,10 +612,10 @@ describe("gateway approval settlement", () => {
   test("shared profiles cannot share or collect another client's approval", async () => {
     const { call, store, accessProfile, approvalPolicy } = await setup({ decision: "require_approval" })
     const other = await run(store.createClient({
-      id: newClientId(), tenantId: defaultTenantId, accessProfileId: accessProfile.id,
+      id: (await run(newClientId)), tenantId: defaultTenantId, accessProfileId: accessProfile.id,
       approvalPolicyId: approvalPolicy.id, name: "other-agent", capabilities: []
     }))
-    const key = generateApiKey()
+    const key = (await run(generateApiKey))
     await run(store.addApiKey({ id: key.id, clientId: other.id, hash: key.hash }))
     const body = { alias: aliasForConnection(connection), tool: "sendEmail", arguments: { to: "a@b.c" } }
     const first = await call("POST", "/v1/execute", { body })
@@ -764,7 +764,7 @@ describe("gateway approval settlement", () => {
     const approvalId = String(frozen.body["approvalId"])
 
     const emptyProfile = await run(store.createAccessProfile({
-      id: newAccessProfileId(),
+      id: (await run(newAccessProfileId)),
       tenantId: defaultTenantId,
       name: "No mail access"
     }))

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { Effect } from "effect"
+import { Crypto, Effect } from "effect"
 import { ToolAddress } from "@mokronos/contracts"
 import type { IntegrationHost } from "@mokronos/integrations"
 import {
@@ -24,7 +24,11 @@ import type { AccessProfileId, ApprovalPolicyId, GatewayStore } from "../src/ind
 
 const directories: Array<string> = []
 const stores: Array<GatewayStore> = []
-const run = Effect.runPromise
+import { webCryptoLayer } from "@mokronos/contracts"
+
+/** Minting identifiers needs the platform's Crypto, as it does in the gateway. */
+const run = <A, E>(effect: Effect.Effect<A, E, Crypto.Crypto>): Promise<A> =>
+  Effect.runPromise(Effect.provide(effect, webCryptoLayer))
 const connection = (integration: string, name: string) => ({
   owner: "org" as const,
   integration: IntegrationSlug.make(integration),
@@ -61,7 +65,7 @@ const createClient = async (store: GatewayStore, name: string, accessProfileId: 
     id: ClientId.make(`${name}-client`), tenantId: defaultTenantId, name,
     accessProfileId, approvalPolicyId, capabilities: []
   }))
-  const key = generateApiKey()
+  const key = (await run(generateApiKey))
   await run(store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash }))
   return { client, key }
 }
@@ -92,8 +96,8 @@ describe("access profiles and approval policies", () => {
 
   test("exposes and authorizes only the exact intersection", async () => {
     const store = await openStore()
-    const accessProfile = await run(store.createAccessProfile({ id: newAccessProfileId(), tenantId: defaultTenantId, name: "Mail access" }))
-    const approvalPolicy = await run(store.createApprovalPolicy({ id: newApprovalPolicyId(), tenantId: defaultTenantId, name: "Reviewed actions" }))
+    const accessProfile = await run(store.createAccessProfile({ id: (await run(newAccessProfileId)), tenantId: defaultTenantId, name: "Mail access" }))
+    const approvalPolicy = await run(store.createApprovalPolicy({ id: (await run(newApprovalPolicyId)), tenantId: defaultTenantId, name: "Reviewed actions" }))
     await run(store.replaceAccessProfileTools(accessProfile.id, [
       { connection: connection("mail", "primary"), tool: ToolName.make("sendEmail") },
       { connection: connection("calendar", "primary"), tool: ToolName.make("createEvent") }
@@ -116,8 +120,8 @@ describe("access profiles and approval policies", () => {
 
   test("changing only the approval policy changes the decision without changing reach", async () => {
     const store = await openStore()
-    const accessProfile = await run(store.createAccessProfile({ id: newAccessProfileId(), tenantId: defaultTenantId, name: "Mail" }))
-    const approvalPolicy = await run(store.createApprovalPolicy({ id: newApprovalPolicyId(), tenantId: defaultTenantId, name: "Mail decisions" }))
+    const accessProfile = await run(store.createAccessProfile({ id: (await run(newAccessProfileId)), tenantId: defaultTenantId, name: "Mail" }))
+    const approvalPolicy = await run(store.createApprovalPolicy({ id: (await run(newApprovalPolicyId)), tenantId: defaultTenantId, name: "Mail decisions" }))
     const route = { connection: connection("mail", "primary"), tool: ToolName.make("sendEmail") }
     await run(store.replaceAccessProfileTools(accessProfile.id, [route]))
     await run(store.replaceApprovalPolicyTools(approvalPolicy.id, [{ ...route, decision: "allow" }]))
@@ -130,8 +134,8 @@ describe("access profiles and approval policies", () => {
 
   test("editing a reusable profile has an explicit shared blast radius", async () => {
     const store = await openStore()
-    const accessProfile = await run(store.createAccessProfile({ id: newAccessProfileId(), tenantId: defaultTenantId, name: "Shared access" }))
-    const approvalPolicy = await run(store.createApprovalPolicy({ id: newApprovalPolicyId(), tenantId: defaultTenantId, name: "Shared decisions" }))
+    const accessProfile = await run(store.createAccessProfile({ id: (await run(newAccessProfileId)), tenantId: defaultTenantId, name: "Shared access" }))
+    const approvalPolicy = await run(store.createApprovalPolicy({ id: (await run(newApprovalPolicyId)), tenantId: defaultTenantId, name: "Shared decisions" }))
     const mail = { connection: connection("mail", "primary"), tool: ToolName.make("sendEmail") }
     const calendar = { connection: connection("calendar", "primary"), tool: ToolName.make("createEvent") }
     await run(store.replaceAccessProfileTools(accessProfile.id, [mail]))

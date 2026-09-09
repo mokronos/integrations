@@ -118,14 +118,14 @@ describe("gateway service", () => {
     const local = await run(gateway.service.store.findClientByName(defaultTenantId, localClientName))
     if (local === undefined) throw new Error("Local client was not bootstrapped")
     const sandbox = await run(gateway.service.store.createClient({
-      id: newClientId(),
+      id: (await run(newClientId)),
       tenantId: defaultTenantId,
       accessProfileId: local.accessProfileId,
       approvalPolicyId: local.approvalPolicyId,
       name: "sandbox",
       capabilities: ["provision_connections"]
     }))
-    const key = generateApiKey()
+    const key = (await run(generateApiKey))
     await run(gateway.service.store.addApiKey({ id: key.id, clientId: sandbox.id, hash: key.hash }))
 
     const response = await http(HttpClient.get(`${gateway.url}/v1/clients`, {

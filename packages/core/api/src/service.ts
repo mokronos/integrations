@@ -6,7 +6,7 @@ import {
 import { whenPresent } from "@mokronos/contracts"
 import { defaultTenantId } from "@mokronos/gateway-core"
 import { resolveEncryption } from "@mokronos/gateway-core"
-import { Context, Effect, Layer, ManagedRuntime, Option } from "effect"
+import { Context, Crypto, Effect, Layer, ManagedRuntime, Option } from "effect"
 import type { HttpClient } from "effect/unstable/http"
 import { isLoopbackAddress, mayBorrowLocalCredential } from "./http/loopback.ts"
 import { createGatewayHandler } from "./http/handler.ts"
@@ -27,6 +27,7 @@ import { createHostRuntime, hostServicesOf, IntegrationHost } from "@mokronos/in
 import type { GatewayStoreOptions } from "@mokronos/gateway-core"
 import type { GatewayStore } from "@mokronos/gateway-core"
 import { GatewayStoreError, GatewayStoreService } from "@mokronos/gateway-core"
+import { webCryptoLayer } from "@mokronos/contracts"
 import { createWebAssets } from "./web-assets.ts"
 import { defaultRateLimitPerMinute, gatewayEnvironment } from "./config.ts"
 import { telemetryLayer } from "@mokronos/observability"
@@ -311,11 +312,14 @@ export const serveGateway = async (options: ServeOptions): Promise<RunningGatewa
     })
 
     const boundPort = Number(server.port)
-    localSecret = await Effect.runPromise(ensureLocalCredential(
-      core.store,
-      Context.get(core.handlerOptions.hostServices, IntegrationHost),
-      core.home,
-      boundPort
+    localSecret = await Effect.runPromise(Effect.provide(
+      ensureLocalCredential(
+        core.store,
+        Context.get(core.handlerOptions.hostServices, IntegrationHost),
+        core.home,
+        boundPort
+      ),
+      webCryptoLayer
     ))
 
     return {
@@ -336,7 +340,7 @@ export const ensureLocalCredential = Effect.fn("Gateway.ensureLocalCredential")(
   host: IntegrationHost["Service"],
   home: string,
   port: number
-): Effect.fn.Return<string, GatewayStoreError | StorageError> {
+): Effect.fn.Return<string, GatewayStoreError | StorageError, Crypto.Crypto> {
   const existing = yield* store.findClientByName(defaultTenantId, localClientName)
   const defaults = yield* reconcileDefaults({ store, integrations: { host }, tenantId: defaultTenantId })
   if (defaults.accessProfile === undefined || defaults.approvalPolicy === undefined) {
@@ -347,14 +351,14 @@ export const ensureLocalCredential = Effect.fn("Gateway.ensureLocalCredential")(
     })
   }
   const client = existing ?? (yield* store.createClient({
-    id: newClientId(),
+    id: (yield* newClientId),
     tenantId: defaultTenantId,
     accessProfileId: defaults.accessProfile.id,
     approvalPolicyId: defaults.approvalPolicy.id,
     name: localClientName,
     capabilities: ["provision_connections", "administer_gateway"]
   }))
-  const key = generateApiKey()
+  const key = (yield* generateApiKey)
   yield* store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
   yield* Effect.promise(() => writeGatewayConfig(home, {
     port,

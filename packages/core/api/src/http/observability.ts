@@ -1,6 +1,6 @@
 import { Cause, Context, Effect, Layer, Option, Result } from "effect"
+import { webCrypto } from "@mokronos/contracts"
 import { whenPresent } from "@mokronos/contracts"
-import { randomUUID } from "node:crypto"
 import { GatewayStoreError, OAuthSessionError, PasswordError } from "@mokronos/gateway-core"
 import { StorageError } from "@mokronos/integrations"
 
@@ -16,22 +16,24 @@ export interface ErrorSink {
   ) => Effect.Effect<string>
 }
 
-const newTraceId = (): string => randomUUID().replaceAll("-", "").slice(0, 12)
+const newTraceId: Effect.Effect<string> = Effect.map(
+  Effect.orDie(webCrypto.randomUUIDv4),
+  (uuid) => uuid.replaceAll("-", "").slice(0, 12)
+)
 
 const loggingCapture: ErrorSink = {
-  captureException: (cause, context) => {
-    const traceId = newTraceId()
-    return Effect.as(
-      Effect.logError("Unhandled gateway failure", cause).pipe(
+  captureException: (cause, context) =>
+    Effect.gen(function*() {
+      const traceId = yield* newTraceId
+      yield* Effect.logError("Unhandled gateway failure", cause).pipe(
         Effect.annotateLogs({
           traceId,
           ...whenPresent("operation", context.operation),
           ...whenPresent("kind", context.kind)
         })
-      ),
-      traceId
-    )
-  }
+      )
+      return traceId
+    })
 }
 
 export class ErrorCapture extends Context.Service<ErrorCapture, ErrorSink>()(

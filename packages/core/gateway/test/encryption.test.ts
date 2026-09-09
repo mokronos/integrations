@@ -165,17 +165,17 @@ describe("the encrypted store", () => {
 
   const seedClient = async (store: GatewayStore) => {
     const accessProfile = await run(store.createAccessProfile({
-      id: newAccessProfileId(), tenantId: defaultTenantId, name: `profile-${crypto.randomUUID()}`
+      id: (await run(newAccessProfileId)), tenantId: defaultTenantId, name: `profile-${crypto.randomUUID()}`
     }))
     await run(store.replaceAccessProfileTools(accessProfile.id, [{ connection, tool: ToolName.make("sendEmail") }]))
     const approvalPolicy = await run(store.createApprovalPolicy({
-      id: newApprovalPolicyId(), tenantId: defaultTenantId, name: `policy-${crypto.randomUUID()}`
+      id: (await run(newApprovalPolicyId)), tenantId: defaultTenantId, name: `policy-${crypto.randomUUID()}`
     }))
     await run(store.replaceApprovalPolicyTools(approvalPolicy.id, [{
       connection, tool: ToolName.make("sendEmail"), decision: "require_approval"
     }]))
     const client = await run(store.createClient({
-      id: newClientId(),
+      id: (await run(newClientId)),
       tenantId: defaultTenantId,
       accessProfileId: accessProfile.id,
       approvalPolicyId: approvalPolicy.id,
@@ -191,7 +191,7 @@ describe("the encrypted store", () => {
     const argumentsValue = { to: "customer@example.com", subject: "Private" }
 
     const approval = await run(store.createApproval({
-      id: newApprovalId(),
+      id: (await run(newApprovalId)),
       tenantId: defaultTenantId,
       clientId: client.id,
       approvalPolicyId: approvalPolicy.id,
@@ -219,7 +219,7 @@ describe("the encrypted store", () => {
   test("seals a settled result while reading it back intact", async () => {
     const { store, raw } = await run(makeEncryptedStore())
     const { client, accessProfile, approvalPolicy } = await run(seedClient(store))
-    const id = newApprovalId()
+    const id = (await run(newApprovalId))
     await run(store.createApproval({
       id,
       tenantId: defaultTenantId,
@@ -256,7 +256,7 @@ describe("the encrypted store", () => {
 
   test("seals audit arguments at rest", async () => {
     const { store, raw } = await run(makeEncryptedStore())
-    const id = newAuditId()
+    const id = (await run(newAuditId))
     await run(store.recordAudit({
       tenantId: defaultTenantId,
       id,
@@ -315,13 +315,13 @@ describe("the encrypted store", () => {
     const store = await run(createGatewayStore(databasePath))
     stores.push(store)
     const accessProfile = await run(store.createAccessProfile({
-      id: newAccessProfileId(), tenantId: defaultTenantId, name: "plaintext profile"
+      id: (await run(newAccessProfileId)), tenantId: defaultTenantId, name: "plaintext profile"
     }))
     const approvalPolicy = await run(store.createApprovalPolicy({
-      id: newApprovalPolicyId(), tenantId: defaultTenantId, name: "plaintext policy"
+      id: (await run(newApprovalPolicyId)), tenantId: defaultTenantId, name: "plaintext policy"
     }))
     const client = await run(store.createClient({
-      id: newClientId(),
+      id: (await run(newClientId)),
       tenantId: defaultTenantId,
       accessProfileId: accessProfile.id,
       approvalPolicyId: approvalPolicy.id,
@@ -329,7 +329,7 @@ describe("the encrypted store", () => {
       capabilities: ["provision_connections"]
     }))
     const approval = await run(store.createApproval({
-      id: newApprovalId(),
+      id: (await run(newApprovalId)),
       tenantId: defaultTenantId,
       clientId: client.id,
       approvalPolicyId: approvalPolicy.id,

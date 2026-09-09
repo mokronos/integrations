@@ -66,17 +66,17 @@ const tenantConfigIds = async (store: GatewayStore, tenantId = defaultTenantId) 
 
 const seedBinding = async (store: GatewayStore) => {
   const accessProfile = await run(store.createAccessProfile({
-    id: newAccessProfileId(), tenantId: defaultTenantId, name: `profile-${crypto.randomUUID()}`
+    id: (await run(newAccessProfileId)), tenantId: defaultTenantId, name: `profile-${crypto.randomUUID()}`
   }))
   await run(store.replaceAccessProfileTools(accessProfile.id, [{ connection, tool: ToolName.make("sendEmail") }]))
   const approvalPolicy = await run(store.createApprovalPolicy({
-    id: newApprovalPolicyId(), tenantId: defaultTenantId, name: `policy-${crypto.randomUUID()}`
+    id: (await run(newApprovalPolicyId)), tenantId: defaultTenantId, name: `policy-${crypto.randomUUID()}`
   }))
   await run(store.replaceApprovalPolicyTools(approvalPolicy.id, [{
     connection, tool: ToolName.make("sendEmail"), decision: "require_approval"
   }]))
   const client = await run(store.createClient({
-    id: newClientId(),
+    id: (await run(newClientId)),
     tenantId: defaultTenantId,
     accessProfileId: accessProfile.id,
     approvalPolicyId: approvalPolicy.id,
@@ -90,8 +90,8 @@ describe("gateway store", () => {
   test("client setup rolls back its configurations when the client cannot be inserted", async () => {
     const store = await makeStore()
     const { client } = await seedBinding(store)
-    const accessProfileId = newAccessProfileId()
-    const approvalPolicyId = newApprovalPolicyId()
+    const accessProfileId = (await run(newAccessProfileId))
+    const approvalPolicyId = (await run(newApprovalPolicyId))
     const result = await run(Effect.result(store.createConfiguredClient({
       id: client.id, tenantId: defaultTenantId, name: "Rollback setup", accessProfileId, approvalPolicyId,
       tools: [{ connection, tool: ToolName.make("sendEmail"), decision: "require_approval" }]
@@ -142,24 +142,24 @@ describe("gateway store", () => {
   test("stores only a hash of an API key", async () => {
     const store = await run(makeStore())
     const client = await run(store.createClient({
-      id: newClientId(),
+      id: (await run(newClientId)),
       tenantId: defaultTenantId,
       ...await tenantConfigIds(store),
       name: "hash-check",
       capabilities: ["provision_connections"]
     }))
-    const key = generateApiKey()
+    const key = (await run(generateApiKey))
     await run(store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash }))
 
     const stored = await run(store.listApiKeys(client.id))
-    expect(stored[0]?.hash).toBe(hashApiKey(key.secret))
+    expect(stored[0]?.hash).toBe((await run(hashApiKey(key.secret))))
     expect(JSON.stringify(stored)).not.toContain(key.secret)
   })
 
   test("updates client authority and approval delivery together", async () => {
     const store = await run(makeStore())
     const client = await run(store.createClient({
-      id: newClientId(),
+      id: (await run(newClientId)),
       tenantId: defaultTenantId,
       ...await tenantConfigIds(store),
       name: "policy-check",
@@ -181,12 +181,12 @@ describe("gateway store", () => {
     const store = await run(makeStore())
     const { client, accessProfile, approvalPolicy } = await run(seedBinding(store))
     const destination = await run(store.createApprovalDestination({
-      id: newApprovalDestinationId(), tenantId: defaultTenantId,
+      id: (await run(newApprovalDestinationId)), tenantId: defaultTenantId,
       name: "phone", url: "https://notify.example/approvals", signingSecret: "wfs_secret"
     }))
     await run(store.replaceClientApprovalDestinations(defaultTenantId, client.id, [destination.id]))
     const approval = await run(store.createApproval({
-      id: newApprovalId(), tenantId: defaultTenantId, clientId: client.id,
+      id: (await run(newApprovalId)), tenantId: defaultTenantId, clientId: client.id,
       approvalPolicyId: approvalPolicy.id, accessProfileId: accessProfile.id,
       alias: Alias.make("mail"), tool: ToolName.make("sendEmail"), arguments: {},
       expiresAt: new Date(Date.now() + 60_000)
@@ -217,14 +217,14 @@ describe("gateway store", () => {
   test("completes and consumes login handoffs and OAuth state once", async () => {
     const store = await run(makeStore())
     const tenant = await run(store.createTenant({ name: "OAuth workspace" }))
-    const subject = await run(store.createSubject({ id: newSubjectId(), tenantId: tenant.id }))
+    const subject = await run(store.createSubject({ id: (await run(newSubjectId)), tenantId: tenant.id }))
     await run(store.createLogin({
       subjectId: subject.id,
       tenantId: tenant.id,
       email: "oauth@example.com",
       passwordHash: null
     }))
-    const handoff = generateLoginHandoff()
+    const handoff = (await run(generateLoginHandoff))
     await run(store.createLoginHandoff({
       requestHash: handoff.hash,
       expiresAt: new Date(Date.now() + 60_000)
@@ -238,7 +238,7 @@ describe("gateway store", () => {
     expect(await run(store.collectLoginHandoff(handoff.hash))).toBe(true)
     expect(await run(store.collectLoginHandoff(handoff.hash))).toBe(false)
 
-    const state = generateLoginHandoff()
+    const state = (await run(generateLoginHandoff))
     await run(store.createIdentityOAuthState({
       stateHash: state.hash,
       provider: "google",
@@ -256,7 +256,7 @@ describe("gateway store", () => {
     const store = await run(makeStore())
     const { client, accessProfile, approvalPolicy } = await run(seedBinding(store))
     const approval = await run(store.createApproval({
-      id: newApprovalId(),
+      id: (await run(newApprovalId)),
       tenantId: defaultTenantId,
       clientId: client.id,
       approvalPolicyId: approvalPolicy.id,
@@ -298,7 +298,7 @@ describe("gateway store", () => {
     const store = await run(makeStore())
     const { client, accessProfile, approvalPolicy } = await run(seedBinding(store))
     const approval = await run(store.createApproval({
-      id: newApprovalId(),
+      id: (await run(newApprovalId)),
       tenantId: defaultTenantId,
       clientId: client.id,
       approvalPolicyId: approvalPolicy.id,
@@ -320,7 +320,7 @@ describe("gateway store", () => {
   test("keeps the audit record after its arguments expire", async () => {
     const store = await run(makeStore())
     const { client } = await run(seedBinding(store))
-    const id = newAuditId()
+    const id = (await run(newAuditId))
     await run(store.recordAudit({
       tenantId: defaultTenantId,
       id,
@@ -351,7 +351,7 @@ describe("gateway store", () => {
     const store = await run(makeStore())
     await run(store.recordAudit({
       tenantId: defaultTenantId,
-      id: newAuditId(),
+      id: (await run(newAuditId)),
       clientId: null,
       alias: null,
       tool: null,
@@ -387,18 +387,18 @@ describe("gateway store", () => {
   test("keeps tenants blind to each other", async () => {
     const store = await run(makeStore())
     const other = await run(store.createTenant({ name: "Acme" }))
-    const otherSubject = await run(store.createSubject({ id: newSubjectId(), tenantId: other.id }))
+    const otherSubject = await run(store.createSubject({ id: (await run(newSubjectId)), tenantId: other.id }))
     expect(otherSubject.tenantId).toBe(other.id)
 
     const mine = await run(store.createClient({
-      id: newClientId(),
+      id: (await run(newClientId)),
       tenantId: defaultTenantId,
       ...await tenantConfigIds(store),
       name: "agent",
       capabilities: ["provision_connections", "administer_gateway"]
     }))
     const theirs = await run(store.createClient({
-      id: newClientId(),
+      id: (await run(newClientId)),
       tenantId: other.id,
       ...await tenantConfigIds(store, other.id),
       name: "agent",
@@ -412,7 +412,7 @@ describe("gateway store", () => {
     expect((await run(store.findClientById(defaultTenantId, mine.id)))?.revokedAt).toBeNull()
 
     const approval = await run(store.createApproval({
-      id: newApprovalId(),
+      id: (await run(newApprovalId)),
       tenantId: defaultTenantId,
       clientId: mine.id,
       approvalPolicyId: mine.approvalPolicyId,
@@ -428,7 +428,7 @@ describe("gateway store", () => {
 
     await run(store.recordAudit({
       tenantId: defaultTenantId,
-      id: newAuditId(),
+      id: (await run(newAuditId)),
       clientId: mine.id,
       alias: null,
       tool: null,

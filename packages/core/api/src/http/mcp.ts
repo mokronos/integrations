@@ -28,7 +28,8 @@ import { Context } from "effect"
 
 const hostOf = (options: McpGatewayOptions): IntegrationHost["Service"] =>
   Context.get(options.hostServices, IntegrationHost)
-import { Layer, ManagedRuntime } from "effect"
+import { Crypto, Layer, ManagedRuntime } from "effect"
+import { webCryptoLayer } from "@mokronos/contracts"
 import type { HttpClient } from "effect/unstable/http"
 import { capture, ErrorCapture } from "./observability.ts"
 import type { ErrorSink } from "./observability.ts"
@@ -98,7 +99,10 @@ export interface McpGatewayOptions {
   readonly errorCapture?: ErrorSink
 }
 
-type McpRuntime = ManagedRuntime.ManagedRuntime<ErrorCapture | HttpClient.HttpClient, never>
+type McpRuntime = ManagedRuntime.ManagedRuntime<
+  Crypto.Crypto | ErrorCapture | HttpClient.HttpClient,
+  never
+>
 
 const serverFor = async (
   options: McpGatewayOptions,
@@ -142,11 +146,12 @@ export interface McpGatewayHandle {
 }
 
 export const createMcpGatewayHandler = (options: McpGatewayOptions): McpGatewayHandle => {
-  const runtime: McpRuntime = ManagedRuntime.make(Layer.merge(
+  const runtime: McpRuntime = ManagedRuntime.make(Layer.mergeAll(
     options.errorCapture === undefined
       ? ErrorCapture.logging
       : Layer.succeed(ErrorCapture, options.errorCapture),
-    options.httpClient
+    options.httpClient,
+    webCryptoLayer
   ))
   const handler = createMcpHandler(({ authInfo }) => {
     if (authInfo === undefined) throw new Error("Authenticated MCP request has no identity")

@@ -112,7 +112,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
         }
         return yield* capture(store.createConfiguredClient({
           ...request.payload, name, tenantId,
-          id: newClientId(), accessProfileId: newAccessProfileId(), approvalPolicyId: newApprovalPolicyId()
+          id: (yield* newClientId), accessProfileId: (yield* newAccessProfileId), approvalPolicyId: (yield* newApprovalPolicyId)
         }))
       }))
       .handle("createClient", (request) =>
@@ -136,7 +136,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
             return yield* new ApiBadRequest({ error: `Unknown approval policy ${body.approvalPolicyId ?? "default"}` })
           }
           const client = yield* capture(store.createClient({
-            id: newClientId(),
+            id: (yield* newClientId),
             tenantId,
             accessProfileId: accessProfile.id,
             approvalPolicyId: approvalPolicy.id,
@@ -172,9 +172,9 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
         const tenantId = yield* requireTenant
         const url = approvalWebhookUrl(request.payload.url)
         if (url === undefined) return yield* new ApiBadRequest({ error: "Webhook URL must be a public HTTPS URL without embedded credentials" })
-        const signingSecret = generateApprovalSigningSecret()
+        const signingSecret = (yield* generateApprovalSigningSecret)
         const destination = yield* capture(store.createApprovalDestination({
-          id: newApprovalDestinationId(), tenantId, name: request.payload.name,
+          id: (yield* newApprovalDestinationId), tenantId, name: request.payload.name,
           url: url.toString(), signingSecret
         }))
         return { destination, signingSecret }
@@ -208,7 +208,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           if ((yield* capture(store.findClientById(tenantId, clientId))) === undefined) {
             return yield* new ApiNotFound({ error: `Unknown client ${clientId}` })
           }
-          const key = generateApiKey()
+          const key = (yield* generateApiKey)
           yield* capture(store.addApiKey({ id: key.id, clientId, hash: key.hash }))
           return { id: key.id, clientId, secret: key.secret }
         }))
@@ -289,7 +289,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
       .handle("createAccessProfile", (request) =>
         Effect.gen(function*() {
           const tenantId = yield* requireTenant
-          return yield* capture(store.createAccessProfile({ id: newAccessProfileId(), tenantId, name: request.payload.name }))
+          return yield* capture(store.createAccessProfile({ id: (yield* newAccessProfileId), tenantId, name: request.payload.name }))
         }))
       .handle("updateAccessProfile", (request) => Effect.gen(function*() {
         const tenantId = yield* requireTenant
@@ -322,7 +322,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           const tenantId = yield* requireTenant
           const source = yield* capture(store.findAccessProfile(tenantId, request.params["id"]))
           if (source === undefined) return yield* new ApiNotFound({ error: "Unknown access profile" })
-          const accessProfile = yield* capture(store.createAccessProfile({ id: newAccessProfileId(), tenantId, name: request.payload.name }))
+          const accessProfile = yield* capture(store.createAccessProfile({ id: (yield* newAccessProfileId), tenantId, name: request.payload.name }))
           const sourceTools = yield* capture(store.listAccessProfileTools(source.id))
           const tools = yield* capture(store.replaceAccessProfileTools(accessProfile.id, sourceTools.map(({ connection, tool }) => ({ connection, tool }))))
           return { accessProfile, tools }
@@ -360,7 +360,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
       }))
       .handle("createApprovalPolicy", (request) => Effect.gen(function*() {
         const tenantId = yield* requireTenant
-        return yield* capture(store.createApprovalPolicy({ id: newApprovalPolicyId(), tenantId, name: request.payload.name }))
+        return yield* capture(store.createApprovalPolicy({ id: (yield* newApprovalPolicyId), tenantId, name: request.payload.name }))
       }))
       .handle("updateApprovalPolicy", (request) => Effect.gen(function*() {
         const tenantId = yield* requireTenant
@@ -391,7 +391,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
         const tenantId = yield* requireTenant
         const source = yield* capture(store.findApprovalPolicy(tenantId, request.params["id"]))
         if (source === undefined) return yield* new ApiNotFound({ error: "Unknown approval policy" })
-        const approvalPolicy = yield* capture(store.createApprovalPolicy({ id: newApprovalPolicyId(), tenantId, name: request.payload.name }))
+        const approvalPolicy = yield* capture(store.createApprovalPolicy({ id: (yield* newApprovalPolicyId), tenantId, name: request.payload.name }))
         const sourceTools = yield* capture(store.listApprovalPolicyTools(source.id))
         const tools = yield* capture(store.replaceApprovalPolicyTools(approvalPolicy.id, sourceTools.map(({ connection, tool, decision }) => ({ connection, tool, decision }))))
         return { approvalPolicy, tools }

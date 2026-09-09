@@ -12,7 +12,7 @@ import type {
   ToolName
 } from "./domain.ts"
 import { hashApiKey } from "./keys.ts"
-import { Effect } from "effect"
+import { Crypto, Effect } from "effect"
 import type { GatewayStore } from "./store.ts"
 import type { GatewayStoreError } from "./store.ts"
 
@@ -25,8 +25,8 @@ export type ClientAuthentication =
 export const authenticateClient = Effect.fn("Authorization.authenticateClient")(function*(
   store: GatewayStore,
   secret: string
-): Effect.fn.Return<ClientAuthentication, GatewayStoreError> {
-  const resolved = yield* store.findApiKeyByHash(hashApiKey(secret))
+): Effect.fn.Return<ClientAuthentication, GatewayStoreError, Crypto.Crypto> {
+  const resolved = yield* store.findApiKeyByHash((yield* hashApiKey(secret)))
   if (resolved === undefined) return { status: "unknown-key" }
   if (resolved.key.revokedAt !== null) return { status: "key-revoked" }
 
@@ -44,7 +44,7 @@ export const authorizeInvocation = Effect.fn("Authorization.authorizeInvocation"
     readonly alias: Alias
     readonly tool: ToolName
   }
-): Effect.fn.Return<Authorization, GatewayStoreError> {
+): Effect.fn.Return<Authorization, GatewayStoreError, Crypto.Crypto> {
   const authentication = yield* authenticateClient(store, input.secret)
   if (authentication.status !== "authenticated") return { status: authentication.status }
 
@@ -101,7 +101,7 @@ export const authorizeClientCapability = Effect.fn("Authorization.authorizeClien
     store: GatewayStore,
     secret: string,
     capability: ClientCapability
-  ): Effect.fn.Return<CapabilityAuthorization, GatewayStoreError> {
+  ): Effect.fn.Return<CapabilityAuthorization, GatewayStoreError, Crypto.Crypto> {
     const authentication = yield* authenticateClient(store, secret)
     if (authentication.status !== "authenticated") return { status: authentication.status }
     if (!clientHasCapability(authentication.client, capability)) {

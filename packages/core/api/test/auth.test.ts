@@ -59,14 +59,14 @@ const setup = async (options: SetupOptions = {}) => {
   stores.push(store)
 
   const accessProfile = await run(store.createAccessProfile({
-    id: newAccessProfileId(), tenantId: defaultTenantId, name: "local"
+    id: (await run(newAccessProfileId)), tenantId: defaultTenantId, name: "local"
   }))
   await run(store.replaceAccessProfileTools(accessProfile.id, [{
     connection,
     tool: ToolName.make("sendEmail")
   }]))
   const approvalPolicy = await run(store.createApprovalPolicy({
-    id: newApprovalPolicyId(), tenantId: defaultTenantId, name: "local"
+    id: (await run(newApprovalPolicyId)), tenantId: defaultTenantId, name: "local"
   }))
   await run(store.replaceApprovalPolicyTools(approvalPolicy.id, [{
       connection,
@@ -74,14 +74,14 @@ const setup = async (options: SetupOptions = {}) => {
       decision: "allow"
     }]))
   const client = await run(store.createClient({
-    id: newClientId(),
+    id: (await run(newClientId)),
     tenantId: defaultTenantId,
     accessProfileId: accessProfile.id,
     approvalPolicyId: approvalPolicy.id,
     name: "local",
     capabilities: ["provision_connections", "administer_gateway"]
   }))
-  const apiKey = generateApiKey()
+  const apiKey = (await run(generateApiKey))
   await run(store.addApiKey({ id: apiKey.id, clientId: client.id, hash: apiKey.hash }))
 
   const { handle } = createGatewayHandler({
@@ -545,14 +545,14 @@ describe("attribution", () => {
     const human = await run(signupHuman(setup_))
 
     const accessProfile = await run(setup_.store.createAccessProfile({
-      id: newAccessProfileId(), tenantId: human.tenantId, name: "support-agent"
+      id: (await run(newAccessProfileId)), tenantId: human.tenantId, name: "support-agent"
     }))
     await run(setup_.store.replaceAccessProfileTools(accessProfile.id, [{
       connection,
       tool: ToolName.make("sendEmail")
     }]))
     const approvalPolicy = await run(setup_.store.createApprovalPolicy({
-      id: newApprovalPolicyId(), tenantId: human.tenantId, name: "support-agent"
+      id: (await run(newApprovalPolicyId)), tenantId: human.tenantId, name: "support-agent"
     }))
     await run(setup_.store.replaceApprovalPolicyTools(approvalPolicy.id, [{
         connection,
@@ -560,14 +560,14 @@ describe("attribution", () => {
         decision: "require_approval"
       }]))
     const client = await run(setup_.store.createClient({
-      id: newClientId(),
+      id: (await run(newClientId)),
       tenantId: human.tenantId,
       accessProfileId: accessProfile.id,
       approvalPolicyId: approvalPolicy.id,
       name: "support-agent",
       capabilities: ["provision_connections"]
     }))
-    const key = generateApiKey()
+    const key = (await run(generateApiKey))
     await run(setup_.store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash }))
 
     const frozen = await run(setup_.call("POST", "/v1/execute", {

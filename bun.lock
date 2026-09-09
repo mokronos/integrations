@@ -135,6 +135,7 @@
         "effect": "catalog:",
       },
       "devDependencies": {
+        "@effect/platform-bun": "catalog:",
         "drizzle-kit": "catalog:",
         "drizzle-orm": "catalog:",
       },

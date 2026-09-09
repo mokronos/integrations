@@ -176,13 +176,13 @@ describe("gateway maintenance", () => {
   test("turns an undecided approval into an expired one", async () => {
     const store = await run(makeStore())
     const accessProfile = await run(store.createAccessProfile({
-      id: newAccessProfileId(), tenantId: defaultTenantId, name: "sales access"
+      id: (await run(newAccessProfileId)), tenantId: defaultTenantId, name: "sales access"
     }))
     const approvalPolicy = await run(store.createApprovalPolicy({
-      id: newApprovalPolicyId(), tenantId: defaultTenantId, name: "sales approvals"
+      id: (await run(newApprovalPolicyId)), tenantId: defaultTenantId, name: "sales approvals"
     }))
     const client = await run(store.createClient({
-      id: newClientId(),
+      id: (await run(newClientId)),
       tenantId: defaultTenantId,
       accessProfileId: accessProfile.id,
       approvalPolicyId: approvalPolicy.id,
@@ -190,7 +190,7 @@ describe("gateway maintenance", () => {
       capabilities: ["provision_connections"]
     }))
     const stale = await run(store.createApproval({
-      id: newApprovalId(),
+      id: (await run(newApprovalId)),
       tenantId: defaultTenantId,
       clientId: client.id,
       accessProfileId: accessProfile.id,
@@ -201,7 +201,7 @@ describe("gateway maintenance", () => {
       expiresAt: new Date(Date.now() - 1_000)
     }))
     const fresh = await run(store.createApproval({
-      id: newApprovalId(),
+      id: (await run(newApprovalId)),
       tenantId: defaultTenantId,
       clientId: client.id,
       accessProfileId: accessProfile.id,
@@ -221,7 +221,7 @@ describe("gateway maintenance", () => {
 
   test("ages out audit arguments while keeping the record", async () => {
     const store = await run(makeStore())
-    const id = newAuditId()
+    const id = (await run(newAuditId))
     await run(store.recordAudit({
       tenantId: defaultTenantId,
       id,
@@ -253,8 +253,8 @@ describe("gateway maintenance", () => {
 
   test("deletes abandoned identity and terminal login flows", async () => {
     const store = await run(makeStore())
-    const handoff = generateLoginHandoff()
-    const state = generateLoginHandoff()
+    const handoff = (await run(generateLoginHandoff))
+    const state = (await run(generateLoginHandoff))
     const expiredAt = new Date(Date.now() - 1_000)
     await run(store.createLoginHandoff({ requestHash: handoff.hash, expiresAt: expiredAt }))
     await run(store.createIdentityOAuthState({

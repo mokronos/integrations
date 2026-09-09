@@ -1,9 +1,9 @@
 import { whenPresent } from "@mokronos/contracts"
-import { randomUUID } from "node:crypto"
 
 import type { AuthMethod, Connection } from "@mokronos/contracts"
 import { Context, Deferred, Effect, Exit, Schema, Scope } from "effect"
 import type { TenantId } from "./domain.ts"
+import { webCrypto } from "@mokronos/contracts"
 import { completeOAuthFlow } from "@mokronos/integrations"
 import {
   authorizeInBrowser,
@@ -129,7 +129,7 @@ export const createOAuthSessions = (
           cause: new Error("The gateway is shutting down")
         })
       }
-      const id = randomUUID()
+      const id = yield* Effect.orDie(webCrypto.randomUUIDv4)
       const publicUrl = options.publicUrlOf?.() ?? options.publicUrl
 
       if (publicUrl !== undefined) {

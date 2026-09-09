@@ -4,6 +4,7 @@ import { createClient } from "@libsql/client"
 import type { Client as LibsqlClient, InValue, Row } from "@libsql/client"
 import { Context, Effect, Layer, Predicate } from "effect"
 import type { Encryption } from "./crypto.ts"
+import { webCrypto } from "@mokronos/contracts"
 import {
   AccessProfileId,
   Alias,
@@ -209,7 +210,7 @@ const createGatewayStoreDriver = async (
     databasePath,
 
     createTenant: async (input) => {
-      const id = input?.id ?? TenantId.make(crypto.randomUUID())
+      const id = input?.id ?? TenantId.make(Effect.runSync(webCrypto.randomUUIDv4))
       const name = input?.name ?? "Untitled"
       await database.execute("BEGIN IMMEDIATE")
       try {

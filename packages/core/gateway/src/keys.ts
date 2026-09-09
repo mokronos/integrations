@@ -1,5 +1,4 @@
-import { createHash, randomUUID, randomBytes } from "node:crypto"
-import { Encoding } from "effect"
+import { Crypto, Effect, Encoding } from "effect"
 import { utf8Bytes } from "@mokronos/contracts"
 import {
   ApiKeyHash,
@@ -18,45 +17,103 @@ import {
 
 const keyPrefix = "wfi_"
 
+/** Bytes of entropy behind every secret we mint. */
+const secretBytes = 32
+
+/**
+ * The platform's random and digest primitives fail only on an out-of-range
+ * size, which every caller here supplies as a constant. A failure would be a
+ * bug in this file rather than a condition callers can act on, so it is a
+ * defect and the identifiers keep a clean error channel.
+ */
+const randomBytes = (size: number): Effect.Effect<Uint8Array, never, Crypto.Crypto> =>
+  Effect.flatMap(Crypto.Crypto, (crypto) => Effect.orDie(crypto.randomBytes(size)))
+
+const uuid: Effect.Effect<string, never, Crypto.Crypto> = Effect.flatMap(
+  Crypto.Crypto,
+  (crypto) => Effect.orDie(crypto.randomUUIDv4)
+)
+
+export const sha256Hex = (text: string): Effect.Effect<string, never, Crypto.Crypto> =>
+  Effect.flatMap(Crypto.Crypto, (crypto) =>
+    Effect.orDie(crypto.digest("SHA-256", utf8Bytes(text)))
+  ).pipe(Effect.map(Encoding.encodeHex))
+
+const prefixedSecret = (prefix: string): Effect.Effect<string, never, Crypto.Crypto> =>
+  Effect.map(randomBytes(secretBytes), (bytes) => `${prefix}${Encoding.encodeBase64Url(bytes)}`)
+
 export interface IssuedApiKey {
   readonly id: ApiKeyId
   readonly secret: string
   readonly hash: ApiKeyHash
 }
 
-export const generateApiKey = (): IssuedApiKey => {
-  const secret = `${keyPrefix}${Encoding.encodeBase64Url(randomBytes(32))}`
-  return {
-    id: ApiKeyId.make(randomUUID()),
-    secret,
-    hash: hashApiKey(secret)
+export const generateApiKey: Effect.Effect<IssuedApiKey, never, Crypto.Crypto> = Effect.gen(
+  function*() {
+    const secret = yield* prefixedSecret(keyPrefix)
+    return {
+      id: ApiKeyId.make(yield* uuid),
+      secret,
+      hash: yield* hashApiKey(secret)
+    }
   }
-}
+)
 
-export const hashApiKey = (secret: string): ApiKeyHash =>
-  ApiKeyHash.make(createHash("sha256").update(utf8Bytes(secret)).digest("hex"))
+export const hashApiKey = (secret: string): Effect.Effect<ApiKeyHash, never, Crypto.Crypto> =>
+  Effect.map(sha256Hex(secret), ApiKeyHash.make)
 
 export interface IssuedLoginHandoff {
   readonly secret: string
   readonly hash: LoginHandoffHash
 }
 
-export const generateLoginHandoff = (): IssuedLoginHandoff => {
-  const secret = `wfl_${Encoding.encodeBase64Url(randomBytes(32))}`
-  return { secret, hash: hashLoginHandoff(secret) }
-}
+export const generateLoginHandoff: Effect.Effect<IssuedLoginHandoff, never, Crypto.Crypto> = Effect
+  .gen(function*() {
+    const secret = yield* prefixedSecret("wfl_")
+    return { secret, hash: yield* hashLoginHandoff(secret) }
+  })
 
-export const hashLoginHandoff = (secret: string): LoginHandoffHash =>
-  LoginHandoffHash.make(createHash("sha256").update(utf8Bytes(secret)).digest("hex"))
+export const hashLoginHandoff = (
+  secret: string
+): Effect.Effect<LoginHandoffHash, never, Crypto.Crypto> =>
+  Effect.map(sha256Hex(secret), LoginHandoffHash.make)
 
-export const newClientId = (): ClientId => ClientId.make(randomUUID())
-export const newAccessProfileId = (): AccessProfileId => AccessProfileId.make(randomUUID())
-export const newApprovalPolicyId = (): ApprovalPolicyId => ApprovalPolicyId.make(randomUUID())
-export const newApprovalId = (): ApprovalId => ApprovalId.make(randomUUID())
-export const newApprovalDestinationId = (): ApprovalDestinationId => ApprovalDestinationId.make(randomUUID())
-export const newApprovalDeliveryId = (): ApprovalDeliveryId => ApprovalDeliveryId.make(randomUUID())
-export const generateApprovalSigningSecret = (): string =>
-  `wfs_${Encoding.encodeBase64Url(randomBytes(32))}`
-export const newAuditId = (): AuditId => AuditId.make(randomUUID())
-export const newTenantId = (): TenantId => TenantId.make(randomUUID())
-export const newSubjectId = (): SubjectId => SubjectId.make(randomUUID())
+export const generateApprovalSigningSecret: Effect.Effect<string, never, Crypto.Crypto> =
+  prefixedSecret("wfs_")
+
+/** Session tokens carry the same prefix and entropy as approval secrets. */
+export const sessionSecret: Effect.Effect<string, never, Crypto.Crypto> = prefixedSecret("wfs_")
+
+export const newClientId: Effect.Effect<ClientId, never, Crypto.Crypto> = Effect.map(
+  uuid,
+  ClientId.make
+)
+export const newAccessProfileId: Effect.Effect<AccessProfileId, never, Crypto.Crypto> = Effect.map(
+  uuid,
+  AccessProfileId.make
+)
+export const newApprovalPolicyId: Effect.Effect<ApprovalPolicyId, never, Crypto.Crypto> = Effect
+  .map(uuid, ApprovalPolicyId.make)
+export const newApprovalId: Effect.Effect<ApprovalId, never, Crypto.Crypto> = Effect.map(
+  uuid,
+  ApprovalId.make
+)
+export const newApprovalDestinationId: Effect.Effect<
+  ApprovalDestinationId,
+  never,
+  Crypto.Crypto
+> = Effect.map(uuid, ApprovalDestinationId.make)
+export const newApprovalDeliveryId: Effect.Effect<ApprovalDeliveryId, never, Crypto.Crypto> = Effect
+  .map(uuid, ApprovalDeliveryId.make)
+export const newAuditId: Effect.Effect<AuditId, never, Crypto.Crypto> = Effect.map(
+  uuid,
+  AuditId.make
+)
+export const newTenantId: Effect.Effect<TenantId, never, Crypto.Crypto> = Effect.map(
+  uuid,
+  TenantId.make
+)
+export const newSubjectId: Effect.Effect<SubjectId, never, Crypto.Crypto> = Effect.map(
+  uuid,
+  SubjectId.make
+)
