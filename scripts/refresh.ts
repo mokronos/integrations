@@ -1,4 +1,6 @@
-import { Effect } from "effect"
+import { Effect, Layer } from "effect"
+import * as BunServices from "@effect/platform-bun/BunServices"
+import type { ChildProcessSpawner } from "effect/unstable/process"
 import { FetchHttpClient, type HttpClient } from "effect/unstable/http"
 import { defaultGatewayPort, integrationsHome, readGatewayConfig } from "@mokronos/integrations-client"
 import {
@@ -15,8 +17,10 @@ import {
   stopService
 } from "../apps/cli/src/service.ts"
 
-const run = <A, E>(effect: Effect.Effect<A, E, HttpClient.HttpClient>): Promise<A> =>
-  Effect.runPromise(effect.pipe(Effect.provide(FetchHttpClient.layer)))
+const run = <A, E>(effect: Effect.Effect<A, E, ChildProcessSpawner.ChildProcessSpawner | HttpClient.HttpClient>): Promise<A> =>
+  Effect.runPromise(effect.pipe(
+    Effect.provide(Layer.merge(FetchHttpClient.layer, BunServices.layer))
+  ))
 
 const refresh = async (): Promise<void> => {
   await installLocal(await parseInstallOptions([]))
@@ -24,7 +28,7 @@ const refresh = async (): Promise<void> => {
   const program = operatorProgram()
   const registered = await serviceIsRegistered()
   if (registered) {
-    await stopService()
+    await run(stopService())
     console.log(`stopped ${serviceLabel}`)
   }
 

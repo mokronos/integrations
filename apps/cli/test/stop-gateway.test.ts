@@ -4,12 +4,16 @@ import os from "node:os"
 import path from "node:path"
 import { gatewayConfigPath } from "@mokronos/integrations-client"
 import { whenPresent } from "@mokronos/contracts"
-import { Effect, Result } from "effect"
+import { Effect, Layer, Result } from "effect"
+import * as BunServices from "@effect/platform-bun/BunServices"
+import type { ChildProcessSpawner } from "effect/unstable/process"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import { stopGateway } from "../src/service.ts"
 
-const run = <A, E>(effect: Effect.Effect<A, E, HttpClient.HttpClient>): Promise<A> =>
-  Effect.runPromise(effect.pipe(Effect.provide(FetchHttpClient.layer)))
+const run = <A, E>(effect: Effect.Effect<A, E, ChildProcessSpawner.ChildProcessSpawner | HttpClient.HttpClient>): Promise<A> =>
+  Effect.runPromise(effect.pipe(
+    Effect.provide(Layer.merge(FetchHttpClient.layer, BunServices.layer))
+  ))
 
 const directories: Array<string> = []
 const children: Array<Bun.Subprocess> = []

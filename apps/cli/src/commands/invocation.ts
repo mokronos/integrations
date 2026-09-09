@@ -18,9 +18,9 @@ const verboseFlag = () =>
     Flag.withDescription("Show complete objects, pretty-printed")
   )
 
-const gatewayTask = <A, E>(
-  task: (client: GatewayClient) => Effect.Effect<A, E>
-): Effect.Effect<A, IntegrationsCliError, HttpClient.HttpClient> =>
+const gatewayTask = <A, E, R>(
+  task: (client: GatewayClient) => Effect.Effect<A, E, R>
+): Effect.Effect<A, IntegrationsCliError, R | HttpClient.HttpClient> =>
   connectToGateway().pipe(
     Effect.flatMap(task),
     Effect.mapError((error) => cliError(describeError(error)))

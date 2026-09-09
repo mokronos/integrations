@@ -30,17 +30,17 @@ import {
 } from "./connection.ts"
 import { connectToOperatorGateway } from "./session.ts"
 
-const gatewayTask = <A, E>(
-  task: (client: GatewayClient) => Effect.Effect<A, E>
-): Effect.Effect<A, IntegrationsCliError, HttpClient.HttpClient> =>
+const gatewayTask = <A, E, R>(
+  task: (client: GatewayClient) => Effect.Effect<A, E, R>
+): Effect.Effect<A, IntegrationsCliError, R | HttpClient.HttpClient> =>
   connectToGateway().pipe(
     Effect.flatMap(task),
     Effect.mapError((error) => cliError(describeError(error)))
   )
 
-const operatorGatewayTask = <A, E>(
-  task: (client: GatewayClient) => Effect.Effect<A, E>
-): Effect.Effect<A, IntegrationsCliError, HttpClient.HttpClient> =>
+const operatorGatewayTask = <A, E, R>(
+  task: (client: GatewayClient) => Effect.Effect<A, E, R>
+): Effect.Effect<A, IntegrationsCliError, R | HttpClient.HttpClient> =>
   connectToOperatorGateway().pipe(
     Effect.flatMap(task),
     Effect.mapError((error) => cliError(describeError(error)))

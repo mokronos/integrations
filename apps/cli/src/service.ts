@@ -2,8 +2,9 @@ import { closeSync, openSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
 import { homedir, userInfo } from "node:os"
 import path from "node:path"
-import { Data, Duration, Effect, Schedule } from "effect"
+import { Data, Duration, Effect, Result, Schedule } from "effect"
 import { HttpClient } from "effect/unstable/http"
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { defaultGatewayPort, integrationsHome, readGatewayConfig } from "@mokronos/integrations-client"
 
 export class ServiceError extends Data.TaggedError("ServiceError")<{
@@ -38,31 +39,49 @@ export const serviceIsRegistered = async (): Promise<boolean> => {
   return await Bun.file(definition).exists()
 }
 
-const command = async (
+/** How much of a failed command's output to quote back. */
+const outputLimit = 800
+
+const bounded = (details: string): string =>
+  details.length <= outputLimit
+    ? details
+    : `${details.slice(0, outputLimit)}… (+${details.length - outputLimit} chars)`
+
+/**
+ * Runs a service-manager command, failing with whatever it said if it refuses.
+ * Under --verbose its output goes straight to the terminal instead.
+ */
+const command = Effect.fn("service.command")(function*(
   program: string,
   arguments_: ReadonlyArray<string>,
   verbose: boolean
-): Promise<void> => {
-  const process_ = Bun.spawn([program, ...arguments_], {
+): Effect.fn.Return<void, ServiceError, ChildProcessSpawner.ChildProcessSpawner> {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const invocation = ChildProcess.make(program, arguments_, {
     stdout: verbose ? "inherit" : "pipe",
     stderr: verbose ? "inherit" : "pipe"
   })
-  const [exitCode, stdout, stderr] = await Promise.all([
-    process_.exited,
-    verbose ? Promise.resolve("") : new Response(process_.stdout).text(),
-    verbose ? Promise.resolve("") : new Response(process_.stderr).text()
-  ])
-  if (exitCode !== 0) {
-    const details = [stdout.trim(), stderr.trim()].filter((line) => line.length > 0).join("\n")
-    const limit = 800
-    const bounded = details.length <= limit
-      ? details
-      : `${details.slice(0, limit)}… (+${details.length - limit} chars)`
-    throw new Error(
-      `${program} ${arguments_.join(" ")} failed${bounded.length === 0 ? "" : `:\n${bounded}`}`
-    )
+  const outcome = yield* Effect.result(
+    verbose
+      ? Effect.map(spawner.exitCode(invocation), (code) => ({ code, output: "" }))
+      : Effect.map(
+        Effect.all([spawner.exitCode(invocation), spawner.string(invocation, { includeStderr: true })]),
+        ([code, output]) => ({ code, output })
+      )
+  )
+  if (Result.isFailure(outcome)) {
+    return yield* new ServiceError({
+      message: `${program} ${arguments_.join(" ")} could not be run: ${outcome.failure.message}`
+    })
   }
-}
+  if (outcome.success.code !== 0) {
+    const details = bounded(outcome.success.output.trim())
+    return yield* new ServiceError({
+      message:
+        `${program} ${arguments_.join(" ")} failed${details.length === 0 ? "" : `:\n${details}`}`
+    })
+  }
+})
 
 const launchdTarget = (): string => `gui/${process.getuid?.() ?? userInfo().uid}`
 
@@ -84,7 +103,11 @@ const installedAndReady = Effect.fn("service.installedAndReady")(function*(
   descriptor: ServiceDescriptor,
   previousKey: string | undefined,
   statusCommand: string
-): Effect.fn.Return<ServiceDescriptor, ServiceError, HttpClient.HttpClient> {
+): Effect.fn.Return<
+  ServiceDescriptor,
+  ServiceError,
+  ChildProcessSpawner.ChildProcessSpawner | HttpClient.HttpClient
+> {
   const ready = yield* waitUntilReady({
     home: descriptor.home,
     base: probeBase("127.0.0.1", descriptor.port),
@@ -105,7 +128,11 @@ export interface InstallOptions {
 
 export const installService = Effect.fn("service.install")(function*(
   options: InstallOptions
-): Effect.fn.Return<ServiceDescriptor, ServiceError, HttpClient.HttpClient> {
+): Effect.fn.Return<
+  ServiceDescriptor,
+  ServiceError,
+  ChildProcessSpawner.ChildProcessSpawner | HttpClient.HttpClient
+> {
   const home = integrationsHome()
   const verbose = options.verbose ?? false
   const descriptor: ServiceDescriptor = {
@@ -132,12 +159,13 @@ export const installService = Effect.fn("service.install")(function*(
         }),
         { mode: 0o600 }
       )
-      await command("systemctl", ["--user", "daemon-reload"], verbose)
-      await command("systemctl", ["--user", "enable", `${serviceLabel}.service`], verbose)
-      await command("systemctl", ["--user", "restart", `${serviceLabel}.service`], verbose)
-      await command("loginctl", ["enable-linger", userInfo().username], verbose)
-        .catch(() => undefined)
     })
+    yield* command("systemctl", ["--user", "daemon-reload"], verbose)
+    yield* command("systemctl", ["--user", "enable", `${serviceLabel}.service`], verbose)
+    yield* command("systemctl", ["--user", "restart", `${serviceLabel}.service`], verbose)
+    // Lingering is what keeps the unit running after logout; a host that
+    // refuses it still has a working gateway for this session.
+    yield* Effect.ignore(command("loginctl", ["enable-linger", userInfo().username], verbose))
     return yield* installedAndReady(
       descriptor,
       previousKey,
@@ -149,10 +177,12 @@ export const installService = Effect.fn("service.install")(function*(
     yield* attempt(async () => {
       await mkdir(path.dirname(plist), { recursive: true })
       await writeFile(plist, launchdPlist(descriptor), { mode: 0o600 })
-      await command("launchctl", ["bootout", `${launchdTarget()}/${serviceLabel}`], verbose)
-        .catch(() => undefined)
-      await command("launchctl", ["bootstrap", launchdTarget(), plist], verbose)
     })
+    // Booting out an agent that was never loaded is not a failure.
+    yield* Effect.ignore(
+      command("launchctl", ["bootout", `${launchdTarget()}/${serviceLabel}`], verbose)
+    )
+    yield* command("launchctl", ["bootstrap", launchdTarget(), plist], verbose)
     return yield* installedAndReady(
       descriptor,
       previousKey,
@@ -162,39 +192,47 @@ export const installService = Effect.fn("service.install")(function*(
   return yield* unsupportedPlatform("install")
 })
 
-export const stopService = async (verbose = false): Promise<void> => {
+export const stopService = Effect.fn("service.stop")(function*(
+  verbose = false
+): Effect.fn.Return<void, ServiceError, ChildProcessSpawner.ChildProcessSpawner> {
+  // Stopping something already stopped is the outcome asked for either way.
   if (process.platform === "linux") {
-    await command("systemctl", ["--user", "stop", `${serviceLabel}.service`], verbose)
-      .catch(() => undefined)
-    return
+    return yield* Effect.ignore(
+      command("systemctl", ["--user", "stop", `${serviceLabel}.service`], verbose)
+    )
   }
   if (process.platform === "darwin") {
-    await command("launchctl", ["bootout", `${launchdTarget()}/${serviceLabel}`], verbose)
-      .catch(() => undefined)
-    return
+    return yield* Effect.ignore(
+      command("launchctl", ["bootout", `${launchdTarget()}/${serviceLabel}`], verbose)
+    )
   }
-  throw unsupportedPlatform("stop")
-}
+  return yield* unsupportedPlatform("stop")
+})
 
-export const uninstallService = async (verbose = false): Promise<void> => {
+export const uninstallService = Effect.fn("service.uninstall")(function*(
+  verbose = false
+): Effect.fn.Return<void, ServiceError, ChildProcessSpawner.ChildProcessSpawner> {
   if (process.platform === "linux") {
-    await command("systemctl", ["--user", "disable", "--now", `${serviceLabel}.service`], verbose)
-      .catch(() => undefined)
-    await Bun.file(
-      path.join(homedir(), ".config", "systemd", "user", `${serviceLabel}.service`)
-    ).delete().catch(() => undefined)
-    await command("systemctl", ["--user", "daemon-reload"], verbose)
-    return
+    yield* Effect.ignore(
+      command("systemctl", ["--user", "disable", "--now", `${serviceLabel}.service`], verbose)
+    )
+    yield* Effect.promise(() =>
+      Bun.file(path.join(homedir(), ".config", "systemd", "user", `${serviceLabel}.service`))
+        .delete().catch(() => undefined)
+    )
+    return yield* command("systemctl", ["--user", "daemon-reload"], verbose)
   }
   if (process.platform === "darwin") {
-    await command("launchctl", ["bootout", `${launchdTarget()}/${serviceLabel}`], verbose)
-      .catch(() => undefined)
-    await Bun.file(path.join(homedir(), "Library", "LaunchAgents", `${serviceLabel}.plist`))
-      .delete().catch(() => undefined)
-    return
+    yield* Effect.ignore(
+      command("launchctl", ["bootout", `${launchdTarget()}/${serviceLabel}`], verbose)
+    )
+    return yield* Effect.promise(() =>
+      Bun.file(path.join(homedir(), "Library", "LaunchAgents", `${serviceLabel}.plist`))
+        .delete().catch(() => undefined)
+    )
   }
-  throw unsupportedPlatform("uninstall")
-}
+  return yield* unsupportedPlatform("uninstall")
+})
 
 export const serviceProgram = (): ReadonlyArray<string> =>
   Bun.main.startsWith("/$bunfs/") || Bun.main.startsWith("B:\\~BUN\\")
@@ -297,6 +335,10 @@ export const startDetachedGateway = Effect.fn("service.startDetached")(function*
   }
   const logPath = serviceLogPath(home)
   const errorPath = serviceErrorLogPath(home)
+  // Not ChildProcess: the detached gateway has to keep writing to its log
+  // files after this process is gone, and ChildProcess routes stdout and
+  // stderr through Sinks that die with the parent fiber. Handing the child
+  // raw file descriptors is the only way to outlive us.
   const spawned = yield* attempt(async () => {
     const previousKey = await recordedKey(home)
     await mkdir(path.join(home, "logs"), { recursive: true })
@@ -352,38 +394,46 @@ const isAlive = (pid: number): boolean => {
   }
 }
 
-const capture = async (
+/** Reads a probe command's output, treating any refusal as "nothing to say". */
+const capture = Effect.fn("service.capture")(function*(
   program: string,
   arguments_: ReadonlyArray<string>
-): Promise<string | undefined> => {
-  try {
-    const process_ = Bun.spawn([program, ...arguments_], { stdout: "pipe", stderr: "ignore" })
-    const [exitCode, stdout] = await Promise.all([
-      process_.exited,
-      new Response(process_.stdout).text()
-    ])
-    return exitCode === 0 ? stdout : undefined
-  } catch {
-    return undefined
-  }
-}
+): Effect.fn.Return<string | undefined, never, ChildProcessSpawner.ChildProcessSpawner> {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const invocation = ChildProcess.make(program, arguments_, {
+    stdout: "pipe",
+    stderr: "ignore"
+  })
+  const outcome = yield* Effect.result(
+    Effect.all([spawner.exitCode(invocation), spawner.string(invocation)])
+  )
+  if (Result.isFailure(outcome)) return undefined
+  const [code, output] = outcome.success
+  return code === 0 ? output : undefined
+})
 
-const processCommand = async (pid: number): Promise<string | undefined> => {
+const processCommand = Effect.fn("service.processCommand")(function*(
+  pid: number
+): Effect.fn.Return<string | undefined, never, ChildProcessSpawner.ChildProcessSpawner> {
   if (process.platform === "linux") {
-    const raw = await Bun.file(`/proc/${pid}/cmdline`).text().catch(() => undefined)
+    const raw = yield* Effect.promise(() =>
+      Bun.file(`/proc/${pid}/cmdline`).text().catch(() => undefined)
+    )
     return raw === undefined ? undefined : raw.replaceAll("\0", " ").trim()
   }
-  return (await capture("ps", ["-o", "command=", "-p", String(pid)]))?.trim()
-}
+  return (yield* capture("ps", ["-o", "command=", "-p", String(pid)]))?.trim()
+})
 
-const listeningPid = async (port: number): Promise<number | undefined> => {
-  const fromLsof = await capture("lsof", ["-ti", `tcp:${port}`, "-sTCP:LISTEN"])
+const listeningPid = Effect.fn("service.listeningPid")(function*(
+  port: number
+): Effect.fn.Return<number | undefined, never, ChildProcessSpawner.ChildProcessSpawner> {
+  const fromLsof = yield* capture("lsof", ["-ti", `tcp:${port}`, "-sTCP:LISTEN"])
   const firstLine = fromLsof?.trim().split("\n")[0]?.trim()
   if (firstLine !== undefined && /^\d+$/.test(firstLine)) return Number(firstLine)
-  const fromSs = await capture("ss", ["-tlnpH", `sport = :${port}`])
+  const fromSs = yield* capture("ss", ["-tlnpH", `sport = :${port}`])
   const matched = fromSs?.match(/pid=(\d+)/)?.[1]
   return matched === undefined ? undefined : Number(matched)
-}
+})
 
 const waitUntilStopped = Effect.fn("service.waitUntilStopped")(function*(
   base: string
@@ -394,7 +444,7 @@ const waitUntilStopped = Effect.fn("service.waitUntilStopped")(function*(
 export const stopGateway = Effect.fn("service.stopGateway")(function*(): Effect.fn.Return<
   StoppedGateway | undefined,
   ServiceError,
-  HttpClient.HttpClient
+  ChildProcessSpawner.ChildProcessSpawner | HttpClient.HttpClient
 > {
   const home = integrationsHome()
   const config = yield* Effect.promise(() => readGatewayConfig(home))
@@ -405,14 +455,14 @@ export const stopGateway = Effect.fn("service.stopGateway")(function*(): Effect.
   const recorded = config?.pid
   const pid = recorded !== undefined && isAlive(recorded)
     ? recorded
-    : yield* Effect.promise(() => listeningPid(port))
+    : yield* listeningPid(port)
   if (pid === undefined) {
     return yield* new ServiceError({
       message:
         `A gateway is answering at ${base}, but nothing on this machine could say which process it is. Stop it where you started it, then run this again.`
     })
   }
-  const command = yield* Effect.promise(() => processCommand(pid))
+  const command = yield* processCommand(pid)
   if (command !== undefined && !command.includes("serve")) {
     return yield* new ServiceError({
       message: `Refusing to stop pid ${pid}: its command line is not a gateway (${command}).`

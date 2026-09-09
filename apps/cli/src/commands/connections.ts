@@ -5,6 +5,7 @@ import { Duration, Effect, Option, Schedule, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import type { IntegrationsCliError } from "../connection.ts"
 import { cliError, connectToGateway, describeError, openBrowser } from "../connection.ts"
+import type { GatewayFailure } from "@mokronos/integrations-client"
 import type { Page, Window } from "../output.ts"
 import {
   jsonOutput,
@@ -47,9 +48,9 @@ const window = (
   offset: Option.getOrUndefined(offset)
 })
 
-const gatewayTask = <A, E>(
-  task: (client: GatewayClient) => Effect.Effect<A, E>
-): Effect.Effect<A, IntegrationsCliError, HttpClient.HttpClient> =>
+const gatewayTask = <A, E, R>(
+  task: (client: GatewayClient) => Effect.Effect<A, E, R>
+): Effect.Effect<A, IntegrationsCliError, R | HttpClient.HttpClient> =>
   connectToGateway().pipe(
     Effect.flatMap(task),
     Effect.mapError((error) => cliError(describeError(error)))
@@ -184,9 +185,12 @@ export const connectCommand = (runGateway: GatewayTask) => Command.make(
         const authorizationUrl = text(state["authorizationUrl"])
         if (text(state["status"]) === "pending" && authorizationUrl.length > 0) {
           console.error(`Authorize in your browser:\n${authorizationUrl}`)
-          if (!options.noOpen) openBrowser(authorizationUrl)
+          if (!options.noOpen) yield* openBrowser(authorizationUrl)
         }
-        const settled = yield* Effect.gen(function*() {
+        const poll: Effect.Effect<
+          typeof JsonObject.Type | undefined,
+          IntegrationsCliError | GatewayFailure
+        > = Effect.gen(function*() {
           const session = record(yield* client.oauth(sessionId))
           const current = record(session["state"])
           if (text(current["status"]) === "connected") return record(current["connection"])
@@ -194,7 +198,8 @@ export const connectCommand = (runGateway: GatewayTask) => Command.make(
             return yield* cliError(`Connection failed: ${text(current["message"])}`)
           }
           return undefined
-        }).pipe(
+        })
+        const settled = yield* poll.pipe(
           Effect.repeat({
             schedule: Schedule.spaced(Duration.millis(500)),
             while: (connection) => connection === undefined

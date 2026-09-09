@@ -9,6 +9,7 @@
       },
       "devDependencies": {
         "@effect/language-service": "catalog:",
+        "@effect/platform-bun": "catalog:",
         "@oxlint/plugins": "catalog:",
         "@types/bun": "catalog:",
         "effect-solutions": "catalog:",
@@ -135,7 +136,6 @@
         "effect": "catalog:",
       },
       "devDependencies": {
-        "@effect/platform-bun": "catalog:",
         "drizzle-kit": "catalog:",
         "drizzle-orm": "catalog:",
       },

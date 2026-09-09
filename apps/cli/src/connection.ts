@@ -1,4 +1,5 @@
 import { Data, Effect, Predicate } from "effect"
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import type { HttpClient } from "effect/unstable/http"
 import { GatewayError, makeGatewayClient, resolveClientConnection } from "@mokronos/integrations-client"
 import type { GatewayClient } from "@mokronos/integrations-client"
@@ -41,11 +42,27 @@ export const connectToGateway = Effect.fn("cli.connectToGateway")(function*(): E
   return yield* makeGatewayClient(connection)
 })
 
-export const openBrowser = (url: string): void => {
-  const command = process.platform === "darwin"
+/**
+ * Hands the URL to the desktop and stops caring. A host with no browser, or
+ * none we know how to ask, is not a reason to fail the command — the URL was
+ * printed either way.
+ */
+export const openBrowser = (
+  url: string
+): Effect.Effect<void, never, ChildProcessSpawner.ChildProcessSpawner> => {
+  const [program, ...arguments_] = process.platform === "darwin"
     ? ["open", url]
     : process.platform === "win32"
       ? ["cmd", "/c", "start", "", url]
       : ["xdg-open", url]
-  Bun.spawn(command, { stdout: "ignore", stderr: "ignore" })
+  return Effect.flatMap(
+    ChildProcessSpawner.ChildProcessSpawner,
+    (spawner) =>
+      Effect.asVoid(Effect.forkDetach(Effect.ignore(
+        spawner.exitCode(ChildProcess.make(program ?? "xdg-open", arguments_, {
+          stdout: "ignore",
+          stderr: "ignore"
+        }))
+      )))
+  )
 }

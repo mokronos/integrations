@@ -111,7 +111,7 @@ const dashboardCommand = Command.make(
           message: `Nothing is answering at ${config.url}. Start the gateway with \`ii serve\`.`
         })
       }
-      if (!print) openBrowser(config.url)
+      if (!print) yield* openBrowser(config.url)
       yield* writeStdoutLine(
         print ? config.url : `Opening the control plane at ${config.url}`
       )
@@ -151,15 +151,11 @@ const uninstallCommand = Command.make(
     )
   },
   ({ verbose }) =>
-    Effect.tryPromise({
-      try: async () => {
-        await uninstallService(verbose)
-        await Effect.runPromise(writeStdoutLine(
-          `${serviceLabel} stopped and deregistered. Connections and credentials were left in place.`
-        ))
-      },
-      catch: serveError
-    })
+    uninstallService(verbose).pipe(
+      Effect.andThen(writeStdoutLine(
+        `${serviceLabel} stopped and deregistered. Connections and credentials were left in place.`
+      ))
+    )
 ).pipe(Command.withDescription("Stop and deregister the gateway service"))
 
 export const rootCommand = Command.make("ii").pipe(

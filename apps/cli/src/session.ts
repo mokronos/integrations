@@ -13,6 +13,7 @@ import {
 import type { GatewayClient } from "@mokronos/integrations-client"
 import { cliError, IntegrationsCliError } from "./connection.ts"
 import { openBrowser } from "./connection.ts"
+import type { ChildProcessSpawner } from "effect/unstable/process"
 import { optionalText, whenPresentMap } from "@mokronos/contracts"
 
 const OperatorSession = Schema.Struct({
@@ -198,7 +199,11 @@ export const loginOperatorInBrowser = Effect.fn("session.loginInBrowser")(functi
   readonly noOpen?: boolean
   readonly timeoutSeconds?: number
   readonly onAuthorization?: (url: string) => Promise<void>
-} = {}): Effect.fn.Return<OperatorSession, IntegrationsCliError, HttpClient.HttpClient> {
+} = {}): Effect.fn.Return<
+  OperatorSession,
+  IntegrationsCliError,
+  ChildProcessSpawner.ChildProcessSpawner | HttpClient.HttpClient
+> {
   const url = yield* resolveGatewayUrl()
   yield* verifyGateway(url)
   const started = yield* gatewayCall("POST", `${url}/v1/auth/cli/start`)
@@ -211,7 +216,7 @@ export const loginOperatorInBrowser = Effect.fn("session.loginInBrowser")(functi
   if (options.onAuthorization !== undefined) {
     yield* attempt(() => options.onAuthorization!(start.authorizationUrl))
   }
-  if (options.noOpen !== true) openBrowser(start.authorizationUrl)
+  if (options.noOpen !== true) yield* openBrowser(start.authorizationUrl)
 
   // Wait no longer than the gateway says the request is good for, and no
   // longer than the caller asked to wait.

@@ -82,6 +82,7 @@
   },
   "devDependencies": {
     "@effect/language-service": "catalog:",
+    "@effect/platform-bun": "catalog:",
     "@oxlint/plugins": "catalog:",
     "@types/bun": "catalog:",
     "effect-solutions": "catalog:",
