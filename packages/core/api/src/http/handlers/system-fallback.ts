@@ -2,7 +2,7 @@ import type { JsonObject } from "@mokronos/contracts"
 import {
   gatewayProtocolVersion
 } from "@mokronos/contracts"
-import { Effect } from "effect"
+import { Effect, Result } from "effect"
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { gatewayVersion } from "../../version.ts"
@@ -66,8 +66,8 @@ const unmatched = (webAssets: WebAssets | undefined) =>
       : new URL(rawUrl).pathname
     const method = request.method === "HEAD" ? "GET" : request.method
     if (webAssets !== undefined && method === "GET" && !pathname.startsWith("/v1/")) {
-      const asset = yield* Effect.promise(() => webAssets.respond(pathname))
-      if (asset !== undefined) return HttpServerResponse.fromWeb(asset)
+      const asset = yield* Effect.result(webAssets.respond)
+      if (Result.isSuccess(asset)) return asset.success
     }
     if (pathIsKnown(pathname)) {
       return json(405, { error: `${request.method} is not allowed on ${pathname}` })

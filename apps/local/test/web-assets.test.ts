@@ -3,7 +3,10 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
+import { Effect, Result } from "effect"
+import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { createWebAssets } from "../index.ts"
+import type { WebAssets } from "../index.ts"
 
 const directories: Array<string> = []
 
@@ -22,50 +25,68 @@ const buildOutput = async (): Promise<string> => {
   return directory
 }
 
+/** Asks the assets for a path the way a browser would, and reports the miss. */
+const ask = (assets: WebAssets, pathname: string): Promise<Response | undefined> =>
+  Effect.runPromise(
+    assets.respond.pipe(
+      Effect.provideService(
+        HttpServerRequest.HttpServerRequest,
+        HttpServerRequest.fromWeb(
+          new Request(`http://control.test${pathname}`, { headers: { accept: "text/html" } })
+        )
+      ),
+      Effect.result,
+      Effect.map((outcome) =>
+        Result.isSuccess(outcome)
+          ? HttpServerResponse.toWeb(outcome.success)
+          : undefined
+      )
+    )
+  )
+
 describe("control plane assets", () => {
   test("serves the entry document at the root", async () => {
-    const directory = await run(buildOutput())
-    const assets = await run(createWebAssets({ directories: [directory] }))
+    const assets = await run(createWebAssets({ directories: [await run(buildOutput())] }))
 
-    const response = await run(assets.respond("/"))
+    const response = await ask(assets, "/")
 
     expect(response?.status).toBe(200)
-    expect(response?.headers.get("content-type")).toBe("text/html; charset=utf-8")
+    expect(response?.headers.get("content-type")).toContain("text/html")
   })
 
   test("serves built files with the content type a browser needs", async () => {
-    const directory = await run(buildOutput())
-    const assets = await run(createWebAssets({ directories: [directory] }))
+    const assets = await run(createWebAssets({ directories: [await run(buildOutput())] }))
 
-    const response = await run(assets.respond("/assets/index-abc.js"))
+    const response = await ask(assets, "/assets/index-abc.js")
 
     expect(response?.status).toBe(200)
-    expect(response?.headers.get("content-type")).toBe("text/javascript; charset=utf-8")
+    expect(response?.headers.get("content-type")).toContain("javascript")
   })
 
   test("falls back to the entry document for a client-side route", async () => {
-    const directory = await run(buildOutput())
-    const assets = await run(createWebAssets({ directories: [directory] }))
+    const assets = await run(createWebAssets({ directories: [await run(buildOutput())] }))
 
-    const response = await run(assets.respond("/clients/cl_7"))
+    const response = await ask(assets, "/clients/cl_7")
 
     expect(response?.status).toBe(200)
     expect(await run(response?.text())).toContain("<title>control</title>")
   })
 
   test("a missing asset is a miss, not the entry document", async () => {
-    const directory = await run(buildOutput())
-    const assets = await run(createWebAssets({ directories: [directory] }))
+    const assets = await run(createWebAssets({ directories: [await run(buildOutput())] }))
 
-    expect(await run(assets.respond("/assets/gone.js"))).toBeUndefined()
+    expect(await ask(assets, "/assets/gone.js")).toBeUndefined()
   })
 
   test("refuses to escape the build directory", async () => {
-    const directory = await run(buildOutput())
-    const assets = await run(createWebAssets({ directories: [directory] }))
+    const assets = await run(createWebAssets({ directories: [await run(buildOutput())] }))
 
-    for (const pathname of ["/../../etc/passwd", "/assets/../../../../etc/passwd"]) {
-      expect(await run(assets.respond(pathname))).toBeUndefined()
+    // The URL parser folds "/../x" and its encoded spellings down to "/x", so
+    // what has to hold is that the resolved file never leaves the build output:
+    // a host path resolves inside the root, misses, and falls back to the SPA.
+    for (const pathname of ["/../../etc/passwd", "/%2e%2e/%2e%2e/etc/passwd", "/etc/passwd"]) {
+      const body = await run((await ask(assets, pathname))?.text())
+      expect(body ?? "").not.toContain("root:")
     }
   })
 
@@ -74,7 +95,7 @@ describe("control plane assets", () => {
     directories.push(empty)
 
     const assets = await run(createWebAssets({ directories: [path.join(empty, "nope")] }))
-    const response = await run(assets.respond("/"))
+    const response = await ask(assets, "/")
 
     expect(assets.directory).toBeUndefined()
     expect(response?.status).toBe(503)

@@ -1,36 +1,43 @@
-import { stat } from "node:fs/promises"
 import path from "node:path"
-
-const contentTypes = new Map([
-  [".html", "text/html; charset=utf-8"],
-  [".css", "text/css; charset=utf-8"],
-  [".js", "text/javascript; charset=utf-8"],
-  [".json", "application/json; charset=utf-8"],
-  [".svg", "image/svg+xml"],
-  [".png", "image/png"],
-  [".ico", "image/x-icon"],
-  [".woff2", "font/woff2"],
-  [".woff", "font/woff"],
-  [".map", "application/json; charset=utf-8"]
-])
-
-const contentTypeFor = (location: string): string =>
-  contentTypes.get(path.extname(location).toLowerCase()) ?? "application/octet-stream"
+// Imported by subpath: the package barrel reaches BunRedis, whose `bun`
+// import the Cloudflare bundler cannot resolve.
+import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
+import * as BunHttpPlatform from "@effect/platform-bun/BunHttpPlatform"
+import * as BunPath from "@effect/platform-bun/BunPath"
+import { Effect, FileSystem, Layer, Result } from "effect"
+import {
+  HttpServerError,
+  HttpServerRequest,
+  HttpServerResponse,
+  HttpStaticServer
+} from "effect/unstable/http"
 
 const webAssetsDirectory = (): string =>
   path.resolve(import.meta.dirname ?? process.cwd(), "../../../../apps/web/dist")
 
-const directoryExists = async (location: string): Promise<boolean> => {
-  try {
-    return (await stat(location)).isDirectory()
-  } catch {
-    return false
-  }
-}
+/**
+ * Serving the built control plane needs a real filesystem, which the gateway's
+ * own platform layer deliberately does not carry. The static app is built with
+ * the Bun platform baked in, so it leaves the caller nothing to provide beyond
+ * the request itself.
+ */
+const platform = Layer.mergeAll(
+  BunFileSystem.layer,
+  BunPath.layer,
+  BunHttpPlatform.layer.pipe(Layer.provide(BunFileSystem.layer))
+)
 
 export interface WebAssets {
   readonly directory: string | undefined
-  respond(pathname: string): Promise<Response | undefined>
+  /**
+   * Resolves the request against the build output. Fails when nothing there
+   * matches, which the caller reads as "not an asset, keep looking".
+   */
+  readonly respond: Effect.Effect<
+    HttpServerResponse.HttpServerResponse,
+    HttpServerError.HttpServerError,
+    HttpServerRequest.HttpServerRequest
+  >
 }
 
 const notBuiltMessage = (directory: string): string =>
@@ -42,46 +49,32 @@ export interface WebAssetsOptions {
   readonly directories?: ReadonlyArray<string>
 }
 
-export const createWebAssets = async (
+export const createWebAssets = (
   options: WebAssetsOptions = {}
-): Promise<WebAssets> => {
-  const directory =
-    options.directories?.[0] ??
-    process.env["INTEGRATIONS_WEB_DIR"] ??
-    webAssetsDirectory()
+): Effect.Effect<WebAssets> =>
+  Effect.gen(function*() {
+    const directory =
+      options.directories?.[0] ??
+      process.env["INTEGRATIONS_WEB_DIR"] ??
+      webAssetsDirectory()
 
-  if (!(await directoryExists(directory))) {
+    const fileSystem = yield* FileSystem.FileSystem
+    const built = yield* Effect.result(fileSystem.stat(directory))
+    if (Result.isFailure(built) || built.success.type !== "Directory") {
+      return {
+        directory: undefined,
+        respond: Effect.succeed(
+          HttpServerResponse.text(notBuiltMessage(directory), { status: 503 })
+        )
+      }
+    }
+
     return {
-      directory: undefined,
-      respond: async () =>
-        new Response(notBuiltMessage(directory), {
-          status: 503,
-          headers: { "content-type": "text/plain; charset=utf-8" }
-        })
+      directory,
+      respond: yield* HttpStaticServer.make({
+        root: directory,
+        index: "index.html",
+        spa: true
+      })
     }
-  }
-
-  const root = directory
-  const indexPath = path.join(root, "index.html")
-
-  const fileResponse = async (location: string): Promise<Response | undefined> => {
-    const file = Bun.file(location)
-    if (!(await file.exists())) return undefined
-    return new Response(file, { headers: { "content-type": contentTypeFor(location) } })
-  }
-
-  return {
-    directory: root,
-    respond: async (pathname) => {
-      const requested = path.resolve(root, `.${pathname}`)
-      const contained = requested === root || requested.startsWith(`${root}${path.sep}`)
-      if (!contained) return undefined
-
-      const direct = pathname === "/" ? undefined : await fileResponse(requested)
-      if (direct !== undefined) return direct
-
-      if (path.extname(pathname).length > 0) return undefined
-      return await fileResponse(indexPath)
-    }
-  }
-}
+  }).pipe(Effect.provide(platform), Effect.orDie)

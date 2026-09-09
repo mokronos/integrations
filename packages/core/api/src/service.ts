@@ -281,7 +281,7 @@ export const serveGateway = async (options: ServeOptions): Promise<RunningGatewa
   })
 
   try {
-    const web = options.web === false ? undefined : await createWebAssets()
+    const web = options.web === false ? undefined : await Effect.runPromise(createWebAssets())
 
     let localSecret: string | undefined
 
@@ -310,11 +310,6 @@ export const serveGateway = async (options: ServeOptions): Promise<RunningGatewa
       hostname,
       port: requestedPort,
       fetch: async (request, running) => {
-        const pathname = new URL(request.url).pathname
-        if (web !== undefined && !pathname.startsWith("/v1/") && pathname !== "/mcp") {
-          const asset = await web.respond(pathname)
-          if (asset !== undefined) return asset
-        }
         const remoteAddress = running.requestIP(request)?.address
         const borrow = localSecret !== undefined && mayBorrowLocalCredential(request, {
           boundToLoopback,
