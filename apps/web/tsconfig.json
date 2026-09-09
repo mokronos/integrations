@@ -15,7 +15,10 @@
       "@mokronos/gateway-core": ["../../packages/core/gateway/src/index.ts"],
       "@mokronos/gateway-core/domain": ["../../packages/core/gateway/src/domain.ts"],
       "@mokronos/integrations": ["../../packages/integrations/src/index.ts"],
-      "@mokronos/integrations-client": ["../../apps/ts/src/index.ts"]
+      "@mokronos/integrations-client": ["../../apps/ts/src/index.ts"],
+      "@mokronos/integrations-client/client": ["../../apps/ts/src/client.ts"],
+      "@mokronos/gateway-api/definition": ["../../packages/core/api/src/http/api.ts"],
+      "@mokronos/contracts/gateway-config": ["../../packages/contracts/src/gateway-config.ts"]
     },
     "allowArbitraryExtensions": true,
     "erasableSyntaxOnly": true

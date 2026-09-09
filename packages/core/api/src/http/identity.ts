@@ -1,8 +1,8 @@
 import { Context, Effect, Option, Schema } from "effect"
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiSchema } from "effect/unstable/httpapi"
-import type { Client, ClientCapability, SubjectId, TenantId } from "@mokronos/gateway-core"
-import { SessionTokenHash } from "@mokronos/gateway-core"
+import type { Client, ClientCapability, SubjectId, TenantId } from "@mokronos/gateway-core/domain"
+import { SessionTokenHash } from "@mokronos/gateway-core/domain"
 
 export const RefusalReason = Schema.Literals([
   "unknown-key",

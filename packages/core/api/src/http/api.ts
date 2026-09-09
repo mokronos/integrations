@@ -11,14 +11,12 @@ import {
   ApprovalDestination,
   ApprovalDestinationId,
   ApprovalId,
-  ApprovalStatus,
   AuditOutcome,
   AuditRecord,
   Client,
   ConfigureClient,
   ClientCapability,
   ClientId,
-  Alias,
   ApiKeyId,
   ConnectionRef,
   AccessProfile,
@@ -30,8 +28,10 @@ import {
   PolicyDecision,
   PendingApproval,
   SubjectId
-} from "@mokronos/gateway-core"
+} from "@mokronos/gateway-core/domain"
 import {
+  Alias,
+  ApprovalStatus,
   BooleanFromString,
   Connection,
   GatewayMetadata,
@@ -49,7 +49,7 @@ import {
   ToolAddress,
   ToolSummary
 } from "@mokronos/contracts"
-import { Authority } from "./authority.ts"
+import { Authority } from "./middleware.ts"
 import { ForbiddenError, RequiredAccess, Unmetered } from "./identity.ts"
 
 const Json = Schema.Json

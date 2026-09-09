@@ -69,7 +69,7 @@ export function OnboardingRoute() {
       if (secret === undefined) throw new Error("Issue a key in the previous step to verify access.")
       return Effect.runPromise(
         makeGatewayClient({ url: window.location.origin, apiKey: secret }).pipe(
-          Effect.flatMap((client) => client.effectiveTools()),
+          Effect.flatMap((client) => client.delegated.listTools({ query: { schemas: false } })),
           Effect.provideService(FetchHttpClient.RequestInit, { credentials: "omit" }),
           Effect.provide(FetchHttpClient.layer)
         )

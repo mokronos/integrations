@@ -1,7 +1,9 @@
 import { Effect, Schema } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { HttpApiClient } from "effect/unstable/httpapi"
-import { GatewayApi } from "@mokronos/gateway-api"
+// The definition alone: importing the package index would pull the server
+// — handlers, store, MCP — into every consumer of this client.
+import { GatewayApi } from "@mokronos/gateway-api/definition"
 import {
   Connection,
   GatewayMetadata,

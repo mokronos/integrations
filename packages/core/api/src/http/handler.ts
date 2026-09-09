@@ -14,7 +14,7 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { HttpApiSchemaError } from "effect/unstable/httpapi/HttpApiError"
 import { GatewayApi } from "./api.ts"
 import {
-  Authority,
+  authorityLayer,
   CurrentRequestContext
 } from "./authority.ts"
 import type { RateLimits } from "./authority.ts"
@@ -163,7 +163,7 @@ export const gatewayAppLayer = (options: GatewayHandlerOptions) => {
   )
   return base.pipe(
     Layer.provideMerge(groups),
-    Layer.provideMerge(Authority.layer({
+    Layer.provideMerge(authorityLayer({
       store: options.store,
       ...whenPresent("rateLimits", options.rateLimits)
     }))

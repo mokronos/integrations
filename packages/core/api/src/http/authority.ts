@@ -1,7 +1,7 @@
 import { Context, Crypto, Duration, Effect, Layer, Option } from "effect"
 import { RateLimiter } from "effect/unstable/persistence"
-import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
+import { Authority } from "./middleware.ts"
 import { authenticateClient, authorizeClientCapability } from "@mokronos/gateway-core"
 import { SessionTokenHash } from "@mokronos/gateway-core"
 import { hashSessionToken } from "@mokronos/gateway-core"
@@ -10,10 +10,8 @@ import type { GatewayStore } from "@mokronos/gateway-core"
 import {
   Identity,
   Forbidden,
-  ForbiddenError,
   RequiredAccess,
   Unauthorized,
-  UnauthorizedError,
   Unmetered,
   rateLimitedResponse,
   refusedOf,
@@ -233,65 +231,61 @@ const refusalOf = (
     )))
     : Effect.die(error)
 
-export class Authority extends HttpApiMiddleware.Service<Authority, {
-  provides: Identity
-}>()("@mokronos/integrations/Authority", {
-  error: [UnauthorizedError, ForbiddenError]
-}) {
-  static readonly layer = (options: AuthorityOptions): Layer.Layer<Authority> =>
-    Layer.effect(
-      Authority,
-      Effect.gen(function*() {
-        const limits = options.rateLimits
-        const crypto = yield* Crypto.Crypto
-        const limiter = yield* RateLimiter.RateLimiter
-        const meter = (key: string, limit: number) =>
-          limiter.consume({ key, limit, window: rateLimitWindow }).pipe(
-            Effect.as(Option.none<HttpServerResponse.HttpServerResponse>()),
-            Effect.catch(refusalOf)
-          )
+export const authorityLayer = (options: AuthorityOptions): Layer.Layer<Authority> =>
+  Layer.effect(
+    Authority,
+    Effect.gen(function*() {
+      const limits = options.rateLimits
+      const crypto = yield* Crypto.Crypto
+      const limiter = yield* RateLimiter.RateLimiter
+      const meter = (key: string, limit: number) =>
+        limiter.consume({ key, limit, window: rateLimitWindow }).pipe(
+          Effect.as(Option.none<HttpServerResponse.HttpServerResponse>()),
+          Effect.catch(refusalOf)
+        )
 
-        return (httpEffect, { endpoint }) =>
-          Effect.gen(function*() {
-            const request = yield* HttpServerRequest.HttpServerRequest
-            const context = yield* CurrentRequestContext
-            const headers = request.headers
-            const unmetered = Context.get(endpoint.annotations, Unmetered)
+      return (httpEffect, { endpoint }) =>
+        Effect.gen(function*() {
+          const request = yield* HttpServerRequest.HttpServerRequest
+          const context = yield* CurrentRequestContext
+          const headers = request.headers
+          const unmetered = Context.get(endpoint.annotations, Unmetered)
 
-            if (!unmetered && limits !== undefined) {
-              const refused = yield* meter(
-                `addr:${context.remoteAddress ?? "unknown"}`,
-                limits.addressPerMinute
-              )
+          if (!unmetered && limits !== undefined) {
+            const refused = yield* meter(
+              `addr:${context.remoteAddress ?? "unknown"}`,
+              limits.addressPerMinute
+            )
+            if (Option.isSome(refused)) return refused.value
+          }
+
+          const caller = unmetered
+            ? ({ kind: "anonymous" } satisfies Caller)
+            : yield* resolveCaller(options, headers, context)
+
+          if (!unmetered && limits !== undefined) {
+            const key = principalKey(caller)
+            if (Option.isSome(key)) {
+              const refused = yield* meter(key.value, limits.principalPerMinute)
               if (Option.isSome(refused)) return refused.value
             }
+          }
 
-            const caller = unmetered
-              ? ({ kind: "anonymous" } satisfies Caller)
-              : yield* resolveCaller(options, headers, context)
+          if (!unmetered) {
+            const access = Context.getOrElse(
+              endpoint.annotations,
+              RequiredAccess,
+              () => RequiredAccess.defaultValue()
+            )
+            yield* admit(options, caller, access, request.method, headers)
+          }
 
-            if (!unmetered && limits !== undefined) {
-              const key = principalKey(caller)
-              if (Option.isSome(key)) {
-                const refused = yield* meter(key.value, limits.principalPerMinute)
-                if (Option.isSome(refused)) return refused.value
-              }
-            }
+          return yield* Effect.provideService(httpEffect, Identity, caller)
+        }).pipe(Effect.provideService(Crypto.Crypto, crypto))
+    })
+  ).pipe(
+    Layer.provide(RateLimiter.layer.pipe(Layer.provide(RateLimiter.layerStoreMemory))),
+    Layer.provide(webCryptoLayer)
+  )
 
-            if (!unmetered) {
-              const access = Context.getOrElse(
-                endpoint.annotations,
-                RequiredAccess,
-                () => RequiredAccess.defaultValue()
-              )
-              yield* admit(options, caller, access, request.method, headers)
-            }
-
-            return yield* Effect.provideService(httpEffect, Identity, caller)
-          }).pipe(Effect.provideService(Crypto.Crypto, crypto))
-      })
-    ).pipe(
-      Layer.provide(RateLimiter.layer.pipe(Layer.provide(RateLimiter.layerStoreMemory))),
-      Layer.provide(webCryptoLayer)
-    )
-}
+export { Authority }

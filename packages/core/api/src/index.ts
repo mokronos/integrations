@@ -1,5 +1,6 @@
 export * from "./http/api.ts"
 export * from "./http/authority.ts"
+export * from "./http/middleware.ts"
 export * from "./http/handler.ts"
 export * from "./http/identity.ts"
 export * from "./http/loopback.ts"
