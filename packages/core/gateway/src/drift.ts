@@ -1,7 +1,7 @@
 import type { IntegrationHost } from "@mokronos/integrations"
 import { IntegrationSlug, TenantId } from "./domain.ts"
 import type { DriftEntry, ToolSnapshot } from "./domain.ts"
-import { Effect, Schema } from "effect"
+import { DateTime, Effect, Schema } from "effect"
 import type { GatewayStore, GatewayStoreError } from "./store.ts"
 
 const schemaFingerprint = (snapshot: Pick<ToolSnapshot, "inputSchema" | "outputSchema">): string =>
@@ -81,7 +81,7 @@ export const refreshIntegrationSnapshot = Effect.fn("Drift.refreshIntegrationSna
     tenantId: TenantId
   ): Effect.fn.Return<DriftReport, DriftRefreshError | GatewayStoreError> {
     const slug = IntegrationSlug.make(integration)
-    const checkedAt = new Date()
+    const checkedAt = yield* DateTime.nowAsDate
     const tools = yield* dependencies.integrations.host.listTools({ integration: slug }).pipe(
       Effect.mapError((cause) => new DriftRefreshError({ integration, cause }))
     )

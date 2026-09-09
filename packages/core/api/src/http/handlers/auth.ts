@@ -1,4 +1,4 @@
-import { Clock, Crypto, Effect } from "effect"
+import { Crypto, DateTime, Duration, Effect } from "effect"
 import { HttpServerResponse } from "effect/unstable/http"
 import type { HttpClient } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -95,7 +95,9 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
     const issueSession = (subjectId: SubjectId, tenantId: TenantId) =>
       Effect.gen(function*() {
         const token = (yield* generateSessionToken)
-        const expiresAt = new Date((yield* Clock.currentTimeMillis) + ttlHours * 60 * 60 * 1000)
+        const expiresAt = DateTime.toDateUtc(
+          DateTime.addDuration(yield* DateTime.now, Duration.hours(ttlHours))
+        )
         yield* capture(store.createSession({ tokenHash: token.hash, subjectId, tenantId, expiresAt }))
         return { token: token.secret }
       })
@@ -132,7 +134,9 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
             })
           }
           const request = (yield* generateLoginHandoff)
-          const expiresAt = new Date((yield* Clock.currentTimeMillis) + handoffTtlMs)
+          const expiresAt = DateTime.toDateUtc(
+            DateTime.addDuration(yield* DateTime.now, handoffTtl)
+          )
           yield* capture(store.createLoginHandoff({ requestHash: request.hash, expiresAt }))
           const start = new URL("/v1/auth/google/start", googleIdentityCallbackUrl(google))
           start.searchParams.set("handoff", request.secret)
@@ -153,7 +157,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
               code: "login-handoff-unknown" as const
             })
           }
-          if (handoff.expiresAt.getTime() <= (yield* Clock.currentTimeMillis)) {
+          if (DateTime.isLessThanOrEqualTo(DateTime.fromDateUnsafe(handoff.expiresAt), yield* DateTime.now)) {
             return yield* new HandoffExpired({
               error: "Login handoff expired",
               code: "login-handoff-expired" as const
@@ -197,9 +201,12 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
           const handoffHash = handoffSecret === undefined ? null : (yield* hashLoginHandoff(handoffSecret))
           if (handoffHash !== null) {
             const handoff = yield* capture(store.getLoginHandoff(handoffHash))
-            const now = yield* Clock.currentTimeMillis
-            if (handoff === undefined || handoff.expiresAt.getTime() <= now ||
-              handoff.collectedAt !== null) {
+            const now = yield* DateTime.now
+            if (
+              handoff === undefined ||
+              DateTime.isLessThanOrEqualTo(DateTime.fromDateUnsafe(handoff.expiresAt), now) ||
+              handoff.collectedAt !== null
+            ) {
               return page(410, {
                 title: "Sign-in link expired",
                 message: "Return to the terminal and run `ii login` again."
@@ -208,13 +215,15 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
           }
           const state = (yield* generateLoginHandoff)
           const returnPath = safeReturnPath(request.query["returnTo"])
-          const stateExpiresAtMs = (yield* Clock.currentTimeMillis) + handoffTtlMs
+          const stateExpiresAt = DateTime.toDateUtc(
+            DateTime.addDuration(yield* DateTime.now, handoffTtl)
+          )
           yield* capture(store.createIdentityOAuthState({
             stateHash: state.hash,
             provider: "google",
             handoffHash,
             returnPath,
-            expiresAt: new Date(stateExpiresAtMs)
+            expiresAt: stateExpiresAt
           }))
           return HttpServerResponse.redirect(
             googleIdentityAuthorizationUrl(google, state.secret),
@@ -456,7 +465,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
 
 const defaultSessionTtlHours = 24 * 30
 
-const handoffTtlMs = 10 * 60 * 1000
+const handoffTtl = Duration.minutes(10)
 
 type GoogleCallbackOutcome = {
   readonly _tag: "page"

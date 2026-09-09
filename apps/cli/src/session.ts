@@ -1,6 +1,6 @@
 import { chmod, mkdir, rm } from "node:fs/promises"
 import path from "node:path"
-import { Config, Effect, Option, Predicate, Schema } from "effect"
+import { Config, DateTime, Duration, Effect, Option, Predicate, Schedule, Schema } from "effect"
 import { HttpBody, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import type { HttpClientResponse, HttpMethod } from "effect/unstable/http"
 import {
@@ -213,11 +213,13 @@ export const loginOperatorInBrowser = Effect.fn("session.loginInBrowser")(functi
   }
   if (options.noOpen !== true) openBrowser(start.authorizationUrl)
 
-  const deadline = Math.min(
-    Date.parse(start.expiresAt),
-    Date.now() + (options.timeoutSeconds ?? 300) * 1_000
+  // Wait no longer than the gateway says the request is good for, and no
+  // longer than the caller asked to wait.
+  const patience = Duration.min(
+    DateTime.distance(yield* DateTime.now, DateTime.makeUnsafe(start.expiresAt)),
+    Duration.seconds(options.timeoutSeconds ?? 300)
   )
-  while (Date.now() < deadline) {
+  const settled = yield* Effect.gen(function*() {
     const polled = yield* gatewayCall(
       "GET",
       `${url}/v1/auth/cli/${encodeURIComponent(start.requestId)}`
@@ -228,18 +230,20 @@ export const loginOperatorInBrowser = Effect.fn("session.loginInBrowser")(functi
       )
     }
     const poll = yield* decoded(decodeLoginPoll(polled.payload))
-    if (poll.status === "authenticated") {
-      const session = yield* decoded(decodeSession({
-        url,
-        token: poll.token,
-        email: poll.email
-      }))
-      yield* writeOperatorSession(session)
-      return session
-    }
-    yield* Effect.sleep(Math.max(250, start.intervalMs))
+    if (poll.status !== "authenticated") return undefined
+    return yield* decoded(decodeSession({ url, token: poll.token, email: poll.email }))
+  }).pipe(
+    Effect.repeat({
+      schedule: Schedule.spaced(Duration.max(Duration.millis(250), Duration.millis(start.intervalMs))),
+      while: (session) => session === undefined
+    }),
+    Effect.timeoutOrElse({ duration: patience, orElse: () => Effect.succeed(undefined) })
+  )
+  if (settled === undefined) {
+    return yield* cliError("Browser login timed out. Run `ii login` to start a fresh sign-in.")
   }
-  return yield* cliError("Browser login timed out. Run `ii login` to start a fresh sign-in.")
+  yield* writeOperatorSession(settled)
+  return settled
 })
 
 export const signupOperator = Effect.fn("session.signup")(function*(input: {

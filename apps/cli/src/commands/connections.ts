@@ -1,7 +1,7 @@
 import { whenPresent, whenPresentMap } from "@mokronos/contracts"
 import type { GatewayClient } from "@mokronos/integrations-client"
 import type { HttpClient } from "effect/unstable/http"
-import { Effect, Option, Schema } from "effect"
+import { Duration, Effect, Option, Schedule, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import type { IntegrationsCliError } from "../connection.ts"
 import { cliError, connectToGateway, describeError, openBrowser } from "../connection.ts"
@@ -186,16 +186,25 @@ export const connectCommand = (runGateway: GatewayTask) => Command.make(
           console.error(`Authorize in your browser:\n${authorizationUrl}`)
           if (!options.noOpen) openBrowser(authorizationUrl)
         }
-        const deadline = Date.now() + Math.max(1, options.timeout) * 1000
-        while (Date.now() < deadline) {
+        const settled = yield* Effect.gen(function*() {
           const session = record(yield* client.oauth(sessionId))
           const current = record(session["state"])
           if (text(current["status"]) === "connected") return record(current["connection"])
           if (text(current["status"]) === "failed") {
             return yield* cliError(`Connection failed: ${text(current["message"])}`)
           }
-          yield* Effect.sleep(500)
-        }
+          return undefined
+        }).pipe(
+          Effect.repeat({
+            schedule: Schedule.spaced(Duration.millis(500)),
+            while: (connection) => connection === undefined
+          }),
+          Effect.timeoutOrElse({
+            duration: Duration.seconds(Math.max(1, options.timeout)),
+            orElse: () => Effect.succeed(undefined)
+          })
+        )
+        if (settled !== undefined) return settled
         return yield* cliError(
           `OAuth authorization timed out after ${options.timeout} seconds`
         )

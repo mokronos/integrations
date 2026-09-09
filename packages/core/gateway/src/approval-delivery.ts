@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
-import { Duration, Effect, Random, Schema } from "effect"
+import { DateTime, Duration, Effect, Random, Schema } from "effect"
 import { FetchHttpClient, HttpBody, HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { utf8Bytes, whenPresent } from "@mokronos/contracts"
 import type { GatewayStore } from "./store-contract.ts"
@@ -53,7 +53,7 @@ export const deliverDueApprovalNotifications = Effect.fn("Approval.deliverDueNot
     readonly limit?: number
     readonly now?: Date
   }) {
-    const at = input.now ?? new Date()
+    const at = input.now ?? (yield* DateTime.nowAsDate)
     const jobs = yield* input.store.claimDueApprovalDeliveries(at, input.limit ?? 25)
     const client = yield* HttpClient.HttpClient
     yield* Effect.forEach(jobs, (job) => Effect.gen(function*() {

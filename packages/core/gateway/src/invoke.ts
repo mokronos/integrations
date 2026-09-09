@@ -1,5 +1,5 @@
 import { whenPresent } from "@mokronos/contracts"
-import { Crypto, Effect, Schema } from "effect"
+import { Crypto, DateTime, Duration, Effect, Schema } from "effect"
 import type { HttpClient } from "effect/unstable/http"
 import type { IntegrationHost } from "@mokronos/integrations"
 import { ToolAddress } from "@mokronos/contracts"
@@ -61,7 +61,7 @@ const auditFor = (
   argumentsValue: Json,
   retentionDays: number
 ): Effect.Effect<RecordAuditInput, never, Crypto.Crypto> =>
-  Effect.map(newAuditId, (id): RecordAuditInput => ({
+  Effect.all([newAuditId, DateTime.now]).pipe(Effect.map(([id, at]): RecordAuditInput => ({
   tenantId: authorization.client.tenantId,
   id,
   clientId: authorization.client.id,
@@ -73,9 +73,9 @@ const auditFor = (
   message,
   arguments: {
     value: argumentsValue,
-    expiresAt: new Date(Date.now() + retentionDays * 24 * 60 * 60 * 1000)
+    expiresAt: DateTime.toDateUtc(DateTime.addDuration(at, Duration.days(retentionDays)))
   }
-}))
+})))
 
 const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function*(
   dependencies: {
@@ -150,7 +150,9 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function*(
     alias: authorization.alias,
     tool: authorization.accessProfileTool.tool,
     arguments: argumentsValue,
-    expiresAt: new Date(Date.now() + dependencies.expiryHours * 60 * 60 * 1000)
+    expiresAt: DateTime.toDateUtc(
+      DateTime.addDuration(yield* DateTime.now, Duration.hours(dependencies.expiryHours))
+    )
   })
   if (approval.id !== id) return pending(approval.id, approval.expiresAt)
   yield* store.recordAudit(
