@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "@effect/vitest"
 import { serviceLabel, serviceName, slugify } from "@integrations/contracts"
 import { Option } from "effect"
 

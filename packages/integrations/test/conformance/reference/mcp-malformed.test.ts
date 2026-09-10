@@ -1,44 +1,35 @@
-import { afterEach, describe, expect, it } from "bun:test"
-import { Effect, Layer, Option } from "effect"
+import { describe, expect, it } from "@effect/vitest"
+import { Effect, Layer, Option, Scope } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { McpClient } from "../../../src/mcp/client.ts"
 
-const servers: Array<ReturnType<typeof Bun.serve>> = []
+const services = McpClient.layer.pipe(Layer.provide(FetchHttpClient.layer))
 
-afterEach(() => {
-  for (const server of servers.splice(0)) server.stop(true)
-})
+/** An endpoint that answers every request the same wrong way. */
+const malformedServer = (
+  response: () => Response
+): Effect.Effect<string, never, Scope.Scope> =>
+  Effect.acquireRelease(
+    Effect.sync(() => Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: response })),
+    (server) => Effect.promise(() => server.stop(true))
+  ).pipe(Effect.map((server) => `http://127.0.0.1:${server.port}/mcp`))
 
-const malformedServer = (response: () => Response): string => {
-  const server = Bun.serve({
-    hostname: "127.0.0.1",
-    port: 0,
-    fetch: response
-  })
-  servers.push(server)
-  return `http://127.0.0.1:${server.port}/mcp`
-}
+const listTools = (endpoint: string) =>
+  Effect.flatMap(McpClient, (host) => host.listTools(endpoint, Option.none()))
 
 describe("malformed MCP servers", () => {
-  it("rejects a non-JSON initialize response", async () => {
-    const endpoint = malformedServer(() => new Response("not json", {
-      headers: { "content-type": "application/json" }
-    }))
-    const result = await Effect.runPromiseExit(
-      Effect.flatMap(McpClient, (host) => host.listTools(endpoint, Option.none())).pipe(
-        Effect.provide(McpClient.layer.pipe(Layer.provide(FetchHttpClient.layer)))
-      )
-    )
-    expect(result._tag).toBe("Failure")
-  })
+  it.live("rejects a non-JSON initialize response", () =>
+    Effect.gen(function*() {
+      const endpoint = yield* malformedServer(() =>
+        new Response("not json", { headers: { "content-type": "application/json" } }))
 
-  it("rejects an invalid JSON-RPC envelope", async () => {
-    const endpoint = malformedServer(() => Response.json({ result: { tools: [] } }))
-    const result = await Effect.runPromiseExit(
-      Effect.flatMap(McpClient, (host) => host.listTools(endpoint, Option.none())).pipe(
-        Effect.provide(McpClient.layer.pipe(Layer.provide(FetchHttpClient.layer)))
-      )
-    )
-    expect(result._tag).toBe("Failure")
-  })
+      expect((yield* Effect.exit(listTools(endpoint)))._tag).toBe("Failure")
+    }).pipe(Effect.provide(services)))
+
+  it.live("rejects an invalid JSON-RPC envelope", () =>
+    Effect.gen(function*() {
+      const endpoint = yield* malformedServer(() => Response.json({ result: { tools: [] } }))
+
+      expect((yield* Effect.exit(listTools(endpoint)))._tag).toBe("Failure")
+    }).pipe(Effect.provide(services)))
 })

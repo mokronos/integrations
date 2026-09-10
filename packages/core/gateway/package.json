@@ -22,6 +22,11 @@
       "bun": "./src/domain.ts",
       "development": "./src/domain.ts",
       "default": "./dist/domain.js"
+    },
+    "./test-fixtures": {
+      "bun": "./test/fixtures.ts",
+      "development": "./test/fixtures.ts",
+      "default": "./test/fixtures.ts"
     }
   },
   "scripts": {

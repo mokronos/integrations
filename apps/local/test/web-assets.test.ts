@@ -1,80 +1,82 @@
-import { run } from "./effect.ts"
-import { afterEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, it } from "@effect/vitest"
 import path from "node:path"
-import { Effect, Result } from "effect"
+import { Effect, FileSystem, Result } from "effect"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { createWebAssets } from "../index.ts"
 import type { WebAssets } from "../index.ts"
+import { temporaryDirectory, testServices } from "./fixtures.ts"
 
-const directories: Array<string> = []
-
-afterEach(async () => {
-  await run(Promise.all(
-    directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
+/** A build output the way `bun run build` leaves one behind. */
+const buildOutput = Effect.fnUntraced(function*() {
+  const fs = yield* FileSystem.FileSystem
+  const directory = yield* temporaryDirectory("web-assets-")
+  yield* Effect.orDie(fs.writeFileString(
+    path.join(directory, "index.html"),
+    "<!doctype html><title>control</title>"
   ))
+  yield* Effect.orDie(fs.makeDirectory(path.join(directory, "assets"), { recursive: true }))
+  yield* Effect.orDie(fs.writeFileString(
+    path.join(directory, "assets", "index-abc.js"),
+    "console.log(1)"
+  ))
+  return directory
 })
 
-const buildOutput = async (): Promise<string> => {
-  const directory = await run(mkdtemp(path.join(tmpdir(), "wf-web-assets-")))
-  directories.push(directory)
-  await run(writeFile(path.join(directory, "index.html"), "<!doctype html><title>control</title>"))
-  await run(mkdir(path.join(directory, "assets"), { recursive: true }))
-  await run(writeFile(path.join(directory, "assets", "index-abc.js"), "console.log(1)"))
-  return directory
-}
+const served = Effect.flatMap(
+  buildOutput(),
+  (directory) => createWebAssets({ directories: [directory] })
+)
 
 /** Asks the assets for a path the way a browser would, and reports the miss. */
-const ask = (assets: WebAssets, pathname: string): Promise<Response | undefined> =>
-  Effect.runPromise(
-    assets.respond.pipe(
-      Effect.provideService(
-        HttpServerRequest.HttpServerRequest,
-        HttpServerRequest.fromWeb(
-          new Request(`http://control.test${pathname}`, { headers: { accept: "text/html" } })
-        )
-      ),
-      Effect.result,
-      Effect.map((outcome) =>
-        Result.isSuccess(outcome)
-          ? HttpServerResponse.toWeb(outcome.success)
-          : undefined
+const ask = (assets: WebAssets, pathname: string): Effect.Effect<Response | undefined> =>
+  assets.respond.pipe(
+    Effect.provideService(
+      HttpServerRequest.HttpServerRequest,
+      HttpServerRequest.fromWeb(
+        new Request(`http://control.test${pathname}`, { headers: { accept: "text/html" } })
       )
+    ),
+    Effect.result,
+    Effect.map((outcome) =>
+      Result.isSuccess(outcome) ? HttpServerResponse.toWeb(outcome.success) : undefined
     )
   )
 
+const bodyOf = (response: Response | undefined) =>
+  Effect.promise(() => response?.text() ?? Promise.resolve(""))
+
 describe("control plane assets", () => {
-  test("falls back to the entry document for a client-side route", async () => {
-    const assets = await run(createWebAssets({ directories: [await run(buildOutput())] }))
+  it.effect("falls back to the entry document for a client-side route", () =>
+    Effect.gen(function*() {
+      const assets = yield* served
 
-    const response = await ask(assets, "/clients/cl_7")
+      const response = yield* ask(assets, "/clients/cl_7")
 
-    expect(response?.status).toBe(200)
-    expect(await run(response?.text())).toContain("<title>control</title>")
-  })
+      expect(response?.status).toBe(200)
+      expect(yield* bodyOf(response)).toContain("<title>control</title>")
+    }).pipe(Effect.provide(testServices)))
 
-  test("refuses to escape the build directory", async () => {
-    const assets = await run(createWebAssets({ directories: [await run(buildOutput())] }))
+  it.effect("refuses to escape the build directory", () =>
+    Effect.gen(function*() {
+      const assets = yield* served
 
-    // The URL parser folds "/../x" and its encoded spellings down to "/x", so
-    // what has to hold is that the resolved file never leaves the build output:
-    // a host path resolves inside the root, misses, and falls back to the SPA.
-    for (const pathname of ["/../../etc/passwd", "/%2e%2e/%2e%2e/etc/passwd", "/etc/passwd"]) {
-      const body = await run((await ask(assets, pathname))?.text())
-      expect(body ?? "").not.toContain("root:")
-    }
-  })
+      // The URL parser folds "/../x" and its encoded spellings down to "/x", so
+      // what has to hold is that the resolved file never leaves the build output:
+      // a host path resolves inside the root, misses, and falls back to the SPA.
+      for (const pathname of ["/../../etc/passwd", "/%2e%2e/%2e%2e/etc/passwd", "/etc/passwd"]) {
+        expect(yield* bodyOf(yield* ask(assets, pathname))).not.toContain("root:")
+      }
+    }).pipe(Effect.provide(testServices)))
 
-  test("says what to build when there is nothing to serve", async () => {
-    const empty = await run(mkdtemp(path.join(tmpdir(), "wf-web-missing-")))
-    directories.push(empty)
+  it.effect("says what to build when there is nothing to serve", () =>
+    Effect.gen(function*() {
+      const empty = yield* temporaryDirectory("web-assets-missing-")
 
-    const assets = await run(createWebAssets({ directories: [path.join(empty, "nope")] }))
-    const response = await ask(assets, "/")
+      const assets = yield* createWebAssets({ directories: [path.join(empty, "nope")] })
+      const response = yield* ask(assets, "/")
 
-    expect(assets.directory).toBeUndefined()
-    expect(response?.status).toBe(503)
-    expect(await run(response?.text())).toContain("bun run --cwd apps/web build")
-  })
+      expect(assets.directory).toBeUndefined()
+      expect(response?.status).toBe(503)
+      expect(yield* bodyOf(response)).toContain("bun run --cwd apps/web build")
+    }).pipe(Effect.provide(testServices)))
 })

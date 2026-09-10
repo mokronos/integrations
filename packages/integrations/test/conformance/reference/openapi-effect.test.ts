@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "bun:test"
+import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Option } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { ConnectionName, IntegrationSlug } from "@integrations/contracts"
@@ -7,23 +7,15 @@ import { compileSpec } from "../../../src/openapi/compile.ts"
 import { OpenApiInvoker } from "../../../src/openapi/invoke.ts"
 import {
   referenceOpenApiDocument,
-  startReferenceOpenApiServer,
-  type ReferenceOpenApiServer
+  referenceOpenApiServer
 } from "../support/reference-openapi.ts"
 
+const services = OpenApiInvoker.layer.pipe(Layer.provide(FetchHttpClient.layer))
+
 describe("Effect OpenAPI reference server", () => {
-  let reference: ReferenceOpenApiServer
-
-  beforeAll(() => {
-    reference = startReferenceOpenApiServer()
-  })
-
-  afterAll(() => {
-    reference.stop()
-  })
-
-  it("compiles and invokes the Effect-defined contract", async () => {
-    const result = await Effect.runPromise(Effect.gen(function*() {
+  it.live("compiles and invokes the Effect-defined contract", () =>
+    Effect.gen(function*() {
+      const baseUrl = yield* referenceOpenApiServer
       const compiled = yield* compileSpec("effect-reference", referenceOpenApiDocument)
       const tools = yield* captureOpenApiTools({
         owner: "org",
@@ -34,11 +26,12 @@ describe("Effect OpenAPI reference server", () => {
       if (echo === undefined || echo.call.kind !== "http") {
         return yield* Effect.die(new Error("Effect OpenAPI document has no echo operation"))
       }
+
       const invoker = yield* OpenApiInvoker
-      return yield* invoker.call({
+      const result = yield* invoker.call({
         call: echo.call,
         tool: echo.name,
-        server: reference.baseUrl,
+        server: baseUrl,
         input: {
           id: "a/b",
           search: "working",
@@ -47,15 +40,12 @@ describe("Effect OpenAPI reference server", () => {
         },
         credential: Option.none()
       })
-    }).pipe(Effect.provide(
-      OpenApiInvoker.layer.pipe(Layer.provide(FetchHttpClient.layer))
-    )))
 
-    expect(result).toEqual({
-      id: "a/b",
-      search: "working",
-      trace: "trace-42",
-      message: "hello"
-    })
-  })
+      expect(result).toEqual({
+        id: "a/b",
+        search: "working",
+        trace: "trace-42",
+        message: "hello"
+      })
+    }).pipe(Effect.provide(services)))
 })

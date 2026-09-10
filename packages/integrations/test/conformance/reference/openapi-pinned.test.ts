@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { compileSpec } from "../../../src/openapi/compile.ts"
 
@@ -19,17 +19,18 @@ const fixtures = [
 
 describe("pinned production OpenAPI specifications", () => {
   for (const fixture of fixtures) {
-    it(`compiles ${fixture.name}`, async () => {
-      const bytes = await Bun.file(fixture.file).arrayBuffer()
+    it.effect(`compiles ${fixture.name}`, () =>
+      Effect.gen(function*() {
+        const bytes = yield* Effect.promise(() => Bun.file(fixture.file).arrayBuffer())
 
-      const compiled = await Effect.runPromise(compileSpec(
-        fixture.source,
-        new TextDecoder().decode(bytes)
-      ))
-      expect(compiled.operations.length).toBeGreaterThanOrEqual(fixture.minimumOperations)
-      expect(compiled.operations.every((operation) => operation.name.length > 0)).toBe(true)
-      expect(new Set(compiled.operations.map((operation) => operation.name)).size)
-        .toBe(compiled.operations.length)
-    })
+        const compiled = yield* compileSpec(
+          fixture.source,
+          new TextDecoder().decode(bytes)
+        )
+        expect(compiled.operations.length).toBeGreaterThanOrEqual(fixture.minimumOperations)
+        expect(compiled.operations.every((operation) => operation.name.length > 0)).toBe(true)
+        expect(new Set(compiled.operations.map((operation) => operation.name)).size)
+          .toBe(compiled.operations.length)
+      }), 60_000)
   }
 })

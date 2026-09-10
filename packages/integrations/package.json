@@ -37,8 +37,8 @@
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
-    "test:conformance": "bun test test/conformance/reference",
-    "test:remote": "RUN_REMOTE_INTEGRATION_TESTS=1 bun test test/conformance/remote",
+    "test:conformance": "bun --bun run --cwd ../.. vitest run packages/integrations/test/conformance/reference",
+    "test:remote": "RUN_REMOTE_INTEGRATION_TESTS=1 bun --bun run --cwd ../.. vitest run packages/integrations/test/conformance/remote",
     "prepublishOnly": "bun run build"
   },
   "dependencies": {

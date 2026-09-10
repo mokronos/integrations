@@ -1,15 +1,11 @@
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Option } from "effect"
 import { CatalogStore } from "../src/catalog/store.ts"
 import { memoryLayer } from "../src/storage/database.ts"
 import { AuthTemplateSlug, OAuthClientSlug, OAuthState } from "../src/catalog/ids.ts"
 import { ConnectionName, IntegrationSlug } from "@integrations/contracts"
 
-const layer = CatalogStore.layer.pipe(Layer.provide(memoryLayer))
-
-const run = <A, E>(
-  operation: Effect.Effect<A, E, CatalogStore>
-): Promise<A> => Effect.runPromise(operation.pipe(Effect.provide(layer)))
+const catalog = CatalogStore.layer.pipe(Layer.provide(memoryLayer))
 
 const notes = IntegrationSlug.make("notes")
 
@@ -29,33 +25,33 @@ const integration = {
 }
 
 describe("integrations", () => {
-  it("round-trips a record through SQL, JSON columns included", async () => {
-    const found = await run(Effect.gen(function* () {
+  it.effect("round-trips a record through SQL, JSON columns included", () =>
+    Effect.gen(function*() {
       const store = yield* CatalogStore
       yield* store.putIntegration(integration)
-      return yield* store.findIntegration(notes)
-    }))
-    expect(Option.getOrThrow(found)).toEqual(integration)
-  })
 
-  it("upserts rather than duplicating on a second install", async () => {
-    const all = await run(Effect.gen(function* () {
+      expect(Option.getOrThrow(yield* store.findIntegration(notes))).toEqual(integration)
+    }).pipe(Effect.provide(catalog)))
+
+  it.effect("upserts rather than duplicating on a second install", () =>
+    Effect.gen(function*() {
       const store = yield* CatalogStore
       yield* store.putIntegration(integration)
       yield* store.putIntegration({ ...integration, name: "Renamed" })
-      return yield* store.listIntegrations()
-    }))
-    expect(all).toHaveLength(1)
-    expect(all[0]?.name).toBe("Renamed")
-  })
 
-  it("reads an absent slug as absent rather than failing", async () => {
-    const found = await run(Effect.gen(function* () {
+      const all = yield* store.listIntegrations()
+      expect(all).toHaveLength(1)
+      expect(all[0]?.name).toBe("Renamed")
+    }).pipe(Effect.provide(catalog)))
+
+  it.effect("reads an absent slug as absent rather than failing", () =>
+    Effect.gen(function*() {
       const store = yield* CatalogStore
-      return yield* store.findIntegration(IntegrationSlug.make("absent"))
-    }))
-    expect(Option.isNone(found)).toBe(true)
-  })
+
+      const found = yield* store.findIntegration(IntegrationSlug.make("absent"))
+
+      expect(Option.isNone(found)).toBe(true)
+    }).pipe(Effect.provide(catalog)))
 })
 
 describe("connections", () => {
@@ -68,20 +64,20 @@ describe("connections", () => {
     createdAt: 2
   }
 
-  it("keeps an absent optional absent rather than reading back a null", async () => {
-    const found = await run(Effect.gen(function* () {
+  it.effect("keeps an absent optional absent rather than reading back a null", () =>
+    Effect.gen(function*() {
       const store = yield* CatalogStore
       yield* store.putIntegration(integration)
       yield* store.putConnection(connection)
-      const rows = yield* store.listConnections({ integration: notes })
-      return rows[0]
-    }))
-    expect(found).toEqual(connection)
-    expect(found).not.toHaveProperty("oauthScope")
-  })
 
-  it("filters by owner tier, integration and name", async () => {
-    const counts = await run(Effect.gen(function* () {
+      const found = (yield* store.listConnections({ integration: notes }))[0]
+
+      expect(found).toEqual(connection)
+      expect(found).not.toHaveProperty("oauthScope")
+    }).pipe(Effect.provide(catalog)))
+
+  it.effect("filters by owner tier, integration and name", () =>
+    Effect.gen(function*() {
       const store = yield* CatalogStore
       yield* store.putIntegration(integration)
       yield* store.putConnection(connection)
@@ -90,14 +86,13 @@ describe("connections", () => {
         owner: "user",
         name: ConnectionName.make("personal")
       })
-      return {
+
+      expect({
         all: (yield* store.listConnections()).length,
         org: (yield* store.listConnections({ owner: "org" })).length,
         named: (yield* store.listConnections({ name: ConnectionName.make("personal") })).length
-      }
-    }))
-    expect(counts).toEqual({ all: 2, org: 1, named: 1 })
-  })
+      }).toEqual({ all: 2, org: 1, named: 1 })
+    }).pipe(Effect.provide(catalog)))
 })
 
 describe("OAuth flows", () => {
@@ -112,19 +107,20 @@ describe("OAuth flows", () => {
     tokenAuthMethods: ["client_secret_post"]
   }
 
-  it("round-trips a client, arrays included, and holds no secret", async () => {
-    const found = await run(Effect.gen(function* () {
+  it.effect("round-trips a client, arrays included, and holds no secret", () =>
+    Effect.gen(function*() {
       const store = yield* CatalogStore
       yield* store.putOAuthClient(client)
-      return yield* store.findOAuthClient({ owner: "org", slug: client.slug })
-    }))
-    const record = Option.getOrThrow(found)
-    expect(record).toEqual(client)
-    expect(Object.keys(record)).not.toContain("clientSecret")
-  })
 
-  it("spends a state value once, so a replayed callback finds nothing", async () => {
-    const outcome = await run(Effect.gen(function* () {
+      const found = yield* store.findOAuthClient({ owner: "org", slug: client.slug })
+
+      const record = Option.getOrThrow(found)
+      expect(record).toEqual(client)
+      expect(Object.keys(record)).not.toContain("clientSecret")
+    }).pipe(Effect.provide(catalog)))
+
+  it.effect("spends a state value once, so a replayed callback finds nothing", () =>
+    Effect.gen(function*() {
       const store = yield* CatalogStore
       const state = OAuthState.make("state-1")
       yield* store.putOAuthFlow({
@@ -139,10 +135,8 @@ describe("OAuth flows", () => {
         redirectUri: "https://gateway.example.com/callback",
         scopes: ["read"]
       })
-      const first = yield* store.takeOAuthFlow(state)
-      const second = yield* store.takeOAuthFlow(state)
-      return { first: Option.isSome(first), second: Option.isSome(second) }
-    }))
-    expect(outcome).toEqual({ first: true, second: false })
-  })
+
+      expect(Option.isSome(yield* store.takeOAuthFlow(state))).toBe(true)
+      expect(Option.isSome(yield* store.takeOAuthFlow(state))).toBe(false)
+    }).pipe(Effect.provide(catalog)))
 })

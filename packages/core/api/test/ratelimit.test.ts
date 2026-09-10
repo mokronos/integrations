@@ -1,61 +1,55 @@
-import { FetchHttpClient } from "effect/unstable/http"
-import { run, runAll } from "./effect.ts"
-import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import path from "node:path"
+import { describe, expect, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
+import { FetchHttpClient } from "effect/unstable/http"
 import { whenPresent } from "@integrations/contracts"
 import {
   createGatewayHandler,
-  createGatewayStore,
   defaultTenantId,
   generateApiKey,
   newClientId
 } from "./gateway.ts"
 import type { GatewayStore } from "./gateway.ts"
 import { stubIntegrationsContext } from "./stubs.ts"
+import { gatewayStore, testServices } from "./fixtures.ts"
 
 const JsonBody = Schema.Record(Schema.String, Schema.Json)
 
-const directories: Array<string> = []
-const stores: Array<GatewayStore> = []
-
-afterEach(async () => {
-  await runAll(stores.splice(0).map((store) => store.close()))
-  await run(Promise.all(
-    directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
-  ))
-})
+const bodyOf = (response: Response) =>
+  Effect.map(
+    Effect.promise(() => response.json()),
+    Schema.decodeUnknownSync(JsonBody)
+  )
 
 describe("gateway traffic shaping", () => {
-  interface SetupOptions {
-    readonly addressLimit?: number
-    readonly principalLimit?: number
-    readonly maxBodyBytes?: number
-  }
-
-  const setup = async (options: SetupOptions = {}) => {
-    const directory = await run(mkdtemp(path.join(tmpdir(), "wf-gateway-limits-")))
-    directories.push(directory)
-    const store = await run(createGatewayStore(path.join(directory, "gateway.sqlite")))
-    stores.push(store)
-    const accessProfile = await run(store.findDefaultAccessProfile(defaultTenantId))
-    const approvalPolicy = await run(store.findDefaultApprovalPolicy(defaultTenantId))
-    if (accessProfile === undefined || approvalPolicy === undefined) throw new Error("missing defaults")
-    const client = await run(store.createClient({
-      id: (await run(newClientId)),
+  const keyFor = Effect.fnUntraced(function*(store: GatewayStore, name: string) {
+    const accessProfile = yield* store.findDefaultAccessProfile(defaultTenantId)
+    const approvalPolicy = yield* store.findDefaultApprovalPolicy(defaultTenantId)
+    if (accessProfile === undefined || approvalPolicy === undefined) {
+      throw new Error("missing defaults")
+    }
+    const client = yield* store.createClient({
+      id: yield* newClientId,
       tenantId: defaultTenantId,
       accessProfileId: accessProfile.id,
       approvalPolicyId: approvalPolicy.id,
-      name: "local",
+      name,
       capabilities: ["provision_connections", "administer_gateway"]
-    }))
-    const key = (await run(generateApiKey))
-    await run(store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash }))
+    })
+    const key = yield* generateApiKey
+    yield* store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
+    return key
+  })
+
+  const setup = Effect.fnUntraced(function*(options: {
+    readonly addressLimit?: number
+    readonly principalLimit?: number
+    readonly maxBodyBytes?: number
+  } = {}) {
+    const store = yield* gatewayStore("gateway-limits-")
+    const key = yield* keyFor(store, "local")
 
     const { handle } = createGatewayHandler({
-    httpClient: FetchHttpClient.layer,
+      httpClient: FetchHttpClient.layer,
       integrationServices: stubIntegrationsContext(),
       store,
       retentionDays: 30,
@@ -72,80 +66,67 @@ describe("gateway traffic shaping", () => {
       ...whenPresent("maxBodyBytes", options.maxBodyBytes)
     })
 
-    return { handle, client, key }
-  }
-
-  test("an address that exhausts its pre-auth bucket gets 429 with Retry-After", async () => {
-    const { handle } = await run(setup({ addressLimit: 2 }))
-    const attempt = () => handle(new Request("http://gateway.test/v1/tools"))
-
-    expect((await run(attempt())).status).toBe(401)
-    expect((await run(attempt())).status).toBe(401)
-    const refused = await run(attempt())
-    expect(refused.status).toBe(429)
-    expect(refused.headers.get("retry-after")).toBe("60")
-    const body = Schema.decodeUnknownSync(JsonBody)(await run(refused.json()))
-    expect(body["code"]).toBe("rate-limited")
-  })
-
-  test("health stays reachable under load — it is what the monitor polls", async () => {
-    const { handle } = await run(setup({ addressLimit: 1 }))
-    expect((await run(handle(new Request("http://gateway.test/v1/health")))).status).toBe(200)
-    await run(handle(new Request("http://gateway.test/v1/tools")))
-    const refused = await run(handle(new Request("http://gateway.test/v1/tools")))
-    expect(refused.status).toBe(429)
-    expect((await run(handle(new Request("http://gateway.test/v1/health")))).status).toBe(200)
-  })
-
-  test("one exhausted principal does not starve another", async () => {
-    const { handle, key } = await run(setup({
-      principalLimit: 2,
-      addressLimit: 10_000
-    }))
-
-    const otherStore = stores[stores.length - 1]
-    if (otherStore === undefined) throw new Error("missing store fixture")
-    const neighbourAccessProfile = await run(otherStore.findDefaultAccessProfile(defaultTenantId))
-    const neighbourApprovalPolicy = await run(otherStore.findDefaultApprovalPolicy(defaultTenantId))
-    if (neighbourAccessProfile === undefined || neighbourApprovalPolicy === undefined) throw new Error("missing defaults")
-    const neighbour = await run(otherStore.createClient({
-      id: (await run(newClientId)),
-      tenantId: defaultTenantId,
-      accessProfileId: neighbourAccessProfile.id,
-      approvalPolicyId: neighbourApprovalPolicy.id,
-      name: "neighbour",
-      capabilities: ["provision_connections"]
-    }))
-    const neighbourKey = (await run(generateApiKey))
-    await run(otherStore.addApiKey({
-      id: neighbourKey.id,
-      clientId: neighbour.id,
-      hash: neighbourKey.hash
-    }))
-    const as = (secret: string) =>
-      handle(new Request("http://gateway.test/v1/tools", {
-        headers: { authorization: `Bearer ${secret}` }
+    const send = (request: Request) => Effect.promise(() => handle(request))
+    const get = (pathname: string, secret?: string) =>
+      send(new Request(`http://gateway.test${pathname}`, {
+        headers: secret === undefined ? {} : { authorization: `Bearer ${secret}` }
       }))
 
-    expect((await run(as(key.secret))).status).toBe(200)
-    expect((await run(as(key.secret))).status).toBe(200)
-    expect((await run(as(key.secret))).status).toBe(429)
-    expect((await run(as(neighbourKey.secret))).status).toBe(200)
+    return { store, key, send, get }
   })
 
-  test("an oversized body is refused with 413 before any handler runs", async () => {
-    const { handle, key } = await run(setup({ maxBodyBytes: 16 }))
-    const response = await run(handle(new Request("http://gateway.test/v1/clients", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${key.secret}`,
-        "content-length": String(Buffer.byteLength(JSON.stringify({ name: "x".repeat(64) })))
-      },
-      body: JSON.stringify({ name: "x".repeat(64) })
-    })))
-    expect(response.status).toBe(413)
-    const body = Schema.decodeUnknownSync(JsonBody)(await run(response.json()))
-    expect(String(body["error"])).toContain("exceeds")
-  })
+  it.live("an address that exhausts its pre-auth bucket gets 429 with Retry-After", () =>
+    Effect.gen(function*() {
+      const { get } = yield* setup({ addressLimit: 2 })
+
+      expect((yield* get("/v1/tools")).status).toBe(401)
+      expect((yield* get("/v1/tools")).status).toBe(401)
+
+      const refused = yield* get("/v1/tools")
+      expect(refused.status).toBe(429)
+      expect(refused.headers.get("retry-after")).toBe("60")
+      expect((yield* bodyOf(refused))["code"]).toBe("rate-limited")
+    }).pipe(Effect.provide(testServices)))
+
+  it.live("health stays reachable under load — it is what the monitor polls", () =>
+    Effect.gen(function*() {
+      const { get } = yield* setup({ addressLimit: 1 })
+
+      expect((yield* get("/v1/health")).status).toBe(200)
+      yield* get("/v1/tools")
+      expect((yield* get("/v1/tools")).status).toBe(429)
+
+      expect((yield* get("/v1/health")).status).toBe(200)
+    }).pipe(Effect.provide(testServices)))
+
+  it.live("one exhausted principal does not starve another", () =>
+    Effect.gen(function*() {
+      const { get, key, store } = yield* setup({ principalLimit: 2, addressLimit: 10_000 })
+      const neighbour = yield* keyFor(store, "neighbour")
+
+      expect((yield* get("/v1/tools", key.secret)).status).toBe(200)
+      expect((yield* get("/v1/tools", key.secret)).status).toBe(200)
+      expect((yield* get("/v1/tools", key.secret)).status).toBe(429)
+
+      expect((yield* get("/v1/tools", neighbour.secret)).status).toBe(200)
+    }).pipe(Effect.provide(testServices)))
+
+  it.live("an oversized body is refused with 413 before any handler runs", () =>
+    Effect.gen(function*() {
+      const { key, send } = yield* setup({ maxBodyBytes: 16 })
+      const body = JSON.stringify({ name: "x".repeat(64) })
+
+      const response = yield* send(new Request("http://gateway.test/v1/clients", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${key.secret}`,
+          "content-length": String(Buffer.byteLength(body))
+        },
+        body
+      }))
+
+      expect(response.status).toBe(413)
+      expect(String((yield* bodyOf(response))["error"])).toContain("exceeds")
+    }).pipe(Effect.provide(testServices)))
 })

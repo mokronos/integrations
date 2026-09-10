@@ -38,6 +38,11 @@
       "bun": "./src/gateway-config.ts",
       "development": "./src/gateway-config.ts",
       "default": "./dist/gateway-config.js"
+    },
+    "./test-fixtures": {
+      "bun": "./test/fixtures.ts",
+      "development": "./test/fixtures.ts",
+      "default": "./test/fixtures.ts"
     }
   },
   "scripts": {

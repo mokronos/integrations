@@ -1,8 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import path from "node:path"
-import { Crypto, Effect } from "effect"
+import { describe, expect, it } from "@effect/vitest"
+import { Effect } from "effect"
 import { ToolAddress } from "@integrations/contracts"
 import type { Integrations } from "@integrations/integrations"
 import {
@@ -12,7 +9,6 @@ import {
   IntegrationSlug,
   ToolName,
   authorizeInvocation,
-  createGatewayStore,
   defaultTenantId,
   generateApiKey,
   listEffectiveTools,
@@ -21,20 +17,20 @@ import {
   reconcileDefaults
 } from "../src/index.ts"
 import type { AccessProfileId, ApprovalPolicyId, GatewayStore } from "../src/index.ts"
+import { gatewayStore, testServices } from "./fixtures.ts"
 
-const directories: Array<string> = []
-const stores: Array<GatewayStore> = []
-import { webCryptoLayer } from "@integrations/contracts"
-
-/** Minting identifiers needs the platform's Crypto, as it does in the gateway. */
-const run = <A, E>(effect: Effect.Effect<A, E, Crypto.Crypto>): Promise<A> =>
-  Effect.runPromise(Effect.provide(effect, webCryptoLayer))
 const connection = (integration: string, name: string) => ({
   owner: "org" as const,
   integration: IntegrationSlug.make(integration),
   name: ConnectionName.make(name)
 })
-const summary = (integration: string, name: string, tool: string, defaultDecision: "allow" | "require_approval" = "allow") => ({
+
+const summary = (
+  integration: string,
+  name: string,
+  tool: string,
+  defaultDecision: "allow" | "require_approval" = "allow"
+) => ({
   address: ToolAddress.make(`tools.${integration}.org.${name}.${tool}`),
   name: ToolName.make(tool),
   description: tool,
@@ -43,125 +39,174 @@ const summary = (integration: string, name: string, tool: string, defaultDecisio
   connection: ConnectionName.make(name),
   defaultDecision
 })
+
 const catalog = (tools: ReadonlyArray<ReturnType<typeof summary>>) => ({
   toolSummaries: () => Effect.succeed(tools)
 } satisfies Pick<Integrations["Service"], "toolSummaries">)
 
-afterEach(async () => {
-  await Promise.all(stores.splice(0).map((store) => run(store.close())))
-  await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })))
-})
-
-const openStore = async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), "gateway-policy-"))
-  directories.push(directory)
-  const store = await run(createGatewayStore(path.join(directory, "gateway.sqlite")))
-  stores.push(store)
-  return store
-}
-
-const createClient = async (store: GatewayStore, name: string, accessProfileId: AccessProfileId, approvalPolicyId: ApprovalPolicyId) => {
-  const client = await run(store.createClient({
+const createClient = Effect.fnUntraced(function*(
+  store: GatewayStore,
+  name: string,
+  accessProfileId: AccessProfileId,
+  approvalPolicyId: ApprovalPolicyId
+) {
+  const client = yield* store.createClient({
     id: ClientId.make(`${name}-client`), tenantId: defaultTenantId, name,
     accessProfileId, approvalPolicyId, capabilities: []
-  }))
-  const key = (await run(generateApiKey))
-  await run(store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash }))
+  })
+  const key = yield* generateApiKey
+  yield* store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
   return { client, key }
-}
+})
+
+const store = gatewayStore("gateway-policy-")
 
 describe("access profiles and approval policies", () => {
-  test("reconciles both reusable defaults without overwriting operator decisions", async () => {
-    const store = await openStore()
-    const accessProfile = await run(store.findDefaultAccessProfile(defaultTenantId))
-    const approvalPolicy = await run(store.findDefaultApprovalPolicy(defaultTenantId))
-    if (accessProfile === undefined || approvalPolicy === undefined) throw new Error("missing defaults")
-    await run(store.replaceApprovalPolicyTools(approvalPolicy.id, [{
-      connection: connection("mail", "primary"), tool: ToolName.make("sendEmail"), decision: "require_approval"
-    }]))
+  it.effect("reconciles both reusable defaults without overwriting operator decisions", () =>
+    Effect.gen(function*() {
+      const gateway = yield* store
+      const accessProfile = yield* gateway.findDefaultAccessProfile(defaultTenantId)
+      const approvalPolicy = yield* gateway.findDefaultApprovalPolicy(defaultTenantId)
+      if (accessProfile === undefined || approvalPolicy === undefined) {
+        throw new Error("missing defaults")
+      }
+      yield* gateway.replaceApprovalPolicyTools(approvalPolicy.id, [{
+        connection: connection("mail", "primary"),
+        tool: ToolName.make("sendEmail"),
+        decision: "require_approval"
+      }])
 
-    await run(reconcileDefaults({
-      store, tenantId: defaultTenantId,
-      integrations: catalog([
-        summary("mail", "primary", "sendEmail", "allow"),
-        summary("calendar", "primary", "createEvent", "allow")
+      yield* reconcileDefaults({
+        store: gateway,
+        tenantId: defaultTenantId,
+        integrations: catalog([
+          summary("mail", "primary", "sendEmail", "allow"),
+          summary("calendar", "primary", "createEvent", "allow")
+        ])
+      })
+
+      expect((yield* gateway.listAccessProfileTools(accessProfile.id)).map((row) => row.tool).sort())
+        .toEqual([ToolName.make("createEvent"), ToolName.make("sendEmail")])
+      expect(
+        (yield* gateway.listApprovalPolicyTools(approvalPolicy.id))
+          .map((row) => [row.tool, row.decision]).sort()
+      ).toEqual([[ToolName.make("createEvent"), "allow"], [ToolName.make("sendEmail"), "require_approval"]])
+    }).pipe(Effect.provide(testServices)))
+
+  it.effect("exposes and authorizes only the exact intersection", () =>
+    Effect.gen(function*() {
+      const gateway = yield* store
+      const accessProfile = yield* gateway.createAccessProfile({
+        id: yield* newAccessProfileId, tenantId: defaultTenantId, name: "Mail access"
+      })
+      const approvalPolicy = yield* gateway.createApprovalPolicy({
+        id: yield* newApprovalPolicyId, tenantId: defaultTenantId, name: "Reviewed actions"
+      })
+      yield* gateway.replaceAccessProfileTools(accessProfile.id, [
+        { connection: connection("mail", "primary"), tool: ToolName.make("sendEmail") },
+        { connection: connection("calendar", "primary"), tool: ToolName.make("createEvent") }
       ])
-    }))
+      yield* gateway.replaceApprovalPolicyTools(approvalPolicy.id, [
+        { connection: connection("mail", "primary"), tool: ToolName.make("sendEmail"), decision: "require_approval" },
+        { connection: connection("mail", "primary"), tool: ToolName.make("archiveEmail"), decision: "allow" }
+      ])
+      const { client, key } = yield* createClient(
+        gateway, "intersection", accessProfile.id, approvalPolicy.id
+      )
 
-    expect((await run(store.listAccessProfileTools(accessProfile.id))).map((row) => row.tool).sort())
-      .toEqual([ToolName.make("createEvent"), ToolName.make("sendEmail")])
-    expect((await run(store.listApprovalPolicyTools(approvalPolicy.id))).map((row) => [row.tool, row.decision]).sort())
-      .toEqual([[ToolName.make("createEvent"), "allow"], [ToolName.make("sendEmail"), "require_approval"]])
-  })
+      expect(yield* listEffectiveTools(gateway, client.id)).toEqual([{
+        alias: Alias.make("org_mail_primary"),
+        tool: ToolName.make("sendEmail"),
+        connection: connection("mail", "primary"),
+        decision: "require_approval"
+      }])
+      const authorized = yield* authorizeInvocation(gateway, {
+        secret: key.secret, alias: Alias.make("org_mail_primary"), tool: ToolName.make("sendEmail")
+      })
+      expect(authorized.status).toBe("authorized")
+      const outsideAccess = yield* authorizeInvocation(gateway, {
+        secret: key.secret, alias: Alias.make("org_calendar_primary"), tool: ToolName.make("createEvent")
+      })
+      expect(outsideAccess.status).toBe("not-authorized")
+      const outsideApproval = yield* authorizeInvocation(gateway, {
+        secret: key.secret, alias: Alias.make("org_mail_primary"), tool: ToolName.make("archiveEmail")
+      })
+      expect(outsideApproval.status).toBe("not-authorized")
+    }).pipe(Effect.provide(testServices)))
 
-  test("exposes and authorizes only the exact intersection", async () => {
-    const store = await openStore()
-    const accessProfile = await run(store.createAccessProfile({ id: (await run(newAccessProfileId)), tenantId: defaultTenantId, name: "Mail access" }))
-    const approvalPolicy = await run(store.createApprovalPolicy({ id: (await run(newApprovalPolicyId)), tenantId: defaultTenantId, name: "Reviewed actions" }))
-    await run(store.replaceAccessProfileTools(accessProfile.id, [
-      { connection: connection("mail", "primary"), tool: ToolName.make("sendEmail") },
-      { connection: connection("calendar", "primary"), tool: ToolName.make("createEvent") }
-    ]))
-    await run(store.replaceApprovalPolicyTools(approvalPolicy.id, [
-      { connection: connection("mail", "primary"), tool: ToolName.make("sendEmail"), decision: "require_approval" },
-      { connection: connection("mail", "primary"), tool: ToolName.make("archiveEmail"), decision: "allow" }
-    ]))
-    const { client, key } = await createClient(store, "intersection", accessProfile.id, approvalPolicy.id)
+  it.effect("changing only the approval policy changes the decision without changing reach", () =>
+    Effect.gen(function*() {
+      const gateway = yield* store
+      const accessProfile = yield* gateway.createAccessProfile({
+        id: yield* newAccessProfileId, tenantId: defaultTenantId, name: "Mail"
+      })
+      const approvalPolicy = yield* gateway.createApprovalPolicy({
+        id: yield* newApprovalPolicyId, tenantId: defaultTenantId, name: "Mail decisions"
+      })
+      const route = { connection: connection("mail", "primary"), tool: ToolName.make("sendEmail") }
+      yield* gateway.replaceAccessProfileTools(accessProfile.id, [route])
+      yield* gateway.replaceApprovalPolicyTools(approvalPolicy.id, [{ ...route, decision: "allow" }])
+      const { client } = yield* createClient(gateway, "decision", accessProfile.id, approvalPolicy.id)
+      expect((yield* listEffectiveTools(gateway, client.id))[0]?.decision).toBe("allow")
 
-    expect(await run(listEffectiveTools(store, client.id))).toEqual([{
-      alias: Alias.make("org_mail_primary"), tool: ToolName.make("sendEmail"),
-      connection: connection("mail", "primary"),
-      decision: "require_approval"
-    }])
-    expect((await run(authorizeInvocation(store, { secret: key.secret, alias: Alias.make("org_mail_primary"), tool: ToolName.make("sendEmail") }))).status).toBe("authorized")
-    expect((await run(authorizeInvocation(store, { secret: key.secret, alias: Alias.make("org_calendar_primary"), tool: ToolName.make("createEvent") }))).status).toBe("not-authorized")
-    expect((await run(authorizeInvocation(store, { secret: key.secret, alias: Alias.make("org_mail_primary"), tool: ToolName.make("archiveEmail") }))).status).toBe("not-authorized")
-  })
+      yield* gateway.replaceApprovalPolicyTools(approvalPolicy.id, [
+        { ...route, decision: "require_approval" }
+      ])
 
-  test("changing only the approval policy changes the decision without changing reach", async () => {
-    const store = await openStore()
-    const accessProfile = await run(store.createAccessProfile({ id: (await run(newAccessProfileId)), tenantId: defaultTenantId, name: "Mail" }))
-    const approvalPolicy = await run(store.createApprovalPolicy({ id: (await run(newApprovalPolicyId)), tenantId: defaultTenantId, name: "Mail decisions" }))
-    const route = { connection: connection("mail", "primary"), tool: ToolName.make("sendEmail") }
-    await run(store.replaceAccessProfileTools(accessProfile.id, [route]))
-    await run(store.replaceApprovalPolicyTools(approvalPolicy.id, [{ ...route, decision: "allow" }]))
-    const { client } = await createClient(store, "decision", accessProfile.id, approvalPolicy.id)
-    expect((await run(listEffectiveTools(store, client.id)))[0]?.decision).toBe("allow")
+      expect((yield* listEffectiveTools(gateway, client.id))[0]?.decision).toBe("require_approval")
+    }).pipe(Effect.provide(testServices)))
 
-    await run(store.replaceApprovalPolicyTools(approvalPolicy.id, [{ ...route, decision: "require_approval" }]))
-    expect((await run(listEffectiveTools(store, client.id)))[0]?.decision).toBe("require_approval")
-  })
+  it.effect("editing a reusable profile has an explicit shared blast radius", () =>
+    Effect.gen(function*() {
+      const gateway = yield* store
+      const accessProfile = yield* gateway.createAccessProfile({
+        id: yield* newAccessProfileId, tenantId: defaultTenantId, name: "Shared access"
+      })
+      const approvalPolicy = yield* gateway.createApprovalPolicy({
+        id: yield* newApprovalPolicyId, tenantId: defaultTenantId, name: "Shared decisions"
+      })
+      const mail = { connection: connection("mail", "primary"), tool: ToolName.make("sendEmail") }
+      const calendar = { connection: connection("calendar", "primary"), tool: ToolName.make("createEvent") }
+      yield* gateway.replaceAccessProfileTools(accessProfile.id, [mail])
+      yield* gateway.replaceApprovalPolicyTools(approvalPolicy.id, [
+        { ...mail, decision: "allow" },
+        { ...calendar, decision: "allow" }
+      ])
+      const alpha = yield* createClient(gateway, "alpha", accessProfile.id, approvalPolicy.id)
+      const beta = yield* createClient(gateway, "beta", accessProfile.id, approvalPolicy.id)
 
-  test("editing a reusable profile has an explicit shared blast radius", async () => {
-    const store = await openStore()
-    const accessProfile = await run(store.createAccessProfile({ id: (await run(newAccessProfileId)), tenantId: defaultTenantId, name: "Shared access" }))
-    const approvalPolicy = await run(store.createApprovalPolicy({ id: (await run(newApprovalPolicyId)), tenantId: defaultTenantId, name: "Shared decisions" }))
-    const mail = { connection: connection("mail", "primary"), tool: ToolName.make("sendEmail") }
-    const calendar = { connection: connection("calendar", "primary"), tool: ToolName.make("createEvent") }
-    await run(store.replaceAccessProfileTools(accessProfile.id, [mail]))
-    await run(store.replaceApprovalPolicyTools(approvalPolicy.id, [{ ...mail, decision: "allow" }, { ...calendar, decision: "allow" }]))
-    const alpha = await createClient(store, "alpha", accessProfile.id, approvalPolicy.id)
-    const beta = await createClient(store, "beta", accessProfile.id, approvalPolicy.id)
+      yield* gateway.replaceAccessProfileTools(accessProfile.id, [mail, calendar])
 
-    await run(store.replaceAccessProfileTools(accessProfile.id, [mail, calendar]))
+      for (const client of [alpha.client, beta.client]) {
+        expect((yield* listEffectiveTools(gateway, client.id)).map((row) => row.tool).sort())
+          .toEqual([ToolName.make("createEvent"), ToolName.make("sendEmail")])
+      }
+    }).pipe(Effect.provide(testServices)))
 
-    expect((await run(listEffectiveTools(store, alpha.client.id))).map((row) => row.tool).sort())
-      .toEqual([ToolName.make("createEvent"), ToolName.make("sendEmail")])
-    expect((await run(listEffectiveTools(store, beta.client.id))).map((row) => row.tool).sort())
-      .toEqual([ToolName.make("createEvent"), ToolName.make("sendEmail")])
-  })
+  it.effect("rejects assigning either reusable configuration across tenants", () =>
+    Effect.gen(function*() {
+      const gateway = yield* store
+      const accessProfile = yield* gateway.findDefaultAccessProfile(defaultTenantId)
+      const approvalPolicy = yield* gateway.findDefaultApprovalPolicy(defaultTenantId)
+      const other = yield* gateway.createTenant({ name: "Other" })
+      const otherAccess = yield* gateway.findDefaultAccessProfile(other.id)
+      const otherApproval = yield* gateway.findDefaultApprovalPolicy(other.id)
+      if (
+        accessProfile === undefined || approvalPolicy === undefined ||
+        otherAccess === undefined || otherApproval === undefined
+      ) {
+        throw new Error("missing defaults")
+      }
+      const { client } = yield* createClient(gateway, "tenant", accessProfile.id, approvalPolicy.id)
 
-  test("rejects assigning either reusable configuration across tenants", async () => {
-    const store = await openStore()
-    const accessProfile = await run(store.findDefaultAccessProfile(defaultTenantId))
-    const approvalPolicy = await run(store.findDefaultApprovalPolicy(defaultTenantId))
-    const other = await run(store.createTenant({ name: "Other" }))
-    const otherAccess = await run(store.findDefaultAccessProfile(other.id))
-    const otherApproval = await run(store.findDefaultApprovalPolicy(other.id))
-    if (accessProfile === undefined || approvalPolicy === undefined || otherAccess === undefined || otherApproval === undefined) throw new Error("missing defaults")
-    const { client } = await createClient(store, "tenant", accessProfile.id, approvalPolicy.id)
+      const access = yield* Effect.exit(
+        gateway.assignAccessProfile(defaultTenantId, client.id, otherAccess.id)
+      )
+      const approval = yield* Effect.exit(
+        gateway.assignApprovalPolicy(defaultTenantId, client.id, otherApproval.id)
+      )
 
-    await expect(run(store.assignAccessProfile(defaultTenantId, client.id, otherAccess.id))).rejects.toBeDefined()
-    await expect(run(store.assignApprovalPolicy(defaultTenantId, client.id, otherApproval.id))).rejects.toBeDefined()
-  })
+      expect(access._tag).toBe("Failure")
+      expect(approval._tag).toBe("Failure")
+    }).pipe(Effect.provide(testServices)))
 })

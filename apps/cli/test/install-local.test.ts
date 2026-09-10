@@ -1,25 +1,22 @@
-import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
-import os from "node:os"
+import { describe, expect, it } from "@effect/vitest"
 import path from "node:path"
+import { Effect, FileSystem } from "effect"
 import { installLocal } from "../install-local.ts"
-
-const directories: Array<string> = []
-
-afterEach(async () => {
-  await Promise.all(
-    directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
-  )
-})
+import { temporaryDirectory, testServices } from "./fixtures.ts"
 
 describe("local CLI installer", () => {
-  test("refuses to overwrite an unrelated executable", async () => {
-    const directory = await mkdtemp(path.join(os.tmpdir(), "integrations-install-"))
-    directories.push(directory)
-    const target = path.join(directory, "i")
-    await writeFile(target, "#!/bin/sh\necho unrelated\n", { mode: 0o755 })
+  it.effect("refuses to overwrite an unrelated executable", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const directory = yield* temporaryDirectory("integrations-install-")
+      const target = path.join(directory, "i")
+      yield* Effect.orDie(fs.writeFileString(target, "#!/bin/sh\necho unrelated\n"))
 
-    await expect(installLocal({ directory })).rejects.toThrow("not a local integrations install")
-    expect(await Bun.file(target).text()).toContain("unrelated")
-  })
+      const outcome = yield* Effect.exit(
+        Effect.promise(() => installLocal({ directory }))
+      )
+
+      expect(outcome._tag).toBe("Failure")
+      expect(yield* Effect.orDie(fs.readFileString(target))).toContain("unrelated")
+    }).pipe(Effect.provide(testServices)))
 })

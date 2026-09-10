@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Option } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { isJsonObject } from "@integrations/contracts"
@@ -8,16 +8,17 @@ import { verifyMcpConformance } from "../support/mcp-conformance.ts"
 const enabled = process.env["RUN_REMOTE_INTEGRATION_TESTS"] === "1"
 const remoteDescribe = enabled ? describe : describe.skip
 
+const services = McpClient.layer.pipe(Layer.provide(FetchHttpClient.layer))
+
 remoteDescribe("remote MCP conformance", () => {
   const githubToken = process.env["INTEGRATIONS_TEST_GITHUB_TOKEN"]?.trim() || undefined
-  const githubIt = githubToken === undefined ? it.skip : it
 
-  githubIt("GitHub's hosted MCP server", async () => {
-    await Effect.runPromise(verifyMcpConformance({
+  it.live.runIf(githubToken !== undefined)("GitHub's hosted MCP server", () =>
+    verifyMcpConformance({
       endpoint: "https://api.githubcopilot.com/mcp/",
       credential: Option.some({
         headerName: "Authorization",
-        headerValue: `Bearer ${githubToken}`
+        headerValue: `Bearer ${githubToken ?? ""}`
       }),
       expectedTool: "get_me",
       input: {},
@@ -25,21 +26,21 @@ remoteDescribe("remote MCP conformance", () => {
         expect(isJsonObject(result)).toBe(true)
         expect(Array.isArray(isJsonObject(result) ? result["content"] : undefined)).toBe(true)
       }
-    }).pipe(Effect.provide(McpClient.layer.pipe(Layer.provide(FetchHttpClient.layer)))))
-  })
+    }).pipe(Effect.provide(services)))
 
   const ownedEndpoint = process.env["INTEGRATIONS_TEST_MCP_URL"]?.trim() || undefined
-  const ownedIt = ownedEndpoint === undefined ? it.skip : it
 
-  ownedIt("the project-owned authless MCP reference deployment", async () => {
-    await Effect.runPromise(verifyMcpConformance({
-      endpoint: ownedEndpoint ?? "",
-      credential: Option.none(),
-      expectedTool: "reference_status",
-      input: {},
-      assertResult: (result) => {
-        expect(isJsonObject(result)).toBe(true)
-      }
-    }).pipe(Effect.provide(McpClient.layer.pipe(Layer.provide(FetchHttpClient.layer)))))
-  })
+  it.live.runIf(ownedEndpoint !== undefined)(
+    "the project-owned authless MCP reference deployment",
+    () =>
+      verifyMcpConformance({
+        endpoint: ownedEndpoint ?? "",
+        credential: Option.none(),
+        expectedTool: "reference_status",
+        input: {},
+        assertResult: (result) => {
+          expect(isJsonObject(result)).toBe(true)
+        }
+      }).pipe(Effect.provide(services))
+  )
 })

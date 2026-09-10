@@ -1,11 +1,19 @@
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server"
+import { Effect } from "effect"
+import type { Scope } from "effect"
 
-export interface ReferenceMcpServer {
+/** The official SDK's reference server, stopped when the test's scope ends. */
+export const referenceMcpServer: Effect.Effect<string, never, Scope.Scope> = Effect.acquireRelease(
+  Effect.promise(() => startReferenceMcpServer()),
+  (server) => Effect.promise(() => server.stop())
+).pipe(Effect.map((server) => server.endpoint))
+
+interface ReferenceMcpServer {
   readonly endpoint: string
   readonly stop: () => Promise<void>
 }
 
-export const startReferenceMcpServer = async (): Promise<ReferenceMcpServer> => {
+const startReferenceMcpServer = async (): Promise<ReferenceMcpServer> => {
   const handler = createMcpHandler(() => {
     const mcp = new McpServer({ name: "official-sdk-reference", version: "1.0.0" })
     mcp.registerTool("reference_status", {

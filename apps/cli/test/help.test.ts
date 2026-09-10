@@ -1,9 +1,9 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, test } from "@effect/vitest"
 import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
-const repoRoot = path.resolve(import.meta.dir, "../../..")
+const repoRoot = path.resolve(import.meta.dirname, "../../..")
 const agentCliPath = path.join(repoRoot, "apps", "cli", "src", "agent.ts")
 const operatorCliPath = path.join(repoRoot, "apps", "cli", "src", "main.ts")
 const decoder = new TextDecoder()

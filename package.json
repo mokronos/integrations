@@ -11,10 +11,11 @@
   "catalog": {
     "@cloudflare/workers-types": "5.20260822.1",
     "@effect/language-service": "^0.86.4",
-    "@effect/platform-bun": "rc",
-    "@effect/platform-node-shared": "rc",
-    "@effect/sql-d1": "rc",
-    "@effect/sql-libsql": "rc",
+    "@effect/platform-bun": "4.0.0-rc.112",
+    "@effect/platform-node-shared": "4.0.0-rc.112",
+    "@effect/sql-d1": "4.0.0-rc.112",
+    "@effect/sql-libsql": "4.0.0-rc.112",
+    "@effect/vitest": "4.0.0-rc.112",
     "@fontsource-variable/geist": "^5.2.9",
     "@libsql/client": "0.17.3",
     "@modelcontextprotocol/sdk": "^1.30.0",
@@ -30,7 +31,7 @@
     "clsx": "^2.1.1",
     "drizzle-kit": "^0.31.10",
     "drizzle-orm": "^0.45.2",
-    "effect": "rc",
+    "effect": "4.0.0-rc.112",
     "effect-solutions": "^0.5.3",
     "lucide-react": "^1.23.0",
     "oas": "^38.3.0",
@@ -47,6 +48,7 @@
     "tw-animate-css": "^1.4.0",
     "typescript": "^6.0.3",
     "vite": "^8.1.1",
+    "vitest": "^4.1.11",
     "wrangler": "4.125.0"
   },
   "overrides": {
@@ -71,12 +73,13 @@
     "lint": "oxlint",
     "prepare": "effect-language-service patch",
     "typecheck": "tsc --build --noEmit && tsc -p apps/web && tsc -p apps/host-cloudflare",
-    "test": "bun test",
-    "verify": "bun run lint && bun run typecheck && bun test && bun run build:control-plane",
+    "test": "bun --bun run vitest run",
+    "verify": "bun run lint && bun run typecheck && bun run test && bun run build:control-plane",
     "build:contracts": "bun run --cwd packages/contracts build",
     "build:host": "bun run --cwd packages/integrations build",
     "build:gateway-core": "bun run --cwd packages/core/gateway build",
-    "build:gateway-api": "bun run --cwd packages/core/api build"
+    "build:gateway-api": "bun run --cwd packages/core/api build",
+    "test:watch": "bun --bun run vitest"
   },
   "dependencies": {
     "effect": "catalog:"
@@ -84,10 +87,12 @@
   "devDependencies": {
     "@effect/language-service": "catalog:",
     "@effect/platform-bun": "catalog:",
+    "@effect/vitest": "catalog:",
     "@oxlint/plugins": "catalog:",
     "@types/bun": "catalog:",
     "effect-solutions": "catalog:",
     "oxlint": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

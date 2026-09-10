@@ -12,7 +12,7 @@ type Installable = typeof Installable.Type
 const InstallOptions = Schema.Struct({ directory: Schema.String })
 export type InstallOptions = typeof InstallOptions.Type
 
-const packageDirectory = import.meta.dir
+const packageDirectory = import.meta.dirname
 export const repositoryDirectory = path.resolve(packageDirectory, "../..")
 
 const installables: ReadonlyArray<Installable> = [

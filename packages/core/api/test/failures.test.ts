@@ -1,14 +1,10 @@
+import { describe, expect, it } from "@effect/vitest"
+import { Effect, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
-import { run, runAll } from "./effect.ts"
-import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import path from "node:path"
-import { Effect } from "effect"
 import { whenPresent, whenPresentMap } from "@integrations/contracts"
+import { McpError, SpecError } from "@integrations/integrations"
 import {
   createGatewayHandler,
-  createGatewayStore,
   defaultTenantId,
   generateApiKey,
   GatewayStoreError,
@@ -16,43 +12,40 @@ import {
 } from "./gateway.ts"
 import type { GatewayStore } from "./gateway.ts"
 import { stubIntegrationsContext } from "./stubs.ts"
-import { McpError, SpecError } from "@integrations/integrations"
+import { gatewayStore, testServices } from "./fixtures.ts"
 
-const directories: Array<string> = []
-const stores: Array<GatewayStore> = []
+const JsonBody = Schema.Record(Schema.String, Schema.Json)
 
-afterEach(async () => {
-  await runAll(stores.splice(0).map((store) => store.close()))
-  await run(Promise.all(
-    directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
-  ))
-})
+const bodyOf = (response: Response) =>
+  Effect.map(
+    Effect.promise(() => response.json()),
+    Schema.decodeUnknownSync(JsonBody)
+  )
 
 const driverFailure = "SQLITE_BUSY: database is locked at /srv/secrets/gateway.sqlite"
 
-const setup = async (options: {
+const setup = Effect.fnUntraced(function*(options: {
   readonly listClientsFails?: boolean
   readonly unreachableUrl?: boolean
   readonly errorCapture?: (operation: string | undefined) => string
-} = {}) => {
-  const directory = await run(mkdtemp(path.join(tmpdir(), "wf-failures-")))
-  directories.push(directory)
-  const store = await run(createGatewayStore(path.join(directory, "gateway.sqlite")))
-  stores.push(store)
-  const accessProfile = await run(store.findDefaultAccessProfile(defaultTenantId))
-  const approvalPolicy = await run(store.findDefaultApprovalPolicy(defaultTenantId))
-  if (accessProfile === undefined || approvalPolicy === undefined) throw new Error("missing defaults")
+} = {}) {
+  const store = yield* gatewayStore("gateway-failures-")
+  const accessProfile = yield* store.findDefaultAccessProfile(defaultTenantId)
+  const approvalPolicy = yield* store.findDefaultApprovalPolicy(defaultTenantId)
+  if (accessProfile === undefined || approvalPolicy === undefined) {
+    throw new Error("missing defaults")
+  }
 
-  const client = await run(store.createClient({
-    id: (await run(newClientId)),
+  const client = yield* store.createClient({
+    id: yield* newClientId,
     tenantId: defaultTenantId,
     accessProfileId: accessProfile.id,
     approvalPolicyId: approvalPolicy.id,
     name: "operator",
     capabilities: ["administer_gateway", "provision_connections"]
-  }))
-  const key = (await run(generateApiKey))
-  await run(store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash }))
+  })
+  const key = yield* generateApiKey
+  yield* store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
 
   const presented: GatewayStore = options.listClientsFails === true
     ? {
@@ -68,16 +61,10 @@ const setup = async (options: {
   const unreachable = options.unreachableUrl === true
     ? {
       mcp: {
-        probe: (endpoint: string) => Effect.fail(new McpError({
-          endpoint,
-          detail: "fetch failed"
-        }))
+        probe: (endpoint: string) => Effect.fail(new McpError({ endpoint, detail: "fetch failed" }))
       },
       specs: {
-        compileUrl: (url: string) => Effect.fail(new SpecError({
-          source: url,
-          detail: "fetch failed"
-        }))
+        compileUrl: (url: string) => Effect.fail(new SpecError({ source: url, detail: "fetch failed" }))
       }
     }
     : {}
@@ -99,59 +86,70 @@ const setup = async (options: {
   })
 
   const call = (method: string, pathname: string, body?: string) =>
-    handle(new Request(`http://gateway.test${pathname}`, {
-      method,
-      headers: {
-        authorization: `Bearer ${key.secret}`,
-        ...whenPresent("content-type", body === undefined ? undefined : "application/json")
-      },
-      ...whenPresent("body", body)
-    }))
+    Effect.promise(() =>
+      handle(new Request(`http://gateway.test${pathname}`, {
+        method,
+        headers: {
+          authorization: `Bearer ${key.secret}`,
+          ...whenPresent("content-type", body === undefined ? undefined : "application/json")
+        },
+        ...whenPresent("body", body)
+      })))
+
   return { call }
-}
+})
 
 describe("failures nobody declared", () => {
-  test("answers in the gateway's own dialect, saying nothing about the database that broke", async () => {
-    const { call } = await run(setup({ listClientsFails: true }))
-    const response = await run(call("GET", "/v1/clients"))
-    expect(response.status).toBe(500)
-    const body = await run(response.text())
-    expect(JSON.parse(body).error).toBe("The gateway could not complete this request")
-    expect(body).not.toContain("SQLITE")
-    expect(body).not.toContain("/srv/secrets")
-  })
+  it.live("answers in the gateway's own dialect, saying nothing about the database that broke", () =>
+    Effect.gen(function*() {
+      const { call } = yield* setup({ listClientsFails: true })
 
-  test("tells the sink which operation rejected and hands the caller back its id", async () => {
-    const recorded: Array<{ readonly traceId: string; readonly operation?: string }> = []
-    const { call } = await run(setup({
-      listClientsFails: true,
-      errorCapture: (operation) => {
-        const traceId = `trace-${recorded.length}`
-        recorded.push({ traceId, ...whenPresent("operation", operation) })
-        return traceId
-      }
-    }))
-    const body = await run((await run(call("GET", "/v1/clients"))).json())
-    expect(recorded).toEqual([{ traceId: "trace-0", operation: "listClients" }])
-    expect(body.traceId).toBe("trace-0")
+      const response = yield* call("GET", "/v1/clients")
 
-    const anonymous = await run(setup({ listClientsFails: true, errorCapture: () => "" }))
-    expect(await run((await run(anonymous.call("GET", "/v1/clients"))).json()))
-      .toEqual({ error: "The gateway could not complete this request" })
-  })
+      expect(response.status).toBe(500)
+      const body = yield* Effect.promise(() => response.text())
+      expect(JSON.parse(body).error).toBe("The gateway could not complete this request")
+      expect(body).not.toContain("SQLITE")
+      expect(body).not.toContain("/srv/secrets")
+    }).pipe(Effect.provide(testServices)))
+
+  it.live("tells the sink which operation rejected and hands the caller back its id", () =>
+    Effect.gen(function*() {
+      const recorded: Array<{ readonly traceId: string; readonly operation?: string }> = []
+      const { call } = yield* setup({
+        listClientsFails: true,
+        errorCapture: (operation) => {
+          const traceId = `trace-${recorded.length}`
+          recorded.push({ traceId, ...whenPresent("operation", operation) })
+          return traceId
+        }
+      })
+
+      const body = yield* bodyOf(yield* call("GET", "/v1/clients"))
+
+      expect(recorded).toEqual([{ traceId: "trace-0", operation: "listClients" }])
+      expect(body["traceId"]).toBe("trace-0")
+
+      const anonymous = yield* setup({ listClientsFails: true, errorCapture: () => "" })
+      expect(yield* bodyOf(yield* anonymous.call("GET", "/v1/clients")))
+        .toEqual({ error: "The gateway could not complete this request" })
+    }).pipe(Effect.provide(testServices)))
 })
 
 describe("failures out at the far end", () => {
-  test("a URL that cannot be read is the caller's 400, not the gateway's 500", async () => {
-    const { call } = await run(setup({ unreachableUrl: true }))
-    const response = await run(call(
-      "POST",
-      "/v1/integrations/discover",
-      JSON.stringify({ url: "https://127.0.0.1:9/openapi.json" })
-    ))
-    expect(response.status).toBe(400)
-    const body = await run(response.json())
-    expect(String(body.error)).toContain("https://127.0.0.1:9/openapi.json")
-    expect(String(body.error)).toContain("fetch failed")
-  })
+  it.live("a URL that cannot be read is the caller's 400, not the gateway's 500", () =>
+    Effect.gen(function*() {
+      const { call } = yield* setup({ unreachableUrl: true })
+
+      const response = yield* call(
+        "POST",
+        "/v1/integrations/discover",
+        JSON.stringify({ url: "https://127.0.0.1:9/openapi.json" })
+      )
+
+      expect(response.status).toBe(400)
+      const body = yield* bodyOf(response)
+      expect(String(body["error"])).toContain("https://127.0.0.1:9/openapi.json")
+      expect(String(body["error"])).toContain("fetch failed")
+    }).pipe(Effect.provide(testServices)))
 })

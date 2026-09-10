@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Effect, Schema, Scope } from "effect"
 import {
   HttpApi,
   HttpApiEndpoint,
@@ -27,12 +27,19 @@ const ReferenceGroup = HttpApiGroup.make("reference").add(
 export const ReferenceApi = HttpApi.make("ReferenceApi").add(ReferenceGroup)
 export const referenceOpenApiDocument = JSON.stringify(OpenApi.fromApi(ReferenceApi))
 
-export interface ReferenceOpenApiServer {
+/** The reference API's server, stopped when the test's scope ends. */
+export const referenceOpenApiServer: Effect.Effect<string, never, Scope.Scope> =
+  Effect.acquireRelease(
+    Effect.sync(() => startReferenceOpenApiServer()),
+    (server) => Effect.sync(() => server.stop())
+  ).pipe(Effect.map((server) => server.baseUrl))
+
+interface ReferenceOpenApiServer {
   readonly baseUrl: string
   readonly stop: () => void
 }
 
-export const startReferenceOpenApiServer = (): ReferenceOpenApiServer => {
+const startReferenceOpenApiServer = (): ReferenceOpenApiServer => {
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,

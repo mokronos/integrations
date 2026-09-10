@@ -1,5 +1,5 @@
-import { describe, expect, it } from "bun:test"
-import { Effect } from "effect"
+import { describe, expect, it } from "@effect/vitest"
+import { Effect, Layer } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import { compileSpec } from "../../../src/openapi/compile.ts"
 
@@ -19,22 +19,21 @@ const specifications = [
   }
 ] as const
 
+const services = Layer.mergeAll(FetchHttpClient.layer)
+
 remoteDescribe("current production OpenAPI specifications", () => {
   for (const specification of specifications) {
-    it(`compiles the latest ${specification.name} document`, async () => {
-      const document = await Effect.runPromise(
-        HttpClient.get(specification.url).pipe(
-          Effect.tap((response) => Effect.sync(() => expect(response.status).toBe(200))),
-          Effect.flatMap((response) => response.text),
-          Effect.provide(FetchHttpClient.layer)
-        )
-      )
-      const compiled = await Effect.runPromise(compileSpec(specification.url, document))
-      expect(compiled.operations.length).toBeGreaterThanOrEqual(
-        specification.minimumOperations
-      )
-      expect(new Set(compiled.operations.map((operation) => operation.name)).size)
-        .toBe(compiled.operations.length)
-    })
+    it.live(`compiles the latest ${specification.name} document`, () =>
+      Effect.gen(function*() {
+        const response = yield* HttpClient.get(specification.url)
+        expect(response.status).toBe(200)
+
+        const compiled = yield* compileSpec(specification.url, yield* response.text)
+
+        expect(compiled.operations.length)
+          .toBeGreaterThanOrEqual(specification.minimumOperations)
+        expect(new Set(compiled.operations.map((operation) => operation.name)).size)
+          .toBe(compiled.operations.length)
+      }).pipe(Effect.provide(services)), 120_000)
   }
 })

@@ -1,8 +1,9 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, it } from "@effect/vitest"
 import type { AuthMethod, Connection } from "@integrations/contracts"
 import { ConnectionName, IntegrationSlug } from "@integrations/contracts"
-import { Cause, Context, Effect, Exit, Option, Result } from "effect"
-import { FetchHttpClient, HttpClient, type HttpClientResponse } from "effect/unstable/http"
+import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Option, Result } from "effect"
+import { TestClock } from "effect/testing"
+import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import {
   AuthTemplateSlug,
   CatalogStore,
@@ -15,6 +16,9 @@ import {
 import { authorizeInBrowser, OAuthFlowError } from "../src/oauth.ts"
 import { createOAuthSessions } from "../src/oauth-sessions.ts"
 import type { OAuthOperations } from "../src/oauth.ts"
+import { testServices } from "./fixtures.ts"
+
+const services = Layer.merge(testServices, FetchHttpClient.layer)
 
 const oauthMethod: AuthMethod = {
   id: "oauth",
@@ -83,9 +87,7 @@ const integrations: Integrations["Service"] = {
   execute: notUsed("Integrations.execute")
 }
 
-const operations = (behaviour: {
-  readonly completeFails?: string
-} = {}) => {
+const operations = (behaviour: { readonly completeFails?: string } = {}) => {
   let redirectUri: string | undefined
   const host: Context.Context<OAuthOperations> = Context.empty().pipe(
     Context.add(OAuthFlows, {
@@ -111,10 +113,7 @@ const operations = (behaviour: {
             scope: Option.none(),
             expiresAt: Option.none()
           })
-          : Effect.fail(new OAuthError({
-            stage: "complete",
-            detail: behaviour.completeFails
-          })),
+          : Effect.fail(new OAuthError({ stage: "complete", detail: behaviour.completeFails })),
       accessToken: notUsed("accessToken")
     }),
     Context.add(CatalogStore, catalogStore),
@@ -131,147 +130,161 @@ const request = {
   clientSecret: "client-secret"
 }
 
-const callback = (
-  redirectUri: string,
-  query: Record<string, string>
-): Promise<HttpClientResponse.HttpClientResponse> => {
-  const url = new URL(redirectUri)
-  for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value)
-  return Effect.runPromise(
-    HttpClient.get(url).pipe(Effect.provide(FetchHttpClient.layer))
-  )
-}
-
-const started = (
+/**
+ * The flow only settles once a browser reaches its loopback listener, so it
+ * runs on its own fiber and announces the URL the provider would redirect to.
+ */
+const started = Effect.fnUntraced(function*(
   auth: ReturnType<typeof operations>,
   overrides: { readonly timeoutMs?: number } = {}
-) => {
-  const announced = Promise.withResolvers<string>()
-  const exit = Effect.runPromiseExit(Effect.scoped(authorizeInBrowser(
-    { ...request, onAuthorizationUrl: (url) => announced.resolve(url), ...overrides }
-  ).pipe(Effect.provide(auth.host))))
-  return { exit, announced: announced.promise }
+) {
+  const announced = yield* Deferred.make<string>()
+  const fiber = yield* Effect.forkChild(Effect.scoped(authorizeInBrowser({
+    ...request,
+    onAuthorizationUrl: (url) => Deferred.doneUnsafe(announced, Exit.succeed(url)),
+    ...overrides
+  }).pipe(Effect.provide(auth.host))))
+  yield* Deferred.await(announced)
+  const redirectUri = auth.redirectUriUsed()
+  if (redirectUri === undefined) throw new Error("the flow announced no redirect URI")
+  return { fiber, redirectUri }
+})
+
+/** The request a browser would make when the provider redirects it back. */
+const callback = (redirectUri: string, query: Record<string, string>) => {
+  const url = new URL(redirectUri)
+  for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value)
+  return HttpClient.get(url)
 }
 
-const failureOf = async (
-  exit: Promise<Exit.Exit<Connection, OAuthFlowError>>
-): Promise<OAuthFlowError> => {
-  const settled = await exit
-  if (Exit.isSuccess(settled)) throw new Error("expected the flow to fail")
-  const found = Cause.findError(settled.cause)
-  if (!Result.isSuccess(found)) throw new Error("the flow died rather than failing")
-  return found.success
-}
-
-describe("authorizing through the loopback listener", () => {
-  test("completes when the provider returns a matching state and code", async () => {
-    const auth = operations()
-    const { exit, announced } = started(auth)
-    await announced
-
-    const page = await callback(auth.redirectUriUsed()!, { state: "state-123", code: "auth-code" })
-
-    expect(page.status).toBe(200)
-    expect(await exit).toEqual(Exit.succeed(connected))
+/** The typed failure the flow ended with, insisting it failed rather than died. */
+const failureOf = <A>(
+  fiber: Fiber.Fiber<A, OAuthFlowError>
+): Effect.Effect<OAuthFlowError> =>
+  Effect.flatMap(Fiber.await(fiber), (settled) => {
+    if (Exit.isSuccess(settled)) throw new Error("expected the flow to fail")
+    const found = Cause.findError(settled.cause)
+    if (!Result.isSuccess(found)) throw new Error("the flow died rather than failing")
+    return Effect.succeed(found.success)
   })
 
-  test("refuses a callback whose state does not match the flow", async () => {
-    const auth = operations()
-    const { exit, announced } = started(auth, { timeoutMs: 1_000 })
-    await announced
-
-    const page = await callback(auth.redirectUriUsed()!, { state: "wrong", code: "auth-code" })
-
-    expect(page.status).toBe(400)
-    expect(await Effect.runPromise(page.text)).toContain("state could not be verified")
-    expect((await failureOf(exit)).stage).toBe("timeout")
-  })
-
-  test("fails the flow when the provider returns no code", async () => {
-    const auth = operations()
-    const { exit, announced } = started(auth)
-    await announced
-
-    const page = await callback(auth.redirectUriUsed()!, {
-      state: "state-123",
-      error_description: "user declined"
-    })
-
-    expect(page.status).toBe(400)
-    const failure = await failureOf(exit)
-    expect(failure.stage).toBe("callback")
-    expect(failure.detail).toContain("user declined")
-  })
-
-  test("fails the flow when the token exchange is refused", async () => {
-    const auth = operations({ completeFails: "token endpoint said no" })
-    const { exit, announced } = started(auth)
-    await announced
-
-    const page = await callback(auth.redirectUriUsed()!, { state: "state-123", code: "auth-code" })
-
-    expect(page.status).toBe(400)
-    expect(await Effect.runPromise(page.text)).toContain("token endpoint said no")
-    const failure = await failureOf(exit)
-    expect(failure.stage).toBe("exchange")
-    expect(failure.detail).toContain("token endpoint said no")
-  })
-
-  test("refuses a second callback once one is in flight", async () => {
-    const auth = operations()
-    const { exit, announced } = started(auth)
-    await announced
-
-    await callback(auth.redirectUriUsed()!, { state: "state-123", code: "auth-code" })
-    const replay = await callback(auth.redirectUriUsed()!, { state: "state-123", code: "auth-code" })
-
-    expect(replay.status).toBe(409)
-    expect(await exit).toEqual(Exit.succeed(connected))
-  })
-
-  test("gives up after the timeout rather than holding the listener forever", async () => {
-    const auth = operations()
-    const { exit, announced } = started(auth, { timeoutMs: 1_000 })
-    await announced
-
-    expect((await failureOf(exit)).detail).toContain("timed out after 1 seconds")
-  })
-
-  test("stops the listener once the flow settles", async () => {
-    const auth = operations()
-    const { exit, announced } = started(auth)
-    await announced
-    const redirectUri = auth.redirectUriUsed()!
-
-    await callback(redirectUri, { state: "state-123", code: "auth-code" })
-    await exit
-
+/** Whether the port the listener held can be taken over again. */
+const portIsFree = (redirectUri: string): Effect.Effect<boolean> =>
+  Effect.sync(() => {
     const port = Number(new URL(redirectUri).port)
     const rebound = Bun.serve({ hostname: "127.0.0.1", port, fetch: () => new Response("ok") })
-    expect(rebound.port).toBe(port)
-    await rebound.stop(true)
+    const reclaimed = rebound.port === port
+    rebound.stop(true)
+    return reclaimed
   })
+
+describe("authorizing through the loopback listener", () => {
+  it.live("completes when the provider returns a matching state and code", () =>
+    Effect.gen(function*() {
+      const auth = operations()
+      const { fiber, redirectUri } = yield* started(auth)
+
+      const page = yield* callback(redirectUri, { state: "state-123", code: "auth-code" })
+
+      expect(page.status).toBe(200)
+      expect(yield* Fiber.join(fiber)).toEqual(connected)
+    }).pipe(Effect.provide(services)))
+
+  it.live("refuses a callback whose state does not match the flow", () =>
+    Effect.gen(function*() {
+      const auth = operations()
+      const { fiber, redirectUri } = yield* started(auth, { timeoutMs: 1_000 })
+
+      const page = yield* callback(redirectUri, { state: "wrong", code: "auth-code" })
+
+      expect(page.status).toBe(400)
+      expect(yield* page.text).toContain("state could not be verified")
+      expect((yield* failureOf(fiber)).stage).toBe("timeout")
+    }).pipe(Effect.provide(services)))
+
+  it.live("fails the flow when the provider returns no code", () =>
+    Effect.gen(function*() {
+      const auth = operations()
+      const { fiber, redirectUri } = yield* started(auth)
+
+      const page = yield* callback(redirectUri, {
+        state: "state-123",
+        error_description: "user declined"
+      })
+
+      expect(page.status).toBe(400)
+      const failure = yield* failureOf(fiber)
+      expect(failure.stage).toBe("callback")
+      expect(failure.detail).toContain("user declined")
+    }).pipe(Effect.provide(services)))
+
+  it.live("fails the flow when the token exchange is refused", () =>
+    Effect.gen(function*() {
+      const auth = operations({ completeFails: "token endpoint said no" })
+      const { fiber, redirectUri } = yield* started(auth)
+
+      const page = yield* callback(redirectUri, { state: "state-123", code: "auth-code" })
+
+      expect(page.status).toBe(400)
+      expect(yield* page.text).toContain("token endpoint said no")
+      const failure = yield* failureOf(fiber)
+      expect(failure.stage).toBe("exchange")
+      expect(failure.detail).toContain("token endpoint said no")
+    }).pipe(Effect.provide(services)))
+
+  it.live("refuses a second callback once one is in flight", () =>
+    Effect.gen(function*() {
+      const auth = operations()
+      const { fiber, redirectUri } = yield* started(auth)
+
+      yield* callback(redirectUri, { state: "state-123", code: "auth-code" })
+      const replay = yield* callback(redirectUri, { state: "state-123", code: "auth-code" })
+
+      expect(replay.status).toBe(409)
+      expect(yield* Fiber.join(fiber)).toEqual(connected)
+    }).pipe(Effect.provide(services)))
+
+  it.effect("gives up after the timeout rather than holding the listener forever", () =>
+    Effect.gen(function*() {
+      const auth = operations()
+      const { fiber } = yield* started(auth, { timeoutMs: 1_000 })
+
+      yield* TestClock.adjust("1 second")
+
+      expect((yield* failureOf(fiber)).detail).toContain("timed out after 1 seconds")
+    }).pipe(Effect.provide(services)))
+
+  it.live("stops the listener once the flow settles", () =>
+    Effect.gen(function*() {
+      const auth = operations()
+      const { fiber, redirectUri } = yield* started(auth)
+
+      yield* callback(redirectUri, { state: "state-123", code: "auth-code" })
+      yield* Fiber.await(fiber)
+
+      expect(yield* portIsFree(redirectUri)).toBe(true)
+    }).pipe(Effect.provide(services)))
 })
 
 describe("shutting down while an authorization is in flight", () => {
-  test("stop() cancels the flow and releases its listener", async () => {
-    const auth = operations()
-    const sessions = createOAuthSessions(auth.host)
+  it.live("stop() cancels the flow and releases its listener", () =>
+    Effect.gen(function*() {
+      const auth = operations()
+      const sessions = createOAuthSessions(auth.host)
 
-    const session = await Effect.runPromise(sessions.start({
-      integration: "provider",
-      connection: "primary",
-      authMethod: oauthMethod,
-      clientId: "client-id",
-      clientSecret: "client-secret"
-    }))
-    expect(session.state.status).toBe("pending")
-    const port = Number(new URL(auth.redirectUriUsed()!).port)
+      const session = yield* sessions.start({
+        integration: "provider",
+        connection: "primary",
+        authMethod: oauthMethod,
+        clientId: "client-id",
+        clientSecret: "client-secret"
+      })
+      expect(session.state.status).toBe("pending")
+      const redirectUri = auth.redirectUriUsed()
+      if (redirectUri === undefined) throw new Error("the session announced no redirect URI")
 
-    await Effect.runPromise(sessions.stop())
+      yield* sessions.stop()
 
-    const rebound = Bun.serve({ hostname: "127.0.0.1", port, fetch: () => new Response("ok") })
-    expect(rebound.port).toBe(port)
-    await rebound.stop(true)
-  })
+      expect(yield* portIsFree(redirectUri)).toBe(true)
+    }).pipe(Effect.provide(services)))
 })

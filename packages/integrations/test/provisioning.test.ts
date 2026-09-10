@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it } from "@effect/vitest"
 import { Cause, Context, Effect, Exit, Option, Result } from "effect"
 import { IntegrationSlug } from "@integrations/contracts"
 import { Integrations } from "../src/integrations.ts"
@@ -66,55 +66,59 @@ const integrationsWith = (options: {
 const install = (
   classified: typeof classification,
   host: Context.Context<Integrations>
-) => Effect.runPromiseExit(installClassified(classified).pipe(Effect.provide(host)))
+) => Effect.exit(installClassified(classified).pipe(Effect.provide(host)))
 
 describe("provisioning a discovered URL", () => {
-  it("installs under the name and slug the caller chose", async () => {
-    const added: Array<{ readonly slug: string; readonly name: string }> = []
-    const exit = await install(
-      { ...classification, slug: "gmail", name: "Gmail" },
-      integrationsWith({ added })
-    )
+  it.effect("installs under the name and slug the caller chose", () =>
+    Effect.gen(function*() {
+      const added: Array<{ readonly slug: string; readonly name: string }> = []
+      const exit = yield* install(
+        { ...classification, slug: "gmail", name: "Gmail" },
+        integrationsWith({ added })
+      )
 
-    expect(added).toEqual([{ slug: "gmail", name: "Gmail" }])
-    expect(Exit.isSuccess(exit) && String(exit.value.slug)).toBe("gmail")
-  })
+      expect(added).toEqual([{ slug: "gmail", name: "Gmail" }])
+      expect(Exit.isSuccess(exit) && String(exit.value.slug)).toBe("gmail")
+    }))
 
-  it("falls back to what the endpoint said it was", async () => {
-    const added: Array<{ readonly slug: string; readonly name: string }> = []
-    await install(classification, integrationsWith({ added }))
+  it.effect("falls back to what the endpoint said it was", () =>
+    Effect.gen(function*() {
+      const added: Array<{ readonly slug: string; readonly name: string }> = []
+      yield* install(classification, integrationsWith({ added }))
 
-    expect(added).toEqual([{ slug: "gmailmcp", name: "Gmailmcp" }])
-  })
+      expect(added).toEqual([{ slug: "gmailmcp", name: "Gmailmcp" }])
+    }))
 
-  it("is idempotent for the URL already installed under that slug", async () => {
-    const added: Array<{ readonly slug: string; readonly name: string }> = []
-    const existing = installed({ slug: "gmailmcp", name: "Gmail" })
-    const exit = await install(classification, integrationsWith({ existing, added }))
+  it.effect("is idempotent for the URL already installed under that slug", () =>
+    Effect.gen(function*() {
+      const added: Array<{ readonly slug: string; readonly name: string }> = []
+      const existing = installed({ slug: "gmailmcp", name: "Gmail" })
+      const exit = yield* install(classification, integrationsWith({ existing, added }))
 
-    expect(added).toEqual([])
-    expect(Exit.isSuccess(exit) && exit.value.name).toBe("Gmail")
-  })
+      expect(added).toEqual([])
+      expect(Exit.isSuccess(exit) && exit.value.name).toBe("Gmail")
+    }))
 
-  it("refuses a name already taken by a different endpoint", async () => {
-    const added: Array<{ readonly slug: string; readonly name: string }> = []
-    const existing = installed({
-      slug: "gmail",
-      name: "Gmail",
-      displayUrl: "https://mail.example.com/mcp"
-    })
-    const exit = await install(
-      { ...classification, slug: "gmail" },
-      integrationsWith({ existing, added })
-    )
+  it.effect("refuses a name already taken by a different endpoint", () =>
+    Effect.gen(function*() {
+      const added: Array<{ readonly slug: string; readonly name: string }> = []
+      const existing = installed({
+        slug: "gmail",
+        name: "Gmail",
+        displayUrl: "https://mail.example.com/mcp"
+      })
+      const exit = yield* install(
+        { ...classification, slug: "gmail" },
+        integrationsWith({ existing, added })
+      )
 
-    expect(Exit.isFailure(exit)).toBe(true)
-    if (Exit.isFailure(exit)) {
-      const failure = Cause.findError(exit.cause)
-      expect(Result.isSuccess(failure) && failure.success._tag).toBe("InvalidInputError")
-      expect(Result.isSuccess(failure) && failure.success.message)
-        .toContain("https://mail.example.com/mcp")
-    }
-    expect(added).toEqual([])
-  })
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) {
+        const failure = Cause.findError(exit.cause)
+        expect(Result.isSuccess(failure) && failure.success._tag).toBe("InvalidInputError")
+        expect(Result.isSuccess(failure) && failure.success.message)
+          .toContain("https://mail.example.com/mcp")
+      }
+      expect(added).toEqual([])
+    }))
 })

@@ -1,8 +1,7 @@
-import { run } from "./effect.ts"
-import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, rm, stat } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import path from "node:path"
+import { describe, expect, it } from "@effect/vitest"
+import { Effect, FileSystem, Layer, Schema } from "effect"
+import { FetchHttpClient, HttpClient } from "effect/unstable/http"
+import { GatewayMetadata } from "@integrations/contracts"
 import {
   defaultTenantId,
   gatewayConfigPath,
@@ -13,139 +12,123 @@ import {
   resolveClientConnection,
   serveGateway
 } from "../index.ts"
-import type { RunningGateway } from "../index.ts"
-import { GatewayMetadata } from "@integrations/contracts"
-import { Effect, Schema } from "effect"
-import { FetchHttpClient, HttpClient } from "effect/unstable/http"
+import { temporaryDirectory, testServices } from "./fixtures.ts"
 
-const http = <A, E>(effect: Effect.Effect<A, E, HttpClient.HttpClient>): Promise<A> =>
-  Effect.runPromise(effect.pipe(Effect.provide(FetchHttpClient.layer)))
+const services = Layer.merge(testServices, FetchHttpClient.layer)
 
-const directories: Array<string> = []
-const running: Array<RunningGateway> = []
-
-afterEach(async () => {
-  await run(Promise.all(running.splice(0).map((gateway) => gateway.stop())))
-  await run(Promise.all(
-    directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))
+/** A gateway on a loopback port, stopped when the test's scope ends. */
+const gateway = Effect.flatMap(temporaryDirectory("gateway-serve-"), (home) =>
+  Effect.acquireRelease(
+    Effect.promise(() => serveGateway({ home, port: 0, httpClient: FetchHttpClient.layer })),
+    (running) => Effect.promise(() => running.stop())
   ))
-})
-
-const start = async (): Promise<RunningGateway> => {
-  const home = await run(mkdtemp(path.join(tmpdir(), "wf-gateway-serve-")))
-  directories.push(home)
-  const gateway = await run(serveGateway({ home, port: 0, httpClient: FetchHttpClient.layer }))
-  running.push(gateway)
-  return gateway
-}
 
 describe("gateway service", () => {
-  test("binds to loopback and answers health", async () => {
-    const gateway = await run(start())
+  it.live("binds to loopback and answers health", () =>
+    Effect.gen(function*() {
+      const running = yield* gateway
 
-    expect(gateway.url).toStartWith("http://127.0.0.1:")
-    const response = await http(HttpClient.get(`${gateway.url}/v1/health`))
-    expect(response.status).toBe(200)
-    const metadataResponse = await http(HttpClient.get(`${gateway.url}/v1/metadata`))
-    const metadata = Schema.decodeUnknownSync(GatewayMetadata)(await http(metadataResponse.json))
-    expect(metadata.gatewayVersion).toBe("0.2.0")
-    expect(metadataResponse.headers["cache-control"]).toBe("no-store")
-  })
+      expect(running.url).toMatch(/^http:\/\/127\.0\.0\.1:/)
+      expect((yield* HttpClient.get(`${running.url}/v1/health`)).status).toBe(200)
 
-  test("bootstraps a local operator client whose recorded key works over the wire", async () => {
-    const gateway = await run(start())
+      const response = yield* HttpClient.get(`${running.url}/v1/metadata`)
+      const metadata = Schema.decodeUnknownSync(GatewayMetadata)(yield* response.json)
+      expect(metadata.gatewayVersion).toBe("0.2.0")
+      expect(response.headers["cache-control"]).toBe("no-store")
+    }).pipe(Effect.provide(services)))
 
-    const config = await run(readGatewayConfig(gateway.service.home))
-    expect(config?.port).toBe(gateway.port)
-    expect(config?.apiKey).toStartWith("wfi_")
+  it.live("bootstraps a local operator client whose recorded key works over the wire", () =>
+    Effect.gen(function*() {
+      const running = yield* gateway
 
-    const local = await run(gateway.service.store.findClientByName(defaultTenantId, localClientName))
-    expect(local?.capabilities).toEqual([
-      "provision_connections",
-      "administer_gateway"
-    ])
+      const config = yield* Effect.promise(() => readGatewayConfig(running.service.home))
+      expect(config?.port).toBe(running.port)
+      expect(config?.apiKey).toMatch(/^wfi_/)
 
-    const response = await http(HttpClient.get(`${gateway.url}/v1/clients`, {
-      headers: { authorization: `Bearer ${config?.apiKey ?? ""}` }
-    }))
-    expect(response.status).toBe(200)
-  })
+      const local = yield* running.service.store.findClientByName(
+        defaultTenantId,
+        localClientName
+      )
+      expect(local?.capabilities).toEqual(["provision_connections", "administer_gateway"])
 
-  test("writes the config file as a credential, not world-readable", async () => {
-    const gateway = await run(start())
+      const response = yield* HttpClient.get(`${running.url}/v1/clients`, {
+        headers: { authorization: `Bearer ${config?.apiKey ?? ""}` }
+      })
+      expect(response.status).toBe(200)
+    }).pipe(Effect.provide(services)))
 
-    const info = await run(stat(gatewayConfigPath(gateway.service.home)))
+  it.live("writes the config file as a credential, not world-readable", () =>
+    Effect.gen(function*() {
+      const running = yield* gateway
+      const fs = yield* FileSystem.FileSystem
 
-    expect(info.mode & 0o777).toBe(0o600)
-  })
+      const info = yield* Effect.orDie(fs.stat(gatewayConfigPath(running.service.home)))
 
-  test("the control plane's own page is authenticated without carrying a key", async () => {
-    const gateway = await run(start())
+      expect(Number(info.mode) & 0o777).toBe(0o600)
+    }).pipe(Effect.provide(services)))
 
-    const response = await http(HttpClient.get(`${gateway.url}/v1/clients`, {
-      headers: { "sec-fetch-site": "same-origin" }
-    }))
+  it.live("the control plane's own page is authenticated, a page on another site is not", () =>
+    Effect.gen(function*() {
+      const running = yield* gateway
 
-    expect(response.status).toBe(200)
-  })
+      const ownPage = yield* HttpClient.get(`${running.url}/v1/clients`, {
+        headers: { "sec-fetch-site": "same-origin" }
+      })
+      expect(ownPage.status).toBe(200)
 
-  test("a page on another site is not, even reaching the same loopback port", async () => {
-    const gateway = await run(start())
+      const elsewhere = yield* HttpClient.get(`${running.url}/v1/clients`, {
+        headers: { "sec-fetch-site": "cross-site", origin: "https://evil.example.com" }
+      })
+      expect(elsewhere.status).toBe(401)
+    }).pipe(Effect.provide(services)))
 
-    const response = await http(HttpClient.get(`${gateway.url}/v1/clients`, {
-      headers: {
-        "sec-fetch-site": "cross-site",
-        origin: "https://evil.example.com"
-      }
-    }))
+  it.live("an explicit key wins over the ambient one", () =>
+    Effect.gen(function*() {
+      const running = yield* gateway
+      const store = running.service.store
+      const local = yield* store.findClientByName(defaultTenantId, localClientName)
+      if (local === undefined) throw new Error("Local client was not bootstrapped")
+      const sandbox = yield* store.createClient({
+        id: yield* newClientId,
+        tenantId: defaultTenantId,
+        accessProfileId: local.accessProfileId,
+        approvalPolicyId: local.approvalPolicyId,
+        name: "sandbox",
+        capabilities: ["provision_connections"]
+      })
+      const key = yield* generateApiKey
+      yield* store.addApiKey({ id: key.id, clientId: sandbox.id, hash: key.hash })
 
-    expect(response.status).toBe(401)
-  })
+      const response = yield* HttpClient.get(`${running.url}/v1/clients`, {
+        headers: { "sec-fetch-site": "same-origin", authorization: `Bearer ${key.secret}` }
+      })
 
-  test("an explicit key wins over the ambient one", async () => {
-    const gateway = await run(start())
-    const local = await run(gateway.service.store.findClientByName(defaultTenantId, localClientName))
-    if (local === undefined) throw new Error("Local client was not bootstrapped")
-    const sandbox = await run(gateway.service.store.createClient({
-      id: (await run(newClientId)),
-      tenantId: defaultTenantId,
-      accessProfileId: local.accessProfileId,
-      approvalPolicyId: local.approvalPolicyId,
-      name: "sandbox",
-      capabilities: ["provision_connections"]
-    }))
-    const key = (await run(generateApiKey))
-    await run(gateway.service.store.addApiKey({ id: key.id, clientId: sandbox.id, hash: key.hash }))
+      expect(response.status).toBe(403)
+    }).pipe(Effect.provide(services)))
 
-    const response = await http(HttpClient.get(`${gateway.url}/v1/clients`, {
-      headers: {
-        "sec-fetch-site": "same-origin",
-        authorization: `Bearer ${key.secret}`
-      }
-    }))
+  it.live("prefers an explicit environment over the local config file", () =>
+    Effect.gen(function*() {
+      const running = yield* gateway
 
-    expect(response.status).toBe(403)
-  })
+      const fromFile = yield* Effect.promise(() =>
+        resolveClientConnection({ INTEGRATIONS_HOME: running.service.home }))
+      const fromEnvironment = yield* Effect.promise(() =>
+        resolveClientConnection({
+          INTEGRATIONS_HOME: running.service.home,
+          INTEGRATIONS_URL: "https://gateway.example",
+          INTEGRATIONS_API_KEY: "wfi_remote"
+        }))
 
-  test("prefers an explicit environment over the local config file", async () => {
-    const gateway = await run(start())
+      expect(fromFile?.url).toBe(running.url)
+      expect(fromEnvironment?.url).toBe("https://gateway.example")
+      expect(fromEnvironment?.apiKey).toBe("wfi_remote")
+    }).pipe(Effect.provide(services)))
 
-    const fromFile = await run(resolveClientConnection({ INTEGRATIONS_HOME: gateway.service.home }))
-    const fromEnvironment = await run(resolveClientConnection({
-      INTEGRATIONS_HOME: gateway.service.home,
-      INTEGRATIONS_URL: "https://gateway.example",
-      INTEGRATIONS_API_KEY: "wfi_remote"
-    }))
+  it.live("reports no connection when neither environment nor config exists", () =>
+    Effect.gen(function*() {
+      const home = yield* temporaryDirectory("gateway-empty-")
 
-    expect(fromFile?.url).toBe(gateway.url)
-    expect(fromEnvironment?.url).toBe("https://gateway.example")
-    expect(fromEnvironment?.apiKey).toBe("wfi_remote")
-  })
-
-  test("reports no connection when neither environment nor config exists", async () => {
-    const home = await run(mkdtemp(path.join(tmpdir(), "wf-gateway-empty-")))
-    directories.push(home)
-
-    expect(await run(resolveClientConnection({ INTEGRATIONS_HOME: home }))).toBeUndefined()
-  })
+      expect(yield* Effect.promise(() =>
+        resolveClientConnection({ INTEGRATIONS_HOME: home }))).toBeUndefined()
+    }).pipe(Effect.provide(services)))
 })
