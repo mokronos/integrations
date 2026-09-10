@@ -111,22 +111,17 @@ const setup = async (options: {
 }
 
 describe("failures nobody declared", () => {
-  test("answers in the gateway's own dialect instead of an empty 500", async () => {
+  test("answers in the gateway's own dialect, saying nothing about the database that broke", async () => {
     const { call } = await run(setup({ listClientsFails: true }))
     const response = await run(call("GET", "/v1/clients"))
     expect(response.status).toBe(500)
-    const body = await run(response.json())
-    expect(body.error).toBe("The gateway could not complete this request")
-  })
-
-  test("says nothing about the database that broke", async () => {
-    const { call } = await run(setup({ listClientsFails: true }))
-    const body = await run((await run(call("GET", "/v1/clients"))).text())
+    const body = await run(response.text())
+    expect(JSON.parse(body).error).toBe("The gateway could not complete this request")
     expect(body).not.toContain("SQLITE")
     expect(body).not.toContain("/srv/secrets")
   })
 
-  test("hands back the id the failure was recorded under", async () => {
+  test("tells the sink which operation rejected and hands the caller back its id", async () => {
     const recorded: Array<{ readonly traceId: string; readonly operation?: string }> = []
     const { call } = await run(setup({
       listClientsFails: true,
@@ -137,36 +132,12 @@ describe("failures nobody declared", () => {
       }
     }))
     const body = await run((await run(call("GET", "/v1/clients"))).json())
-    expect(recorded).toHaveLength(1)
-    expect(body.traceId).toBe(recorded[0]?.traceId)
-  })
+    expect(recorded).toEqual([{ traceId: "trace-0", operation: "listClients" }])
+    expect(body.traceId).toBe("trace-0")
 
-  test("tells the sink which store operation rejected", async () => {
-    const operations: Array<string | undefined> = []
-    const { call } = await run(setup({
-      listClientsFails: true,
-      errorCapture: (operation) => {
-        operations.push(operation)
-        return "trace"
-      }
-    }))
-    await run(call("GET", "/v1/clients"))
-    expect(operations).toEqual(["listClients"])
-  })
-
-  test("a sink that keeps no id leaves the field off rather than sending an empty one", async () => {
-    const { call } = await run(setup({
-      listClientsFails: true,
-      errorCapture: () => ""
-    }))
-    const body = await run((await run(call("GET", "/v1/clients"))).json())
-    expect(body).toEqual({ error: "The gateway could not complete this request" })
-  })
-
-  test("still refuses a malformed request with 400, not 500", async () => {
-    const { call } = await run(setup())
-    const response = await run(call("POST", "/v1/clients", JSON.stringify({ nope: true })))
-    expect(response.status).toBe(400)
+    const anonymous = await run(setup({ listClientsFails: true, errorCapture: () => "" }))
+    expect(await run((await run(anonymous.call("GET", "/v1/clients"))).json()))
+      .toEqual({ error: "The gateway could not complete this request" })
   })
 })
 

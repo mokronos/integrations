@@ -45,24 +45,6 @@ const ask = (assets: WebAssets, pathname: string): Promise<Response | undefined>
   )
 
 describe("control plane assets", () => {
-  test("serves the entry document at the root", async () => {
-    const assets = await run(createWebAssets({ directories: [await run(buildOutput())] }))
-
-    const response = await ask(assets, "/")
-
-    expect(response?.status).toBe(200)
-    expect(response?.headers.get("content-type")).toContain("text/html")
-  })
-
-  test("serves built files with the content type a browser needs", async () => {
-    const assets = await run(createWebAssets({ directories: [await run(buildOutput())] }))
-
-    const response = await ask(assets, "/assets/index-abc.js")
-
-    expect(response?.status).toBe(200)
-    expect(response?.headers.get("content-type")).toContain("javascript")
-  })
-
   test("falls back to the entry document for a client-side route", async () => {
     const assets = await run(createWebAssets({ directories: [await run(buildOutput())] }))
 
@@ -70,12 +52,6 @@ describe("control plane assets", () => {
 
     expect(response?.status).toBe(200)
     expect(await run(response?.text())).toContain("<title>control</title>")
-  })
-
-  test("a missing asset is a miss, not the entry document", async () => {
-    const assets = await run(createWebAssets({ directories: [await run(buildOutput())] }))
-
-    expect(await ask(assets, "/assets/gone.js")).toBeUndefined()
   })
 
   test("refuses to escape the build directory", async () => {

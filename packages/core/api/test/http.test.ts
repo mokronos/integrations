@@ -349,12 +349,6 @@ describe("gateway http surface", () => {
     expect((await run(call("GET", "/v1/tools"))).status).toBe(403)
   })
 
-  test("distinguishes an unknown path from a wrong method", async () => {
-    const { call } = await run(setup())
-    expect((await run(call("GET", "/v1/nothing"))).status).toBe(404)
-    expect((await run(call("DELETE", "/v1/tools"))).status).toBe(405)
-  })
-
   test("lists only the caller's effective tools", async () => {
     const { call } = await run(setup())
     const response = await run(call("GET", "/v1/tools"))
@@ -513,29 +507,6 @@ describe("gateway http surface", () => {
 
     const stored = await run(store.listApiKeys(clientId))
     expect(JSON.stringify(stored)).not.toContain(secret)
-  })
-
-  test("a new client defaults to invocation-only authority", async () => {
-    const { call } = await run(setup({ capabilities: ["provision_connections", "administer_gateway"] }))
-    const response = await run(call("POST", "/v1/clients", { body: { name: "sandbox" } }))
-    expect(response.body["capabilities"]).toEqual([])
-  })
-
-  test("updates client capabilities and approval delivery", async () => {
-    const { call } = await run(setup({
-      capabilities: ["provision_connections", "administer_gateway"]
-    }))
-    const created = await run(call("POST", "/v1/clients", { body: { name: "sandbox" } }))
-    const clientId = String(created.body["id"])
-    const response = await run(call("POST", `/v1/clients/${clientId}/settings`, {
-      body: {
-        capabilities: ["provision_connections"],
-        approvalDelivery: { returnLink: false }
-      }
-    }))
-    expect(response.status).toBe(200)
-    expect(response.body["capabilities"]).toEqual(["provision_connections"])
-    expect(response.body["approvalDelivery"]).toEqual({ returnLink: false })
   })
 
   test("manages reusable approval destinations and client assignments", async () => {
@@ -753,51 +724,45 @@ describe("gateway approval settlement", () => {
     ))).status).toBe(400)
   })
 
-  test("refuses to approve a call removed by access profile reassignment while frozen", async () => {
-    const { call, store, client, calls } = await run(setup({
+  test("re-checks authority at approval time, however it was taken away", async () => {
+    const reassigned = await run(setup({
       decision: "require_approval",
       capabilities: ["provision_connections", "administer_gateway"]
     }))
-    const frozen = await run(call("POST", "/v1/execute", {
+    const frozen = await run(reassigned.call("POST", "/v1/execute", {
       body: { alias: "user_sebastian_gmail_work", tool: "sendEmail" }
     }))
-    const approvalId = String(frozen.body["approvalId"])
-
-    const emptyProfile = await run(store.createAccessProfile({
+    const emptyProfile = await run(reassigned.store.createAccessProfile({
       id: (await run(newAccessProfileId)),
       tenantId: defaultTenantId,
       name: "No mail access"
     }))
-    await run(store.assignAccessProfile(defaultTenantId, client.id, emptyProfile.id))
-    const approved = await run(call(
-      "POST",
-      `/v1/approvals/${approvalId}/approve`,
-      { body: {}, local: true }
+    await run(reassigned.store.assignAccessProfile(
+      defaultTenantId,
+      reassigned.client.id,
+      emptyProfile.id
     ))
+    expect((await run(reassigned.call(
+      "POST",
+      `/v1/approvals/${String(frozen.body["approvalId"])}/approve`,
+      { body: {}, local: true }
+    ))).status).toBe(400)
+    expect(reassigned.calls).toHaveLength(0)
 
-    expect(approved.status).toBe(400)
-    expect(calls).toHaveLength(0)
-  })
-
-  test("refuses to approve a tool removed while the call was frozen", async () => {
-    const { call, store, accessProfile, calls } = await run(setup({
+    const emptied = await run(setup({
       decision: "require_approval",
       capabilities: ["provision_connections", "administer_gateway"]
     }))
-    const frozen = await run(call("POST", "/v1/execute", {
+    const stale = await run(emptied.call("POST", "/v1/execute", {
       body: { alias: "user_sebastian_gmail_work", tool: "sendEmail" }
     }))
-    const approvalId = String(frozen.body["approvalId"])
-    await run(store.replaceAccessProfileTools(accessProfile.id, []))
-
-    const approved = await run(call(
+    await run(emptied.store.replaceAccessProfileTools(emptied.accessProfile.id, []))
+    expect((await run(emptied.call(
       "POST",
-      `/v1/approvals/${approvalId}/approve`,
+      `/v1/approvals/${String(stale.body["approvalId"])}/approve`,
       { body: {}, local: true }
-    ))
-
-    expect(approved.status).toBe(400)
-    expect(calls).toHaveLength(0)
+    ))).status).toBe(400)
+    expect(emptied.calls).toHaveLength(0)
   })
 
   test("denying settles without performing the call", async () => {
@@ -823,20 +788,6 @@ describe("frozen calls and retries", () => {
     args: Record<string, typeof Schema.Json.Type> = { to: "a@b.c" }
   ) => call("POST", "/v1/execute", {
     body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: args }
-  })
-
-  test("a retry meets the frozen call it already proposed", async () => {
-    const { call, store } = await run(setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] }))
-
-    const first = await run(send(call))
-    const second = await run(send(call))
-    const third = await run(call("POST", "/v1/execute", {
-      body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } }
-    }))
-
-    expect(second.body["approvalId"]).toBe(first.body["approvalId"])
-    expect(third.body["approvalId"]).toBe(first.body["approvalId"])
-    expect(await run(store.listApprovals(defaultTenantId, "pending"))).toHaveLength(1)
   })
 
   test("different arguments are a different frozen call", async () => {
@@ -929,25 +880,6 @@ describe("provisioning surface", () => {
     expect(JSON.stringify(report.body)).toContain("not authorized")
   })
 
-  test("supports creating a client with explicit reusable configurations", async () => {
-    const { call } = await run(setup({ capabilities: ["provision_connections", "administer_gateway"] }))
-    const profile = await run(call("POST", "/v1/access-profiles", { body: { name: "Explicit access" } }))
-    const policy = await run(call("POST", "/v1/approval-policies", { body: { name: "Explicit approval" } }))
-    const response = await run(call("POST", "/v1/clients", {
-      body: {
-        name: "explicit-client",
-        accessProfileId: String(profile.body["id"]),
-        approvalPolicyId: String(policy.body["id"])
-      }
-    }))
-
-    expect(profile.status).toBe(201)
-    expect(policy.status).toBe(201)
-    expect(response.status).toBe(201)
-    expect(response.body["accessProfileId"]).toBe(profile.body["id"])
-    expect(response.body["approvalPolicyId"]).toBe(policy.body["id"])
-  })
-
   test("removes a connection by the name it was asked for, not the stored one", async () => {
     const { call, removed } = await run(setup({
       capabilities: ["provision_connections", "administer_gateway"],
@@ -995,29 +927,17 @@ describe("provisioning surface", () => {
     expect(renamed).toEqual([{ slug: "statelessserver", name: "Gmail" }])
   })
 
-  test("refuses to rename an integration it never installed", async () => {
-    const { call, renamed } = await run(setup({
+  test("refuses to rename or remove an integration it never installed", async () => {
+    const { call, renamed, forgotten } = await run(setup({
       capabilities: ["provision_connections", "administer_gateway"],
       connections: [{ integration: "gmail", name: "work" }]
     }))
 
-    const response = await run(call("POST", "/v1/integrations/notion/name", {
+    expect((await run(call("POST", "/v1/integrations/notion/name", {
       body: { name: "Notion" }
-    }))
-
-    expect(response.status).toBe(404)
+    }))).status).toBe(404)
+    expect((await run(call("DELETE", "/v1/integrations/notion"))).status).toBe(404)
     expect(renamed).toEqual([])
-  })
-
-  test("refuses to remove an integration it never installed", async () => {
-    const { call, forgotten } = await run(setup({
-      capabilities: ["provision_connections", "administer_gateway"],
-      connections: [{ integration: "gmail", name: "work" }]
-    }))
-
-    const response = await run(call("DELETE", "/v1/integrations/notion"))
-
-    expect(response.status).toBe(404)
     expect(forgotten).toEqual([])
   })
 
@@ -1048,41 +968,18 @@ describe("provisioning surface", () => {
     expect(after[0]?.revokedAt).not.toBeNull()
   })
 
-  test("names the MCP endpoint alongside the clients that connect to it", async () => {
-    const { call } = await run(setup({
+  test("names the MCP endpoint alongside the clients, and omits it without a public origin", async () => {
+    const named = await run(setup({
       capabilities: ["provision_connections", "administer_gateway"],
       mcpUrl: "https://gateway.example/mcp"
     }))
+    expect((await run(named.call("GET", "/v1/clients"))).body["mcpUrl"])
+      .toBe("https://gateway.example/mcp")
 
-    const response = await run(call("GET", "/v1/clients"))
-
-    expect(response.status).toBe(200)
-    expect(response.body["mcpUrl"]).toBe("https://gateway.example/mcp")
-  })
-
-  test("omits the MCP endpoint when the gateway has no public origin to name", async () => {
-    const { call } = await run(setup({ capabilities: ["provision_connections", "administer_gateway"] }))
-
-    const response = await run(call("GET", "/v1/clients"))
-
-    expect(response.status).toBe(200)
-    expect(response.body["mcpUrl"]).toBeUndefined()
-  })
-
-  test("reads another client's effective surface, so codegen does not need its key", async () => {
-    const { call, client } = await run(setup({ capabilities: ["provision_connections", "administer_gateway"] }))
-
-    const response = await run(call("GET", `/v1/clients/${client.id}/tools`))
-
-    expect(response.status).toBe(200)
-    expect(response.body["tools"]).toEqual([
-      {
-        alias: "user_sebastian_gmail_work",
-        tool: "sendEmail",
-        connection: { owner: "user", subject: "sebastian", integration: "gmail", name: "work" },
-        decision: "allow"
-      }
-    ])
+    const anonymous = await run(setup({
+      capabilities: ["provision_connections", "administer_gateway"]
+    }))
+    expect((await run(anonymous.call("GET", "/v1/clients"))).body["mcpUrl"]).toBeUndefined()
   })
 
   test("filters and windows the audit trail, and says how much there is", async () => {

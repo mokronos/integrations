@@ -98,7 +98,7 @@ describe("gateway traffic shaping", () => {
   })
 
   test("one exhausted principal does not starve another", async () => {
-    const { handle, client, key } = await run(setup({
+    const { handle, key } = await run(setup({
       principalLimit: 2,
       addressLimit: 10_000
     }))
@@ -122,8 +122,6 @@ describe("gateway traffic shaping", () => {
       clientId: neighbour.id,
       hash: neighbourKey.hash
     }))
-    void client
-
     const as = (secret: string) =>
       handle(new Request("http://gateway.test/v1/tools", {
         headers: { authorization: `Bearer ${secret}` }

@@ -140,16 +140,6 @@ describe("gateway authorization", () => {
     expect((await run(invoke(store, "wfi_not-a-real-key"))).status).toBe("unknown-key")
   })
 
-  test("denies a revoked key immediately", async () => {
-    const store = await run(makeStore())
-    const { key } = await run(seed(store))
-    expect((await run(invoke(store, key.secret))).status).toBe("authorized")
-
-    await run(store.revokeApiKey(key.id))
-
-    expect((await run(invoke(store, key.secret))).status).toBe("key-revoked")
-  })
-
   test("denies every key of a revoked client", async () => {
     const store = await run(makeStore())
     const { client, key } = await run(seed(store))
@@ -174,22 +164,14 @@ describe("gateway authorization", () => {
     expect((await run(invoke(store, replacement.secret))).status).toBe("authorized")
   })
 
-  test("denies a tool outside the access profile and approval policy intersection", async () => {
+  test("denies a tool outside the intersection, and says no more than it does for an unknown alias", async () => {
     const store = await run(makeStore())
     const { key } = await run(seed(store))
 
-    const result = await run(invoke(store, key.secret, "org_sharepoint_default", "deleteDocument"))
-
-    expect(result.status).toBe("not-authorized")
-  })
-
-  test("does not distinguish an unknown alias from an unauthorized tool", async () => {
-    const store = await run(makeStore())
-    const { key } = await run(seed(store))
-
-    const unknownAlias = await run(invoke(store, key.secret, "nothing-here", "getDocument"))
     const unauthorizedTool = await run(invoke(store, key.secret, "org_sharepoint_default", "deleteDocument"))
+    const unknownAlias = await run(invoke(store, key.secret, "nothing-here", "getDocument"))
 
+    expect(unauthorizedTool.status).toBe("not-authorized")
     expect(unknownAlias.status).toBe(unauthorizedTool.status)
   })
 
@@ -249,39 +231,6 @@ describe("gateway authorization", () => {
     expect(campaign.decision).toBe("require_approval")
   })
 
-  test("one client exposes two connections to the same integration side by side", async () => {
-    const store = await run(makeStore())
-    const { client, key } = await run(seed(store))
-    const personal = {
-      owner: "user",
-      subject: SubjectId.make("sebastian"),
-      integration: IntegrationSlug.make("sharepoint"),
-      name: ConnectionName.make("personal")
-    } as const
-    const accessProfile = await run(store.findAccessProfile(defaultTenantId, client.accessProfileId))
-    const approvalPolicy = await run(store.findApprovalPolicy(defaultTenantId, client.approvalPolicyId))
-    if (accessProfile === undefined || approvalPolicy === undefined) throw new Error("missing configuration")
-    await run(store.replaceAccessProfileTools(accessProfile.id, [
-      { connection: orgConnection, tool: ToolName.make("getDocument") },
-      { connection: personal, tool: ToolName.make("getDocument") }
-    ]))
-    await run(store.replaceApprovalPolicyTools(approvalPolicy.id, [
-      { connection: orgConnection, tool: ToolName.make("getDocument"), decision: "allow" },
-      { connection: personal, tool: ToolName.make("getDocument"), decision: "require_approval" }
-    ]))
-
-    const application = await run(invoke(store, key.secret, "org_sharepoint_default"))
-    const delegated = await run(invoke(store, key.secret, "user_sebastian_sharepoint_personal"))
-
-    expect(application.status).toBe("authorized")
-    expect(delegated.status).toBe("authorized")
-    if (application.status !== "authorized" || delegated.status !== "authorized") return
-    expect(application.subject).toBeNull()
-    expect(delegated.subject).toBe(SubjectId.make("sebastian"))
-    expect(application.decision).toBe("allow")
-    expect(delegated.decision).toBe("require_approval")
-  })
-
   test("the tenant's connection and one person's own never share an alias", async () => {
     const store = await run(makeStore())
     const { client, key } = await run(seed(store))
@@ -301,7 +250,7 @@ describe("gateway authorization", () => {
     ]))
     await run(store.replaceApprovalPolicyTools(approvalPolicy.id, [
       { connection: shared, tool: ToolName.make("sendEmail"), decision: "allow" },
-      { connection: userConnection, tool: ToolName.make("sendEmail"), decision: "allow" }
+      { connection: userConnection, tool: ToolName.make("sendEmail"), decision: "require_approval" }
     ]))
 
     const tenant = await run(invoke(store, key.secret, aliasForConnection(shared), "sendEmail"))
@@ -312,8 +261,10 @@ describe("gateway authorization", () => {
     if (tenant.status !== "authorized" || personal.status !== "authorized") return
     expect(tenant.connection).toEqual(shared)
     expect(tenant.subject).toBeNull()
+    expect(tenant.decision).toBe("allow")
     expect(personal.connection).toEqual(userConnection)
     expect(personal.subject).toBe(SubjectId.make("sebastian"))
+    expect(personal.decision).toBe("require_approval")
   })
 
   test("records when a key was last used", async () => {

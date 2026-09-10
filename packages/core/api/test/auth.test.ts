@@ -517,9 +517,7 @@ describe("logout", () => {
 describe("credential precedence", () => {
   test("an explicit key wins over a valid cookie", async () => {
     const setup_ = await run(setup({ signupOpen: true }))
-    const human = await run(signupHuman(setup_))
-    void human
-
+    await run(signupHuman(setup_))
     const me = await run(setup_.call("GET", "/v1/auth/me", {
       cookie: (await run(signupHuman(setup_, "second@example.com"))).cookie,
       headers: { authorization: `Bearer ${setup_.apiKey.secret}` }

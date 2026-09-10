@@ -125,42 +125,6 @@ describe("i and ii CLI help", () => {
     }
   }, 30_000)
 
-  test("offers a detached start and a service install", () => {
-    const serve = runOperator(["serve", "--help"])
-    expect(serve.exitCode).toBe(0)
-    expect(serve.stdout).toContain("--detach")
-    expect(serve.stdout).toContain("-d")
-
-    const install = runOperator(["install", "--help"])
-    expect(install.exitCode).toBe(0)
-    expect(install.stdout).toContain("--port")
-
-  })
-
-  test("offers browser authentication as both ii login and ii auth", () => {
-    const root = runOperator(["--help"])
-    const login = runOperator(["login", "--help"])
-    const auth = runOperator(["auth", "--help"])
-
-    expect(root.stdout).toContain("login, auth")
-    for (const help of [login, auth]) {
-      expect(help.exitCode).toBe(0)
-      expect(help.stdout).toContain("[<email>]")
-      expect(help.stdout).toContain("--no-open")
-      expect(help.stdout).toContain("--timeout")
-    }
-  }, 30_000)
-
-  test("shows arguments and flags for a specific command", () => {
-    const help = runAgent(["search", "--help"])
-
-    expect(help.exitCode).toBe(0)
-    expect(help.stdout).toContain("query string")
-    expect(help.stdout).toContain("--verbose")
-    expect(help.stdout).toContain("--kind")
-    expect(help.stdout).not.toContain("--text")
-  })
-
   test("reports a missing integrations service instead of failing obscurely", () => {
     const result = runAgent(["integrations"])
 

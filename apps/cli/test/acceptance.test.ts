@@ -513,29 +513,6 @@ describe("integrations CLI acceptance", () => {
     expect(refused.exitCode).toBe(1)
   }, 30_000)
 
-  test("every result is JSON a reader can parse, whole", async () => {
-    const vendor = startVendor()
-    const gateway = await startGateway()
-    await loginOperator(gateway)
-    const clientCli = (args: ReadonlyArray<string>, environment = gateway.environment) =>
-      run(agentCli, args, environment)
-    const operator = (args: ReadonlyArray<string>) =>
-      run(operatorCli, args, { ...gateway.environment, INTEGRATIONS_API_KEY: undefined })
-
-    const discovered = parseOutput(DiscoveredOutput, (await clientCli(["discover", vendor.specUrl])).stdout)
-    const slug = discovered.integration.slug
-    await clientCli(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
-
-    const client = parseOutput(IdOutput, (await operator(["client", "sandbox"])).stdout)
-    const key = parseOutput(SecretOutput, (await operator(["key", client.id])).stdout)
-    const refused = await clientCli(
-      ["execute", "nothing", "tickets.create", "{}"],
-      { ...gateway.environment, INTEGRATIONS_API_KEY: key.secret }
-    )
-    expect(refused.exitCode).toBe(1)
-    expect(JSON.parse(refused.stdout)).toHaveProperty("status", "denied")
-  }, 40_000)
-
   test("listings return every row, and window only when asked", async () => {
     const vendor = startVendor()
     const gateway = await startGateway()

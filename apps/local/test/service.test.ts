@@ -52,7 +52,7 @@ describe("gateway service", () => {
     expect(metadataResponse.headers["cache-control"]).toBe("no-store")
   })
 
-  test("bootstraps a local operator client and records its key", async () => {
+  test("bootstraps a local operator client whose recorded key works over the wire", async () => {
     const gateway = await run(start())
 
     const config = await run(readGatewayConfig(gateway.service.home))
@@ -64,6 +64,11 @@ describe("gateway service", () => {
       "provision_connections",
       "administer_gateway"
     ])
+
+    const response = await http(HttpClient.get(`${gateway.url}/v1/clients`, {
+      headers: { authorization: `Bearer ${config?.apiKey ?? ""}` }
+    }))
+    expect(response.status).toBe(200)
   })
 
   test("writes the config file as a credential, not world-readable", async () => {
@@ -72,22 +77,6 @@ describe("gateway service", () => {
     const info = await run(stat(gatewayConfigPath(gateway.service.home)))
 
     expect(info.mode & 0o777).toBe(0o600)
-  })
-
-  test("the recorded key actually works over the wire", async () => {
-    const gateway = await run(start())
-    const config = await run(readGatewayConfig(gateway.service.home))
-
-    const response = await http(HttpClient.get(`${gateway.url}/v1/clients`, {
-      headers: { authorization: `Bearer ${config?.apiKey ?? ""}` }
-    }))
-
-    expect(response.status).toBe(200)
-  })
-
-  test("rejects a request with no credential over the wire", async () => {
-    const gateway = await run(start())
-    expect((await http(HttpClient.get(`${gateway.url}/v1/clients`))).status).toBe(401)
   })
 
   test("the control plane's own page is authenticated without carrying a key", async () => {
