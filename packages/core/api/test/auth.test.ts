@@ -60,7 +60,7 @@ const setup = Effect.fnUntraced(function*(options: SetupOptions = {}) {
     tool: ToolName.make("sendEmail")
   }])
   const approvalPolicy = yield* store.createApprovalPolicy({
-    id: (yield* newApprovalPolicyId), tenantId: defaultTenantId, name: "local"
+    id: (yield* newApprovalPolicyId), tenantId: defaultTenantId, name: "local", tools: []
   })
   yield* store.replaceApprovalPolicyTools(approvalPolicy.id, [{
       connection,
@@ -572,7 +572,7 @@ describe("attribution", () => {
       tool: ToolName.make("sendEmail")
     }])
     const approvalPolicy = yield* setup_.store.createApprovalPolicy({
-      id: (yield* newApprovalPolicyId), tenantId: human.tenantId, name: "support-agent"
+      id: (yield* newApprovalPolicyId), tenantId: human.tenantId, name: "support-agent", tools: []
     })
     yield* setup_.store.replaceApprovalPolicyTools(approvalPolicy.id, [{
         connection,

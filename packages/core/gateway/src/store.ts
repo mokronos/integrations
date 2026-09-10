@@ -510,12 +510,13 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
                 VALUES (?, ?, ?, 0, ?, ?)`,
           args: [input.approvalPolicyId, input.tenantId, input.name, at, at]
         },
-        ...input.tools.flatMap((entry) => {
+        ...input.tools.map((entry) => {
           const route = [entry.connection.owner, connectionSubject(entry.connection) ?? null, entry.connection.integration, entry.connection.name, entry.tool]
-          return [
-            { sql: `INSERT INTO gateway_access_profile_tool (access_profile_id, owner, subject, integration, connection_name, tool) VALUES (?, ?, ?, ?, ?, ?)`, args: [input.accessProfileId, ...route] },
-            { sql: `INSERT INTO gateway_approval_policy_tool (approval_policy_id, owner, subject, integration, connection_name, tool, decision) VALUES (?, ?, ?, ?, ?, ?, ?)`, args: [input.approvalPolicyId, ...route, entry.decision] }
-          ]
+          return { sql: `INSERT INTO gateway_access_profile_tool (access_profile_id, owner, subject, integration, connection_name, tool) VALUES (?, ?, ?, ?, ?, ?)`, args: [input.accessProfileId, ...route] }
+        }),
+        ...input.approvalPolicyTools.map((entry) => {
+          const route = [entry.connection.owner, connectionSubject(entry.connection) ?? null, entry.connection.integration, entry.connection.name, entry.tool]
+          return { sql: `INSERT INTO gateway_approval_policy_tool (approval_policy_id, owner, subject, integration, connection_name, tool, decision) VALUES (?, ?, ?, ?, ?, ?, ?)`, args: [input.approvalPolicyId, ...route, entry.decision] }
         }),
         {
           sql: `INSERT INTO gateway_client (id, tenant_id, access_profile_id, approval_policy_id, name, capabilities, approval_delivery, created_at, revoked_at)
@@ -921,11 +922,27 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
 
     createApprovalPolicy: (input) => operation("createApprovalPolicy", Effect.gen(function*() {
       const timestamp = yield* now
-      yield* run(
-        `INSERT INTO gateway_approval_policy (id, tenant_id, name, is_default, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [input.id, input.tenantId, input.name, input.isDefault === true ? 1 : 0, timestamp, timestamp]
-      )
+      yield* batch([
+        {
+          sql: `INSERT INTO gateway_approval_policy (id, tenant_id, name, is_default, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)`,
+          args: [input.id, input.tenantId, input.name, input.isDefault === true ? 1 : 0, timestamp, timestamp]
+        },
+        ...input.tools.map((tool) => ({
+          sql: `INSERT INTO gateway_approval_policy_tool
+                (approval_policy_id, owner, subject, integration, connection_name, tool, decision)
+                VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          args: [
+            input.id,
+            tool.connection.owner,
+            connectionSubject(tool.connection) ?? null,
+            tool.connection.integration,
+            tool.connection.name,
+            tool.tool,
+            tool.decision
+          ]
+        }))
+      ])
       const row = yield* one("SELECT * FROM gateway_approval_policy WHERE id = ?", [input.id])
       if (row === undefined) return yield* Effect.die(new Error(`Failed to store approval policy ${input.id}`))
       return toApprovalPolicy(row)

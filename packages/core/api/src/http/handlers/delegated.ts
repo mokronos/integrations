@@ -36,7 +36,9 @@ export const DelegatedLayer = HttpApiBuilder.group(GatewayApi, "delegated", (han
           return {
             tools: yield* capture(listEffectiveTools(store, client.id, {
               schemas: request.query["schemas"],
-              integrations
+              integrations,
+              ...whenPresentMap("integration", request.query["integration"], (integration) => integration),
+              ...whenPresentMap("connection", request.query["connection"], (connection) => connection)
             }))
           }
         }))

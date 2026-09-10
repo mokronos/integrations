@@ -35,7 +35,7 @@ const ConnectionsOutput = Schema.Struct({
 })
 const ToolsOutput = Schema.Struct({
   count: Schema.Number,
-  tools: Schema.Array(Schema.Struct({ name: Schema.String })),
+  tools: Schema.Array(Schema.Struct({ tool: Schema.String, connection: Schema.String })),
   showing: Schema.optional(Schema.Number)
 })
 const WindowedToolsOutput = Schema.Struct({
@@ -490,6 +490,22 @@ describe("integrations CLI acceptance", () => {
       const discoverAttempt = yield* clientCli(["discover", vendor.specUrl], sandbox)
       expect(discoverAttempt.exitCode).toBe(1)
       expect(discoverAttempt.stderr).toContain("required capability")
+
+      const visible = parseOutput(
+        ToolsOutput,
+        (yield* clientCli(["tools", slug, "--connection", connectionName], sandbox)).stdout
+      )
+      expect(visible.tools.map((tool) => tool.tool)).toEqual(["tickets.create"])
+      expect(visible.tools[0]?.connection).toBe(connectionName)
+      const visibleSchema = yield* clientCli([
+        "schema", slug, "tickets.create", "--connection", connectionName
+      ], sandbox)
+      expect(visibleSchema.exitCode, visibleSchema.stderr).toBe(0)
+      const hiddenSchema = yield* clientCli([
+        "schema", slug, "tickets.delete", "--connection", connectionName
+      ], sandbox)
+      expect(hiddenSchema.exitCode).toBe(1)
+      expect(hiddenSchema.stderr).toContain("not available to this client")
 
       const executed = yield* clientCli([
         "execute",

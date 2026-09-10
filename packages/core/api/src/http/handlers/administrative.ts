@@ -19,9 +19,11 @@ import type { DriftReport } from "@integrations/gateway-core"
 import { refreshIntegrationSnapshot } from "@integrations/gateway-core"
 import {
   approveApproval,
+  catalogConfigurationTools,
+  completeApprovalPolicyTools,
   denyApproval,
   listEffectiveTools,
-  reconcileDefaults
+  reconcileConfigurations
 } from "@integrations/gateway-core"
 import {
   generateApiKey,
@@ -110,9 +112,18 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
             return yield* new ApiBadRequest({ error: `The selected tool ${entry.tool} is no longer available. Refresh the connections and try again.` })
           }
         }
+        const approvalPolicyTools = completeApprovalPolicyTools(
+          yield* capture(catalogConfigurationTools(integrations)),
+          tools.map(({ connection, tool, decision }) => ({
+            connection,
+            tool: ToolName.make(tool),
+            decision
+          }))
+        )
         return yield* capture(store.createConfiguredClient({
           ...request.payload, name, tenantId,
-          id: (yield* newClientId), accessProfileId: (yield* newAccessProfileId), approvalPolicyId: (yield* newApprovalPolicyId)
+          id: (yield* newClientId), accessProfileId: (yield* newAccessProfileId),
+          approvalPolicyId: (yield* newApprovalPolicyId), approvalPolicyTools
         }))
       }))
       .handle("createClient", (request) =>
@@ -122,7 +133,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           if ((yield* capture(store.findClientByName(tenantId, body.name))) !== undefined) {
             return yield* new ApiBadRequest({ error: `A client named ${body.name} already exists` })
           }
-          const defaults = yield* capture(reconcileDefaults({ store, integrations, tenantId }))
+          const defaults = yield* capture(reconcileConfigurations({ store, integrations, tenantId }))
           const accessProfile = body.accessProfileId === undefined
             ? defaults.accessProfile
             : yield* capture(store.findAccessProfile(tenantId, body.accessProfileId))
@@ -360,7 +371,10 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
       }))
       .handle("createApprovalPolicy", (request) => Effect.gen(function*() {
         const tenantId = yield* requireTenant
-        return yield* capture(store.createApprovalPolicy({ id: (yield* newApprovalPolicyId), tenantId, name: request.payload.name }))
+        return yield* capture(store.createApprovalPolicy({
+          id: (yield* newApprovalPolicyId), tenantId, name: request.payload.name,
+          tools: yield* capture(catalogConfigurationTools(integrations))
+        }))
       }))
       .handle("updateApprovalPolicy", (request) => Effect.gen(function*() {
         const tenantId = yield* requireTenant
@@ -384,17 +398,31 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           const existing = deduplicated.get(key)
           deduplicated.set(key, { connection: input.connection, tool: ToolName.make(input.tool), decision: existing?.decision === "require_approval" || input.decision === "require_approval" ? "require_approval" : "allow" })
         }
-        const tools = yield* capture(store.replaceApprovalPolicyTools(approvalPolicy.id, [...deduplicated.values()]))
+        const tools = yield* capture(store.replaceApprovalPolicyTools(
+          approvalPolicy.id,
+          completeApprovalPolicyTools(
+            yield* capture(catalogConfigurationTools(integrations)),
+            [...deduplicated.values()]
+          )
+        ))
         return { approvalPolicy: yield* capture(store.findApprovalPolicy(tenantId, approvalPolicy.id)).pipe(Effect.flatMap((v) => v === undefined ? new ApiNotFound({ error: "Unknown approval policy" }) : Effect.succeed(v))), tools }
       }))
       .handle("cloneApprovalPolicy", (request) => Effect.gen(function*() {
         const tenantId = yield* requireTenant
         const source = yield* capture(store.findApprovalPolicy(tenantId, request.params["id"]))
         if (source === undefined) return yield* new ApiNotFound({ error: "Unknown approval policy" })
-        const approvalPolicy = yield* capture(store.createApprovalPolicy({ id: (yield* newApprovalPolicyId), tenantId, name: request.payload.name }))
         const sourceTools = yield* capture(store.listApprovalPolicyTools(source.id))
-        const tools = yield* capture(store.replaceApprovalPolicyTools(approvalPolicy.id, sourceTools.map(({ connection, tool, decision }) => ({ connection, tool, decision }))))
-        return { approvalPolicy, tools }
+        const tools = completeApprovalPolicyTools(
+          yield* capture(catalogConfigurationTools(integrations)),
+          sourceTools
+        )
+        const approvalPolicy = yield* capture(store.createApprovalPolicy({
+          id: (yield* newApprovalPolicyId), tenantId, name: request.payload.name, tools
+        }))
+        return {
+          approvalPolicy,
+          tools: yield* capture(store.listApprovalPolicyTools(approvalPolicy.id))
+        }
       }))
       .handle("assignApprovalPolicy", (request) => Effect.gen(function*() {
         const tenantId = yield* requireTenant

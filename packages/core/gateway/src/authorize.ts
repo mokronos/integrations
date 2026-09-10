@@ -84,18 +84,18 @@ export const authorizeInvocation = Effect.fn("Authorization.authorizeInvocation"
     : approvalPolicyTools.find((candidate) =>
       candidate.tool === input.tool
       && sameConnectionRef(candidate.connection, accessProfileTool.connection))
-  if (
-    accessProfile === undefined
-    || accessProfileTool === undefined
-    || approvalPolicy === undefined
-    || approvalPolicyTool === undefined
-  ) {
+  if (accessProfile === undefined || accessProfileTool === undefined) {
     return {
       status: "not-authorized",
       alias: input.alias,
       tool: input.tool,
       message: `${input.alias}.${input.tool} is not authorized for this client`
     }
+  }
+  if (approvalPolicy === undefined || approvalPolicyTool === undefined) {
+    return yield* Effect.die(new Error(
+      `Approval policy ${client.approvalPolicyId} has no decision for ${input.alias}.${input.tool}`
+    ))
   }
 
   return {

@@ -5,20 +5,19 @@ import {
   type AccessProfile,
   type AccessProfileTool,
   type ApprovalPolicy,
-  type ApprovalPolicyTool,
   type Client,
   type ConnectionRef,
   type PolicyDecision,
   ToolName
 } from "./domain.ts"
-import { type GatewayStore, GatewayStoreError } from "./store.ts"
+import { type ApprovalPolicyToolInput, type GatewayStore, GatewayStoreError } from "./store.ts"
 
 type ConfigurationCatalog = Pick<Integrations["Service"], "toolSummaries">
 
 const routeKey = (connection: ConnectionRef, tool: string): string =>
   `${connectionRefKey(connection)}\u0000${tool}`
 
-const catalogTools = Effect.fn("Configurations.catalogTools")(function*(integrations: ConfigurationCatalog) {
+export const catalogConfigurationTools = Effect.fn("Configurations.catalogTools")(function*(integrations: ConfigurationCatalog) {
   const summaries = yield* integrations.toolSummaries()
   const tools = new Map<string, {
     readonly connection: ConnectionRef
@@ -46,21 +45,43 @@ const catalogTools = Effect.fn("Configurations.catalogTools")(function*(integrat
   return [...tools.values()]
 })
 
+export const completeApprovalPolicyTools = (
+  catalog: ReadonlyArray<ApprovalPolicyToolInput>,
+  configured: ReadonlyArray<ApprovalPolicyToolInput> = []
+): ReadonlyArray<ApprovalPolicyToolInput> => {
+  const completed = new Map(catalog.map((entry) => [routeKey(entry.connection, entry.tool), entry]))
+  const overrides = new Map<string, ApprovalPolicyToolInput>()
+  for (const entry of configured) {
+    const key = routeKey(entry.connection, entry.tool)
+    const existing = overrides.get(key)
+    overrides.set(key, {
+      connection: entry.connection,
+      tool: entry.tool,
+      decision: existing?.decision === "require_approval" || entry.decision === "require_approval"
+        ? "require_approval"
+        : "allow"
+    })
+  }
+  for (const [key, entry] of overrides) completed.set(key, entry)
+  return [...completed.values()]
+}
+
 export interface DefaultConfigurations {
   readonly accessProfile: AccessProfile | undefined
   readonly approvalPolicy: ApprovalPolicy | undefined
 }
 
-export const reconcileDefaults = Effect.fn("Grants.reconcileDefaults")(function*(input: {
+export const reconcileConfigurations = Effect.fn("Configurations.reconcile")(function*(input: {
   readonly store: GatewayStore
   readonly integrations: ConfigurationCatalog
   readonly tenantId: Client["tenantId"]
 }): Effect.fn.Return<DefaultConfigurations, GatewayStoreError | StorageError> {
-  const [catalog, accessProfile, approvalPolicy] = yield* Effect.all([
-    catalogTools(input.integrations),
+  const [catalog, accessProfile, approvalPolicies] = yield* Effect.all([
+    catalogConfigurationTools(input.integrations),
     input.store.findDefaultAccessProfile(input.tenantId),
-    input.store.findDefaultApprovalPolicy(input.tenantId)
+    input.store.listApprovalPolicies(input.tenantId)
   ])
+  const approvalPolicy = approvalPolicies.find((policy) => policy.isDefault)
 
   if (accessProfile !== undefined) {
     const existing = yield* input.store.listAccessProfileTools(accessProfile.id)
@@ -73,16 +94,13 @@ export const reconcileDefaults = Effect.fn("Grants.reconcileDefaults")(function*
     }
   }
 
-  if (approvalPolicy !== undefined) {
-    const existing = yield* input.store.listApprovalPolicyTools(approvalPolicy.id)
-    const routes = new Set(existing.map((entry) => routeKey(entry.connection, entry.tool)))
-    const added: ReadonlyArray<Omit<ApprovalPolicyTool, "approvalPolicyId">> = catalog
-      .filter((entry) => !routes.has(routeKey(entry.connection, entry.tool)))
-      .map(({ connection, tool, decision }) => ({ connection, tool, decision }))
-    if (added.length > 0) {
-      yield* input.store.replaceApprovalPolicyTools(approvalPolicy.id, [...existing, ...added])
+  yield* Effect.forEach(approvalPolicies, (policy) => Effect.gen(function*() {
+    const existing = yield* input.store.listApprovalPolicyTools(policy.id)
+    const completed = completeApprovalPolicyTools(catalog, existing)
+    if (completed.length > existing.length) {
+      yield* input.store.replaceApprovalPolicyTools(policy.id, completed)
     }
-  }
+  }), { discard: true })
 
   return { accessProfile, approvalPolicy }
 })

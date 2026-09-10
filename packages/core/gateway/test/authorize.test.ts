@@ -44,7 +44,8 @@ const seed = Effect.fnUntraced(function*(store: GatewayStore, options: {
   const approvalPolicy = yield* store.createApprovalPolicy({
     id: yield* newApprovalPolicyId,
     tenantId: defaultTenantId,
-    name: `approval-${crypto.randomUUID()}`
+    name: `approval-${crypto.randomUUID()}`,
+    tools: []
   })
   const client = yield* store.createClient({
     id: yield* newClientId,
@@ -196,7 +197,7 @@ describe("gateway authorization", () => {
         id: yield* newAccessProfileId, tenantId: defaultTenantId, name: "writer access"
       })
       const writerApproval = yield* store.createApprovalPolicy({
-        id: yield* newApprovalPolicyId, tenantId: defaultTenantId, name: "writer approval"
+        id: yield* newApprovalPolicyId, tenantId: defaultTenantId, name: "writer approval", tools: []
       })
       const writer = yield* store.createClient({
         id: yield* newClientId,

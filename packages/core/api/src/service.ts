@@ -17,7 +17,7 @@ import { deliverDueApprovalNotifications } from "@integrations/gateway-core"
 import type { MaintenanceLoop } from "@integrations/gateway-core"
 import { createOAuthSessions } from "@integrations/gateway-core"
 import {
-  reconcileDefaults
+  reconcileConfigurations
 } from "@integrations/gateway-core"
 import type { OAuthSessionStore } from "@integrations/gateway-core"
 import { generateApiKey, newClientId } from "@integrations/gateway-core"
@@ -97,7 +97,7 @@ const buildCore = async (
     resources = await bootResources()
     await Effect.runPromise(Effect.gen(function*() {
       const tenants = yield* resources.store.listTenants()
-      yield* Effect.forEach(tenants, (tenant) => reconcileDefaults({
+      yield* Effect.forEach(tenants, (tenant) => reconcileConfigurations({
         store: resources.store,
         integrations: Context.get(resources.integrationServices, Integrations),
         tenantId: tenant.id
@@ -135,7 +135,7 @@ const buildCore = async (
     onConnected: async (session) => {
       const state = session.state
       if (session.bindingTenant === undefined || state.status !== "connected") return
-      await Effect.runPromise(reconcileDefaults({
+      await Effect.runPromise(reconcileConfigurations({
         store: resources.store,
         integrations: Context.get(resources.integrationServices, Integrations),
         tenantId: session.bindingTenant
@@ -350,7 +350,7 @@ export const ensureLocalCredential = Effect.fn("Gateway.ensureLocalCredential")(
   port: number
 ): Effect.fn.Return<string, GatewayStoreError | StorageError, Crypto.Crypto> {
   const existing = yield* store.findClientByName(defaultTenantId, localClientName)
-  const defaults = yield* reconcileDefaults({ store, integrations, tenantId: defaultTenantId })
+  const defaults = yield* reconcileConfigurations({ store, integrations, tenantId: defaultTenantId })
   if (defaults.accessProfile === undefined || defaults.approvalPolicy === undefined) {
     return yield* new GatewayStoreError({
       operation: "ensureLocalCredential",

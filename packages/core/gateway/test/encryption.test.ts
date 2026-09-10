@@ -189,7 +189,8 @@ describe("the encrypted store", () => {
     const approvalPolicy = yield* store.createApprovalPolicy({
       id: yield* newApprovalPolicyId,
       tenantId: defaultTenantId,
-      name: `policy-${crypto.randomUUID()}`
+      name: `policy-${crypto.randomUUID()}`,
+      tools: []
     })
     yield* store.replaceApprovalPolicyTools(approvalPolicy.id, [{
       connection, tool: ToolName.make("sendEmail"), decision: "require_approval"

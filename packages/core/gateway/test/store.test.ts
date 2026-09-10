@@ -62,7 +62,8 @@ const seedBinding = Effect.fnUntraced(function*(store: GatewayStore) {
   const approvalPolicy = yield* store.createApprovalPolicy({
     id: yield* newApprovalPolicyId,
     tenantId: defaultTenantId,
-    name: `policy-${crypto.randomUUID()}`
+    name: `policy-${crypto.randomUUID()}`,
+    tools: []
   })
   yield* store.replaceApprovalPolicyTools(approvalPolicy.id, [{
     connection, tool: ToolName.make("sendEmail"), decision: "require_approval"
@@ -95,6 +96,7 @@ describe("gateway store", () => {
         name: "Rollback setup",
         accessProfileId,
         approvalPolicyId,
+        approvalPolicyTools: [{ connection, tool: ToolName.make("sendEmail"), decision: "require_approval" }],
         tools: [{ connection, tool: ToolName.make("sendEmail"), decision: "require_approval" }]
       }))
 

@@ -9,6 +9,7 @@ import { stubIntegrationsContext } from "./stubs.ts"
 import { openStore, temporaryDirectory, testServices } from "./fixtures.ts"
 import {
   aliasForConnection,
+  ApprovalPolicyId,
   ClientId,
   ConnectionName,
   createGatewayHandler,
@@ -25,6 +26,7 @@ import {
 import type { ConnectionRef } from "./gateway.ts"
 
 const JsonBody = Schema.Record(Schema.String, Schema.Json)
+const JsonRows = Schema.Array(JsonBody)
 const isApprovalId = Schema.is(Schema.String)
 
 const connection: ConnectionRef = {
@@ -167,7 +169,8 @@ const setup = Effect.fnUntraced(function*(options: {
   const approvalPolicy = yield* store.createApprovalPolicy({
     id: yield* newApprovalPolicyId,
     tenantId: defaultTenantId,
-    name: `approval-${crypto.randomUUID()}`
+    name: `approval-${crypto.randomUUID()}`,
+    tools: []
   })
   yield* store.replaceApprovalPolicyTools(approvalPolicy.id, [{
     connection,
@@ -258,10 +261,13 @@ const setup = Effect.fnUntraced(function*(options: {
 })
 
 describe("gateway http surface", () => {
-  it.effect("onboarding creates only the selected tools with separate configurations and no administrative power", () =>
+  it.effect("onboarding scopes access to selected tools and fills every approval decision", () =>
     Effect.gen(function*() {
       const { call, store, accessProfile } = yield* setup({
-        tools: [{ address: "tools.gmail.org.work.sendEmail", name: "sendEmail", owner: "org" }]
+        tools: [
+          { address: "tools.gmail.org.work.sendEmail", name: "sendEmail", owner: "org" },
+          { address: "tools.gmail.org.work.getEmail", name: "getEmail", owner: "org", defaultDecision: "allow" }
+        ]
       })
       const selected = { connection: { owner: "org", integration: "gmail", name: "work" }, tool: "sendEmail", decision: "require_approval" }
       const response = yield* call("POST", "/v1/clients/configured", { local: true, body: { name: "New assistant", tools: [selected] } })
@@ -271,10 +277,40 @@ describe("gateway http surface", () => {
       const id = String(response.body["id"])
       const tools = yield* call("GET", `/v1/clients/${id}/tools`, { local: true })
       expect(tools.body["tools"]).toMatchObject([{ alias: "org_gmail_work", tool: "sendEmail", decision: "require_approval" }])
+      const approvalPolicyId = String(response.body["approvalPolicyId"])
+      expect((yield* store.listApprovalPolicyTools(ApprovalPolicyId.make(approvalPolicyId))).map((entry) => ({
+        tool: entry.tool,
+        decision: entry.decision
+      }))).toEqual([
+        { tool: "getEmail", decision: "allow" },
+        { tool: "sendEmail", decision: "require_approval" }
+      ])
       expect(yield* store.listAccessProfileTools(accessProfile.id)).toHaveLength(1)
       expect((yield* call("POST", "/v1/clients/configured", { local: true, body: { name: "New assistant", tools: [selected] } })).status).toBe(400)
       expect((yield* call("POST", "/v1/clients/configured", { local: true, body: { name: "Unavailable", tools: [{ ...selected, tool: "missing" }] } })).status).toBe(400)
       expect(yield* store.findClientByName(defaultTenantId, "Unavailable")).toBeUndefined()
+    }).pipe(Effect.provide(testServices)))
+
+  it.effect("creates approval policies with a decision for every catalogued tool", () =>
+    Effect.gen(function*() {
+      const { call, store } = yield* setup({
+        tools: [
+          { address: "tools.gmail.org.work.getEmail", name: "getEmail", owner: "org", defaultDecision: "allow" },
+          { address: "tools.gmail.org.work.sendEmail", name: "sendEmail", owner: "org" }
+        ]
+      })
+      const response = yield* call("POST", "/v1/approval-policies", {
+        local: true,
+        body: { name: "Filled defaults" }
+      })
+      expect(response.status).toBe(201)
+      const tools = yield* store.listApprovalPolicyTools(
+        ApprovalPolicyId.make(String(response.body["id"]))
+      )
+      expect(tools.map(({ tool, decision }) => ({ tool, decision }))).toEqual([
+        { tool: "getEmail", decision: "allow" },
+        { tool: "sendEmail", decision: "require_approval" }
+      ])
     }).pipe(Effect.provide(testServices)))
 
   it.effect("serves each API key's effective tools over MCP", () =>
@@ -363,6 +399,40 @@ describe("gateway http surface", () => {
           decision: "allow"
         }
       ])
+    }).pipe(Effect.provide(testServices)))
+
+  it.effect("filters the caller's tools by integration and connection", () =>
+    Effect.gen(function*() {
+      const { call, store, accessProfile, approvalPolicy } = yield* setup()
+      const personal = {
+        ...connection,
+        name: ConnectionName.make("personal")
+      }
+      const slack = {
+        ...connection,
+        integration: IntegrationSlug.make("slack"),
+        name: ConnectionName.make("team")
+      }
+      const routes = [
+        { connection, tool: ToolName.make("sendEmail"), decision: "allow" as const },
+        { connection: personal, tool: ToolName.make("readEmail"), decision: "allow" as const },
+        { connection: slack, tool: ToolName.make("postMessage"), decision: "require_approval" as const }
+      ]
+      yield* store.replaceAccessProfileTools(
+        accessProfile.id,
+        routes.map(({ connection, tool }) => ({ connection, tool }))
+      )
+      yield* store.replaceApprovalPolicyTools(approvalPolicy.id, routes)
+
+      const gmail = yield* call("GET", "/v1/tools?integration=gmail")
+      expect(Schema.decodeUnknownSync(JsonRows)(gmail.body["tools"])
+        .map((tool) => tool["tool"])).toEqual(["readEmail", "sendEmail"])
+
+      const work = yield* call("GET", "/v1/tools?integration=gmail&connection=work")
+      expect(work.body["tools"]).toMatchObject([{
+        tool: "sendEmail",
+        connection: { integration: "gmail", name: "work" }
+      }])
     }).pipe(Effect.provide(testServices)))
 
   it.effect("executes an effective tool against the address built from the access profile", () =>

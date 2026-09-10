@@ -14,7 +14,7 @@ import {
   listEffectiveTools,
   newAccessProfileId,
   newApprovalPolicyId,
-  reconcileDefaults
+  reconcileConfigurations
 } from "../src/index.ts"
 import type { AccessProfileId, ApprovalPolicyId, GatewayStore } from "../src/index.ts"
 import { gatewayStore, testServices } from "./fixtures.ts"
@@ -62,7 +62,7 @@ const createClient = Effect.fnUntraced(function*(
 const store = gatewayStore("gateway-policy-")
 
 describe("access profiles and approval policies", () => {
-  it.effect("reconciles both reusable defaults without overwriting operator decisions", () =>
+  it.effect("reconciles access defaults and every approval policy without overwriting decisions", () =>
     Effect.gen(function*() {
       const gateway = yield* store
       const accessProfile = yield* gateway.findDefaultAccessProfile(defaultTenantId)
@@ -75,8 +75,18 @@ describe("access profiles and approval policies", () => {
         tool: ToolName.make("sendEmail"),
         decision: "require_approval"
       }])
+      const customPolicy = yield* gateway.createApprovalPolicy({
+        id: yield* newApprovalPolicyId,
+        tenantId: defaultTenantId,
+        name: "Custom",
+        tools: [{
+          connection: connection("mail", "primary"),
+          tool: ToolName.make("sendEmail"),
+          decision: "require_approval"
+        }]
+      })
 
-      yield* reconcileDefaults({
+      yield* reconcileConfigurations({
         store: gateway,
         tenantId: defaultTenantId,
         integrations: catalog([
@@ -91,16 +101,20 @@ describe("access profiles and approval policies", () => {
         (yield* gateway.listApprovalPolicyTools(approvalPolicy.id))
           .map((row) => [row.tool, row.decision]).sort()
       ).toEqual([[ToolName.make("createEvent"), "allow"], [ToolName.make("sendEmail"), "require_approval"]])
+      expect(
+        (yield* gateway.listApprovalPolicyTools(customPolicy.id))
+          .map((row) => [row.tool, row.decision]).sort()
+      ).toEqual([[ToolName.make("createEvent"), "allow"], [ToolName.make("sendEmail"), "require_approval"]])
     }).pipe(Effect.provide(testServices)))
 
-  it.effect("exposes and authorizes only the exact intersection", () =>
+  it.effect("uses the access profile for reach and the approval policy for decisions", () =>
     Effect.gen(function*() {
       const gateway = yield* store
       const accessProfile = yield* gateway.createAccessProfile({
         id: yield* newAccessProfileId, tenantId: defaultTenantId, name: "Mail access"
       })
       const approvalPolicy = yield* gateway.createApprovalPolicy({
-        id: yield* newApprovalPolicyId, tenantId: defaultTenantId, name: "Reviewed actions"
+        id: yield* newApprovalPolicyId, tenantId: defaultTenantId, name: "Reviewed actions", tools: []
       })
       yield* gateway.replaceAccessProfileTools(accessProfile.id, [
         { connection: connection("mail", "primary"), tool: ToolName.make("sendEmail") },
@@ -108,26 +122,35 @@ describe("access profiles and approval policies", () => {
       ])
       yield* gateway.replaceApprovalPolicyTools(approvalPolicy.id, [
         { connection: connection("mail", "primary"), tool: ToolName.make("sendEmail"), decision: "require_approval" },
+        { connection: connection("calendar", "primary"), tool: ToolName.make("createEvent"), decision: "allow" },
         { connection: connection("mail", "primary"), tool: ToolName.make("archiveEmail"), decision: "allow" }
       ])
       const { client, key } = yield* createClient(
         gateway, "intersection", accessProfile.id, approvalPolicy.id
       )
 
-      expect(yield* listEffectiveTools(gateway, client.id)).toEqual([{
-        alias: Alias.make("org_mail_primary"),
-        tool: ToolName.make("sendEmail"),
-        connection: connection("mail", "primary"),
-        decision: "require_approval"
-      }])
+      expect(yield* listEffectiveTools(gateway, client.id)).toEqual([
+        {
+          alias: Alias.make("org_calendar_primary"),
+          tool: ToolName.make("createEvent"),
+          connection: connection("calendar", "primary"),
+          decision: "allow"
+        },
+        {
+          alias: Alias.make("org_mail_primary"),
+          tool: ToolName.make("sendEmail"),
+          connection: connection("mail", "primary"),
+          decision: "require_approval"
+        }
+      ])
       const authorized = yield* authorizeInvocation(gateway, {
         secret: key.secret, alias: Alias.make("org_mail_primary"), tool: ToolName.make("sendEmail")
       })
       expect(authorized.status).toBe("authorized")
-      const outsideAccess = yield* authorizeInvocation(gateway, {
+      const calendar = yield* authorizeInvocation(gateway, {
         secret: key.secret, alias: Alias.make("org_calendar_primary"), tool: ToolName.make("createEvent")
       })
-      expect(outsideAccess.status).toBe("not-authorized")
+      expect(calendar.status).toBe("authorized")
       const outsideApproval = yield* authorizeInvocation(gateway, {
         secret: key.secret, alias: Alias.make("org_mail_primary"), tool: ToolName.make("archiveEmail")
       })
@@ -141,7 +164,7 @@ describe("access profiles and approval policies", () => {
         id: yield* newAccessProfileId, tenantId: defaultTenantId, name: "Mail"
       })
       const approvalPolicy = yield* gateway.createApprovalPolicy({
-        id: yield* newApprovalPolicyId, tenantId: defaultTenantId, name: "Mail decisions"
+        id: yield* newApprovalPolicyId, tenantId: defaultTenantId, name: "Mail decisions", tools: []
       })
       const route = { connection: connection("mail", "primary"), tool: ToolName.make("sendEmail") }
       yield* gateway.replaceAccessProfileTools(accessProfile.id, [route])
@@ -163,7 +186,7 @@ describe("access profiles and approval policies", () => {
         id: yield* newAccessProfileId, tenantId: defaultTenantId, name: "Shared access"
       })
       const approvalPolicy = yield* gateway.createApprovalPolicy({
-        id: yield* newApprovalPolicyId, tenantId: defaultTenantId, name: "Shared decisions"
+        id: yield* newApprovalPolicyId, tenantId: defaultTenantId, name: "Shared decisions", tools: []
       })
       const mail = { connection: connection("mail", "primary"), tool: ToolName.make("sendEmail") }
       const calendar = { connection: connection("calendar", "primary"), tool: ToolName.make("createEvent") }

@@ -149,7 +149,7 @@ describe("gateway maintenance", () => {
         id: yield* newAccessProfileId, tenantId: defaultTenantId, name: "sales access"
       })
       const approvalPolicy = yield* gateway.createApprovalPolicy({
-        id: yield* newApprovalPolicyId, tenantId: defaultTenantId, name: "sales approvals"
+        id: yield* newApprovalPolicyId, tenantId: defaultTenantId, name: "sales approvals", tools: []
       })
       const client = yield* gateway.createClient({
         id: yield* newClientId,
@@ -189,7 +189,7 @@ describe("gateway maintenance", () => {
         id: yield* newAccessProfileId, tenantId: defaultTenantId, name: "sales access"
       })
       const approvalPolicy = yield* gateway.createApprovalPolicy({
-        id: yield* newApprovalPolicyId, tenantId: defaultTenantId, name: "sales approvals"
+        id: yield* newApprovalPolicyId, tenantId: defaultTenantId, name: "sales approvals", tools: []
       })
       const client = yield* gateway.createClient({
         id: yield* newClientId,

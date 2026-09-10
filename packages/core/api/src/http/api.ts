@@ -36,6 +36,7 @@ import {
   ApprovalStatus,
   BooleanFromString,
   Connection,
+  ConnectionName,
   GatewayMetadata,
   Integration,
   IntegrationDiscovery,
@@ -43,6 +44,7 @@ import {
   IntegrationSearchResponse,
   IntegrationValidationReport,
   IntegrationOverview,
+  IntegrationSlug,
   InvocationSucceeded,
   InvocationPending,
   InvocationDenied,
@@ -298,7 +300,9 @@ const DelegatedGroup = HttpApiGroup.make("delegated")
     query: {
       schemas: BooleanFromString.pipe(
         Schema.withDecodingDefaultTypeKey(Effect.succeed(false))
-      )
+      ),
+      integration: Schema.optional(IntegrationSlug),
+      connection: Schema.optional(ConnectionName)
     },
     success: Schema.Struct({ tools: Schema.Array(EffectiveTool) })
   }).annotate(RequiredAccess, "delegated"))

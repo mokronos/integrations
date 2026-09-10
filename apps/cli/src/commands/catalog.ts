@@ -1,4 +1,4 @@
-import { whenPresent } from "@integrations/contracts"
+import { ConnectionName, IntegrationSlug, whenPresent } from "@integrations/contracts"
 import type { GatewayClient } from "@mokronos/integrations-client"
 import type { HttpClient } from "effect/unstable/http"
 import { Effect, Option, Schema } from "effect"
@@ -229,18 +229,29 @@ export const toolsCommand = (runGateway: GatewayTask) => Command.make(
       Flag.optional,
       Flag.withDescription("Only list tools whose name or description contains this text")
     ),
+    connection: Flag.string("connection").pipe(
+      Flag.optional,
+      Flag.withDescription("Only list tools available through this connection")
+    ),
     limit: limitFlag(),
     offset: offsetFlag(),
     verbose: verboseFlag()
   },
-  ({ integration, filter, limit, offset, verbose }) =>
-    runGateway((client) => client.provisioning.integrationTools({ params: { slug: integration } })).pipe(Effect.flatMap((result) => {
+  ({ integration, connection, filter, limit, offset, verbose }) =>
+    runGateway((client) => client.delegated.listTools({ query: {
+      schemas: true,
+      integration: IntegrationSlug.make(integration),
+      ...whenPresent(
+        "connection",
+        Option.map(connection, ConnectionName.make).pipe(Option.getOrUndefined)
+      )
+    } })).pipe(Effect.flatMap((result) => {
       const term = Option.getOrUndefined(filter)?.toLowerCase()
       const all = array(record(result)["tools"])
       const matching = term === undefined
         ? all
         : all.filter((tool) =>
-          text(tool["name"]).toLowerCase().includes(term) ||
+          text(tool["tool"]).toLowerCase().includes(term) ||
           text(tool["description"]).toLowerCase().includes(term)
         )
       return listing(
@@ -251,10 +262,15 @@ export const toolsCommand = (runGateway: GatewayTask) => Command.make(
           verbose,
           empty: term === undefined ? "No tools available." : `No tools match "${term}".`,
           next: `i schema ${integration} <tool>`,
-          extra: { integration },
+          extra: {
+            integration,
+            ...whenPresent("connection", Option.getOrUndefined(connection))
+          },
           row: (tool) =>
             verbose ? tool : {
-              name: tool["name"] ?? null,
+              connection: record(tool["connection"])["name"] ?? null,
+              tool: tool["tool"] ?? null,
+              decision: tool["decision"] ?? null,
               description: inline(text(tool["description"]), 200)
             }
         }
@@ -271,31 +287,27 @@ export const schemaCommand = (runGateway: GatewayTask) => Command.make(
     verbose: verboseFlag()
   },
   ({ integration, tool, connection, verbose }) =>
-    runGateway((client) =>
-      Effect.all({
-        detail: client.provisioning.describeTool({
-          params: { slug: integration, tool },
-          query: { connection }
-        }),
-        effective: client.delegated.listTools({ query: { schemas: false } })
-      })).pipe(Effect.flatMap(({ detail: found, effective }) => {
+    runGateway((client) => client.delegated.listTools({ query: {
+      schemas: true,
+      integration: IntegrationSlug.make(integration),
+      connection: ConnectionName.make(connection)
+    } })).pipe(Effect.flatMap((effective) => {
+      const found = effective.tools.find((candidate) => candidate.tool === tool)
+      if (found === undefined) {
+        return Effect.fail(cliError(
+          `${tool} is not available to this client through ${integration}/${connection}`
+        ))
+      }
       const detail = record(found)
       const core = Object.fromEntries(
         Object.entries(detail).filter(([key]) =>
           key !== "inputTypeScript" && key !== "outputTypeScript"
         )
       )
-      const callable = effective.tools.find((candidate) =>
-        candidate.tool === tool &&
-        candidate.connection.integration === integration &&
-        candidate.connection.name === connection
-      )
       return writeStdoutLine(jsonOutput(
         withNext(
-          { ...(verbose ? detail : core), alias: callable?.alias ?? null },
-          callable === undefined
-            ? `i connect ${integration}`
-            : `i execute ${callable.alias} ${tool} '<json>'`
+          verbose ? detail : core,
+          `i execute ${found.alias} ${tool} '<json>'`
         ),
         verbose
       ))

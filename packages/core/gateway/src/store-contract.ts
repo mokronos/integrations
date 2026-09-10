@@ -56,6 +56,7 @@ export interface CreateApprovalPolicyInput {
   readonly id: ApprovalPolicyId
   readonly name: string
   readonly isDefault?: boolean
+  readonly tools: ReadonlyArray<ApprovalPolicyToolInput>
 }
 
 export type AccessProfileToolInput = Omit<AccessProfileTool, "accessProfileId">
@@ -198,6 +199,7 @@ export interface GatewayStore {
     readonly id: ClientId
     readonly accessProfileId: AccessProfileId
     readonly approvalPolicyId: ApprovalPolicyId
+    readonly approvalPolicyTools: ReadonlyArray<ApprovalPolicyToolInput>
   }): Effect.Effect<Client, GatewayStoreError>
   createClient(input: CreateClientInput): Effect.Effect<Client, GatewayStoreError>
   listClients(tenantId: TenantId): Effect.Effect<ReadonlyArray<Client>, GatewayStoreError>
@@ -325,4 +327,3 @@ export class GatewayStoreError extends Schema.TaggedError<GatewayStoreError>()(
     return `${this.operation} failed (${this.kind})`
   }
 }
-

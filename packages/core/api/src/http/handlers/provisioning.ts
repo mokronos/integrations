@@ -26,7 +26,7 @@ import {
 import { boundToolAddress } from "@integrations/gateway-core"
 import {
   forgetConnection,
-  reconcileDefaults
+  reconcileConfigurations
 } from "@integrations/gateway-core"
 import { oauthBrowserPage } from "@integrations/gateway-core"
 import type { GatewayStore } from "@integrations/gateway-core"
@@ -274,7 +274,7 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
                 ? { value: values["token"] }
                 : { values })
           }))
-          yield* reconcileDefaults({ store, integrations, tenantId }).pipe(capture)
+          yield* reconcileConfigurations({ store, integrations, tenantId }).pipe(capture)
           return {
             connection,
             tools: yield* capture(integrations.toolSummaries({

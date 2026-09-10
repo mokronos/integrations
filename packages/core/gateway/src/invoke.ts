@@ -14,8 +14,10 @@ import {
 import type {
   Alias,
   ApprovalId,
+  ConnectionName,
   Authorization,
   ConnectionRef,
+  IntegrationSlug,
   PolicyDecision,
   ToolName
 } from "./domain.ts"
@@ -262,6 +264,8 @@ export const listEffectiveTools = Effect.fn("Invocation.listEffectiveTools")(fun
   options: {
     readonly schemas?: boolean
     readonly integrations?: Integrations["Service"]
+    readonly integration?: IntegrationSlug
+    readonly connection?: ConnectionName
   } = {}
 ): Effect.fn.Return<ReadonlyArray<EffectiveTool>, GatewayStoreError> {
   const [accessProfile, approvalPolicy] = yield* Effect.all([
@@ -274,12 +278,20 @@ export const listEffectiveTools = Effect.fn("Invocation.listEffectiveTools")(fun
   const policyTools = approvalPolicy === undefined
     ? []
     : yield* store.listApprovalPolicyTools(approvalPolicy.id)
-  const reachable = profileTools.flatMap((profileTool) =>
-    policyTools
-      .filter((policyTool) =>
-        policyTool.tool === profileTool.tool
-        && sameConnectionRef(policyTool.connection, profileTool.connection))
-      .map((policyTool) => ({ profileTool, policyTool })))
+  const filtered = profileTools.filter((profileTool) =>
+    (options.integration === undefined || profileTool.connection.integration === options.integration)
+    && (options.connection === undefined || profileTool.connection.name === options.connection))
+  const reachable = yield* Effect.forEach(filtered, (profileTool) => Effect.gen(function*() {
+    const policyTool = policyTools.find((candidate) =>
+      candidate.tool === profileTool.tool
+      && sameConnectionRef(candidate.connection, profileTool.connection))
+    if (policyTool === undefined) {
+      return yield* Effect.die(new Error(
+        `Approval policy ${approvalPolicy?.id ?? "missing"} has no decision for ${aliasForConnection(profileTool.connection)}.${profileTool.tool}`
+      ))
+    }
+    return { profileTool, policyTool }
+  }))
   const base = reachable.map(({ profileTool, policyTool }) => ({
     alias: aliasForConnection(profileTool.connection),
     tool: profileTool.tool,
