@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Fiber, Option, Schema } from "effect"
+import { Clock, Effect, Fiber, Option, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { ToolAddress, whenPresent } from "@integrations/contracts"
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client"
@@ -258,7 +258,7 @@ const setup = Effect.fnUntraced(function*(options: {
 })
 
 describe("gateway http surface", () => {
-  it.live("onboarding creates only the selected tools with separate configurations and no administrative power", () =>
+  it.effect("onboarding creates only the selected tools with separate configurations and no administrative power", () =>
     Effect.gen(function*() {
       const { call, store, accessProfile } = yield* setup({
         tools: [{ address: "tools.gmail.org.work.sendEmail", name: "sendEmail", owner: "org" }]
@@ -277,7 +277,7 @@ describe("gateway http surface", () => {
       expect(yield* store.findClientByName(defaultTenantId, "Unavailable")).toBeUndefined()
     }).pipe(Effect.provide(testServices)))
 
-  it.live("serves each API key's effective tools over MCP", () =>
+  it.effect("serves each API key's effective tools over MCP", () =>
     Effect.gen(function*() {
       const { handle, key, calls } = yield* setup()
       const transport = new StreamableHTTPClientTransport(
@@ -315,7 +315,7 @@ describe("gateway http surface", () => {
       }])
     }).pipe(Effect.provide(testServices)))
 
-  it.live("requires an API key on the MCP endpoint", () =>
+  it.effect("requires an API key on the MCP endpoint", () =>
     Effect.gen(function*() {
       const { handle } = yield* setup()
       const response = yield* Effect.promise(() =>
@@ -328,20 +328,20 @@ describe("gateway http surface", () => {
       expect(response.headers.get("www-authenticate")).toBe("Bearer")
     }).pipe(Effect.provide(testServices)))
 
-  it.live("serves health without a key", () =>
+  it.effect("serves health without a key", () =>
     Effect.gen(function*() {
       const { call } = yield* setup()
       const response = yield* call("GET", "/v1/health", { secret: null })
       expect(response.status).toBe(200)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("requires a key on every other route", () =>
+  it.effect("requires a key on every other route", () =>
     Effect.gen(function*() {
       const { call } = yield* setup()
       expect((yield* call("GET", "/v1/tools", { secret: null })).status).toBe(401)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("rejects an unknown key with 401 and a revoked client with 403", () =>
+  it.effect("rejects an unknown key with 401 and a revoked client with 403", () =>
     Effect.gen(function*() {
       const { call, client, store } = yield* setup()
       expect((yield* call("GET", "/v1/tools", { secret: "wfi_nope" })).status).toBe(401)
@@ -350,7 +350,7 @@ describe("gateway http surface", () => {
       expect((yield* call("GET", "/v1/tools")).status).toBe(403)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("lists only the caller's effective tools", () =>
+  it.effect("lists only the caller's effective tools", () =>
     Effect.gen(function*() {
       const { call } = yield* setup()
       const response = yield* call("GET", "/v1/tools")
@@ -365,7 +365,7 @@ describe("gateway http surface", () => {
       ])
     }).pipe(Effect.provide(testServices)))
 
-  it.live("executes an effective tool against the address built from the access profile", () =>
+  it.effect("executes an effective tool against the address built from the access profile", () =>
     Effect.gen(function*() {
       const { call, calls } = yield* setup()
 
@@ -379,7 +379,7 @@ describe("gateway http surface", () => {
       expect(calls[0]?.address).toBe("tools.gmail.user.work.sendEmail")
     }).pipe(Effect.provide(testServices)))
 
-  it.live("refuses an unauthorized tool without calling the vendor", () =>
+  it.effect("refuses an unauthorized tool without calling the vendor", () =>
     Effect.gen(function*() {
       const { call, calls } = yield* setup()
 
@@ -391,7 +391,7 @@ describe("gateway http surface", () => {
       expect(calls).toHaveLength(0)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("freezes a require_approval call instead of performing it", () =>
+  it.effect("freezes a require_approval call instead of performing it", () =>
     Effect.gen(function*() {
       const { call, calls } = yield* setup({ decision: "require_approval" })
 
@@ -405,7 +405,7 @@ describe("gateway http surface", () => {
       expect(calls).toHaveLength(0)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("reports a vendor failure as 502 rather than a denial", () =>
+  it.effect("reports a vendor failure as 502 rather than a denial", () =>
     Effect.gen(function*() {
       const { call } = yield* setup({ fail: true })
 
@@ -417,14 +417,14 @@ describe("gateway http surface", () => {
       expect(response.body["status"]).toBe("failed")
     }).pipe(Effect.provide(testServices)))
 
-  it.live("rejects a malformed body at the boundary", () =>
+  it.effect("rejects a malformed body at the boundary", () =>
     Effect.gen(function*() {
       const { call } = yield* setup()
       const response = yield* call("POST", "/v1/execute", { body: { alias: "user_sebastian_gmail_work" } })
       expect(response.status).toBe(400)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("provisioning does not imply gateway administration", () =>
+  it.effect("provisioning does not imply gateway administration", () =>
     Effect.gen(function*() {
       const { call } = yield* setup({ capabilities: ["provision_connections"] })
 
@@ -452,7 +452,7 @@ describe("gateway http surface", () => {
       }
     }).pipe(Effect.provide(testServices)))
 
-  it.live("permits administrative routes to a key with the administration capability", () =>
+  it.effect("permits administrative routes to a key with the administration capability", () =>
     Effect.gen(function*() {
       const { call } = yield* setup({ capabilities: ["provision_connections", "administer_gateway"] })
       expect((yield* call("GET", "/v1/integrations")).status).toBe(200)
@@ -460,7 +460,7 @@ describe("gateway http surface", () => {
       expect((yield* call("GET", "/v1/audit")).status).toBe(200)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("summarizes dashboard readiness without per-client requests", () =>
+  it.effect("summarizes dashboard readiness without per-client requests", () =>
     Effect.gen(function*() {
       const { call } = yield* setup({
         capabilities: ["provision_connections", "administer_gateway"]
@@ -480,7 +480,7 @@ describe("gateway http surface", () => {
       })
     }).pipe(Effect.provide(testServices)))
 
-  it.live("does not let one client read another's frozen call", () =>
+  it.effect("does not let one client read another's frozen call", () =>
     Effect.gen(function*() {
       const { call, store, client, accessProfile, approvalPolicy } = yield* setup({ decision: "require_approval" })
       const frozen = yield* call("POST", "/v1/execute", {
@@ -505,7 +505,7 @@ describe("gateway http surface", () => {
       expect(client.id).not.toBe(other.id)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("issues a key exactly once and never returns it again", () =>
+  it.effect("issues a key exactly once and never returns it again", () =>
     Effect.gen(function*() {
       const { call, store } = yield* setup({ capabilities: ["provision_connections", "administer_gateway"] })
       const clientResponse = yield* call("POST", "/v1/clients", { body: { name: "sandbox" } })
@@ -521,7 +521,7 @@ describe("gateway http surface", () => {
       expect(JSON.stringify(stored)).not.toContain(secret)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("manages reusable approval destinations and client assignments", () =>
+  it.effect("manages reusable approval destinations and client assignments", () =>
     Effect.gen(function*() {
       const { call } = yield* setup({ capabilities: ["provision_connections", "administer_gateway"] })
       const createdClient = yield* call("POST", "/v1/clients", { body: { name: "notified" } })
@@ -541,7 +541,7 @@ describe("gateway http surface", () => {
       expect(listed.body["destinations"]).toHaveLength(1)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("uses a tool's conservative decision when seeding the default policy", () =>
+  it.effect("uses a tool's conservative decision when seeding the default policy", () =>
     Effect.gen(function*() {
       const { call } = yield* setup({
         capabilities: ["provision_connections", "administer_gateway"],
@@ -560,7 +560,7 @@ describe("gateway http surface", () => {
       expect(JSON.stringify(response.body)).toContain("require_approval")
     }).pipe(Effect.provide(testServices)))
 
-  it.live("returns an authenticated dashboard link with a pending invocation", () =>
+  it.effect("returns an authenticated dashboard link with a pending invocation", () =>
     Effect.gen(function*() {
       const { call } = yield* setup({
         decision: "require_approval",
@@ -574,7 +574,7 @@ describe("gateway http surface", () => {
       )
     }).pipe(Effect.provide(testServices)))
 
-  it.live("revoking a client through the API cancels its frozen calls", () =>
+  it.effect("revoking a client through the API cancels its frozen calls", () =>
     Effect.gen(function*() {
       const { call, client } = yield* setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })
       yield* call("POST", "/v1/execute", { body: { alias: "user_sebastian_gmail_work", tool: "sendEmail" } })
@@ -587,7 +587,7 @@ describe("gateway http surface", () => {
 })
 
 describe("gateway approval settlement", () => {
-  it.live("simultaneous retries freeze one invocation and record one approval event", () =>
+  it.effect("simultaneous retries freeze one invocation and record one approval event", () =>
     Effect.gen(function*() {
       const { call, store } = yield* setup({ decision: "require_approval" })
       const body = { alias: aliasForConnection(connection), tool: "sendEmail", arguments: { to: "a@b.c" } }
@@ -600,7 +600,7 @@ describe("gateway approval settlement", () => {
       expect(yield* store.listApprovals(defaultTenantId)).toHaveLength(1)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("shared profiles cannot share or collect another client's approval", () =>
+  it.effect("shared profiles cannot share or collect another client's approval", () =>
     Effect.gen(function*() {
       const { call, store, accessProfile, approvalPolicy } = yield* setup({ decision: "require_approval" })
       const other = yield* store.createClient({
@@ -620,7 +620,7 @@ describe("gateway approval settlement", () => {
       expect((yield* call("POST", "/v1/execute", { body })).body["status"]).toBe("succeeded")
     }).pipe(Effect.provide(testServices)))
 
-  it.live("the same tool and arguments on different accounts keep distinct approvals and targets", () =>
+  it.effect("the same tool and arguments on different accounts keep distinct approvals and targets", () =>
     Effect.gen(function*() {
       const { call, store, accessProfile, approvalPolicy, calls } = yield* setup({ decision: "require_approval" })
       const personal = { ...connection, name: ConnectionName.make("personal") }
@@ -635,7 +635,7 @@ describe("gateway approval settlement", () => {
       expect(calls).toEqual([{ address: "tools.gmail.user.personal.sendEmail", input: { to: "a@b.c" } }])
     }).pipe(Effect.provide(testServices)))
 
-  it.live("concurrent decisions cannot execute twice, deny an executing call, or collect it early", () =>
+  it.effect("concurrent decisions cannot execute twice, deny an executing call, or collect it early", () =>
     Effect.gen(function*() {
       const started = Promise.withResolvers<void>()
       const release = Promise.withResolvers<void>()
@@ -664,7 +664,10 @@ describe("gateway approval settlement", () => {
       expect(deny.status).toBe(400)
       expect(retry.body["approvalId"]).toBe(id)
       expect(retry.body["status"]).toBe("pending")
-      expect(yield* store.expireApprovals(new Date(Date.now() + 86_400_000))).toBe(0)
+      // A cutoff well past the freeze: an executing call is not pending, so
+      // maintenance leaves it alone rather than expiring it mid-flight.
+      const wellPast = new Date((yield* Clock.currentTimeMillis) + 86_400_000)
+      expect(yield* store.expireApprovals(wellPast)).toBe(0)
       expect(calls).toHaveLength(1)
 
       release.resolve()
@@ -673,7 +676,7 @@ describe("gateway approval settlement", () => {
       expect(calls).toHaveLength(1)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("a durable execution claim survives reopening the store and cannot be replayed", () =>
+  it.effect("a durable execution claim survives reopening the store and cannot be replayed", () =>
     Effect.gen(function*() {
       const { call, store, calls } = yield* setup({ decision: "require_approval" })
       const body = { alias: aliasForConnection(connection), tool: "sendEmail" }
@@ -695,7 +698,7 @@ describe("gateway approval settlement", () => {
       expect(calls).toHaveLength(0)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("an administrative API key cannot make a human approval decision", () =>
+  it.effect("an administrative API key cannot make a human approval decision", () =>
     Effect.gen(function*() {
       const { call, calls } = yield* setup({
         decision: "require_approval",
@@ -718,7 +721,7 @@ describe("gateway approval settlement", () => {
       expect(calls).toHaveLength(0)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("the gateway performs the call itself once approved", () =>
+  it.effect("the gateway performs the call itself once approved", () =>
     Effect.gen(function*() {
       const { call, calls } = yield* setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })
       const frozen = yield* call("POST", "/v1/execute", {
@@ -737,7 +740,7 @@ describe("gateway approval settlement", () => {
       expect(calls[0]?.input).toEqual({ to: "a@b.c" })
     }).pipe(Effect.provide(testServices)))
 
-  it.live("refuses to approve twice", () =>
+  it.effect("refuses to approve twice", () =>
     Effect.gen(function*() {
       const { call } = yield* setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })
       const frozen = yield* call("POST", "/v1/execute", {
@@ -757,7 +760,7 @@ describe("gateway approval settlement", () => {
       )).status).toBe(400)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("re-checks authority at approval time, however it was taken away", () =>
+  it.effect("re-checks authority at approval time, however it was taken away", () =>
     Effect.gen(function*() {
       const reassigned = yield* setup({
         decision: "require_approval",
@@ -799,7 +802,7 @@ describe("gateway approval settlement", () => {
       expect(emptied.calls).toHaveLength(0)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("denying settles without performing the call", () =>
+  it.effect("denying settles without performing the call", () =>
     Effect.gen(function*() {
       const { call, calls } = yield* setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })
       const frozen = yield* call("POST", "/v1/execute", {
@@ -823,7 +826,7 @@ describe("frozen calls and retries", () => {
     body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: args }
   })
 
-  it.live("different arguments are a different frozen call", () =>
+  it.effect("different arguments are a different frozen call", () =>
     Effect.gen(function*() {
       const { call, store } = yield* setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })
 
@@ -834,7 +837,7 @@ describe("frozen calls and retries", () => {
       expect(yield* store.listApprovals(defaultTenantId, "pending")).toHaveLength(2)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("the retry after approval collects the result exactly once", () =>
+  it.effect("the retry after approval collects the result exactly once", () =>
     Effect.gen(function*() {
       const { call, store, calls } = yield* setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })
       const frozen = yield* call("POST", "/v1/execute", sendEmail())
@@ -856,7 +859,7 @@ describe("frozen calls and retries", () => {
       expect(yield* store.listApprovals(defaultTenantId, "pending")).toHaveLength(1)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("a denial is delivered to the caller rather than left pending forever", () =>
+  it.effect("a denial is delivered to the caller rather than left pending forever", () =>
     Effect.gen(function*() {
       const { call } = yield* setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })
       const frozen = yield* call("POST", "/v1/execute", sendEmail())
@@ -874,7 +877,7 @@ describe("frozen calls and retries", () => {
       expect(String(collected.body["reason"])).not.toContain("sebastian")
     }).pipe(Effect.provide(testServices)))
 
-  it.live("the caller can read its own frozen call without an administrative key", () =>
+  it.effect("the caller can read its own frozen call without an administrative key", () =>
     Effect.gen(function*() {
       const { call } = yield* setup({ decision: "require_approval" })
       const frozen = yield* call("POST", "/v1/execute", sendEmail())
@@ -888,7 +891,7 @@ describe("frozen calls and retries", () => {
 })
 
 describe("provisioning surface", () => {
-  it.live("validates the node shape a workflow actually authors", () =>
+  it.effect("validates the node shape a workflow actually authors", () =>
     Effect.gen(function*() {
       const { call } = yield* setup({
         capabilities: ["provision_connections", "administer_gateway"],
@@ -907,7 +910,7 @@ describe("provisioning surface", () => {
       expect(checks).toEqual(["structural", "authorization", "catalog"])
     }).pipe(Effect.provide(testServices)))
 
-  it.live("reports an alias this key does not hold", () =>
+  it.effect("reports an alias this key does not hold", () =>
     Effect.gen(function*() {
       const { call } = yield* setup({ capabilities: ["provision_connections", "administer_gateway"] })
 
@@ -919,7 +922,7 @@ describe("provisioning surface", () => {
       expect(JSON.stringify(report.body)).toContain("not authorized")
     }).pipe(Effect.provide(testServices)))
 
-  it.live("removes a connection by the name it was asked for, not the stored one", () =>
+  it.effect("removes a connection by the name it was asked for, not the stored one", () =>
     Effect.gen(function*() {
       const { call, removed } = yield* setup({
         capabilities: ["provision_connections", "administer_gateway"],
@@ -933,7 +936,7 @@ describe("provisioning surface", () => {
       expect(removed).toEqual([{ integration: "gmail", name: "docs_demo" }])
     }).pipe(Effect.provide(testServices)))
 
-  it.live("removing an integration takes its connections and their policy rules", () =>
+  it.effect("removing an integration takes its connections and their policy rules", () =>
     Effect.gen(function*() {
       const { call, store, accessProfile, approvalPolicy, forgotten } = yield* setup({
         capabilities: ["provision_connections", "administer_gateway"],
@@ -952,7 +955,7 @@ describe("provisioning surface", () => {
       expect(yield* store.listApprovalPolicyTools(approvalPolicy.id)).toEqual([])
     }).pipe(Effect.provide(testServices)))
 
-  it.live("renames an integration without moving its slug", () =>
+  it.effect("renames an integration without moving its slug", () =>
     Effect.gen(function*() {
       const { call, renamed } = yield* setup({
         capabilities: ["provision_connections", "administer_gateway"],
@@ -969,7 +972,7 @@ describe("provisioning surface", () => {
       expect(renamed).toEqual([{ slug: "statelessserver", name: "Gmail" }])
     }).pipe(Effect.provide(testServices)))
 
-  it.live("refuses to rename or remove an integration it never installed", () =>
+  it.effect("refuses to rename or remove an integration it never installed", () =>
     Effect.gen(function*() {
       const { call, renamed, forgotten } = yield* setup({
         capabilities: ["provision_connections", "administer_gateway"],
@@ -984,7 +987,7 @@ describe("provisioning surface", () => {
       expect(forgotten).toEqual([])
     }).pipe(Effect.provide(testServices)))
 
-  it.live("says which connections exist when none matches", () =>
+  it.effect("says which connections exist when none matches", () =>
     Effect.gen(function*() {
       const { call } = yield* setup({
         capabilities: ["provision_connections", "administer_gateway"],
@@ -997,7 +1000,7 @@ describe("provisioning surface", () => {
       expect(String(response.body["error"])).toContain("work")
     }).pipe(Effect.provide(testServices)))
 
-  it.live("lists a client's keys without their hashes, and revokes one", () =>
+  it.effect("lists a client's keys without their hashes, and revokes one", () =>
     Effect.gen(function*() {
       const { call, client, key, store } = yield* setup({ capabilities: ["provision_connections", "administer_gateway"] })
 
@@ -1013,7 +1016,7 @@ describe("provisioning surface", () => {
       expect(after[0]?.revokedAt).not.toBeNull()
     }).pipe(Effect.provide(testServices)))
 
-  it.live("names the MCP endpoint alongside the clients, and omits it without a public origin", () =>
+  it.effect("names the MCP endpoint alongside the clients, and omits it without a public origin", () =>
     Effect.gen(function*() {
       const named = yield* setup({
         capabilities: ["provision_connections", "administer_gateway"],
@@ -1028,7 +1031,7 @@ describe("provisioning surface", () => {
       expect((yield* anonymous.call("GET", "/v1/clients")).body["mcpUrl"]).toBeUndefined()
     }).pipe(Effect.provide(testServices)))
 
-  it.live("filters and windows the audit trail, and says how much there is", () =>
+  it.effect("filters and windows the audit trail, and says how much there is", () =>
     Effect.gen(function*() {
       const { call } = yield* setup({ capabilities: ["provision_connections", "administer_gateway"] })
       yield* call("POST", "/v1/execute", { body: { alias: "user_sebastian_gmail_work", tool: "sendEmail" } })
@@ -1047,7 +1050,7 @@ describe("provisioning surface", () => {
       expect(Schema.decodeUnknownSync(Schema.Array(Schema.Json))(windowed.body["records"])).toHaveLength(1)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("refuses a window it cannot read rather than quietly serving another one", () =>
+  it.effect("refuses a window it cannot read rather than quietly serving another one", () =>
     Effect.gen(function*() {
       const { call } = yield* setup({ capabilities: ["provision_connections", "administer_gateway"] })
       for (const query of ["limit=abc", "limit=0", "limit=1.5", "offset=-1", "since=nope"]) {

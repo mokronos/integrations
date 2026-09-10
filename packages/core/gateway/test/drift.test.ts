@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Clock, Effect } from "effect"
+import { TestClock } from "effect/testing"
 import { PositiveInt, ToolAddress } from "@integrations/contracts"
 import type { Tool } from "@integrations/contracts"
 import {
@@ -134,11 +135,6 @@ describe("catalog drift", () => {
     }).pipe(Effect.provide(testServices)))
 })
 
-/**
- * Maintenance decides what has aged out by comparing stored timestamps against
- * the system clock, which the store reads directly, so these run live and date
- * their fixtures the same way.
- */
 describe("gateway maintenance", () => {
   const connection: ConnectionRef = {
     owner: "org",
@@ -146,7 +142,7 @@ describe("gateway maintenance", () => {
     name: ConnectionName.make("default")
   }
 
-  it.live("turns an undecided approval into an expired one", () =>
+  it.effect("turns an undecided approval into an expired one", () =>
     Effect.gen(function*() {
       const gateway = yield* store
       const accessProfile = yield* gateway.createAccessProfile({
@@ -176,8 +172,8 @@ describe("gateway maintenance", () => {
             arguments: {},
             expiresAt
           }))
-      const stale = yield* freeze("create", new Date(Date.now() - 1_000))
-      const fresh = yield* freeze("close", new Date(Date.now() + 60_000))
+      const stale = yield* freeze("create", new Date((yield* Clock.currentTimeMillis) - 1_000))
+      const fresh = yield* freeze("close", new Date((yield* Clock.currentTimeMillis) + 60_000))
 
       const result = yield* runMaintenance(gateway)
 
@@ -186,7 +182,45 @@ describe("gateway maintenance", () => {
       expect((yield* gateway.getApproval(defaultTenantId, fresh.id))?.status).toBe("pending")
     }).pipe(Effect.provide(testServices)))
 
-  it.live("ages out audit arguments while keeping the record", () =>
+  it.effect("expires an approval once its window passes, not before", () =>
+    Effect.gen(function*() {
+      const gateway = yield* store
+      const accessProfile = yield* gateway.createAccessProfile({
+        id: yield* newAccessProfileId, tenantId: defaultTenantId, name: "sales access"
+      })
+      const approvalPolicy = yield* gateway.createApprovalPolicy({
+        id: yield* newApprovalPolicyId, tenantId: defaultTenantId, name: "sales approvals"
+      })
+      const client = yield* gateway.createClient({
+        id: yield* newClientId,
+        tenantId: defaultTenantId,
+        accessProfileId: accessProfile.id,
+        approvalPolicyId: approvalPolicy.id,
+        name: "sales",
+        capabilities: ["provision_connections"]
+      })
+      const frozen = yield* gateway.createApproval({
+        id: yield* newApprovalId,
+        tenantId: defaultTenantId,
+        clientId: client.id,
+        accessProfileId: accessProfile.id,
+        approvalPolicyId: approvalPolicy.id,
+        alias: Alias.make("tickets"),
+        tool: ToolName.make("create"),
+        arguments: {},
+        expiresAt: new Date((yield* Clock.currentTimeMillis) + 60_000)
+      })
+
+      expect((yield* runMaintenance(gateway)).expiredApprovals).toBe(0)
+      expect((yield* gateway.getApproval(defaultTenantId, frozen.id))?.status).toBe("pending")
+
+      yield* TestClock.adjust("2 minutes")
+
+      expect((yield* runMaintenance(gateway)).expiredApprovals).toBe(1)
+      expect((yield* gateway.getApproval(defaultTenantId, frozen.id))?.status).toBe("expired")
+    }).pipe(Effect.provide(testServices)))
+
+  it.effect("ages out audit arguments while keeping the record", () =>
     Effect.gen(function*() {
       const gateway = yield* store
       yield* gateway.recordAudit({
@@ -199,7 +233,7 @@ describe("gateway maintenance", () => {
         decision: "allow",
         outcome: "succeeded",
         message: null,
-        arguments: { value: { body: "PII" }, expiresAt: new Date(Date.now() - 1_000) }
+        arguments: { value: { body: "PII" }, expiresAt: new Date((yield* Clock.currentTimeMillis) - 1_000) }
       })
 
       const result = yield* runMaintenance(gateway)
@@ -209,7 +243,7 @@ describe("gateway maintenance", () => {
         .toHaveLength(1)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("is safe to run when there is nothing to do", () =>
+  it.effect("is safe to run when there is nothing to do", () =>
     Effect.gen(function*() {
       const gateway = yield* store
       expect(yield* runMaintenance(gateway)).toEqual({
@@ -220,12 +254,12 @@ describe("gateway maintenance", () => {
       })
     }).pipe(Effect.provide(testServices)))
 
-  it.live("deletes abandoned identity and terminal login flows", () =>
+  it.effect("deletes abandoned identity and terminal login flows", () =>
     Effect.gen(function*() {
       const gateway = yield* store
       const handoff = yield* generateLoginHandoff
       const state = yield* generateLoginHandoff
-      const expiredAt = new Date(Date.now() - 1_000)
+      const expiredAt = new Date((yield* Clock.currentTimeMillis) - 1_000)
       yield* gateway.createLoginHandoff({ requestHash: handoff.hash, expiresAt: expiredAt })
       yield* gateway.createIdentityOAuthState({
         stateHash: state.hash,

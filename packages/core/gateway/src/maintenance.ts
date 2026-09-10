@@ -1,4 +1,4 @@
-import { Effect, Fiber, Schedule } from "effect"
+import { Clock, Effect, Fiber, Schedule } from "effect"
 import type { GatewayStore, GatewayStoreError } from "./store.ts"
 
 export type MaintenanceResult = {
@@ -10,8 +10,9 @@ export type MaintenanceResult = {
 
 export const runMaintenance = Effect.fn("Maintenance.run")(function*(
   store: GatewayStore,
-  at: Date = new Date()
+  cutoff?: Date
 ): Effect.fn.Return<MaintenanceResult, GatewayStoreError> {
+  const at = cutoff ?? new Date(yield* Clock.currentTimeMillis)
   return {
     expiredApprovals: yield* store.expireApprovals(at),
     expiredAuditArguments: yield* store.expireAuditArguments(at),

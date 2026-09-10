@@ -189,7 +189,7 @@ const oauthStateFrom = (response: Response): string => {
 }
 
 describe("signup", () => {
-  it.live("the first human claims a fresh tenant and a live session", () =>
+  it.effect("the first human claims a fresh tenant and a live session", () =>
     Effect.gen(function*() {
     const setup_ = yield* setup({ signupOpen: true })
     const human = yield* signupHuman(setup_)
@@ -210,7 +210,7 @@ describe("signup", () => {
     expect(me.body["subjectId"]).toBe(subjects[0]?.id)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("rechecks whether signup is open for every account creation", () =>
+  it.effect("rechecks whether signup is open for every account creation", () =>
     Effect.gen(function*() {
     let open = true
     const setup_ = yield* setup({ signupOpenOf: async () => open })
@@ -228,7 +228,7 @@ describe("signup", () => {
     expect(providers.body["signupOpen"]).toBe(false)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("is closed unless asked otherwise", () =>
+  it.effect("is closed unless asked otherwise", () =>
     Effect.gen(function*() {
     const setup_ = yield* setup({ signupOpen: false })
     const response = yield* setup_.call("POST", "/v1/auth/signup", {
@@ -238,7 +238,7 @@ describe("signup", () => {
     expect(response.body["code"]).toBe("signup-closed")
     }).pipe(Effect.provide(testServices)))
 
-  it.live("rejects a short password and a malformed email at the boundary", () =>
+  it.effect("rejects a short password and a malformed email at the boundary", () =>
     Effect.gen(function*() {
     const setup_ = yield* setup({ signupOpen: true })
     const short = yield* setup_.call("POST", "/v1/auth/signup", {
@@ -251,7 +251,7 @@ describe("signup", () => {
     expect(malformed.status).toBe(400)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("does not mint a second account for a taken email", () =>
+  it.effect("does not mint a second account for a taken email", () =>
     Effect.gen(function*() {
     const setup_ = yield* setup({ signupOpen: true })
     const first = yield* signupHuman(setup_)
@@ -264,7 +264,7 @@ describe("signup", () => {
 })
 
 describe("login", () => {
-  it.live("accepts the credentials it issued", () =>
+  it.effect("accepts the credentials it issued", () =>
     Effect.gen(function*() {
     const setup_ = yield* setup({ signupOpen: true })
     const human = yield* signupHuman(setup_)
@@ -277,7 +277,7 @@ describe("login", () => {
     expect(login.setCookie).toContain("wf_session=wfs_")
     }).pipe(Effect.provide(testServices)))
 
-  it.live("answers the same for unknown email and wrong password", () =>
+  it.effect("answers the same for unknown email and wrong password", () =>
     Effect.gen(function*() {
     const setup_ = yield* setup({ signupOpen: true })
     const human = yield* signupHuman(setup_)
@@ -297,7 +297,7 @@ describe("login", () => {
 })
 
 describe("Google identity and CLI handoff", () => {
-  it.live("signs ii in through a one-time browser handoff", () =>
+  it.effect("signs ii in through a one-time browser handoff", () =>
     Effect.gen(function*() {
     const setup_ = yield* setup({ signupOpen: true, google: googleIdentity() })
     const providers = yield* setup_.call("GET", "/v1/auth/providers")
@@ -349,7 +349,7 @@ describe("Google identity and CLI handoff", () => {
     expect(after.status).toBe(200)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("returns a dashboard sign-in to a safe local path", () =>
+  it.effect("returns a dashboard sign-in to a safe local path", () =>
     Effect.gen(function*() {
     const setup_ = yield* setup({ signupOpen: true, google: googleIdentity() })
     const start = yield* Effect.promise(() => setup_.handle(new Request(
@@ -373,7 +373,7 @@ describe("Google identity and CLI handoff", () => {
 })
 
 describe("what a session may do", () => {
-  it.live("reads administrative surfaces without holding any API key", () =>
+  it.effect("reads administrative surfaces without holding any API key", () =>
     Effect.gen(function*() {
     const setup_ = yield* setup({ signupOpen: true })
     const human = yield* signupHuman(setup_)
@@ -386,7 +386,7 @@ describe("what a session may do", () => {
     expect(audit.body["total"]).toBe(0)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("never reaches the delegated surface — delegation needs a key", () =>
+  it.effect("never reaches the delegated surface — delegation needs a key", () =>
     Effect.gen(function*() {
     const setup_ = yield* setup({ signupOpen: true })
     const human = yield* signupHuman(setup_)
@@ -404,7 +404,7 @@ describe("what a session may do", () => {
     expect(execute.status).toBe(403)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("connects an integration on its own authority, holding no API key", () =>
+  it.effect("connects an integration on its own authority, holding no API key", () =>
     Effect.gen(function*() {
     const created: Array<{ readonly integration: string; readonly name: string }> = []
     const integrationServices = stubIntegrationsContext({
@@ -443,7 +443,7 @@ describe("what a session may do", () => {
     expect(created).toEqual([{ integration: "gmail", name: "work" }])
     }).pipe(Effect.provide(testServices)))
 
-  it.live("is scoped to its own tenant", () =>
+  it.effect("is scoped to its own tenant", () =>
     Effect.gen(function*() {
     const setup_ = yield* setup({ signupOpen: true })
     const human = yield* signupHuman(setup_)
@@ -459,7 +459,7 @@ describe("what a session may do", () => {
 })
 
 describe("cross-site protection for cookie-carried authority", () => {
-  it.live("blocks a write with neither Origin nor Sec-Fetch-Site", () =>
+  it.effect("blocks a write with neither Origin nor Sec-Fetch-Site", () =>
     Effect.gen(function*() {
     const setup_ = yield* setup({ signupOpen: true })
     const human = yield* signupHuman(setup_)
@@ -473,7 +473,7 @@ describe("cross-site protection for cookie-carried authority", () => {
     expect(response.body["message"]).toBe("Cross-site requests are not permitted")
     }).pipe(Effect.provide(testServices)))
 
-  it.live("blocks a write whose Origin names another site", () =>
+  it.effect("blocks a write whose Origin names another site", () =>
     Effect.gen(function*() {
     const setup_ = yield* setup({ signupOpen: true })
     const human = yield* signupHuman(setup_)
@@ -487,7 +487,7 @@ describe("cross-site protection for cookie-carried authority", () => {
     expect(response.body["code"]).toBe("cross-site")
     }).pipe(Effect.provide(testServices)))
 
-  it.live("allows a same-origin attested write and exempts reads entirely", () =>
+  it.effect("allows a same-origin attested write and exempts reads entirely", () =>
     Effect.gen(function*() {
     const setup_ = yield* setup({ signupOpen: true })
     const human = yield* signupHuman(setup_)
@@ -505,7 +505,7 @@ describe("cross-site protection for cookie-carried authority", () => {
 })
 
 describe("logout", () => {
-  it.live("revokes the session server-side, not just the cookie", () =>
+  it.effect("revokes the session server-side, not just the cookie", () =>
     Effect.gen(function*() {
     const setup_ = yield* setup({ signupOpen: true })
     const human = yield* signupHuman(setup_)
@@ -522,7 +522,7 @@ describe("logout", () => {
     expect(surface.status).toBe(401)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("is harmless without a session at all", () =>
+  it.effect("is harmless without a session at all", () =>
     Effect.gen(function*() {
     const setup_ = yield* setup({ signupOpen: true })
     const response = yield* setup_.call("POST", "/v1/auth/logout")
@@ -531,7 +531,7 @@ describe("logout", () => {
 })
 
 describe("credential precedence", () => {
-  it.live("an explicit key wins over a valid cookie", () =>
+  it.effect("an explicit key wins over a valid cookie", () =>
     Effect.gen(function*() {
     const setup_ = yield* setup({ signupOpen: true })
     yield* signupHuman(setup_)
@@ -543,7 +543,7 @@ describe("credential precedence", () => {
     expect(me.body["clientId"]).toBe(setup_.client.id)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("a refused key is reported even when a valid cookie sits next to it", () =>
+  it.effect("a refused key is reported even when a valid cookie sits next to it", () =>
     Effect.gen(function*() {
     const setup_ = yield* setup({ signupOpen: true })
     const human = yield* signupHuman(setup_)
@@ -559,7 +559,7 @@ describe("credential precedence", () => {
 })
 
 describe("attribution", () => {
-  it.live("an approval decided by a session records the human's email", () =>
+  it.effect("an approval decided by a session records the human's email", () =>
     Effect.gen(function*() {
     const setup_ = yield* setup({ signupOpen: true })
     const human = yield* signupHuman(setup_)
@@ -611,7 +611,7 @@ describe("attribution", () => {
 })
 
 describe("cookie hardening", () => {
-  it.live("issued cookies are HttpOnly and SameSite=Lax", () =>
+  it.effect("issued cookies are HttpOnly and SameSite=Lax", () =>
     Effect.gen(function*() {
     const setup_ = yield* setup({ signupOpen: true })
     const response = yield* setup_.call("POST", "/v1/auth/signup", {
@@ -623,7 +623,7 @@ describe("cookie hardening", () => {
     expect((response.setCookie ?? "").includes("; Secure")).toBe(false)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("a deployment behind TLS marks its cookies Secure", () =>
+  it.effect("a deployment behind TLS marks its cookies Secure", () =>
     Effect.gen(function*() {
     const setup_ = yield* setup({ signupOpen: true, secureCookies: true })
     const response = yield* setup_.call("POST", "/v1/auth/signup", {

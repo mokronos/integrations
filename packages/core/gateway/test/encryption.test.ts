@@ -3,7 +3,7 @@ import { readFileSync, statSync } from "node:fs"
 import path from "node:path"
 import { randomBytes } from "node:crypto"
 import { createClient as openRawDatabase } from "@libsql/client"
-import { Effect, Encoding, Schema } from "effect"
+import { Clock, Effect, Encoding, Schema } from "effect"
 import { decodeBase64Field, decodeBase64UrlField } from "@integrations/contracts"
 import {
   Alias,
@@ -146,10 +146,6 @@ describe("master key resolution", () => {
     }).pipe(Effect.provide(testServices)))
 })
 
-/**
- * Approvals carry an expiry the store compares against the system clock, which
- * it reads directly, so these run live and date their fixtures the same way.
- */
 describe("the encrypted store", () => {
   const connection = {
     owner: "org" as const,
@@ -209,7 +205,7 @@ describe("the encrypted store", () => {
     return { client, accessProfile, approvalPolicy }
   })
 
-  it.live("stores frozen-call arguments sealed, yet retries still meet them", () =>
+  it.effect("stores frozen-call arguments sealed, yet retries still meet them", () =>
     Effect.gen(function*() {
       const { column, store } = yield* encryptedStore()
       const { accessProfile, approvalPolicy, client } = yield* seedClient(store)
@@ -224,7 +220,7 @@ describe("the encrypted store", () => {
         alias: Alias.make("gmail-work"),
         tool: ToolName.make("sendEmail"),
         arguments: argumentsValue,
-        expiresAt: new Date(Date.now() + 60_000)
+        expiresAt: new Date((yield* Clock.currentTimeMillis) + 60_000)
       })
 
       const stored = yield* column("gateway_pending_approval", "arguments", "id", approval.id)
@@ -244,7 +240,7 @@ describe("the encrypted store", () => {
       expect(metAgain?.arguments).toEqual(argumentsValue)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("seals a settled result while reading it back intact", () =>
+  it.effect("seals a settled result while reading it back intact", () =>
     Effect.gen(function*() {
       const { column, store } = yield* encryptedStore()
       const { accessProfile, approvalPolicy, client } = yield* seedClient(store)
@@ -258,7 +254,7 @@ describe("the encrypted store", () => {
         alias: Alias.make("gmail-work"),
         tool: ToolName.make("sendEmail"),
         arguments: {},
-        expiresAt: new Date(Date.now() + 60_000)
+        expiresAt: new Date((yield* Clock.currentTimeMillis) + 60_000)
       })
       yield* store.claimApproval({ tenantId: defaultTenantId, id, decidedBy: "sebastian" })
       yield* store.settleApproval({
@@ -278,7 +274,7 @@ describe("the encrypted store", () => {
         .toEqual({ messageId: "secret-message-id" })
     }).pipe(Effect.provide(testServices)))
 
-  it.live("seals audit arguments at rest", () =>
+  it.effect("seals audit arguments at rest", () =>
     Effect.gen(function*() {
       const { column, store } = yield* encryptedStore()
       const id = yield* newAuditId
@@ -294,7 +290,7 @@ describe("the encrypted store", () => {
         message: null,
         arguments: {
           value: { body: "personal data ages out" },
-          expiresAt: new Date(Date.now() - 1_000)
+          expiresAt: new Date((yield* Clock.currentTimeMillis) - 1_000)
         }
       })
 
@@ -303,10 +299,11 @@ describe("the encrypted store", () => {
       expect(stored).not.toContain("personal data")
     }).pipe(Effect.provide(testServices)))
 
-  it.live("still matches pre-encryption rows written in plaintext", () =>
+  it.effect("still matches pre-encryption rows written in plaintext", () =>
     Effect.gen(function*() {
       const { raw, store } = yield* encryptedStore()
       const { accessProfile, approvalPolicy, client } = yield* seedClient(store)
+      const expiresAt = (yield* Clock.currentTimeMillis) + 60_000
 
       yield* Effect.promise(() =>
         raw.execute(
@@ -321,7 +318,7 @@ describe("the encrypted store", () => {
             Alias.make("gmail-work"),
             ToolName.make("sendEmail"),
             canonicalArguments({ to: "old@example.com" }),
-            Date.now() + 60_000
+            expiresAt
           ]
         )
       )
@@ -339,7 +336,7 @@ describe("the encrypted store", () => {
       expect(metAgain?.arguments).toEqual({ to: "old@example.com" })
     }).pipe(Effect.provide(testServices)))
 
-  it.live("a store without a key keeps storing plaintext", () =>
+  it.effect("a store without a key keeps storing plaintext", () =>
     Effect.gen(function*() {
       const { column, store } = yield* encryptedStore({ sealed: false })
       const { accessProfile, approvalPolicy, client } = yield* seedClient(store)
@@ -353,7 +350,7 @@ describe("the encrypted store", () => {
         alias: Alias.make("gmail-work"),
         tool: ToolName.make("sendEmail"),
         arguments: { visible: true },
-        expiresAt: new Date(Date.now() + 60_000)
+        expiresAt: new Date((yield* Clock.currentTimeMillis) + 60_000)
       })
 
       expect(yield* column("gateway_pending_approval", "arguments", "id", approval.id))

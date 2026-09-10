@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs"
 import path from "node:path"
 import type { InValue, Row } from "@libsql/client"
 import { LibsqlClient } from "@effect/sql-libsql"
-import { Context, Effect, Exit, Layer, Scope } from "effect"
+import { Clock, Context, Effect, Exit, Layer, Scope } from "effect"
 import { Reactivity } from "effect/unstable/reactivity"
 import { SqlClient, SqlError } from "effect/unstable/sql"
 import type { Encryption } from "./crypto.ts"
@@ -70,13 +70,14 @@ export class GatewayStoreService extends Context.Service<
     )
 }
 
-const now = (): number => Date.now()
+/** The current time, read from Effect's clock so tests can govern it. */
+const now: Effect.Effect<number> = Clock.currentTimeMillis
 const identity = (text: string): string => text
 
 const bootstrapDefaultTenant = Effect.fn("GatewayStore.bootstrap")(function*(
   sql: SqlClient.SqlClient
 ) {
-  const timestamp = now()
+  const timestamp = yield* now
   yield* sql.unsafe(
     "INSERT INTO gateway_tenant (id, name, created_at) VALUES (?, ?, ?) ON CONFLICT (id) DO NOTHING",
     [defaultTenantId, "Default", timestamp]
@@ -232,9 +233,9 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
       yield* sql.withTransaction(Effect.gen(function*() {
         yield* run(
           "INSERT INTO gateway_tenant (id, name, created_at) VALUES (?, ?, ?)",
-          [id, name, now()]
+          [id, name, yield* now]
         )
-        const timestamp = now()
+        const timestamp = yield* now
         yield* run(
          `INSERT INTO gateway_access_profile (id, tenant_id, name, is_default, created_at, updated_at)
            VALUES (?, ?, 'Default', 1, ?, ?)`,
@@ -268,7 +269,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
     createSubject: (input) => operation("createSubject", Effect.gen(function*() {
       yield* run(
         "INSERT INTO gateway_subject (id, tenant_id, created_at) VALUES (?, ?, ?)",
-        [input.id, input.tenantId, now()]
+        [input.id, input.tenantId, yield* now]
       )
       const row = yield* one("SELECT * FROM gateway_subject WHERE id = ?", [input.id])
       if (row === undefined) return yield* Effect.die(new Error(`Failed to store subject ${input.id}`))
@@ -298,7 +299,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
     createLogin: (input) => operation("createLogin", Effect.gen(function*() {
       yield* run(
         "INSERT INTO gateway_login (subject_id, tenant_id, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
-        [input.subjectId, input.tenantId, input.email, input.passwordHash, now()]
+        [input.subjectId, input.tenantId, input.email, input.passwordHash, yield* now]
       )
       const row = yield* one("SELECT * FROM gateway_login WHERE subject_id = ?", [input.subjectId])
       if (row === undefined) return yield* Effect.die(new Error(`Failed to store login for ${input.email}`))
@@ -348,7 +349,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
     createSession: (input) => operation("createSession", Effect.gen(function*() {
       yield* run(
         "INSERT INTO gateway_session (token_hash, subject_id, tenant_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
-        [input.tokenHash, input.subjectId, input.tenantId, now(), millis(input.expiresAt)]
+        [input.tokenHash, input.subjectId, input.tenantId, yield* now, millis(input.expiresAt)]
       )
       return yield* requireSession(input.tokenHash)
     })),
@@ -358,7 +359,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
         `SELECT gateway_session.*, gateway_login.email
            FROM gateway_session JOIN gateway_login ON gateway_login.subject_id = gateway_session.subject_id
           WHERE gateway_session.token_hash = ? AND gateway_session.expires_at > ?`,
-        [tokenHash, now()]
+        [tokenHash, yield* now]
       )
       return row === undefined ? undefined : toAuthSession(row)
     })),
@@ -384,7 +385,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
           input.subjectId,
           input.tenantId,
           input.email,
-          now()
+          yield* now
         ]
       )
       const row = yield* one(
@@ -415,7 +416,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
         `INSERT INTO gateway_login_handoff
            (request_hash, subject_id, tenant_id, email, created_at, expires_at, collected_at)
          VALUES (?, NULL, NULL, NULL, ?, ?, NULL)`,
-        [input.requestHash, now(), millis(input.expiresAt)]
+        [input.requestHash, yield* now, millis(input.expiresAt)]
       )
       const row = yield* one(
         "SELECT * FROM gateway_login_handoff WHERE request_hash = ?",
@@ -439,7 +440,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
             SET subject_id = ?, tenant_id = ?, email = ?
           WHERE request_hash = ? AND collected_at IS NULL AND expires_at > ?
           RETURNING request_hash`,
-        [input.subjectId, input.tenantId, input.email, input.requestHash, now()]
+        [input.subjectId, input.tenantId, input.email, input.requestHash, yield* now]
       )) > 0
     })),
 
@@ -449,7 +450,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
           WHERE request_hash = ? AND subject_id IS NOT NULL
             AND collected_at IS NULL AND expires_at > ?
           RETURNING request_hash`,
-        [now(), requestHash, now()]
+        [yield* now, requestHash, yield* now]
       )) > 0
     })),
 
@@ -475,7 +476,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
         `DELETE FROM gateway_identity_oauth_state
           WHERE state_hash = ? AND expires_at > ?
           RETURNING *`,
-        [stateHash, now()]
+        [stateHash, yield* now]
       )
       if (row === undefined) {
         yield* run("DELETE FROM gateway_identity_oauth_state WHERE state_hash = ?", [stateHash])
@@ -497,7 +498,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
     })),
 
     createConfiguredClient: (input) => operation("createConfiguredClient", Effect.gen(function*() {
-      const at = now()
+      const at = yield* now
       yield* batch([
         {
           sql: `INSERT INTO gateway_access_profile (id, tenant_id, name, is_default, created_at, updated_at)
@@ -536,7 +537,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
           input.name,
           JSON.stringify(input.capabilities),
           JSON.stringify(input.approvalDelivery ?? defaultApprovalDelivery),
-          now()
+          yield* now
         ]
       )
       return yield* requireClient(input.id)
@@ -568,7 +569,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
               AND api_key.revoked_at IS NULL) AS keys,
           (SELECT COUNT(*) FROM gateway_pending_approval
             WHERE tenant_id = ? AND status = 'pending' AND expires_at > ?) AS pending_approvals`,
-        [tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, now()]
+        [tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, yield* now]
       )
       return {
         clients: Number(row?.["clients"] ?? 0),
@@ -614,10 +615,12 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
     revokeClient: (tenantId, id) =>
       operation(
         "revokeClient",
-        run(
-          "UPDATE gateway_client SET revoked_at = ? WHERE tenant_id = ? AND id = ? AND revoked_at IS NULL",
-          [now(), tenantId, id]
-        )
+        Effect.gen(function*() {
+          yield* run(
+            "UPDATE gateway_client SET revoked_at = ? WHERE tenant_id = ? AND id = ? AND revoked_at IS NULL",
+            [yield* now, tenantId, id]
+          )
+        })
       ),
 
     createApprovalDestination: (input) => operation("createApprovalDestination", Effect.gen(function*() {
@@ -625,7 +628,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
         `INSERT INTO gateway_approval_destination
           (id, tenant_id, name, type, url, signing_secret, created_at, deleted_at)
          VALUES (?, ?, ?, 'webhook', ?, ?, ?, NULL)`,
-        [input.id, input.tenantId, input.name, input.url, sealText(input.signingSecret), now()]
+        [input.id, input.tenantId, input.name, input.url, sealText(input.signingSecret), yield* now]
       )
       const row = yield* one("SELECT * FROM gateway_approval_destination WHERE id = ?", [input.id])
       if (row === undefined) return yield* Effect.die(new Error(`Failed to store approval destination ${input.id}`))
@@ -640,7 +643,12 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
     deleteApprovalDestination: (tenantId, id) =>
       operation(
         "deleteApprovalDestination",
-        run("UPDATE gateway_approval_destination SET deleted_at = ? WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL", [now(), tenantId, id])
+        Effect.gen(function*() {
+          yield* run(
+            "UPDATE gateway_approval_destination SET deleted_at = ? WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL",
+            [yield* now, tenantId, id]
+          )
+        })
       ),
 
     listClientApprovalDestinationIds: (clientId) => operation("listClientApprovalDestinationIds", Effect.gen(function*() {
@@ -720,20 +728,29 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
     settleApprovalDelivery: (input) =>
       operation(
         "settleApprovalDelivery",
-        run(
-          `UPDATE gateway_approval_delivery
-            SET status = ?, attempts = attempts + 1, next_attempt_at = ?,
-                delivered_at = CASE WHEN ? = 'delivered' THEN ? ELSE delivered_at END,
-                last_error = ?
-          WHERE id = ?`,
-          [input.status, input.nextAttemptAt === null ? null : millis(input.nextAttemptAt), input.status, now(), input.error, input.id]
-        )
+        Effect.gen(function*() {
+          yield* run(
+            `UPDATE gateway_approval_delivery
+              SET status = ?, attempts = attempts + 1, next_attempt_at = ?,
+                  delivered_at = CASE WHEN ? = 'delivered' THEN ? ELSE delivered_at END,
+                  last_error = ?
+            WHERE id = ?`,
+            [
+              input.status,
+              input.nextAttemptAt === null ? null : millis(input.nextAttemptAt),
+              input.status,
+              yield* now,
+              input.error,
+              input.id
+            ]
+          )
+        })
       ),
 
     addApiKey: (input) => operation("addApiKey", Effect.gen(function*() {
       yield* run(
         "INSERT INTO gateway_api_key (id, client_id, hash, created_at, last_used_at, revoked_at) VALUES (?, ?, ?, ?, NULL, NULL)",
-        [input.id, input.clientId, input.hash, now()]
+        [input.id, input.clientId, input.hash, yield* now]
       )
       const row = yield* one("SELECT * FROM gateway_api_key WHERE id = ?", [input.id])
       if (row === undefined) return yield* Effect.die(new Error(`Failed to store API key ${input.id}`))
@@ -777,16 +794,23 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
     })),
 
     touchApiKey: (id) =>
-      operation("touchApiKey", run("UPDATE gateway_api_key SET last_used_at = ? WHERE id = ?", [now(), id])),
+      operation("touchApiKey", Effect.gen(function*() {
+        yield* run("UPDATE gateway_api_key SET last_used_at = ? WHERE id = ?", [yield* now, id])
+      })),
 
     revokeApiKey: (id) =>
       operation(
         "revokeApiKey",
-        run("UPDATE gateway_api_key SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL", [now(), id])
+        Effect.gen(function*() {
+          yield* run(
+            "UPDATE gateway_api_key SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL",
+            [yield* now, id]
+          )
+        })
       ),
 
     createAccessProfile: (input) => operation("createAccessProfile", Effect.gen(function*() {
-      const timestamp = now()
+      const timestamp = yield* now
       yield* run(
         `INSERT INTO gateway_access_profile (id, tenant_id, name, is_default, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?)`,
@@ -802,7 +826,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
     updateAccessProfile: (tenantId, id, name) => operation("updateAccessProfile", Effect.gen(function*() {
       yield* run(
         "UPDATE gateway_access_profile SET name = ?, updated_at = ? WHERE tenant_id = ? AND id = ?",
-        [name, now(), tenantId, id]
+        [name, yield* now, tenantId, id]
       )
       const row = yield* one("SELECT * FROM gateway_access_profile WHERE tenant_id = ? AND id = ?", [tenantId, id])
       if (row === undefined) return yield* Effect.die(new Error(`Unknown access profile ${id}`))
@@ -872,7 +896,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
           `UPDATE gateway_access_profile
               SET updated_at = CASE WHEN updated_at >= ? THEN updated_at + 1 ELSE ? END
             WHERE id = ?`,
-          [now(), now(), id]
+          [yield* now, yield* now, id]
         )
       }))
       return (yield* all("SELECT * FROM gateway_access_profile_tool WHERE access_profile_id = ? ORDER BY integration, connection_name, tool", [id])).map(toAccessProfileTool)
@@ -896,7 +920,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
     })),
 
     createApprovalPolicy: (input) => operation("createApprovalPolicy", Effect.gen(function*() {
-      const timestamp = now()
+      const timestamp = yield* now
       yield* run(
         `INSERT INTO gateway_approval_policy (id, tenant_id, name, is_default, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?)`,
@@ -908,7 +932,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
     })),
 
     updateApprovalPolicy: (tenantId, id, name) => operation("updateApprovalPolicy", Effect.gen(function*() {
-      yield* run("UPDATE gateway_approval_policy SET name = ?, updated_at = ? WHERE tenant_id = ? AND id = ?", [name, now(), tenantId, id])
+      yield* run("UPDATE gateway_approval_policy SET name = ?, updated_at = ? WHERE tenant_id = ? AND id = ?", [name, yield* now, tenantId, id])
       const row = yield* one("SELECT * FROM gateway_approval_policy WHERE tenant_id = ? AND id = ?", [tenantId, id])
       if (row === undefined) return yield* Effect.die(new Error(`Unknown approval policy ${id}`))
       return toApprovalPolicy(row)
@@ -963,7 +987,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
             tool.connection.integration, tool.connection.name, tool.tool, tool.decision
           ])
         }
-        yield* run(`UPDATE gateway_approval_policy SET updated_at = CASE WHEN updated_at >= ? THEN updated_at + 1 ELSE ? END WHERE id = ?`, [now(), now(), id])
+        yield* run(`UPDATE gateway_approval_policy SET updated_at = CASE WHEN updated_at >= ? THEN updated_at + 1 ELSE ? END WHERE id = ?`, [yield* now, yield* now, id])
       }))
       return (yield* all("SELECT * FROM gateway_approval_policy_tool WHERE approval_policy_id = ? ORDER BY integration, connection_name, tool", [id])).map(toApprovalPolicyTool)
     })),
@@ -986,7 +1010,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
     createApproval: (input) => operation("createApproval", Effect.gen(function*() {
       const match = approvalMatch(input)
       const canonical = canonicalArguments(input.arguments)
-      const createdAt = now()
+      const createdAt = yield* now
       yield* batch([
         { sql: `INSERT INTO gateway_pending_approval
            (id, tenant_id, client_id, approval_policy_id, access_profile_id, alias, tool, arguments, arguments_lookup, status, created_at, expires_at, decided_at, decided_by, result, error, collected_at)
@@ -1028,7 +1052,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
           WHERE tenant_id = ? AND id = ? AND collected_at IS NULL
             AND status IN ('approved', 'denied', 'expired')
           RETURNING id`,
-        [now(), tenantId, id]
+        [yield* now, tenantId, id]
       )) > 0
     })),
 
@@ -1053,7 +1077,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
     })),
 
     claimApproval: (input) => operation("claimApproval", Effect.gen(function*() {
-      const at = now()
+      const at = yield* now
       return (yield* changed(
         `UPDATE gateway_pending_approval
             SET status = 'executing', decided_at = ?, decided_by = ?
@@ -1071,7 +1095,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
           RETURNING id`,
         [
           input.status,
-          now(),
+          yield* now,
           input.decidedBy,
           input.result === null ? null : sealText(JSON.stringify(input.result)),
           input.error,
@@ -1085,13 +1109,15 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
     cancelApprovalsForClient: (clientId) =>
       operation(
         "cancelApprovalsForClient",
-        changed(
-          `UPDATE gateway_pending_approval
-            SET status = 'denied', decided_at = ?, decided_by = 'client-revoked'
-          WHERE client_id = ? AND status = 'pending'
-          RETURNING id`,
-          [now(), clientId]
-        )
+        Effect.gen(function*() {
+          return yield* changed(
+            `UPDATE gateway_pending_approval
+              SET status = 'denied', decided_at = ?, decided_by = 'client-revoked'
+            WHERE client_id = ? AND status = 'pending'
+            RETURNING id`,
+            [yield* now, clientId]
+          )
+        })
       ),
 
     recordAudit: (input) => operation("recordAudit", Effect.gen(function*() {
@@ -1113,7 +1139,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
           input.decision,
           input.outcome,
           input.message,
-          now()
+          yield* now
         ]
       )
       if (input.arguments !== undefined) {
@@ -1194,14 +1220,16 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
     expireApprovals: (at) =>
       operation(
         "expireApprovals",
-        changed(
-          `UPDATE gateway_pending_approval
-            SET status = 'expired', decided_at = ?,
-                error = 'expired before a decision was recorded'
-          WHERE status = 'pending' AND expires_at <= ?
-          RETURNING id`,
-          [now(), millis(at)]
-        )
+        Effect.gen(function*() {
+          return yield* changed(
+            `UPDATE gateway_pending_approval
+              SET status = 'expired', decided_at = ?,
+                  error = 'expired before a decision was recorded'
+            WHERE status = 'pending' AND expires_at <= ?
+            RETURNING id`,
+            [yield* now, millis(at)]
+          )
+        })
       ),
 
     // The SqlClient owns the connection; closing it is the scope's business.

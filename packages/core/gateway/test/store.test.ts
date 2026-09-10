@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Layer } from "effect"
+import { Clock, Effect, Layer } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import path from "node:path"
 import { PositiveInt } from "@integrations/contracts"
@@ -78,14 +78,11 @@ const seedBinding = Effect.fnUntraced(function*(store: GatewayStore) {
   return { client, accessProfile, approvalPolicy }
 })
 
-/**
- * The store stamps and compares rows against the system clock rather than the
- * Effect one, so these tests run live and date their fixtures the same way.
- */
-const notYet = (): Date => new Date(Date.now() + 60_000)
+/** An expiry the test clock has not reached. */
+const notYet = Effect.map(Clock.currentTimeMillis, (now) => new Date(now + 60_000))
 
 describe("gateway store", () => {
-  it.live("client setup rolls back its configurations when the client cannot be inserted", () =>
+  it.effect("client setup rolls back its configurations when the client cannot be inserted", () =>
     Effect.gen(function*() {
       const gateway = yield* store
       const { client } = yield* seedBinding(gateway)
@@ -107,14 +104,14 @@ describe("gateway store", () => {
       expect(yield* gateway.findClientById(defaultTenantId, client.id)).toEqual(client)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("creates the database directory it was pointed at", () =>
+  it.effect("creates the database directory it was pointed at", () =>
     Effect.gen(function*() {
       const gateway = yield* store
       expect(gateway.databasePath).toContain(path.join("nested", "gateway.sqlite"))
       expect(yield* gateway.listClients(defaultTenantId)).toEqual([])
     }).pipe(Effect.provide(testServices)))
 
-  it.live("persists access profiles and their tools", () =>
+  it.effect("persists access profiles and their tools", () =>
     Effect.gen(function*() {
       const gateway = yield* store
       const { accessProfile } = yield* seedBinding(gateway)
@@ -130,7 +127,7 @@ describe("gateway store", () => {
       }])
     }).pipe(Effect.provide(testServices)))
 
-  it.live("persists approval policies and their decisions", () =>
+  it.effect("persists approval policies and their decisions", () =>
     Effect.gen(function*() {
       const gateway = yield* store
       const { approvalPolicy } = yield* seedBinding(gateway)
@@ -147,7 +144,7 @@ describe("gateway store", () => {
       }])
     }).pipe(Effect.provide(testServices)))
 
-  it.live("stores only a hash of an API key", () =>
+  it.effect("stores only a hash of an API key", () =>
     Effect.gen(function*() {
       const gateway = yield* store
       const client = yield* gateway.createClient({
@@ -165,7 +162,7 @@ describe("gateway store", () => {
       expect(JSON.stringify(stored)).not.toContain(key.secret)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("updates client authority and approval delivery together", () =>
+  it.effect("updates client authority and approval delivery together", () =>
     Effect.gen(function*() {
       const gateway = yield* store
       const client = yield* gateway.createClient({
@@ -188,7 +185,7 @@ describe("gateway store", () => {
       expect(updated.approvalDelivery).toEqual({ returnLink: false })
     }).pipe(Effect.provide(testServices)))
 
-  it.live("creates durable delivery jobs for a client's destinations", () =>
+  it.effect("creates durable delivery jobs for a client's destinations", () =>
     Effect.gen(function*() {
       const gateway = yield* store
       const { accessProfile, approvalPolicy, client } = yield* seedBinding(gateway)
@@ -213,7 +210,7 @@ describe("gateway store", () => {
         alias: Alias.make("mail"),
         tool: ToolName.make("sendEmail"),
         arguments: {},
-        expiresAt: notYet()
+        expiresAt: yield* notYet
       })
       expect(yield* gateway.listApprovalDeliveries(defaultTenantId, approval.id)).toMatchObject([{
         approvalId: approval.id,
@@ -244,7 +241,7 @@ describe("gateway store", () => {
       }])
     }).pipe(Effect.provide(testServices)))
 
-  it.live("completes and consumes login handoffs and OAuth state once", () =>
+  it.effect("completes and consumes login handoffs and OAuth state once", () =>
     Effect.gen(function*() {
       const gateway = yield* store
       const tenant = yield* gateway.createTenant({ name: "OAuth workspace" })
@@ -261,7 +258,7 @@ describe("gateway store", () => {
       const handoff = yield* generateLoginHandoff
       yield* gateway.createLoginHandoff({
         requestHash: handoff.hash,
-        expiresAt: notYet()
+        expiresAt: yield* notYet
       })
 
       expect(yield* gateway.completeLoginHandoff({
@@ -279,7 +276,7 @@ describe("gateway store", () => {
         provider: "google",
         handoffHash: handoff.hash,
         returnPath: "/approvals?approval=ap_1",
-        expiresAt: notYet()
+        expiresAt: yield* notYet
       })
 
       expect((yield* gateway.consumeIdentityOAuthState(state.hash))?.returnPath)
@@ -287,7 +284,7 @@ describe("gateway store", () => {
       expect(yield* gateway.consumeIdentityOAuthState(state.hash)).toBeUndefined()
     }).pipe(Effect.provide(testServices)))
 
-  it.live("freezes approval arguments and settles them once", () =>
+  it.effect("freezes approval arguments and settles them once", () =>
     Effect.gen(function*() {
       const gateway = yield* store
       const { accessProfile, approvalPolicy, client } = yield* seedBinding(gateway)
@@ -300,7 +297,7 @@ describe("gateway store", () => {
         alias: Alias.make("gmail-work"),
         tool: ToolName.make("sendEmail"),
         arguments: { to: ["customer@example.com"], subject: "Follow up" },
-        expiresAt: notYet()
+        expiresAt: yield* notYet
       })
       expect(approval.status).toBe("pending")
       expect(approval.arguments).toEqual({ to: ["customer@example.com"], subject: "Follow up" })
@@ -333,7 +330,7 @@ describe("gateway store", () => {
       expect(settled?.result).toEqual({ id: "msg-1" })
     }).pipe(Effect.provide(testServices)))
 
-  it.live("revoking a client cancels its pending approvals", () =>
+  it.effect("revoking a client cancels its pending approvals", () =>
     Effect.gen(function*() {
       const gateway = yield* store
       const { accessProfile, approvalPolicy, client } = yield* seedBinding(gateway)
@@ -346,7 +343,7 @@ describe("gateway store", () => {
         alias: Alias.make("gmail-work"),
         tool: ToolName.make("sendEmail"),
         arguments: {},
-        expiresAt: notYet()
+        expiresAt: yield* notYet
       })
 
       const cancelled = yield* gateway.cancelApprovalsForClient(client.id)
@@ -357,11 +354,11 @@ describe("gateway store", () => {
       expect(after?.decidedBy).toBe("client-revoked")
     }).pipe(Effect.provide(testServices)))
 
-  it.live("keeps the audit record after its arguments expire", () =>
+  it.effect("keeps the audit record after its arguments expire", () =>
     Effect.gen(function*() {
       const gateway = yield* store
       const { client } = yield* seedBinding(gateway)
-      const now = Date.now()
+      const now = yield* Clock.currentTimeMillis
       yield* gateway.recordAudit({
         tenantId: defaultTenantId,
         id: yield* newAuditId,
@@ -388,7 +385,7 @@ describe("gateway store", () => {
       expect(records[0]?.outcome).toBe("succeeded")
     }).pipe(Effect.provide(testServices)))
 
-  it.live("records a denial that never reached a connection", () =>
+  it.effect("records a denial that never reached a connection", () =>
     Effect.gen(function*() {
       const gateway = yield* store
       yield* gateway.recordAudit({
@@ -408,7 +405,7 @@ describe("gateway store", () => {
       expect(records[0]?.connection).toBeNull()
     }).pipe(Effect.provide(testServices)))
 
-  it.live("upserts tool snapshots so a resync overwrites rather than duplicates", () =>
+  it.effect("upserts tool snapshots so a resync overwrites rather than duplicates", () =>
     Effect.gen(function*() {
       const gateway = yield* store
       const integration = IntegrationSlug.make("gmail")
@@ -417,7 +414,7 @@ describe("gateway store", () => {
         connection: ConnectionName.make("work"),
         tool: ToolName.make("sendEmail"),
         outputSchema: null,
-        syncedAt: new Date()
+        syncedAt: new Date(yield* Clock.currentTimeMillis)
       }
       yield* gateway.putToolSnapshots(defaultTenantId, [
         { ...base, inputSchema: { type: "object" } }
@@ -431,7 +428,7 @@ describe("gateway store", () => {
       expect(snapshots[0]?.inputSchema).toEqual({ type: "string" })
     }).pipe(Effect.provide(testServices)))
 
-  it.live("keeps tenants blind to each other", () =>
+  it.effect("keeps tenants blind to each other", () =>
     Effect.gen(function*() {
       const gateway = yield* store
       const other = yield* gateway.createTenant({ name: "Acme" })
@@ -471,7 +468,7 @@ describe("gateway store", () => {
         alias: Alias.make("gmail-work"),
         tool: ToolName.make("sendEmail"),
         arguments: {},
-        expiresAt: notYet()
+        expiresAt: yield* notYet
       })
       expect(yield* gateway.getApproval(other.id, approval.id)).toBeUndefined()
       expect(yield* gateway.listApprovals(other.id)).toEqual([])
@@ -497,7 +494,7 @@ describe("gateway store", () => {
         tool: ToolName.make("sendEmail"),
         inputSchema: null,
         outputSchema: null,
-        syncedAt: new Date()
+        syncedAt: new Date(yield* Clock.currentTimeMillis)
       }])
       expect(yield* gateway.listToolSnapshots(other.id, IntegrationSlug.make("gmail"))).toEqual([])
       expect(yield* gateway.countSubjects(defaultTenantId)).toBe(0)

@@ -100,7 +100,7 @@ const setup = Effect.fnUntraced(function*(options: {
 })
 
 describe("failures nobody declared", () => {
-  it.live("answers in the gateway's own dialect, saying nothing about the database that broke", () =>
+  it.effect("answers in the gateway's own dialect, saying nothing about the database that broke", () =>
     Effect.gen(function*() {
       const { call } = yield* setup({ listClientsFails: true })
 
@@ -113,7 +113,7 @@ describe("failures nobody declared", () => {
       expect(body).not.toContain("/srv/secrets")
     }).pipe(Effect.provide(testServices)))
 
-  it.live("tells the sink which operation rejected and hands the caller back its id", () =>
+  it.effect("tells the sink which operation rejected and hands the caller back its id", () =>
     Effect.gen(function*() {
       const recorded: Array<{ readonly traceId: string; readonly operation?: string }> = []
       const { call } = yield* setup({
@@ -137,7 +137,7 @@ describe("failures nobody declared", () => {
 })
 
 describe("failures out at the far end", () => {
-  it.live("a URL that cannot be read is the caller's 400, not the gateway's 500", () =>
+  it.effect("a URL that cannot be read is the caller's 400, not the gateway's 500", () =>
     Effect.gen(function*() {
       const { call } = yield* setup({ unreachableUrl: true })
 

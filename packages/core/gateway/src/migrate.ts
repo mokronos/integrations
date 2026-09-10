@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Clock, Effect, Schema } from "effect"
 import type { SqlError } from "effect/unstable/sql"
 import { SqlClient } from "effect/unstable/sql"
 import { type GatewayMigration, gatewayMigrations } from "./store-migrations.gen.ts"
@@ -73,7 +73,7 @@ export const applyGatewayMigrations = Effect.fn("Migrations.apply")(function*(
     .filter((migration) => !applied.has(migration.id))
     .toSorted((left, right) => left.id - right.id)
 
-  const at = Date.now()
+  const at = yield* Clock.currentTimeMillis
   for (const migration of pending) {
     yield* sql.withTransaction(Effect.gen(function*() {
       for (const statement of migration.statements) {

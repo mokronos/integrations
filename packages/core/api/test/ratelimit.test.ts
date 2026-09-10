@@ -75,7 +75,7 @@ describe("gateway traffic shaping", () => {
     return { store, key, send, get }
   })
 
-  it.live("an address that exhausts its pre-auth bucket gets 429 with Retry-After", () =>
+  it.effect("an address that exhausts its pre-auth bucket gets 429 with Retry-After", () =>
     Effect.gen(function*() {
       const { get } = yield* setup({ addressLimit: 2 })
 
@@ -88,7 +88,7 @@ describe("gateway traffic shaping", () => {
       expect((yield* bodyOf(refused))["code"]).toBe("rate-limited")
     }).pipe(Effect.provide(testServices)))
 
-  it.live("health stays reachable under load — it is what the monitor polls", () =>
+  it.effect("health stays reachable under load — it is what the monitor polls", () =>
     Effect.gen(function*() {
       const { get } = yield* setup({ addressLimit: 1 })
 
@@ -99,7 +99,7 @@ describe("gateway traffic shaping", () => {
       expect((yield* get("/v1/health")).status).toBe(200)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("one exhausted principal does not starve another", () =>
+  it.effect("one exhausted principal does not starve another", () =>
     Effect.gen(function*() {
       const { get, key, store } = yield* setup({ principalLimit: 2, addressLimit: 10_000 })
       const neighbour = yield* keyFor(store, "neighbour")
@@ -111,7 +111,7 @@ describe("gateway traffic shaping", () => {
       expect((yield* get("/v1/tools", neighbour.secret)).status).toBe(200)
     }).pipe(Effect.provide(testServices)))
 
-  it.live("an oversized body is refused with 413 before any handler runs", () =>
+  it.effect("an oversized body is refused with 413 before any handler runs", () =>
     Effect.gen(function*() {
       const { key, send } = yield* setup({ maxBodyBytes: 16 })
       const body = JSON.stringify({ name: "x".repeat(64) })

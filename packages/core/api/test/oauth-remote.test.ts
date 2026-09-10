@@ -154,7 +154,7 @@ describe("remote oauth flows", () => {
       expect(failed.state.message).toContain("token exchange rejected")
     }))
 
-  it.live("local mode still owns an ephemeral listener and needs no public URL", () =>
+  it.effect("local mode still owns an ephemeral listener and needs no public URL", () =>
     Effect.gen(function*() {
       const fake = fakeAuth()
       const sessions = createOAuthSessions(fake.host)
@@ -193,7 +193,7 @@ describe("the remote callback route", () => {
     })
   })
 
-  it.live("connects when the state is known and shows the human a page", () =>
+  it.effect("connects when the state is known and shows the human a page", () =>
     Effect.gen(function*() {
       let completed: { state?: string; code?: string } | undefined
       const call = yield* callbacks({
@@ -216,7 +216,7 @@ describe("the remote callback route", () => {
       expect(completed?.code).toBe("abc")
     }).pipe(Effect.provide(testServices)))
 
-  it.live("answers an unknown or error callback with a readable page, not JSON", () =>
+  it.effect("answers an unknown or error callback with a readable page, not JSON", () =>
     Effect.gen(function*() {
       const call = yield* callbacks({
         ...notUsed,
@@ -234,7 +234,7 @@ describe("the remote callback route", () => {
       expect(errored.text).toContain("User declined")
     }).pipe(Effect.provide(testServices)))
 
-  it.live("reports a flow that failed during completion", () =>
+  it.effect("reports a flow that failed during completion", () =>
     Effect.gen(function*() {
       const call = yield* callbacks({
         ...notUsed,
