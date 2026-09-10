@@ -283,15 +283,12 @@ const SystemGroup = HttpApiGroup.make("system")
 
 const FallbackGroup = HttpApiGroup.make("fallback")
   .add(HttpApiEndpoint.make("GET")("unmatchedGet", "/*", {
-    params: { "*": Schema.String },
     success: Schema.Never.pipe(HttpApiSchema.status(404))
   }).annotate(Unmetered, true).annotate(RequiredAccess, "public"))
   .add(HttpApiEndpoint.make("POST")("unmatchedPost", "/*", {
-    params: { "*": Schema.String },
     success: Schema.Never.pipe(HttpApiSchema.status(404))
   }).annotate(Unmetered, true).annotate(RequiredAccess, "public"))
   .add(HttpApiEndpoint.make("DELETE")("unmatchedDelete", "/*", {
-    params: { "*": Schema.String },
     success: Schema.Never.pipe(HttpApiSchema.status(404))
   }).annotate(Unmetered, true).annotate(RequiredAccess, "public"))
   .middleware(Authority)
