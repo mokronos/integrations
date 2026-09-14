@@ -27,7 +27,13 @@ export class OAuthSessionError extends Schema.TaggedError<OAuthSessionError>()(
     operation: Schema.String,
     cause: Schema.Defect()
   }
-) {}
+) {
+  override get message(): string {
+    return `OAuth ${this.operation} failed: ${
+      this.cause instanceof Error ? this.cause.message : String(this.cause)
+    }`
+  }
+}
 
 export interface OAuthSessionStore {
   put(session: OAuthSession): Effect.Effect<void, OAuthSessionError>

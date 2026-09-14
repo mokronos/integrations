@@ -1,4 +1,4 @@
-import { Data, Effect } from "effect"
+import { Data, Effect, Predicate } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import type { HttpClient } from "effect/unstable/http"
 import { makeGatewayClient, resolveClientConnection } from "@mokronos/integrations-client"
@@ -12,6 +12,11 @@ export class IntegrationsCliError extends Data.TaggedError("IntegrationsCliError
 export const cliError = (message: string): IntegrationsCliError =>
   new IntegrationsCliError({ message })
 
+// The gateway routes spell their human-readable text `error`, not `message`,
+// so an Error carrying one reads as empty until it is asked for by name.
+const explains = (failure: Error): failure is Error & { readonly error: string } =>
+  "error" in failure && Predicate.isString(failure.error) && failure.error.length > 0
+
 // oxlint-disable-next-line anti-slop/no-unknown-parameters
 export const describeError = (error: unknown): string => {
   if (error instanceof IntegrationsCliError) return error.message
@@ -20,7 +25,9 @@ export const describeError = (error: unknown): string => {
   if (error instanceof Forbidden && error.code === "not-permitted") {
     return `${error.message} (use a client or human session with the required capability)`
   }
-  return error instanceof Error ? error.message : String(error)
+  if (!(error instanceof Error)) return String(error)
+  if (error.message.length > 0) return error.message
+  return explains(error) ? error.error : String(error)
 }
 
 export const connectToGateway = Effect.fn("cli.connectToGateway")(function*(): Effect.fn.Return<

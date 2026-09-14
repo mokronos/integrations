@@ -316,8 +316,7 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
               (ms) => ms
             )
           }).pipe(Effect.mapError((failure) => new ApiBadRequest({
-            error: `${body.integration} could not start an OAuth flow: ${failure.cause instanceof Error ? failure.cause.message : String(failure.cause)
-              }`
+            error: `${body.integration} could not start an OAuth flow: ${failure.message}`
           })))
         }))
       .handle("oauthSession", (request) =>
