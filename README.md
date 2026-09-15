@@ -23,6 +23,33 @@ key and invoke logical `{ alias, tool }` addresses through the HTTP API.
 
 `VISION.md` records product direction.
 
+## Install
+
+The packages are not on npm yet. Install from this repository with Bun 1.2 or
+newer:
+
+```bash
+git clone https://github.com/mokronos/integrations.git
+cd integrations
+bun install
+bun run install:local
+ii login
+```
+
+`install:local` puts `i` and `ii` on PATH as shims that run the TypeScript
+sources in the checkout, so there is no build step and `git pull && bun install`
+is the whole upgrade. Keep the checkout where it is; moving it means re-running
+`bun run install:local`. The gateway dashboard is the one part that needs
+building — run `bun run build:control-plane` before `ii serve` if you want it.
+
+`i` mirrors the public TypeScript client: agents can discover integrations,
+manage connections, inspect schemas, invoke effective policy tools, and poll their own
+approvals. `ii` is its strict operator superset, adding every dashboard action,
+human login/account commands, and local gateway lifecycle commands.
+
+State defaults to `~/.integrations`; set `INTEGRATIONS_HOME` to use another
+directory.
+
 ## Development
 
 ```bash
@@ -50,21 +77,6 @@ That reinstalls the `i` and `ii` shims, stops the gateway that is running —
 service unit or a `serve` started by hand — and starts one from these sources on
 the same port. A gateway keeps the modules Bun loaded at startup, so one left
 running across a change serves the older wire shape to newly started clients.
-
-Or install the published command package with Bun:
-
-```bash
-bun add --global @integrations/integrations
-ii login
-```
-
-`i` mirrors the public TypeScript client: agents can discover integrations,
-manage connections, inspect schemas, invoke effective policy tools, and poll their own
-approvals. `ii` is its strict operator superset, adding every dashboard action,
-human login/account commands, and local gateway lifecycle commands.
-
-State defaults to `~/.integrations`; set `INTEGRATIONS_HOME` to use another
-directory.
 
 ## Clients
 
