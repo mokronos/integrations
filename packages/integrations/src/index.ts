@@ -46,6 +46,7 @@ export { validateIntegrationNode } from "./validate.ts"
 export {
   completeOAuthFlow,
   createOAuthClient,
+  findOAuthClient,
   probeOAuthServer,
   registerOAuthClient,
   startOAuthFlow

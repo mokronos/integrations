@@ -1,31 +1,17 @@
-import { OAuthSessionError } from "@integrations/gateway-core"
+import { OAuthSessionError, OAuthSessionRequest } from "@integrations/gateway-core"
 import type { OAuthSession, OAuthSessionStore } from "@integrations/gateway-core"
-import { Connection } from "@integrations/contracts"
+import { OAuthSessionState, whenPresent } from "@integrations/contracts"
 import { Effect, Schema } from "effect"
 import type { D1DatabaseLike } from "./cloudflare.ts"
 
 const sessionTtlMs = 24 * 60 * 60 * 1000
 
-const SessionState = Schema.Union([
-  Schema.Struct({
-    status: Schema.Literal("pending"),
-    authorizationUrl: Schema.String
-  }),
-  Schema.Struct({
-    status: Schema.Literal("connected"),
-    connection: Connection
-  }),
-  Schema.Struct({
-    status: Schema.Literal("failed"),
-    message: Schema.String
-  })
-])
-
 const SessionRow = Schema.Struct({
   id: Schema.String,
   integration: Schema.String,
   connection_name: Schema.String,
-  status_json: Schema.String
+  status_json: Schema.String,
+  request_json: Schema.String
 })
 
 const StoredSessionRow = Schema.Struct({
@@ -38,7 +24,9 @@ const StateOwnerRow = Schema.Struct({
   created_at: Schema.Number
 })
 
-const decodeSessionStateJson = Schema.decodeUnknownSync(Schema.fromJsonString(SessionState))
+const decodeSessionStateJson = Schema.decodeUnknownSync(Schema.fromJsonString(OAuthSessionState))
+const decodeSessionRequestJson = Schema.decodeUnknownSync(Schema.fromJsonString(OAuthSessionRequest))
+const encodeSessionRequestJson = Schema.encodeSync(Schema.fromJsonString(OAuthSessionRequest))
 const decodeStoredSessionRow = Schema.decodeUnknownSync(StoredSessionRow)
 const decodeStateOwnerRow = Schema.decodeUnknownSync(StateOwnerRow)
 
@@ -48,6 +36,7 @@ const ddl = [
      integration TEXT NOT NULL,
      connection_name TEXT NOT NULL,
      status_json TEXT NOT NULL,
+     request_json TEXT NOT NULL,
      created_at INTEGER NOT NULL
    )`,
   `CREATE TABLE IF NOT EXISTS gateway_oauth_state (
@@ -87,14 +76,22 @@ export class D1OAuthSessionStore implements OAuthSessionStore {
       const statusJson = JSON.stringify(session.state)
       await this.#database
         .prepare(
-          `INSERT INTO gateway_oauth_session (id, integration, connection_name, status_json, created_at)
-           VALUES (?, ?, ?, ?, ?)
+          `INSERT INTO gateway_oauth_session (id, integration, connection_name, status_json, request_json, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)
            ON CONFLICT (id) DO UPDATE SET
              integration = excluded.integration,
              connection_name = excluded.connection_name,
-             status_json = excluded.status_json`
+             status_json = excluded.status_json,
+             request_json = excluded.request_json`
         )
-        .bind(session.id, session.integration, session.connection, statusJson, Date.now())
+        .bind(
+          session.id,
+          session.integration,
+          session.connection,
+          statusJson,
+          encodeSessionRequestJson(session.request),
+          Date.now()
+        )
         .run()
     })
 
@@ -103,7 +100,7 @@ export class D1OAuthSessionStore implements OAuthSessionStore {
       await this.ensureReady()
       const result = await this.#database
         .prepare(
-          `SELECT id, integration, connection_name, status_json, created_at
+          `SELECT id, integration, connection_name, status_json, request_json, created_at
            FROM gateway_oauth_session WHERE id = ?`
         )
         .bind(id)
@@ -111,12 +108,14 @@ export class D1OAuthSessionStore implements OAuthSessionStore {
       if (result === null) return undefined
       const row = decodeStoredSessionRow(result)
       if (Date.now() - row.created_at > sessionTtlMs) return undefined
-      const state = decodeSessionStateJson(row.status_json)
+      const request = decodeSessionRequestJson(row.request_json)
       return {
         id: row.id,
         integration: row.integration,
         connection: row.connection_name,
-        state
+        request,
+        ...whenPresent("bindingTenant", request.bindingTenant),
+        state: decodeSessionStateJson(row.status_json)
       }
     })
 

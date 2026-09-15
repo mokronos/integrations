@@ -1,9 +1,7 @@
-import { whenPresent } from "@integrations/contracts"
+import { AuthMethod, TenantId, whenPresent } from "@integrations/contracts"
 import type { OAuthSessionState } from "@integrations/contracts"
 
-import type { AuthMethod } from "@integrations/contracts"
 import { Context, Deferred, Effect, Exit, Schema, Scope } from "effect"
-import type { TenantId } from "./domain.ts"
 import { webCrypto } from "@integrations/contracts"
 import { completeOAuthFlow } from "@integrations/integrations"
 import {
@@ -13,11 +11,25 @@ import {
   type OAuthOperations
 } from "./oauth.ts"
 
+/**
+ * Everything needed to run the authorization again, minus the OAuth client
+ * credentials: a secret belongs in the credential store, not in a session.
+ */
+export const OAuthSessionRequest = Schema.Struct({
+  integration: Schema.String,
+  connection: Schema.String,
+  authMethod: AuthMethod,
+  timeoutMs: Schema.optional(Schema.Number),
+  bindingTenant: Schema.optional(TenantId)
+})
+export type OAuthSessionRequest = typeof OAuthSessionRequest.Type
+
 export type OAuthSession = {
   readonly id: string
   readonly integration: string
   readonly connection: string
   readonly bindingTenant?: TenantId
+  readonly request: OAuthSessionRequest
   readonly state: OAuthSessionState
 }
 
@@ -44,15 +56,16 @@ export interface OAuthSessionStore {
 }
 
 export interface OAuthSessions {
-  start(input: {
-    readonly integration: string
-    readonly connection: string
-    readonly authMethod: AuthMethod
-    readonly clientId?: string
-    readonly clientSecret?: string
-    readonly timeoutMs?: number
-    readonly bindingTenant?: TenantId
-  }): Effect.Effect<OAuthSession, OAuthSessionError | OAuthFlowError>
+  start(
+    input: OAuthSessionRequest & {
+      readonly clientId?: string
+      readonly clientSecret?: string
+    }
+  ): Effect.Effect<OAuthSession, OAuthSessionError | OAuthFlowError>
+  provideClient(
+    id: string,
+    client: { readonly clientId: string; readonly clientSecret?: string }
+  ): Effect.Effect<OAuthSession | undefined, OAuthSessionError | OAuthFlowError>
   get(id: string): Effect.Effect<OAuthSession | undefined, OAuthSessionError>
   completeByState(
     state: string,
@@ -66,6 +79,12 @@ export interface OAuthSessionsOptions {
   readonly publicUrlOf?: () => string | undefined
   readonly store?: OAuthSessionStore
   readonly onConnected?: (session: OAuthSession) => Promise<void>
+}
+
+const setupUrl = (publicUrl: string, session: string): string => {
+  const url = new URL("/integrations", publicUrl)
+  url.searchParams.set("setup", session)
+  return url.toString()
 }
 
 const inMemoryStore = (): OAuthSessionStore & { clear(): void } => {
@@ -123,6 +142,112 @@ export const createOAuthSessions = (
       catch: (cause) => new OAuthSessionError({ operation, cause })
     })
 
+  const authorize = Effect.fn("OAuthSession.authorize")(function*(
+    id: string,
+    input: OAuthSessionRequest,
+    client: { readonly clientId?: string; readonly clientSecret?: string }
+  ): Effect.fn.Return<OAuthSession, OAuthSessionError | OAuthFlowError> {
+    const publicUrl = options.publicUrlOf?.() ?? options.publicUrl
+    const base = {
+      id,
+      integration: input.integration,
+      connection: input.connection,
+      request: input,
+      ...whenPresent("bindingTenant", input.bindingTenant)
+    }
+
+    if (publicUrl !== undefined) {
+      const started = yield* Effect.result(
+        startRemoteAuthorization({
+          integration: input.integration,
+          connection: input.connection,
+          authMethod: input.authMethod,
+          publicUrl,
+          ...whenPresent("clientId", client.clientId),
+          ...whenPresent("clientSecret", client.clientSecret),
+          ...whenPresent("timeoutMs", input.timeoutMs)
+        }).pipe(Effect.provide(host))
+      )
+      if (started._tag === "Failure") {
+        if (started.failure.stage !== "client-required") return yield* started.failure
+        const waiting: OAuthSession = {
+          ...base,
+          state: {
+            status: "needs-client",
+            setupUrl: setupUrl(publicUrl, id),
+            guidance: started.failure.detail
+          }
+        }
+        yield* store.put(waiting)
+        return waiting
+      }
+      const flow = started.success
+      if (flow.status === "connected") {
+        const connected: OAuthSession = {
+          ...base,
+          state: { status: "connected", connection: flow.connection }
+        }
+        yield* store.put(connected)
+        if (options.onConnected !== undefined) {
+          yield* external("bindConnectedTools", () => options.onConnected!(connected))
+        }
+        return connected
+      }
+      yield* store.putState(flow.state, id)
+      const pending: OAuthSession = {
+        ...base,
+        state: { status: "pending", authorizationUrl: flow.authorizationUrl }
+      }
+      yield* store.put(pending)
+      return pending
+    }
+
+    const parent = yield* flowScope
+    const announced = yield* Deferred.make<string>()
+
+    yield* authorizeInBrowser({
+      integration: input.integration,
+      connection: input.connection,
+      authMethod: input.authMethod,
+      ...whenPresent("clientId", client.clientId),
+      ...whenPresent("clientSecret", client.clientSecret),
+      ...whenPresent("timeoutMs", input.timeoutMs),
+      onAuthorizationUrl: (url) => {
+        Deferred.doneUnsafe(announced, Effect.succeed(url))
+      }
+    }).pipe(
+      Effect.provide(host),
+      Effect.matchEffect({
+        onSuccess: (connection) =>
+          Effect.gen(function*() {
+            yield* finish(id, { status: "connected", connection })
+            const session = yield* store.get(id)
+            if (session !== undefined && options.onConnected !== undefined) {
+              yield* external("bindConnectedTools", () => options.onConnected!(session))
+            }
+          }),
+        onFailure: (failure) => finish(id, { status: "failed", message: failure.message })
+      }),
+      Effect.catch((failure) =>
+        Effect.logError(`OAuth session ${id} could not be settled: ${failure.message}`).pipe(
+          Effect.annotateLogs({ session: id, operation: "OAuthSession.settle" })
+        )),
+      Effect.ensuring(Effect.sync(() => {
+        Deferred.doneUnsafe(announced, Effect.succeed(""))
+      })),
+      Effect.scoped,
+      Effect.forkIn(parent)
+    )
+
+    const authorizationUrl = yield* Deferred.await(announced)
+    const session = (yield* store.get(id)) ?? {
+      ...base,
+      state: { status: "pending" as const, authorizationUrl }
+    }
+    yield* store.put(session)
+    return session
+  })
+
   return {
     start: Effect.fn("OAuthSession.start")(function*(input) {
       if (stopped) {
@@ -132,91 +257,25 @@ export const createOAuthSessions = (
         })
       }
       const id = yield* Effect.orDie(webCrypto.randomUUIDv4)
-      const publicUrl = options.publicUrlOf?.() ?? options.publicUrl
-
-      if (publicUrl !== undefined) {
-        const flow = yield* startRemoteAuthorization({
-          integration: input.integration,
-          connection: input.connection,
-          authMethod: input.authMethod,
-          publicUrl,
-          ...whenPresent("clientId", input.clientId),
-          ...whenPresent("clientSecret", input.clientSecret),
-          ...whenPresent("timeoutMs", input.timeoutMs)
-        }).pipe(Effect.provide(host))
-        if (flow.status === "connected") {
-          const connected: OAuthSession = {
-            id,
-            integration: input.integration,
-            connection: input.connection,
-            ...whenPresent("bindingTenant", input.bindingTenant),
-            state: { status: "connected", connection: flow.connection }
-          }
-          yield* store.put(connected)
-          if (options.onConnected !== undefined) {
-            yield* external("bindConnectedTools", () => options.onConnected!(connected))
-          }
-          return connected
-        }
-        yield* store.putState(flow.state, id)
-        const pending: OAuthSession = {
-          id,
-          integration: input.integration,
-          connection: input.connection,
-          ...whenPresent("bindingTenant", input.bindingTenant),
-          state: { status: "pending", authorizationUrl: flow.authorizationUrl }
-        }
-        yield* store.put(pending)
-        return pending
-      }
-
-      const parent = yield* flowScope
-      const announced = yield* Deferred.make<string>()
-
-      yield* authorizeInBrowser({
+      return yield* authorize(id, {
         integration: input.integration,
         connection: input.connection,
         authMethod: input.authMethod,
-        ...whenPresent("clientId", input.clientId),
-        ...whenPresent("clientSecret", input.clientSecret),
         ...whenPresent("timeoutMs", input.timeoutMs),
-        onAuthorizationUrl: (url) => {
-          Deferred.doneUnsafe(announced, Effect.succeed(url))
-        }
-      }).pipe(
-        Effect.provide(host),
-        Effect.matchEffect({
-          onSuccess: (connection) =>
-            Effect.gen(function*() {
-              yield* finish(id, { status: "connected", connection })
-              const session = yield* store.get(id)
-              if (session !== undefined && options.onConnected !== undefined) {
-                yield* external("bindConnectedTools", () => options.onConnected!(session))
-              }
-            }),
-          onFailure: (failure) => finish(id, { status: "failed", message: failure.message })
-        }),
-        Effect.catch((failure) =>
-          Effect.logError(`OAuth session ${id} could not be settled: ${failure.message}`).pipe(
-            Effect.annotateLogs({ session: id, operation: "OAuthSession.settle" })
-          )),
-        Effect.ensuring(Effect.sync(() => {
-          Deferred.doneUnsafe(announced, Effect.succeed(""))
-        })),
-        Effect.scoped,
-        Effect.forkIn(parent)
-      )
+        ...whenPresent("bindingTenant", input.bindingTenant)
+      }, input)
+    }),
 
-      const authorizationUrl = yield* Deferred.await(announced)
-      const session = (yield* store.get(id)) ?? {
-        id,
-        integration: input.integration,
-        connection: input.connection,
-        ...whenPresent("bindingTenant", input.bindingTenant),
-        state: { status: "pending", authorizationUrl }
+    provideClient: Effect.fn("OAuthSession.provideClient")(function*(id, client) {
+      if (stopped) {
+        return yield* new OAuthSessionError({
+          operation: "provideClient",
+          cause: new Error("The gateway is shutting down")
+        })
       }
-      yield* store.put(session)
-      return session
+      const session = yield* store.get(id)
+      if (session === undefined || session.state.status !== "needs-client") return undefined
+      return yield* authorize(id, session.request, client)
     }),
 
     get: (id) => store.get(id),

@@ -29,6 +29,7 @@ import {
   PolicyDecision,
   PendingApproval,
   SubjectId,
+  OAuthClientSubmission,
   OAuthSessionView
 } from "@integrations/contracts"
 import {
@@ -375,6 +376,12 @@ const ProvisioningGroup = HttpApiGroup.make("provisioning")
     params: { id: Schema.String },
     success: OAuthSessionView,
     error: ApiNotFoundError
+  }).annotate(RequiredAccess, "provisioning"))
+  .add(HttpApiEndpoint.post("provideOAuthClient", "/v1/connections/oauth/:id/client", {
+    params: { id: Schema.String },
+    payload: OAuthClientSubmission,
+    success: OAuthSessionView,
+    error: [ApiNotFoundError, ApiBadRequestError]
   }).annotate(RequiredAccess, "provisioning"))
   .add(HttpApiEndpoint.get("oauthCallback", "/v1/oauth/callback", {
     query: {

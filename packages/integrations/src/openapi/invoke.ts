@@ -67,9 +67,15 @@ const decodeBody = (
   return body
 }
 
-const errorDetail = (body: string): string => {
+const errorDetail = (contentType: string, body: string): string => {
   const trimmed = body.trim()
   if (trimmed.length === 0) return "no response body"
+  // An API answering HTML is an API that was never reached, and its error page
+  // is worth less to the caller than knowing that is what happened.
+  if (!jsonContentType.test(contentType)) {
+    const kind = contentType.split(";")[0]?.trim()
+    return `answered ${kind === undefined || kind.length === 0 ? "a non-JSON body" : kind}, not an API error`
+  }
   return trimmed.length > 600 ? `${trimmed.slice(0, 600)}…` : trimmed
 }
 
@@ -147,13 +153,13 @@ export class OpenApiInvoker extends Context.Service<
         })).pipe(
           Effect.mapError((cause) => new InvocationError({
             code: "transport_error",
-            detail: describeCause(cause)
+            detail: `${built.method} ${built.url}: ${describeCause(cause)}`
           })),
           Effect.timeoutOrElse({
             duration: call.timeoutMillis ?? defaultTimeoutMillis,
             orElse: () => Effect.fail(new InvocationError({
               code: "timeout",
-              detail: `${call.tool} did not answer in time`
+              detail: `${call.tool} did not answer in time: ${built.method} ${built.url}`
             }))
           })
         )
@@ -170,7 +176,9 @@ export class OpenApiInvoker extends Context.Service<
         if (response.status < 200 || response.status >= 300) {
           return yield* new InvocationError({
             code: `http_${response.status}`,
-            detail: errorDetail(body),
+            // `built.url` and not the prepared one: a credential can be placed
+            // in the query string, and this text reaches the caller.
+            detail: `${built.method} ${built.url}: ${errorDetail(contentType, body)}`,
             status: response.status
           })
         }

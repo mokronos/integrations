@@ -41,6 +41,12 @@ export interface CompiledOperation {
   readonly bodyProperty: Option.Option<string>
   readonly parameters: ReadonlyArray<CompiledParameter>
   readonly contentType: Option.Option<string>
+  /**
+   * Set when the document gives this operation a base of its own, which
+   * OpenAPI allows on the operation and the path item. Google's APIs need it:
+   * Drive bases its media uploads somewhere other than the rest of itself.
+   */
+  readonly server: Option.Option<string>
 }
 
 export interface CompiledSecurityScheme {
@@ -278,7 +284,8 @@ const compileParameters = (operation: Operation): ReadonlyArray<CompiledParamete
 const compileOperation = (
   method: HttpMethodType,
   path: string,
-  operation: Operation
+  operation: Operation,
+  server: Option.Option<string>
 ): CompiledOperation => {
   const flattened = flattenParameters(operation)
   const operationId = operation.hasOperationId()
@@ -301,9 +308,36 @@ const compileOperation = (
     parameters: compileParameters(operation),
     contentType: operation.hasRequestBody()
       ? Option.fromNullishOr(operation.getContentType())
-      : Option.none()
+      : Option.none(),
+    server
   }
 }
+
+const DeclaredServers = Schema.Struct({
+  servers: Schema.optional(Schema.Array(Schema.Struct({
+    url: Schema.String,
+    variables: Schema.optional(Schema.Record(
+      Schema.String,
+      Schema.Struct({ default: Schema.optional(Schema.String) })
+    ))
+  })))
+})
+
+const expandServerUrl = (
+  url: string,
+  variables: Readonly<Record<string, { readonly default?: string | undefined }>>
+): string =>
+  url.replace(
+    /\{([^{}]+)\}/g,
+    (whole, name: string) => variables[name]?.default ?? whole
+  )
+
+/** The `servers` an operation or path item declares for itself, if any. */
+const declaredServer = (value: Json): Option.Option<string> =>
+  Schema.decodeUnknownOption(DeclaredServers)(value).pipe(
+    Option.flatMap((declared) => Option.fromNullishOr(declared.servers?.[0])),
+    Option.map((server) => expandServerUrl(server.url, server.variables ?? {}))
+  )
 
 const DeclaredSecurityScheme = Schema.Struct({
   type: Schema.Literals(["http", "apiKey", "oauth2", "openIdConnect"]),
@@ -386,13 +420,20 @@ export const compileSpec = (
         const definition = oas.getDefinition()
         const operations: Array<CompiledOperation> = []
 
+        const pathsJson = property(documentJson, "paths")
         for (const [path, methods] of Object.entries(oas.getPaths())) {
+          const pathServer = declaredServer(property(pathsJson, path))
           for (const [rawMethod, operation] of Object.entries(methods)) {
             const method = Option.getOrUndefined(
               Schema.decodeUnknownOption(HttpMethod)(rawMethod)
             )
             if (method === undefined) continue
-            operations.push(compileOperation(method, path, operation))
+            operations.push(compileOperation(
+              method,
+              path,
+              operation,
+              Option.orElse(declaredServer(asJson(operation.schema)), () => pathServer)
+            ))
           }
         }
 

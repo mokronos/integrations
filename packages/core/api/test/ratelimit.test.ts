@@ -55,6 +55,7 @@ describe("gateway traffic shaping", () => {
       retentionDays: 30,
       oauth: {
         start: () => Effect.die(new Error("not used")),
+        provideClient: () => Effect.sync((): undefined => undefined),
         get: () => Effect.sync((): undefined => undefined),
         completeByState: () => Effect.sync((): undefined => undefined),
         stop: () => Effect.void

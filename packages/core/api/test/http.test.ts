@@ -200,6 +200,7 @@ const setup = Effect.fnUntraced(function*(options: {
     retentionDays: 30,
     oauth: {
       start: () => Effect.die(new Error("not used")),
+      provideClient: () => Effect.sync((): undefined => undefined),
       get: () => Effect.sync((): undefined => undefined),
       completeByState: () => Effect.sync((): undefined => undefined),
       stop: () => Effect.void

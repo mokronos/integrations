@@ -160,6 +160,11 @@ export const startOAuth = async (input: {
 export const pollOAuth = async (id: string) =>
   await run(endpoints.provisioning.oauthSession({ params: { id } }))
 
+export const provideOAuthClient = async (
+  id: string,
+  payload: { readonly clientId: string; readonly clientSecret?: string }
+) => await run(endpoints.provisioning.provideOAuthClient({ params: { id }, payload }))
+
 export const removeIntegration = async (slug: string) =>
   await run(endpoints.provisioning.removeIntegration({ params: { slug } }))
 

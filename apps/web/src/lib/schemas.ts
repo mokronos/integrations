@@ -17,7 +17,7 @@ import {
   PolicyDecision as PolicyDecisionSchema,
   PendingApproval
 } from "@integrations/contracts"
-import { IntegrationSearchKind } from "@integrations/contracts"
+import { IntegrationSearchKind, OAuthSessionView } from "@integrations/contracts"
 import {
   AuthMethod,
   Connection,
@@ -135,26 +135,8 @@ export const ConnectionCreated = Schema.Struct({
 })
 export type ConnectionCreated = typeof ConnectionCreated.Type
 
-export const OAuthSession = Schema.Struct({
-  id: Schema.String,
-  integration: Schema.String,
-  connection: Schema.String,
-  state: Schema.Union([
-    Schema.Struct({
-      status: Schema.Literal("pending"),
-      authorizationUrl: Schema.String
-    }),
-    Schema.Struct({
-      status: Schema.Literal("connected"),
-      connection: Connection
-    }),
-    Schema.Struct({
-      status: Schema.Literal("failed"),
-      message: Schema.String
-    })
-  ])
-})
-export type OAuthSession = typeof OAuthSession.Type
+export const OAuthSession = OAuthSessionView
+export type OAuthSession = typeof OAuthSessionView.Type
 
 export const DriftReport = Schema.Struct({
   integration: Schema.String,

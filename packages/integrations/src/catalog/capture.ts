@@ -95,6 +95,7 @@ export const captureOpenApiTools = (
         parameters: operation.parameters,
         locations: operation.locations,
         ...whenPresent("contentType", Option.getOrUndefined(operation.contentType)),
-        ...whenPresent("bodyProperty", Option.getOrUndefined(operation.bodyProperty))
+        ...whenPresent("bodyProperty", Option.getOrUndefined(operation.bodyProperty)),
+        ...whenPresent("server", Option.getOrUndefined(operation.server))
       }
     }))

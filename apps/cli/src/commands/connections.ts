@@ -134,6 +134,12 @@ export const connectCommand = (runGateway: GatewayTask) => Command.make(
     clientSecretEnv: Flag.string("client-secret-env").pipe(Flag.optional),
     noOpen: Flag.boolean("no-open").pipe(Flag.withDefault(false)),
     timeout: Flag.integer("timeout").pipe(Flag.withDefault(300)),
+    setupTimeout: Flag.integer("setup-timeout").pipe(
+      Flag.withDefault(1800),
+      Flag.withDescription(
+        "Seconds to wait for a human to register an OAuth client in the dashboard"
+      )
+    ),
     verbose: verboseFlag()
   },
   (options) =>
@@ -182,10 +188,21 @@ export const connectCommand = (runGateway: GatewayTask) => Command.make(
         const sessionId = text(started["id"])
         const state = record(started["state"])
         const authorizationUrl = text(state["authorizationUrl"])
+        const setupUrl = text(state["setupUrl"])
+        const needsClient = text(state["status"]) === "needs-client"
         if (text(state["status"]) === "pending" && authorizationUrl.length > 0) {
           console.error(`Authorize in your browser:\n${authorizationUrl}`)
           if (!options.noOpen) yield* openBrowser(authorizationUrl)
         }
+        if (needsClient) {
+          console.error(
+            `${text(state["guidance"])}\n\n` +
+            `A human has to enter the client id and secret here, so they are never handed to an agent:\n  ${setupUrl}\n\n` +
+            `Waiting up to ${options.setupTimeout} seconds for that to happen.`
+          )
+          if (!options.noOpen) yield* openBrowser(setupUrl)
+        }
+        let announced = authorizationUrl
         const poll = Effect.gen(function*() {
           const session = yield* client.provisioning.oauthSession({ params: { id: sessionId } })
           const current = record(session["state"])
@@ -193,21 +210,29 @@ export const connectCommand = (runGateway: GatewayTask) => Command.make(
           if (text(current["status"]) === "failed") {
             return yield* cliError(`Connection failed: ${text(current["message"])}`)
           }
+          const url = text(current["authorizationUrl"])
+          if (url.length > 0 && url !== announced) {
+            announced = url
+            console.error(`Authorize in your browser:\n${url}`)
+          }
           return undefined
         })
+        const budget = needsClient ? options.setupTimeout : options.timeout
         const settled = yield* poll.pipe(
           Effect.repeat({
             schedule: Schedule.spaced(Duration.millis(500)),
             while: (connection) => connection === undefined
           }),
           Effect.timeoutOrElse({
-            duration: Duration.seconds(Math.max(1, options.timeout)),
+            duration: Duration.seconds(Math.max(1, budget)),
             orElse: () => Effect.succeed(undefined)
           })
         )
         if (settled !== undefined) return settled
         return yield* cliError(
-          `OAuth authorization timed out after ${options.timeout} seconds`
+          needsClient
+            ? `No OAuth client was registered at ${setupUrl} within ${budget} seconds`
+            : `OAuth authorization timed out after ${budget} seconds`
         )
       }
 

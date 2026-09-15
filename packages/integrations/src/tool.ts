@@ -28,7 +28,9 @@ export const HttpCall = Schema.Struct({
   parameters: Schema.Array(CallParameter),
   locations: Schema.Record(Schema.String, ParameterLocation),
   contentType: Schema.optional(Schema.String),
-  bodyProperty: Schema.optional(Schema.String)
+  bodyProperty: Schema.optional(Schema.String),
+  /** Overrides the integration's base URL when the document gave this operation one. */
+  server: Schema.optional(Schema.String)
 })
 export type HttpCall = typeof HttpCall.Type
 

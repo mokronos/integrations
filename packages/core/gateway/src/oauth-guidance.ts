@@ -21,8 +21,11 @@ export const oauthSetupGuidance = (input: {
   const scopeLines = scopes.length === 0
     ? []
     : [`Scopes to request:\n${scopes.map((scope) => `  - ${scope}`).join("\n")}`]
+  // The client secret is what a human is here to protect, so the browser form
+  // leads and the flags stay available for an unattended setup.
   const retry =
-    `Once the client exists, retry with its credentials:\n` +
+    `Once the client exists, a human enters it in the gateway dashboard.\n` +
+    `Unattended alternative, when the secret is already in the environment:\n` +
     `  i connect ${input.integration} --client-id <client-id> --client-secret-env <ENV_VAR_NAME>`
   const preamble =
     `${input.integration} does not support dynamic client registration, so an ` +

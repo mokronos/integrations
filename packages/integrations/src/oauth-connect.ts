@@ -65,6 +65,14 @@ export const registerOAuthClient = Effect.fn("OAuthConnect.registerClient")(func
   })
 })
 
+export const findOAuthClient = Effect.fn("OAuthConnect.findClient")(function*(
+  slug: string
+) {
+  const store = yield* CatalogStore
+  const decoded = yield* decodeId(OAuthClientSlug, "client", slug)
+  return yield* store.findOAuthClient({ owner: defaultOwner, slug: decoded })
+})
+
 export interface CreateOAuthClientOptions {
   readonly slug: string
   readonly integration: string

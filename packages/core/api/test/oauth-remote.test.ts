@@ -13,6 +13,7 @@ import {
   OAuthFlows,
   OAuthState
 } from "@integrations/integrations"
+import type { OAuthClientRecord } from "@integrations/integrations"
 import type { OAuthOperations } from "@integrations/gateway-core"
 import type { Connection } from "@integrations/contracts"
 import { createGatewayHandler, createOAuthSessions } from "./gateway.ts"
@@ -43,10 +44,12 @@ interface RecordedFlow {
   redirectUri: string
   completedState?: string
   completedCode?: string
+  createdClientId?: string
 }
 
 const fakeAuth = (behaviour: {
   readonly completeFails?: boolean
+  readonly storedClient?: OAuthClientRecord
 } = {}) => {
   const record: RecordedFlow = { redirectUri: "(none)" }
   let started = false
@@ -60,7 +63,10 @@ const fakeAuth = (behaviour: {
         record.redirectUri = options.redirectUri
         return Effect.succeed(OAuthClientSlug.make(`client-${options.slug}`))
       },
-      createClient: dies("createClient"),
+      createClient: (options) => {
+        record.createdClientId = options.clientId
+        return Effect.succeed(options.slug)
+      },
       start: () => {
         if (started) return Effect.die(new Error("start called twice"))
         started = true
@@ -91,7 +97,12 @@ const fakeAuth = (behaviour: {
       },
       accessToken: dies("accessToken")
     }),
-    Context.add(CatalogStore, catalogStoreFake()),
+    Context.add(
+      CatalogStore,
+      catalogStoreFake({
+        findOAuthClient: () => Effect.succeed(Option.fromNullishOr(behaviour.storedClient))
+      })
+    ),
     Context.add(Integrations, stubIntegrations({ refreshConnection: () => Effect.succeed([]) }))
   )
   return { record, host }
@@ -107,6 +118,94 @@ describe("remote oauth flows", () => {
     })
 
   const startGoogle = { integration: "google", connection: "default", authMethod: oauthMethod }
+
+  /** A provider like Google: no dynamic registration, so a human must register an app. */
+  const manualMethod = {
+    ...oauthMethod,
+    oauth: {
+      authorizationUrl: oauthMethod.oauth.authorizationUrl,
+      tokenUrl: oauthMethod.oauth.tokenUrl
+    }
+  } as const
+  const startManual = { integration: "google", connection: "default", authMethod: manualMethod }
+
+  const storedClient = {
+    owner: "org" as const,
+    slug: OAuthClientSlug.make("google-wf"),
+    integration: IntegrationSlug.make("google"),
+    clientId: "already-registered",
+    authorizationUrl: manualMethod.oauth.authorizationUrl,
+    tokenUrl: manualMethod.oauth.tokenUrl,
+    scopes: [],
+    tokenAuthMethods: []
+  }
+
+  it.effect("parks the session for a human when the provider needs an app of its own", () =>
+    Effect.gen(function*() {
+      const fake = fakeAuth()
+
+      const session = yield* remote(fake).start(startManual)
+
+      expect(session.state.status).toBe("needs-client")
+      if (session.state.status !== "needs-client") return
+      expect(session.state.setupUrl).toBe(
+        `https://gw.example.com/integrations?setup=${session.id}`
+      )
+      expect(session.state.guidance).toContain("does not support dynamic client registration")
+      expect(session.state.guidance).toContain("https://gw.example.com/v1/oauth/callback")
+    }))
+
+  it.effect("resumes a parked session once a human supplies the client", () =>
+    Effect.gen(function*() {
+      const fake = fakeAuth()
+      const sessions = remote(fake)
+      const parked = yield* sessions.start(startManual)
+
+      const resumed = yield* sessions.provideClient(parked.id, {
+        clientId: "typed-by-a-human",
+        clientSecret: "secret-from-the-browser"
+      })
+
+      expect(fake.record.createdClientId).toBe("typed-by-a-human")
+      expect(resumed?.id).toBe(parked.id)
+      expect(resumed?.state.status).toBe("pending")
+    }))
+
+  it.effect("keeps the client secret out of the stored session", () =>
+    Effect.gen(function*() {
+      const fake = fakeAuth()
+      const sessions = remote(fake)
+      const parked = yield* sessions.start(startManual)
+
+      yield* sessions.provideClient(parked.id, {
+        clientId: "typed-by-a-human",
+        clientSecret: "secret-from-the-browser"
+      })
+
+      const stored = yield* sessions.get(parked.id)
+      expect(JSON.stringify(stored)).not.toContain("secret-from-the-browser")
+    }))
+
+  it.effect("ignores a client for a session that is not waiting for one", () =>
+    Effect.gen(function*() {
+      const fake = fakeAuth()
+      const sessions = remote(fake)
+      const pending = yield* sessions.start(startGoogle)
+
+      const resumed = yield* sessions.provideClient(pending.id, { clientId: "too-late" })
+
+      expect(resumed).toBeUndefined()
+    }))
+
+  it.effect("reuses an OAuth client a human already registered", () =>
+    Effect.gen(function*() {
+      const fake = fakeAuth({ storedClient })
+
+      const session = yield* remote(fake).start(startManual)
+
+      expect(session.state.status).toBe("pending")
+      expect(fake.record.createdClientId).toBeUndefined()
+    }))
 
   it.effect("registers against the public URL instead of a loopback port", () =>
     Effect.gen(function*() {
@@ -170,8 +269,20 @@ describe("remote oauth flows", () => {
 describe("the remote callback route", () => {
   const notUsed = {
     start: () => Effect.die(new Error("not used")),
+    provideClient: () => Effect.sync((): undefined => undefined),
     get: () => Effect.sync((): undefined => undefined),
     stop: () => Effect.void
+  }
+
+  const request = {
+    integration: "google",
+    connection: "default",
+    authMethod: {
+      id: "googleOAuth2",
+      label: "Google",
+      kind: "oauth" as const,
+      template: "google"
+    }
   }
 
   /** A browser arriving at the callback route, and the page it is shown. */
@@ -204,6 +315,7 @@ describe("the remote callback route", () => {
             id: "s1",
             integration: "google",
             connection: "default",
+            request,
             state: { status: "connected", connection: connection("default") }
           }
         })
@@ -242,6 +354,7 @@ describe("the remote callback route", () => {
           id: "s1",
           integration: "google",
           connection: "default",
+          request,
           state: { status: "failed", message: "token exchange rejected" }
         })
       })

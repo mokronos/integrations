@@ -139,6 +139,56 @@ describe("resolving the server", () => {
     }))
 })
 
+describe("an operation that declares its own server", () => {
+  /** Shaped after Google Drive, which bases its media uploads elsewhere. */
+  const perOperation = JSON.stringify({
+    openapi: "3.0.3",
+    info: { title: "Drive-like", version: "3" },
+    servers: [{ url: "https://www.googleapis.com/" }],
+    paths: {
+      "/about": {
+        get: {
+          operationId: "drive.about.get",
+          servers: [{ url: "https://www.googleapis.com/drive/v3/" }],
+          responses: { "200": { description: "ok" } }
+        }
+      },
+      "/upload/drive/v3/files": {
+        post: {
+          operationId: "drive.files.createMedia",
+          responses: { "200": { description: "ok" } }
+        }
+      },
+      "/regional": {
+        servers: [{ url: "https://eu.example.com" }],
+        get: { operationId: "regional.get", responses: { "200": { description: "ok" } } }
+      }
+    }
+  })
+
+  const operationNamed = (compiled: { operations: ReadonlyArray<{ name: string; server: Option.Option<string> }> }, name: string) =>
+    Option.getOrNull(compiled.operations.find((operation) => operation.name === name)!.server)
+
+  it.effect("takes the base the operation declares, not the document's", () =>
+    Effect.gen(function*() {
+      const compiled = yield* compileSpec("https://example.com/drive.json", perOperation)
+      expect(operationNamed(compiled, "drive.about.get"))
+        .toBe("https://www.googleapis.com/drive/v3/")
+    }))
+
+  it.effect("inherits a base the path item declares", () =>
+    Effect.gen(function*() {
+      const compiled = yield* compileSpec("https://example.com/drive.json", perOperation)
+      expect(operationNamed(compiled, "regional.get")).toBe("https://eu.example.com")
+    }))
+
+  it.effect("leaves an operation the document says nothing about to the integration", () =>
+    Effect.gen(function*() {
+      const compiled = yield* compileSpec("https://example.com/drive.json", perOperation)
+      expect(operationNamed(compiled, "drive.files.createMedia")).toBeNull()
+    }))
+})
+
 describe("previewing a specification", () => {
   it.effect("summarises without installing anything", () =>
     Effect.gen(function*() {

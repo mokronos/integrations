@@ -327,6 +327,20 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
           }
           return session
         }))
+      .handle("provideOAuthClient", (request) =>
+        Effect.gen(function*() {
+          const secret = request.payload.clientSecret?.trim()
+          const resumed = yield* asApiFailure(oauth.provideClient(request.params["id"], {
+            clientId: request.payload.clientId.trim(),
+            ...whenPresent("clientSecret", secret === undefined || secret.length === 0 ? undefined : secret)
+          }))
+          if (resumed === undefined) {
+            return yield* new ApiNotFound({
+              error: "Unknown OAuth session, or it is no longer waiting for an OAuth client"
+            })
+          }
+          return resumed
+        }))
       .handle("oauthCallback", (request) =>
         Effect.gen(function*() {
           const state = request.query["state"]

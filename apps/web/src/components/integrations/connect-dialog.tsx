@@ -111,6 +111,16 @@ export function ConnectDialog({ integration }: { readonly integration: Integrati
         })
         return
       }
+      if (started.state.status === "needs-client") {
+        setOAuthFailure({
+          source: "provider",
+          step: "Preparing authorization with the provider",
+          error: new Error(
+            "This provider needs an OAuth application of its own. Fill in the client ID and secret above, then authorize again."
+          )
+        })
+        return
+      }
       setSession(started.id)
       setAuthorizationUrl(started.state.authorizationUrl)
       const providerTab = window.open(started.state.authorizationUrl, "_blank", "noopener")
@@ -141,13 +151,17 @@ export function ConnectDialog({ integration }: { readonly integration: Integrati
           invalidate(keys.integrations, keys.connections)
           return
         }
-        if (current.state.status === "failed") {
+        if (current.state.status === "failed" || current.state.status === "needs-client") {
           setSession(undefined)
           setAuthorizationUrl(undefined)
           setOAuthFailure({
             source: "provider",
             step: "Provider authorization and token exchange",
-            error: new Error(current.state.message)
+            error: new Error(
+              current.state.status === "failed"
+                ? current.state.message
+                : "This provider needs an OAuth application of its own."
+            )
           })
           return
         }

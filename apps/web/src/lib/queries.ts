@@ -24,7 +24,8 @@ export const keys = {
   approvalPolicy: (id: string) => ["approval-policies", id] as const,
   clientTools: (clientId: string) => ["clients", clientId, "tools"] as const,
   approvals: (status: ApprovalStatus | "all") => ["approvals", status] as const,
-  audit: (input: AuditQuery) => ["audit", input] as const
+  audit: (input: AuditQuery) => ["audit", input] as const,
+  oauthSession: (id: string) => ["oauth-session", id] as const
 }
 
 export const useIntegrations = () =>

@@ -30,6 +30,7 @@ export const catalogStoreFake = (
 ): CatalogStore["Service"] => ({
   ...catalogStore,
   putConnection: () => Effect.void,
+  findOAuthClient: () => Effect.succeed(Option.none()),
   ...overrides
 })
 

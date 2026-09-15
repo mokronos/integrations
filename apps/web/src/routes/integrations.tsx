@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import { ConnectionBadge } from "@/components/integrations/connection-badge"
 import { DiscoverDialog } from "@/components/integrations/discover-dialog"
 import { IntegrationDetail } from "@/components/integrations/integration-detail"
+import { OAuthSetupDialog } from "@/components/integrations/oauth-setup-dialog"
 import {
   IntegrationIcon,
   integrationHost
@@ -54,6 +55,7 @@ export function IntegrationsRoute() {
       description="What this gateway knows how to reach, and which of it is connected."
       actions={
         <>
+          <OAuthSetupDialog />
           <RegistrySearchDialog />
           <DiscoverDialog />
           <Button

@@ -441,7 +441,9 @@ export class Integrations extends Context.Service<
             return yield* normalizeToolResult(tool.name, raw)
           }
 
-          const server = integration.baseUrl
+          // The document may base a single operation somewhere other than the
+          // integration, so what it declared for this one wins.
+          const server = tool.call.server ?? integration.baseUrl
           if (server === undefined) {
             return yield* new InvalidInputError({
               field: "integration",

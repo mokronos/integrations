@@ -1,8 +1,9 @@
-import { Deferred, Duration, Effect, Schema } from "effect"
+import { Deferred, Duration, Effect, Option, Schema } from "effect"
 import type { Scope } from "effect"
 import {
   completeOAuthFlow,
   createOAuthClient,
+  findOAuthClient,
   probeOAuthServer,
   registerOAuthClient,
   startOAuthFlow
@@ -16,6 +17,7 @@ export class OAuthFlowError extends Schema.TaggedError<OAuthFlowError>()(
   {
     stage: Schema.Literals([
       "configure",
+      "client-required",
       "discover",
       "register",
       "start",
@@ -116,6 +118,12 @@ const prepareFlow = Effect.fn("OAuth.prepareFlow")(function*(
     })
   }
   const clientSlug = `${input.integration}-wf`
+  const reusable = input.clientId !== undefined
+    ? false
+    : Option.isSome(
+      yield* step("register", `Could not read the OAuth client for ${input.integration}`,
+        findOAuthClient(clientSlug))
+    )
   let client: string
   if (input.clientId !== undefined) {
     client = yield* step("register", `Could not record the OAuth client for ${input.integration}`,
@@ -129,11 +137,13 @@ const prepareFlow = Effect.fn("OAuth.prepareFlow")(function*(
         ...whenPresent("resource", resource),
         scopes: oauth.scopes ?? discovered?.scopesSupported ?? []
       }))
+  } else if (reusable) {
+    client = clientSlug
   } else {
     const registrationEndpoint = oauth.registrationEndpoint ?? discovered?.registrationEndpoint
     if (registrationEndpoint === null || registrationEndpoint === undefined) {
       return yield* new OAuthFlowError({
-        stage: "configure",
+        stage: "client-required",
         detail: oauthSetupGuidance({
           integration: input.integration,
           method: input.authMethod,
