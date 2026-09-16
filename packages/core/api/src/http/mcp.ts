@@ -5,35 +5,43 @@ import {
 } from "@modelcontextprotocol/server"
 import {
   Alias,
-  ClientId,
   asJson,
-  type Json,
+  ClientCapability,
   isJsonObject,
   objectEntries,
   ToolName,
-  whenPresent,
-  whenPresentMap
+  webCryptoLayer,
+  whenPresent
 } from "@integrations/contracts"
-import {
-  authenticateClient,
-  deliverDueApprovalNotifications,
-  invokeThroughGateway,
-  listEffectiveTools
-} from "@integrations/gateway-core"
-import type { InvocationOutcome } from "@integrations/contracts"
+import type { Json, PolicyDecision } from "@integrations/contracts"
+import { authenticateClient } from "@integrations/gateway-core"
 import type { GatewayStore } from "@integrations/gateway-core"
-import { Integrations } from "@integrations/integrations"
-import type { IntegrationServices } from "@integrations/integrations"
-import { Context } from "effect"
-
-const integrationsOf = (options: McpGatewayOptions): Integrations["Service"] =>
-  Context.get(options.integrationServices, Integrations)
-import { Crypto, Layer, ManagedRuntime } from "effect"
-import { webCryptoLayer } from "@integrations/contracts"
-import type { HttpClient } from "effect/unstable/http"
+import { makeGatewayClient } from "@mokronos/integrations-client"
+import type { GatewayClient } from "@mokronos/integrations-client"
+import { Crypto, Effect, Layer, ManagedRuntime, Predicate, Schema } from "effect"
+import { FetchHttpClient, HttpClient } from "effect/unstable/http"
+import { agentTools, invokeTool } from "./mcp-tools.ts"
+import type { AgentTool, ToolOutput } from "./mcp-tools.ts"
 import { capture, ErrorCapture } from "./observability.ts"
 import type { ErrorSink } from "./observability.ts"
 import { gatewayVersion } from "../version.ts"
+
+/**
+ * MCP is a second surface over the same gateway, not a second gateway: every
+ * tool call is an ordinary API request that the handler authenticates, meters,
+ * and authorizes exactly as it would one arriving over the network.
+ */
+export type GatewayDispatch = (request: Request) => Promise<Response>
+
+/** Never resolved: the dispatch answers without the request leaving the process. */
+const loopbackOrigin = "http://gateway.mcp.internal"
+
+/** Nothing to warm up when the other end of the socket is this process. */
+const loopbackFetch = (dispatch: GatewayDispatch): typeof globalThis.fetch =>
+  Object.assign(
+    (input: RequestInfo | URL, init?: RequestInit) => dispatch(new Request(input, init)),
+    { preconnect: () => {} }
+  )
 
 const defaultInputSchema = {
   type: "object",
@@ -59,43 +67,46 @@ const authenticationFailure = (status: "unknown-key" | "key-revoked" | "client-r
 
 const toolName = (alias: Alias, name: ToolName): string => `${alias}__${name}`
 
-const toolResult = (outcome: InvocationOutcome) => {
-  const text = JSON.stringify(outcome)
-  return outcome.status === "succeeded"
-    ? { content: [{ type: "text" as const, text }] }
-    : { content: [{ type: "text" as const, text }], isError: true }
-}
+const awaitsApproval = "Calls to this tool are held until a human approves them."
 
-const invocation = (options: McpGatewayOptions, input: {
-  readonly secret: string
-  readonly alias: Alias
-  readonly tool: ToolName
-  readonly arguments: Json
-}) => invokeThroughGateway(
-  {
-    store: options.store,
-    integrations: integrationsOf(options),
-    argumentRetentionDays: options.retentionDays,
-    approvalUrlOf: (approvalId) => {
-      const origin = options.dashboardUrl?.()
-      return origin === undefined
-        ? undefined
-        : `${origin.replace(/\/+$/, "")}/approvals?approval=${encodeURIComponent(approvalId)}`
-    },
-    onApprovalCreated: () => capture(deliverDueApprovalNotifications({
-      store: options.store,
-      ...whenPresentMap("dashboardUrl", options.dashboardUrl?.(), (url) => url)
-    }))
-  },
-  input
-)
+/** The approval decision belongs in the description: the model reads that. */
+const describeEffectiveTool = (tool: {
+  readonly description?: string | undefined
+  readonly decision: PolicyDecision
+}): string | undefined =>
+  tool.decision !== "require_approval"
+    ? tool.description
+    : tool.description === undefined
+      ? awaitsApproval
+      : `${tool.description}\n\n${awaitsApproval}`
+
+const isCapability = Schema.is(ClientCapability)
+
+// The gateway's routes spell their human-readable text `error`, not `message`,
+// so a failure carrying one reads as empty until it is asked for by name.
+const explains = (failure: Error): failure is Error & { readonly error: string } =>
+  "error" in failure && Predicate.isString(failure.error) && failure.error.length > 0
+
+const describeFailure = (failure: Error): string =>
+  failure.message.length > 0 ? failure.message : explains(failure) ? failure.error : String(failure)
+
+const contentOf = (text: string, isError: boolean) => ({
+  content: [{ type: "text" as const, text }],
+  isError
+})
+
+const resultOf = (
+  runtime: McpRuntime,
+  effect: Effect.Effect<ToolOutput, Error>
+) =>
+  runtime.runPromise(Effect.match(effect, {
+    onSuccess: (output: ToolOutput) => contentOf(JSON.stringify(output.value), output.failed),
+    onFailure: (failure: Error) => contentOf(describeFailure(failure), true)
+  }))
 
 export interface McpGatewayOptions {
   readonly store: GatewayStore
-  readonly integrationServices: Context.Context<IntegrationServices>
-  readonly httpClient: Layer.Layer<HttpClient.HttpClient>
-  readonly retentionDays: number
-  readonly dashboardUrl?: () => string | undefined
+  readonly dispatch: GatewayDispatch
   readonly errorCapture?: ErrorSink
 }
 
@@ -104,37 +115,60 @@ type McpRuntime = ManagedRuntime.ManagedRuntime<
   never
 >
 
-const serverFor = async (
-  options: McpGatewayOptions,
+const registerAgentTool = (
+  server: McpServer,
   runtime: McpRuntime,
-  clientId: ClientId,
-  secret: string
+  client: GatewayClient,
+  tool: AgentTool
+): void => {
+  server.registerTool(
+    tool.name,
+    {
+      title: tool.title,
+      description: tool.description,
+      inputSchema: fromJsonSchema<Record<string, Json>>(tool.inputSchema)
+    },
+    async (arguments_) => resultOf(runtime, tool.run(client, asJson(arguments_)))
+  )
+}
+
+const serverFor = async (
+  runtime: McpRuntime,
+  secret: string,
+  capabilities: ReadonlyArray<ClientCapability>
 ): Promise<McpServer> => {
   const server = new McpServer({ name: "integrations-gateway", version: gatewayVersion })
-  const tools = await runtime.runPromise(capture(listEffectiveTools(options.store, clientId, {
-    schemas: true,
-    integrations: integrationsOf(options)
-  })))
+  const client = await runtime.runPromise(
+    makeGatewayClient({ url: loopbackOrigin, apiKey: secret })
+  )
 
-  for (const tool of tools) {
+  for (const tool of agentTools) {
+    if (tool.capability === undefined || capabilities.includes(tool.capability)) {
+      registerAgentTool(server, runtime, client, tool)
+    }
+  }
+
+  const effective = await runtime.runPromise(client.delegated.listTools({
+    query: { schemas: true }
+  }))
+  for (const tool of effective.tools) {
+    const name = ToolName.make(tool.tool)
     const inputSchema = tool.inputSchema !== undefined && isJsonObject(tool.inputSchema)
       ? objectEntries(tool.inputSchema)
       : defaultInputSchema
     server.registerTool(
-      toolName(tool.alias, tool.tool),
+      toolName(tool.alias, name),
       {
         title: `${tool.connection.integration} / ${tool.connection.name} / ${tool.tool}`,
-        ...whenPresent("description", tool.description),
-        inputSchema: fromJsonSchema<Record<string, Json>>(
-          inputSchema
-        )
+        ...whenPresent("description", describeEffectiveTool(tool)),
+        inputSchema: fromJsonSchema<Record<string, Json>>(inputSchema)
       },
-      async (arguments_) => toolResult(await runtime.runPromise(capture(invocation(options, {
-        secret,
-        alias: tool.alias,
-        tool: tool.tool,
-        arguments: asJson(arguments_)
-      }))))
+      async (arguments_) =>
+        resultOf(runtime, invokeTool(client, {
+          alias: tool.alias,
+          tool: name,
+          arguments: asJson(arguments_)
+        }))
     )
   }
   return server
@@ -150,12 +184,14 @@ export const createMcpGatewayHandler = (options: McpGatewayOptions): McpGatewayH
     options.errorCapture === undefined
       ? ErrorCapture.logging
       : Layer.succeed(ErrorCapture, options.errorCapture),
-    options.httpClient,
+    FetchHttpClient.layer.pipe(
+      Layer.provide(Layer.succeed(FetchHttpClient.Fetch, loopbackFetch(options.dispatch)))
+    ),
     webCryptoLayer
   ))
   const handler = createMcpHandler(({ authInfo }) => {
     if (authInfo === undefined) throw new Error("Authenticated MCP request has no identity")
-    return serverFor(options, runtime, ClientId.make(authInfo.clientId), authInfo.token)
+    return serverFor(runtime, authInfo.token, authInfo.scopes.filter(isCapability))
   })
 
   return {
@@ -177,7 +213,7 @@ export const createMcpGatewayHandler = (options: McpGatewayOptions): McpGatewayH
         authInfo: {
           token: secret,
           clientId: authentication.client.id,
-          scopes: []
+          scopes: [...authentication.client.capabilities]
         }
       })
     },

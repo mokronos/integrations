@@ -102,8 +102,20 @@ Applications such as [`wf`](https://github.com/mokronos/wf) consume the client
 without importing gateway or integrations implementation.
 
 MCP clients connect to the Streamable HTTP endpoint at `/mcp` and send their
-gateway API key as a bearer token. The server exposes only that client's
-effective tools. Tool names use `<connection-alias>__<tool-name>` so tools from
-multiple enabled connections remain distinct. A connection alias spells out the
-whole reference — `org--github--work`, or `user--sebastian--github--work` for a
-connection held on one person's behalf — so no two connections can share one.
+gateway API key as a bearer token. The server exposes that client's effective
+tools under `<connection-alias>__<tool-name>`, so tools from multiple enabled
+connections remain distinct. A connection alias spells out the whole reference —
+`org_github_work`, or `user_sebastian_github_work` for a connection held on one
+person's behalf — so no two connections can share one.
+
+Alongside them it offers the `i` CLI's own commands as tools: `search`,
+`discover`, `integrations`, `rename`, `connect`, `oauth_status`, `connections`,
+`disconnect`, `tools`, `schema`, `execute`, `validate`, and `approval`. An agent
+that speaks MCP can therefore find an integration, authorize it, and call it
+without a terminal. The provisioning ones appear only for keys that hold
+`provision_connections`. Each is served by calling the same HTTP route the CLI
+calls, so the two surfaces cannot drift apart.
+
+Two things stay CLI-only for now: a tool result carrying a blob handle comes
+back as the handle rather than the bytes, and local file arguments are refused
+instead of uploaded. Both say so in the result.

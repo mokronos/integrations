@@ -186,14 +186,6 @@ export interface GatewayHandle {
 }
 
 export const createGatewayHandler = (options: GatewayHandlerOptions): GatewayHandle => {
-  const mcp = createMcpGatewayHandler({
-    store: options.store,
-    integrationServices: options.integrationServices,
-    httpClient: options.httpClient,
-    retentionDays: options.retentionDays,
-    ...whenPresent("dashboardUrl", options.dashboardUrl),
-    ...whenPresent("errorCapture", options.errorCapture)
-  })
   const app = HttpApiBuilder.layer(GatewayApi).pipe(
     Layer.provideMerge(gatewayAppLayer(options)),
     HttpRouter.provideRequest(Layer.merge(options.httpClient, webCryptoLayer))
@@ -212,6 +204,13 @@ export const createGatewayHandler = (options: GatewayHandlerOptions): GatewayHan
     requestContext === undefined
       ? undefined
       : Context.makeUnsafe(new Map([[String(CurrentRequestContext.key), requestContext]]))
+  // The MCP surface answers by calling the API it sits in front of, so its
+  // tools cannot drift from the routes the CLI and clients already use.
+  const mcp = createMcpGatewayHandler({
+    store: options.store,
+    dispatch: (request) => web.handler(request, Context.empty()),
+    ...whenPresent("errorCapture", options.errorCapture)
+  })
   return {
     handle: (request, requestContext) =>
       new URL(request.url).pathname === "/mcp"

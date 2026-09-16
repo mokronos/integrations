@@ -261,6 +261,45 @@ const setup = Effect.fnUntraced(function*(options: {
   }
 })
 
+const McpToolResult = Schema.Struct({
+  content: Schema.Array(Schema.Struct({
+    type: Schema.String,
+    text: Schema.optional(Schema.String)
+  }))
+})
+const decodeMcpResult = Schema.decodeUnknownSync(McpToolResult)
+
+const mcpText = <A>(result: A): string =>
+  decodeMcpResult(result).content.map((block) => block.text ?? "").join("")
+
+const mcpClient = Effect.fnUntraced(function*(
+  handle: (request: Request) => Promise<Response>,
+  secret: string
+) {
+  const transport = new StreamableHTTPClientTransport(new URL("http://gateway.test/mcp"), {
+    authProvider: { token: async () => secret },
+    fetch: (input, init) => handle(new Request(input, init))
+  })
+  return yield* Effect.acquireRelease(
+    Effect.promise(async () => {
+      const client = new Client({ name: "gateway-test", version: "1.0.0" })
+      await client.connect(transport)
+      return client
+    }),
+    (client) => Effect.promise(() => client.close())
+  )
+})
+
+const mcpJson = Effect.fnUntraced(function*(
+  client: Client,
+  name: string,
+  arguments_: typeof JsonBody.Type
+) {
+  const result = yield* Effect.promise(() => client.callTool({ name, arguments: arguments_ }))
+  expect(result.isError, mcpText(result)).not.toBe(true)
+  return Schema.decodeUnknownSync(JsonBody)(JSON.parse(mcpText(result)))
+})
+
 describe("gateway http surface", () => {
   it.effect("onboarding scopes access to selected tools and fills every approval decision", () =>
     Effect.gen(function*() {
@@ -317,28 +356,14 @@ describe("gateway http surface", () => {
   it.effect("serves each API key's effective tools over MCP", () =>
     Effect.gen(function*() {
       const { handle, key, calls } = yield* setup()
-      const transport = new StreamableHTTPClientTransport(
-        new URL("http://gateway.test/mcp"),
-        {
-          authProvider: { token: async () => key.secret },
-          fetch: (input, init) => handle(new Request(input, init))
-        }
-      )
-      const client = yield* Effect.acquireRelease(
-        Effect.promise(async () => {
-          const client = new Client({ name: "gateway-test", version: "1.0.0" })
-          await client.connect(transport)
-          return client
-        }),
-        (client) => Effect.promise(() => client.close())
-      )
+      const client = yield* mcpClient(handle, key.secret)
 
       const listed = yield* Effect.promise(() => client.listTools())
-      expect(listed.tools).toEqual([expect.objectContaining({
+      expect(listed.tools).toContainEqual(expect.objectContaining({
         name: "user_sebastian_gmail_work__sendEmail",
         description: "Send an email",
         inputSchema: expect.objectContaining({ type: "object" })
-      })])
+      }))
 
       const called = yield* Effect.promise(() =>
         client.callTool({
@@ -350,6 +375,82 @@ describe("gateway http surface", () => {
         address: "tools.gmail.user.work.sendEmail",
         input: { to: "a@b.c" }
       }])
+    }).pipe(Effect.provide(testServices)))
+
+  it.effect("offers the agent CLI's commands as MCP tools", () =>
+    Effect.gen(function*() {
+      const { handle, key, calls, removed } = yield* setup({
+        connections: [{ integration: "gmail", name: "work" }]
+      })
+      const client = yield* mcpClient(handle, key.secret)
+
+      const listed = yield* Effect.promise(() => client.listTools())
+      expect(listed.tools.map((tool) => tool.name)).toEqual(expect.arrayContaining([
+        "search",
+        "discover",
+        "integrations",
+        "rename",
+        "connect",
+        "oauth_status",
+        "connections",
+        "disconnect",
+        "tools",
+        "schema",
+        "execute",
+        "validate",
+        "approval"
+      ]))
+
+      const tools = yield* mcpJson(client, "tools", { integration: "gmail" })
+      expect(tools["tools"]).toEqual([{
+        alias: "user_sebastian_gmail_work",
+        tool: "sendEmail",
+        decision: "allow",
+        description: "Send an email"
+      }])
+
+      const schema = yield* mcpJson(client, "schema", { integration: "gmail", tool: "sendEmail" })
+      expect(schema["inputSchema"]).toMatchObject({ type: "object" })
+
+      const executed = yield* mcpJson(client, "execute", {
+        alias: "user_sebastian_gmail_work",
+        tool: "sendEmail",
+        arguments: { to: "a@b.c" }
+      })
+      expect(executed["status"]).toBe("succeeded")
+      expect(calls).toEqual([{ address: "tools.gmail.user.work.sendEmail", input: { to: "a@b.c" } }])
+
+      const connections = yield* mcpJson(client, "connections", {})
+      expect(connections["connections"]).toMatchObject([{ integration: "gmail", name: "work" }])
+
+      yield* mcpJson(client, "disconnect", { integration: "gmail", connection: "work" })
+      expect(removed).toEqual([{ integration: "gmail", name: "work" }])
+    }).pipe(Effect.provide(testServices)))
+
+  it.effect("keeps provisioning tools off keys that may not provision", () =>
+    Effect.gen(function*() {
+      const { handle, key } = yield* setup({ capabilities: [] })
+      const client = yield* mcpClient(handle, key.secret)
+
+      const names = (yield* Effect.promise(() => client.listTools())).tools.map((tool) => tool.name)
+      expect(names).toEqual(expect.arrayContaining(["tools", "schema", "execute", "approval"]))
+      expect(names).not.toContain("connect")
+      expect(names).not.toContain("discover")
+    }).pipe(Effect.provide(testServices)))
+
+  it.effect("refuses local file arguments it cannot upload", () =>
+    Effect.gen(function*() {
+      const { handle, key, calls } = yield* setup()
+      const client = yield* mcpClient(handle, key.secret)
+
+      const refused = yield* Effect.promise(() =>
+        client.callTool({
+          name: "user_sebastian_gmail_work__sendEmail",
+          arguments: { to: "a@b.c", attachment: { "@integrations/file": "/tmp/report.pdf" } }
+        }))
+      expect(refused.isError).toBe(true)
+      expect(mcpText(refused)).toContain("not implemented")
+      expect(calls).toEqual([])
     }).pipe(Effect.provide(testServices)))
 
   it.effect("requires an API key on the MCP endpoint", () =>
