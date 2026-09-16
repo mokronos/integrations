@@ -22,7 +22,30 @@ export const BlobHandle = Schema.Struct({
 })
 export type BlobHandle = typeof BlobHandle.Type
 
+/**
+ * The minimal form: a returned handle also satisfies it, so bytes that came out
+ * of one call can be passed straight into the next without a round trip.
+ */
+export const BlobRef = Schema.Struct({ [blobHandleKey]: BlobId })
+export type BlobRef = typeof BlobRef.Type
+
+/** What an agent writes to send a local file: resolved to a `BlobRef` by the CLI. */
+export const localFileKey = "@integrations/file"
+
+export const LocalFileRef = Schema.Struct({ [localFileKey]: Schema.String })
+export type LocalFileRef = typeof LocalFileRef.Type
+
+export const BlobUpload = Schema.Struct({
+  [blobHandleKey]: BlobId,
+  bytes: Schema.Number,
+  contentType: Schema.String,
+  sha256: Schema.String
+})
+export type BlobUpload = typeof BlobUpload.Type
+
 export const defaultMaxInlineBytes = 64 * 1024
+
+export const defaultMaxUploadBytes = 128 * 1024 * 1024
 
 export const isTextualContentType = (contentType: string): boolean => {
   const kind = contentType.split(";")[0]?.trim().toLowerCase() ?? ""

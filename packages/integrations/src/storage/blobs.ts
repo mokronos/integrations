@@ -9,7 +9,8 @@ import {
   readFileSync,
   readSync,
   rmSync,
-  statSync
+  statSync,
+  writeFileSync
 } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
@@ -122,11 +123,14 @@ const fileBlobStore = (directory: string): BlobStore["Service"] => {
         }
         yield* Effect.try({
           try: () =>
-            createWriteStream(metadataPath(id), { mode: 0o600 })
-              .end(JSON.stringify({
+            writeFileSync(
+              metadataPath(id),
+              JSON.stringify({
                 contentType: stored.contentType,
                 filename: stored.filename
-              })),
+              }),
+              { mode: 0o600 }
+            ),
           catch: storageFailure(`Could not write blob metadata ${id}`)
         })
         return stored

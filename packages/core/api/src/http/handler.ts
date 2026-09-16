@@ -35,7 +35,7 @@ import {
 import { ErrorCapture, traceIdFor } from "./observability.ts"
 import type { ErrorSink } from "./observability.ts"
 import type { GatewaySettings, SignInPolicy } from "./services.ts"
-import { NonNegativeIntFromString, whenPresent } from "@integrations/contracts"
+import { defaultMaxUploadBytes, NonNegativeIntFromString, whenPresent } from "@integrations/contracts"
 import type { IntegrationServices } from "@integrations/integrations"
 import { GatewayStoreService } from "@integrations/gateway-core"
 import { webCryptoLayer } from "@integrations/contracts"
@@ -57,18 +57,23 @@ export interface GatewayHandlerOptions extends GatewaySettings {
   readonly sessions?: SignInPolicy
   readonly rateLimits?: RateLimits
   readonly maxBodyBytes?: number
+  readonly maxUploadBytes?: number
   readonly webAssets?: WebAssets
   readonly observabilityLayer?: Layer.Layer<never>
   readonly errorCapture?: ErrorSink
 }
 
-const bodyLimitLayer = (maxBytes: number) =>
+const bodyLimitLayer = (limits: { readonly request: number; readonly upload: number }) =>
   HttpRouter.use((router) =>
     router.addGlobalMiddleware((httpEffect) =>
       Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) => {
         const declared = Schema.decodeUnknownOption(NonNegativeIntFromString)(
           request.headers["content-length"]
         )
+        // Blob uploads are the one route whose whole purpose is a large body.
+        const maxBytes = new URL(request.url, "http://localhost").pathname === "/v1/blobs"
+          ? limits.upload
+          : limits.request
         return Option.getOrElse(declared, () => 0) > maxBytes
           ? Effect.succeed(HttpServerResponse.jsonUnsafe(
             { error: `Request body exceeds ${maxBytes} bytes` },
@@ -157,7 +162,10 @@ export const gatewayAppLayer = (options: GatewayHandlerOptions) => {
     Path.layer
   )
   const base = failureLayer().pipe(
-    Layer.provideMerge(bodyLimitLayer(options.maxBodyBytes ?? defaultMaxBodyBytes)),
+    Layer.provideMerge(bodyLimitLayer({
+      request: options.maxBodyBytes ?? defaultMaxBodyBytes,
+      upload: options.maxUploadBytes ?? defaultMaxUploadBytes
+    })),
     Layer.provideMerge(platform),
     Layer.provideMerge(errorCapture)
   )

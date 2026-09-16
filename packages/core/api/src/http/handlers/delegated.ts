@@ -2,12 +2,13 @@ import {
   whenPresentMap
 } from "@integrations/contracts"
 import { BlobStore, Integrations } from "@integrations/integrations"
-import { Effect } from "effect"
+import { Effect, Stream } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { deliverDueApprovalNotifications } from "@integrations/gateway-core"
 import {
   ApprovalId,
   BlobId,
+  blobHandleKey,
   ToolName
 } from "@integrations/contracts"
 import { invokeThroughGateway, listEffectiveTools } from "@integrations/gateway-core"
@@ -78,6 +79,22 @@ export const DelegatedLayer = HttpApiBuilder.group(GatewayApi, "delegated", (han
             Effect.mapError(() => new ApiNotFound({ error: `Unknown blob ${id}` }))
           )
           return opened.content
+        }))
+      .handle("uploadBlob", (request) =>
+        Effect.gen(function*() {
+          const stored = yield* capture(blobs.write(
+            {
+              contentType: request.headers["x-blob-content-type"] ?? "application/octet-stream",
+              filename: request.headers["x-blob-filename"]
+            },
+            Stream.succeed(request.payload)
+          ))
+          return {
+            [blobHandleKey]: stored.id,
+            bytes: stored.bytes,
+            contentType: stored.contentType,
+            sha256: stored.sha256
+          }
         }))
       .handle("approval", (request) =>
         Effect.gen(function*() {

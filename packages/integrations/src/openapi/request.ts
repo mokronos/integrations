@@ -1,13 +1,18 @@
-import { Option } from "effect"
+import { Option, Schema } from "effect"
 import type { HttpMethod } from "effect/unstable/http"
-import { isJsonObject, isJsonString, type Json } from "@integrations/contracts"
+import { blobHandleKey, BlobRef, isJsonObject, isJsonString, type BlobId, type Json } from "@integrations/contracts"
 import type { CallParameter, HttpCall, HttpMethod as CallMethod } from "../tool.ts"
+
+export type RequestBody =
+  | { readonly kind: "text"; readonly value: string }
+  /** Bytes the gateway already holds: streamed into the request, never encoded. */
+  | { readonly kind: "blob"; readonly id: BlobId }
 
 export interface BuiltRequest {
   readonly url: string
   readonly method: HttpMethod.HttpMethod
   readonly headers: Readonly<Record<string, string>>
-  readonly body: Option.Option<string>
+  readonly body: Option.Option<RequestBody>
 }
 
 const requestMethods = {
@@ -112,18 +117,29 @@ const pathSegment = (parameter: CallParameter, value: Json): string => {
 
 const jsonContentType = /^application\/(?:[\w.+-]+\+)?json\b/i
 
+const decodeBlobRef = Schema.decodeUnknownOption(BlobRef)
+
 const encodeBody = (
   call: HttpCall,
   body: Json
-): Option.Option<string> => {
+): Option.Option<RequestBody> => {
+  const referenced = decodeBlobRef(body)
+  if (Option.isSome(referenced)) {
+    return Option.some({ kind: "blob", id: referenced.value[blobHandleKey] })
+  }
   const contentType = call.contentType ?? "application/json"
   if (/^application\/x-www-form-urlencoded\b/i.test(contentType)) {
     const encoded = new URLSearchParams()
     for (const [key, value] of entriesOf(body)) encoded.append(key, scalar(value))
-    return Option.some(encoded.toString())
+    return Option.some({ kind: "text", value: encoded.toString() })
   }
-  if (jsonContentType.test(contentType)) return Option.some(JSON.stringify(body))
-  return Option.some(isJsonString(body) ? body : JSON.stringify(body))
+  if (jsonContentType.test(contentType)) {
+    return Option.some({ kind: "text", value: JSON.stringify(body) })
+  }
+  return Option.some({
+    kind: "text",
+    value: isJsonString(body) ? body : JSON.stringify(body)
+  })
 }
 
 export interface BuildRequestOptions {
@@ -175,7 +191,9 @@ export const buildRequest = (options: BuildRequestOptions): BuiltRequest => {
   }
 
   const body = Option.flatMap(options.requestBody, (value) => encodeBody(call, value))
-  if (Option.isSome(body)) {
+  // A blob carries its own recorded content type; the invoker sets it when it
+  // opens the bytes, so the declared one must not overwrite it here.
+  if (Option.isSome(body) && body.value.kind === "text") {
     headers["content-type"] = call.contentType ?? "application/json"
   }
 

@@ -161,11 +161,21 @@ export class OpenApiInvoker extends Context.Service<
           headers: { accept: "application/json, */*", ...prepared.headers }
         })
 
-        const response = yield* client.execute(Option.match(built.body, {
-          onNone: () => request,
-          onSome: (body) =>
-            HttpClientRequest.bodyText(request, body, request.headers["content-type"])
-        })).pipe(
+        const withBody = Option.isNone(built.body)
+          ? Effect.succeed(request)
+          : built.body.value.kind === "text"
+          ? Effect.succeed(HttpClientRequest.bodyText(
+            request,
+            built.body.value.value,
+            request.headers["content-type"]
+          ))
+          : Effect.map(blobs.open(built.body.value.id), (opened) =>
+            HttpClientRequest.bodyStream(request, opened.content, {
+              contentType: opened.metadata.contentType,
+              contentLength: opened.metadata.bytes
+            }))
+
+        const response = yield* client.execute(yield* withBody).pipe(
           Effect.mapError((cause) => new InvocationError({
             code: "transport_error",
             detail: `${built.method} ${built.url}: ${describeCause(cause)}`

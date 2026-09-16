@@ -13,6 +13,7 @@ import {
   ApprovalId,
   AuditOutcome,
   BlobId,
+  BlobUpload,
   AuditRecord,
   Client,
   ConfigureClient,
@@ -321,6 +322,14 @@ const DelegatedGroup = HttpApiGroup.make("delegated")
     params: { id: BlobId },
     success: HttpApiSchema.StreamUint8Array(),
     error: ApiNotFoundError
+  }).annotate(RequiredAccess, "delegated"))
+  .add(HttpApiEndpoint.post("uploadBlob", "/v1/blobs", {
+    headers: {
+      "x-blob-content-type": Schema.optional(Schema.String),
+      "x-blob-filename": Schema.optional(Schema.String)
+    },
+    payload: Schema.Uint8Array.pipe(HttpApiSchema.asUint8Array()),
+    success: BlobUpload
   }).annotate(RequiredAccess, "delegated"))
   .middleware(Authority)
 

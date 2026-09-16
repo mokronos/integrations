@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Layer, Option, Schema } from "effect"
+import { Effect, Layer, Option, Schema, Stream } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { BlobHandle, blobHandleKey } from "@integrations/contracts"
 import { OpenApiInvoker } from "../src/openapi/invoke.ts"
@@ -33,6 +33,18 @@ const server = Effect.acquireRelease(
             }
           })
         }
+        if (url.pathname === "/upload") {
+          return request.bytes().then((received) =>
+            new Response(
+              JSON.stringify({
+                bytes: received.length,
+                sha256: createHash("sha256").update(received).digest("hex"),
+                contentType: request.headers.get("content-type")
+              }),
+              { headers: { "content-type": "application/json" } }
+            )
+          )
+        }
         if (url.pathname === "/large") {
           return new Response(JSON.stringify({ rows: Array.from({ length: 4000 }, (_, i) => i) }), {
             headers: { "content-type": "application/json" }
@@ -44,8 +56,26 @@ const server = Effect.acquireRelease(
       }
     })
   ),
-  (running) => Effect.sync(() => running.stop())
+  (running) => Effect.promise(() => running.stop())
 )
+
+const upload = (baseUrl: string, blobId: string) =>
+  Effect.flatMap(OpenApiInvoker, (invoker) =>
+    invoker.call({
+      call: {
+        kind: "http",
+        method: "post",
+        path: "/upload",
+        parameters: [],
+        locations: { body: "body" },
+        bodyProperty: "body",
+        contentType: "application/octet-stream"
+      },
+      tool: "reference.upload",
+      server: baseUrl,
+      input: { body: { [blobHandleKey]: blobId } },
+      credential: Option.none()
+    }))
 
 const invoke = (baseUrl: string, path: string, maxInlineBytes: number) =>
   Effect.flatMap(OpenApiInvoker, (invoker) =>
@@ -95,6 +125,27 @@ describe("byte-faithful responses", () => {
       const parsed: unknown = JSON.parse(new TextDecoder().decode(stored))
       expect(Schema.decodeUnknownSync(Schema.Struct({ rows: Schema.Array(Schema.Number) }))(parsed).rows)
         .toHaveLength(4000)
+    }).pipe(Effect.provide(services), Effect.scoped))
+
+  it.live("streams stored bytes back out as a request body", () =>
+    Effect.gen(function*() {
+      const running = yield* server
+      const blobs = yield* BlobStore
+      const stored = yield* blobs.write(
+        { contentType: "application/zip", filename: "archive.zip" },
+        Stream.succeed(zipBytes)
+      )
+
+      const echoed = yield* upload(running.url.origin, stored.id)
+      const report = Schema.decodeUnknownSync(Schema.Struct({
+        bytes: Schema.Number,
+        sha256: Schema.String,
+        contentType: Schema.String
+      }))(echoed)
+
+      expect(report.bytes).toBe(zipBytes.length)
+      expect(report.sha256).toBe(createHash("sha256").update(zipBytes).digest("hex"))
+      expect(report.contentType).toBe("application/zip")
     }).pipe(Effect.provide(services), Effect.scoped))
 
   it.live("keeps small JSON inline", () =>

@@ -10,7 +10,7 @@ import {
   jsonOutput,
   writeStdoutLine
 } from "../output.ts"
-import { materializeBlobs } from "../blobs.ts"
+import { materializeBlobs, resolveFileArguments } from "../blobs.ts"
 
 const outFlag = () =>
   Flag.string("out").pipe(
@@ -116,9 +116,12 @@ export const operatorExecuteCommand = Command.make(
   ({ target, second, third, file, out, verbose }) =>
     gatewayTask((client) =>
       Effect.gen(function*() {
-        const payload = yield* readJsonArgument(
-          Option.getOrUndefined(third),
-          Option.getOrUndefined(file)
+        const payload = yield* resolveFileArguments(
+          client,
+          yield* readJsonArgument(
+            Option.getOrUndefined(third),
+            Option.getOrUndefined(file)
+          )
         )
         const outcome = yield* client.delegated.execute({
           payload: {
@@ -158,9 +161,12 @@ export const clientExecuteCommand = Command.make(
   ({ alias, tool, json, file, out, verbose }) =>
     gatewayTask((client) =>
       Effect.gen(function*() {
-        const arguments_ = yield* readJsonArgument(
-          Option.getOrUndefined(json),
-          Option.getOrUndefined(file)
+        const arguments_ = yield* resolveFileArguments(
+          client,
+          yield* readJsonArgument(
+            Option.getOrUndefined(json),
+            Option.getOrUndefined(file)
+          )
         )
         const outcome = yield* client.delegated.execute({
           payload: { alias: Alias.make(alias), tool, arguments: arguments_ }

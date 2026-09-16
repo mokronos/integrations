@@ -225,7 +225,7 @@ it.layer(Requests.layer)("bodies", (it) => {
       const { build } = yield* Requests
       const built = build("send", { id: "u1", body: { text: "hello" } })
       expect(built.method).toBe("POST")
-      expect(Option.getOrNull(built.body)).toBe("{\"text\":\"hello\"}")
+      expect(Option.getOrNull(built.body)).toEqual({ kind: "text", value: "{\"text\":\"hello\"}" })
       expect(built.headers["content-type"]).toBe("application/json")
     }))
 
@@ -233,7 +233,7 @@ it.layer(Requests.layer)("bodies", (it) => {
     Effect.gen(function*() {
       const { build } = yield* Requests
       const built = build("submitForm", { body: { a: "1", b: "x y" } })
-      expect(Option.getOrNull(built.body)).toBe("a=1&b=x+y")
+      expect(Option.getOrNull(built.body)).toEqual({ kind: "text", value: "a=1&b=x+y" })
       expect(built.headers["content-type"]).toBe("application/x-www-form-urlencoded")
     }))
 
