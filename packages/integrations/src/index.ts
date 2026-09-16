@@ -20,6 +20,8 @@ export { OpenApiInvoker } from "./openapi/invoke.ts"
 export { SpecCache } from "./openapi/cache.ts"
 export { classify } from "./classify.ts"
 
+export { BlobStore } from "./storage/blobs.ts"
+export type { BlobMetadata, StoredBlob } from "./storage/blobs.ts"
 export { applySchema, Database, libsqlLayer, memoryLayer, SqlValue } from "./storage/database.ts"
 export type { SqlRow, SqlStatement } from "./storage/database.ts"
 export {

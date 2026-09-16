@@ -1,11 +1,20 @@
 import { buildRequest } from "./request.ts"
-import { Context, Effect, Layer, Option } from "effect"
+import { Context, Effect, Layer, Option, Stream } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
-import { describeCause, InvocationError, SpecError } from "../errors.ts"
+import { describeCause, InvocationError, SpecError, StorageError } from "../errors.ts"
 import type { HttpCall } from "../tool.ts"
 import { missingArguments, splitArguments } from "./arguments.ts"
 import { AuthPlacement } from "@integrations/contracts"
-import { parseJsonString, type Json } from "@integrations/contracts"
+import { parseJsonString, whenPresent, type Json } from "@integrations/contracts"
+import {
+  binaryNote,
+  blobHandleKey,
+  defaultMaxInlineBytes,
+  filenameFromDisposition,
+  isTextualContentType,
+  oversizeNote
+} from "@integrations/contracts"
+import { BlobStore } from "../storage/blobs.ts"
 
 export interface ResolvedCredential {
   readonly value: string
@@ -86,26 +95,32 @@ export interface OpenApiCall {
   readonly input: Json
   readonly credential: Option.Option<ResolvedCredential>
   readonly timeoutMillis?: number
+  readonly maxInlineBytes?: number
 }
 
 const defaultTimeoutMillis = 60_000
+
+const previewBytes = 600
+
+const utf8 = new TextDecoder()
 
 export class OpenApiInvoker extends Context.Service<
   OpenApiInvoker,
   {
     readonly call: (
       call: OpenApiCall
-    ) => Effect.Effect<Json, InvocationError | SpecError>
+    ) => Effect.Effect<Json, InvocationError | SpecError | StorageError>
   }
 >()("@integrations/integrations/OpenApiInvoker") {
   static readonly layer: Layer.Layer<
     OpenApiInvoker,
     never,
-    HttpClient.HttpClient
+    HttpClient.HttpClient | BlobStore
   > = Layer.effect(
     OpenApiInvoker,
     Effect.gen(function* () {
       const client = yield* HttpClient.HttpClient
+      const blobs = yield* BlobStore
       return {
       call: Effect.fn("OpenApiInvoker.call")(function* (call: OpenApiCall) {
         const split = splitArguments(call.call, call.input)
@@ -165,15 +180,15 @@ export class OpenApiInvoker extends Context.Service<
         )
 
         const contentType = response.headers["content-type"] ?? ""
-        const body = yield* response.text.pipe(
-          Effect.mapError((cause) => new InvocationError({
-            code: "response_error",
-            detail: describeCause(cause),
-            status: response.status
-          }))
-        )
 
         if (response.status < 200 || response.status >= 300) {
+          const body = yield* response.text.pipe(
+            Effect.mapError((cause) => new InvocationError({
+              code: "response_error",
+              detail: describeCause(cause),
+              status: response.status
+            }))
+          )
           return yield* new InvocationError({
             code: `http_${response.status}`,
             // `built.url` and not the prepared one: a credential can be placed
@@ -183,7 +198,59 @@ export class OpenApiInvoker extends Context.Service<
           })
         }
 
-        return decodeBody(contentType, body)
+        const limit = call.maxInlineBytes ?? defaultMaxInlineBytes
+        const textual = isTextualContentType(contentType)
+        const declared = Number(response.headers["content-length"])
+
+        // The common case — a small JSON answer that announced its size — never
+        // touches the disk.
+        if (textual && Number.isFinite(declared) && declared <= limit) {
+          const buffer = yield* response.arrayBuffer.pipe(
+            Effect.mapError((cause) => new InvocationError({
+              code: "response_error",
+              detail: describeCause(cause),
+              status: response.status
+            }))
+          )
+          return decodeBody(contentType, utf8.decode(buffer))
+        }
+
+        // Everything else is streamed to disk before anything decides what it
+        // is. Bytes are the lossless superset: text can be recovered from them,
+        // but a decode that has already happened cannot be undone.
+        const filename = filenameFromDisposition(response.headers["content-disposition"])
+        const stored = yield* blobs.write(
+          { contentType, filename },
+          response.stream.pipe(Stream.mapError((cause) =>
+            new InvocationError({
+              code: "response_error",
+              detail: describeCause(cause),
+              status: response.status
+            })
+          ))
+        )
+
+        if (textual && stored.bytes <= limit) {
+          const bytes = yield* blobs.readAll(stored.id)
+          yield* blobs.discard(stored.id)
+          return decodeBody(contentType, utf8.decode(bytes))
+        }
+
+        const preview = textual
+          ? utf8.decode(yield* blobs.readPrefix(stored.id, previewBytes))
+          : undefined
+
+        return {
+          [blobHandleKey]: stored.id,
+          bytes: stored.bytes,
+          contentType,
+          sha256: stored.sha256,
+          note: textual
+            ? oversizeNote(contentType, stored.bytes, limit)
+            : binaryNote(contentType),
+          ...whenPresent("filename", filename),
+          ...whenPresent("preview", preview)
+        }
       })
       }
     })

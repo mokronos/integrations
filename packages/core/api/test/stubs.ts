@@ -1,5 +1,5 @@
 import { Context, Effect, Option } from "effect"
-import { CatalogStore, Integrations, McpClient, OAuthFlows, OpenApiInvoker, SpecCache } from "@integrations/integrations"
+import { BlobStore, CatalogStore, Integrations, McpClient, OAuthFlows, OpenApiInvoker, SpecCache } from "@integrations/integrations"
 import type { IntegrationServices } from "@integrations/integrations"
 
 export const stubIntegrations = (
@@ -54,6 +54,14 @@ const catalogStore: CatalogStore["Service"] = {
   putSpecDocument: dies("CatalogStore.putSpecDocument")
 }
 
+const stubBlobStore: BlobStore["Service"] = {
+  write: dies("BlobStore.write"),
+  readAll: dies("BlobStore.readAll"),
+  readPrefix: dies("BlobStore.readPrefix"),
+  open: dies("BlobStore.open"),
+  discard: dies("BlobStore.discard")
+}
+
 export const stubIntegrationsContext = (
   overrides: Partial<Integrations["Service"]> = {},
   reading: {
@@ -63,6 +71,7 @@ export const stubIntegrationsContext = (
 ): Context.Context<IntegrationServices> =>
   Context.empty().pipe(
     Context.add(Integrations, stubIntegrations(overrides)),
+    Context.add(BlobStore, stubBlobStore),
     Context.add(McpClient, {
       probe: dies("McpClient.probe"),
       listTools: dies("McpClient.listTools"),

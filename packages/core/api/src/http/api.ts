@@ -12,6 +12,7 @@ import {
   ApprovalDestinationId,
   ApprovalId,
   AuditOutcome,
+  BlobId,
   AuditRecord,
   Client,
   ConfigureClient,
@@ -314,6 +315,11 @@ const DelegatedGroup = HttpApiGroup.make("delegated")
   .add(HttpApiEndpoint.get("approval", "/v1/approvals/:id", {
     params: { id: ApprovalId },
     success: PendingApproval,
+    error: ApiNotFoundError
+  }).annotate(RequiredAccess, "delegated"))
+  .add(HttpApiEndpoint.get("blob", "/v1/blobs/:id", {
+    params: { id: BlobId },
+    success: HttpApiSchema.StreamUint8Array(),
     error: ApiNotFoundError
   }).annotate(RequiredAccess, "delegated"))
   .middleware(Authority)

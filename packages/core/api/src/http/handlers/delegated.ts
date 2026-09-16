@@ -1,12 +1,13 @@
 import {
   whenPresentMap
 } from "@integrations/contracts"
-import { Integrations } from "@integrations/integrations"
+import { BlobStore, Integrations } from "@integrations/integrations"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { deliverDueApprovalNotifications } from "@integrations/gateway-core"
 import {
   ApprovalId,
+  BlobId,
   ToolName
 } from "@integrations/contracts"
 import { invokeThroughGateway, listEffectiveTools } from "@integrations/gateway-core"
@@ -28,6 +29,7 @@ export const DelegatedLayer = HttpApiBuilder.group(GatewayApi, "delegated", (han
   Effect.gen(function*() {
     const store = yield* GatewayStoreService
     const integrations = yield* Integrations
+    const blobs = yield* BlobStore
     const config = yield* GatewayConfig
     return handlers
       .handle("listTools", (request) =>
@@ -68,6 +70,14 @@ export const DelegatedLayer = HttpApiBuilder.group(GatewayApi, "delegated", (han
               arguments: request.payload.arguments ?? {}
             }
           ))
+        }))
+      .handle("blob", (request) =>
+        Effect.gen(function*() {
+          const id = BlobId.make(request.params["id"])
+          const opened = yield* blobs.open(id).pipe(
+            Effect.mapError(() => new ApiNotFound({ error: `Unknown blob ${id}` }))
+          )
+          return opened.content
         }))
       .handle("approval", (request) =>
         Effect.gen(function*() {

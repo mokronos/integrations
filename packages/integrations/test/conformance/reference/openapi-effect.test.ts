@@ -5,12 +5,15 @@ import { ConnectionName, IntegrationSlug } from "@integrations/contracts"
 import { captureOpenApiTools } from "../../../src/catalog/capture.ts"
 import { compileSpec } from "../../../src/openapi/compile.ts"
 import { OpenApiInvoker } from "../../../src/openapi/invoke.ts"
+import { BlobStore } from "../../../src/storage/blobs.ts"
 import {
   referenceOpenApiDocument,
   referenceOpenApiServer
 } from "../support/reference-openapi.ts"
 
-const services = OpenApiInvoker.layer.pipe(Layer.provide(FetchHttpClient.layer))
+const services = OpenApiInvoker.layer.pipe(
+  Layer.provide(Layer.mergeAll(FetchHttpClient.layer, BlobStore.temporaryLayer))
+)
 
 describe("Effect OpenAPI reference server", () => {
   it.live("compiles and invokes the Effect-defined contract", () =>

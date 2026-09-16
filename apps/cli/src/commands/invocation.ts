@@ -10,6 +10,13 @@ import {
   jsonOutput,
   writeStdoutLine
 } from "../output.ts"
+import { materializeBlobs } from "../blobs.ts"
+
+const outFlag = () =>
+  Flag.string("out").pipe(
+    Flag.optional,
+    Flag.withDescription("Write file results to this path instead of the download directory")
+  )
 
 const verboseFlag = () =>
   Flag.boolean("verbose").pipe(
@@ -59,6 +66,33 @@ const readJsonArgument = Effect.fn("cli.readJsonArgument")(function*(
 
 const looksLikeAddress = (value: string): boolean => value.startsWith("tools.")
 
+/** File results are fetched onto local disk before the agent ever sees them. */
+const settleOutcome = (
+  client: GatewayClient,
+  outcome: InvocationOutcome,
+  out: string | undefined
+): Effect.Effect<InvocationOutcome, IntegrationsCliError> =>
+  outcome.status === "succeeded"
+    ? Effect.map(
+      materializeBlobs(client, outcome.result, out),
+      (result): InvocationOutcome => ({ ...outcome, result })
+    )
+    : Effect.succeed(outcome)
+
+const reportOutcome = (
+  outcome: InvocationOutcome,
+  verbose: boolean
+): Effect.Effect<void, IntegrationsCliError> =>
+  writeStdoutLine(jsonOutput(encodeOutcome(outcome), verbose)).pipe(
+    Effect.flatMap(() =>
+      outcome.status === "succeeded" || outcome.status === "pending"
+        ? Effect.void
+        : Effect.fail(cliError(
+          outcome.status === "denied" ? outcome.reason : outcome.message
+        ))
+    )
+  )
+
 export const operatorExecuteCommand = Command.make(
   "execute",
   {
@@ -76,35 +110,25 @@ export const operatorExecuteCommand = Command.make(
       Flag.optional,
       Flag.withDescription("Read the JSON input from a file")
     ),
+    out: outFlag(),
     verbose: verboseFlag()
   },
-  ({ target, second, third, file, verbose }) => {
-    const invocation = gatewayTask((client) =>
+  ({ target, second, third, file, out, verbose }) =>
+    gatewayTask((client) =>
       Effect.gen(function*() {
         const payload = yield* readJsonArgument(
           Option.getOrUndefined(third),
           Option.getOrUndefined(file)
         )
-        return yield* client.delegated.execute({
+        const outcome = yield* client.delegated.execute({
           payload: {
             alias: Alias.make(target),
             tool: second,
             arguments: payload
           }
         })
-      }))
-    return invocation.pipe(Effect.flatMap((outcome) =>
-      writeStdoutLine(
-        jsonOutput(encodeOutcome(outcome), verbose)
-      ).pipe(Effect.flatMap(() =>
-        outcome.status === "succeeded" || outcome.status === "pending"
-          ? Effect.void
-          : Effect.fail(cliError(
-            outcome.status === "denied" ? outcome.reason : outcome.message
-          ))
-      ))
-    ))
-  }
+        return yield* settleOutcome(client, outcome, Option.getOrUndefined(out))
+      })).pipe(Effect.flatMap((outcome) => reportOutcome(outcome, verbose)))
 ).pipe(
   Command.withDescription(
     "Invoke an effective policy tool through its alias"
@@ -128,29 +152,22 @@ export const clientExecuteCommand = Command.make(
       Flag.optional,
       Flag.withDescription("Read the JSON input from a file")
     ),
+    out: outFlag(),
     verbose: verboseFlag()
   },
-  ({ alias, tool, json, file, verbose }) =>
+  ({ alias, tool, json, file, out, verbose }) =>
     gatewayTask((client) =>
-      readJsonArgument(
-        Option.getOrUndefined(json),
-        Option.getOrUndefined(file)
-      ).pipe(Effect.flatMap((arguments_) =>
-        client.delegated.execute({
+      Effect.gen(function*() {
+        const arguments_ = yield* readJsonArgument(
+          Option.getOrUndefined(json),
+          Option.getOrUndefined(file)
+        )
+        const outcome = yield* client.delegated.execute({
           payload: { alias: Alias.make(alias), tool, arguments: arguments_ }
         })
-      ))
-    ).pipe(Effect.flatMap((outcome) =>
-      writeStdoutLine(
-        jsonOutput(encodeOutcome(outcome), verbose)
-      ).pipe(Effect.flatMap(() =>
-        outcome.status === "succeeded" || outcome.status === "pending"
-          ? Effect.void
-          : Effect.fail(cliError(
-            outcome.status === "denied" ? outcome.reason : outcome.message
-          ))
-      ))
-    ))
+        return yield* settleOutcome(client, outcome, Option.getOrUndefined(out))
+      })
+    ).pipe(Effect.flatMap((outcome) => reportOutcome(outcome, verbose)))
 ).pipe(Command.withDescription("Invoke a connected tool through its alias"))
 
 export const validateCommand = (runGateway: GatewayTask) => Command.make(

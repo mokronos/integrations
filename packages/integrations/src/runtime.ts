@@ -3,6 +3,7 @@ import { HttpClient } from "effect/unstable/http"
 import path from "node:path"
 import { CatalogStore } from "./catalog/store.ts"
 import { CredentialStore } from "./storage/credentials.ts"
+import { BlobStore } from "./storage/blobs.ts"
 import { Database, libsqlLayer, memoryLayer } from "./storage/database.ts"
 import type { StorageError } from "./errors.ts"
 import { Integrations } from "./integrations.ts"
@@ -19,7 +20,7 @@ export const unavailableHttpClientLayer: Layer.Layer<HttpClient.HttpClient> = La
 const clientsLayer: Layer.Layer<
   McpClient | OpenApiInvoker,
   never,
-  HttpClient.HttpClient
+  HttpClient.HttpClient | BlobStore
 > = Layer.mergeAll(McpClient.layer, OpenApiInvoker.layer)
 
 const capabilitiesLayer: Layer.Layer<
@@ -32,7 +33,7 @@ const capabilitiesLayer: Layer.Layer<
 )
 
 type IntegrationLayer = Layer.Layer<
-  Integrations | OAuthFlows | SpecCache | CatalogStore | McpClient | OpenApiInvoker,
+  Integrations | OAuthFlows | SpecCache | CatalogStore | McpClient | OpenApiInvoker | BlobStore,
   StorageError,
   HttpClient.HttpClient
 >
@@ -44,6 +45,7 @@ export interface IntegrationStorageOptions {
 export const localLayer = (options: IntegrationStorageOptions): IntegrationLayer =>
   capabilitiesLayer.pipe(
     Layer.provideMerge(clientsLayer),
+    Layer.provideMerge(BlobStore.fileLayer(options.directory)),
     Layer.provide(Layer.mergeAll(
       libsqlLayer({ directory: options.directory }),
       CredentialStore.fileLayer(options.directory)
@@ -51,14 +53,16 @@ export const localLayer = (options: IntegrationStorageOptions): IntegrationLayer
   )
 
 export const integrationLayer = <E>(
-  storage: Layer.Layer<Database | CredentialStore, E>
+  storage: Layer.Layer<Database | CredentialStore, E>,
+  blobs: Layer.Layer<BlobStore>
 ): Layer.Layer<
-  Integrations | OAuthFlows | SpecCache | CatalogStore | McpClient | OpenApiInvoker,
+  Integrations | OAuthFlows | SpecCache | CatalogStore | McpClient | OpenApiInvoker | BlobStore,
   E,
   HttpClient.HttpClient
 > =>
   capabilitiesLayer.pipe(
     Layer.provideMerge(clientsLayer),
+    Layer.provideMerge(blobs),
     Layer.provide(storage)
   )
 
@@ -87,6 +91,7 @@ export type IntegrationServices =
   | OpenApiInvoker
   | SpecCache
   | CatalogStore
+  | BlobStore
 
 export interface IntegrationStorage {
   readonly storage?: Layer.Layer<Database | CredentialStore, StorageError>
@@ -100,7 +105,10 @@ export const createIntegrationRuntime = (
   ManagedRuntime.make(
     (storage.storage === undefined
       ? localLayer({ directory: path.resolve(directory) })
-      : integrationLayer(storage.storage)).pipe(Layer.provide(httpClient))
+      : integrationLayer(
+        storage.storage,
+        BlobStore.fileLayer(path.resolve(directory))
+      )).pipe(Layer.provide(httpClient))
   )
 
 export const integrationServicesOf = (
