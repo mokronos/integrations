@@ -39,7 +39,6 @@ jobs:
             packages/integrations/package.json \
             packages/contracts/package.json \
             packages/observability/package.json \
-            packages/core/integrations/package.json \
             packages/core/gateway/package.json \
             packages/core/api/package.json \
             apps/ts/package.json \
@@ -50,71 +49,26 @@ jobs:
           done
           grep -F "gatewayVersion = \"$version\"" packages/core/api/src/version.ts >/dev/null
 
-  publish:
+  release:
     needs: verify
     runs-on: ubuntu-latest
-    environment: npm
     permissions:
       contents: write
-      id-token: write
     steps:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.3.14
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          registry-url: https://registry.npmjs.org
-      - run: bun install --frozen-lockfile
-      - run: bun run build
-      - run: mkdir -p ${{ runner.temp }}/release
-      - run: bun pm pack --ignore-scripts --destination ${{ runner.temp }}/release --filename protocol.tgz
-        working-directory: packages/contracts
-      - run: bun pm pack --ignore-scripts --destination ${{ runner.temp }}/release --filename core-integrations.tgz
-        working-directory: packages/core/integrations
-      - run: bun pm pack --ignore-scripts --destination ${{ runner.temp }}/release --filename executor.tgz
-        working-directory: packages/integrations
-      - run: bun pm pack --ignore-scripts --destination ${{ runner.temp }}/release --filename observability.tgz
-        working-directory: packages/observability
-      - run: bun pm pack --ignore-scripts --destination ${{ runner.temp }}/release --filename gateway-core.tgz
-        working-directory: packages/core/gateway
-      - run: bun pm pack --ignore-scripts --destination ${{ runner.temp }}/release --filename gateway-api.tgz
-        working-directory: packages/core/api
-      - run: bun pm pack --ignore-scripts --destination ${{ runner.temp }}/release --filename client.tgz
-        working-directory: apps/ts
-      - run: bun pm pack --ignore-scripts --destination ${{ runner.temp }}/release --filename local.tgz
-        working-directory: apps/local
-      - run: bun pm pack --ignore-scripts --destination ${{ runner.temp }}/release --filename cli.tgz
-        working-directory: apps/cli
-      - run: npm publish ${{ runner.temp }}/release/protocol.tgz --provenance --access public
-      - run: npm publish ${{ runner.temp }}/release/core-integrations.tgz --provenance --access public
-      - run: npm publish ${{ runner.temp }}/release/executor.tgz --provenance --access public
-      - run: npm publish ${{ runner.temp }}/release/observability.tgz --provenance --access public
-      - run: npm publish ${{ runner.temp }}/release/gateway-core.tgz --provenance --access public
-      - run: npm publish ${{ runner.temp }}/release/gateway-api.tgz --provenance --access public
-      - run: npm publish ${{ runner.temp }}/release/client.tgz --provenance --access public
-      - run: npm publish ${{ runner.temp }}/release/local.tgz --provenance --access public
-      - run: npm publish ${{ runner.temp }}/release/cli.tgz --provenance --access public
-      - name: Verify the registry install
+      - name: Prepare version-pinned installer
         env:
           RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
-          version="${RELEASE_TAG#v}"
-          directory="$(mktemp -d)"
-          cd "$directory"
-          bun init -y
-          bun add "@mokronos/integrations-cli@$version"
-          test -x node_modules/.bin/i
-          test -x node_modules/.bin/ii
-          test ! -e node_modules/.bin/integrations
-          node_modules/.bin/i --help >/dev/null
-          node_modules/.bin/ii --help >/dev/null
+          mkdir -p "${{ runner.temp }}/release"
+          sed "s/^default_ref=.*/default_ref=\"$RELEASE_TAG\"/" install.sh > "${{ runner.temp }}/release/install.sh"
+          chmod +x "${{ runner.temp }}/release/install.sh"
+          sh -n "${{ runner.temp }}/release/install.sh"
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
-        run: gh release create "$RELEASE_TAG" --generate-notes --verify-tag
+        run: gh release create "$RELEASE_TAG" "${{ runner.temp }}/release/install.sh" --generate-notes --verify-tag

@@ -25,22 +25,28 @@ key and invoke logical `{ alias, tool }` addresses through the HTTP API.
 
 ## Install
 
-The packages are not on npm yet. Install from this repository with Bun 1.2 or
-newer:
+Install the latest GitHub release with curl, Git, and Bun 1.2 or newer:
 
 ```bash
-git clone https://github.com/mokronos/integrations.git
-cd integrations
-bun install
-bun run install:local
-ii login
+curl -fsSL https://github.com/mokronos/integrations/releases/latest/download/install.sh | sh
+ii install
+ii dashboard
 ```
 
-`install:local` puts `i` and `ii` on PATH as shims that run the TypeScript
-sources in the checkout, so there is no build step and `git pull && bun install`
-is the whole upgrade. Keep the checkout where it is; moving it means re-running
-`bun run install:local`. The gateway dashboard is the one part that needs
-building — run `bun run build:control-plane` before `ii serve` if you want it.
+`ii install` registers the gateway as a per-user service on Linux or macOS. Use
+`ii serve -d` instead to run it for the current session. The installer checks
+out the release under `~/.local/share/integrations`, builds the control plane,
+and puts `i` and `ii` on PATH. Override those locations with
+`INTEGRATIONS_INSTALL_DIR` and `INTEGRATIONS_BIN_DIR`.
+
+To install the current development branch instead of a release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mokronos/integrations/main/install.sh | sh
+```
+
+Re-run the same command to upgrade. The installer refuses to overwrite local
+changes in its checkout.
 
 `i` mirrors the public TypeScript client: agents can discover integrations,
 manage connections, inspect schemas, invoke effective policy tools, and poll their own
@@ -53,6 +59,8 @@ directory.
 ## Development
 
 ```bash
+git clone https://github.com/mokronos/integrations.git
+cd integrations
 bun install
 bun run typecheck
 bun test
@@ -66,6 +74,15 @@ Run the CLIs from source with:
 bun run apps/cli/src/agent.ts --help
 bun run apps/cli/src/main.ts serve
 ```
+
+Install this checkout's source-backed `i` and `ii` commands with:
+
+```bash
+bun run install:local
+```
+
+The shims run the TypeScript sources directly. Keep the checkout where it is;
+moving it means re-running `bun run install:local`.
 
 After changing sources, hand the machine to the working tree in one step:
 
