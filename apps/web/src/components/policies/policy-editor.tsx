@@ -104,20 +104,24 @@ function ToolEditor({ title, description, catalog, assignedClientCount, render, 
           const open = searching || expanded.has(connection)
           return <section key={connection} className="space-y-2">
             <div className="flex items-center gap-2 border-b pb-2">
-              <Item asChild interactive variant="plain" size="sm" className="min-w-0 flex-1">
-                <button type="button" aria-expanded={open} onClick={() => setExpanded((current) => {
-                  const next = new Set(current)
-                  if (next.has(connection)) next.delete(connection); else next.add(connection)
-                  return next
-                })}>
-                  <ChevronRight aria-hidden className={cn("size-4 shrink-0 transition-transform", open && "rotate-90")} />
-                  <ItemContent><ItemTitle className="font-mono font-medium">{connection}</ItemTitle></ItemContent>
-                  {renderGroup === undefined ? <span className="text-muted-foreground shrink-0 text-xs">{pluralise(tools.length, "tool")}</span> : null}
-                </button>
+              <Item
+                size="sm"
+                className="min-w-0 flex-1 cursor-pointer select-none hover:bg-muted"
+                render={
+                  <button type="button" aria-expanded={open} onClick={() => setExpanded((current) => {
+                    const next = new Set(current)
+                    if (next.has(connection)) next.delete(connection); else next.add(connection)
+                    return next
+                  })} />
+                }
+              >
+                <ChevronRight aria-hidden className={cn("size-4 shrink-0 transition-transform", open && "rotate-90")} />
+                <ItemContent><ItemTitle className="font-mono font-medium">{connection}</ItemTitle></ItemContent>
+                {renderGroup === undefined ? <span className="text-muted-foreground shrink-0 text-xs">{pluralise(tools.length, "tool")}</span> : null}
               </Item>
               {renderGroup?.(tools)}
             </div>
-            {open ? tools.map((tool) => <Item key={keyOf(tool.connection, tool.name)} asChild interactive variant="plain" size="sm"><label><ItemContent><ItemTitle className="font-mono font-normal">{tool.name}</ItemTitle>{tool.description.length === 0 ? null : <ItemDescription className="line-clamp-2">{tool.description}</ItemDescription>}</ItemContent>{render(tool)}</label></Item>) : null}
+            {open ? tools.map((tool) => <Item key={keyOf(tool.connection, tool.name)} size="sm" render={<label />} className="cursor-pointer select-none hover:bg-muted"><ItemContent><ItemTitle className="font-mono font-normal">{tool.name}</ItemTitle>{tool.description.length === 0 ? null : <ItemDescription className="line-clamp-2">{tool.description}</ItemDescription>}</ItemContent>{render(tool)}</Item>) : null}
           </section>
         })}
         {catalog.length === 0

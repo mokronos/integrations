@@ -99,7 +99,7 @@ export function ExecutionsRoute() {
             <span className="text-muted-foreground text-xs">{total === 0 ? "No records" : `${start}–${end} of ${total}`}</span>
             <div className="flex items-center gap-2">
               <span className="text-muted-foreground text-xs">Rows per page</span>
-              <Select value={String(limit)} onValueChange={(value) => { setLimit(Number.parseInt(value, 10)); setOffset(0) }}>
+              <Select value={String(limit)} onValueChange={(next) => { if (next !== null) { setLimit(Number.parseInt(next, 10)); setOffset(0) } }}>
                 <SelectTrigger aria-label="Rows per page" className="w-20"><SelectValue /></SelectTrigger>
                 <SelectContent>{limits.map((candidate) => <SelectItem key={candidate} value={String(candidate)}>{candidate}</SelectItem>)}</SelectContent>
               </Select>

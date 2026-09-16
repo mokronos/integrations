@@ -53,9 +53,13 @@ function ToolCard({ tool }: { readonly tool: Tool }) {
   const [open, setOpen] = useState(false)
   return (
     <div className="min-w-0 rounded-lg border">
-      <Item asChild interactive variant="plain">
-        <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}>
-          <ItemMedia>
+      <Item
+        render={
+          <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} />
+        }
+        className="cursor-pointer select-none hover:bg-muted"
+      >
+        <ItemMedia>
             <ChevronRight
               aria-hidden
               className={cn("size-4 transition-transform", open && "rotate-90")}
@@ -73,7 +77,6 @@ function ToolCard({ tool }: { readonly tool: Tool }) {
           <code className="text-muted-foreground hidden max-w-[40%] shrink-0 truncate font-mono text-xs sm:block">
             {tool.address}
           </code>
-        </button>
       </Item>
 
       {open
@@ -124,11 +127,13 @@ function RemoveIntegration({ integration }: { readonly integration: IntegrationO
 
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>
-      <AlertDialogTrigger asChild>
-        <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive">
-          <Trash2 className="size-3" />
-          Remove
-        </Button>
+      <AlertDialogTrigger
+        render={
+          <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" />
+        }
+      >
+        <Trash2 className="size-3" />
+        Remove
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
@@ -337,7 +342,7 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
                 <ul className="space-y-2">
                   {integration.connections.map((connection) => (
                     <li key={connection.address} className="min-w-0">
-                      <Item size="sm">
+                      <Item variant="outline" size="sm">
                         <ItemContent>
                           <ItemTitle className="flex-wrap">
                             <span>{connection.name}</span>

@@ -99,31 +99,32 @@ export function IntegrationsRoute() {
                   {listed.map((integration) => (
                     <Item
                       key={integration.slug}
-                      asChild
-                      interactive
+                      variant="outline"
                       size="sm"
                       data-active={selected?.slug === integration.slug}
+                      render={
+                        <button
+                          type="button"
+                          onClick={() => void navigate(`/integrations/${integration.slug}`)}
+                        />
+                      }
+                      className="cursor-pointer select-none hover:bg-muted data-[active=true]:border-primary data-[active=true]:bg-accent/50"
                     >
-                      <button
-                        type="button"
-                        onClick={() => void navigate(`/integrations/${integration.slug}`)}
-                      >
-                        <ItemMedia>
-                          <IntegrationIcon host={integrationHost(integration)} />
-                        </ItemMedia>
-                        <ItemContent>
-                          <ItemTitle>
-                            <span className="min-w-0 truncate">{integration.name}</span>
-                            <ConnectionBadge integration={integration} />
-                          </ItemTitle>
-                          <ItemDescription className="flex items-center gap-1.5 font-mono">
-                            <span className="min-w-0 truncate">{integration.slug}</span>
-                            <span className="shrink-0">
-                              · {pluralise(integration.tools.length, "tool")}
-                            </span>
-                          </ItemDescription>
-                        </ItemContent>
-                      </button>
+                      <ItemMedia>
+                        <IntegrationIcon host={integrationHost(integration)} />
+                      </ItemMedia>
+                      <ItemContent>
+                        <ItemTitle>
+                          <span className="min-w-0 truncate">{integration.name}</span>
+                          <ConnectionBadge integration={integration} />
+                        </ItemTitle>
+                        <ItemDescription className="flex items-center gap-1.5 font-mono">
+                          <span className="min-w-0 truncate">{integration.slug}</span>
+                          <span className="shrink-0">
+                            · {pluralise(integration.tools.length, "tool")}
+                          </span>
+                        </ItemDescription>
+                      </ItemContent>
                     </Item>
                   ))}
                 </CardContent>

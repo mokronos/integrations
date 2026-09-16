@@ -59,20 +59,18 @@ function SetupStep({ complete, children, to }: {
   readonly to: string
 }) {
   return (
-    <Item asChild interactive>
-      <Link to={to}>
-        <ItemMedia>
-          {complete
-            ? <span className="bg-primary text-primary-foreground rounded-full p-1"><Check className="size-3" /></span>
-            : <Circle className="size-5" />}
-        </ItemMedia>
-        <ItemContent>
-          <ItemTitle className={complete ? "text-muted-foreground font-normal line-through" : undefined}>
-            {children}
-          </ItemTitle>
-        </ItemContent>
-        <ArrowRight className="text-muted-foreground ml-auto size-4 shrink-0" />
-      </Link>
+    <Item variant="outline" render={<Link to={to} />}>
+      <ItemMedia>
+        {complete
+          ? <span className="bg-primary text-primary-foreground rounded-full p-1"><Check className="size-3" /></span>
+          : <Circle className="size-5" />}
+      </ItemMedia>
+      <ItemContent>
+        <ItemTitle className={complete ? "text-muted-foreground font-normal line-through" : undefined}>
+          {children}
+        </ItemTitle>
+      </ItemContent>
+      <ArrowRight className="text-muted-foreground ml-auto size-4 shrink-0" />
     </Item>
   )
 }
@@ -97,7 +95,7 @@ export function OverviewRoute() {
       title="Overview"
       description="Connection health, delegated authority, and calls waiting for you."
       actions={pending === 0 ? undefined : (
-        <Button asChild><Link to="/approvals">Review {pending} pending</Link></Button>
+        <Button render={<Link to="/approvals" />}>Review {pending} pending</Button>
       )}
     >
       <QueryError error={overview.error} />
@@ -128,7 +126,7 @@ export function OverviewRoute() {
             <CardTitle>Recent activity</CardTitle>
             <CardDescription>Latest delegated execution attempts.</CardDescription>
             <CardAction>
-              <Button variant="ghost" size="sm" asChild><Link to="/activity">View all</Link></Button>
+              <Button variant="ghost" size="sm" render={<Link to="/activity" />}>View all</Button>
             </CardAction>
           </CardHeader>
           <CardContent>

@@ -261,8 +261,8 @@ function DeleteAccountCard({ hasPassword }: { readonly hasPassword: boolean }) {
       </CardHeader>
       <CardContent>
         <AlertDialog open={open} onOpenChange={setOpen}>
-          <AlertDialogTrigger asChild>
-            <Button variant="destructive" disabled={!hasPassword}>Delete account…</Button>
+          <AlertDialogTrigger render={<Button variant="destructive" disabled={!hasPassword} />}>
+            Delete account…
           </AlertDialogTrigger>
           <AlertDialogContent>
             <AlertDialogHeader>

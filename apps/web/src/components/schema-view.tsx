@@ -87,13 +87,17 @@ function SchemaRow({
     <li className="min-w-0">
       {expandable
         ? (
-          <Item asChild interactive variant="plain" size="sm">
-            <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}>
-              {body}
-            </button>
+          <Item
+            size="sm"
+            render={
+              <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} />
+            }
+            className="cursor-pointer select-none hover:bg-muted"
+          >
+            {body}
           </Item>
         )
-        : <Item variant="plain" size="sm" className="items-start">{body}</Item>}
+        : <Item size="sm" className="items-start">{body}</Item>}
 
       {open && expandable
         ? (

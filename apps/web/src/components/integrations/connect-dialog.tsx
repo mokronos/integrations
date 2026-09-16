@@ -216,8 +216,8 @@ export function ConnectDialog({ integration }: { readonly integration: Integrati
   const connected = connect.data !== undefined || oauthConnected
   return (
     <Dialog open={open} onOpenChange={changeOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm">Connect</Button>
+      <DialogTrigger render={<Button size="sm" />}>
+        Connect
       </DialogTrigger>
       <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-xl">
         <DialogHeader>

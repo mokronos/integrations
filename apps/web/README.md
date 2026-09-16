@@ -56,7 +56,7 @@ here rather than rendering as `undefined` three screens away.
 
 ## Components
 
-shadcn, `radix-nova` style, added through the CLI:
+shadcn, `base-nova` style, added through the CLI:
 
 ```bash
 bunx --bun shadcn@latest add <component>

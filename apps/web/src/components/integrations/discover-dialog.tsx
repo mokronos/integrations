@@ -133,8 +133,8 @@ export function DiscoverDialog({ onInstalled }: { readonly onInstalled?: (slug: 
   const result = discover.data
   return (
     <Dialog open={open} onOpenChange={changeOpen}>
-      <DialogTrigger asChild>
-        <Button>Discover endpoint</Button>
+      <DialogTrigger render={<Button />}>
+        Discover endpoint
       </DialogTrigger>
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>

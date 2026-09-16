@@ -74,8 +74,8 @@ export function RegistrySearchDialog({ onInstalled }: { readonly onInstalled?: (
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button><Search className="size-4" /> Find integration</Button>
+      <DialogTrigger render={<Button />}>
+        <Search className="size-4" /> Find integration
       </DialogTrigger>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
