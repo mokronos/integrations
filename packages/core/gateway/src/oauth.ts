@@ -45,6 +45,21 @@ const step = <A, E extends { readonly message: string }, R>(
     cause
   }))
 
+const offlineAccessScope = "offline_access"
+
+// Servers reject scopes they do not publish, so this dialect only ships when
+// discovery advertises it.
+const requestedScopes = (
+  configured: ReadonlyArray<string> | undefined,
+  supported: ReadonlyArray<string> | undefined
+): ReadonlyArray<string> => {
+  const base = configured ?? supported ?? []
+  return supported?.includes(offlineAccessScope) === true &&
+      !base.includes(offlineAccessScope)
+    ? [...base, offlineAccessScope]
+    : base
+}
+
 const decodeRequest = (
   input: AuthorizationRequest
 ): Effect.Effect<AuthorizationRequest, OAuthFlowError> =>
@@ -111,6 +126,7 @@ const prepareFlow = Effect.fn("OAuth.prepareFlow")(function*(
   const authorizationUrl = oauth.authorizationUrl ?? discovered?.authorizationUrl
   const tokenUrl = oauth.tokenUrl ?? discovered?.tokenUrl
   const resource = oauth.resource ?? discovered?.resource
+  const scopes = requestedScopes(oauth.scopes, discovered?.scopesSupported)
   if (authorizationUrl === undefined || tokenUrl === undefined) {
     return yield* new OAuthFlowError({
       stage: "discover",
@@ -135,7 +151,7 @@ const prepareFlow = Effect.fn("OAuth.prepareFlow")(function*(
         clientId: input.clientId!,
         ...whenPresent("clientSecret", input.clientSecret),
         ...whenPresent("resource", resource),
-        scopes: oauth.scopes ?? discovered?.scopesSupported ?? []
+        scopes
       }))
   } else if (reusable) {
     client = clientSlug
@@ -159,7 +175,7 @@ const prepareFlow = Effect.fn("OAuth.prepareFlow")(function*(
         registrationEndpoint,
         authorizationUrl,
         tokenUrl,
-        scopes: oauth.scopes ?? discovered?.scopesSupported ?? [],
+        scopes,
         ...whenPresent("issuer", discovered?.issuer),
         ...whenPresent("resource", resource),
         ...whenPresent(

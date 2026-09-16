@@ -92,7 +92,8 @@ const fakeAuth = (behaviour: {
           clientOwner: "org" as const,
           client: OAuthClientSlug.make("client-google-wf"),
           scope: Option.none(),
-          expiresAt: Option.none()
+          expiresAt: Option.none(),
+          renewable: true
         })
       },
       accessToken: dies("accessToken")

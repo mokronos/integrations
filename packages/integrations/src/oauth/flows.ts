@@ -107,6 +107,15 @@ const clientMetadata = (redirectUri: string, scopes: ReadonlyArray<string>) => (
 
 const noRedirectUris: ReadonlyArray<string> = []
 
+// Providers disagree on how a client asks for a refresh token, and no discovery
+// document advertises which dialect applies. RFC 6749 requires servers to ignore
+// request parameters they do not recognise, so every dialect ships every time.
+const offlineAccessParams: ReadonlyArray<readonly [string, string]> = [
+  ["access_type", "offline"],
+  ["token_access_type", "offline"],
+  ["prompt", "consent"]
+]
+
 const clientInformation = (
   record: OAuthClientRecord,
   secret: Option.Option<string>
@@ -146,6 +155,7 @@ export interface CompletedAuthorization {
   readonly client: OAuthClientSlug
   readonly scope: Option.Option<string>
   readonly expiresAt: Option.Option<number>
+  readonly renewable: boolean
 }
 
 export interface OAuthAccess {
@@ -384,6 +394,10 @@ export class OAuthFlows extends Context.Service<
           })
         })
 
+        for (const [name, value] of offlineAccessParams) {
+          began.authorizationUrl.searchParams.set(name, value)
+        }
+
         yield* store.putOAuthFlow({
           state,
           owner: options.owner,
@@ -429,7 +443,8 @@ export class OAuthFlows extends Context.Service<
         yield* writeTokens(credentials, connectionCredentialKey(address), tokens)
         return {
           scope: Option.fromNullishOr(options.response.scope),
-          expiresAt: Option.fromNullishOr(expiresAt)
+          expiresAt: Option.fromNullishOr(expiresAt),
+          renewable: options.response.refresh_token !== undefined
         }
       })
 
@@ -493,7 +508,8 @@ export class OAuthFlows extends Context.Service<
           clientOwner: flow.clientOwner,
           client: flow.clientSlug,
           scope: stored.scope,
-          expiresAt: stored.expiresAt
+          expiresAt: stored.expiresAt,
+          renewable: stored.renewable
         }
       })
 

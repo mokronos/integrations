@@ -180,6 +180,24 @@ export const completeOAuthFlow = Effect.fn("OAuthConnect.complete")(function*(
     )
   }
 
+  const expiry = Option.getOrUndefined(completed.expiresAt)
+  const renewalWarning = completed.renewable || expiry === undefined
+    ? undefined
+    : `Connected, but ${record.integration} issued no refresh token: this ` +
+      `connection stops working at ${new Date(expiry).toISOString()} and has to ` +
+      `be authorized again. Grant consent when the provider asks for it.`
+  if (renewalWarning !== undefined) {
+    yield* Effect.logWarning(renewalWarning).pipe(
+      Effect.annotateLogs({
+        integration: record.integration,
+        connection: record.name,
+        operation: "completeOAuthFlow"
+      })
+    )
+  }
+
+  const notices = [renewalWarning, captureError].filter((notice) => notice !== undefined)
+
   return yield* Schema.decodeUnknownEffect(Connection)({
     owner: record.owner,
     name: record.name,
@@ -197,7 +215,7 @@ export const completeOAuthFlow = Effect.fn("OAuthConnect.complete")(function*(
     expiresAt: Option.getOrNull(completed.expiresAt),
     missingOAuthScopes: [],
     status: "connected",
-    ...whenPresent("error", captureError)
+    ...whenPresent("error", notices.length === 0 ? undefined : notices.join(" "))
   }).pipe(Effect.mapError((cause) =>
     new InvalidInputError({
       field: "connection",
