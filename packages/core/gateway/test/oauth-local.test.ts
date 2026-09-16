@@ -111,7 +111,8 @@ const operations = (behaviour: { readonly completeFails?: string } = {}) => {
             clientOwner: "org" as const,
             client: OAuthClientSlug.make("provider-wf"),
             scope: Option.none(),
-            expiresAt: Option.none()
+            expiresAt: Option.none(),
+            renewable: true
           })
           : Effect.fail(new OAuthError({ stage: "complete", detail: behaviour.completeFails })),
       accessToken: notUsed("accessToken")
