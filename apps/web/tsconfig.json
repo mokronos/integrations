@@ -8,16 +8,7 @@
     "types": ["vite/client", "node", "bun"],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"],
-      "@integrations/observability": ["../../packages/observability/src/index.ts"],
-      "@integrations/contracts": ["../../packages/contracts/src/index.ts"],
-      "@integrations/contracts/gateway-config": ["../../packages/contracts/src/gateway-config.ts"],
-      "@integrations/gateway-core": ["../../packages/core/gateway/src/index.ts"],
-      "@integrations/gateway-core/domain": ["../../packages/core/gateway/src/domain.ts"],
-      "@integrations/gateway-api/definition": ["../../packages/core/api/src/http/api.ts"],
-      "@integrations/integrations": ["../../packages/integrations/src/index.ts"],
-      "@mokronos/integrations-client": ["../../apps/ts/src/index.ts"],
-      "@mokronos/integrations-client/client": ["../../apps/ts/src/client.ts"]
+      "@/*": ["./src/*"]
     },
     "allowArbitraryExtensions": true,
     "erasableSyntaxOnly": true

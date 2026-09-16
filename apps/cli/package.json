@@ -38,6 +38,7 @@
     "@integrations/contracts": "workspace:*",
     "@integrations/gateway-api": "workspace:*",
     "@integrations/gateway-core": "workspace:*",
+    "@mokronos/integrations": "workspace:*",
     "@mokronos/integrations-client": "workspace:*",
     "@integrations/integrations": "workspace:*",
     "@integrations/observability": "workspace:*",

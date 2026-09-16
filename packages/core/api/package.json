@@ -12,15 +12,15 @@
   ],
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "bun": "./src/index.ts",
       "development": "./src/index.ts",
+      "bun": "./src/index.ts",
+      "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
     "./definition": {
-      "types": "./dist/http/api.d.ts",
-      "bun": "./src/http/api.ts",
       "development": "./src/http/api.ts",
+      "bun": "./src/http/api.ts",
+      "types": "./dist/http/api.d.ts",
       "default": "./dist/http/api.js"
     }
   },

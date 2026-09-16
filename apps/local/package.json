@@ -28,10 +28,13 @@
   "files": [
     "dist",
     "web",
+    "index.ts",
     "README.md"
   ],
   "exports": {
     ".": {
+      "development": "./index.ts",
+      "bun": "./index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
@@ -42,6 +45,7 @@
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
+    "@integrations/contracts": "workspace:*",
     "@integrations/gateway-api": "workspace:*",
     "@integrations/gateway-core": "workspace:*",
     "@mokronos/integrations-client": "workspace:*",

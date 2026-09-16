@@ -88,6 +88,7 @@
     "@effect/language-service": "catalog:",
     "@effect/platform-bun": "catalog:",
     "@effect/vitest": "catalog:",
+    "@mokronos/integrations-client": "workspace:*",
     "@oxlint/plugins": "catalog:",
     "@types/bun": "catalog:",
     "effect-solutions": "catalog:",

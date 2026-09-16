@@ -9,7 +9,9 @@
     "sourceMap": true,
     "outDir": "dist",
     "rootDir": ".",
-    "paths": {},
+    // Emit resolves workspace dependencies to their built `dist` declarations,
+    // so the `development` condition the root config enables is dropped here.
+    "customConditions": [],
     "types": ["bun"]
   },
   "include": ["*.ts"]

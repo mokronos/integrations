@@ -28,20 +28,20 @@
   ],
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "bun": "./src/index.ts",
       "development": "./src/index.ts",
+      "bun": "./src/index.ts",
+      "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
     "./gateway-config": {
-      "types": "./dist/gateway-config.d.ts",
-      "bun": "./src/gateway-config.ts",
       "development": "./src/gateway-config.ts",
+      "bun": "./src/gateway-config.ts",
+      "types": "./dist/gateway-config.d.ts",
       "default": "./dist/gateway-config.js"
     },
     "./test-fixtures": {
-      "bun": "./test/fixtures.ts",
       "development": "./test/fixtures.ts",
+      "bun": "./test/fixtures.ts",
       "default": "./test/fixtures.ts"
     }
   },

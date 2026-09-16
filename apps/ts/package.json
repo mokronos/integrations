@@ -31,15 +31,15 @@
   ],
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "bun": "./src/index.ts",
       "development": "./src/index.ts",
+      "bun": "./src/index.ts",
+      "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
     "./client": {
-      "types": "./dist/client.d.ts",
-      "bun": "./src/client.ts",
       "development": "./src/client.ts",
+      "bun": "./src/client.ts",
+      "types": "./dist/client.d.ts",
       "default": "./dist/client.js"
     }
   },

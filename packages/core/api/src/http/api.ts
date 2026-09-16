@@ -60,7 +60,7 @@ import {
   ToolSummary
 } from "@integrations/contracts"
 import { Authority } from "./middleware.ts"
-import { ForbiddenError, RequiredAccess, Unmetered } from "./identity.ts"
+import { Forbidden, ForbiddenError, RequiredAccess, Unmetered } from "./identity.ts"
 
 const Json = Schema.Json
 
@@ -805,6 +805,8 @@ export {
   ApiBadRequest,
   ApiNotFound,
   ApiNotImplemented,
+  Authority,
+  Forbidden,
   HandoffCollected,
   HandoffExpired,
   HandoffUnknown,

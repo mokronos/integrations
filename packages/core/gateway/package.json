@@ -12,20 +12,20 @@
   ],
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "bun": "./src/index.ts",
       "development": "./src/index.ts",
+      "bun": "./src/index.ts",
+      "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
     "./domain": {
-      "types": "./dist/domain.d.ts",
-      "bun": "./src/domain.ts",
       "development": "./src/domain.ts",
+      "bun": "./src/domain.ts",
+      "types": "./dist/domain.d.ts",
       "default": "./dist/domain.js"
     },
     "./test-fixtures": {
-      "bun": "./test/fixtures.ts",
       "development": "./test/fixtures.ts",
+      "bun": "./test/fixtures.ts",
       "default": "./test/fixtures.ts"
     }
   },

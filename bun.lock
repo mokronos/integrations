@@ -11,6 +11,7 @@
         "@effect/language-service": "catalog:",
         "@effect/platform-bun": "catalog:",
         "@effect/vitest": "catalog:",
+        "@mokronos/integrations-client": "workspace:*",
         "@oxlint/plugins": "catalog:",
         "@types/bun": "catalog:",
         "effect-solutions": "catalog:",
@@ -33,6 +34,7 @@
         "@integrations/gateway-core": "workspace:*",
         "@integrations/integrations": "workspace:*",
         "@integrations/observability": "workspace:*",
+        "@mokronos/integrations": "workspace:*",
         "@mokronos/integrations-client": "workspace:*",
         "effect": "catalog:",
       },
@@ -42,6 +44,7 @@
       "version": "0.2.0",
       "dependencies": {
         "@effect/sql-d1": "catalog:",
+        "@integrations/contracts": "workspace:*",
         "@integrations/gateway-api": "workspace:*",
         "@integrations/gateway-core": "workspace:*",
         "@integrations/integrations": "workspace:*",
@@ -56,6 +59,7 @@
       "name": "@mokronos/integrations",
       "version": "0.2.0",
       "dependencies": {
+        "@integrations/contracts": "workspace:*",
         "@integrations/gateway-api": "workspace:*",
         "@integrations/gateway-core": "workspace:*",
         "@mokronos/integrations-client": "workspace:*",

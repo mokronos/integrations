@@ -13,18 +13,11 @@
 
     // Bundler mode
     "moduleResolution": "bundler",
-    "baseUrl": ".",
-    "paths": {
-      "@integrations/observability": ["packages/observability/src/index.ts"],
-      "@integrations/contracts": ["packages/contracts/src/index.ts"],
-      "@integrations/contracts/gateway-config": ["packages/contracts/src/gateway-config.ts"],
-      "@integrations/integrations": ["packages/integrations/src/index.ts"],
-      "@integrations/gateway-core": ["packages/core/gateway/src/index.ts"],
-      "@integrations/gateway-api": ["packages/core/api/src/index.ts"],
-      "@integrations/gateway-api/definition": ["packages/core/api/src/http/api.ts"],
-      "@mokronos/integrations": ["apps/local/index.ts"],
-      "@mokronos/integrations-client": ["apps/ts/src/index.ts"]
-    },
+    // Workspace packages resolve through their own `exports` maps. The
+    // `development` condition is listed ahead of `types` in every manifest, so
+    // enabling it here points type-checking at TypeScript sources instead of
+    // `dist`, which no clean checkout has built yet.
+    "customConditions": ["development"],
     "allowImportingTsExtensions": true,
     "rewriteRelativeImportExtensions": true,
     "verbatimModuleSyntax": true,
