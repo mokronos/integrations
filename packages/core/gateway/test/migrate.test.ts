@@ -88,7 +88,7 @@ describe("applyGatewayMigrations", () => {
       const message = yield* refusal(applyGatewayMigrations(sql))
 
       expect(message).toContain("9999_from_a_newer_gateway")
-      expect(message).toContain("newer gateway")
+      expect(message).toContain("newer build")
     }).pipe(Effect.provide(testServices)))
 
   it.effect("a renamed applied migration stops the migration", () =>

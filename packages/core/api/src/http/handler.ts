@@ -14,6 +14,7 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { HttpApiSchemaError } from "effect/unstable/httpapi/HttpApiError"
 import { GatewayApi } from "./api.ts"
 import {
+  Authority,
   authorityLayer,
   CurrentRequestContext
 } from "./authority.ts"
@@ -49,11 +50,25 @@ export interface GatewayRequestContext {
   readonly remoteAddress?: string
 }
 
+export type GatewayCoreServices = GatewayStoreService | IntegrationServices | OAuthFlowSessions
+
+export const gatewayServicesContext = (input: {
+  readonly store: GatewayStore
+  readonly integrationServices: Context.Context<IntegrationServices>
+  readonly oauth: OAuthSessions
+}): Context.Context<GatewayCoreServices> =>
+  input.integrationServices.pipe(
+    Context.add(GatewayStoreService, input.store),
+    Context.add(OAuthFlowSessions, input.oauth)
+  )
+
 export interface GatewayHandlerOptions extends GatewaySettings {
   readonly store: GatewayStore
   readonly integrationServices: Context.Context<IntegrationServices>
   readonly httpClient: Layer.Layer<HttpClient.HttpClient>
   readonly oauth: OAuthSessions
+  /** Who is calling. Defaults to the gateway's own keys, sessions, and local credential. */
+  readonly authority?: Layer.Layer<Authority, never, GatewayStoreService>
   readonly sessions?: SignInPolicy
   readonly rateLimits?: RateLimits
   readonly maxBodyBytes?: number
@@ -127,11 +142,10 @@ export const gatewayAppLayer = (options: GatewayHandlerOptions) => {
     ? ErrorCapture.logging
     : Layer.succeed(ErrorCapture, options.errorCapture)
 
+  const services = Layer.succeedContext(gatewayServicesContext(options))
   const dependencies = Layer.mergeAll(
     errorCapture,
-    Layer.succeed(GatewayStoreService, options.store),
-    Layer.succeedContext(options.integrationServices),
-    Layer.succeed(OAuthFlowSessions, options.oauth),
+    services,
     Layer.succeed(GatewayConfig, {
       retentionDays: options.retentionDays,
       ...optional("dashboardUrl", options.dashboardUrl),
@@ -169,12 +183,12 @@ export const gatewayAppLayer = (options: GatewayHandlerOptions) => {
     Layer.provideMerge(platform),
     Layer.provideMerge(errorCapture)
   )
+  const authority = (options.authority ?? authorityLayer(whenPresent("rateLimits", options.rateLimits))).pipe(
+    Layer.provide(services)
+  )
   return base.pipe(
     Layer.provideMerge(groups),
-    Layer.provideMerge(authorityLayer({
-      store: options.store,
-      ...whenPresent("rateLimits", options.rateLimits)
-    }))
+    Layer.provideMerge(authority)
   )
 }
 

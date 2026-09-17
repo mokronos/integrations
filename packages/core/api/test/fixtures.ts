@@ -1,1 +1,1 @@
-export { gatewayStore, openStore, temporaryDirectory, testServices } from "@integrations/gateway-core/test-fixtures"
+export { gatewayStore, openDatabase, openStore, storeOn, temporaryDirectory, testEncryption, testServices } from "@integrations/gateway-core/test-fixtures"

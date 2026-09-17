@@ -1,9 +1,7 @@
-import { mkdirSync } from "node:fs"
-import path from "node:path"
-import { createClient } from "@libsql/client"
-import type { Client as LibsqlClient, Value as LibsqlValue } from "@libsql/client"
 import { Context, Effect, Layer, Predicate, Schema } from "effect"
-import { describeCause, StorageError } from "../errors.ts"
+import { SqlClient } from "effect/unstable/sql"
+import type { SqlError } from "effect/unstable/sql"
+import { StorageError } from "../errors.ts"
 
 export const SqlValue = Schema.Union([Schema.String, Schema.Number, Schema.Null])
 export type SqlValue = typeof SqlValue.Type
@@ -24,207 +22,50 @@ export class Database extends Context.Service<
     readonly query: (statement: SqlStatement) => Effect.Effect<ReadonlyArray<SqlRow>, StorageError>
     readonly batch: (statements: ReadonlyArray<SqlStatement>) => Effect.Effect<void, StorageError>
   }
->()("@integrations/integrations/Database") {}
-
-const toRecords = (
-  columns: ReadonlyArray<string>,
-  rows: ReadonlyArray<ReadonlyArray<SqlValue>>
-): ReadonlyArray<Record<string, SqlValue>> =>
-  rows.map((row) =>
-    Object.fromEntries(columns.map((column, index) => [column, row[index] ?? null]))
+>()("@integrations/integrations/Database") {
+  /** The catalog's tables on whatever `SqlClient` the host provides. */
+  static readonly layer: Layer.Layer<Database, never, SqlClient.SqlClient> = Layer.effect(
+    Database,
+    Effect.map(SqlClient.SqlClient, sqlDatabase)
   )
+}
 
-const cell = (value: LibsqlValue | undefined): SqlValue => {
+const Cell = Schema.Union([Schema.String, Schema.Number, Schema.Null, Schema.BigInt, Schema.Boolean, Schema.Uint8Array])
+
+const cell = (value: typeof Cell.Type): SqlValue => {
   if (Predicate.isString(value) || Predicate.isNumber(value)) return value
   if (Predicate.isBigInt(value)) return Number(value)
   if (Predicate.isBoolean(value)) return value ? 1 : 0
-  if (Predicate.isNullish(value)) return null
-  return String(value)
+  if (Predicate.isNull(value)) return null
+  return new TextDecoder().decode(value)
 }
 
-const storageFailure = (sql: string) => (cause: unknown): StorageError =>
-  new StorageError({
-    message: `Statement failed: ${sql.trim().split("\n")[0] ?? sql} (${describeCause(cause)})`,
-    cause
-  })
+const decodeCells = Schema.decodeUnknownEffect(Schema.Array(Schema.Record(Schema.String, Cell)))
 
-const libsqlDatabase = (client: LibsqlClient): Database["Service"] => {
+const firstLine = (sql: string): string => sql.trim().split("\n")[0] ?? sql
+
+const storageFailure = (sql: string) => (cause: SqlError.SqlError | Schema.SchemaError): StorageError =>
+  new StorageError({ message: `Statement failed: ${firstLine(sql)} (${cause.message})`, cause })
+
+function sqlDatabase(sql: SqlClient.SqlClient): Database["Service"] {
   const query = Effect.fn("Database.query")((statement: SqlStatement) =>
-    Effect.tryPromise({
-      try: async () => {
-        const result = await client.execute({
-          sql: statement.sql,
-          args: [...(statement.params ?? [])]
-        })
-        return toRecords(
-          result.columns,
-          result.rows.map((row) => result.columns.map((_, index) => cell(row[index])))
-        )
-      },
-      catch: storageFailure(statement.sql)
-    }).pipe(Effect.flatMap((records) =>
-      decodeRows(records).pipe(Effect.mapError((cause) =>
-        new StorageError({
-          message: `Unexpected column shape from: ${statement.sql}`,
-          cause
-        })
-      ))
-    ))
+    sql.unsafe(statement.sql, [...(statement.params ?? [])]).pipe(
+      Effect.flatMap(decodeCells),
+      Effect.map((rows) =>
+        rows.map((row) => Object.fromEntries(Object.entries(row).map(([column, value]) => [column, cell(value)])))
+      ),
+      Effect.flatMap(decodeRows),
+      Effect.mapError(storageFailure(statement.sql))
+    )
   )
 
   const batch = Effect.fn("Database.batch")((statements: ReadonlyArray<SqlStatement>) =>
-    Effect.tryPromise({
-      try: async () => {
-        await client.batch(
-          statements.map((statement) => ({
-            sql: statement.sql,
-            args: [...(statement.params ?? [])]
-          })),
-          "write"
-        )
-      },
-      catch: storageFailure(statements[0]?.sql ?? "batch")
-    })
+    sql.withTransaction(Effect.forEach(statements, query, { discard: true })).pipe(
+      Effect.mapError((cause) =>
+        cause instanceof StorageError ? cause : storageFailure(statements[0]?.sql ?? "batch")(cause)
+      )
+    )
   )
 
   return { query, batch }
 }
-
-const schemaStatements: ReadonlyArray<string> = [
-  `CREATE TABLE IF NOT EXISTS integration (
-     slug           TEXT PRIMARY KEY NOT NULL,
-     name           TEXT NOT NULL,
-     description    TEXT NOT NULL DEFAULT '',
-     kind           TEXT NOT NULL,
-     endpoint       TEXT,
-     spec_source    TEXT,
-     spec_format    TEXT,
-     base_url       TEXT,
-     display_url    TEXT,
-     auth_methods   TEXT NOT NULL DEFAULT '[]',
-     created_at     INTEGER NOT NULL
-   )`,
-  `CREATE TABLE IF NOT EXISTS spec_document (
-     source      TEXT PRIMARY KEY NOT NULL,
-     content     TEXT NOT NULL,
-     fetched_at  INTEGER NOT NULL
-   )`,
-  `CREATE TABLE IF NOT EXISTS connection (
-     owner              TEXT NOT NULL,
-     integration        TEXT NOT NULL,
-     name               TEXT NOT NULL,
-     template           TEXT NOT NULL,
-     provider           TEXT NOT NULL,
-     identity_label     TEXT,
-     description        TEXT,
-     oauth_client       TEXT,
-     oauth_client_owner TEXT,
-     oauth_scope        TEXT,
-     expires_at         INTEGER,
-     created_at         INTEGER NOT NULL,
-     PRIMARY KEY (owner, integration, name),
-     FOREIGN KEY (integration) REFERENCES integration(slug) ON DELETE CASCADE
-   )`,
-  `CREATE TABLE IF NOT EXISTS tool (
-     address          TEXT PRIMARY KEY NOT NULL,
-     owner            TEXT NOT NULL,
-     integration      TEXT NOT NULL,
-     connection       TEXT NOT NULL,
-     name             TEXT NOT NULL,
-     description      TEXT NOT NULL DEFAULT '',
-     read_only        INTEGER NOT NULL DEFAULT 0,
-     input_schema     TEXT,
-     output_schema    TEXT,
-     call             TEXT NOT NULL,
-     captured_at      INTEGER NOT NULL
-   )`,
-  `CREATE INDEX IF NOT EXISTS tool_by_connection
-     ON tool (integration, owner, connection)`,
-  `CREATE TABLE IF NOT EXISTS oauth_client (
-     owner                        TEXT NOT NULL,
-     slug                         TEXT NOT NULL,
-     integration                  TEXT NOT NULL,
-     client_id                    TEXT NOT NULL,
-     authorization_url            TEXT NOT NULL,
-     token_url                    TEXT NOT NULL,
-     registration_endpoint        TEXT,
-     issuer                       TEXT,
-     resource                     TEXT,
-     scopes                       TEXT NOT NULL DEFAULT '[]',
-     token_auth_methods           TEXT NOT NULL DEFAULT '[]',
-     created_at                   INTEGER NOT NULL,
-     PRIMARY KEY (owner, slug)
-   )`,
-  `CREATE TABLE IF NOT EXISTS oauth_flow (
-     state         TEXT PRIMARY KEY NOT NULL,
-     owner         TEXT NOT NULL,
-     integration   TEXT NOT NULL,
-     connection    TEXT NOT NULL,
-     template      TEXT NOT NULL,
-     client_owner  TEXT NOT NULL,
-     client_slug   TEXT NOT NULL,
-     code_verifier TEXT NOT NULL,
-     redirect_uri  TEXT NOT NULL,
-     resource      TEXT,
-     scopes        TEXT NOT NULL DEFAULT '[]',
-     created_at    INTEGER NOT NULL
-   )`,
-  `CREATE INDEX IF NOT EXISTS connection_by_integration
-     ON connection (integration, owner)`
-]
-
-export const applySchema = (
-  database: Database["Service"]
-): Effect.Effect<void, StorageError> =>
-  Effect.forEach(schemaStatements, (sql) => database.query({ sql }), { discard: true })
-
-export interface LibsqlDatabaseOptions {
-  readonly directory: string
-  readonly fileName?: string
-}
-
-export const libsqlLayer = (
-  options: LibsqlDatabaseOptions
-): Layer.Layer<Database, StorageError> =>
-  Layer.effect(
-    Database,
-    Effect.acquireRelease(
-      Effect.try({
-        try: () => {
-          mkdirSync(options.directory, { recursive: true, mode: 0o700 })
-          return createClient({
-            url: `file:${path.join(options.directory, options.fileName ?? "integrations.sqlite")}`
-          })
-        },
-        catch: (cause) => new StorageError({
-          message: `Could not open the integration database in ${options.directory}`,
-          cause
-        })
-      }),
-      (client) => Effect.sync(() => client.close())
-    ).pipe(
-      Effect.tap((client) => Effect.tryPromise({
-        try: async () => {
-          await client.execute("PRAGMA foreign_keys = ON")
-          await client.execute("PRAGMA journal_mode = WAL")
-        },
-        catch: (cause) => new StorageError({
-          message: "Could not configure the integration database",
-          cause
-        })
-      })),
-      Effect.map(libsqlDatabase),
-      Effect.tap(applySchema)
-    )
-  )
-
-export const memoryLayer: Layer.Layer<Database, StorageError> = Layer.effect(
-  Database,
-  Effect.acquireRelease(
-    Effect.sync(() => createClient({ url: ":memory:" })),
-    (client) => Effect.sync(() => client.close())
-  ).pipe(
-    Effect.map(libsqlDatabase),
-    Effect.tap(applySchema)
-  )
-)

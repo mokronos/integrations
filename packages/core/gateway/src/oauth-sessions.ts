@@ -1,7 +1,7 @@
-import { AuthMethod, TenantId, whenPresent } from "@integrations/contracts"
-import type { OAuthSessionState } from "@integrations/contracts"
+import { AuthMethod, OAuthSessionState, TenantId, whenPresent } from "@integrations/contracts"
 
-import { Context, Deferred, Effect, Exit, Schema, Scope } from "effect"
+import { Clock, Context, Deferred, Effect, Exit, Schema, Scope } from "effect"
+import type { SqlClient } from "effect/unstable/sql"
 import { webCrypto } from "@integrations/contracts"
 import { completeOAuthFlow } from "@integrations/integrations"
 import {
@@ -55,6 +55,96 @@ export interface OAuthSessionStore {
   deleteState(state: string): Effect.Effect<void, OAuthSessionError>
 }
 
+const sessionTtlMs = 24 * 60 * 60 * 1000
+
+const StoredSessionRow = Schema.Struct({
+  id: Schema.String,
+  integration: Schema.String,
+  connection_name: Schema.String,
+  status_json: Schema.fromJsonString(OAuthSessionState),
+  request_json: Schema.fromJsonString(OAuthSessionRequest),
+  created_at: Schema.Number
+})
+const decodeStoredSessions = Schema.decodeUnknownEffect(Schema.Array(StoredSessionRow))
+const StateOwnerRow = Schema.Struct({ session_id: Schema.String, created_at: Schema.Number })
+const decodeStateOwners = Schema.decodeUnknownEffect(Schema.Array(StateOwnerRow))
+const encodeRequestJson = Schema.encodeSync(Schema.fromJsonString(OAuthSessionRequest))
+
+/**
+ * Sessions in the gateway's own tables, so a flow started on one instance
+ * completes on another and survives a restart.
+ */
+export const sqlOAuthSessionStore = (sql: SqlClient.SqlClient): OAuthSessionStore => {
+  const operation = <A, E>(name: string, effect: Effect.Effect<A, E>): Effect.Effect<A, OAuthSessionError> =>
+    effect.pipe(
+      Effect.mapError((cause) => new OAuthSessionError({ operation: name, cause })),
+      Effect.withSpan(`OAuthSessionStore.${name}`)
+    )
+
+  return {
+    put: (session) => operation("put", Effect.gen(function*() {
+      yield* sql.unsafe(
+        `INSERT INTO gateway_oauth_session (id, integration, connection_name, status_json, request_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET
+           integration = excluded.integration,
+           connection_name = excluded.connection_name,
+           status_json = excluded.status_json,
+           request_json = excluded.request_json`,
+        [
+          session.id,
+          session.integration,
+          session.connection,
+          JSON.stringify(session.state),
+          encodeRequestJson(session.request),
+          yield* Clock.currentTimeMillis
+        ]
+      )
+    })),
+
+    get: (id) => operation("get", Effect.gen(function*() {
+      const rows = yield* decodeStoredSessions(yield* sql.unsafe(
+        `SELECT id, integration, connection_name, status_json, request_json, created_at
+         FROM gateway_oauth_session WHERE id = ?`,
+        [id]
+      ))
+      const row = rows[0]
+      if (row === undefined) return undefined
+      if ((yield* Clock.currentTimeMillis) - row.created_at > sessionTtlMs) return undefined
+      return {
+        id: row.id,
+        integration: row.integration,
+        connection: row.connection_name,
+        request: row.request_json,
+        ...whenPresent("bindingTenant", row.request_json.bindingTenant),
+        state: row.status_json
+      } satisfies OAuthSession
+    })),
+
+    putState: (state, sessionId) => operation("putState", Effect.gen(function*() {
+      yield* sql.unsafe(
+        `INSERT INTO gateway_oauth_state (state, session_id, created_at) VALUES (?, ?, ?)
+         ON CONFLICT (state) DO UPDATE SET session_id = excluded.session_id`,
+        [state, sessionId, yield* Clock.currentTimeMillis]
+      )
+    })),
+
+    findState: (state) => operation("findState", Effect.gen(function*() {
+      const rows = yield* decodeStateOwners(yield* sql.unsafe(
+        "SELECT session_id, created_at FROM gateway_oauth_state WHERE state = ?",
+        [state]
+      ))
+      const owner = rows[0]
+      if (owner === undefined) return undefined
+      if ((yield* Clock.currentTimeMillis) - owner.created_at > sessionTtlMs) return undefined
+      return owner.session_id
+    })),
+
+    deleteState: (state) => operation("deleteState",
+      Effect.asVoid(sql.unsafe("DELETE FROM gateway_oauth_state WHERE state = ?", [state])))
+  }
+}
+
 export interface OAuthSessions {
   start(
     input: OAuthSessionRequest & {
@@ -78,7 +168,7 @@ export interface OAuthSessionsOptions {
   readonly publicUrl?: string
   readonly publicUrlOf?: () => string | undefined
   readonly store?: OAuthSessionStore
-  readonly onConnected?: (session: OAuthSession) => Promise<void>
+  readonly onConnected?: (session: OAuthSession) => Effect.Effect<void, OAuthSessionError>
 }
 
 const setupUrl = (publicUrl: string, session: string): string => {
@@ -136,12 +226,6 @@ export const createOAuthSessions = (
     yield* store.put({ ...existing, state })
   })
 
-  const external = <A>(operation: string, call: () => Promise<A>) =>
-    Effect.tryPromise({
-      try: call,
-      catch: (cause) => new OAuthSessionError({ operation, cause })
-    })
-
   const authorize = Effect.fn("OAuthSession.authorize")(function*(
     id: string,
     input: OAuthSessionRequest,
@@ -189,7 +273,7 @@ export const createOAuthSessions = (
         }
         yield* store.put(connected)
         if (options.onConnected !== undefined) {
-          yield* external("bindConnectedTools", () => options.onConnected!(connected))
+          yield* options.onConnected(connected)
         }
         return connected
       }
@@ -223,7 +307,7 @@ export const createOAuthSessions = (
             yield* finish(id, { status: "connected", connection })
             const session = yield* store.get(id)
             if (session !== undefined && options.onConnected !== undefined) {
-              yield* external("bindConnectedTools", () => options.onConnected!(session))
+              yield* options.onConnected(session)
             }
           }),
         onFailure: (failure) => finish(id, { status: "failed", message: failure.message })
@@ -294,7 +378,7 @@ export const createOAuthSessions = (
         yield* finish(id, { status: "connected", connection: result.success })
         const completed = yield* store.get(id)
         if (completed !== undefined && options.onConnected !== undefined) {
-          yield* external("bindConnectedTools", () => options.onConnected!(completed))
+          yield* options.onConnected(completed)
         }
       } else {
         yield* finish(id, { status: "failed", message: result.failure.message })

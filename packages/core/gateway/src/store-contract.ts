@@ -126,7 +126,6 @@ export interface GatewayOverviewCounts {
  * runs on a SqlClient, so there is no promise boundary to lift over.
  */
 export interface GatewayStore {
-  readonly databasePath: string
 
   createTenant(input?: CreateTenantInput): Effect.Effect<Tenant, GatewayStoreError>
   listTenants(): Effect.Effect<ReadonlyArray<Tenant>, GatewayStoreError>

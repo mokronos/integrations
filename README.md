@@ -18,6 +18,7 @@ key and invoke logical `{ alias, tool }` addresses through the HTTP API.
 | `apps/ts/` | `@mokronos/integrations-client`, the thin TypeScript gateway client |
 | `apps/web/` | Browser control plane |
 | `apps/host-cloudflare/` | Cloudflare Worker host |
+| `apps/platform-demo/` | An application embedding the gateway core in-process, on its own database |
 | `packages/integrations/` | The integration host: MCP and OpenAPI catalog, connections, tools |
 | `packages/contracts/` | Shared vocabulary and wire contracts |
 
@@ -94,6 +95,19 @@ That reinstalls the `i` and `ii` shims, stops the gateway that is running —
 service unit or a `serve` started by hand — and starts one from these sources on
 the same port. A gateway keeps the modules Bun loaded at startup, so one left
 running across a change serves the older wire shape to newly started clients.
+
+## Embedding
+
+An application that owns its process and database does not need the HTTP
+API to reach the gateway. `gatewayCoreLayer` from `@integrations/gateway-api`
+provides the store, the integration host, and OAuth sessions as Effect
+services on whatever `SqlClient` the application supplies. From there
+`listEffectiveTools` returns an agent's tools with schemas and
+`invokeAsClient` executes under the same policy, approval, and audit path the
+`/v1/execute` route uses. Both packages export their Drizzle schemas under
+`./schema`, so the application's migration pipeline can carry the gateway's
+tables; pass `migrate: false` and the gateway trusts the tables are there.
+`apps/platform-demo/` is the smallest working example.
 
 ## Clients
 

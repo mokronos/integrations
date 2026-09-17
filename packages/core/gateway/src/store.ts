@@ -2,10 +2,10 @@ import { mkdirSync } from "node:fs"
 import path from "node:path"
 import type { InValue, Row } from "@libsql/client"
 import { LibsqlClient } from "@effect/sql-libsql"
-import { Clock, Context, Effect, Exit, Layer, Scope } from "effect"
+import { Clock, Context, Effect, Layer } from "effect"
 import { Reactivity } from "effect/unstable/reactivity"
 import { SqlClient, SqlError } from "effect/unstable/sql"
-import type { Encryption } from "./crypto.ts"
+import type { Encryption } from "@integrations/integrations"
 import { webCrypto } from "@integrations/contracts"
 import {
   AccessProfileId,
@@ -25,6 +25,7 @@ import type {
   Client,
   PendingApproval
 } from "./domain.ts"
+import { applyIntegrationMigrations } from "@integrations/integrations"
 import { applyGatewayMigrations } from "./migrate.ts"
 
 import {
@@ -48,31 +49,24 @@ import {
   type GatewayStore,
 } from "./store-contract.ts"
 
+export interface GatewayStoreOptions {
+  readonly encryption: Encryption
+  /** Whether opening the store brings the tables up to date. Off when the host owns migrations. */
+  readonly migrate?: boolean
+}
+
 export class GatewayStoreService extends Context.Service<
   GatewayStoreService,
   GatewayStore
 >()("@integrations/gateway-core/GatewayStore") {
   static readonly layer = (
-    databasePath: string,
-    encryption?: Encryption,
-    options?: GatewayStoreOptions
-  ): Layer.Layer<GatewayStoreService, GatewayStoreError> =>
-    Layer.effect(
-      GatewayStoreService,
-      Effect.acquireRelease(
-        createGatewayStore(databasePath, encryption, options),
-        (store) =>
-          store.close().pipe(Effect.catch((failure) =>
-            Effect.logWarning(`The gateway store did not close cleanly: ${failure.message}`).pipe(
-              Effect.annotateLogs({ operation: "GatewayStore.close" })
-            )))
-      )
-    )
+    options: GatewayStoreOptions
+  ): Layer.Layer<GatewayStoreService, GatewayStoreError, SqlClient.SqlClient> =>
+    Layer.effect(GatewayStoreService, createGatewayStore(options))
 }
 
 /** The current time, read from Effect's clock so tests can govern it. */
 const now: Effect.Effect<number> = Clock.currentTimeMillis
-const identity = (text: string): string => text
 
 const bootstrapDefaultTenant = Effect.fn("GatewayStore.bootstrap")(function*(
   sql: SqlClient.SqlClient
@@ -133,11 +127,14 @@ const auditFilter = (
 }
 
 const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
-  databasePath: string,
-  encryption?: Encryption
+  options: GatewayStoreOptions
 ): Effect.fn.Return<GatewayStore, SqlError.SqlError, SqlClient.SqlClient> {
   const sql = yield* SqlClient.SqlClient
-  yield* applyGatewayMigrations(sql)
+  const { encryption } = options
+  if (options.migrate !== false) {
+    yield* applyIntegrationMigrations(sql)
+    yield* applyGatewayMigrations(sql)
+  }
   yield* bootstrapDefaultTenant(sql)
 
   const all = (
@@ -185,10 +182,8 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
       return toClient(row)
     })
 
-  const sealText = (text: string): string =>
-    encryption === undefined ? text : encryption.seal(text)
-  const openApproval = (row: Row): PendingApproval =>
-    toApproval(row, encryption === undefined ? identity : encryption.open)
+  const sealText = (text: string): string => encryption.seal(text)
+  const openApproval = (row: Row): PendingApproval => toApproval(row, encryption.open)
 
   const requireSession = (tokenHash: SessionTokenHash) =>
     Effect.gen(function*() {
@@ -210,7 +205,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
         AND ((arguments_lookup IS NOT NULL AND arguments_lookup = ?)
           OR (arguments_lookup IS NULL AND arguments = ?)) AND collected_at IS NULL`,
       args: [input.tenantId, input.clientId, input.alias, input.approvalPolicyId, input.accessProfileId,
-        input.tool, encryption === undefined ? canonical : encryption.lookup(canonical), canonical]
+        input.tool, encryption.lookup(canonical), canonical]
     }
   }
 
@@ -225,8 +220,6 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
     })
 
   return {
-    databasePath,
-
     createTenant: (input) => operation("createTenant", Effect.gen(function*() {
       const id = input?.id ?? TenantId.make(yield* Effect.orDie(webCrypto.randomUUIDv4))
       const name = input?.name ?? "Untitled"
@@ -722,7 +715,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
         tool: ToolName.make(String(row["tool"])),
         expiresAt: new Date(Number(row["expires_at"])),
         url: String(row["url"]),
-        signingSecret: encryption === undefined ? String(row["signing_secret"]) : encryption.open(String(row["signing_secret"]))
+        signingSecret: encryption.open(String(row["signing_secret"]))
       }))
     })),
 
@@ -1041,7 +1034,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
           input.alias,
           input.tool,
           sealText(canonical),
-          encryption === undefined ? null : encryption.lookup(canonical),
+          encryption.lookup(canonical),
           createdAt,
           millis(input.expiresAt),
           ...match.args
@@ -1281,17 +1274,15 @@ const operation = <Success>(
     Effect.withSpan(`GatewayStore.${name}`)
   )
 
-export interface GatewayStoreOptions {
-  /** Where the gateway's tables live, when it is not this machine's file. */
-  readonly sqlClient?: Layer.Layer<SqlClient.SqlClient>
-}
-
 /** The gateway's own SQLite file, opened with the pragmas it relies on. */
 export const libsqlLayer = (databasePath: string): Layer.Layer<SqlClient.SqlClient> =>
   Layer.unwrap(Effect.sync(() => {
     mkdirSync(path.dirname(databasePath), { recursive: true, mode: 0o700 })
     return LibsqlClient.layer({ url: `file:${databasePath}` })
-  })).pipe(Layer.provide(Reactivity.layer))
+  })).pipe(
+    Layer.tap((context) => Effect.orDie(applyPragmas().pipe(Effect.provide(context)))),
+    Layer.provide(Reactivity.layer)
+  )
 
 const applyPragmas = Effect.fn("GatewayStore.pragmas")(function*() {
   const sql = yield* SqlClient.SqlClient
@@ -1299,30 +1290,9 @@ const applyPragmas = Effect.fn("GatewayStore.pragmas")(function*() {
   yield* sql.unsafe("PRAGMA foreign_keys = ON")
 })
 
-export const createGatewayStore = Effect.fn("GatewayStore.open")(function*(
-  databasePath: string,
-  encryption?: Encryption,
-  options: GatewayStoreOptions = {}
-): Effect.fn.Return<GatewayStore, GatewayStoreError> {
-  // The store owns the connection's scope so that closing the store closes
-  // the client, which is the lifecycle every caller already relies on. The
-  // layer is built into that scope rather than around a single effect, so the
-  // connection outlives the call that opened it.
-  const scope = yield* Scope.make()
-  const client = options.sqlClient ?? libsqlLayer(databasePath)
-  const store = yield* Effect.gen(function*() {
-    const context = yield* Layer.buildWithScope(client, scope)
-    return yield* operation(
-      "open",
-      Effect.provide(
-        Effect.andThen(applyPragmas(), createGatewayStoreDriver(databasePath, encryption)),
-        context
-      )
-    )
-  }).pipe(Effect.onError(() => Scope.close(scope, Exit.void)))
-
-  return {
-    ...store,
-    close: () => Effect.andThen(store.close(), Scope.close(scope, Exit.void))
-  }
-})
+/** The gateway's store on whatever `SqlClient` is in context. */
+export const createGatewayStore = (
+  options: GatewayStoreOptions
+): Effect.Effect<GatewayStore, GatewayStoreError, SqlClient.SqlClient> =>
+  Effect.flatMap(SqlClient.SqlClient, (sql) =>
+    operation("open", Effect.provideService(createGatewayStoreDriver(options), SqlClient.SqlClient, sql)))

@@ -282,3 +282,18 @@ export const gatewayToolSnapshot = sqliteTable("gateway_tool_snapshot", {
     columns: [table.tenantId, table.integration, table.connectionName, table.tool]
   })
 ])
+
+export const gatewayOauthSession = sqliteTable("gateway_oauth_session", {
+  id: text("id").primaryKey(),
+  integration: text("integration").notNull(),
+  connectionName: text("connection_name").notNull(),
+  statusJson: text("status_json").notNull(),
+  requestJson: text("request_json").notNull(),
+  createdAt: createdAt()
+})
+
+export const gatewayOauthState = sqliteTable("gateway_oauth_state", {
+  state: text("state").primaryKey(),
+  sessionId: text("session_id").notNull(),
+  createdAt: createdAt()
+})

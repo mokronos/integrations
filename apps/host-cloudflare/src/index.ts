@@ -1,21 +1,16 @@
 import { createGatewayService, type GatewayService } from "@integrations/gateway-api"
 import {
   createEncryption,
-  GatewayStoreService,
   deliverDueApprovalNotifications,
-  runMaintenance,
-  type Encryption
+  runMaintenance
 } from "@integrations/gateway-core"
 import type { D1Database } from "@cloudflare/workers-types"
-import type { AssetsFetcherLike, D1DatabaseLike, ScheduledEventLike } from "./cloudflare.ts"
-import { Layer } from "effect"
-import { SqlClient } from "effect/unstable/sql"
-import { Effect } from "effect"
+import type { AssetsFetcherLike, ScheduledEventLike } from "./cloudflare.ts"
+import { Effect, Layer } from "effect"
+import type { SqlClient } from "effect/unstable/sql"
 import { decodeBase64UrlField } from "@integrations/contracts"
 import { FetchHttpClient } from "effect/unstable/http"
 import { D1Client } from "@effect/sql-d1"
-import { d1IntegrationStorage } from "./integration-storage-d1.ts"
-import { D1OAuthSessionStore } from "./oauth-store-d1.ts"
 
 export const masterKeyFromEnv = (envValue: string | undefined): Uint8Array => {
   if (envValue === undefined || envValue.length === 0) {
@@ -34,15 +29,8 @@ export const masterKeyFromEnv = (envValue: string | undefined): Uint8Array => {
   return key
 }
 
-const resolveMasterKey = async (
-  envValue: string | undefined
-): Promise<{ readonly key: Uint8Array; readonly encryption: Encryption }> => {
-  const key = masterKeyFromEnv(envValue)
-  return { key, encryption: createEncryption(key) }
-}
-
 export interface Env {
-  readonly DB: D1Database & D1DatabaseLike
+  readonly DB: D1Database
   readonly ASSETS?: AssetsFetcherLike
   readonly INTEGRATIONS_MASTER_KEY?: string
   readonly INTEGRATIONS_PUBLIC_URL?: string
@@ -100,19 +88,12 @@ const d1Layer = (db: D1Database): Layer.Layer<SqlClient.SqlClient> =>
 
 const getService = (env: Env): Promise<GatewayService> => {
   servicePromise ??= (async () => {
-    const { key, encryption } = await resolveMasterKey(env.INTEGRATIONS_MASTER_KEY)
-    const database = env.DB
     return await createGatewayService({
       home: "/integrations-worker",
       httpClient: FetchHttpClient.layer,
-      storeLayer: GatewayStoreService.layer(
-        "d1:integrations-gateway",
-        encryption,
-        { sqlClient: d1Layer(database) }
-      ),
-      integrationStorage: d1IntegrationStorage(database, key),
-      oauthStore: new D1OAuthSessionStore(database),
-      externalMaintenance: true,
+      sqlClient: d1Layer(env.DB),
+      encryption: createEncryption(masterKeyFromEnv(env.INTEGRATIONS_MASTER_KEY)),
+      maintenance: false,
       secureCookies: true,
       allowSignup: env.INTEGRATIONS_ALLOW_SIGNUP === "1",
       ...googleIdentityOption(

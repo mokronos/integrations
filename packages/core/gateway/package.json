@@ -27,22 +27,28 @@
       "development": "./test/fixtures.ts",
       "bun": "./test/fixtures.ts",
       "default": "./test/fixtures.ts"
+    },
+    "./schema": {
+      "development": "./src/db/schema.ts",
+      "bun": "./src/db/schema.ts",
+      "types": "./dist/db/schema.d.ts",
+      "default": "./dist/db/schema.js"
     }
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
-    "db:generate": "drizzle-kit generate && bun run scripts/embed-migrations.ts"
+    "db:generate": "drizzle-kit generate && bun run ../../../scripts/embed-migrations.ts --package . --out src/store-migrations.gen.ts --name gatewayMigrations --type-import @integrations/integrations"
   },
   "dependencies": {
     "@effect/sql-libsql": "catalog:",
-    "@libsql/client": "catalog:",
     "@integrations/contracts": "workspace:*",
     "@integrations/integrations": "workspace:*",
+    "@libsql/client": "catalog:",
     "@mokronos/integrations-client": "workspace:*",
+    "drizzle-orm": "catalog:",
     "effect": "catalog:"
   },
   "devDependencies": {
-    "drizzle-kit": "catalog:",
-    "drizzle-orm": "catalog:"
+    "drizzle-kit": "catalog:"
   }
 }

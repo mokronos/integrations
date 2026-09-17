@@ -109,7 +109,6 @@ describe("gateway store", () => {
   it.effect("creates the database directory it was pointed at", () =>
     Effect.gen(function*() {
       const gateway = yield* store
-      expect(gateway.databasePath).toContain(path.join("nested", "gateway.sqlite"))
       expect(yield* gateway.listClients(defaultTenantId)).toEqual([])
     }).pipe(Effect.provide(testServices)))
 

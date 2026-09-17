@@ -111,7 +111,7 @@ const fakeAuth = (behaviour: {
 
 describe("remote oauth flows", () => {
   const remote = (fake: ReturnType<typeof fakeAuth>, options: {
-    readonly onConnected?: (session: { readonly id: string }) => Promise<void>
+    readonly onConnected?: (session: { readonly id: string }) => Effect.Effect<void>
   } = {}) =>
     createOAuthSessions(fake.host, {
       publicUrl: "https://gw.example.com",
@@ -225,7 +225,7 @@ describe("remote oauth flows", () => {
       const fake = fakeAuth()
       const completed: Array<string> = []
       const sessions = remote(fake, {
-        onConnected: async (session) => void completed.push(session.id)
+        onConnected: (session) => Effect.sync(() => void completed.push(session.id))
       })
       yield* sessions.start(startGoogle)
 

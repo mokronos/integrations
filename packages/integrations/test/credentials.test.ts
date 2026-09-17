@@ -1,106 +1,52 @@
 import { describe, expect, it } from "@effect/vitest"
-import { readFileSync } from "node:fs"
-import path from "node:path"
 import { randomBytes } from "node:crypto"
-import { Effect, Encoding, Option } from "effect"
-import { utf8Bytes } from "@integrations/contracts"
+import { Effect, Layer, Option, Schema } from "effect"
+import { SqlClient } from "effect/unstable/sql"
 import {
   connectionCredentialKey,
   CredentialStore,
   oauthClientCredentialKey,
-  openValue,
   readTokens,
-  sealValue,
   writeTokens
 } from "../src/storage/credentials.ts"
-import { temporaryDirectory, testServices } from "./fixtures.ts"
+import { createEncryption } from "../src/storage/encryption.ts"
+import { temporarySqlLayer } from "../src/runtime.ts"
 
-describe("sealing", () => {
-  it("round-trips a value under its own key", () => {
-    const key = randomBytes(32)
-    const sealed = sealValue(key, "s3cret")
-    expect(sealed).toMatch(/^v1\./)
-    expect(sealed).not.toContain("s3cret")
-    expect(openValue(key, sealed)).toBe("s3cret")
-  })
+const sqlStore = CredentialStore.sqlLayer(createEncryption(randomBytes(32))).pipe(
+  Layer.provideMerge(temporarySqlLayer)
+)
 
-  it("refuses a value sealed under a different key", () => {
-    const sealed = sealValue(randomBytes(32), "s3cret")
-    expect(() => openValue(randomBytes(32), sealed)).toThrow()
-  })
+const decodeSealed = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ key: Schema.String, sealed: Schema.String })))
 
-  it("refuses a tampered envelope", () => {
-    const key = randomBytes(32)
-    const [version, vector, tag, ciphertext] = sealValue(key, "s3cret").split(".")
-    const swapped = [version, vector, tag, Encoding.encodeBase64Url(utf8Bytes("other"))].join(".")
-    expect(() => openValue(key, swapped)).toThrow()
-    expect(() => openValue(key, `v2.${vector}.${tag}.${ciphertext}`)).toThrow()
-  })
-
-  it("produces a different envelope each time for the same value", () => {
-    const key = randomBytes(32)
-    expect(sealValue(key, "same")).not.toBe(sealValue(key, "same"))
-  })
-})
-
-describe("the file store", () => {
-  it.effect("writes nothing readable to disk", () =>
+describe("the sql store", () => {
+  it.effect("writes nothing readable to the table", () =>
     Effect.gen(function*() {
-      const directory = yield* temporaryDirectory("credentials-")
+      const store = yield* CredentialStore
+      const sql = yield* SqlClient.SqlClient
+      yield* store.set(connectionCredentialKey("org.notes.primary"), "s3cret")
 
-      yield* Effect.gen(function*() {
-        const store = yield* CredentialStore
-        yield* store.set(connectionCredentialKey("org.notes.primary"), "s3cret")
-      }).pipe(Effect.provide(CredentialStore.fileLayer(directory)))
-
-      const onDisk = readFileSync(path.join(directory, "credentials.json"), "utf8")
-      expect(onDisk).not.toContain("s3cret")
-      expect(onDisk).toContain("connection:org.notes.primary")
-    }).pipe(Effect.provide(testServices)))
+      const rows = decodeSealed(yield* sql.unsafe("SELECT key, sealed FROM credential"))
+      expect(rows.map((row) => row.key)).toEqual(["connection:org.notes.primary"])
+      expect(rows[0]?.sealed).not.toContain("s3cret")
+    }).pipe(Effect.provide(sqlStore)))
 
   it.effect("reads back what it wrote, and forgets what it removed", () =>
     Effect.gen(function*() {
-      const directory = yield* temporaryDirectory("credentials-")
+      const store = yield* CredentialStore
+      const key = connectionCredentialKey("org.notes.primary")
+      yield* store.set(key, "first")
+      const first = yield* store.get(key)
+      yield* store.set(key, "second")
+      const second = yield* store.get(key)
+      yield* store.remove(key)
+      const gone = yield* store.get(key)
 
-      const outcome = yield* Effect.gen(function*() {
-        const store = yield* CredentialStore
-        const key = connectionCredentialKey("org.notes.primary")
-        yield* store.set(key, "first")
-        const first = yield* store.get(key)
-        yield* store.set(key, "second")
-        const second = yield* store.get(key)
-        yield* store.remove(key)
-        const gone = yield* store.get(key)
-        return {
-          first: Option.getOrNull(first),
-          second: Option.getOrNull(second),
-          gone: Option.isNone(gone)
-        }
-      }).pipe(Effect.provide(CredentialStore.fileLayer(directory)))
-
-      expect(outcome).toEqual({ first: "first", second: "second", gone: true })
-    }).pipe(Effect.provide(testServices)))
-
-  it.effect("keeps concurrent writes from dropping each other", () =>
-    Effect.gen(function*() {
-      const directory = yield* temporaryDirectory("credentials-")
-
-      const held = yield* Effect.gen(function*() {
-        const store = yield* CredentialStore
-        const keys = Array.from(
-          { length: 12 },
-          (_unused, index) => connectionCredentialKey(`org.notes.c${index}`)
-        )
-        yield* Effect.forEach(keys, (key) => store.set(key, `value-${key}`), {
-          concurrency: "unbounded",
-          discard: true
-        })
-        const values = yield* Effect.forEach(keys, (key) => store.get(key))
-        return values.filter(Option.isSome).length
-      }).pipe(Effect.provide(CredentialStore.fileLayer(directory)))
-
-      expect(held).toBe(12)
-    }).pipe(Effect.provide(testServices)))
+      expect({
+        first: Option.getOrNull(first),
+        second: Option.getOrNull(second),
+        gone: Option.isNone(gone)
+      }).toEqual({ first: "first", second: "second", gone: true })
+    }).pipe(Effect.provide(sqlStore)))
 
   it("separates a client's secret from a connection's tokens", () => {
     expect(String(connectionCredentialKey("tools.notes.org.primary")))

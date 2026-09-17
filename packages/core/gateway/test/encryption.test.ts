@@ -9,7 +9,6 @@ import {
   Alias,
   ConnectionName,
   createEncryption,
-  createGatewayStore,
   defaultTenantId,
   IntegrationSlug,
   newApprovalId,
@@ -22,7 +21,7 @@ import {
 } from "../src/index.ts"
 import type { GatewayStore } from "../src/index.ts"
 import { canonicalArguments } from "../src/domain.ts"
-import { temporaryDirectory, testServices } from "./fixtures.ts"
+import { openStore, temporaryDirectory, testServices } from "./fixtures.ts"
 
 class KeyRefused extends Schema.TaggedError<KeyRefused>()("KeyRefused", {
   message: Schema.String
@@ -82,16 +81,10 @@ describe("payload sealing", () => {
 })
 
 describe("master key resolution", () => {
-  it.effect("is absent when nothing is configured", () =>
-    Effect.gen(function*() {
-      expect(yield* resolve({})).toBeUndefined()
-    }))
-
   it.effect("uses an environment key of exactly 32 bytes", () =>
     Effect.gen(function*() {
       const key = Encoding.encodeBase64Url(randomBytes(32))
       const encryption = yield* resolve({ envValue: key })
-      if (encryption === undefined) throw new Error("expected an encryption instance")
       expect(encryption.open(encryption.seal("round trip"))).toBe("round trip")
     }))
 
@@ -122,9 +115,6 @@ describe("master key resolution", () => {
       const first = yield* resolve({ keyFile })
       const second = yield* resolve({ keyFile })
 
-      if (first === undefined || second === undefined) {
-        throw new Error("expected both resolutions to produce instances")
-      }
       expect(second.open(first.seal("persist"))).toBe("persist")
     }).pipe(Effect.provide(testServices)))
 
@@ -136,7 +126,6 @@ describe("master key resolution", () => {
       const environmentKey = Encoding.encodeBase64Url(randomBytes(32))
 
       const encryption = yield* resolve({ envValue: environmentKey, keyFile })
-      if (encryption === undefined) throw new Error("expected an encryption instance")
       const sealed = encryption.seal("decides")
 
       expect(createEncryption(decodeBase64UrlField("key", environmentKey)).open(sealed))
@@ -154,17 +143,10 @@ describe("the encrypted store", () => {
   }
 
   /** A store whose rows can also be read raw, to see what actually landed. */
-  const encryptedStore = Effect.fnUntraced(function*(options: { readonly sealed: boolean } = {
-    sealed: true
-  }) {
+  const encryptedStore = Effect.fnUntraced(function*() {
     const directory = yield* temporaryDirectory("gateway-crypto-")
     const databasePath = path.join(directory, "gateway.sqlite")
-    const store = yield* Effect.acquireRelease(
-      options.sealed
-        ? createGatewayStore(databasePath, createEncryption(randomBytes(32)))
-        : createGatewayStore(databasePath),
-      (store) => Effect.orDie(store.close())
-    )
+    const store = yield* openStore(directory)
     const raw = yield* Effect.acquireRelease(
       Effect.sync(() => openRawDatabase({ url: `file:${databasePath}` })),
       (raw) => Effect.sync(() => raw.close())
@@ -335,26 +317,5 @@ describe("the encrypted store", () => {
       })
       expect(metAgain?.id).toBe("legacy-approval")
       expect(metAgain?.arguments).toEqual({ to: "old@example.com" })
-    }).pipe(Effect.provide(testServices)))
-
-  it.effect("a store without a key keeps storing plaintext", () =>
-    Effect.gen(function*() {
-      const { column, store } = yield* encryptedStore({ sealed: false })
-      const { accessProfile, approvalPolicy, client } = yield* seedClient(store)
-
-      const approval = yield* store.createApproval({
-        id: yield* newApprovalId,
-        tenantId: defaultTenantId,
-        clientId: client.id,
-        approvalPolicyId: approvalPolicy.id,
-        accessProfileId: accessProfile.id,
-        alias: Alias.make("gmail-work"),
-        tool: ToolName.make("sendEmail"),
-        arguments: { visible: true },
-        expiresAt: new Date((yield* Clock.currentTimeMillis) + 60_000)
-      })
-
-      expect(yield* column("gateway_pending_approval", "arguments", "id", approval.id))
-        .toBe('{"visible":true}')
     }).pipe(Effect.provide(testServices)))
 })

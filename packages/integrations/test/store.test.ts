@@ -1,11 +1,12 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Option } from "effect"
 import { CatalogStore } from "../src/catalog/store.ts"
-import { memoryLayer } from "../src/storage/database.ts"
+import { Database } from "../src/storage/database.ts"
+import { temporarySqlLayer } from "../src/runtime.ts"
 import { AuthTemplateSlug, OAuthClientSlug, OAuthState } from "../src/catalog/ids.ts"
 import { ConnectionName, IntegrationSlug } from "@integrations/contracts"
 
-const catalog = CatalogStore.layer.pipe(Layer.provide(memoryLayer))
+const catalog = CatalogStore.layer.pipe(Layer.provide(Database.layer), Layer.provide(temporarySqlLayer))
 
 const notes = IntegrationSlug.make("notes")
 

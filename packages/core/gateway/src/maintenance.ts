@@ -1,4 +1,4 @@
-import { Clock, Effect, Fiber, Schedule } from "effect"
+import { Clock, Effect, Schedule } from "effect"
 import type { GatewayStore, GatewayStoreError } from "./store.ts"
 
 export type MaintenanceResult = {
@@ -21,24 +21,20 @@ export const runMaintenance = Effect.fn("Maintenance.run")(function*(
   }
 })
 
-export interface MaintenanceLoop {
-  stop(): void
-}
-
-export const startMaintenanceLoop = (
+/** Sweeps forever on the interval; a failed sweep is logged and the next one still runs. */
+export const maintenanceLoop = <E, R>(
   store: GatewayStore,
   options: {
     readonly interval?: Schedule.Schedule<unknown>
-    readonly onError?: (error: GatewayStoreError) => void
-    readonly afterSweep?: () => Effect.Effect<void, GatewayStoreError>
-  } = {}
-): MaintenanceLoop => {
-  const sweep = runMaintenance(store).pipe(
-    Effect.andThen(options.afterSweep?.() ?? Effect.void),
-    Effect.catch((error) => Effect.sync(() => options.onError?.(error)))
+    readonly afterSweep: Effect.Effect<void, E, R>
+  }
+): Effect.Effect<never, never, R> =>
+  runMaintenance(store).pipe(
+    Effect.andThen(options.afterSweep),
+    Effect.catchCause((cause) =>
+      Effect.logWarning("gateway maintenance sweep failed", cause).pipe(
+        Effect.annotateLogs({ operation: "Maintenance.sweep" })
+      )),
+    Effect.repeat(options.interval ?? Schedule.spaced("1 minute")),
+    Effect.andThen(Effect.never)
   )
-  const fiber = Effect.runFork(
-    Effect.repeat(sweep, options.interval ?? Schedule.spaced("1 minute"))
-  )
-  return { stop: () => Effect.runFork(Fiber.interrupt(fiber)) }
-}

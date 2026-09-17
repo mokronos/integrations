@@ -8,10 +8,11 @@ When im using these words im talking about the following:
 ## Development
 This project is in an early stage of development.
 - Don't create db migrations, if they aren't auto-generated
-  - The gateway schema is declared once, in `packages/core/gateway/db/schema.ts`.
-    Change it there and run `bun run db:generate`, which writes the SQL and
-    embeds it for the runtime. Never hand-edit `db/migrations/*.sql` or
-    `src/store-migrations.gen.ts`.
+  - Each package declares its tables once, in Drizzle: the gateway in
+    `packages/core/gateway/src/db/schema.ts`, the integration host in
+    `packages/integrations/src/db/schema.ts`. Change it there and run
+    `bun run db:generate` in that package, which writes the SQL and embeds it
+    for the runtime. Never hand-edit `db/migrations/*.sql` or a `*.gen.ts`.
 - Don't create any shims or backwards compatibility code
 
 ## Type Discipline

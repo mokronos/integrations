@@ -4,7 +4,7 @@ import { Crypto, DateTime, Duration, Effect, Schema } from "effect"
 import type { HttpClient } from "effect/unstable/http"
 import type { Integrations } from "@integrations/integrations"
 import { ToolAddress } from "@integrations/contracts"
-import { authorizeInvocation } from "./authorize.ts"
+import { authorizeClientInvocation, authorizeInvocation } from "./authorize.ts"
 import { defaultApprovalExpiryHours, defaultArgumentRetentionDays } from "./config.ts"
 import {
   aliasForConnection,
@@ -14,11 +14,13 @@ import {
 import type {
   Alias,
   ApprovalId,
+  Client,
   ConnectionName,
   Authorization,
   ConnectionRef,
   IntegrationSlug,
   PolicyDecision,
+  TenantId,
   ToolName
 } from "./domain.ts"
 import { newApprovalId, newAuditId } from "./keys.ts"
@@ -164,10 +166,11 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function*(
   return outcome
 })
 
-export const invokeThroughGateway = Effect.fn("Invocation.invokeThroughGateway")(function*(
+const settle = Effect.fn("Invocation.settle")(function*(
   dependencies: InvokeDependencies,
+  tenantId: TenantId,
+  authorization: Authorization,
   input: {
-    readonly secret: string
     readonly alias: Alias
     readonly tool: ToolName
     readonly arguments: Json
@@ -177,16 +180,10 @@ export const invokeThroughGateway = Effect.fn("Invocation.invokeThroughGateway")
   const retentionDays = dependencies.argumentRetentionDays ?? defaultArgumentRetentionDays
   const expiryHours = dependencies.approvalExpiryHours ?? defaultApprovalExpiryHours
 
-  const authorization = yield* authorizeInvocation(store, {
-    secret: input.secret,
-    alias: input.alias,
-    tool: input.tool
-  })
-
   if (authorization.status !== "authorized") {
     const reason = authorization.message
     yield* store.recordAudit({
-      tenantId: defaultTenantId,
+      tenantId,
       id: (yield* newAuditId),
       clientId: null,
       alias: input.alias,
@@ -218,6 +215,37 @@ export const invokeThroughGateway = Effect.fn("Invocation.invokeThroughGateway")
     authorization,
     input.arguments
   )
+})
+
+/** An invocation presented with an API key, as the HTTP route receives it. */
+export const invokeThroughGateway = Effect.fn("Invocation.invokeThroughGateway")(function*(
+  dependencies: InvokeDependencies,
+  input: {
+    readonly secret: string
+    readonly alias: Alias
+    readonly tool: ToolName
+    readonly arguments: Json
+  }
+): Effect.fn.Return<InvocationOutcome, GatewayStoreError, Crypto.Crypto | HttpClient.HttpClient> {
+  const authorization = yield* authorizeInvocation(dependencies.store, input)
+  return yield* settle(dependencies, defaultTenantId, authorization, input)
+})
+
+/**
+ * An invocation on behalf of a client the host already identified: the same
+ * policy, approval, and audit path, with no key to present or check.
+ */
+export const invokeAsClient = Effect.fn("Invocation.invokeAsClient")(function*(
+  dependencies: InvokeDependencies,
+  input: {
+    readonly client: Client
+    readonly alias: Alias
+    readonly tool: ToolName
+    readonly arguments: Json
+  }
+): Effect.fn.Return<InvocationOutcome, GatewayStoreError, Crypto.Crypto | HttpClient.HttpClient> {
+  const authorization = yield* authorizeClientInvocation(dependencies.store, input.client, input)
+  return yield* settle(dependencies, input.client.tenantId, authorization, input)
 })
 
 export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(function*(

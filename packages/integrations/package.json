@@ -33,23 +33,33 @@
       "bun": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./schema": {
+      "development": "./src/db/schema.ts",
+      "bun": "./src/db/schema.ts",
+      "types": "./dist/db/schema.d.ts",
+      "default": "./dist/db/schema.js"
     }
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "test:conformance": "bun --bun run --cwd ../.. vitest run packages/integrations/test/conformance/reference",
     "test:remote": "RUN_REMOTE_INTEGRATION_TESTS=1 bun --bun run --cwd ../.. vitest run packages/integrations/test/conformance/remote",
-    "prepublishOnly": "bun run build"
+    "prepublishOnly": "bun run build",
+    "db:generate": "drizzle-kit generate && bun run ../../scripts/embed-migrations.ts --package . --out src/storage/migrations.gen.ts --name integrationMigrations --type-import ./migrate.ts"
   },
   "dependencies": {
+    "@effect/sql-libsql": "catalog:",
+    "@integrations/contracts": "workspace:*",
     "@libsql/client": "catalog:",
     "@modelcontextprotocol/client": "2.0.0",
-    "@integrations/contracts": "workspace:*",
+    "drizzle-orm": "catalog:",
     "effect": "catalog:",
     "oas": "catalog:",
     "oas-normalize": "catalog:"
   },
   "devDependencies": {
-    "@modelcontextprotocol/server": "2.0.0"
+    "@modelcontextprotocol/server": "2.0.0",
+    "drizzle-kit": "catalog:"
   }
 }

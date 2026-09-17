@@ -22,26 +22,28 @@ export { classify } from "./classify.ts"
 
 export { BlobStore } from "./storage/blobs.ts"
 export type { BlobMetadata, StoredBlob } from "./storage/blobs.ts"
-export { applySchema, Database, libsqlLayer, memoryLayer, SqlValue } from "./storage/database.ts"
+export { Database, SqlValue } from "./storage/database.ts"
 export type { SqlRow, SqlStatement } from "./storage/database.ts"
 export {
   connectionCredentialKey,
   CredentialStore,
   oauthClientCredentialKey,
-  openValue,
-  sealValue,
   StoredTokens
 } from "./storage/credentials.ts"
+export { createEncryption } from "./storage/encryption.ts"
+export type { Encryption } from "./storage/encryption.ts"
+export { applyMigrations } from "./storage/migrate.ts"
+export type { Migration, MigrationSet } from "./storage/migrate.ts"
 
 export {
-  createIntegrationRuntime,
+  applyIntegrationMigrations,
   integrationLayer,
-  integrationServicesOf,
-  localLayer,
+  integrationMigrationSet,
+  temporarySqlLayer,
   stubbedLayer,
   unavailableHttpClientLayer
 } from "./runtime.ts"
-export type { IntegrationServices, IntegrationStorage } from "./runtime.ts"
+export type { IntegrationLayerOptions, IntegrationServices } from "./runtime.ts"
 export { listIntegrationOverviews } from "./overview.ts"
 export { installClassified, provisionIntegration } from "./provision.ts"
 export { validateIntegrationNode } from "./validate.ts"

@@ -2,7 +2,7 @@ import { Context, Crypto, Duration, Effect, Layer, Option } from "effect"
 import { RateLimiter } from "effect/unstable/persistence"
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { Authority } from "./middleware.ts"
-import { authenticateClient, authorizeClientCapability } from "@integrations/gateway-core"
+import { authenticateClient, authorizeClientCapability, GatewayStoreService } from "@integrations/gateway-core"
 import { SessionTokenHash } from "@integrations/gateway-core"
 import { hashSessionToken } from "@integrations/gateway-core"
 import { webCryptoLayer } from "@integrations/contracts"
@@ -124,12 +124,15 @@ export interface RateLimits {
 }
 
 export interface AuthorityOptions {
-  readonly store: GatewayStore
   readonly rateLimits?: RateLimits
 }
 
+interface ResolvedAuthority {
+  readonly store: GatewayStore
+}
+
 const resolveCaller = Effect.fn("authority.resolveCaller")(function*(
-  options: AuthorityOptions,
+  options: ResolvedAuthority,
   headers: Readonly<Record<string, string>>,
   context: RequestContext
 ) {
@@ -171,7 +174,7 @@ const resolveCaller = Effect.fn("authority.resolveCaller")(function*(
 })
 
 const admit = Effect.fn("authority.admit")(function*(
-  options: AuthorityOptions,
+  options: ResolvedAuthority,
   caller: Caller,
   access: Access,
   method: string,
@@ -228,10 +231,19 @@ const refusalOf = (
     )))
     : Effect.die(error)
 
-export const authorityLayer = (options: AuthorityOptions): Layer.Layer<Authority> =>
+/**
+ * The gateway's own notion of who is calling: its API keys, its dashboard
+ * session cookie, or the local host's borrowed credential. A host with its
+ * own identity provides another `Authority` in its place.
+ */
+export const authorityLayer = (
+  options: AuthorityOptions = {}
+): Layer.Layer<Authority, never, GatewayStoreService> =>
   Layer.effect(
     Authority,
     Effect.gen(function*() {
+      const store = yield* GatewayStoreService
+      const resolved: ResolvedAuthority = { store }
       const limits = options.rateLimits
       const crypto = yield* Crypto.Crypto
       const limiter = yield* RateLimiter.RateLimiter
@@ -258,7 +270,7 @@ export const authorityLayer = (options: AuthorityOptions): Layer.Layer<Authority
 
           const caller = unmetered
             ? ({ kind: "anonymous" } satisfies Caller)
-            : yield* resolveCaller(options, headers, context)
+            : yield* resolveCaller(resolved, headers, context)
 
           if (!unmetered && limits !== undefined) {
             const key = principalKey(caller)
@@ -274,7 +286,7 @@ export const authorityLayer = (options: AuthorityOptions): Layer.Layer<Authority
               RequiredAccess,
               () => RequiredAccess.defaultValue()
             )
-            yield* admit(options, caller, access, request.method, headers)
+            yield* admit(resolved, caller, access, request.method, headers)
           }
 
           return yield* Effect.provideService(httpEffect, Identity, caller)

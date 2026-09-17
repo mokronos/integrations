@@ -1,16 +1,8 @@
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto"
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  writeFileSync
-} from "node:fs"
-import path from "node:path"
-import { Context, Effect, Encoding, Layer, Option, Schema, Semaphore } from "effect"
-import { concatBytes, decodeBase64UrlField, utf8Bytes, utf8Text } from "@integrations/contracts"
-import { describeCause, StorageError } from "../errors.ts"
+import { Cause, Context, Effect, Layer, Option, Schema } from "effect"
+import { SqlClient } from "effect/unstable/sql"
+import type { SqlError } from "effect/unstable/sql"
+import { StorageError } from "../errors.ts"
+import type { Encryption } from "./encryption.ts"
 
 export const CredentialKey = Schema.String.check(Schema.isMinLength(1)).pipe(
   Schema.brand("CredentialKey")
@@ -34,6 +26,9 @@ export const StoredTokens = Schema.Struct({
 })
 export type StoredTokens = typeof StoredTokens.Type
 
+const SealedRow = Schema.Struct({ sealed: Schema.String })
+const decodeSealedRows = Schema.decodeUnknownEffect(Schema.Array(SealedRow))
+
 export class CredentialStore extends Context.Service<
   CredentialStore,
   {
@@ -42,8 +37,11 @@ export class CredentialStore extends Context.Service<
     readonly remove: (key: CredentialKey) => Effect.Effect<void, StorageError>
   }
 >()("@integrations/integrations/CredentialStore") {
-  static readonly fileLayer = (directory: string): Layer.Layer<CredentialStore> =>
-    Layer.effect(CredentialStore, Effect.sync(() => fileCredentialStore(directory)))
+  /** Credentials sealed at rest in the `credential` table of the host's `SqlClient`. */
+  static readonly sqlLayer = (
+    encryption: Encryption
+  ): Layer.Layer<CredentialStore, never, SqlClient.SqlClient> =>
+    Layer.effect(CredentialStore, Effect.map(SqlClient.SqlClient, (sql) => sqlCredentialStore(sql, encryption)))
 
   static readonly memoryLayer: Layer.Layer<CredentialStore> = Layer.effect(
     CredentialStore,
@@ -62,132 +60,46 @@ export class CredentialStore extends Context.Service<
   )
 }
 
-const CredentialFile = Schema.Record(Schema.String, Schema.String)
-type CredentialFile = typeof CredentialFile.Type
-
-const additionalData = utf8Bytes("@integrations/integrations/credentials/v1")
-
-const credentialKey = (directory: string): Uint8Array => {
-  const keyPath = path.join(directory, "credentials.key")
-  mkdirSync(directory, { recursive: true, mode: 0o700 })
-  if (!existsSync(keyPath)) {
-    try {
-      writeFileSync(keyPath, randomBytes(32), { flag: "wx", mode: 0o600 })
-    } catch (cause) {
-      if (!(cause instanceof Error) || !("code" in cause) || cause.code !== "EEXIST") {
-        throw cause
-      }
-    }
-  }
-  chmodSync(keyPath, 0o600)
-  const key = readFileSync(keyPath)
-  if (key.byteLength !== 32) throw new Error(`Invalid credential key at ${keyPath}`)
-  return key
-}
-
-export const sealValue = (key: Uint8Array, value: string): string => {
-  const initializationVector = randomBytes(12)
-  const cipher = createCipheriv("aes-256-gcm", key, initializationVector)
-  cipher.setAAD(additionalData)
-  const ciphertext = concatBytes([cipher.update(value, "utf8"), cipher.final()])
-  return [
-    "v1",
-    Encoding.encodeBase64Url(initializationVector),
-    Encoding.encodeBase64Url(cipher.getAuthTag()),
-    Encoding.encodeBase64Url(ciphertext)
-  ].join(".")
-}
-
-export const openValue = (key: Uint8Array, sealed: string): string => {
-  const [version, encodedVector, encodedTag, encodedCiphertext, extra] = sealed.split(".")
-  if (
-    version !== "v1" ||
-    encodedVector === undefined ||
-    encodedTag === undefined ||
-    encodedCiphertext === undefined ||
-    extra !== undefined
-  ) {
-    throw new Error("Unsupported credential envelope")
-  }
-  const decipher = createDecipheriv(
-    "aes-256-gcm",
-    key,
-    decodeBase64UrlField("initialisation vector", encodedVector)
-  )
-  decipher.setAAD(additionalData)
-  decipher.setAuthTag(decodeBase64UrlField("authentication tag", encodedTag))
-  return utf8Text(concatBytes([
-    decipher.update(decodeBase64UrlField("ciphertext", encodedCiphertext)),
-    decipher.final()
-  ]))
-}
-
-const fileCredentialStore = (directory: string): CredentialStore["Service"] => {
-  const filePath = path.join(directory, "credentials.json")
-  const writes = Semaphore.makeUnsafe(1)
-
-  const readAll = Effect.try({
-    try: (): CredentialFile => {
-      if (!existsSync(filePath)) return {}
-      return Schema.decodeUnknownSync(Schema.fromJsonString(CredentialFile))(
-        readFileSync(filePath, "utf8")
-      )
-    },
-    catch: (cause) => new StorageError({
-      message: `Could not read credentials from ${filePath}: ${describeCause(cause)}`,
-      cause
-    })
-  })
-
-  const writeAll = (credentials: CredentialFile) => Effect.try({
-    try: () => {
-      mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 })
-      const temporaryPath = `${filePath}.${process.pid}.tmp`
-      writeFileSync(temporaryPath, JSON.stringify(credentials, null, 2), { mode: 0o600 })
-      chmodSync(temporaryPath, 0o600)
-      renameSync(temporaryPath, filePath)
-    },
-    catch: (cause) => new StorageError({
-      message: `Could not write credentials to ${filePath}: ${describeCause(cause)}`,
-      cause
-    })
-  })
+const sqlCredentialStore = (
+  sql: SqlClient.SqlClient,
+  encryption: Encryption
+): CredentialStore["Service"] => {
+  const failure = (action: string, key: CredentialKey) =>
+    (cause: SqlError.SqlError | Schema.SchemaError | Cause.UnknownError): StorageError =>
+      new StorageError({ message: `Could not ${action} credential ${key}: ${cause.message}`, cause })
 
   return {
-    get: Effect.fn("CredentialStore.get")(function* (key: CredentialKey) {
-      const credentials = yield* readAll
-      const sealed = credentials[key]
-      if (sealed === undefined) return Option.none()
-      return Option.some(yield* Effect.try({
-        try: () => openValue(credentialKey(directory), sealed),
-        catch: (cause) => new StorageError({
-          message: `Could not open credential ${key}: ${describeCause(cause)}`,
-          cause
-        })
-      }))
-    }),
+    get: Effect.fn("CredentialStore.get")((key: CredentialKey) =>
+      sql.unsafe("SELECT sealed FROM credential WHERE key = ?", [key]).pipe(
+        Effect.flatMap(decodeSealedRows),
+        Effect.flatMap((rows) => {
+          const row = rows[0]
+          if (row === undefined) return Effect.succeed(Option.none<string>())
+          return Effect.try(() => Option.some(encryption.open(row.sealed)))
+        }),
+        Effect.mapError(failure("open", key))
+      )
+    ),
 
     set: Effect.fn("CredentialStore.set")((key: CredentialKey, value: string) =>
-      writes.withPermit(Effect.gen(function* () {
-        const sealed = yield* Effect.try({
-          try: () => sealValue(credentialKey(directory), value),
-          catch: (cause) => new StorageError({
-            message: `Could not seal credential ${key}: ${describeCause(cause)}`,
-            cause
-          })
-        })
-        const credentials = yield* readAll
-        yield* writeAll({ ...credentials, [key]: sealed })
-      }))
+      Effect.try(() => encryption.seal(value)).pipe(
+        Effect.flatMap((sealed) =>
+          sql.unsafe(
+            `INSERT INTO credential (key, sealed) VALUES (?, ?)
+             ON CONFLICT (key) DO UPDATE SET sealed = excluded.sealed`,
+            [key, sealed]
+          )
+        ),
+        Effect.mapError(failure("store", key)),
+        Effect.asVoid
+      )
     ),
 
     remove: Effect.fn("CredentialStore.remove")((key: CredentialKey) =>
-      writes.withPermit(Effect.gen(function* () {
-        const credentials = yield* readAll
-        yield* writeAll(
-          Object.fromEntries(Object.entries(credentials).filter(([name]) => name !== key))
-        )
-      }))
+      sql.unsafe("DELETE FROM credential WHERE key = ?", [key]).pipe(
+        Effect.mapError(failure("remove", key)),
+        Effect.asVoid
+      )
     )
   }
 }

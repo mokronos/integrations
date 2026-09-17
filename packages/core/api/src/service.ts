@@ -1,39 +1,128 @@
 import {
+  createOAuthSessions,
   defaultArgumentRetentionDays,
   defaultGatewayPort,
+  defaultTenantId,
+  deliverDueApprovalNotifications,
+  GatewayStoreError,
+  GatewayStoreService,
+  generateApiKey,
+  libsqlLayer,
+  maintenanceLoop,
+  newClientId,
+  OAuthSessionError,
+  reconcileConfigurations,
+  resolveEncryption,
+  sqlOAuthSessionStore,
   writeGatewayConfig
 } from "@integrations/gateway-core"
+import type { Encryption, GatewayStore, OAuthOperations } from "@integrations/gateway-core"
+import type { GoogleIdentityOAuth } from "@integrations/gateway-core"
 import { whenPresent } from "@integrations/contracts"
-import { defaultTenantId } from "@integrations/gateway-core"
-import { resolveEncryption } from "@integrations/gateway-core"
+import { webCryptoLayer } from "@integrations/contracts"
+import { BlobStore, integrationLayer, Integrations } from "@integrations/integrations"
+import type { StorageError } from "@integrations/integrations"
 import { Context, Crypto, Effect, Layer, ManagedRuntime, Option } from "effect"
 import type { HttpClient } from "effect/unstable/http"
+import { SqlClient } from "effect/unstable/sql"
 import { isLoopbackAddress, mayBorrowLocalCredential } from "./http/loopback.ts"
 import { createGatewayHandler } from "./http/handler.ts"
-import type { GatewayHandle, GatewayRequestContext } from "./http/handler.ts"
+import type { GatewayCoreServices, GatewayHandle, GatewayHandlerOptions, GatewayRequestContext } from "./http/handler.ts"
 import type { RateLimits } from "./http/authority.ts"
-import { startMaintenanceLoop } from "@integrations/gateway-core"
-import { deliverDueApprovalNotifications } from "@integrations/gateway-core"
-import type { MaintenanceLoop } from "@integrations/gateway-core"
-import { createOAuthSessions } from "@integrations/gateway-core"
-import {
-  reconcileConfigurations
-} from "@integrations/gateway-core"
-import type { OAuthSessionStore } from "@integrations/gateway-core"
-import { generateApiKey, newClientId } from "@integrations/gateway-core"
+import { OAuthFlowSessions } from "./http/services.ts"
 import { integrationsHome } from "./paths.ts"
-import type { IntegrationStorage, StorageError } from "@integrations/integrations"
-import { createIntegrationRuntime, integrationServicesOf, Integrations } from "@integrations/integrations"
-import type { GatewayStoreOptions } from "@integrations/gateway-core"
-import type { GatewayStore } from "@integrations/gateway-core"
-import { GatewayStoreError, GatewayStoreService } from "@integrations/gateway-core"
-import { webCryptoLayer } from "@integrations/contracts"
 import { createWebAssets } from "./web-assets.ts"
 import { defaultRateLimitPerMinute, gatewayEnvironment } from "./config.ts"
 import { telemetryLayer } from "@integrations/observability"
-import type { GoogleIdentityOAuth } from "@integrations/gateway-core"
 
 export const localClientName = "local"
+
+export type { GatewayCoreServices } from "./http/handler.ts"
+
+export interface GatewayCoreOptions {
+  readonly encryption: Encryption
+  /** Where uploaded blobs live; the only thing the core keeps outside the database. */
+  readonly blobDirectory: string
+  /** Where OAuth callbacks and approval links resolve to, read when needed. */
+  readonly publicUrlOf?: () => string | undefined
+  /** Bring the tables up to date on start. Off when the host runs the migrations itself. */
+  readonly migrate?: boolean
+  /** Sweep expired approvals and deliver notifications on a timer. Off when the host schedules it. */
+  readonly maintenance?: boolean
+}
+
+const oauthSessionsLayer = (
+  publicUrlOf: (() => string | undefined) | undefined
+): Layer.Layer<OAuthFlowSessions, never, SqlClient.SqlClient | GatewayStoreService | OAuthOperations> =>
+  Layer.effect(
+    OAuthFlowSessions,
+    Effect.gen(function*() {
+      const sql = yield* SqlClient.SqlClient
+      const store = yield* GatewayStoreService
+      const host = yield* Effect.context<OAuthOperations>()
+      return yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          createOAuthSessions(host, {
+            store: sqlOAuthSessionStore(sql),
+            ...whenPresent("publicUrlOf", publicUrlOf),
+            onConnected: (session) =>
+              session.bindingTenant === undefined || session.state.status !== "connected"
+                ? Effect.void
+                : reconcileConfigurations({
+                  store,
+                  integrations: Context.get(host, Integrations),
+                  tenantId: session.bindingTenant
+                }).pipe(
+                  Effect.asVoid,
+                  Effect.mapError((cause) => new OAuthSessionError({ operation: "bindConnectedTools", cause }))
+                )
+          })),
+        (sessions) => sessions.stop()
+      )
+    })
+  )
+
+const reconcileOnStart: Layer.Layer<never, GatewayStoreError | StorageError, GatewayStoreService | Integrations> =
+  Layer.effectDiscard(Effect.gen(function*() {
+    const store = yield* GatewayStoreService
+    const integrations = yield* Integrations
+    const tenants = yield* store.listTenants()
+    yield* Effect.forEach(
+      tenants,
+      (tenant) => reconcileConfigurations({ store, integrations, tenantId: tenant.id }),
+      { discard: true }
+    )
+  }))
+
+const maintenanceLayer = (
+  publicUrlOf: (() => string | undefined) | undefined
+): Layer.Layer<never, never, GatewayStoreService | HttpClient.HttpClient> =>
+  Layer.effectDiscard(Effect.gen(function*() {
+    const store = yield* GatewayStoreService
+    yield* Effect.forkScoped(maintenanceLoop(store, {
+      afterSweep: Effect.suspend(() =>
+        deliverDueApprovalNotifications({ store, ...whenPresent("dashboardUrl", publicUrlOf?.()) }))
+    }))
+  }))
+
+/**
+ * Everything the gateway is, short of a transport: the store, the integration
+ * host, and OAuth sessions on one `SqlClient`. A host that owns the process
+ * provides this once and calls the core functions or mounts the API on top.
+ */
+export const gatewayCoreLayer = (
+  options: GatewayCoreOptions
+): Layer.Layer<GatewayCoreServices, GatewayStoreError | StorageError, SqlClient.SqlClient | HttpClient.HttpClient> => {
+  const base = Layer.mergeAll(
+    GatewayStoreService.layer({ encryption: options.encryption, ...whenPresent("migrate", options.migrate) }),
+    integrationLayer({ encryption: options.encryption, blobs: BlobStore.fileLayer(options.blobDirectory) })
+  )
+  return Layer.mergeAll(
+    oauthSessionsLayer(options.publicUrlOf),
+    reconcileOnStart,
+    options.maintenance === false ? Layer.empty : maintenanceLayer(options.publicUrlOf)
+  ).pipe(Layer.provideMerge(base))
+}
 
 export interface GatewayService {
   readonly home: string
@@ -44,7 +133,13 @@ export interface GatewayService {
 
 export interface GatewayServiceOptions {
   readonly httpClient: Layer.Layer<HttpClient.HttpClient>
+  /** The database. Defaults to the SQLite file under `home`. */
+  readonly sqlClient?: Layer.Layer<SqlClient.SqlClient>
+  /** The master key. Defaults to the environment's, then the key file under `home`. */
+  readonly encryption?: Encryption
   readonly home?: string
+  readonly migrate?: boolean
+  readonly maintenance?: boolean
   readonly retentionDays?: number
   readonly registryUrl?: string
   readonly publicUrl?: string
@@ -54,21 +149,15 @@ export interface GatewayServiceOptions {
   readonly allowSignup?: boolean
   readonly rateLimitPerMinute?: number
   readonly maxBodyBytes?: number
-  readonly storeLayer?: Layer.Layer<GatewayStoreService, GatewayStoreError>
-  readonly integrationStorage?: IntegrationStorage
-  readonly oauthStore?: OAuthSessionStore
-  readonly storeOptions?: GatewayStoreOptions
-  readonly externalMaintenance?: boolean
   readonly telemetryEndpoint?: string
   readonly telemetryHeaders?: Record<string, string>
 }
 
 interface GatewayCore {
   readonly home: string
+  readonly services: Context.Context<GatewayCoreServices>
   readonly store: GatewayStore
-  readonly oauth: ReturnType<typeof createOAuthSessions>
-  readonly maintenance: MaintenanceLoop | undefined
-  readonly handlerOptions: Parameters<typeof createGatewayHandler>[0]
+  readonly handlerOptions: GatewayHandlerOptions
   readonly disposeCore: () => Promise<void>
 }
 
@@ -78,46 +167,37 @@ const signupOpen = (
 ): Effect.Effect<boolean, GatewayStoreError> =>
   explicitlyAllowed ? Effect.succeed(true) : store.countLogins().pipe(Effect.map((count) => count === 0))
 
-const buildCore = async (
-  options: GatewayServiceOptions
-): Promise<GatewayCore> => {
+const buildCore = async (options: GatewayServiceOptions): Promise<GatewayCore> => {
   const environment = await Effect.runPromise(gatewayEnvironment)
   const home = options.home ?? integrationsHome()
-  const encryption = await resolveEncryption({
+  const encryption = options.encryption ?? await resolveEncryption({
     ...whenPresent("envValue", Option.getOrUndefined(environment.masterKey)),
     keyFile: `${home}/gateway.key`
   })
-  const storeRuntime = ManagedRuntime.make(
-    options.storeLayer ??
-    GatewayStoreService.layer(`${home}/gateway.sqlite`, encryption, options.storeOptions)
+  const resolvePublicUrl = (): string | undefined =>
+    options.publicUrl ?? Option.getOrUndefined(environment.publicUrl) ?? options.localCallbackOrigin
+
+  const runtime = ManagedRuntime.make(
+    gatewayCoreLayer({
+      encryption,
+      blobDirectory: home,
+      publicUrlOf: resolvePublicUrl,
+      ...whenPresent("migrate", options.migrate),
+      ...whenPresent("maintenance", options.maintenance)
+    }).pipe(Layer.provide(Layer.merge(
+      options.sqlClient ?? libsqlLayer(`${home}/gateway.sqlite`),
+      options.httpClient
+    )))
   )
-  const integrationRuntime = createIntegrationRuntime(home, options.httpClient, options.integrationStorage ?? {})
-  let resources: Awaited<ReturnType<typeof bootResources>>
+  let services: Context.Context<GatewayCoreServices>
   try {
-    resources = await bootResources()
-    await Effect.runPromise(Effect.gen(function*() {
-      const tenants = yield* resources.store.listTenants()
-      yield* Effect.forEach(tenants, (tenant) => reconcileConfigurations({
-        store: resources.store,
-        integrations: Context.get(resources.integrationServices, Integrations),
-        tenantId: tenant.id
-      }), { discard: true })
-    }))
+    services = await runtime.runPromise(Effect.context<GatewayCoreServices>())
   } catch (error) {
-    await Promise.all([storeRuntime.dispose(), integrationRuntime.dispose()])
+    await runtime.dispose()
     throw error
   }
+  const store = Context.get(services, GatewayStoreService)
 
-  async function bootResources() {
-    const [store, integrationServices] = await Promise.all([
-      storeRuntime.runPromise(Effect.service(GatewayStoreService)),
-      integrationServicesOf(integrationRuntime)
-    ])
-    return { store, integrationServices }
-  }
-  const resolvePublicUrl = (): string | undefined =>
-    options.publicUrl ?? Option.getOrUndefined(environment.publicUrl) ??
-    options.localCallbackOrigin
   const googleClientId = options.googleIdentity?.clientId ??
     Option.getOrUndefined(environment.googleClientId)
   const googleClientSecret = options.googleIdentity?.clientSecret ??
@@ -125,31 +205,7 @@ const buildCore = async (
   const googleIdentity: GoogleIdentityOAuth | undefined =
     googleClientId === undefined || googleClientSecret === undefined
       ? undefined
-      : {
-        clientId: googleClientId,
-        clientSecret: googleClientSecret,
-        publicUrlOf: resolvePublicUrl
-      }
-  const oauth = createOAuthSessions(resources.integrationServices, {
-    publicUrlOf: resolvePublicUrl,
-    onConnected: async (session) => {
-      const state = session.state
-      if (session.bindingTenant === undefined || state.status !== "connected") return
-      await Effect.runPromise(reconcileConfigurations({
-        store: resources.store,
-        integrations: Context.get(resources.integrationServices, Integrations),
-        tenantId: session.bindingTenant
-      }))
-    },
-    ...whenPresent("store", options.oauthStore)
-  })
-  const maintenance: MaintenanceLoop | undefined =
-    options.externalMaintenance === true ? undefined : startMaintenanceLoop(resources.store, {
-      afterSweep: () => deliverDueApprovalNotifications({
-        store: resources.store,
-        ...whenPresent("dashboardUrl", resolvePublicUrl())
-      }).pipe(Effect.provide(options.httpClient))
-    })
+      : { clientId: googleClientId, clientSecret: googleClientSecret, publicUrlOf: resolvePublicUrl }
 
   const perMinute = options.rateLimitPerMinute ??
     Option.getOrElse(environment.rateLimitPerMinute, () => defaultRateLimitPerMinute)
@@ -157,37 +213,24 @@ const buildCore = async (
     principalPerMinute: perMinute,
     addressPerMinute: Math.max(20, Math.floor(perMinute / 5))
   }
-
-  const disposeCore = async () => {
-    maintenance?.stop()
-    await Effect.runPromise(oauth.stop())
-    await Promise.all([storeRuntime.dispose(), integrationRuntime.dispose()])
+  const withOrigin = (suffix: string) => (): string | undefined => {
+    const origin = resolvePublicUrl()
+    return origin === undefined ? undefined : `${origin.replace(/\/+$/, "")}${suffix}`
   }
-
-  void defaultTenantId
 
   return {
     home,
-    store: resources.store,
-    oauth,
-    maintenance,
-    disposeCore,
+    services,
+    store,
+    disposeCore: () => runtime.dispose(),
     handlerOptions: {
-      store: resources.store,
-      integrationServices: resources.integrationServices,
+      store,
+      integrationServices: services,
+      oauth: Context.get(services, OAuthFlowSessions),
       httpClient: options.httpClient,
       retentionDays: options.retentionDays ?? defaultArgumentRetentionDays,
-      oauth,
-      oauthCallbackUrl: () => {
-        const origin = resolvePublicUrl()
-        return origin === undefined
-          ? undefined
-          : `${origin.replace(/\/+$/, "")}/v1/oauth/callback`
-      },
-      mcpUrl: () => {
-        const origin = resolvePublicUrl()
-        return origin === undefined ? undefined : `${origin.replace(/\/+$/, "")}/mcp`
-      },
+      oauthCallbackUrl: withOrigin("/v1/oauth/callback"),
+      mcpUrl: withOrigin("/mcp"),
       dashboardUrl: resolvePublicUrl,
       rateLimits,
       observabilityLayer: telemetryLayer({
@@ -197,7 +240,7 @@ const buildCore = async (
       }),
       ...whenPresent("maxBodyBytes", options.maxBodyBytes),
       sessions: {
-        signupOpen: () => signupOpen(resources.store, options.allowSignup ?? environment.allowSignup),
+        signupOpen: () => signupOpen(store, options.allowSignup ?? environment.allowSignup),
         secureCookies: options.secureCookies ?? false,
         ...whenPresent("google", googleIdentity)
       },
@@ -210,18 +253,13 @@ export const createGatewayService = async (
   options: GatewayServiceOptions
 ): Promise<GatewayService> => {
   const core = await buildCore(options)
-
   const handle = createGatewayHandler(core.handlerOptions)
-  const dispatch = async (request: Request, context?: GatewayRequestContext): Promise<Response> => {
-    const response = await handle.handle(request, context)
-    return response
-  }
 
   let closed = false
   return {
     home: core.home,
     store: core.store,
-    handle: dispatch,
+    handle: (request, context) => handle.handle(request, context),
     close: async () => {
       if (closed) return
       closed = true
@@ -288,7 +326,7 @@ export const serveGateway = async (options: ServeOptions): Promise<RunningGatewa
     const service: GatewayService = {
       home: core.home,
       store: core.store,
-        handle: (request, context) => handle.handle(request, context),
+      handle: (request, context) => handle.handle(request, context),
       close: async () => {
         if (stopped) return
         stopped = true
@@ -323,7 +361,7 @@ export const serveGateway = async (options: ServeOptions): Promise<RunningGatewa
     localSecret = await Effect.runPromise(Effect.provide(
       ensureLocalCredential(
         core.store,
-        Context.get(core.handlerOptions.integrationServices, Integrations),
+        Context.get(core.services, Integrations),
         core.home,
         boundPort
       ),

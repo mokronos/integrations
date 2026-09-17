@@ -6,7 +6,7 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import type { Connection, Tool } from "@integrations/contracts"
 import { InvocationError } from "@integrations/integrations"
 import { stubIntegrationsContext } from "./stubs.ts"
-import { openStore, temporaryDirectory, testServices } from "./fixtures.ts"
+import { openDatabase, storeOn, temporaryDirectory, testServices } from "./fixtures.ts"
 import {
   aliasForConnection,
   ApprovalPolicyId,
@@ -19,7 +19,6 @@ import {
   newClientId,
   newAccessProfileId,
   newApprovalPolicyId,
-  createGatewayStore,
   SubjectId,
   ToolName
 } from "./gateway.ts"
@@ -155,7 +154,8 @@ const setup = Effect.fnUntraced(function*(options: {
   readonly dashboardUrl?: string
   readonly mcpUrl?: string
 } = {}) {
-  const store = yield* openStore(yield* temporaryDirectory("gateway-http-"))
+  const sql = yield* openDatabase(yield* temporaryDirectory("gateway-http-"))
+  const store = yield* storeOn(sql)
 
   const accessProfile = yield* store.createAccessProfile({
     id: yield* newAccessProfileId,
@@ -248,6 +248,7 @@ const setup = Effect.fnUntraced(function*(options: {
 
   return {
     store,
+    sql,
     client,
     key,
     accessProfile,
@@ -850,16 +851,13 @@ describe("gateway approval settlement", () => {
 
   it.effect("a durable execution claim survives reopening the store and cannot be replayed", () =>
     Effect.gen(function*() {
-      const { call, store, calls } = yield* setup({ decision: "require_approval" })
+      const { call, store, sql, calls } = yield* setup({ decision: "require_approval" })
       const body = { alias: aliasForConnection(connection), tool: "sendEmail" }
       const frozen = yield* call("POST", "/v1/execute", { body })
       const approval = (yield* store.listApprovals(defaultTenantId))[0]
       if (approval === undefined) throw new Error("Missing approval")
       yield* store.claimApproval({ tenantId: defaultTenantId, id: approval.id, decidedBy: "human" })
-      const reopened = yield* Effect.acquireRelease(
-        createGatewayStore(store.databasePath),
-        (reopened) => Effect.orDie(reopened.close())
-      )
+      const reopened = yield* storeOn(sql)
       expect((yield* reopened.getApproval(defaultTenantId, approval.id))?.status).toBe("executing")
       expect(yield* reopened.claimApproval({
         tenantId: defaultTenantId, id: approval.id, decidedBy: "human"

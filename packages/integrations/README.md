@@ -23,18 +23,17 @@ vocabulary come from `@integrations/contracts`.
 | `@modelcontextprotocol/sdk` | MCP transports and framing, plus the OAuth 2.1 flow primitives — which serve OpenAPI connections too, so there is one OAuth implementation |
 | `oas` | Projects an OpenAPI operation's parameters and responses into JSON Schema |
 | `oas-normalize` | Parses, upconverts Swagger 2.0, and bundles a document |
-| `@libsql/client` | The SQLite driver behind `Database` |
+| `@effect/sql-libsql` | The SQLite driver behind the local host's `SqlClient` |
+| `drizzle-orm` | Declares the tables; `drizzle-kit` turns them into the embedded migrations |
 
 Request building, the Google Discovery converter, persistence and credential
 sealing are ours.
 
 ## Storage
 
-`integrations.sqlite` holds the catalog; `credentials.json` holds AES-256-GCM
-sealed secrets under the owner-only key `credentials.key`. No database column
-ever holds a credential, so a database dump is not a secret spill.
-
-A Cloudflare deployment supplies its own `Database` and `CredentialStore` over
-one D1 binding and reuses everything above them. It seals with the same envelope
-but a key derived from the gateway's master key, so secrets do not move between
-deployments.
+Every table lives on whatever `SqlClient` the host provides: the local host's
+SQLite file, a D1 binding, or the embedding application's own database. The
+catalog tables are declared in `src/db/schema.ts` and applied through the
+`integration_migration` ledger, or by the host's own migration pipeline when it
+owns the schema. Credentials sit in the `credential` table sealed with the
+host's master key, so a database dump is not a secret spill.

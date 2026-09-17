@@ -1,11 +1,18 @@
-import { Context, Effect, Layer, ManagedRuntime } from "effect"
-import { HttpClient } from "effect/unstable/http"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
 import path from "node:path"
+import { Context, Effect, Layer } from "effect"
+import { HttpClient } from "effect/unstable/http"
+import { Reactivity } from "effect/unstable/reactivity"
+import { SqlClient } from "effect/unstable/sql"
+import { LibsqlClient } from "@effect/sql-libsql"
 import { CatalogStore } from "./catalog/store.ts"
 import { CredentialStore } from "./storage/credentials.ts"
 import { BlobStore } from "./storage/blobs.ts"
-import { Database, libsqlLayer, memoryLayer } from "./storage/database.ts"
-import type { StorageError } from "./errors.ts"
+import { Database } from "./storage/database.ts"
+import type { Encryption } from "./storage/encryption.ts"
+import { applyMigrations } from "./storage/migrate.ts"
+import { integrationMigrations } from "./storage/migrations.gen.ts"
 import { Integrations } from "./integrations.ts"
 import { McpClient } from "./mcp/client.ts"
 import { OAuthFlows } from "./oauth/flows.ts"
@@ -32,39 +39,57 @@ const capabilitiesLayer: Layer.Layer<
   Layer.provideMerge(CatalogStore.layer)
 )
 
-type IntegrationLayer = Layer.Layer<
-  Integrations | OAuthFlows | SpecCache | CatalogStore | McpClient | OpenApiInvoker | BlobStore,
-  StorageError,
-  HttpClient.HttpClient
->
+export type IntegrationServices =
+  | Integrations
+  | McpClient
+  | OAuthFlows
+  | OpenApiInvoker
+  | SpecCache
+  | CatalogStore
+  | BlobStore
 
-export interface IntegrationStorageOptions {
-  readonly directory: string
+/** The migration set the catalog's tables come from; stamped in `integration_migration`. */
+export const integrationMigrationSet = { ledger: "integration_migration", migrations: integrationMigrations } as const
+
+export const applyIntegrationMigrations = (sql: SqlClient.SqlClient) =>
+  applyMigrations(sql, integrationMigrationSet)
+
+export interface IntegrationLayerOptions {
+  readonly encryption: Encryption
+  readonly blobs: Layer.Layer<BlobStore>
 }
 
-export const localLayer = (options: IntegrationStorageOptions): IntegrationLayer =>
+/**
+ * Every integration service on the host's `SqlClient`. The tables are expected
+ * to exist; whoever owns the database applies `integrationMigrationSet`.
+ */
+export const integrationLayer = (
+  options: IntegrationLayerOptions
+): Layer.Layer<IntegrationServices, never, SqlClient.SqlClient | HttpClient.HttpClient> =>
   capabilitiesLayer.pipe(
     Layer.provideMerge(clientsLayer),
-    Layer.provideMerge(BlobStore.fileLayer(options.directory)),
-    Layer.provide(Layer.mergeAll(
-      libsqlLayer({ directory: options.directory }),
-      CredentialStore.fileLayer(options.directory)
-    ))
+    Layer.provideMerge(options.blobs),
+    Layer.provide(Layer.mergeAll(Database.layer, CredentialStore.sqlLayer(options.encryption)))
   )
 
-export const integrationLayer = <E>(
-  storage: Layer.Layer<Database | CredentialStore, E>,
-  blobs: Layer.Layer<BlobStore>
-): Layer.Layer<
-  Integrations | OAuthFlows | SpecCache | CatalogStore | McpClient | OpenApiInvoker | BlobStore,
-  E,
-  HttpClient.HttpClient
-> =>
-  capabilitiesLayer.pipe(
-    Layer.provideMerge(clientsLayer),
-    Layer.provideMerge(blobs),
-    Layer.provide(storage)
+/**
+ * A throwaway SQLite file with the catalog's tables, removed with the scope.
+ * A file rather than `:memory:`: libsql hands its connection to each
+ * transaction and opens a fresh one afterwards, which for a memory database
+ * is an empty one.
+ */
+export const temporarySqlLayer: Layer.Layer<SqlClient.SqlClient> = Layer.unwrap(
+  Effect.map(
+    Effect.acquireRelease(
+      Effect.sync(() => mkdtempSync(path.join(tmpdir(), "integrations-sql-"))),
+      (directory) => Effect.sync(() => rmSync(directory, { recursive: true, force: true }))
+    ),
+    (directory) => LibsqlClient.layer({ url: `file:${path.join(directory, "integrations.sqlite")}` })
   )
+).pipe(
+  Layer.tap((context) => Effect.orDie(applyIntegrationMigrations(Context.get(context, SqlClient.SqlClient)))),
+  Layer.provide(Reactivity.layer)
+)
 
 export const stubbedLayer = (
   clients: Layer.Layer<McpClient | OpenApiInvoker>
@@ -76,42 +101,9 @@ export const stubbedLayer = (
   | McpClient
   | OpenApiInvoker
   | Database
-  | CredentialStore,
-  StorageError
+  | CredentialStore
 > =>
   capabilitiesLayer.pipe(
     Layer.provideMerge(Layer.mergeAll(clients, unavailableHttpClientLayer)),
-    Layer.provideMerge(Layer.mergeAll(memoryLayer, CredentialStore.memoryLayer))
+    Layer.provideMerge(Layer.mergeAll(Database.layer.pipe(Layer.provide(temporarySqlLayer)), CredentialStore.memoryLayer))
   )
-
-export type IntegrationServices =
-  | Integrations
-  | McpClient
-  | OAuthFlows
-  | OpenApiInvoker
-  | SpecCache
-  | CatalogStore
-  | BlobStore
-
-export interface IntegrationStorage {
-  readonly storage?: Layer.Layer<Database | CredentialStore, StorageError>
-}
-
-export const createIntegrationRuntime = (
-  directory: string,
-  httpClient: Layer.Layer<HttpClient.HttpClient>,
-  storage: IntegrationStorage = {}
-): ManagedRuntime.ManagedRuntime<IntegrationServices, StorageError> =>
-  ManagedRuntime.make(
-    (storage.storage === undefined
-      ? localLayer({ directory: path.resolve(directory) })
-      : integrationLayer(
-        storage.storage,
-        BlobStore.fileLayer(path.resolve(directory))
-      )).pipe(Layer.provide(httpClient))
-  )
-
-export const integrationServicesOf = (
-  runtime: ManagedRuntime.ManagedRuntime<IntegrationServices, StorageError>
-): Promise<Context.Context<IntegrationServices>> =>
-  runtime.runPromise(Effect.context<IntegrationServices>())

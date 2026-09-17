@@ -65,8 +65,24 @@ export const authorizeInvocation = Effect.fn("Authorization.authorizeInvocation"
 ): Effect.fn.Return<Authorization, GatewayStoreError, Crypto.Crypto> {
   const authentication = yield* authenticateClient(store, input.secret)
   if (authentication.status !== "authenticated") return authentication
+  return yield* authorizeClientInvocation(store, authentication.client, input)
+})
 
-  const client = authentication.client
+/**
+ * The policy decision for a client the caller has already identified, as an
+ * embedding host does when the agent loop and the gateway share a process.
+ */
+export const authorizeClientInvocation = Effect.fn("Authorization.authorizeClientInvocation")(function*(
+  store: GatewayStore,
+  client: Client,
+  input: {
+    readonly alias: Alias
+    readonly tool: ToolName
+  }
+): Effect.fn.Return<Authorization, GatewayStoreError> {
+  if (client.revokedAt !== null) {
+    return { status: "client-revoked", message: "The client this key belongs to was revoked" }
+  }
   const [accessProfile, approvalPolicy] = yield* Effect.all([
     store.findAccessProfile(client.tenantId, client.accessProfileId),
     store.findApprovalPolicy(client.tenantId, client.approvalPolicyId)

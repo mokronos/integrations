@@ -66,6 +66,24 @@
         "effect": "catalog:",
       },
     },
+    "apps/platform-demo": {
+      "name": "@integrations/platform-demo",
+      "version": "0.2.0",
+      "dependencies": {
+        "@effect/platform-bun": "catalog:",
+        "@effect/sql-libsql": "catalog:",
+        "@integrations/contracts": "workspace:*",
+        "@integrations/gateway-api": "workspace:*",
+        "@integrations/gateway-core": "workspace:*",
+        "@integrations/integrations": "workspace:*",
+        "@libsql/client": "catalog:",
+        "drizzle-orm": "catalog:",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "drizzle-kit": "catalog:",
+      },
+    },
     "apps/ts": {
       "name": "@mokronos/integrations-client",
       "version": "0.2.0",
@@ -143,26 +161,29 @@
         "@integrations/integrations": "workspace:*",
         "@libsql/client": "catalog:",
         "@mokronos/integrations-client": "workspace:*",
+        "drizzle-orm": "catalog:",
         "effect": "catalog:",
       },
       "devDependencies": {
         "drizzle-kit": "catalog:",
-        "drizzle-orm": "catalog:",
       },
     },
     "packages/integrations": {
       "name": "@integrations/integrations",
       "version": "0.2.0",
       "dependencies": {
+        "@effect/sql-libsql": "catalog:",
         "@integrations/contracts": "workspace:*",
         "@libsql/client": "catalog:",
         "@modelcontextprotocol/client": "2.0.0",
+        "drizzle-orm": "catalog:",
         "effect": "catalog:",
         "oas": "catalog:",
         "oas-normalize": "catalog:",
       },
       "devDependencies": {
         "@modelcontextprotocol/server": "2.0.0",
+        "drizzle-kit": "catalog:",
       },
     },
     "packages/observability": {
@@ -461,6 +482,8 @@
     "@integrations/integrations": ["@integrations/integrations@workspace:packages/integrations"],
 
     "@integrations/observability": ["@integrations/observability@workspace:packages/observability"],
+
+    "@integrations/platform-demo": ["@integrations/platform-demo@workspace:apps/platform-demo"],
 
     "@jridgewell/gen-mapping": ["@jridgewell/gen-mapping@0.3.13", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.0", "@jridgewell/trace-mapping": "^0.3.24" } }, "sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA=="],
 
