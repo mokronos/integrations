@@ -6,6 +6,7 @@ import {
   clientHasCapability,
   Client,
   connectionSubject,
+  isDelegationTemplate,
   sameConnectionRef
 } from "./domain.ts"
 import type {
@@ -13,6 +14,8 @@ import type {
   Authorization,
   Authorized,
   ClientCapability,
+  ConnectionRef,
+  SubjectId,
   ToolName
 } from "./domain.ts"
 import { hashApiKey } from "./keys.ts"
@@ -61,6 +64,7 @@ export const authorizeInvocation = Effect.fn("Authorization.authorizeInvocation"
     readonly secret: string
     readonly alias: Alias
     readonly tool: ToolName
+    readonly subject?: SubjectId
   }
 ): Effect.fn.Return<Authorization, GatewayStoreError, Crypto.Crypto> {
   const authentication = yield* authenticateClient(store, input.secret)
@@ -71,6 +75,10 @@ export const authorizeInvocation = Effect.fn("Authorization.authorizeInvocation"
 /**
  * The policy decision for a client the caller has already identified, as an
  * embedding host does when the agent loop and the gateway share a process.
+ *
+ * A delegated tool is granted on a template, a user-owned connection with no
+ * subject. It resolves to the connection of the subject the call names, so the
+ * same grant serves every user and no user reaches another's credential.
  */
 export const authorizeClientInvocation = Effect.fn("Authorization.authorizeClientInvocation")(function*(
   store: GatewayStore,
@@ -78,6 +86,7 @@ export const authorizeClientInvocation = Effect.fn("Authorization.authorizeClien
   input: {
     readonly alias: Alias
     readonly tool: ToolName
+    readonly subject?: SubjectId
   }
 ): Effect.fn.Return<Authorization, GatewayStoreError> {
   if (client.revokedAt !== null) {
@@ -114,6 +123,19 @@ export const authorizeClientInvocation = Effect.fn("Authorization.authorizeClien
     ))
   }
 
+  let connection: ConnectionRef = accessProfileTool.connection
+  if (isDelegationTemplate(connection)) {
+    if (input.subject === undefined) {
+      return {
+        status: "not-authorized",
+        alias: input.alias,
+        tool: input.tool,
+        message: `${input.alias}.${input.tool} acts on behalf of a user; the invocation must name a subject`
+      }
+    }
+    connection = { owner: "user", subject: input.subject, integration: connection.integration, name: connection.name }
+  }
+
   return {
     status: "authorized",
     client,
@@ -122,8 +144,8 @@ export const authorizeClientInvocation = Effect.fn("Authorization.authorizeClien
     approvalPolicy,
     approvalPolicyTool,
     alias: input.alias,
-    connection: accessProfileTool.connection,
-    subject: connectionSubject(accessProfileTool.connection) ?? null,
+    connection,
+    subject: connectionSubject(connection) ?? null,
     decision: approvalPolicyTool.decision
   } satisfies Authorized
 })

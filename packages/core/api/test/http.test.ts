@@ -1,9 +1,10 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Clock, Effect, Fiber, Option, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
-import { ToolAddress, whenPresent } from "@integrations/contracts"
+import { delegationTemplateOf, ToolAddress, whenPresent } from "@integrations/contracts"
+import type { OAuthSessions } from "@integrations/gateway-core"
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client"
-import type { Connection, Tool } from "@integrations/contracts"
+import type { Connection, ConnectionOwner, Tool } from "@integrations/contracts"
 import { InvocationError } from "@integrations/integrations"
 import { stubIntegrationsContext } from "./stubs.ts"
 import { openDatabase, storeOn, temporaryDirectory, testServices } from "./fixtures.ts"
@@ -43,7 +44,7 @@ interface ExecutedCall {
 const stubConnection = (
   reference: { readonly integration: string; readonly name: string }
 ): Connection => ({
-  owner: "user",
+  owner: "user:sebastian",
   name: ConnectionName.make(reference.name),
   integration: IntegrationSlug.make(reference.integration),
   template: reference.integration,
@@ -56,7 +57,7 @@ const stubTool = (
   tool: {
     readonly address: string
     readonly name: string
-    readonly owner?: "org" | "user"
+    readonly owner?: ConnectionOwner
     readonly defaultDecision?: "allow" | "require_approval"
   }
 ): Tool => ({
@@ -64,7 +65,7 @@ const stubTool = (
   name: ToolName.make(tool.name),
   description: "",
   integration: IntegrationSlug.make("gmail"),
-  owner: tool.owner ?? "user",
+  owner: tool.owner ?? "user:sebastian",
   connection: ConnectionName.make("work"),
   defaultDecision: tool.defaultDecision ?? "require_approval"
 })
@@ -73,10 +74,12 @@ const stubIntegrations = (behaviour: {
   readonly beforeExecute?: () => Promise<void>
   readonly fail?: boolean
   readonly connections?: ReadonlyArray<{ readonly integration: string; readonly name: string }>
+  /** Integrations known to the catalog that offer OAuth, connected or not. */
+  readonly oauthIntegrations?: ReadonlyArray<string>
   readonly tools?: ReadonlyArray<{
     readonly address: string
     readonly name: string
-    readonly owner?: "org" | "user"
+    readonly owner?: ConnectionOwner
     readonly defaultDecision?: "allow" | "require_approval"
   }>
 } = {}) => {
@@ -84,7 +87,8 @@ const stubIntegrations = (behaviour: {
   const removed: Array<{ readonly integration: string; readonly name: string }> = []
   const forgotten: Array<string> = []
   const renamed: Array<{ readonly slug: string; readonly name: string }> = []
-  const known = new Set((behaviour.connections ?? []).map((connection) => connection.integration))
+  const oauthCapable = new Set(behaviour.oauthIntegrations ?? [])
+  const known = new Set([...(behaviour.connections ?? []).map((connection) => connection.integration), ...oauthCapable])
   const integrationServices = stubIntegrationsContext({
     execute: (address, input) => {
       calls.push({ address: String(address), input })
@@ -126,7 +130,15 @@ const stubIntegrations = (behaviour: {
           kind: "mcp" as const,
           canRemove: true,
           canRefresh: true,
-          authMethods: []
+          authMethods: oauthCapable.has(slug)
+            ? [{
+              id: "oauth",
+              label: "OAuth",
+              kind: "oauth" as const,
+              template: "oauth2",
+              oauth: { authorizationUrl: "https://accounts.example/authorize", tokenUrl: "https://accounts.example/token" }
+            }]
+            : []
         })
         : Option.none()),
     renameIntegration: (slug, name) => Effect.sync(() => {
@@ -148,14 +160,19 @@ const setup = Effect.fnUntraced(function*(options: {
   readonly tools?: ReadonlyArray<{
     readonly address: string
     readonly name: string
-    readonly owner?: "org" | "user"
+    readonly owner?: ConnectionOwner
     readonly defaultDecision?: "allow" | "require_approval"
   }>
   readonly dashboardUrl?: string
   readonly mcpUrl?: string
+  /** Grant the tool on the delegation template instead of sebastian's connection. */
+  readonly template?: boolean
+  readonly oauthStart?: OAuthSessions["start"]
+  readonly oauthIntegrations?: ReadonlyArray<string>
 } = {}) {
   const sql = yield* openDatabase(yield* temporaryDirectory("gateway-http-"))
   const store = yield* storeOn(sql)
+  const granted: ConnectionRef = options.template === true ? delegationTemplateOf(connection) : connection
 
   const accessProfile = yield* store.createAccessProfile({
     id: yield* newAccessProfileId,
@@ -163,7 +180,7 @@ const setup = Effect.fnUntraced(function*(options: {
     name: `access-${crypto.randomUUID()}`
   })
   yield* store.replaceAccessProfileTools(accessProfile.id, [{
-    connection,
+    connection: granted,
     tool: ToolName.make("sendEmail")
   }])
   const approvalPolicy = yield* store.createApprovalPolicy({
@@ -173,7 +190,7 @@ const setup = Effect.fnUntraced(function*(options: {
     tools: []
   })
   yield* store.replaceApprovalPolicyTools(approvalPolicy.id, [{
-    connection,
+    connection: granted,
     tool: ToolName.make("sendEmail"),
     decision: options.decision ?? "allow"
   }])
@@ -191,7 +208,8 @@ const setup = Effect.fnUntraced(function*(options: {
     ...whenPresent("beforeExecute", options.beforeExecute),
     ...whenPresent("fail", options.fail),
     ...whenPresent("connections", options.connections),
-    ...whenPresent("tools", options.tools)
+    ...whenPresent("tools", options.tools),
+    ...whenPresent("oauthIntegrations", options.oauthIntegrations)
   })
   const { handle } = createGatewayHandler({
     httpClient: FetchHttpClient.layer,
@@ -199,7 +217,7 @@ const setup = Effect.fnUntraced(function*(options: {
     integrationServices: stub.integrationServices,
     retentionDays: 30,
     oauth: {
-      start: () => Effect.die(new Error("not used")),
+      start: options.oauthStart ?? (() => Effect.die(new Error("not used"))),
       provideClient: () => Effect.sync((): undefined => undefined),
       get: () => Effect.sync((): undefined => undefined),
       completeByState: () => Effect.sync((): undefined => undefined),
@@ -373,7 +391,7 @@ describe("gateway http surface", () => {
         }))
       expect(called.isError).not.toBe(true)
       expect(calls).toEqual([{
-        address: "tools.gmail.user.work.sendEmail",
+        address: "tools.gmail.user:sebastian.work.sendEmail",
         input: { to: "a@b.c" }
       }])
     }).pipe(Effect.provide(testServices)))
@@ -419,7 +437,7 @@ describe("gateway http surface", () => {
         arguments: { to: "a@b.c" }
       })
       expect(executed["status"]).toBe("succeeded")
-      expect(calls).toEqual([{ address: "tools.gmail.user.work.sendEmail", input: { to: "a@b.c" } }])
+      expect(calls).toEqual([{ address: "tools.gmail.user:sebastian.work.sendEmail", input: { to: "a@b.c" } }])
 
       const connections = yield* mcpJson(client, "connections", {})
       expect(connections["connections"]).toMatchObject([{ integration: "gmail", name: "work" }])
@@ -499,9 +517,69 @@ describe("gateway http surface", () => {
           alias: "user_sebastian_gmail_work",
           tool: "sendEmail",
           connection: { owner: "user", subject: "sebastian", integration: "gmail", name: "work" },
-          decision: "allow"
+          decision: "allow",
+          delegated: false
         }
       ])
+    }).pipe(Effect.provide(testServices)))
+
+  it.effect("a delegated tool starts a flow bound to the subject when they have not connected", () =>
+    Effect.gen(function*() {
+      const started: Array<{ readonly subject?: string; readonly connection: string }> = []
+      const { call, calls } = yield* setup({
+        template: true,
+        oauthIntegrations: ["gmail"],
+        tools: [{ address: "tools.gmail.user:sebastian.work.sendEmail", name: "sendEmail" }],
+        oauthStart: (input) => Effect.sync(() => {
+          started.push({ ...whenPresent("subject", input.subject), connection: input.connection })
+          return {
+            id: "session-1",
+            integration: input.integration,
+            connection: input.connection,
+            ...whenPresent("subject", input.subject),
+            request: input,
+            state: { status: "pending", authorizationUrl: "https://accounts.example/authorize?state=x" }
+          }
+        })
+      })
+
+      const tools = yield* call("GET", "/v1/tools")
+      expect(tools.body["tools"]).toEqual([{
+        alias: "user_gmail_work",
+        tool: "sendEmail",
+        connection: { owner: "user", integration: "gmail", name: "work" },
+        decision: "allow",
+        delegated: true
+      }])
+
+      const anonymous = yield* call("POST", "/v1/execute", { body: { alias: "user_gmail_work", tool: "sendEmail" } })
+      expect(anonymous.status).toBe(403)
+
+      const first = yield* call("POST", "/v1/execute", {
+        body: { alias: "user_gmail_work", tool: "sendEmail", subject: "sebastian", arguments: { to: "a@b.c" } }
+      })
+      expect(first.status).toBe(200)
+      expect(first.body["status"]).toBe("authorization-required")
+      expect(first.body["subject"]).toBe("sebastian")
+      expect(started).toEqual([{ subject: "sebastian", connection: "work" }])
+      expect(calls).toHaveLength(0)
+    }).pipe(Effect.provide(testServices)))
+
+  it.effect("a delegated tool runs on the subject's own connection once it exists", () =>
+    Effect.gen(function*() {
+      const { call, calls } = yield* setup({
+        template: true,
+        connections: [{ integration: "gmail", name: "work" }],
+        tools: [{ address: "tools.gmail.user:sebastian.work.sendEmail", name: "sendEmail" }]
+      })
+
+      const response = yield* call("POST", "/v1/execute", {
+        body: { alias: "user_gmail_work", tool: "sendEmail", subject: "sebastian", arguments: { to: "a@b.c" } }
+      })
+
+      expect(response.status).toBe(200)
+      expect(response.body["status"]).toBe("succeeded")
+      expect(calls).toEqual([{ address: "tools.gmail.user:sebastian.work.sendEmail", input: { to: "a@b.c" } }])
     }).pipe(Effect.provide(testServices)))
 
   it.effect("filters the caller's tools by integration and connection", () =>
@@ -549,7 +627,7 @@ describe("gateway http surface", () => {
       expect(response.status).toBe(200)
       expect(response.body["status"]).toBe("succeeded")
       expect(calls).toHaveLength(1)
-      expect(calls[0]?.address).toBe("tools.gmail.user.work.sendEmail")
+      expect(calls[0]?.address).toBe("tools.gmail.user:sebastian.work.sendEmail")
     }).pipe(Effect.provide(testServices)))
 
   it.effect("refuses an unauthorized tool without calling the vendor", () =>
@@ -805,7 +883,7 @@ describe("gateway approval settlement", () => {
       expect(second.body["approvalId"]).not.toBe(first.body["approvalId"])
       const response = yield* call("POST", `/v1/approvals/${String(second.body["approvalId"])}/approve`, { body: {}, local: true })
       expect(response.status).toBe(200)
-      expect(calls).toEqual([{ address: "tools.gmail.user.personal.sendEmail", input: { to: "a@b.c" } }])
+      expect(calls).toEqual([{ address: "tools.gmail.user:sebastian.personal.sendEmail", input: { to: "a@b.c" } }])
     }).pipe(Effect.provide(testServices)))
 
   it.effect("concurrent decisions cannot execute twice, deny an executing call, or collect it early", () =>
@@ -1065,7 +1143,7 @@ describe("provisioning surface", () => {
     Effect.gen(function*() {
       const { call } = yield* setup({
         capabilities: ["provision_connections", "administer_gateway"],
-        tools: [{ address: "tools.gmail.user.work.sendEmail", name: "sendEmail" }]
+        tools: [{ address: "tools.gmail.user:sebastian.work.sendEmail", name: "sendEmail" }]
       })
 
       const report = yield* call("POST", "/v1/validate", {

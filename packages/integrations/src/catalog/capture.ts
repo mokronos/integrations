@@ -2,7 +2,7 @@ import { Effect, Option, Schema } from "effect"
 import {
   ConnectionName,
   IntegrationSlug,
-  OwnerTier,
+  ConnectionOwner,
   ToolName,
   toolAddress,
   whenPresent
@@ -15,7 +15,7 @@ import { Tool } from "../tool.ts"
 import type { Tool as IntegrationTool, ToolCall } from "../tool.ts"
 
 export interface CaptureTarget {
-  readonly owner: OwnerTier
+  readonly owner: ConnectionOwner
   readonly integration: IntegrationSlug
   readonly connection: ConnectionName
 }

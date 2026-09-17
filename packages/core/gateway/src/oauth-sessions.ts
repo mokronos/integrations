@@ -1,4 +1,4 @@
-import { AuthMethod, OAuthSessionState, TenantId, whenPresent } from "@integrations/contracts"
+import { AuthMethod, OAuthSessionState, SubjectId, TenantId, userOwner, whenPresent } from "@integrations/contracts"
 
 import { Clock, Context, Deferred, Effect, Exit, Schema, Scope } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
@@ -20,7 +20,9 @@ export const OAuthSessionRequest = Schema.Struct({
   connection: Schema.String,
   authMethod: AuthMethod,
   timeoutMs: Schema.optional(Schema.Number),
-  bindingTenant: Schema.optional(TenantId)
+  bindingTenant: Schema.optional(TenantId),
+  /** The person this flow connects for. Set at start, so a leaked URL can only ever finish their connection. */
+  subject: Schema.optional(SubjectId)
 })
 export type OAuthSessionRequest = typeof OAuthSessionRequest.Type
 
@@ -29,6 +31,7 @@ export type OAuthSession = {
   readonly integration: string
   readonly connection: string
   readonly bindingTenant?: TenantId
+  readonly subject?: SubjectId
   readonly request: OAuthSessionRequest
   readonly state: OAuthSessionState
 }
@@ -117,6 +120,7 @@ export const sqlOAuthSessionStore = (sql: SqlClient.SqlClient): OAuthSessionStor
         connection: row.connection_name,
         request: row.request_json,
         ...whenPresent("bindingTenant", row.request_json.bindingTenant),
+        ...whenPresent("subject", row.request_json.subject),
         state: row.status_json
       } satisfies OAuthSession
     })),
@@ -237,14 +241,17 @@ export const createOAuthSessions = (
       integration: input.integration,
       connection: input.connection,
       request: input,
-      ...whenPresent("bindingTenant", input.bindingTenant)
+      ...whenPresent("bindingTenant", input.bindingTenant),
+      ...whenPresent("subject", input.subject)
     }
+    const owner = input.subject === undefined ? {} : { owner: userOwner(input.subject) }
 
     if (publicUrl !== undefined) {
       const started = yield* Effect.result(
         startRemoteAuthorization({
           integration: input.integration,
           connection: input.connection,
+          ...owner,
           authMethod: input.authMethod,
           publicUrl,
           ...whenPresent("clientId", client.clientId),
@@ -292,6 +299,7 @@ export const createOAuthSessions = (
     yield* authorizeInBrowser({
       integration: input.integration,
       connection: input.connection,
+      ...owner,
       authMethod: input.authMethod,
       ...whenPresent("clientId", client.clientId),
       ...whenPresent("clientSecret", client.clientSecret),
@@ -346,7 +354,8 @@ export const createOAuthSessions = (
         connection: input.connection,
         authMethod: input.authMethod,
         ...whenPresent("timeoutMs", input.timeoutMs),
-        ...whenPresent("bindingTenant", input.bindingTenant)
+        ...whenPresent("bindingTenant", input.bindingTenant),
+        ...whenPresent("subject", input.subject)
       }, input)
     }),
 

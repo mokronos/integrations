@@ -1,8 +1,8 @@
 import { Schema } from "effect"
-import { ConnectionName, IntegrationSlug, OwnerTier } from "./vocabulary.ts"
+import { ConnectionName, IntegrationSlug, ConnectionOwner } from "./vocabulary.ts"
 
 export const Connection = Schema.Struct({
-  owner: OwnerTier,
+  owner: ConnectionOwner,
   name: ConnectionName,
   integration: IntegrationSlug,
   template: Schema.String,
@@ -11,7 +11,7 @@ export const Connection = Schema.Struct({
   identityLabel: Schema.optional(Schema.NullOr(Schema.String)),
   description: Schema.optional(Schema.NullOr(Schema.String)),
   oauthClient: Schema.optional(Schema.NullOr(Schema.String)),
-  oauthClientOwner: Schema.optional(Schema.NullOr(OwnerTier)),
+  oauthClientOwner: Schema.optional(Schema.NullOr(ConnectionOwner)),
   oauthScope: Schema.optional(Schema.NullOr(Schema.String)),
   missingOAuthScopes: Schema.optional(Schema.Array(Schema.String)),
   expiresAt: Schema.optional(Schema.NullOr(Schema.Number)),

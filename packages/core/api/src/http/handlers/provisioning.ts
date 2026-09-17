@@ -1,4 +1,6 @@
 import {
+  connectionRefOf,
+  userOwner,
   whenPresent,
   whenPresentMap
 } from "@integrations/contracts"
@@ -264,7 +266,7 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
           const values = body.values ?? {}
           const names = Object.keys(values)
           const connection = yield* asApiFailure(integrations.createConnection({
-            owner: "org",
+            owner: body.subject === undefined ? "org" : userOwner(body.subject),
             integration: slug,
             name: ConnectionName.make(body.connection ?? "default"),
             template: AuthTemplateSlug.make(method.template),
@@ -306,6 +308,7 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
             connection: body.connection ?? "default",
             authMethod: method,
             bindingTenant: tenantId,
+            ...whenPresent("subject", body.subject),
             ...whenPresentMap("clientId", body.clientId, (id) => id),
             ...whenPresentMap("clientSecret", body.clientSecret, (secret) => secret),
             ...whenPresentMap(
@@ -398,8 +401,7 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
             forgetConnection({
               store,
               tenantId,
-              integration: slug,
-              connection: connection.name
+              connection: connectionRefOf(connection.owner, slug, connection.name)
             }).pipe(capture))
           yield* capture(integrations.removeIntegration(slug))
           return {
@@ -437,8 +439,7 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
           yield* forgetConnection({
             store,
             tenantId,
-            integration,
-            connection: match.name
+            connection: connectionRefOf(match.owner, match.integration, match.name)
           }).pipe(capture)
           return { removed: true as const, integration, connection: match.name }
         }))

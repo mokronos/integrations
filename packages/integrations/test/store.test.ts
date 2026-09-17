@@ -84,7 +84,7 @@ describe("connections", () => {
       yield* store.putConnection(connection)
       yield* store.putConnection({
         ...connection,
-        owner: "user",
+        owner: "user:sebastian",
         name: ConnectionName.make("personal")
       })
 

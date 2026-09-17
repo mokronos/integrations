@@ -28,8 +28,8 @@ export const connectionLabel = (connection: {
   readonly owner: "org" | "user"
   readonly integration: string
   readonly name: string
-  readonly subject?: string
+  readonly subject?: string | undefined
 }): string =>
-  connection.owner === "user" && connection.subject !== undefined
-    ? `user:${connection.subject}/${connection.integration}/${connection.name}`
-    : `org/${connection.integration}/${connection.name}`
+  connection.owner === "org"
+    ? `org/${connection.integration}/${connection.name}`
+    : `user:${connection.subject ?? "*"}/${connection.integration}/${connection.name}`

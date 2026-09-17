@@ -4,6 +4,7 @@ import {
   Alias,
   aliasForConnection,
   authorizeClientCapability,
+  authorizeClientInvocation,
   authorizeInvocation,
   ConnectionName,
   defaultTenantId,
@@ -27,6 +28,12 @@ const orgConnection: ConnectionRef = {
 const userConnection: ConnectionRef = {
   owner: "user",
   subject: SubjectId.make("sebastian"),
+  integration: IntegrationSlug.make("gmail"),
+  name: ConnectionName.make("work")
+}
+
+const delegationTemplate: ConnectionRef = {
+  owner: "user",
   integration: IntegrationSlug.make("gmail"),
   name: ConnectionName.make("work")
 }
@@ -274,6 +281,58 @@ describe("gateway authorization", () => {
       yield* invoke(store, key.secret)
 
       expect((yield* store.listApiKeys(client.id))[0]?.lastUsedAt).not.toBeNull()
+    }).pipe(Effect.provide(testServices)))
+})
+
+describe("delegated tools", () => {
+  it.effect("a template grant resolves to the calling subject's own connection", () =>
+    Effect.gen(function*() {
+      const store = yield* gatewayStore()
+      const { client } = yield* seed(store, { connection: delegationTemplate })
+
+      const result = yield* authorizeClientInvocation(store, client, {
+        alias: aliasForConnection(delegationTemplate),
+        tool: ToolName.make("getDocument"),
+        subject: SubjectId.make("sebastian")
+      })
+
+      expect(aliasForConnection(delegationTemplate)).toBe("user_gmail_work")
+      expect(result.status).toBe("authorized")
+      if (result.status !== "authorized") return
+      expect(result.connection).toEqual(userConnection)
+      expect(result.subject).toBe(SubjectId.make("sebastian"))
+      expect(result.accessProfileTool.connection).toEqual(delegationTemplate)
+    }).pipe(Effect.provide(testServices)))
+
+  it.effect("refuses a template grant when the call names nobody", () =>
+    Effect.gen(function*() {
+      const store = yield* gatewayStore()
+      const { client } = yield* seed(store, { connection: delegationTemplate })
+
+      const result = yield* authorizeClientInvocation(store, client, {
+        alias: aliasForConnection(delegationTemplate),
+        tool: ToolName.make("getDocument")
+      })
+
+      expect(result.status).toBe("not-authorized")
+      if (result.status !== "not-authorized") return
+      expect(result.message).toContain("subject")
+    }).pipe(Effect.provide(testServices)))
+
+  it.effect("a subject does not turn a concrete grant into someone else's connection", () =>
+    Effect.gen(function*() {
+      const store = yield* gatewayStore()
+      const { client } = yield* seed(store, { connection: userConnection })
+
+      const result = yield* authorizeClientInvocation(store, client, {
+        alias: aliasForConnection(userConnection),
+        tool: ToolName.make("getDocument"),
+        subject: SubjectId.make("someone-else")
+      })
+
+      expect(result.status).toBe("authorized")
+      if (result.status !== "authorized") return
+      expect(result.connection).toEqual(userConnection)
     }).pipe(Effect.provide(testServices)))
 })
 

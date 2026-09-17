@@ -23,11 +23,17 @@ const json = (value: Json): string => escape(JSON.stringify(value, null, 2))
 
 const toolRow = (tool: EffectiveTool, withSchema: boolean): string => `
   <tr>
-    <td><code>${escape(tool.alias)}</code></td>
+    <td><code>${escape(tool.alias)}</code>${tool.delegated ? " <small>per user</small>" : ""}</td>
     <td><code>${escape(tool.tool)}</code></td>
     <td>${escape(tool.decision)}</td>
     <td>${withSchema && tool.inputSchema !== undefined ? `<details><summary>schema</summary><pre>${json(tool.inputSchema)}</pre></details>` : ""}</td>
   </tr>`
+
+const authorizationLink = (outcome: InvocationOutcome): string =>
+  outcome.status === "authorization-required" && outcome.session.state.status === "pending"
+    ? `<p>The user <code>${escape(outcome.subject)}</code> has not connected <code>${escape(outcome.integration)}</code> yet.
+      <a href="${escape(outcome.session.state.authorizationUrl)}" target="_blank">Authorize</a>, then run the call again.</p>`
+    : ""
 
 const agentSection = (agent: AgentView, selected: boolean): string => `
   <section>
@@ -42,6 +48,7 @@ const agentSection = (agent: AgentView, selected: boolean): string => `
       <input name="alias" placeholder="alias" required>
       <input name="tool" placeholder="tool" required>
       <input name="arguments" placeholder='{"id": 1}' size="40">
+      <input name="subject" placeholder="subject (for per-user tools)">
       <button>execute in-process</button>
     </form>
   </section>`
@@ -77,6 +84,18 @@ export const page = (model: PageModel): string => `<!doctype html>
   </section>
 
   <section>
+    <h2>Delegated tools</h2>
+    <p>A grant on a user-owned connection without a subject. The first call for a subject starts an OAuth
+    flow bound to them and comes back as <code>authorization-required</code> with the URL to open.</p>
+    <form method="post" action="/delegate">
+      <input name="integration" placeholder="integration slug" required>
+      <input name="connection" placeholder="connection name" value="default" required>
+      <input name="tool" placeholder="tool name" required>
+      <button>grant per user</button>
+    </form>
+  </section>
+
+  <section>
     <h2>Agents</h2>
     <form method="post" action="/agents">
       <input name="name" placeholder="support-agent" required>
@@ -84,7 +103,7 @@ export const page = (model: PageModel): string => `<!doctype html>
     </form>
   </section>
 
-  ${model.result === undefined ? "" : `<section><h2>Last execution</h2><pre>${escape(JSON.stringify(model.result, null, 2))}</pre></section>`}
+  ${model.result === undefined ? "" : `<section><h2>Last execution</h2>${authorizationLink(model.result)}<pre>${escape(JSON.stringify(model.result, null, 2))}</pre></section>`}
 
   ${model.agents.map((agent) => agentSection(agent, agent.id === model.selected)).join("")}
 </body>

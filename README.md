@@ -109,6 +109,23 @@ services on whatever `SqlClient` the application supplies. From there
 tables; pass `migrate: false` and the gateway trusts the tables are there.
 `apps/platform-demo/` is the smallest working example.
 
+## Delegated access
+
+A tool can act for the person the agent is serving rather than for the
+organisation. The administrator grants it on a delegation template: a
+user-owned connection with no subject, so its alias reads `user_gmail_work`
+rather than naming anyone. Every invocation of such a tool names a subject,
+the gateway's id for that person, which an administrator mirrors from the
+application's own users through `POST /v1/subjects`.
+
+The first call for a subject who has not connected yet does not fail. The
+gateway starts the OAuth flow bound to that subject and answers
+`authorization-required` with the session, including the URL to open. The
+application shows it to the person, the provider redirects to the gateway's
+callback, and the connection lands under `user:<subject>`. The same call then
+runs. Because the binding happens when the flow starts, a leaked URL can only
+ever finish that person's connection, never someone else's.
+
 ## Clients
 
 The TypeScript client communicates only with the versioned gateway HTTP API.

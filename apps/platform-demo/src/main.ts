@@ -19,11 +19,13 @@ import {
   newClientId,
   reconcileConfigurations,
   resolveEncryption,
+  SubjectId,
   ToolName
 } from "@integrations/gateway-core"
 import { gatewayCoreLayer } from "@integrations/gateway-api"
 import type { GatewayCoreServices } from "@integrations/gateway-api"
 import { ConnectionName, IntegrationSlug } from "@integrations/contracts"
+import { OAuthFlowSessions } from "@integrations/gateway-api"
 import { AuthTemplateSlug, Integrations } from "@integrations/integrations"
 import { page } from "./page.ts"
 import type { AgentView, PageModel } from "./page.ts"
@@ -107,6 +109,35 @@ const addIntegration = Effect.fn("Platform.addIntegration")(function*(input: {
   yield* reconcileConfigurations({ store, integrations, tenantId })
 })
 
+/**
+ * Marks a tool as acting for the calling user: the grant names a user-owned
+ * connection with no subject, and each invocation supplies the subject.
+ */
+const delegateTool = Effect.fn("Platform.delegateTool")(function*(input: {
+  readonly integration: string
+  readonly connection: string
+  readonly tool: string
+}) {
+  const store = yield* GatewayStoreService
+  const integrations = yield* Integrations
+  const accessProfile = yield* store.findDefaultAccessProfile(tenantId)
+  if (accessProfile === undefined) return yield* Effect.die(new Error("The tenant has no default access profile"))
+  const existing = yield* store.listAccessProfileTools(accessProfile.id)
+  yield* store.replaceAccessProfileTools(accessProfile.id, [...existing, {
+    connection: { owner: "user", integration: IntegrationSlug.make(input.integration), name: ConnectionName.make(input.connection) },
+    tool: ToolName.make(input.tool)
+  }])
+  yield* reconcileConfigurations({ store, integrations, tenantId })
+})
+
+/** The platform mirrors its users as gateway subjects; here a subject is whatever the form says. */
+const ensureSubject = Effect.fn("Platform.ensureSubject")(function*(subject: SubjectId) {
+  const store = yield* GatewayStoreService
+  if ((yield* store.findSubjectById(subject)) === undefined) {
+    yield* store.createSubject({ id: subject, tenantId })
+  }
+})
+
 const agentView = Effect.fn("Platform.agentView")(function*(row: typeof AgentRow.Type, withSchemas: boolean) {
   const store = yield* GatewayStoreService
   const integrations = yield* Integrations
@@ -114,19 +145,30 @@ const agentView = Effect.fn("Platform.agentView")(function*(row: typeof AgentRow
   return { id: row.id, name: row.name, clientId: row.gateway_client_id, tools } satisfies AgentView
 })
 
-const execute = Effect.fn("Platform.execute")(function*(agentId: string, alias: string, tool: string, argumentsText: string) {
+const execute = Effect.fn("Platform.execute")(function*(input: {
+  readonly agentId: string
+  readonly alias: string
+  readonly tool: string
+  readonly argumentsText: string
+  readonly subject: string
+}) {
   const store = yield* GatewayStoreService
   const integrations = yield* Integrations
+  const oauth = yield* OAuthFlowSessions
+  const { agentId, alias, tool, argumentsText } = input
+  const subject = input.subject === "" ? undefined : SubjectId.make(input.subject)
+  if (subject !== undefined) yield* ensureSubject(subject)
   const agents = yield* listAgents
   const row = agents.find((candidate) => candidate.id === agentId)
   if (row === undefined) return yield* Effect.die(new Error(`Unknown agent ${agentId}`))
   const client = yield* store.findClientById(tenantId, row.gateway_client_id)
   if (client === undefined) return yield* Effect.die(new Error(`Agent ${row.name} has no gateway client`))
-  return yield* invokeAsClient({ store, integrations }, {
+  return yield* invokeAsClient({ store, integrations, oauth }, {
     client,
     alias: Alias.make(alias),
     tool: ToolName.make(tool),
-    arguments: yield* decodeJson(argumentsText.trim() === "" ? "{}" : argumentsText)
+    arguments: yield* decodeJson(argumentsText.trim() === "" ? "{}" : argumentsText),
+    ...whenPresent("subject", subject)
   })
 })
 
@@ -162,9 +204,23 @@ const handle = Effect.fn("Platform.handle")(function*(request: Request) {
     })
     return Response.redirect(selected === undefined ? "/" : `/?agent=${encodeURIComponent(selected)}`, 303)
   }
+  if (url.pathname === "/delegate") {
+    yield* delegateTool({
+      integration: field(form, "integration"),
+      connection: field(form, "connection"),
+      tool: field(form, "tool")
+    })
+    return Response.redirect("/", 303)
+  }
   if (url.pathname === "/execute") {
     const agentId = field(form, "agent")
-    const outcome = yield* execute(agentId, field(form, "alias"), field(form, "tool"), field(form, "arguments"))
+    const outcome = yield* execute({
+      agentId,
+      alias: field(form, "alias"),
+      tool: field(form, "tool"),
+      argumentsText: field(form, "arguments"),
+      subject: field(form, "subject")
+    })
     return new Response(yield* render(agentId, outcome), { headers: { "content-type": "text/html" } })
   }
   return new Response("Not found", { status: 404 })

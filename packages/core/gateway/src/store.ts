@@ -879,7 +879,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
             [
               id,
               tool.connection.owner,
-              tool.connection.owner === "user" ? tool.connection.subject : null,
+              tool.connection.owner === "user" ? tool.connection.subject ?? null : null,
               tool.connection.integration,
               tool.connection.name,
               tool.tool
@@ -993,7 +993,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
           yield* run(`INSERT INTO gateway_approval_policy_tool
             (approval_policy_id, owner, subject, integration, connection_name, tool, decision)
             VALUES (?, ?, ?, ?, ?, ?, ?)`, [
-            id, tool.connection.owner, tool.connection.owner === "user" ? tool.connection.subject : null,
+            id, tool.connection.owner, tool.connection.owner === "user" ? tool.connection.subject ?? null : null,
             tool.connection.integration, tool.connection.name, tool.tool, tool.decision
           ])
         }
@@ -1143,7 +1143,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
           input.alias,
           input.tool,
           connection === null ? null : connection.owner,
-          connection === null || connection.owner !== "user" ? null : connection.subject,
+          connection === null || connection.owner !== "user" ? null : connection.subject ?? null,
           connection === null ? null : connection.integration,
           connection === null ? null : connection.name,
           input.decision,

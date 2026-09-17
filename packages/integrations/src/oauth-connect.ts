@@ -6,7 +6,7 @@ import {
   ConnectionName,
   IntegrationSlug,
   type OAuthServerProbe,
-  type OwnerTier
+  type ConnectionOwner
 } from "@integrations/contracts"
 import { AuthTemplateSlug, OAuthClientSlug, OAuthState } from "./catalog/ids.ts"
 import { CatalogStore } from "./catalog/store.ts"
@@ -24,7 +24,7 @@ const decodeId = <A, I>(
       new InvalidInputError({ field, detail: `${String(value)} is not a valid ${field}: ${cause}` }))
   )
 
-const defaultOwner: OwnerTier = "org"
+const defaultOwner: ConnectionOwner = "org"
 
 export const probeOAuthServer = (
   url: string
@@ -109,6 +109,8 @@ export interface StartOAuthFlowOptions {
   readonly connection: string
   readonly template: string
   readonly redirectUri: string
+  /** Who the resulting connection belongs to. The OAuth client stays the organisation's. */
+  readonly owner?: ConnectionOwner
 }
 
 export type StartedOAuthFlow =
@@ -124,7 +126,7 @@ export const startOAuthFlow = Effect.fn("OAuthConnect.start")(function*(
   const connection = yield* decodeId(ConnectionName, "connection", options.connection)
   const template = yield* decodeId(AuthTemplateSlug, "template", options.template)
   const started = yield* oauth.start({
-    owner: defaultOwner,
+    owner: options.owner ?? defaultOwner,
     clientOwner: defaultOwner,
     client,
     integration,

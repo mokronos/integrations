@@ -1,9 +1,11 @@
 import { Schema } from "effect"
-import { Alias, ApprovalStatus, ConnectionName, IntegrationSlug, OwnerTier, ToolName } from "./vocabulary.ts"
+import { Alias, ApprovalStatus, ConnectionName, ConnectionOwner, IntegrationSlug, ToolName } from "./vocabulary.ts"
+import { OAuthSessionView } from "./oauth.ts"
 
 export const TenantId = Schema.String.pipe(Schema.brand("TenantId"))
 export type TenantId = typeof TenantId.Type
-export const SubjectId = Schema.String.pipe(Schema.brand("SubjectId"))
+/** A person the gateway acts for. Ids double as a segment of connection owners and tool addresses, hence the alphabet. */
+export const SubjectId = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]+$/)).pipe(Schema.brand("SubjectId"))
 export type SubjectId = typeof SubjectId.Type
 export const ClientId = Schema.String.pipe(Schema.brand("ClientId"))
 export type ClientId = typeof ClientId.Type
@@ -22,17 +24,35 @@ export type ApprovalDeliveryId = typeof ApprovalDeliveryId.Type
 export const AuditId = Schema.String.pipe(Schema.brand("AuditId"))
 export type AuditId = typeof AuditId.Type
 
+/**
+ * A connection as policy names it. A user-owned reference without a subject is
+ * a delegation template: it stands for "the calling user's own connection" and
+ * resolves to a concrete one when an invocation names its subject.
+ */
 export const ConnectionRef = Schema.Union([
   Schema.Struct({ owner: Schema.Literal("org"), integration: IntegrationSlug, name: ConnectionName }),
-  Schema.Struct({ owner: Schema.Literal("user"), subject: SubjectId, integration: IntegrationSlug, name: ConnectionName })
+  Schema.Struct({ owner: Schema.Literal("user"), subject: Schema.optional(SubjectId), integration: IntegrationSlug, name: ConnectionName })
 ])
 export type ConnectionRef = typeof ConnectionRef.Type
 export const connectionSubject = (connection: ConnectionRef): SubjectId | undefined => connection.owner === "user" ? connection.subject : undefined
+export const isDelegationTemplate = (connection: ConnectionRef): boolean => connection.owner === "user" && connection.subject === undefined
+/** The owner key the integration host files this connection under. */
+export const connectionOwner = (connection: ConnectionRef): ConnectionOwner => connection.owner === "org" ? "org" : `user:${connection.subject ?? ""}`
+export const userOwner = (subject: SubjectId): ConnectionOwner => `user:${subject}`
+const userOwnerPrefix = "user:"
+/** The reference for a connection the integration host holds. */
+export const connectionRefOf = (owner: ConnectionOwner, integration: IntegrationSlug, name: ConnectionName): ConnectionRef =>
+  owner === "org"
+    ? { owner: "org", integration, name }
+    : { owner: "user", subject: SubjectId.make(owner.slice(userOwnerPrefix.length)), integration, name }
+/** The template with the subject removed, which is how policy names a delegated tool. */
+export const delegationTemplateOf = (connection: ConnectionRef): ConnectionRef =>
+  connection.owner === "org" ? connection : { owner: "user", integration: connection.integration, name: connection.name }
 export const connectionRefKey = (connection: ConnectionRef): string => [connection.owner, connectionSubject(connection) ?? "", connection.integration, connection.name].join("\u0000")
 export const sameConnectionRef = (left: ConnectionRef, right: ConnectionRef): boolean => connectionRefKey(left) === connectionRefKey(right)
 const utf8 = new TextEncoder()
 const aliasPart = (value: string): string => Array.from(utf8.encode(value), (byte) => byte >= 0x61 && byte <= 0x7a || byte >= 0x30 && byte <= 0x39 ? String.fromCharCode(byte) : `-${byte.toString(16).padStart(2, "0")}`).join("")
-export const aliasForConnection = (connection: ConnectionRef): Alias => Alias.make([connection.owner, ...connection.owner === "user" ? [aliasPart(connection.subject)] : [], aliasPart(connection.integration), aliasPart(connection.name)].join("_"))
+export const aliasForConnection = (connection: ConnectionRef): Alias => Alias.make([connection.owner, ...connection.owner === "user" && connection.subject !== undefined ? [aliasPart(connection.subject)] : [], aliasPart(connection.integration), aliasPart(connection.name)].join("_"))
 
 export const ClientCapability = Schema.Literals(["provision_connections", "administer_gateway"])
 export type ClientCapability = typeof ClientCapability.Type
@@ -78,7 +98,16 @@ export const InvocationDenied = Schema.Struct({ status: Schema.Literal("denied")
 export type InvocationDenied = typeof InvocationDenied.Type
 export const InvocationFailed = Schema.Struct({ status: Schema.Literal("failed"), message: Schema.String })
 export type InvocationFailed = typeof InvocationFailed.Type
-export const InvocationOutcome = Schema.Union([InvocationSucceeded, InvocationPending, InvocationDenied, InvocationFailed])
+/** The tool acts for a user who has not connected yet: the flow is started, bound to them, and waits for their browser. */
+export const InvocationAuthorizationRequired = Schema.Struct({
+  status: Schema.Literal("authorization-required"),
+  integration: IntegrationSlug,
+  connection: ConnectionName,
+  subject: SubjectId,
+  session: OAuthSessionView
+})
+export type InvocationAuthorizationRequired = typeof InvocationAuthorizationRequired.Type
+export const InvocationOutcome = Schema.Union([InvocationSucceeded, InvocationPending, InvocationDenied, InvocationFailed, InvocationAuthorizationRequired])
 export type InvocationOutcome = typeof InvocationOutcome.Type
 export const AuditOutcome = Schema.Literals(["succeeded", "failed", "denied", "pending"])
 export type AuditOutcome = typeof AuditOutcome.Type
@@ -115,4 +144,4 @@ export const refusalReason = (code: RefusalReason["code"]): RefusalReason => {
   }
 }
 
-export { Alias, ApprovalStatus, ConnectionName, IntegrationSlug, OwnerTier, ToolName }
+export { Alias, ApprovalStatus, ConnectionName, IntegrationSlug, ConnectionOwner, ToolName }

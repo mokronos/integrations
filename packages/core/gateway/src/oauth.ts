@@ -9,7 +9,7 @@ import {
   startOAuthFlow
 } from "@integrations/integrations"
 import type { CatalogStore, Integrations, OAuthFlows } from "@integrations/integrations"
-import { AuthMethod, Connection, whenPresent } from "@integrations/contracts"
+import { AuthMethod, Connection, ConnectionOwner, whenPresent } from "@integrations/contracts"
 import { oauthSetupGuidance } from "./oauth-guidance.ts"
 
 export class OAuthFlowError extends Schema.TaggedError<OAuthFlowError>()(
@@ -74,6 +74,7 @@ const decodeRequest = (
 const AuthorizationRequest = Schema.Struct({
   integration: Schema.String,
   connection: Schema.String,
+  owner: Schema.optional(ConnectionOwner),
   authMethod: AuthMethod,
   clientId: Schema.optional(Schema.String),
   clientSecret: Schema.optional(Schema.String),
@@ -190,7 +191,8 @@ const prepareFlow = Effect.fn("OAuth.prepareFlow")(function*(
       integration: input.integration,
       connection: input.connection,
       template: input.authMethod.template,
-      redirectUri
+      redirectUri,
+      ...whenPresent("owner", input.owner)
     }))
   if (started.status === "connected") {
     return { status: "connected", connection: started.connection }

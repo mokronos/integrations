@@ -17,9 +17,9 @@ describe("tool addresses", () => {
   })
 
   it("keeps the four leading segments positional", () => {
-    const parsed = Option.getOrThrow(parseToolAddress("tools.slack.user.personal.chat.post"))
+    const parsed = Option.getOrThrow(parseToolAddress("tools.slack.user:sebastian.personal.chat.post"))
     expect(String(parsed.integration)).toBe("slack")
-    expect(parsed.owner).toBe("user")
+    expect(parsed.owner).toBe("user:sebastian")
     expect(String(parsed.connection)).toBe("personal")
     expect(String(parsed.tool)).toBe("chat.post")
   })
@@ -44,7 +44,7 @@ describe("connection addresses", () => {
       connection: ConnectionName.make("work")
     }
     expect(String(connectionAddress({ ...reference, owner: "org" }))).toBe("tools.gmail.org.work")
-    expect(String(connectionAddress({ ...reference, owner: "user" }))).toBe("tools.gmail.user.work")
+    expect(String(connectionAddress({ ...reference, owner: "user:sebastian" }))).toBe("tools.gmail.user:sebastian.work")
   })
 })
 

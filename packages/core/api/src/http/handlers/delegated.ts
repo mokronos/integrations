@@ -1,4 +1,5 @@
 import {
+  whenPresent,
   whenPresentMap
 } from "@integrations/contracts"
 import { BlobStore, Integrations } from "@integrations/integrations"
@@ -22,7 +23,8 @@ import {
   requireSecret
 } from "../authority.ts"
 import {
-  GatewayConfig
+  GatewayConfig,
+  OAuthFlowSessions
 } from "../services.ts"
 import { capture } from "../observability.ts"
 
@@ -32,6 +34,7 @@ export const DelegatedLayer = HttpApiBuilder.group(GatewayApi, "delegated", (han
     const integrations = yield* Integrations
     const blobs = yield* BlobStore
     const config = yield* GatewayConfig
+    const oauth = yield* OAuthFlowSessions
     return handlers
       .handle("listTools", (request) =>
         Effect.gen(function*() {
@@ -52,6 +55,7 @@ export const DelegatedLayer = HttpApiBuilder.group(GatewayApi, "delegated", (han
             {
               store,
               integrations,
+              oauth,
               argumentRetentionDays: config.retentionDays,
               approvalUrlOf: (approvalId) => {
                 const origin = config.dashboardUrl?.()
@@ -68,7 +72,8 @@ export const DelegatedLayer = HttpApiBuilder.group(GatewayApi, "delegated", (han
               secret,
               alias: request.payload.alias,
               tool: ToolName.make(request.payload.tool),
-              arguments: request.payload.arguments ?? {}
+              arguments: request.payload.arguments ?? {},
+              ...whenPresent("subject", request.payload.subject)
             }
           ))
         }))

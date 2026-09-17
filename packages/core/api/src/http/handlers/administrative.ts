@@ -31,7 +31,8 @@ import {
   newAccessProfileId,
   newApprovalDestinationId,
   newApprovalPolicyId,
-  newClientId
+  newClientId,
+  newSubjectId
 } from "@integrations/gateway-core"
 import { runMaintenance } from "@integrations/gateway-core"
 import { deliverDueApprovalNotifications } from "@integrations/gateway-core"
@@ -83,6 +84,20 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
             }))
           ])
           return { ...counts, connections: connections.length, recentActivity }
+        }))
+      .handle("listSubjects", () =>
+        Effect.gen(function*() {
+          const tenantId = yield* requireTenant
+          return { subjects: yield* capture(store.listSubjects(tenantId)) }
+        }))
+      .handle("createSubject", (request) =>
+        Effect.gen(function*() {
+          const tenantId = yield* requireTenant
+          const id = request.payload.id ?? (yield* newSubjectId)
+          if ((yield* capture(store.findSubjectById(id))) !== undefined) {
+            return yield* new ApiBadRequest({ error: `Subject ${id} already exists` })
+          }
+          return yield* capture(store.createSubject({ id, tenantId }))
         }))
       .handle("listClients", () =>
         Effect.gen(function*() {

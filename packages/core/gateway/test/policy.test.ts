@@ -134,13 +134,15 @@ describe("access profiles and approval policies", () => {
           alias: Alias.make("org_calendar_primary"),
           tool: ToolName.make("createEvent"),
           connection: connection("calendar", "primary"),
-          decision: "allow"
+          decision: "allow",
+          delegated: false
         },
         {
           alias: Alias.make("org_mail_primary"),
           tool: ToolName.make("sendEmail"),
           connection: connection("mail", "primary"),
-          decision: "require_approval"
+          decision: "require_approval",
+          delegated: false
         }
       ])
       const authorized = yield* authorizeInvocation(gateway, {

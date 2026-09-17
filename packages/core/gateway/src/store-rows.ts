@@ -432,9 +432,7 @@ const toConnectionRef = (fields: {
   const integration = IntegrationSlug.make(fields.integration)
   const name = ConnectionName.make(fields.connection_name)
   if (fields.owner === "org") return { owner: "org", integration, name }
-  if (fields.subject === null) {
-    throw new Error(`User-tier connection ${fields.integration}/${fields.connection_name} has no subject`)
-  }
+  if (fields.subject === null) return { owner: "user", integration, name }
   return { owner: "user", subject: SubjectId.make(fields.subject), integration, name }
 }
 

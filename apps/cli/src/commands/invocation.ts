@@ -2,8 +2,7 @@ import type { GatewayClient } from "@mokronos/integrations-client"
 import type { HttpClient } from "effect/unstable/http"
 import { Effect, Option, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
-import { Alias } from "@integrations/contracts"
-import { InvocationOutcome } from "@integrations/contracts"
+import { Alias, InvocationOutcome, SubjectId, whenPresentMap } from "@integrations/contracts"
 import type { IntegrationsCliError } from "../connection.ts"
 import { cliError, connectToGateway, describeError } from "../connection.ts"
 import {
@@ -79,13 +78,19 @@ const settleOutcome = (
     )
     : Effect.succeed(outcome)
 
+const subjectFlag = () =>
+  Flag.string("subject").pipe(
+    Flag.optional,
+    Flag.withDescription("The user this call acts for; delegated tools require it")
+  )
+
 const reportOutcome = (
   outcome: InvocationOutcome,
   verbose: boolean
 ): Effect.Effect<void, IntegrationsCliError> =>
   writeStdoutLine(jsonOutput(encodeOutcome(outcome), verbose)).pipe(
     Effect.flatMap(() =>
-      outcome.status === "succeeded" || outcome.status === "pending"
+      outcome.status === "succeeded" || outcome.status === "pending" || outcome.status === "authorization-required"
         ? Effect.void
         : Effect.fail(cliError(
           outcome.status === "denied" ? outcome.reason : outcome.message
@@ -110,10 +115,11 @@ export const operatorExecuteCommand = Command.make(
       Flag.optional,
       Flag.withDescription("Read the JSON input from a file")
     ),
+    subject: subjectFlag(),
     out: outFlag(),
     verbose: verboseFlag()
   },
-  ({ target, second, third, file, out, verbose }) =>
+  ({ target, second, third, file, subject, out, verbose }) =>
     gatewayTask((client) =>
       Effect.gen(function*() {
         const payload = yield* resolveFileArguments(
@@ -127,7 +133,8 @@ export const operatorExecuteCommand = Command.make(
           payload: {
             alias: Alias.make(target),
             tool: second,
-            arguments: payload
+            arguments: payload,
+            ...whenPresentMap("subject", Option.getOrUndefined(subject), SubjectId.make)
           }
         })
         return yield* settleOutcome(client, outcome, Option.getOrUndefined(out))
@@ -155,10 +162,11 @@ export const clientExecuteCommand = Command.make(
       Flag.optional,
       Flag.withDescription("Read the JSON input from a file")
     ),
+    subject: subjectFlag(),
     out: outFlag(),
     verbose: verboseFlag()
   },
-  ({ alias, tool, json, file, out, verbose }) =>
+  ({ alias, tool, json, file, subject, out, verbose }) =>
     gatewayTask((client) =>
       Effect.gen(function*() {
         const arguments_ = yield* resolveFileArguments(
@@ -169,7 +177,12 @@ export const clientExecuteCommand = Command.make(
           )
         )
         const outcome = yield* client.delegated.execute({
-          payload: { alias: Alias.make(alias), tool, arguments: arguments_ }
+          payload: {
+            alias: Alias.make(alias),
+            tool,
+            arguments: arguments_,
+            ...whenPresentMap("subject", Option.getOrUndefined(subject), SubjectId.make)
+          }
         })
         return yield* settleOutcome(client, outcome, Option.getOrUndefined(out))
       })

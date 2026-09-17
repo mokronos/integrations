@@ -17,8 +17,12 @@ export const ToolName = Schema.String.check(Schema.isMinLength(1)).pipe(
 )
 export type ToolName = typeof ToolName.Type
 
-export const OwnerTier = Schema.Literals(["org", "user"])
-export type OwnerTier = typeof OwnerTier.Type
+/** Who a connection belongs to: the organisation, or one person by subject id. */
+export const ConnectionOwner = Schema.Union([
+  Schema.Literal("org"),
+  Schema.TemplateLiteral(["user:", Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]+$/))])
+])
+export type ConnectionOwner = typeof ConnectionOwner.Type
 
 export const Alias = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_-]*$/)).pipe(
   Schema.brand("Alias")

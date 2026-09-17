@@ -3,7 +3,7 @@ import {
   ConnectionName,
   HttpMethod,
   IntegrationSlug,
-  OwnerTier,
+  ConnectionOwner,
   ParameterLocation,
   ToolAddress
 } from "@integrations/contracts"
@@ -39,7 +39,7 @@ export type ToolCall = typeof ToolCall.Type
 
 export const Tool = Schema.Struct({
   address: ToolAddress,
-  owner: OwnerTier,
+  owner: ConnectionOwner,
   integration: IntegrationSlug,
   connection: ConnectionName,
   name: Schema.String,

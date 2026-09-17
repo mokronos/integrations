@@ -23,7 +23,7 @@ import { OAuthClientSlug, OAuthState } from "../catalog/ids.ts"
 import { connectionAddress, ConnectionName, IntegrationSlug } from "@integrations/contracts"
 import { AuthTemplateSlug } from "../catalog/ids.ts"
 import { whenPresent } from "@integrations/contracts"
-import { OAuthServerProbe, OwnerTier } from "@integrations/contracts"
+import { OAuthServerProbe, ConnectionOwner } from "@integrations/contracts"
 
 const ServerMetadata = Schema.Struct({
   issuer: Schema.optional(Schema.String),
@@ -137,8 +137,8 @@ const metadataOf = (record: OAuthClientRecord) => ({
 })
 
 export interface StartOptions {
-  readonly owner: OwnerTier
-  readonly clientOwner: OwnerTier
+  readonly owner: ConnectionOwner
+  readonly clientOwner: ConnectionOwner
   readonly client: OAuthClientSlug
   readonly integration: IntegrationSlug
   readonly connection: ConnectionName
@@ -147,11 +147,11 @@ export interface StartOptions {
 }
 
 export interface CompletedAuthorization {
-  readonly owner: OwnerTier
+  readonly owner: ConnectionOwner
   readonly integration: IntegrationSlug
   readonly connection: ConnectionName
   readonly template: AuthTemplateSlug
-  readonly clientOwner: OwnerTier
+  readonly clientOwner: ConnectionOwner
   readonly client: OAuthClientSlug
   readonly scope: Option.Option<string>
   readonly expiresAt: Option.Option<number>
@@ -168,7 +168,7 @@ export class OAuthFlows extends Context.Service<
   {
     readonly probe: (url: string) => Effect.Effect<OAuthServerProbe, OAuthError>
     readonly registerDynamicClient: (options: {
-      readonly owner: OwnerTier
+      readonly owner: ConnectionOwner
       readonly slug: OAuthClientSlug
       readonly integration: IntegrationSlug
       readonly redirectUri: string
@@ -181,7 +181,7 @@ export class OAuthFlows extends Context.Service<
       readonly tokenAuthMethods?: ReadonlyArray<string>
     }) => Effect.Effect<OAuthClientSlug, OAuthError | StorageError>
     readonly createClient: (options: {
-      readonly owner: OwnerTier
+      readonly owner: ConnectionOwner
       readonly slug: OAuthClientSlug
       readonly integration: IntegrationSlug
       readonly authorizationUrl: string
@@ -202,10 +202,10 @@ export class OAuthFlows extends Context.Service<
       readonly code: string
     }) => Effect.Effect<CompletedAuthorization, OAuthError | StorageError>
     readonly accessToken: (reference: {
-      readonly owner: OwnerTier
+      readonly owner: ConnectionOwner
       readonly integration: IntegrationSlug
       readonly connection: ConnectionName
-      readonly clientOwner: OwnerTier
+      readonly clientOwner: ConnectionOwner
       readonly client: OAuthClientSlug
     }) => Effect.Effect<Option.Option<OAuthAccess>, OAuthError | StorageError>
   }
@@ -224,7 +224,7 @@ export class OAuthFlows extends Context.Service<
         credentials.get(oauthClientCredentialKey(record.owner, record.slug))
 
       const requireClient = Effect.fn("OAuthFlows.requireClient")(function* (reference: {
-        readonly owner: OwnerTier
+        readonly owner: ConnectionOwner
         readonly slug: OAuthClientSlug
       }) {
         const found = yield* store.findOAuthClient(reference)
@@ -265,7 +265,7 @@ export class OAuthFlows extends Context.Service<
 
       const registerDynamicClient = Effect.fn("OAuthFlows.registerDynamicClient")(
         function* (options: {
-          readonly owner: OwnerTier
+          readonly owner: ConnectionOwner
           readonly slug: OAuthClientSlug
           readonly integration: IntegrationSlug
           readonly redirectUri: string
@@ -335,7 +335,7 @@ export class OAuthFlows extends Context.Service<
       )
 
       const createClient = Effect.fn("OAuthFlows.createClient")(function* (options: {
-        readonly owner: OwnerTier
+        readonly owner: ConnectionOwner
         readonly slug: OAuthClientSlug
         readonly integration: IntegrationSlug
         readonly authorizationUrl: string
@@ -419,7 +419,7 @@ export class OAuthFlows extends Context.Service<
       })
 
       const persistTokens = Effect.fn("OAuthFlows.persistTokens")(function* (options: {
-        readonly owner: OwnerTier
+        readonly owner: ConnectionOwner
         readonly integration: IntegrationSlug
         readonly connection: ConnectionName
         readonly response: typeof TokenResponse.Type
@@ -516,10 +516,10 @@ export class OAuthFlows extends Context.Service<
       const refreshSkewMillis = 60_000
 
       const accessToken = Effect.fn("OAuthFlows.accessToken")(function* (reference: {
-        readonly owner: OwnerTier
+        readonly owner: ConnectionOwner
         readonly integration: IntegrationSlug
         readonly connection: ConnectionName
-        readonly clientOwner: OwnerTier
+        readonly clientOwner: ConnectionOwner
         readonly client: OAuthClientSlug
       }) {
         const address = connectionAddress({

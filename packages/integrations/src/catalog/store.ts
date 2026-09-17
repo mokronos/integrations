@@ -8,7 +8,7 @@ import {
   ConnectionName,
   IntegrationKind,
   IntegrationSlug,
-  OwnerTier,
+  ConnectionOwner,
   ToolAddress,
   whenPresent
 } from "@integrations/contracts"
@@ -31,7 +31,7 @@ export const IntegrationRecord = Schema.Struct({
 export type IntegrationRecord = typeof IntegrationRecord.Type
 
 export const ConnectionRecord = Schema.Struct({
-  owner: OwnerTier,
+  owner: ConnectionOwner,
   integration: IntegrationSlug,
   name: ConnectionName,
   template: AuthTemplateSlug,
@@ -39,7 +39,7 @@ export const ConnectionRecord = Schema.Struct({
   identityLabel: Schema.optional(Schema.String),
   description: Schema.optional(Schema.String),
   oauthClient: Schema.optional(Schema.String),
-  oauthClientOwner: Schema.optional(OwnerTier),
+  oauthClientOwner: Schema.optional(ConnectionOwner),
   oauthScope: Schema.optional(Schema.String),
   expiresAt: Schema.optional(Schema.Number),
   createdAt: Schema.Number
@@ -47,7 +47,7 @@ export const ConnectionRecord = Schema.Struct({
 export type ConnectionRecord = typeof ConnectionRecord.Type
 
 export const OAuthClientRecord = Schema.Struct({
-  owner: OwnerTier,
+  owner: ConnectionOwner,
   slug: OAuthClientSlug,
   integration: IntegrationSlug,
   clientId: Schema.String,
@@ -63,11 +63,11 @@ export type OAuthClientRecord = typeof OAuthClientRecord.Type
 
 export const OAuthFlowRecord = Schema.Struct({
   state: OAuthState,
-  owner: OwnerTier,
+  owner: ConnectionOwner,
   integration: IntegrationSlug,
   connection: ConnectionName,
   template: AuthTemplateSlug,
-  clientOwner: OwnerTier,
+  clientOwner: ConnectionOwner,
   clientSlug: OAuthClientSlug,
   codeVerifier: Schema.String,
   redirectUri: Schema.String,
@@ -234,13 +234,13 @@ const decodeOAuthFlowRow = (row: SqlRow) =>
 
 export interface ToolFilter {
   readonly integration?: IntegrationSlug
-  readonly owner?: OwnerTier
+  readonly owner?: ConnectionOwner
   readonly connection?: ConnectionName
 }
 
 export interface ConnectionFilter {
   readonly integration?: IntegrationSlug
-  readonly owner?: OwnerTier
+  readonly owner?: ConnectionOwner
   readonly name?: ConnectionName
 }
 
@@ -266,13 +266,13 @@ export class CatalogStore extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<ConnectionRecord>, StorageError>
     readonly putConnection: (record: ConnectionRecord) => Effect.Effect<void, StorageError>
     readonly removeConnection: (reference: {
-      readonly owner: OwnerTier
+      readonly owner: ConnectionOwner
       readonly integration: IntegrationSlug
       readonly name: ConnectionName
     }) => Effect.Effect<void, StorageError>
 
     readonly findOAuthClient: (reference: {
-      readonly owner: OwnerTier
+      readonly owner: ConnectionOwner
       readonly slug: OAuthClientSlug
     }) => Effect.Effect<Option.Option<OAuthClientRecord>, StorageError>
     readonly putOAuthClient: (record: OAuthClientRecord) => Effect.Effect<void, StorageError>
@@ -290,7 +290,7 @@ export class CatalogStore extends Context.Service<
     ) => Effect.Effect<Option.Option<IntegrationTool>, StorageError>
     readonly replaceTools: (
       connection: {
-        readonly owner: OwnerTier
+        readonly owner: ConnectionOwner
         readonly integration: IntegrationSlug
         readonly name: ConnectionName
       },
@@ -442,7 +442,7 @@ export class CatalogStore extends Context.Service<
 
       const removeConnection = Effect.fn("CatalogStore.removeConnection")(
         (reference: {
-          readonly owner: OwnerTier
+          readonly owner: ConnectionOwner
           readonly integration: IntegrationSlug
           readonly name: ConnectionName
         }) =>
@@ -454,7 +454,7 @@ export class CatalogStore extends Context.Service<
 
       const findOAuthClient = Effect.fn("CatalogStore.findOAuthClient")(
         function* (reference: {
-          readonly owner: OwnerTier
+          readonly owner: ConnectionOwner
           readonly slug: OAuthClientSlug
         }) {
           const rows = yield* database.query({
@@ -580,7 +580,7 @@ export class CatalogStore extends Context.Service<
 
       const replaceTools = Effect.fn("CatalogStore.replaceTools")((
         connection: {
-          readonly owner: OwnerTier
+          readonly owner: ConnectionOwner
           readonly integration: IntegrationSlug
           readonly name: ConnectionName
         },

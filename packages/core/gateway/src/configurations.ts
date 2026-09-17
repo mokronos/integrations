@@ -2,6 +2,7 @@ import type { Integrations, StorageError } from "@integrations/integrations"
 import { Effect } from "effect"
 import {
   connectionRefKey,
+  sameConnectionRef,
   type AccessProfile,
   type AccessProfileTool,
   type ApprovalPolicy,
@@ -94,25 +95,38 @@ export const reconcileConfigurations = Effect.fn("Configurations.reconcile")(fun
     }
   }
 
+  // Every granted route needs a decision, including delegation templates an
+  // administrator granted by hand. Those the catalog does not know default to
+  // asking a human, the same way unclassified tools do.
+  const granted = (yield* Effect.forEach(
+    yield* input.store.listAccessProfiles(input.tenantId),
+    (profile) => input.store.listAccessProfileTools(profile.id)
+  )).flat()
   yield* Effect.forEach(approvalPolicies, (policy) => Effect.gen(function*() {
     const existing = yield* input.store.listApprovalPolicyTools(policy.id)
     const completed = completeApprovalPolicyTools(catalog, existing)
-    if (completed.length > existing.length) {
-      yield* input.store.replaceApprovalPolicyTools(policy.id, completed)
+    const decided = new Set(completed.map((entry) => routeKey(entry.connection, entry.tool)))
+    const undecided = granted
+      .filter((entry) => !decided.has(routeKey(entry.connection, entry.tool)))
+      .map((entry): ApprovalPolicyToolInput => ({ connection: entry.connection, tool: entry.tool, decision: "require_approval" }))
+    const withGrants = [...completed, ...undecided.filter((entry, index) =>
+      undecided.findIndex((other) => routeKey(other.connection, other.tool) === routeKey(entry.connection, entry.tool)) === index)]
+    if (withGrants.length > existing.length) {
+      yield* input.store.replaceApprovalPolicyTools(policy.id, withGrants)
     }
   }), { discard: true })
 
   return { accessProfile, approvalPolicy }
 })
 
+/** Drops the grants that named exactly this connection. A user's connection leaving keeps the template. */
 export const forgetConnection = Effect.fn("Grants.forgetConnection")(function*(input: {
   readonly store: GatewayStore
   readonly tenantId: Client["tenantId"]
-  readonly integration: string
-  readonly connection: string
+  readonly connection: ConnectionRef
 }): Effect.fn.Return<void, GatewayStoreError> {
   const names = (row: { readonly connection: ConnectionRef }): boolean =>
-    row.connection.integration === input.integration && row.connection.name === input.connection
+    sameConnectionRef(row.connection, input.connection)
   const [accessProfiles, approvalPolicies] = yield* Effect.all([
     input.store.listAccessProfiles(input.tenantId),
     input.store.listApprovalPolicies(input.tenantId)

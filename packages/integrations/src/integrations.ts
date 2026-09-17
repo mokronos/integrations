@@ -33,7 +33,7 @@ import { whenPresent } from "@integrations/contracts"
 import {
   Connection,
   Integration,
-  OwnerTier,
+  ConnectionOwner,
   Tool,
   ToolAddress,
   ToolSummary
@@ -56,7 +56,7 @@ export type IntegrationFailure =
 
 export interface ToolFilter {
   readonly integration?: IntegrationSlug
-  readonly owner?: OwnerTier
+  readonly owner?: ConnectionOwner
   readonly connection?: ConnectionName
 }
 
@@ -81,7 +81,7 @@ export interface AddOpenApiOptions {
 }
 
 export interface CreateConnectionOptions {
-  readonly owner: OwnerTier
+  readonly owner: ConnectionOwner
   readonly integration: IntegrationSlug
   readonly name: ConnectionName
   readonly template: AuthTemplateSlug
@@ -191,15 +191,15 @@ export class Integrations extends Context.Service<
       options: CreateConnectionOptions
     ) => Effect.Effect<Connection, IntegrationFailure>
     readonly listConnections: (
-      filter?: { readonly integration?: IntegrationSlug; readonly owner?: OwnerTier }
+      filter?: { readonly integration?: IntegrationSlug; readonly owner?: ConnectionOwner }
     ) => Effect.Effect<ReadonlyArray<Connection>, StorageError>
     readonly removeConnection: (reference: {
-      readonly owner: OwnerTier
+      readonly owner: ConnectionOwner
       readonly integration: IntegrationSlug
       readonly name: ConnectionName
     }) => Effect.Effect<void, StorageError>
     readonly refreshConnection: (reference: {
-      readonly owner: OwnerTier
+      readonly owner: ConnectionOwner
       readonly integration: IntegrationSlug
       readonly name: ConnectionName
     }) => Effect.Effect<ReadonlyArray<Tool>, IntegrationFailure>
@@ -257,7 +257,7 @@ export class Integrations extends Context.Service<
 
       const requireConnection = Effect.fn("Integrations.requireConnection")(
         function* (reference: {
-          readonly owner: OwnerTier
+          readonly owner: ConnectionOwner
           readonly integration: IntegrationSlug
           readonly name: ConnectionName
         }) {
@@ -550,7 +550,7 @@ export class Integrations extends Context.Service<
 
       const refreshConnection = Effect.fn("Integrations.refreshConnection")(
         function* (reference: {
-          readonly owner: OwnerTier
+          readonly owner: ConnectionOwner
           readonly integration: IntegrationSlug
           readonly name: ConnectionName
         }) {
@@ -563,7 +563,7 @@ export class Integrations extends Context.Service<
 
       const removeConnection = Effect.fn("Integrations.removeConnection")(
         function* (reference: {
-          readonly owner: OwnerTier
+          readonly owner: ConnectionOwner
           readonly integration: IntegrationSlug
           readonly name: ConnectionName
         }) {
@@ -612,7 +612,7 @@ export class Integrations extends Context.Service<
         listConnections: Effect.fn("Integrations.listConnections")(
           function* (filter: {
             readonly integration?: IntegrationSlug
-            readonly owner?: OwnerTier
+            readonly owner?: ConnectionOwner
           } = {}) {
             const records = yield* store.listConnections(filter)
             return yield* Effect.forEach(records, (record) => {

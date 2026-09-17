@@ -1,9 +1,10 @@
-import { whenPresent } from "@integrations/contracts"
+import { connectionOwner, connectionRefOf, isDelegationTemplate, whenPresent } from "@integrations/contracts"
 import type { InvocationOutcome } from "@integrations/contracts"
-import { Crypto, DateTime, Duration, Effect, Schema } from "effect"
+import { Crypto, DateTime, Duration, Effect, Option, Schema } from "effect"
 import type { HttpClient } from "effect/unstable/http"
 import type { Integrations } from "@integrations/integrations"
 import { ToolAddress } from "@integrations/contracts"
+import type { OAuthSessions } from "./oauth-sessions.ts"
 import { authorizeClientInvocation, authorizeInvocation } from "./authorize.ts"
 import { defaultApprovalExpiryHours, defaultArgumentRetentionDays } from "./config.ts"
 import {
@@ -14,12 +15,14 @@ import {
 import type {
   Alias,
   ApprovalId,
+  Authorized,
   Client,
   ConnectionName,
   Authorization,
   ConnectionRef,
   IntegrationSlug,
   PolicyDecision,
+  SubjectId,
   TenantId,
   ToolName
 } from "./domain.ts"
@@ -30,12 +33,14 @@ type Json = typeof Schema.Json.Type
 
 export const boundToolAddress = (connection: ConnectionRef, tool: ToolName): ToolAddress =>
   ToolAddress.make(
-    `tools.${connection.integration}.${connection.owner}.${connection.name}.${tool}`
+    `tools.${connection.integration}.${connectionOwner(connection)}.${connection.name}.${tool}`
   )
 
 export interface InvokeDependencies {
   readonly store: GatewayStore
   readonly integrations: Integrations["Service"]
+  /** Starts the flow a delegated tool needs when its user has not connected yet. */
+  readonly oauth?: OAuthSessions
   readonly argumentRetentionDays?: number
   readonly approvalExpiryHours?: number
   readonly approvalUrlOf?: (approvalId: ApprovalId) => string | undefined
@@ -196,6 +201,9 @@ const settle = Effect.fn("Invocation.settle")(function*(
     return { status: "denied", reason }
   }
 
+  const missing = yield* missingUserConnection(dependencies, authorization)
+  if (missing !== undefined) return missing
+
   if (authorization.decision === "require_approval") {
     return yield* freezeOrCollect(
       {
@@ -217,6 +225,58 @@ const settle = Effect.fn("Invocation.settle")(function*(
   )
 })
 
+/**
+ * A delegated tool whose user has no live connection yet cannot run. Instead
+ * the OAuth flow starts, bound to that user, and the caller gets what it needs
+ * to send the person to their browser and try again afterwards.
+ */
+const missingUserConnection = Effect.fn("Invocation.missingUserConnection")(function*(
+  dependencies: InvokeDependencies,
+  authorization: Authorized
+): Effect.fn.Return<InvocationOutcome | undefined, GatewayStoreError> {
+  const connection = authorization.connection
+  if (!isDelegationTemplate(authorization.accessProfileTool.connection)) return undefined
+  if (connection.owner !== "user" || connection.subject === undefined) return undefined
+  const subject = connection.subject
+  const held = yield* dependencies.integrations.listConnections({
+    integration: connection.integration,
+    owner: connectionOwner(connection)
+  }).pipe(Effect.catch(() => Effect.succeed([])))
+  const live = held.find((candidate) => candidate.name === connection.name && candidate.status === "connected")
+  if (live !== undefined) return undefined
+
+  const deny = (reason: string): InvocationOutcome => ({ status: "denied", reason })
+  if (dependencies.oauth === undefined) {
+    return deny(`${authorization.alias}.${authorization.accessProfileTool.tool} needs ${subject} to connect ${connection.integration} first`)
+  }
+  const integration = yield* dependencies.integrations.findIntegration(connection.integration).pipe(
+    Effect.catch(() => Effect.succeed(Option.none()))
+  )
+  const method = Option.isNone(integration)
+    ? undefined
+    : integration.value.authMethods.find((candidate) => candidate.kind === "oauth")
+  if (method === undefined) {
+    return deny(`${connection.integration} offers no OAuth method, so it cannot be connected on behalf of ${subject}`)
+  }
+  const session = yield* dependencies.oauth.start({
+    integration: connection.integration,
+    connection: connection.name,
+    authMethod: method,
+    bindingTenant: authorization.client.tenantId,
+    subject
+  }).pipe(Effect.catch((failure) => Effect.succeed(failure)))
+  if ("_tag" in session) {
+    return deny(`${connection.integration} could not start authorization for ${subject}: ${session.message}`)
+  }
+  return {
+    status: "authorization-required",
+    integration: connection.integration,
+    connection: connection.name,
+    subject,
+    session: { id: session.id, integration: session.integration, connection: session.connection, state: session.state }
+  }
+})
+
 /** An invocation presented with an API key, as the HTTP route receives it. */
 export const invokeThroughGateway = Effect.fn("Invocation.invokeThroughGateway")(function*(
   dependencies: InvokeDependencies,
@@ -225,6 +285,7 @@ export const invokeThroughGateway = Effect.fn("Invocation.invokeThroughGateway")
     readonly alias: Alias
     readonly tool: ToolName
     readonly arguments: Json
+    readonly subject?: SubjectId
   }
 ): Effect.fn.Return<InvocationOutcome, GatewayStoreError, Crypto.Crypto | HttpClient.HttpClient> {
   const authorization = yield* authorizeInvocation(dependencies.store, input)
@@ -242,6 +303,7 @@ export const invokeAsClient = Effect.fn("Invocation.invokeAsClient")(function*(
     readonly alias: Alias
     readonly tool: ToolName
     readonly arguments: Json
+    readonly subject?: SubjectId
   }
 ): Effect.fn.Return<InvocationOutcome, GatewayStoreError, Crypto.Crypto | HttpClient.HttpClient> {
   const authorization = yield* authorizeClientInvocation(dependencies.store, input.client, input)
@@ -281,6 +343,8 @@ export type EffectiveTool = {
   readonly tool: ToolName
   readonly connection: ConnectionRef
   readonly decision: PolicyDecision
+  /** The tool runs on the calling user's own connection; invocations must name a subject. */
+  readonly delegated: boolean
   readonly description?: string
   readonly inputSchema?: Json
   readonly outputSchema?: Json
@@ -324,13 +388,27 @@ export const listEffectiveTools = Effect.fn("Invocation.listEffectiveTools")(fun
     alias: aliasForConnection(profileTool.connection),
     tool: profileTool.tool,
     connection: profileTool.connection,
-    decision: policyTool.decision
+    decision: policyTool.decision,
+    delegated: isDelegationTemplate(profileTool.connection)
   }))
   if (options.schemas !== true || options.integrations === undefined) return base
 
   const host = options.integrations
-  return yield* Effect.forEach(base, (entry) => {
-    return host.describeTool(boundToolAddress(entry.connection, entry.tool)).pipe(
+  /** A template names no connection of its own; any held connection of the integration describes the tool. */
+  const addressOf = (entry: { readonly connection: ConnectionRef; readonly tool: ToolName }) =>
+    isDelegationTemplate(entry.connection)
+      ? host.listConnections({ integration: entry.connection.integration }).pipe(
+        Effect.map((held) => {
+          const sample = held[0]
+          return sample === undefined
+            ? Option.none<ToolAddress>()
+            : Option.some(boundToolAddress(connectionRefOf(sample.owner, sample.integration, sample.name), entry.tool))
+        }),
+        Effect.catch(() => Effect.succeed(Option.none<ToolAddress>()))
+      )
+      : Effect.succeed(Option.some(boundToolAddress(entry.connection, entry.tool)))
+  const describe = (entry: (typeof base)[number], address: ToolAddress) =>
+    host.describeTool(address).pipe(
       Effect.map((described) => ({
         ...entry,
         ...whenPresent("description", described.description),
@@ -349,5 +427,9 @@ export const listEffectiveTools = Effect.fn("Invocation.listEffectiveTools")(fun
           entry
         ))
     )
-  }, { concurrency: "unbounded" })
+  return yield* Effect.forEach(base, (entry) =>
+    Effect.flatMap(addressOf(entry), Option.match({
+      onNone: () => Effect.succeed(entry),
+      onSome: (address) => describe(entry, address)
+    })), { concurrency: "unbounded" })
 })

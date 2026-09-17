@@ -1,13 +1,13 @@
 import { Schema } from "effect"
 import { ToolAddress } from "./address.ts"
-import { ConnectionName, IntegrationSlug, OwnerTier, ToolName } from "./vocabulary.ts"
+import { ConnectionName, IntegrationSlug, ConnectionOwner, ToolName } from "./vocabulary.ts"
 
 export const ToolSummary = Schema.Struct({
   address: ToolAddress,
   name: ToolName,
   description: Schema.String,
   integration: IntegrationSlug,
-  owner: OwnerTier,
+  owner: ConnectionOwner,
   connection: ConnectionName,
   defaultDecision: Schema.Literals(["allow", "require_approval"])
 })

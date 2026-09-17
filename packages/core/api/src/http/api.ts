@@ -31,6 +31,7 @@ import {
   PolicyDecision,
   PendingApproval,
   SubjectId,
+  TenantId,
   OAuthClientSubmission,
   OAuthSessionView
 } from "@integrations/contracts"
@@ -52,6 +53,7 @@ import {
   InvocationPending,
   InvocationDenied,
   InvocationFailed,
+  InvocationAuthorizationRequired,
   NonNegativeInt,
   NonNegativeIntFromString,
   PositiveInt,
@@ -69,7 +71,9 @@ const WireAlias = Alias
 const ExecuteBody = Schema.Struct({
   alias: WireAlias,
   tool: Schema.String,
-  arguments: Schema.optional(Json)
+  arguments: Schema.optional(Json),
+  /** Who the agent acts for. Required by delegated tools, ignored by the rest. */
+  subject: Schema.optional(SubjectId)
 })
 
 const CreateClientBody = Schema.Struct({
@@ -129,13 +133,16 @@ const ConnectBody = Schema.Struct({
   integration: Schema.String,
   connection: Schema.optional(Schema.String),
   template: Schema.optional(Schema.String),
-  values: Schema.optional(Schema.Record(Schema.String, Schema.String))
+  values: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  /** Connect on behalf of one person rather than the organisation. */
+  subject: Schema.optional(SubjectId)
 })
 
 const OAuthStartBody = Schema.Struct({
   integration: Schema.String,
   connection: Schema.optional(Schema.String),
   template: Schema.optional(Schema.String),
+  subject: Schema.optional(SubjectId),
   clientId: Schema.optional(Schema.String),
   clientSecret: Schema.optional(Schema.String),
   timeoutSeconds: Schema.optional(Schema.Number)
@@ -180,12 +187,16 @@ const EffectiveTool = Schema.Struct({
   tool: Schema.String,
   connection: ConnectionRef,
   decision: PolicyDecision,
+  delegated: Schema.Boolean,
   description: Schema.optional(Schema.String),
   inputSchema: Schema.optional(Json),
   outputSchema: Schema.optional(Json)
 })
 
-const InvokedOk = Schema.Union([InvocationSucceeded, InvocationPending])
+const InvokedOk = Schema.Union([InvocationSucceeded, InvocationPending, InvocationAuthorizationRequired])
+
+const SubjectView = Schema.Struct({ id: SubjectId, tenantId: TenantId, createdAt: Schema.Date })
+const CreateSubjectBody = Schema.Struct({ id: Schema.optional(SubjectId) })
 const InvokedDenied = InvocationDenied.pipe(HttpApiSchema.status(403))
 const InvokedFailed = InvocationFailed.pipe(HttpApiSchema.status(502))
 
@@ -448,6 +459,14 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
       connections: Schema.Number,
       recentActivity: Schema.Array(AuditRecord)
     })
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.get("listSubjects", "/v1/subjects", {
+    success: Schema.Struct({ subjects: Schema.Array(SubjectView) })
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.post("createSubject", "/v1/subjects", {
+    payload: CreateSubjectBody,
+    success: HttpApiSchema.status(201)(SubjectView),
+    error: ApiBadRequestError
   }).annotate(RequiredAccess, "administrative"))
   .add(HttpApiEndpoint.get("listClients", "/v1/clients", {
     success: Schema.Struct({

@@ -1,26 +1,26 @@
 import { Option, Schema } from "effect"
-import { ConnectionName, IntegrationSlug, OwnerTier, ToolName } from "./vocabulary.ts"
+import { ConnectionName, IntegrationSlug, ConnectionOwner, ToolName } from "./vocabulary.ts"
 
 export const ToolAddress = Schema.String
-  .check(Schema.isPattern(/^tools\.[^.]+\.(org|user)\.[^.]+\..+$/))
+  .check(Schema.isPattern(/^tools\.[^.]+\.(org|user:[^.]+)\.[^.]+\..+$/))
   .pipe(Schema.brand("ToolAddress"))
 export type ToolAddress = typeof ToolAddress.Type
 
 export const ConnectionAddress = Schema.String
-  .check(Schema.isPattern(/^tools\.[^.]+\.(org|user)\.[^.]+$/))
+  .check(Schema.isPattern(/^tools\.[^.]+\.(org|user:[^.]+)\.[^.]+$/))
   .pipe(Schema.brand("ConnectionAddress"))
 export type ConnectionAddress = typeof ConnectionAddress.Type
 
 export interface ParsedToolAddress {
   readonly integration: IntegrationSlug
-  readonly owner: OwnerTier
+  readonly owner: ConnectionOwner
   readonly connection: ConnectionName
   readonly tool: ToolName
 }
 
 const decodeParts = Schema.decodeUnknownOption(Schema.Struct({
   integration: IntegrationSlug,
-  owner: OwnerTier,
+  owner: ConnectionOwner,
   connection: ConnectionName,
   tool: ToolName
 }))
@@ -46,7 +46,7 @@ export const toolAddress = (parts: ParsedToolAddress): ToolAddress =>
   )
 
 export const connectionAddress = (parts: {
-  readonly owner: OwnerTier
+  readonly owner: ConnectionOwner
   readonly integration: IntegrationSlug
   readonly connection: ConnectionName
 }): ConnectionAddress =>
