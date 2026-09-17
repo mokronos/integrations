@@ -58,12 +58,14 @@ export const ClientCapability = Schema.Literals(["provision_connections", "admin
 export type ClientCapability = typeof ClientCapability.Type
 export const ApprovalDelivery = Schema.Struct({ returnLink: Schema.Boolean })
 export type ApprovalDelivery = typeof ApprovalDelivery.Type
+export const McpSurface = Schema.Literals(["tools", "discovery"])
+export type McpSurface = typeof McpSurface.Type
 export const PolicyDecision = Schema.Literals(["allow", "require_approval"])
 export type PolicyDecision = typeof PolicyDecision.Type
 
 export const Client = Schema.Struct({
   id: ClientId, tenantId: TenantId, accessProfileId: AccessProfileId, approvalPolicyId: ApprovalPolicyId,
-  name: Schema.String, capabilities: Schema.Array(ClientCapability), approvalDelivery: ApprovalDelivery,
+  name: Schema.String, capabilities: Schema.Array(ClientCapability), approvalDelivery: ApprovalDelivery, mcpSurface: McpSurface,
   createdAt: Schema.Date, revokedAt: Schema.NullOr(Schema.Date)
 })
 export type Client = typeof Client.Type
@@ -98,6 +100,9 @@ export const InvocationDenied = Schema.Struct({ status: Schema.Literal("denied")
 export type InvocationDenied = typeof InvocationDenied.Type
 export const InvocationFailed = Schema.Struct({ status: Schema.Literal("failed"), message: Schema.String })
 export type InvocationFailed = typeof InvocationFailed.Type
+export const InvocationIssue = Schema.Struct({ path: Schema.String, message: Schema.String })
+export const InvocationInvalid = Schema.Struct({ status: Schema.Literal("invalid"), message: Schema.String, issues: Schema.Array(InvocationIssue) })
+export type InvocationInvalid = typeof InvocationInvalid.Type
 /** The tool acts for a user who has not connected yet: the flow is started, bound to them, and waits for their browser. */
 export const InvocationAuthorizationRequired = Schema.Struct({
   status: Schema.Literal("authorization-required"),
@@ -107,7 +112,7 @@ export const InvocationAuthorizationRequired = Schema.Struct({
   session: OAuthSessionView
 })
 export type InvocationAuthorizationRequired = typeof InvocationAuthorizationRequired.Type
-export const InvocationOutcome = Schema.Union([InvocationSucceeded, InvocationPending, InvocationDenied, InvocationFailed, InvocationAuthorizationRequired])
+export const InvocationOutcome = Schema.Union([InvocationSucceeded, InvocationPending, InvocationDenied, InvocationFailed, InvocationInvalid, InvocationAuthorizationRequired])
 export type InvocationOutcome = typeof InvocationOutcome.Type
 export const AuditOutcome = Schema.Literals(["succeeded", "failed", "denied", "pending"])
 export type AuditOutcome = typeof AuditOutcome.Type

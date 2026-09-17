@@ -168,9 +168,25 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
             approvalPolicyId: approvalPolicy.id,
             name: body.name,
             capabilities: body.capabilities ?? [],
-            ...whenPresentMap("approvalDelivery", body.approvalDelivery, (d) => d)
+            ...whenPresentMap("approvalDelivery", body.approvalDelivery, (d) => d),
+            ...whenPresentMap("mcpSurface", body.mcpSurface, (surface) => surface)
           }))
           return client
+        }))
+      .handle("renameClient", (request) =>
+        Effect.gen(function*() {
+          const tenantId = yield* requireTenant
+          const clientId = request.params["id"]
+          const name = request.payload.name.trim()
+          if (name.length === 0) return yield* new ApiBadRequest({ error: "A client needs a name" })
+          const existing = yield* capture(store.findClientById(tenantId, clientId))
+          if (existing === undefined) return yield* new ApiNotFound({ error: `Unknown client ${clientId}` })
+          if (existing.revokedAt !== null) return yield* new ApiBadRequest({ error: `Client ${clientId} is revoked` })
+          const taken = yield* capture(store.findClientByName(tenantId, name))
+          if (taken !== undefined && taken.id !== clientId) {
+            return yield* new ApiBadRequest({ error: `A client named ${name} already exists` })
+          }
+          return yield* capture(store.renameClient(tenantId, clientId, name))
         }))
       .handle("updateClientSettings", (request) =>
         Effect.gen(function*() {
@@ -187,7 +203,8 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
             tenantId,
             id: clientId,
             capabilities: request.payload.capabilities,
-            approvalDelivery: request.payload.approvalDelivery
+            approvalDelivery: request.payload.approvalDelivery,
+            mcpSurface: request.payload.mcpSurface
           }))
         }))
       .handle("listApprovalDestinations", () => Effect.gen(function*() {
@@ -327,6 +344,10 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
         const profile = yield* capture(store.findAccessProfile(tenantId, request.params["id"]))
         if (profile === undefined) return yield* new ApiNotFound({ error: "Unknown access profile" })
         if (profile.isDefault) return yield* new ApiBadRequest({ error: "The default access profile cannot be deleted" })
+        const assigned = (yield* capture(store.listClients(tenantId))).filter((client) => client.accessProfileId === profile.id)
+        if (assigned.length > 0) {
+          return yield* new ApiBadRequest({ error: `${assigned.length} client${assigned.length === 1 ? " is" : "s are"} still assigned to ${profile.name}. Reassign them first.` })
+        }
         yield* capture(store.deleteAccessProfile(tenantId, profile.id))
         return { deleted: true as const }
       }))
@@ -401,6 +422,10 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
         const policy = yield* capture(store.findApprovalPolicy(tenantId, request.params["id"]))
         if (policy === undefined) return yield* new ApiNotFound({ error: "Unknown approval policy" })
         if (policy.isDefault) return yield* new ApiBadRequest({ error: "The default approval policy cannot be deleted" })
+        const assigned = (yield* capture(store.listClients(tenantId))).filter((client) => client.approvalPolicyId === policy.id)
+        if (assigned.length > 0) {
+          return yield* new ApiBadRequest({ error: `${assigned.length} client${assigned.length === 1 ? " is" : "s are"} still assigned to ${policy.name}. Reassign them first.` })
+        }
         yield* capture(store.deleteApprovalPolicy(tenantId, policy.id)); return { deleted: true as const }
       }))
       .handle("replaceApprovalPolicyTools", (request) => Effect.gen(function*() {

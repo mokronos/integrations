@@ -154,6 +154,7 @@ const stubIntegrations = (behaviour: {
 const setup = Effect.fnUntraced(function*(options: {
   readonly decision?: "allow" | "require_approval"
   readonly capabilities?: ReadonlyArray<"provision_connections" | "administer_gateway">
+  readonly mcpSurface?: "tools" | "discovery"
   readonly beforeExecute?: () => Promise<void>
   readonly fail?: boolean
   readonly connections?: ReadonlyArray<{ readonly integration: string; readonly name: string }>
@@ -200,7 +201,8 @@ const setup = Effect.fnUntraced(function*(options: {
     accessProfileId: accessProfile.id,
     approvalPolicyId: approvalPolicy.id,
     name: "support-agent",
-    capabilities: options.capabilities ?? ["provision_connections"]
+    capabilities: options.capabilities ?? ["provision_connections"],
+    ...whenPresent("mcpSurface", options.mcpSurface)
   })
   const key = yield* generateApiKey
   yield* store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
@@ -315,7 +317,7 @@ const mcpJson = Effect.fnUntraced(function*(
   arguments_: typeof JsonBody.Type
 ) {
   const result = yield* Effect.promise(() => client.callTool({ name, arguments: arguments_ }))
-  expect(result.isError, mcpText(result)).not.toBe(true)
+  expect(result.isError, `${name}: ${mcpText(result)}`).not.toBe(true)
   return Schema.decodeUnknownSync(JsonBody)(JSON.parse(mcpText(result)))
 })
 
@@ -383,6 +385,7 @@ describe("gateway http surface", () => {
         description: "Send an email",
         inputSchema: expect.objectContaining({ type: "object" })
       }))
+      expect(listed.tools.map((tool) => tool.name)).not.toContain("execute")
 
       const called = yield* Effect.promise(() =>
         client.callTool({
@@ -399,6 +402,7 @@ describe("gateway http surface", () => {
   it.effect("offers the agent CLI's commands as MCP tools", () =>
     Effect.gen(function*() {
       const { handle, key, calls, removed } = yield* setup({
+        mcpSurface: "discovery",
         connections: [{ integration: "gmail", name: "work" }]
       })
       const client = yield* mcpClient(handle, key.secret)
@@ -408,7 +412,6 @@ describe("gateway http surface", () => {
         "search",
         "discover",
         "integrations",
-        "rename",
         "connect",
         "oauth_status",
         "connections",
@@ -428,7 +431,7 @@ describe("gateway http surface", () => {
         description: "Send an email"
       }])
 
-      const schema = yield* mcpJson(client, "schema", { integration: "gmail", tool: "sendEmail" })
+      const schema = yield* mcpJson(client, "schema", { alias: "user_sebastian_gmail_work", tool: "sendEmail" })
       expect(schema["inputSchema"]).toMatchObject({ type: "object" })
 
       const executed = yield* mcpJson(client, "execute", {
@@ -448,7 +451,7 @@ describe("gateway http surface", () => {
 
   it.effect("keeps provisioning tools off keys that may not provision", () =>
     Effect.gen(function*() {
-      const { handle, key } = yield* setup({ capabilities: [] })
+      const { handle, key } = yield* setup({ capabilities: [], mcpSurface: "discovery" })
       const client = yield* mcpClient(handle, key.secret)
 
       const names = (yield* Effect.promise(() => client.listTools())).tools.map((tool) => tool.name)
@@ -552,7 +555,7 @@ describe("gateway http surface", () => {
         delegated: true
       }])
 
-      const anonymous = yield* call("POST", "/v1/execute", { body: { alias: "user_gmail_work", tool: "sendEmail" } })
+      const anonymous = yield* call("POST", "/v1/execute", { body: { alias: "user_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } } })
       expect(anonymous.status).toBe(403)
 
       const first = yield* call("POST", "/v1/execute", {
@@ -656,12 +659,28 @@ describe("gateway http surface", () => {
       expect(calls).toHaveLength(0)
     }).pipe(Effect.provide(testServices)))
 
+  it.effect("rejects arguments the tool's schema refuses before freezing an approval", () =>
+    Effect.gen(function*() {
+      const { call, calls, store } = yield* setup({ decision: "require_approval" })
+
+      const response = yield* call("POST", "/v1/execute", {
+        body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: 5 } }
+      })
+
+      expect(response.status).toBe(400)
+      expect(response.body["status"]).toBe("invalid")
+      expect(response.body["issues"]).toEqual([expect.objectContaining({ path: "to" })])
+      expect(response.body["message"]).toContain("sendEmail")
+      expect(calls).toHaveLength(0)
+      expect(yield* store.listApprovals(defaultTenantId, "pending")).toHaveLength(0)
+    }).pipe(Effect.provide(testServices)))
+
   it.effect("reports a vendor failure as 502 rather than a denial", () =>
     Effect.gen(function*() {
       const { call } = yield* setup({ fail: true })
 
       const response = yield* call("POST", "/v1/execute", {
-        body: { alias: "user_sebastian_gmail_work", tool: "sendEmail" }
+        body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } }
       })
 
       expect(response.status).toBe(502)
@@ -735,7 +754,7 @@ describe("gateway http surface", () => {
     Effect.gen(function*() {
       const { call, store, client, accessProfile, approvalPolicy } = yield* setup({ decision: "require_approval" })
       const frozen = yield* call("POST", "/v1/execute", {
-        body: { alias: "user_sebastian_gmail_work", tool: "sendEmail" }
+        body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } }
       })
       const approvalId = String(frozen.body["approvalId"])
 
@@ -818,7 +837,7 @@ describe("gateway http surface", () => {
         dashboardUrl: "https://gateway.example"
       })
       const response = yield* call("POST", "/v1/execute", {
-        body: { alias: "user_sebastian_gmail_work", tool: "sendEmail" }
+        body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } }
       })
       expect(response.body["approvalUrl"]).toBe(
         `https://gateway.example/approvals?approval=${String(response.body["approvalId"])}`
@@ -828,7 +847,7 @@ describe("gateway http surface", () => {
   it.effect("revoking a client through the API cancels its frozen calls", () =>
     Effect.gen(function*() {
       const { call, client } = yield* setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })
-      yield* call("POST", "/v1/execute", { body: { alias: "user_sebastian_gmail_work", tool: "sendEmail" } })
+      yield* call("POST", "/v1/execute", { body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } } })
 
       const response = yield* call("POST", `/v1/clients/${client.id}/revoke`, { body: {} })
 
@@ -897,7 +916,7 @@ describe("gateway approval settlement", () => {
           return release.promise
         }
       })
-      const body = { alias: aliasForConnection(connection), tool: "sendEmail" }
+      const body = { alias: aliasForConnection(connection), tool: "sendEmail", arguments: { to: "a@b.c" } }
       const frozen = yield* call("POST", "/v1/execute", { body })
       const id = String(frozen.body["approvalId"])
 
@@ -930,7 +949,7 @@ describe("gateway approval settlement", () => {
   it.effect("a durable execution claim survives reopening the store and cannot be replayed", () =>
     Effect.gen(function*() {
       const { call, store, sql, calls } = yield* setup({ decision: "require_approval" })
-      const body = { alias: aliasForConnection(connection), tool: "sendEmail" }
+      const body = { alias: aliasForConnection(connection), tool: "sendEmail", arguments: { to: "a@b.c" } }
       const frozen = yield* call("POST", "/v1/execute", { body })
       const approval = (yield* store.listApprovals(defaultTenantId))[0]
       if (approval === undefined) throw new Error("Missing approval")
@@ -953,7 +972,7 @@ describe("gateway approval settlement", () => {
         capabilities: ["provision_connections", "administer_gateway"]
       })
       const frozen = yield* call("POST", "/v1/execute", {
-        body: { alias: "user_sebastian_gmail_work", tool: "sendEmail" }
+        body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } }
       })
       const approvalId = String(frozen.body["approvalId"])
 
@@ -992,7 +1011,7 @@ describe("gateway approval settlement", () => {
     Effect.gen(function*() {
       const { call } = yield* setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })
       const frozen = yield* call("POST", "/v1/execute", {
-        body: { alias: "user_sebastian_gmail_work", tool: "sendEmail" }
+        body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } }
       })
       const approvalId = String(frozen.body["approvalId"])
 
@@ -1015,7 +1034,7 @@ describe("gateway approval settlement", () => {
         capabilities: ["provision_connections", "administer_gateway"]
       })
       const frozen = yield* reassigned.call("POST", "/v1/execute", {
-        body: { alias: "user_sebastian_gmail_work", tool: "sendEmail" }
+        body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } }
       })
       const emptyProfile = yield* reassigned.store.createAccessProfile({
         id: (yield* newAccessProfileId),
@@ -1039,7 +1058,7 @@ describe("gateway approval settlement", () => {
         capabilities: ["provision_connections", "administer_gateway"]
       })
       const stale = yield* emptied.call("POST", "/v1/execute", {
-        body: { alias: "user_sebastian_gmail_work", tool: "sendEmail" }
+        body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } }
       })
       yield* emptied.store.replaceAccessProfileTools(emptied.accessProfile.id, [])
       expect((yield* emptied.call(
@@ -1054,7 +1073,7 @@ describe("gateway approval settlement", () => {
     Effect.gen(function*() {
       const { call, calls } = yield* setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })
       const frozen = yield* call("POST", "/v1/execute", {
-        body: { alias: "user_sebastian_gmail_work", tool: "sendEmail" }
+        body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } }
       })
       const approvalId = String(frozen.body["approvalId"])
 
@@ -1282,7 +1301,7 @@ describe("provisioning surface", () => {
   it.effect("filters and windows the audit trail, and says how much there is", () =>
     Effect.gen(function*() {
       const { call } = yield* setup({ capabilities: ["provision_connections", "administer_gateway"] })
-      yield* call("POST", "/v1/execute", { body: { alias: "user_sebastian_gmail_work", tool: "sendEmail" } })
+      yield* call("POST", "/v1/execute", { body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } } })
       yield* call("POST", "/v1/execute", { body: { alias: "user_sebastian_gmail_work", tool: "nope" } })
 
       const all = yield* call("GET", "/v1/audit")

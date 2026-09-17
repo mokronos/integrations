@@ -1,3 +1,6 @@
+export const mcpServerName = (clientName: string): string =>
+  `integrations_${clientName.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "_")}`
+
 export const mcpConfiguration = (
   clientName: string,
   url: string,
@@ -5,7 +8,7 @@ export const mcpConfiguration = (
 ): string =>
   JSON.stringify({
     mcpServers: {
-      [clientName]: {
+      [mcpServerName(clientName)]: {
         type: "http",
         url,
         headers: { Authorization: `Bearer ${apiKey}` }

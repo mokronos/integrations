@@ -40,6 +40,7 @@
     "db:generate": "drizzle-kit generate && bun run ../../../scripts/embed-migrations.ts --package . --out src/store-migrations.gen.ts --name gatewayMigrations --type-import @integrations/integrations"
   },
   "dependencies": {
+    "@cfworker/json-schema": "catalog:",
     "@effect/sql-libsql": "catalog:",
     "@integrations/contracts": "workspace:*",
     "@integrations/integrations": "workspace:*",

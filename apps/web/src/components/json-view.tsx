@@ -1,50 +1,86 @@
-import { useState } from "react"
 import { ChevronRight } from "lucide-react"
+import { useState } from "react"
+import type { Json } from "@integrations/contracts"
+import { isJsonObject } from "@integrations/contracts"
 
 import { Button } from "@/components/ui/button"
+import { CopyButton, copyButtonOverlay } from "@/components/ui/copy-button"
+import { pluralise } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
-// oxlint-disable-next-line anti-slop/no-unknown-parameters
-const render = (value: unknown): string => {
-  try {
-    return JSON.stringify(value, null, 2) ?? "null"
-  } catch {
-    return String(value)
+const tokenPattern = /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g
+
+const highlight = (text: string): ReadonlyArray<React.ReactNode> => {
+  const nodes: Array<React.ReactNode> = []
+  let cursor = 0
+  for (const match of text.matchAll(tokenPattern)) {
+    const start = match.index
+    if (start > cursor) nodes.push(text.slice(cursor, start))
+    const [whole, string, colon, keyword, number] = match
+    if (string !== undefined) {
+      nodes.push(
+        <span key={start} className={colon === undefined ? "text-emerald-600 dark:text-emerald-400" : "text-sky-700 dark:text-sky-300"}>
+          {string}
+        </span>
+      )
+      if (colon !== undefined) nodes.push(colon)
+    } else if (keyword !== undefined) {
+      nodes.push(<span key={start} className="text-amber-600 dark:text-amber-400">{whole}</span>)
+    } else if (number !== undefined) {
+      nodes.push(<span key={start} className="text-violet-600 dark:text-violet-400">{whole}</span>)
+    }
+    cursor = start + whole.length
   }
+  if (cursor < text.length) nodes.push(text.slice(cursor))
+  return nodes
+}
+
+const summarise = (value: Json): string => {
+  if (isJsonObject(value)) {
+    const keys = Object.keys(value)
+    if (keys.length === 0) return "empty object"
+    const shown = keys.slice(0, 4).join(", ")
+    return `${pluralise(keys.length, "field")}: ${shown}${keys.length > 4 ? ", …" : ""}`
+  }
+  if (Array.isArray(value)) return value.length === 0 ? "empty list" : pluralise(value.length, "item")
+  const text = JSON.stringify(value)
+  return text.length > 64 ? `${text.slice(0, 64)}…` : text
 }
 
 export function JsonView({
   value,
-  label = "payload",
+  label,
+  defaultOpen = false,
   className
 }: {
-  readonly value: unknown
-  readonly label?: string
+  readonly value: Json
+  readonly label: string
+  readonly defaultOpen?: boolean
   readonly className?: string
 }) {
-  const [open, setOpen] = useState(false)
-  const text = render(value)
-  const lines = text.split("\n").length
-
-  if (value === null || value === undefined) {
-    return <span className="text-muted-foreground text-sm">—</span>
-  }
+  const [open, setOpen] = useState(defaultOpen)
+  const text = JSON.stringify(value, null, 2)
 
   return (
     <div className={cn("space-y-1", className)}>
       <Button
         variant="ghost"
         size="sm"
-        className="h-7 gap-1 px-1.5 font-mono text-xs"
-        onClick={() => setOpen((value) => !value)}
+        className="h-7 max-w-full gap-1 px-1.5 font-mono text-xs"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
       >
-        <ChevronRight className={cn("size-3 transition-transform", open && "rotate-90")} />
-        {label} · {lines === 1 ? text.slice(0, 48) : `${lines} lines`}
+        <ChevronRight className={cn("size-3 shrink-0 transition-transform", open && "rotate-90")} />
+        <span className="font-medium">{label}</span>
+        <span className="text-muted-foreground truncate font-normal">· {summarise(value)}</span>
       </Button>
       {open ? (
-        <pre className="bg-muted/60 max-h-80 overflow-auto rounded-md p-3 font-mono text-xs leading-relaxed">
-          {text}
-        </pre>
+        <div className="relative">
+          <pre className="bg-muted/60 max-h-96 overflow-auto rounded-md py-2.5 pr-10 pl-3 font-mono text-xs leading-relaxed">
+            {highlight(text)}
+          </pre>
+          <CopyButton value={text} label={label} className={copyButtonOverlay} />
+        </div>
       ) : null}
     </div>
   )

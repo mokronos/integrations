@@ -93,7 +93,11 @@ const reportOutcome = (
       outcome.status === "succeeded" || outcome.status === "pending" || outcome.status === "authorization-required"
         ? Effect.void
         : Effect.fail(cliError(
-          outcome.status === "denied" ? outcome.reason : outcome.message
+          outcome.status === "denied"
+            ? outcome.reason
+            : outcome.status === "invalid"
+            ? [outcome.message, ...outcome.issues.map((issue) => `  ${issue.path}: ${issue.message}`)].join("\n")
+            : outcome.message
         ))
     )
   )

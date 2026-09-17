@@ -86,7 +86,7 @@ function ApprovalCard({
           Execution has started. If it was interrupted, the action may already have completed.
           Check the connected service before requesting it again; the gateway will not rerun this approval.
         </p> : null}
-        <JsonView value={approval.arguments} label="arguments" />
+        <JsonView value={approval.arguments} label="arguments" defaultOpen={approval.status === "pending"} />
         {(deliveries.data ?? []).length > 0 ? <div className="flex flex-wrap gap-2">
           {(deliveries.data ?? []).map((delivery) => <Badge key={delivery.id} variant={delivery.status === "failed" ? "destructive" : "outline"}>
             {delivery.destinationName}: {delivery.status}{delivery.attempts > 0 ? ` (${delivery.attempts})` : ""}

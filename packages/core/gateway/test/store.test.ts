@@ -179,11 +179,13 @@ describe("gateway store", () => {
         tenantId: defaultTenantId,
         id: client.id,
         capabilities: ["provision_connections"],
-        approvalDelivery: { returnLink: false }
+        approvalDelivery: { returnLink: false },
+        mcpSurface: "discovery"
       })
 
       expect(updated.capabilities).toEqual(["provision_connections"])
       expect(updated.approvalDelivery).toEqual({ returnLink: false })
+      expect(updated.mcpSurface).toBe("discovery")
     }).pipe(Effect.provide(testServices)))
 
   it.effect("creates durable delivery jobs for a client's destinations", () =>

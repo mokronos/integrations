@@ -2,7 +2,7 @@ import { ApprovalStatus } from "./domain.ts"
 import type { Row } from "@libsql/client"
 import { Schema } from "effect"
 import {
-  AccessProfileId, Alias, ApiKeyHash, ApiKeyId, ApprovalDelivery, ApprovalDeliveryId,
+  AccessProfileId, Alias, ApiKeyHash, ApiKeyId, ApprovalDelivery, ApprovalDeliveryId, McpSurface,
   ApprovalDestinationId, ApprovalId,
   ApprovalPolicyId, AuditId, ClientId, ConnectionName, IntegrationSlug,
   LoginHandoffHash, SessionTokenHash, SubjectId, TenantId, ToolName
@@ -30,6 +30,7 @@ const ClientRow = Schema.Struct({
   approval_policy_id: Schema.String,
   name: Schema.String,
   capabilities: Schema.String,
+  mcp_surface: McpSurface,
   approval_delivery: Schema.String,
   created_at: Schema.Number,
   revoked_at: NullableNumber
@@ -191,7 +192,7 @@ const SnapshotRow = Schema.Struct({
 })
 
 const clientColumns = [
-  "id", "tenant_id", "access_profile_id", "approval_policy_id", "name", "capabilities", "approval_delivery", "created_at", "revoked_at"
+  "id", "tenant_id", "access_profile_id", "approval_policy_id", "name", "capabilities", "approval_delivery", "mcp_surface", "created_at", "revoked_at"
 ]
 const tenantColumns = ["id", "name", "created_at"]
 const subjectColumns = ["id", "tenant_id", "created_at"]
@@ -300,6 +301,7 @@ export const toClient = (row: Row): Client => {
     name: decoded.name,
     capabilities: decodeCapabilities(decoded.capabilities),
     approvalDelivery: decodeApprovalDelivery(decoded.approval_delivery),
+    mcpSurface: decoded.mcp_surface,
     createdAt: date(decoded.created_at),
     revokedAt: nullableDate(decoded.revoked_at)
   }

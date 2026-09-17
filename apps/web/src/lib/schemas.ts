@@ -15,7 +15,8 @@ import {
   ApprovalDestination,
   ApprovalDeliveryAttempt,
   PolicyDecision as PolicyDecisionSchema,
-  PendingApproval
+  PendingApproval,
+  McpSurface
 } from "@integrations/contracts"
 import { IntegrationSearchKind, OAuthSessionView } from "@integrations/contracts"
 import {
@@ -27,6 +28,7 @@ import {
 } from "@integrations/contracts"
 
 export type {
+  McpSurface,
   AuditRecord,
   AuditOutcome,
   Client,
@@ -168,6 +170,7 @@ export const decodeApprovalFilter = Schema.decodeUnknownSync(
 export const decodeIntegrationSearchFilter = Schema.decodeUnknownSync(
   Schema.Union([IntegrationSearchKind, Schema.Literal("__all__")])
 )
+export const decodeMcpSurface = Schema.decodeUnknownSync(McpSurface)
 export const decodeAuditOutcomeFilter = Schema.decodeUnknownSync(
   Schema.Union([AuditOutcome, Schema.Literal("all")])
 )

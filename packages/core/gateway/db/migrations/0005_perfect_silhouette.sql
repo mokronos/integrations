@@ -1,0 +1,1 @@
+ALTER TABLE `gateway_client` ADD `mcp_surface` text DEFAULT 'tools' NOT NULL;

@@ -11,6 +11,7 @@ import {
   CardTitle
 } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
+import { Select } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import * as gateway from "@/lib/gateway"
 import {
@@ -20,7 +21,13 @@ import {
   useApprovalDestinations,
   useClientApprovalDestinations
 } from "@/lib/queries"
-import type { ApprovalDestinationId, Client } from "@/lib/schemas"
+import { decodeMcpSurface } from "@/lib/schemas"
+import type { ApprovalDestinationId, Client, McpSurface } from "@/lib/schemas"
+
+const mcpSurfaceOptions: ReadonlyArray<{ readonly value: McpSurface; readonly label: string; readonly description: string }> = [
+  { value: "tools", label: "Tools", description: "Every tool this client may call appears as its own MCP tool. Best for agents that just need to do work." },
+  { value: "discovery", label: "Discovery", description: "The CLI surface as MCP tools: search, connect, tools, schema, execute, approval. Best for agents that set up integrations themselves." }
+]
 
 function DestinationAssignments({ client }: { readonly client: Client }) {
   const destinations = useApprovalDestinations()
@@ -57,6 +64,7 @@ export function ClientSettings({ client }: { readonly client: Client }) {
     client.capabilities.includes("administer_gateway")
   )
   const [returnLink, setReturnLink] = useState(client.approvalDelivery.returnLink)
+  const [mcpSurface, setMcpSurface] = useState<McpSurface>(client.mcpSurface)
 
   const save = useMutation({
     mutationFn: () => {
@@ -66,7 +74,8 @@ export function ClientSettings({ client }: { readonly client: Client }) {
       return gateway.updateClientSettings({
         clientId: client.id,
         capabilities,
-        approvalDelivery: { returnLink }
+        approvalDelivery: { returnLink },
+        mcpSurface
       })
     },
     onSuccess: () => {
@@ -82,13 +91,26 @@ export function ClientSettings({ client }: { readonly client: Client }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Authority and approval delivery</CardTitle>
+        <CardTitle>MCP surface, authority and approval delivery</CardTitle>
         <CardDescription>
-          Tool access comes from the assigned policy. These switches control the wider
-          control-plane actions this credential may perform.
+          Tool access comes from the assigned policy. These settings control what an MCP
+          client sees and which wider control-plane actions this credential may perform.
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4 lg:grid-cols-2">
+        <div className="space-y-1.5 rounded-md border p-3 lg:col-span-2">
+          <Label>MCP surface</Label>
+          <Select
+            className="w-full sm:w-72"
+            value={mcpSurface}
+            onValueChange={(next) => { if (next !== null) setMcpSurface(decodeMcpSurface(next)) }}
+            items={mcpSurfaceOptions}
+            disabled={disabled}
+          />
+          <p className="text-muted-foreground text-xs">
+            {mcpSurfaceOptions.find((option) => option.value === mcpSurface)?.description}
+          </p>
+        </div>
         <div className="space-y-3">
           <div className="flex items-start gap-3 rounded-md border p-3">
             <Switch

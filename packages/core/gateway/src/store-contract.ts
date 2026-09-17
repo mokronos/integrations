@@ -2,7 +2,7 @@ import { Effect, Schema } from "effect"
 import type { NonNegativeInt, PositiveInt } from "@integrations/contracts"
 import type {
   AccessProfile, AccessProfileId, AccessProfileTool, Alias, ApiKey, ApiKeyHash,
-  ApiKeyId, ApprovalDelivery, ApprovalDeliveryAttempt, ApprovalDeliveryId,
+  ApiKeyId, ApprovalDelivery, ApprovalDeliveryAttempt, ApprovalDeliveryId, McpSurface,
   ApprovalDestination, ApprovalDestinationId, ApprovalId, ApprovalPolicy, ApprovalPolicyId,
   ApprovalPolicyTool, ApprovalStatus, AuditId, AuditOutcome, AuditRecord,
   AuthSession, Client, ConfigureClient, ClientCapability, ClientId, ConnectionName, ConnectionRef,
@@ -42,6 +42,7 @@ export interface CreateClientInput {
   readonly name: string
   readonly capabilities: ReadonlyArray<ClientCapability>
   readonly approvalDelivery?: ApprovalDelivery
+  readonly mcpSurface?: McpSurface
 }
 
 export interface CreateAccessProfileInput {
@@ -210,7 +211,9 @@ export interface GatewayStore {
     readonly id: ClientId
     readonly capabilities: ReadonlyArray<ClientCapability>
     readonly approvalDelivery: ApprovalDelivery
+    readonly mcpSurface: McpSurface
   }): Effect.Effect<Client, GatewayStoreError>
+  renameClient(tenantId: TenantId, id: ClientId, name: string): Effect.Effect<Client, GatewayStoreError>
   revokeClient(tenantId: TenantId, id: ClientId): Effect.Effect<void, GatewayStoreError>
 
   createApprovalDestination(input: {

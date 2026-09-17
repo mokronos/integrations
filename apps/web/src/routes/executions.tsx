@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Select } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { connectionLabel, when } from "@/lib/format"
 import type { AuditQuery } from "@/lib/gateway"
@@ -24,6 +24,14 @@ const outcomeVariant = {
 
 const limits = [50, 100, 250, 500] as const
 const ALL = "all"
+const outcomeOptions = [
+  { value: ALL, label: "Any outcome" },
+  { value: "succeeded", label: "Succeeded" },
+  { value: "failed", label: "Failed" },
+  { value: "denied", label: "Denied" },
+  { value: "pending", label: "Pending" },
+] as const
+const limitOptions = limits.map((candidate) => ({ value: String(candidate), label: candidate }))
 
 type Filters = {
   readonly clientId: string
@@ -70,7 +78,7 @@ export function ExecutionsRoute() {
           <Input aria-label="Client ID" value={draft.clientId} onChange={(event) => setDraft({ ...draft, clientId: event.target.value })} placeholder="Client ID" />
           <Input aria-label="Alias" value={draft.alias} onChange={(event) => setDraft({ ...draft, alias: event.target.value })} placeholder="Alias" />
           <Input aria-label="Tool" value={draft.tool} onChange={(event) => setDraft({ ...draft, tool: event.target.value })} placeholder="Tool" />
-          <Select value={draft.outcome} onValueChange={(value) => setDraft({ ...draft, outcome: decodeAuditOutcomeFilter(value) })}><SelectTrigger aria-label="Outcome"><SelectValue /></SelectTrigger><SelectContent><SelectItem value={ALL}>Any outcome</SelectItem><SelectItem value="succeeded">Succeeded</SelectItem><SelectItem value="failed">Failed</SelectItem><SelectItem value="denied">Denied</SelectItem><SelectItem value="pending">Pending</SelectItem></SelectContent></Select>
+          <Select aria-label="Outcome" value={draft.outcome} onValueChange={(value) => setDraft({ ...draft, outcome: decodeAuditOutcomeFilter(value) })} items={outcomeOptions} />
           <Input type="datetime-local" value={draft.since} onChange={(event) => setDraft({ ...draft, since: event.target.value })} aria-label="Since" />
           <div className="flex gap-1">
             <Button onClick={() => { setFilters(draft); setOffset(0) }}><Filter className="size-3" /> Apply</Button>
@@ -99,10 +107,7 @@ export function ExecutionsRoute() {
             <span className="text-muted-foreground text-xs">{total === 0 ? "No records" : `${start}–${end} of ${total}`}</span>
             <div className="flex items-center gap-2">
               <span className="text-muted-foreground text-xs">Rows per page</span>
-              <Select value={String(limit)} onValueChange={(next) => { if (next !== null) { setLimit(Number.parseInt(next, 10)); setOffset(0) } }}>
-                <SelectTrigger aria-label="Rows per page" className="w-20"><SelectValue /></SelectTrigger>
-                <SelectContent>{limits.map((candidate) => <SelectItem key={candidate} value={String(candidate)}>{candidate}</SelectItem>)}</SelectContent>
-              </Select>
+              <Select aria-label="Rows per page" className="w-20" value={String(limit)} onValueChange={(next) => { if (next !== null) { setLimit(Number.parseInt(next, 10)); setOffset(0) } }} items={limitOptions} />
               <Button variant="outline" size="sm" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - limit))}><ChevronLeft className="size-3" /> Previous</Button>
               <Button variant="outline" size="sm" disabled={offset + records.length >= total} onClick={() => setOffset(offset + limit)}>Next <ChevronRight className="size-3" /></Button>
             </div>

@@ -512,8 +512,8 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
           return { sql: `INSERT INTO gateway_approval_policy_tool (approval_policy_id, owner, subject, integration, connection_name, tool, decision) VALUES (?, ?, ?, ?, ?, ?, ?)`, args: [input.approvalPolicyId, ...route, entry.decision] }
         }),
         {
-          sql: `INSERT INTO gateway_client (id, tenant_id, access_profile_id, approval_policy_id, name, capabilities, approval_delivery, created_at, revoked_at)
-                VALUES (?, ?, ?, ?, ?, '[]', ?, ?, NULL)`,
+          sql: `INSERT INTO gateway_client (id, tenant_id, access_profile_id, approval_policy_id, name, capabilities, approval_delivery, mcp_surface, created_at, revoked_at)
+                VALUES (?, ?, ?, ?, ?, '[]', ?, 'tools', ?, NULL)`,
           args: [input.id, input.tenantId, input.accessProfileId, input.approvalPolicyId, input.name, JSON.stringify(defaultApprovalDelivery), at]
         }
       ])
@@ -522,7 +522,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
 
     createClient: (input) => operation("createClient", Effect.gen(function*() {
       yield* run(
-        "INSERT INTO gateway_client (id, tenant_id, access_profile_id, approval_policy_id, name, capabilities, approval_delivery, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+        "INSERT INTO gateway_client (id, tenant_id, access_profile_id, approval_policy_id, name, capabilities, approval_delivery, mcp_surface, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
         [
           input.id,
           input.tenantId,
@@ -531,6 +531,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
           input.name,
           JSON.stringify(input.capabilities),
           JSON.stringify(input.approvalDelivery ?? defaultApprovalDelivery),
+          input.mcpSurface ?? "tools",
           yield* now
         ]
       )
@@ -594,16 +595,25 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
 
     updateClientSettings: (input) => operation("updateClientSettings", Effect.gen(function*() {
       yield* run(
-        `UPDATE gateway_client SET capabilities = ?, approval_delivery = ?
+        `UPDATE gateway_client SET capabilities = ?, approval_delivery = ?, mcp_surface = ?
           WHERE tenant_id = ? AND id = ? AND revoked_at IS NULL`,
         [
           JSON.stringify(input.capabilities),
           JSON.stringify(input.approvalDelivery),
+          input.mcpSurface,
           input.tenantId,
           input.id
         ]
       )
       return yield* requireClient(input.id)
+    })),
+
+    renameClient: (tenantId, id, name) => operation("renameClient", Effect.gen(function*() {
+      yield* run(
+        "UPDATE gateway_client SET name = ? WHERE tenant_id = ? AND id = ? AND revoked_at IS NULL",
+        [name, tenantId, id]
+      )
+      return yield* requireClient(id)
     })),
 
     revokeClient: (tenantId, id) =>
@@ -764,6 +774,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
                 gateway_client.name AS client_name,
                 gateway_client.capabilities AS client_capabilities,
                 gateway_client.approval_delivery AS client_approval_delivery,
+                gateway_client.mcp_surface AS client_mcp_surface,
                 gateway_client.created_at AS client_created_at, gateway_client.revoked_at AS client_revoked_at
            FROM gateway_api_key JOIN gateway_client ON gateway_client.id = gateway_api_key.client_id
           WHERE gateway_api_key.hash = ?`,
@@ -781,6 +792,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
           name: row["client_name"] ?? "",
           capabilities: row["client_capabilities"] ?? "[]",
           approval_delivery: row["client_approval_delivery"] ?? JSON.stringify(defaultApprovalDelivery),
+          mcp_surface: row["client_mcp_surface"] ?? "tools",
           created_at: row["client_created_at"] ?? 0,
           revoked_at: row["client_revoked_at"] ?? null
         })

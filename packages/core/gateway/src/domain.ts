@@ -4,7 +4,7 @@ export {
   Alias, ApprovalStatus, ConnectionName, IntegrationSlug, ToolName, TenantId, SubjectId, ClientId,
   ApiKeyId, ApiKeyView, AccessProfileId, ApprovalPolicyId, ApprovalId, ApprovalDestinationId,
   ApprovalDeliveryId, AuditId, ConnectionRef, connectionSubject, connectionRefKey,
-  sameConnectionRef, aliasForConnection, ClientCapability, ApprovalDelivery, ApprovalDestination,
+  sameConnectionRef, aliasForConnection, ClientCapability, ApprovalDelivery, McpSurface, ApprovalDestination,
   ApprovalDeliveryStatus, ApprovalDeliveryAttempt, Client, PolicyDecision, AccessProfile,
   AccessProfileTool, ApprovalPolicy, ApprovalPolicyTool, PendingApproval, AuditOutcome,
   AuditRecord, ConfigureClient, ToolSnapshot, DriftKind, DriftEntry

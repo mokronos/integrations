@@ -18,6 +18,7 @@ import {
   Client,
   ConfigureClient,
   ClientCapability,
+  McpSurface,
   ClientId,
   ApiKeyId,
   ApiKeyView,
@@ -53,6 +54,7 @@ import {
   InvocationPending,
   InvocationDenied,
   InvocationFailed,
+  InvocationInvalid,
   InvocationAuthorizationRequired,
   NonNegativeInt,
   NonNegativeIntFromString,
@@ -81,12 +83,14 @@ const CreateClientBody = Schema.Struct({
   accessProfileId: Schema.optional(AccessProfileId),
   approvalPolicyId: Schema.optional(ApprovalPolicyId),
   capabilities: Schema.optional(Schema.Array(ClientCapability)),
-  approvalDelivery: Schema.optional(ApprovalDelivery)
+  approvalDelivery: Schema.optional(ApprovalDelivery),
+  mcpSurface: Schema.optional(McpSurface)
 })
 
 const UpdateClientSettingsBody = Schema.Struct({
   capabilities: Schema.Array(ClientCapability),
-  approvalDelivery: ApprovalDelivery
+  approvalDelivery: ApprovalDelivery,
+  mcpSurface: McpSurface
 })
 
 const CreateApprovalDestinationBody = Schema.Struct({
@@ -199,6 +203,7 @@ const SubjectView = Schema.Struct({ id: SubjectId, tenantId: TenantId, createdAt
 const CreateSubjectBody = Schema.Struct({ id: Schema.optional(SubjectId) })
 const InvokedDenied = InvocationDenied.pipe(HttpApiSchema.status(403))
 const InvokedFailed = InvocationFailed.pipe(HttpApiSchema.status(502))
+const InvokedInvalid = InvocationInvalid.pipe(HttpApiSchema.status(400))
 
 const SettledOutcome = Schema.Union([InvocationSucceeded, InvocationFailed])
 
@@ -322,7 +327,7 @@ const DelegatedGroup = HttpApiGroup.make("delegated")
   }).annotate(RequiredAccess, "delegated"))
   .add(HttpApiEndpoint.post("execute", "/v1/execute", {
     payload: ExecuteBody,
-    success: [InvokedOk, InvokedDenied, InvokedFailed]
+    success: [InvokedOk, InvokedDenied, InvokedFailed, InvokedInvalid]
   }).annotate(RequiredAccess, "delegated"))
   .add(HttpApiEndpoint.get("approval", "/v1/approvals/:id", {
     params: { id: ApprovalId },
@@ -425,7 +430,7 @@ const ProvisioningGroup = HttpApiGroup.make("provisioning")
     payload: RenameIntegrationBody,
     success: Integration,
     error: ApiNotFoundError
-  }).annotate(RequiredAccess, "provisioning"))
+  }).annotate(RequiredAccess, "administrative"))
   .add(HttpApiEndpoint.delete("removeIntegration", "/v1/integrations/:slug", {
     params: { slug: Schema.String },
     success: Schema.Struct({
@@ -483,6 +488,12 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
     payload: CreateClientBody,
     success: HttpApiSchema.status(201)(Client),
     error: ApiBadRequestError
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.post("renameClient", "/v1/clients/:id/name", {
+    params: { id: ClientId },
+    payload: Schema.Struct({ name: Schema.String }),
+    success: Client,
+    error: [ApiNotFoundError, ApiBadRequestError]
   }).annotate(RequiredAccess, "administrative"))
   .add(HttpApiEndpoint.post("updateClientSettings", "/v1/clients/:id/settings", {
     params: { id: ClientId },

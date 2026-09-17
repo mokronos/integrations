@@ -14,6 +14,7 @@ import {
 import { Alias } from "@integrations/contracts"
 import type {
   ApprovalDelivery,
+  McpSurface,
   ApprovalStatus,
   AccessProfileToolInput,
   ApprovalPolicyToolInput
@@ -210,14 +211,18 @@ export const createClient = async (input: {
     }
   }))
 
+export const renameClient = async (clientId: string, name: string) =>
+  await run(endpoints.administrative.renameClient({ params: { id: ClientId.make(clientId) }, payload: { name } }))
+
 export const updateClientSettings = async (input: {
   readonly clientId: string
   readonly capabilities: ReadonlyArray<"provision_connections" | "administer_gateway">
   readonly approvalDelivery: ApprovalDelivery
+  readonly mcpSurface: McpSurface
 }) =>
   await run(endpoints.administrative.updateClientSettings({
     params: { id: ClientId.make(input.clientId) },
-    payload: { capabilities: input.capabilities, approvalDelivery: input.approvalDelivery }
+    payload: { capabilities: input.capabilities, approvalDelivery: input.approvalDelivery, mcpSurface: input.mcpSurface }
   }))
 
 export const listApprovalDestinations = async () =>
@@ -271,6 +276,12 @@ export const getAccessProfile = async (id: string) =>
 export const createAccessProfile = async (name: string) =>
   await run(endpoints.administrative.createAccessProfile({ payload: { name } }))
 
+export const renameAccessProfile = async (id: string, name: string) =>
+  await run(endpoints.administrative.updateAccessProfile({ params: { id: AccessProfileId.make(id) }, payload: { name } }))
+
+export const deleteAccessProfile = async (id: string) =>
+  await run(endpoints.administrative.deleteAccessProfile({ params: { id: AccessProfileId.make(id) } }))
+
 export const cloneAccessProfile = async (id: string, name: string) =>
   await run(endpoints.administrative.cloneAccessProfile({
     params: { id: AccessProfileId.make(id) },
@@ -300,6 +311,12 @@ export const getApprovalPolicy = async (id: string) =>
 
 export const createApprovalPolicy = async (name: string) =>
   await run(endpoints.administrative.createApprovalPolicy({ payload: { name } }))
+
+export const renameApprovalPolicy = async (id: string, name: string) =>
+  await run(endpoints.administrative.updateApprovalPolicy({ params: { id: ApprovalPolicyId.make(id) }, payload: { name } }))
+
+export const deleteApprovalPolicy = async (id: string) =>
+  await run(endpoints.administrative.deleteApprovalPolicy({ params: { id: ApprovalPolicyId.make(id) } }))
 
 export const cloneApprovalPolicy = async (id: string, name: string) =>
   await run(endpoints.administrative.cloneApprovalPolicy({

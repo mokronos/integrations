@@ -1,5 +1,5 @@
 import { Context, Effect, Option } from "effect"
-import { BlobStore, CatalogStore, Integrations, McpClient, OAuthFlows, OpenApiInvoker, SpecCache } from "@integrations/integrations"
+import { BlobStore, CatalogStore, Integrations, McpClient, OAuthFlows, OpenApiInvoker, SpecCache, ToolNotFoundError } from "@integrations/integrations"
 import type { IntegrationServices } from "@integrations/integrations"
 
 export const stubIntegrations = (
@@ -17,7 +17,7 @@ export const stubIntegrations = (
   refreshConnection: dies("refreshConnection"),
   toolSummaries: () => Effect.succeed([]),
   listTools: () => Effect.succeed([]),
-  describeTool: dies("describeTool"),
+  describeTool: (target) => Effect.fail(new ToolNotFoundError({ tool: String(target) })),
   execute: dies("execute"),
   ...overrides
 })

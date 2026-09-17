@@ -6,19 +6,18 @@ import {
 import {
   Alias,
   asJson,
-  ClientCapability,
   isJsonObject,
   objectEntries,
   ToolName,
   webCryptoLayer,
   whenPresent
 } from "@integrations/contracts"
-import type { Json, PolicyDecision } from "@integrations/contracts"
+import type { Client, Json, PolicyDecision } from "@integrations/contracts"
 import { authenticateClient } from "@integrations/gateway-core"
 import type { GatewayStore } from "@integrations/gateway-core"
 import { makeGatewayClient } from "@mokronos/integrations-client"
 import type { GatewayClient } from "@mokronos/integrations-client"
-import { Crypto, Effect, Layer, ManagedRuntime, Predicate, Schema } from "effect"
+import { Crypto, Effect, Layer, ManagedRuntime, Predicate } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import { agentTools, invokeTool } from "./mcp-tools.ts"
 import type { AgentTool, ToolOutput } from "./mcp-tools.ts"
@@ -80,7 +79,6 @@ const describeEffectiveTool = (tool: {
       ? awaitsApproval
       : `${tool.description}\n\n${awaitsApproval}`
 
-const isCapability = Schema.is(ClientCapability)
 
 // The gateway's routes spell their human-readable text `error`, not `message`,
 // so a failure carrying one reads as empty until it is asked for by name.
@@ -135,17 +133,20 @@ const registerAgentTool = (
 const serverFor = async (
   runtime: McpRuntime,
   secret: string,
-  capabilities: ReadonlyArray<ClientCapability>
+  identity: Client
 ): Promise<McpServer> => {
   const server = new McpServer({ name: "integrations-gateway", version: gatewayVersion })
   const client = await runtime.runPromise(
     makeGatewayClient({ url: loopbackOrigin, apiKey: secret })
   )
 
-  for (const tool of agentTools) {
-    if (tool.capability === undefined || capabilities.includes(tool.capability)) {
-      registerAgentTool(server, runtime, client, tool)
+  if (identity.mcpSurface === "discovery") {
+    for (const tool of agentTools) {
+      if (tool.capability === undefined || identity.capabilities.includes(tool.capability)) {
+        registerAgentTool(server, runtime, client, tool)
+      }
     }
+    return server
   }
 
   const effective = await runtime.runPromise(client.delegated.listTools({
@@ -189,9 +190,11 @@ export const createMcpGatewayHandler = (options: McpGatewayOptions): McpGatewayH
     ),
     webCryptoLayer
   ))
-  const handler = createMcpHandler(({ authInfo }) => {
+  const handler = createMcpHandler(async ({ authInfo }) => {
     if (authInfo === undefined) throw new Error("Authenticated MCP request has no identity")
-    return serverFor(runtime, authInfo.token, authInfo.scopes.filter(isCapability))
+    const authentication = await runtime.runPromise(capture(authenticateClient(options.store, authInfo.token)))
+    if (authentication.status !== "authenticated") throw new Error("MCP session key is no longer valid")
+    return serverFor(runtime, authInfo.token, authentication.client)
   })
 
   return {

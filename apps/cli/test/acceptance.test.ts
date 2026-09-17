@@ -378,13 +378,13 @@ describe("integrations CLI acceptance", () => {
         expect(tools.exitCode, tools.stderr).toBe(0)
         expect(tools.stdout).toContain("tickets.create")
 
-        const schema = yield* integrations(["schema", slug, "tickets.create"])
-        expect(schema.exitCode, schema.stderr).toBe(0)
-        expect(schema.stdout).toContain("title")
-
         const listed = parseOutput(ConnectionsOutput, (yield* integrations(["connections"])).stdout)
         const address = listed.connections[0]?.address ?? ""
         const connectionName = listed.connections[0]?.name ?? ""
+
+        const schema = yield* integrations(["schema", orgAlias(slug, connectionName), "tickets.create"])
+        expect(schema.exitCode, schema.stderr).toBe(0)
+        expect(schema.stdout).toContain("title")
         expect(address).toMatch(new RegExp(`^tools\\.${slug}\\.org\\.`))
 
         yield* loginOperator(gateway)
@@ -498,11 +498,11 @@ describe("integrations CLI acceptance", () => {
       expect(visible.tools.map((tool) => tool.tool)).toEqual(["tickets.create"])
       expect(visible.tools[0]?.connection).toBe(connectionName)
       const visibleSchema = yield* clientCli([
-        "schema", slug, "tickets.create", "--connection", connectionName
+        "schema", orgAlias(slug, connectionName), "tickets.create"
       ], sandbox)
       expect(visibleSchema.exitCode, visibleSchema.stderr).toBe(0)
       const hiddenSchema = yield* clientCli([
-        "schema", slug, "tickets.delete", "--connection", connectionName
+        "schema", orgAlias(slug, connectionName), "tickets.delete"
       ], sandbox)
       expect(hiddenSchema.exitCode).toBe(1)
       expect(hiddenSchema.stderr).toContain("not available to this client")

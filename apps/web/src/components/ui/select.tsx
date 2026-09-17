@@ -3,7 +3,35 @@ import { Select as SelectPrimitive } from "@base-ui/react/select"
 import { cn } from "@/lib/utils"
 import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react"
 
-const Select = SelectPrimitive.Root
+type SelectItemOption = { readonly value: string; readonly label: React.ReactNode }
+
+function Select({
+  items,
+  className,
+  size = "default",
+  "aria-label": ariaLabel,
+  ...props
+}: Omit<SelectPrimitive.Root.Props<string>, "items" | "children"> & {
+  readonly items: ReadonlyArray<SelectItemOption>
+  readonly className?: string
+  readonly size?: "sm" | "default"
+  readonly "aria-label"?: string
+}) {
+  return (
+    <SelectPrimitive.Root items={items} {...props}>
+      <SelectTrigger className={className} size={size} aria-label={ariaLabel}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {items.map((item) => (
+          <SelectItem key={item.value} value={item.value}>
+            {item.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </SelectPrimitive.Root>
+  )
+}
 
 function SelectGroup({ className, ...props }: SelectPrimitive.Group.Props) {
   return (
@@ -58,9 +86,9 @@ function SelectContent({
   children,
   side = "bottom",
   sideOffset = 4,
-  align = "center",
+  align = "start",
   alignOffset = 0,
-  alignItemWithTrigger = true,
+  alignItemWithTrigger = false,
   ...props
 }: SelectPrimitive.Popup.Props &
   Pick<

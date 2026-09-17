@@ -82,5 +82,12 @@ export const gatewayMigrations: ReadonlyArray<Migration> = [
       "CREATE TABLE `gateway_oauth_session` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`integration` text NOT NULL,\n\t`connection_name` text NOT NULL,\n\t`status_json` text NOT NULL,\n\t`request_json` text NOT NULL,\n\t`created_at` integer NOT NULL\n);",
       "CREATE TABLE `gateway_oauth_state` (\n\t`state` text PRIMARY KEY NOT NULL,\n\t`session_id` text NOT NULL,\n\t`created_at` integer NOT NULL\n);"
     ]
+  },
+  {
+    id: 5,
+    name: "0005_perfect_silhouette",
+    statements: [
+      "ALTER TABLE `gateway_client` ADD `mcp_surface` text DEFAULT 'tools' NOT NULL;"
+    ]
   }
 ]

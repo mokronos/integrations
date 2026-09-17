@@ -261,7 +261,7 @@ export const toolsCommand = (runGateway: GatewayTask) => Command.make(
           narrowing: "narrow with --filter <text>, or window with --limit/--offset",
           verbose,
           empty: term === undefined ? "No tools available." : `No tools match "${term}".`,
-          next: `i schema ${integration} <tool>`,
+          next: "i schema <alias> <tool>",
           extra: {
             integration,
             ...whenPresent("connection", Option.getOrUndefined(connection))
@@ -281,22 +281,15 @@ export const toolsCommand = (runGateway: GatewayTask) => Command.make(
 export const schemaCommand = (runGateway: GatewayTask) => Command.make(
   "schema",
   {
-    integration: Argument.string("integration"),
-    tool: Argument.string("tool"),
-    connection: connectionFlag(),
+    alias: Argument.string("alias").pipe(Argument.withDescription("Connection alias, as listed by `i tools`")),
+    tool: Argument.string("tool").pipe(Argument.withDescription("Effective tool name")),
     verbose: verboseFlag()
   },
-  ({ integration, tool, connection, verbose }) =>
-    runGateway((client) => client.delegated.listTools({ query: {
-      schemas: true,
-      integration: IntegrationSlug.make(integration),
-      connection: ConnectionName.make(connection)
-    } })).pipe(Effect.flatMap((effective) => {
-      const found = effective.tools.find((candidate) => candidate.tool === tool)
+  ({ alias, tool, verbose }) =>
+    runGateway((client) => client.delegated.listTools({ query: { schemas: true } })).pipe(Effect.flatMap((effective) => {
+      const found = effective.tools.find((candidate) => candidate.alias === alias && candidate.tool === tool)
       if (found === undefined) {
-        return Effect.fail(cliError(
-          `${tool} is not available to this client through ${integration}/${connection}`
-        ))
+        return Effect.fail(cliError(`${tool} is not available to this client through ${alias}`))
       }
       const detail = record(found)
       const core = Object.fromEntries(

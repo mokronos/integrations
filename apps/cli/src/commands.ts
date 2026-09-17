@@ -50,7 +50,6 @@ export const clientSubcommands = [
   discoverCommand(gatewayTask),
   searchCommand(gatewayTask),
   integrationsCommand(gatewayTask),
-  renameCommand(gatewayTask),
   toolsCommand(gatewayTask),
   schemaCommand(gatewayTask),
   connectCommand(gatewayTask),

@@ -17,13 +17,7 @@ import {
   DialogTrigger
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "@/components/ui/select"
+import { Select } from "@/components/ui/select"
 import * as gateway from "@/lib/gateway"
 import { keys, useInvalidate, useMutation } from "@/lib/queries"
 import {
@@ -31,6 +25,11 @@ import {
 } from "@/lib/schemas"
 import type { IntegrationSearchKind, IntegrationSearchMatch } from "@integrations/contracts"
 const ALL_KINDS = "__all__"
+const kindOptions = [
+  { value: ALL_KINDS, label: "Any kind" },
+  { value: "mcp", label: "MCP" },
+  { value: "openapi", label: "OpenAPI" },
+] as const
 
 export function RegistrySearchDialog({ onInstalled }: { readonly onInstalled?: (slug: string) => void }) {
   const invalidate = useInvalidate()
@@ -101,16 +100,11 @@ export function RegistrySearchDialog({ onInstalled }: { readonly onInstalled?: (
             />
           </div>
           <Select
+            className="w-32"
             value={kind}
             onValueChange={(value) => setKind(decodeIntegrationSearchFilter(value))}
-          >
-            <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_KINDS}>Any kind</SelectItem>
-              <SelectItem value="mcp">MCP</SelectItem>
-              <SelectItem value="openapi">OpenAPI</SelectItem>
-            </SelectContent>
-          </Select>
+            items={kindOptions}
+          />
           <Button type="submit" disabled={query.trim().length === 0 || search.isPending}>
             {search.isPending ? "Searching…" : "Search"}
           </Button>

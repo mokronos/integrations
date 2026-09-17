@@ -23,6 +23,7 @@ export const keys = {
   approvalPolicies: ["approval-policies"] as const,
   approvalPolicy: (id: string) => ["approval-policies", id] as const,
   clientTools: (clientId: string) => ["clients", clientId, "tools"] as const,
+  apiKeys: (clientId: string) => ["clients", clientId, "keys"] as const,
   approvals: (status: ApprovalStatus | "all") => ["approvals", status] as const,
   audit: (input: AuditQuery) => ["audit", input] as const,
   oauthSession: (id: string) => ["oauth-session", id] as const
@@ -86,6 +87,9 @@ export const useApprovalPolicy = (id: string | undefined) =>
   useQuery({
     queryKey: keys.approvalPolicy(id ?? ""), queryFn: () => gateway.getApprovalPolicy(id ?? ""), enabled: id !== undefined
   })
+
+export const useApiKeys = (clientId: string) =>
+  useQuery({ queryKey: keys.apiKeys(clientId), queryFn: () => gateway.listKeys(clientId) })
 
 export const useClientTools = (clientId: string | undefined) =>
   useQuery({

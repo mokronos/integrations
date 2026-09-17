@@ -136,6 +136,7 @@ export const gatewayClient = sqliteTable("gateway_client", {
   name: text("name").notNull(),
   capabilities: text("capabilities").notNull(),
   approvalDelivery: text("approval_delivery").notNull(),
+  mcpSurface: text("mcp_surface").notNull().default("tools"),
   createdAt: createdAt(),
   revokedAt: integer("revoked_at")
 }, (table) => [

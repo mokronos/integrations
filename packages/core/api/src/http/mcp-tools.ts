@@ -121,7 +121,7 @@ export const invokeTool = (
           value: outcome.status === "succeeded" && mentionsKey(outcome.result, blobHandleKey)
             ? { ...objectEntries(asJson(encoded)), note: blobsUnsupported }
             : encoded,
-          failed: outcome.status === "denied" || outcome.status === "failed"
+          failed: outcome.status === "denied" || outcome.status === "failed" || outcome.status === "invalid"
         }
       }
     )
@@ -213,21 +213,6 @@ const integrationsTool = agentTool({
       }))
 })
 
-const renameTool = agentTool({
-  name: "rename",
-  title: "Rename an integration",
-  description: "Change an integration's display name. Its slug does not change.",
-  capability: "provision_connections",
-  input: Schema.Struct({ integration: IntegrationSlug, name: Schema.String }),
-  run: (client, input) =>
-    Effect.map(
-      client.provisioning.renameIntegration({
-        params: { slug: input.integration },
-        payload: { name: input.name }
-      }),
-      ok
-    )
-})
 
 const toolsTool = agentTool({
   name: "tools",
@@ -283,28 +268,19 @@ const toolsTool = agentTool({
 const schemaTool = agentTool({
   name: "schema",
   title: "Show one tool's schemas",
-  description: "Show one effective tool's description and input/output schemas.",
-  input: Schema.Struct({
-    integration: IntegrationSlug,
-    tool: ToolName,
-    connection: Schema.optional(ConnectionName)
-  }),
+  description:
+    "Show one effective tool's description and input/output schemas. Address it the same way " +
+    "`execute` does: by the connection alias `tools` reports, plus the tool name.",
+  input: Schema.Struct({ alias: Alias, tool: ToolName }),
   run: (client, input) =>
     Effect.flatMap(
-      client.delegated.listTools({
-        query: {
-          schemas: true,
-          integration: input.integration,
-          ...whenPresent("connection", input.connection)
-        }
-      }),
+      client.delegated.listTools({ query: { schemas: true } }),
       (result) => {
-        const found = result.tools.find((candidate) => candidate.tool === input.tool)
+        const found = result.tools.find((candidate) =>
+          candidate.alias === input.alias && candidate.tool === input.tool
+        )
         return found === undefined
-          ? Effect.fail(refuse(
-            `${input.tool} is not available to this key through ${input.integration}` +
-            `${input.connection === undefined ? "" : `/${input.connection}`}`
-          ))
+          ? Effect.fail(refuse(`${input.tool} is not available to this key through ${input.alias}`))
           : Effect.succeed(ok(found))
       }
     )
@@ -429,12 +405,12 @@ const executeTool = agentTool({
   name: "execute",
   title: "Invoke a tool by alias",
   description:
-    "Invoke any tool this key may call, by alias and name. Every effective tool is also registered " +
-    "under its own name; reach for this when the tool was authorized after this session started.",
+    "Invoke any tool this key may call, by the connection alias `tools` reports and the tool name. " +
+    "Inspect arguments with `schema` first.",
   input: Schema.Struct({
     alias: Alias,
     tool: ToolName,
-    arguments: Schema.optional(Schema.Json)
+    arguments: Schema.optional(Schema.Record(Schema.String, Schema.Json))
   }),
   run: (client, input) =>
     invokeTool(client, {
@@ -491,7 +467,6 @@ export const agentTools: ReadonlyArray<AgentTool> = [
   searchTool,
   discoverTool,
   integrationsTool,
-  renameTool,
   connectTool,
   oauthStatusTool,
   connectionsTool,

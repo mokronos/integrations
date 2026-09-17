@@ -5,6 +5,7 @@ import type { HttpClient } from "effect/unstable/http"
 import type { Integrations } from "@integrations/integrations"
 import { ToolAddress } from "@integrations/contracts"
 import type { OAuthSessions } from "./oauth-sessions.ts"
+import { invalidArguments } from "./arguments.ts"
 import { authorizeClientInvocation, authorizeInvocation } from "./authorize.ts"
 import { defaultApprovalExpiryHours, defaultArgumentRetentionDays } from "./config.ts"
 import {
@@ -201,6 +202,9 @@ const settle = Effect.fn("Invocation.settle")(function*(
     return { status: "denied", reason }
   }
 
+  const invalid = yield* checkArguments(integrations, authorization, input.arguments)
+  if (invalid !== undefined) return invalid
+
   const missing = yield* missingUserConnection(dependencies, authorization)
   if (missing !== undefined) return missing
 
@@ -223,6 +227,25 @@ const settle = Effect.fn("Invocation.settle")(function*(
     authorization,
     input.arguments
   )
+})
+
+/**
+ * Arguments are checked against the tool's declared input schema before any
+ * approval is frozen, so a malformed call fails fast for the caller instead of
+ * failing at the vendor after a human said yes.
+ */
+const checkArguments = Effect.fn("Invocation.checkArguments")(function*(
+  integrations: Integrations["Service"],
+  authorization: Authorized,
+  argumentsValue: Json
+): Effect.fn.Return<InvocationOutcome | undefined> {
+  const address = boundToolAddress(authorization.connection, authorization.accessProfileTool.tool)
+  const described = yield* integrations.describeTool(address).pipe(
+    Effect.map(Option.some),
+    Effect.catch(() => Effect.succeed(Option.none()))
+  )
+  if (Option.isNone(described)) return undefined
+  return invalidArguments(described.value.inputSchema, argumentsValue, authorization.accessProfileTool.tool)
 })
 
 /**

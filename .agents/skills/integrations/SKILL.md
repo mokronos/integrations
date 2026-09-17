@@ -31,14 +31,15 @@ i connect mcp_linear_app                     # 3. authorize (OAuth opens a brows
 
 Then call whatever tool you want:
 ```bash
-i tools mcp_linear_app --filter issue        # browse tool names
-i schema mcp_linear_app list_issues          # read one tool's input/output schema,
-                                             # its tools.… address, and the `alias`
-                                             # to call it under
-
-i execute org_mcp-5flinear-5fapp_default list_issues '{"limit":5}' # 4. use the alias
-                                                                    #    `schema` printed
+i tools mcp_linear_app --filter issue                    # browse tool names; each row
+                                                         # carries the `alias` to call it under
+i schema org_mcp-5flinear-5fapp_default list_issues      # read one tool's input/output schema
+i execute org_mcp-5flinear-5fapp_default list_issues '{"limit":5}' # 4. call it
 ```
+
+`schema` and `execute` take the same two arguments: the connection alias that
+`tools` printed, then the tool name. The integration slug is only for
+`tools`, `connect`, and `discover`.
 
 OAuth requires a human browser step. Run `i connect` with a command timeout of
 at least 5 minutes; do not let the agent's shell timeout terminate it first.
