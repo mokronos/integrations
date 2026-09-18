@@ -1,6 +1,6 @@
 {
   "name": "@mokronos/integrations-gateway-api",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "type": "module",
   "description": "Gateway HTTP API definitions, handlers, and server assembly.",
   "license": "MIT",

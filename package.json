@@ -2,7 +2,7 @@
   "name": "integrations-monorepo",
   "private": true,
   "type": "module",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "workspaces": [
     "apps/*",
     "packages/*",
