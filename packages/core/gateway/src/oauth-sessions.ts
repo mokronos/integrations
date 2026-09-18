@@ -1,15 +1,11 @@
-import { AuthMethod, OAuthSessionState, SubjectId, TenantId, userOwner, whenPresent } from "@integrations/contracts"
+import { AuthMethod, OAuthSessionState, SubjectId, TenantId, userOwner, whenPresent } from "@mokronos/integrations-contracts"
 
 import { Clock, Context, Deferred, Effect, Exit, Schema, Scope } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
-import { webCrypto } from "@integrations/contracts"
-import { completeOAuthFlow } from "@integrations/integrations"
-import {
-  authorizeInBrowser,
-  OAuthFlowError,
-  startRemoteAuthorization,
-  type OAuthOperations
-} from "./oauth.ts"
+import { webCrypto } from "@mokronos/integrations-contracts"
+import { completeOAuthFlow } from "@mokronos/integrations-host"
+import { OAuthFlowError, startRemoteAuthorization } from "./oauth.ts"
+import type { LocalAuthorizer, OAuthOperations } from "./oauth.ts"
 
 /**
  * Everything needed to run the authorization again, minus the OAuth client
@@ -171,6 +167,8 @@ export interface OAuthSessions {
 export interface OAuthSessionsOptions {
   readonly publicUrl?: string
   readonly publicUrlOf?: () => string | undefined
+  /** Completes flows on a host-owned listener when no public URL is configured. */
+  readonly authorizeLocally?: LocalAuthorizer
   readonly store?: OAuthSessionStore
   readonly onConnected?: (session: OAuthSession) => Effect.Effect<void, OAuthSessionError>
 }
@@ -293,10 +291,17 @@ export const createOAuthSessions = (
       return pending
     }
 
+    const authorizeLocally = options.authorizeLocally
+    if (authorizeLocally === undefined) {
+      return yield* new OAuthSessionError({
+        operation: "start",
+        cause: new Error("OAuth needs a public URL for the provider to redirect to, and none is configured")
+      })
+    }
     const parent = yield* flowScope
     const announced = yield* Deferred.make<string>()
 
-    yield* authorizeInBrowser({
+    yield* authorizeLocally({
       integration: input.integration,
       connection: input.connection,
       ...owner,

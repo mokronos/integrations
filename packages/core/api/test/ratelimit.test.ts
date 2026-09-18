@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
-import { whenPresent } from "@integrations/contracts"
+import { whenPresent } from "@mokronos/integrations-contracts"
 import {
   createGatewayHandler,
   defaultTenantId,

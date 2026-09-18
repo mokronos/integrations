@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router"
 import { ArrowLeft, ArrowRight, Check, CheckCircle2, KeyRound, Plug, ShieldCheck } from "lucide-react"
 import { Effect, Option, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
-import { ConnectionName, IntegrationSlug, ToolName } from "@integrations/contracts"
+import { ConnectionName, IntegrationSlug, ToolName } from "@mokronos/integrations-contracts"
 import { makeGatewayClient } from "@mokronos/integrations-client/client"
 
 import { useSession } from "@/components/auth-gate"

@@ -3,7 +3,7 @@ import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { HttpApiClient } from "effect/unstable/httpapi"
 // The definition alone: importing the package index would pull the server
 // — handlers, store, MCP — into every consumer of this client.
-import { GatewayApi } from "@integrations/gateway-api/definition"
+import { GatewayApi } from "@mokronos/integrations-gateway-api/definition"
 import {
   Connection,
   GatewayMetadata,
@@ -15,7 +15,7 @@ import {
   IntegrationValidationReport,
   Tool,
   ToolSummary
-} from "@integrations/contracts"
+} from "@mokronos/integrations-contracts"
 
 export type GatewayCredential =
   /** A client API key, presented as a bearer token. */

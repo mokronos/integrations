@@ -1,7 +1,7 @@
-import type { JsonObject } from "@integrations/contracts"
+import type { JsonObject } from "@mokronos/integrations-contracts"
 import {
   gatewayProtocolVersion
-} from "@integrations/contracts"
+} from "@mokronos/integrations-contracts"
 import { Effect, Result } from "effect"
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"

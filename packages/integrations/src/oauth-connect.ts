@@ -1,5 +1,5 @@
 import { Clock, Effect, Option, Schema } from "effect"
-import { whenPresent } from "@integrations/contracts"
+import { whenPresent } from "@mokronos/integrations-contracts"
 import {
   Connection,
   connectionAddress,
@@ -7,7 +7,7 @@ import {
   IntegrationSlug,
   type OAuthServerProbe,
   type ConnectionOwner
-} from "@integrations/contracts"
+} from "@mokronos/integrations-contracts"
 import { AuthTemplateSlug, OAuthClientSlug, OAuthState } from "./catalog/ids.ts"
 import { CatalogStore } from "./catalog/store.ts"
 import { InvalidInputError, type StorageError, type OAuthError } from "./errors.ts"

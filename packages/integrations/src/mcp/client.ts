@@ -8,14 +8,14 @@ import { Context, Effect, Layer, Option, Schema } from "effect"
 import { HttpBody, HttpClient, HttpClientResponse } from "effect/unstable/http"
 import type { Headers } from "effect/unstable/http"
 import { describeCause, McpError } from "../errors.ts"
-import { serviceName, slugify } from "@integrations/contracts"
-import { whenPresent } from "@integrations/contracts"
-import { isJsonObject, parseJsonString, type Json, type JsonObject } from "@integrations/contracts"
-import { McpProbe } from "@integrations/contracts"
+import { serviceName, slugify } from "@mokronos/integrations-contracts"
+import { whenPresent } from "@mokronos/integrations-contracts"
+import { isJsonObject, parseJsonString, type Json, type JsonObject } from "@mokronos/integrations-contracts"
+import { McpProbe } from "@mokronos/integrations-contracts"
 
 const PROTOCOL_VERSION = "2026-07-28"
 
-const clientInfo = { name: "@integrations/integrations", version: "0.2.0" } as const
+const clientInfo = { name: "@mokronos/integrations-host", version: "0.2.0" } as const
 
 const requestMeta = {
   "io.modelcontextprotocol/protocolVersion": PROTOCOL_VERSION,
@@ -269,7 +269,7 @@ export class McpClient extends Context.Service<
       input: Json
     ) => Effect.Effect<Json, McpError>
   }
->()("@integrations/integrations/McpClient") {
+>()("@mokronos/integrations-host/McpClient") {
   static readonly layer: Layer.Layer<McpClient, never, HttpClient.HttpClient> = Layer.effect(
     McpClient,
     Effect.gen(function* () {

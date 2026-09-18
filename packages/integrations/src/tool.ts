@@ -6,8 +6,8 @@ import {
   ConnectionOwner,
   ParameterLocation,
   ToolAddress
-} from "@integrations/contracts"
-export { HttpMethod, ParameterLocation } from "@integrations/contracts"
+} from "@mokronos/integrations-contracts"
+export { HttpMethod, ParameterLocation } from "@mokronos/integrations-contracts"
 
 export const McpCall = Schema.Struct({ kind: Schema.Literal("mcp"), tool: Schema.String })
 export type McpCall = typeof McpCall.Type

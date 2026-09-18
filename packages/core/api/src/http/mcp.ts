@@ -11,12 +11,12 @@ import {
   ToolName,
   webCryptoLayer,
   whenPresent
-} from "@integrations/contracts"
-import type { Client, Json, PolicyDecision } from "@integrations/contracts"
-import { Integrations } from "@integrations/integrations"
-import type { IntegrationServices } from "@integrations/integrations"
-import { authenticateClient, GatewayStoreService, listEffectiveTools } from "@integrations/gateway-core"
-import type { GatewayStore } from "@integrations/gateway-core"
+} from "@mokronos/integrations-contracts"
+import type { Client, Json, PolicyDecision } from "@mokronos/integrations-contracts"
+import { Integrations } from "@mokronos/integrations-host"
+import type { IntegrationServices } from "@mokronos/integrations-host"
+import { authenticateClient, GatewayStoreService, listEffectiveTools } from "@mokronos/integrations-gateway-core"
+import type { GatewayStore } from "@mokronos/integrations-gateway-core"
 import { Context, Effect, Layer, ManagedRuntime, Predicate } from "effect"
 import type { HttpClient } from "effect/unstable/http"
 import { agentTools, invokeTool } from "./mcp-tools.ts"
@@ -24,7 +24,8 @@ import type { AgentTool, McpCaller, ToolOutput } from "./mcp-tools.ts"
 import { capture, ErrorCapture } from "./observability.ts"
 import type { ErrorSink } from "./observability.ts"
 import type { GatewayOperationServices } from "./operations.ts"
-import { GatewayConfig, OAuthFlowSessions } from "./services.ts"
+import { GatewayConfig } from "./services.ts"
+import { OAuthFlowSessions } from "@mokronos/integrations-gateway-core"
 import type { GatewaySettings } from "./services.ts"
 import { gatewayVersion } from "../version.ts"
 

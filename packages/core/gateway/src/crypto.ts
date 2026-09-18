@@ -1,9 +1,9 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { randomBytes } from "node:crypto"
 import path from "node:path"
-import { decodeBase64UrlField } from "@integrations/contracts"
-import { createEncryption } from "@integrations/integrations"
-import type { Encryption } from "@integrations/integrations"
+import { decodeBase64UrlField } from "@mokronos/integrations-contracts"
+import { createEncryption } from "@mokronos/integrations-host"
+import type { Encryption } from "@mokronos/integrations-host"
 
 export { createEncryption }
 export type { Encryption }

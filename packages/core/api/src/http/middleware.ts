@@ -8,6 +8,6 @@ import { ForbiddenError, Identity, UnauthorizedError } from "./identity.ts"
  */
 export class Authority extends HttpApiMiddleware.Service<Authority, {
   provides: Identity
-}>()("@integrations/gateway-api/Authority", {
+}>()("@mokronos/integrations-gateway-api/Authority", {
   error: [UnauthorizedError, ForbiddenError]
 }) {}

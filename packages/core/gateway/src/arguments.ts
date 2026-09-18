@@ -1,7 +1,7 @@
 import { Validator } from "@cfworker/json-schema"
 import type { Schema as JsonSchemaDocument, SchemaDraft } from "@cfworker/json-schema"
-import { isJsonObject, isJsonString, property } from "@integrations/contracts"
-import type { InvocationInvalid, Json, JsonObject } from "@integrations/contracts"
+import { isJsonObject, isJsonString, property } from "@mokronos/integrations-contracts"
+import type { InvocationInvalid, Json, JsonObject } from "@mokronos/integrations-contracts"
 
 const draftOf = (schema: JsonObject): SchemaDraft => {
   const declared = property(schema, "$schema")

@@ -1,5 +1,5 @@
-import type { InvocationOutcome, Json } from "@integrations/contracts"
-import type { EffectiveTool } from "@integrations/gateway-core"
+import type { InvocationOutcome, Json } from "@mokronos/integrations-contracts"
+import type { EffectiveTool } from "@mokronos/integrations-gateway-core"
 
 export interface AgentView {
   readonly id: string

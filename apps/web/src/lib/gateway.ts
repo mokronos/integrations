@@ -1,8 +1,8 @@
 import { Effect, Predicate } from "effect"
 import { FetchHttpClient, HttpClientError } from "effect/unstable/http"
 import { HttpApiClient } from "effect/unstable/httpapi"
-import { GatewayApi } from "@integrations/gateway-api/definition"
-import { NonNegativeInt, PositiveInt, whenPresent } from "@integrations/contracts"
+import { GatewayApi } from "@mokronos/integrations-gateway-api/definition"
+import { NonNegativeInt, PositiveInt, whenPresent } from "@mokronos/integrations-contracts"
 import {
   AccessProfileId,
   ApiKeyId,
@@ -10,8 +10,8 @@ import {
   ApprovalId,
   ApprovalPolicyId,
   ClientId
-} from "@integrations/contracts"
-import { Alias } from "@integrations/contracts"
+} from "@mokronos/integrations-contracts"
+import { Alias } from "@mokronos/integrations-contracts"
 import type {
   ApprovalDelivery,
   McpSurface,
@@ -185,7 +185,7 @@ export const listClients = async () => {
 export const fetchOverview = async () => await run(endpoints.administrative.overview())
 
 export const createConfiguredClient = async (
-  input: import("@integrations/contracts").ConfigureClient
+  input: import("@mokronos/integrations-contracts").ConfigureClient
 ) => await run(endpoints.administrative.createConfiguredClient({ payload: input }))
 
 export const createClient = async (input: {

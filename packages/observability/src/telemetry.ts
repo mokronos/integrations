@@ -1,7 +1,7 @@
 import { FetchHttpClient } from "effect/unstable/http"
 import { OtlpLogger, OtlpSerialization, OtlpTracer } from "effect/unstable/observability"
 import { Config, Effect, Layer, Option } from "effect"
-import { optionalText, whenPresent } from "@integrations/contracts"
+import { optionalText, whenPresent } from "@mokronos/integrations-contracts"
 
 export const telemetryEndpointEnvVar = "INTEGRATIONS_OTLP_ENDPOINT"
 

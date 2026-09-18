@@ -1,7 +1,6 @@
 {
-  "name": "@integrations/contracts",
+  "name": "@mokronos/integrations-contracts",
   "version": "0.2.0",
-  "private": true,
   "type": "module",
   "description": "The shared vocabulary and wire contracts every component agrees on.",
   "license": "MIT",
@@ -19,7 +18,11 @@
     "effect"
   ],
   "engines": {
+    "node": ">=22",
     "bun": ">=1.2"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "files": [
     "src",
@@ -41,15 +44,14 @@
     },
     "./test-fixtures": {
       "development": "./test/fixtures.ts",
-      "bun": "./test/fixtures.ts",
-      "default": "./test/fixtures.ts"
+      "bun": "./test/fixtures.ts"
     }
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
-    "prepublishOnly": "bun run build"
+    "prepack": "bun run build"
   },
-  "dependencies": {
+  "peerDependencies": {
     "effect": "catalog:"
   }
 }

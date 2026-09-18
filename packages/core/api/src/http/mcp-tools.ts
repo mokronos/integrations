@@ -14,15 +14,15 @@ import {
   PositiveInt,
   ToolName,
   whenPresent
-} from "@integrations/contracts"
-import type { Client, ClientCapability, Json, JsonEncodable } from "@integrations/contracts"
+} from "@mokronos/integrations-contracts"
+import type { Client, ClientCapability, Json, JsonEncodable } from "@mokronos/integrations-contracts"
 import {
   Integrations,
   listIntegrationOverviews,
   provisionIntegration,
   searchIntegrations
-} from "@integrations/integrations"
-import { GatewayStoreService, invokeAsClient, listEffectiveTools } from "@integrations/gateway-core"
+} from "@mokronos/integrations-host"
+import { GatewayStoreService, invokeAsClient, listEffectiveTools } from "@mokronos/integrations-gateway-core"
 import { capture } from "./observability.ts"
 import {
   connectWithCredentials,
@@ -33,7 +33,8 @@ import {
   validateReference
 } from "./operations.ts"
 import type { GatewayOperationServices } from "./operations.ts"
-import { GatewayConfig, OAuthFlowSessions } from "./services.ts"
+import { GatewayConfig } from "./services.ts"
+import { OAuthFlowSessions } from "@mokronos/integrations-gateway-core"
 
 /** A refusal the gateway never saw: the arguments did not survive this surface. */
 export class ToolRefusal extends Data.TaggedError("ToolRefusal")<{

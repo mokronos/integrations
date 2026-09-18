@@ -48,8 +48,8 @@
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
-    "@integrations/contracts": "workspace:*",
-    "@integrations/gateway-api": "workspace:*",
+    "@mokronos/integrations-contracts": "workspace:*",
+    "@mokronos/integrations-gateway-api": "workspace:*",
     "effect": "catalog:"
   }
 }

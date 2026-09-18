@@ -1,5 +1,5 @@
 import { Option } from "effect"
-import { isJsonObject, type Json } from "@integrations/contracts"
+import { isJsonObject, type Json } from "@mokronos/integrations-contracts"
 import type { HttpCall } from "../tool.ts"
 
 export interface SplitArguments {

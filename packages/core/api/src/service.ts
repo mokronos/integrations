@@ -1,128 +1,38 @@
 import {
-  createOAuthSessions,
   defaultArgumentRetentionDays,
   defaultGatewayPort,
   defaultTenantId,
-  deliverDueApprovalNotifications,
+  gatewayCoreLayer,
   GatewayStoreError,
   GatewayStoreService,
   generateApiKey,
   libsqlLayer,
-  maintenanceLoop,
   newClientId,
-  OAuthSessionError,
+  OAuthFlowSessions,
   reconcileConfigurations,
   resolveEncryption,
-  sqlOAuthSessionStore,
   writeGatewayConfig
-} from "@integrations/gateway-core"
-import type { Encryption, GatewayStore, OAuthOperations } from "@integrations/gateway-core"
-import type { GoogleIdentityOAuth } from "@integrations/gateway-core"
-import { whenPresent } from "@integrations/contracts"
-import { webCryptoLayer } from "@integrations/contracts"
-import { BlobStore, integrationLayer, Integrations } from "@integrations/integrations"
-import type { StorageError } from "@integrations/integrations"
+} from "@mokronos/integrations-gateway-core"
+import type { Encryption, GatewayCoreServices, GatewayStore } from "@mokronos/integrations-gateway-core"
+import type { GoogleIdentityOAuth } from "@mokronos/integrations-gateway-core"
+import { whenPresent } from "@mokronos/integrations-contracts"
+import { webCryptoLayer } from "@mokronos/integrations-contracts"
+import { Integrations } from "@mokronos/integrations-host"
+import type { StorageError } from "@mokronos/integrations-host"
 import { Context, Crypto, Effect, Layer, ManagedRuntime, Option } from "effect"
 import type { HttpClient } from "effect/unstable/http"
 import { SqlClient } from "effect/unstable/sql"
 import { isLoopbackAddress, mayBorrowLocalCredential } from "./http/loopback.ts"
 import { createGatewayHandler } from "./http/handler.ts"
-import type { GatewayCoreServices, GatewayHandle, GatewayHandlerOptions, GatewayRequestContext } from "./http/handler.ts"
+import type { GatewayHandle, GatewayHandlerOptions, GatewayRequestContext } from "./http/handler.ts"
 import type { RateLimits } from "./http/authority.ts"
-import { OAuthFlowSessions } from "./http/services.ts"
+import { authorizeInBrowser } from "./oauth-browser.ts"
 import { integrationsHome } from "./paths.ts"
 import { createWebAssets } from "./web-assets.ts"
 import { defaultRateLimitPerMinute, gatewayEnvironment } from "./config.ts"
-import { telemetryLayer } from "@integrations/observability"
+import { telemetryLayer } from "@mokronos/integrations-observability"
 
 export const localClientName = "local"
-
-export type { GatewayCoreServices } from "./http/handler.ts"
-
-export interface GatewayCoreOptions {
-  readonly encryption: Encryption
-  /** Where uploaded blobs live; the only thing the core keeps outside the database. */
-  readonly blobDirectory: string
-  /** Where OAuth callbacks and approval links resolve to, read when needed. */
-  readonly publicUrlOf?: () => string | undefined
-  /** Bring the tables up to date on start. Off when the host runs the migrations itself. */
-  readonly migrate?: boolean
-  /** Sweep expired approvals and deliver notifications on a timer. Off when the host schedules it. */
-  readonly maintenance?: boolean
-}
-
-const oauthSessionsLayer = (
-  publicUrlOf: (() => string | undefined) | undefined
-): Layer.Layer<OAuthFlowSessions, never, SqlClient.SqlClient | GatewayStoreService | OAuthOperations> =>
-  Layer.effect(
-    OAuthFlowSessions,
-    Effect.gen(function*() {
-      const sql = yield* SqlClient.SqlClient
-      const store = yield* GatewayStoreService
-      const host = yield* Effect.context<OAuthOperations>()
-      return yield* Effect.acquireRelease(
-        Effect.sync(() =>
-          createOAuthSessions(host, {
-            store: sqlOAuthSessionStore(sql),
-            ...whenPresent("publicUrlOf", publicUrlOf),
-            onConnected: (session) =>
-              session.bindingTenant === undefined || session.state.status !== "connected"
-                ? Effect.void
-                : reconcileConfigurations({
-                  store,
-                  integrations: Context.get(host, Integrations),
-                  tenantId: session.bindingTenant
-                }).pipe(
-                  Effect.asVoid,
-                  Effect.mapError((cause) => new OAuthSessionError({ operation: "bindConnectedTools", cause }))
-                )
-          })),
-        (sessions) => sessions.stop()
-      )
-    })
-  )
-
-const reconcileOnStart: Layer.Layer<never, GatewayStoreError | StorageError, GatewayStoreService | Integrations> =
-  Layer.effectDiscard(Effect.gen(function*() {
-    const store = yield* GatewayStoreService
-    const integrations = yield* Integrations
-    const tenants = yield* store.listTenants()
-    yield* Effect.forEach(
-      tenants,
-      (tenant) => reconcileConfigurations({ store, integrations, tenantId: tenant.id }),
-      { discard: true }
-    )
-  }))
-
-const maintenanceLayer = (
-  publicUrlOf: (() => string | undefined) | undefined
-): Layer.Layer<never, never, GatewayStoreService | HttpClient.HttpClient> =>
-  Layer.effectDiscard(Effect.gen(function*() {
-    const store = yield* GatewayStoreService
-    yield* Effect.forkScoped(maintenanceLoop(store, {
-      afterSweep: Effect.suspend(() =>
-        deliverDueApprovalNotifications({ store, ...whenPresent("dashboardUrl", publicUrlOf?.()) }))
-    }))
-  }))
-
-/**
- * Everything the gateway is, short of a transport: the store, the integration
- * host, and OAuth sessions on one `SqlClient`. A host that owns the process
- * provides this once and calls the core functions or mounts the API on top.
- */
-export const gatewayCoreLayer = (
-  options: GatewayCoreOptions
-): Layer.Layer<GatewayCoreServices, GatewayStoreError | StorageError, SqlClient.SqlClient | HttpClient.HttpClient> => {
-  const base = Layer.mergeAll(
-    GatewayStoreService.layer({ encryption: options.encryption, ...whenPresent("migrate", options.migrate) }),
-    integrationLayer({ encryption: options.encryption, blobs: BlobStore.fileLayer(options.blobDirectory) })
-  )
-  return Layer.mergeAll(
-    oauthSessionsLayer(options.publicUrlOf),
-    reconcileOnStart,
-    options.maintenance === false ? Layer.empty : maintenanceLayer(options.publicUrlOf)
-  ).pipe(Layer.provideMerge(base))
-}
 
 export interface GatewayService {
   readonly home: string
@@ -182,6 +92,7 @@ const buildCore = async (options: GatewayServiceOptions): Promise<GatewayCore> =
       encryption,
       blobDirectory: home,
       publicUrlOf: resolvePublicUrl,
+      authorizeLocally: authorizeInBrowser,
       ...whenPresent("migrate", options.migrate),
       ...whenPresent("maintenance", options.maintenance)
     }).pipe(Layer.provide(Layer.merge(

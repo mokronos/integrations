@@ -21,7 +21,7 @@ import {
   ToolNotFoundError
 } from "./errors.ts"
 import { OAuthClientSlug } from "./catalog/ids.ts"
-import { connectionAddress, ConnectionName, IntegrationSlug } from "@integrations/contracts"
+import { connectionAddress, ConnectionName, IntegrationSlug } from "@mokronos/integrations-contracts"
 import { AuthTemplateSlug } from "./catalog/ids.ts"
 import { McpClient } from "./mcp/client.ts"
 import type { McpCredential } from "./mcp/client.ts"
@@ -29,7 +29,7 @@ import { OAuthFlows } from "./oauth/flows.ts"
 import { resolveServer } from "./openapi/compile.ts"
 import { OpenApiInvoker } from "./openapi/invoke.ts"
 import type { ResolvedCredential } from "./openapi/invoke.ts"
-import { whenPresent } from "@integrations/contracts"
+import { whenPresent } from "@mokronos/integrations-contracts"
 import {
   Connection,
   Integration,
@@ -37,7 +37,7 @@ import {
   Tool,
   ToolAddress,
   ToolSummary
-} from "@integrations/contracts"
+} from "@mokronos/integrations-contracts"
 import { SpecCache } from "./openapi/cache.ts"
 import { normalizeToolResult } from "./mcp/result.ts"
 
@@ -218,7 +218,7 @@ export class Integrations extends Context.Service<
       input: Json
     ) => Effect.Effect<Json, IntegrationFailure>
   }
->()("@integrations/integrations/Integrations") {
+>()("@mokronos/integrations-host/Integrations") {
   static readonly layer: Layer.Layer<
     Integrations,
     never,

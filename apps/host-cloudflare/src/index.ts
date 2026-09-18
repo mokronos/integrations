@@ -1,14 +1,14 @@
-import { createGatewayService, type GatewayService } from "@integrations/gateway-api"
+import { createGatewayService, type GatewayService } from "@mokronos/integrations-gateway-api"
 import {
   createEncryption,
   deliverDueApprovalNotifications,
   runMaintenance
-} from "@integrations/gateway-core"
+} from "@mokronos/integrations-gateway-core"
 import type { D1Database } from "@cloudflare/workers-types"
 import type { AssetsFetcherLike, ScheduledEventLike } from "./cloudflare.ts"
 import { Effect, Layer } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
-import { decodeBase64UrlField } from "@integrations/contracts"
+import { decodeBase64UrlField } from "@mokronos/integrations-contracts"
 import { FetchHttpClient } from "effect/unstable/http"
 import { D1Client } from "@effect/sql-d1"
 

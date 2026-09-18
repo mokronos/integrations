@@ -1,19 +1,20 @@
-import { whenPresent, whenPresentMap } from "@integrations/contracts"
+import { whenPresent, whenPresentMap } from "@mokronos/integrations-contracts"
 import {
   Integrations,
   listIntegrationOverviews,
   provisionIntegration,
   searchIntegrations
-} from "@integrations/integrations"
-import type { IntegrationServices } from "@integrations/integrations"
+} from "@mokronos/integrations-host"
+import type { IntegrationServices } from "@mokronos/integrations-host"
 import { Effect, Option } from "effect"
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import { ConnectionName } from "@integrations/contracts"
-import { connectionRefOf, forgetConnection, oauthBrowserPage, GatewayStoreService } from "@integrations/gateway-core"
+import { ConnectionName } from "@mokronos/integrations-contracts"
+import { connectionRefOf, forgetConnection, oauthBrowserPage, GatewayStoreService } from "@mokronos/integrations-gateway-core"
 import { ApiBadRequest, ApiNotFound, GatewayApi } from "../api.ts"
 import { Identity, requireTenant } from "../authority.ts"
-import { GatewayConfig, OAuthFlowSessions } from "../services.ts"
+import { GatewayConfig } from "../services.ts"
+import { OAuthFlowSessions } from "@mokronos/integrations-gateway-core"
 import { capture } from "../observability.ts"
 import { asApiFailure } from "./host-failure.ts"
 import {

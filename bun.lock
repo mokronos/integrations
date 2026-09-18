@@ -29,25 +29,25 @@
       },
       "dependencies": {
         "@effect/platform-bun": "catalog:",
-        "@integrations/contracts": "workspace:*",
-        "@integrations/gateway-api": "workspace:*",
-        "@integrations/gateway-core": "workspace:*",
-        "@integrations/integrations": "workspace:*",
-        "@integrations/observability": "workspace:*",
         "@mokronos/integrations": "workspace:*",
         "@mokronos/integrations-client": "workspace:*",
+        "@mokronos/integrations-contracts": "workspace:*",
+        "@mokronos/integrations-gateway-api": "workspace:*",
+        "@mokronos/integrations-gateway-core": "workspace:*",
+        "@mokronos/integrations-host": "workspace:*",
+        "@mokronos/integrations-observability": "workspace:*",
         "effect": "catalog:",
       },
     },
     "apps/host-cloudflare": {
-      "name": "@integrations/host-cloudflare",
+      "name": "@mokronos/integrations-host-cloudflare",
       "version": "0.2.0",
       "dependencies": {
         "@effect/sql-d1": "catalog:",
-        "@integrations/contracts": "workspace:*",
-        "@integrations/gateway-api": "workspace:*",
-        "@integrations/gateway-core": "workspace:*",
-        "@integrations/integrations": "workspace:*",
+        "@mokronos/integrations-contracts": "workspace:*",
+        "@mokronos/integrations-gateway-api": "workspace:*",
+        "@mokronos/integrations-gateway-core": "workspace:*",
+        "@mokronos/integrations-host": "workspace:*",
         "effect": "catalog:",
       },
       "devDependencies": {
@@ -59,24 +59,23 @@
       "name": "@mokronos/integrations",
       "version": "0.2.0",
       "dependencies": {
-        "@integrations/contracts": "workspace:*",
-        "@integrations/gateway-api": "workspace:*",
-        "@integrations/gateway-core": "workspace:*",
         "@mokronos/integrations-client": "workspace:*",
+        "@mokronos/integrations-contracts": "workspace:*",
+        "@mokronos/integrations-gateway-api": "workspace:*",
+        "@mokronos/integrations-gateway-core": "workspace:*",
         "effect": "catalog:",
       },
     },
     "apps/platform-demo": {
-      "name": "@integrations/platform-demo",
+      "name": "@mokronos/integrations-platform-demo",
       "version": "0.2.0",
       "dependencies": {
         "@effect/platform-bun": "catalog:",
         "@effect/sql-libsql": "catalog:",
-        "@integrations/contracts": "workspace:*",
-        "@integrations/gateway-api": "workspace:*",
-        "@integrations/gateway-core": "workspace:*",
-        "@integrations/integrations": "workspace:*",
         "@libsql/client": "catalog:",
+        "@mokronos/integrations-contracts": "workspace:*",
+        "@mokronos/integrations-gateway-core": "workspace:*",
+        "@mokronos/integrations-host": "workspace:*",
         "drizzle-orm": "catalog:",
         "effect": "catalog:",
       },
@@ -88,8 +87,8 @@
       "name": "@mokronos/integrations-client",
       "version": "0.2.0",
       "dependencies": {
-        "@integrations/contracts": "workspace:*",
-        "@integrations/gateway-api": "workspace:*",
+        "@mokronos/integrations-contracts": "workspace:*",
+        "@mokronos/integrations-gateway-api": "workspace:*",
         "effect": "catalog:",
       },
     },
@@ -99,10 +98,10 @@
       "dependencies": {
         "@base-ui/react": "catalog:",
         "@fontsource-variable/geist": "catalog:",
-        "@integrations/contracts": "workspace:*",
-        "@integrations/gateway-api": "workspace:*",
-        "@integrations/gateway-core": "workspace:*",
         "@mokronos/integrations-client": "workspace:*",
+        "@mokronos/integrations-contracts": "workspace:*",
+        "@mokronos/integrations-gateway-api": "workspace:*",
+        "@mokronos/integrations-gateway-core": "workspace:*",
         "@tailwindcss/vite": "catalog:",
         "@tanstack/react-query": "catalog:",
         "@vitejs/plugin-react": "catalog:",
@@ -128,55 +127,54 @@
       },
     },
     "packages/contracts": {
-      "name": "@integrations/contracts",
+      "name": "@mokronos/integrations-contracts",
       "version": "0.2.0",
-      "dependencies": {
+      "peerDependencies": {
         "effect": "catalog:",
       },
     },
     "packages/core/api": {
-      "name": "@integrations/gateway-api",
+      "name": "@mokronos/integrations-gateway-api",
       "version": "0.2.0",
       "dependencies": {
         "@effect/platform-bun": "catalog:",
-        "@integrations/contracts": "workspace:*",
-        "@integrations/gateway-core": "workspace:*",
-        "@integrations/integrations": "workspace:*",
-        "@integrations/observability": "workspace:*",
         "@modelcontextprotocol/server": "^2.0.0",
-        "effect": "catalog:",
+        "@mokronos/integrations-contracts": "workspace:*",
+        "@mokronos/integrations-gateway-core": "workspace:*",
+        "@mokronos/integrations-host": "workspace:*",
+        "@mokronos/integrations-observability": "workspace:*",
       },
       "devDependencies": {
         "@modelcontextprotocol/client": "^2.0.0",
       },
+      "peerDependencies": {
+        "effect": "catalog:",
+      },
     },
     "packages/core/gateway": {
-      "name": "@integrations/gateway-core",
+      "name": "@mokronos/integrations-gateway-core",
       "version": "0.2.0",
       "dependencies": {
         "@cfworker/json-schema": "catalog:",
-        "@effect/sql-libsql": "catalog:",
-        "@integrations/contracts": "workspace:*",
-        "@integrations/integrations": "workspace:*",
-        "@libsql/client": "catalog:",
-        "@mokronos/integrations-client": "workspace:*",
-        "drizzle-orm": "catalog:",
-        "effect": "catalog:",
+        "@mokronos/integrations-contracts": "workspace:*",
+        "@mokronos/integrations-host": "workspace:*",
       },
       "devDependencies": {
         "drizzle-kit": "catalog:",
       },
-    },
-    "packages/integrations": {
-      "name": "@integrations/integrations",
-      "version": "0.2.0",
-      "dependencies": {
+      "peerDependencies": {
         "@effect/sql-libsql": "catalog:",
-        "@integrations/contracts": "workspace:*",
         "@libsql/client": "catalog:",
-        "@modelcontextprotocol/client": "2.0.0",
         "drizzle-orm": "catalog:",
         "effect": "catalog:",
+      },
+    },
+    "packages/integrations": {
+      "name": "@mokronos/integrations-host",
+      "version": "0.2.0",
+      "dependencies": {
+        "@modelcontextprotocol/client": "2.0.0",
+        "@mokronos/integrations-contracts": "workspace:*",
         "oas": "catalog:",
         "oas-normalize": "catalog:",
       },
@@ -184,12 +182,20 @@
         "@modelcontextprotocol/server": "2.0.0",
         "drizzle-kit": "catalog:",
       },
+      "peerDependencies": {
+        "@effect/sql-libsql": "catalog:",
+        "@libsql/client": "catalog:",
+        "drizzle-orm": "catalog:",
+        "effect": "catalog:",
+      },
     },
     "packages/observability": {
-      "name": "@integrations/observability",
+      "name": "@mokronos/integrations-observability",
       "version": "0.2.0",
       "dependencies": {
-        "@integrations/contracts": "workspace:*",
+        "@mokronos/integrations-contracts": "workspace:*",
+      },
+      "peerDependencies": {
         "effect": "catalog:",
       },
     },
@@ -413,20 +419,6 @@
 
     "@img/sharp-win32-x64": ["@img/sharp-win32-x64@0.35.2", "", { "os": "win32", "cpu": "x64" }, "sha512-imoOyBcoM/iiUr4J6VPpCNjPnjvP/Gks95898yB8YqoGGYmHYbOyCuNv9FMhFgtaiHFGbHW8bxKqRV6VjtXThQ=="],
 
-    "@integrations/contracts": ["@integrations/contracts@workspace:packages/contracts"],
-
-    "@integrations/gateway-api": ["@integrations/gateway-api@workspace:packages/core/api"],
-
-    "@integrations/gateway-core": ["@integrations/gateway-core@workspace:packages/core/gateway"],
-
-    "@integrations/host-cloudflare": ["@integrations/host-cloudflare@workspace:apps/host-cloudflare"],
-
-    "@integrations/integrations": ["@integrations/integrations@workspace:packages/integrations"],
-
-    "@integrations/observability": ["@integrations/observability@workspace:packages/observability"],
-
-    "@integrations/platform-demo": ["@integrations/platform-demo@workspace:apps/platform-demo"],
-
     "@jridgewell/gen-mapping": ["@jridgewell/gen-mapping@0.3.13", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.0", "@jridgewell/trace-mapping": "^0.3.24" } }, "sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA=="],
 
     "@jridgewell/remapping": ["@jridgewell/remapping@2.3.5", "", { "dependencies": { "@jridgewell/gen-mapping": "^0.3.5", "@jridgewell/trace-mapping": "^0.3.24" } }, "sha512-LI9u/+laYG4Ds1TDKSJW2YPrIlcVYOwi2fUC6xB43lueCjgxV4lffOCZCtYFiH6TNOX+tQKXx97T4IKHbhyHEQ=="],
@@ -478,6 +470,20 @@
     "@mokronos/integrations-cli": ["@mokronos/integrations-cli@workspace:apps/cli"],
 
     "@mokronos/integrations-client": ["@mokronos/integrations-client@workspace:apps/ts"],
+
+    "@mokronos/integrations-contracts": ["@mokronos/integrations-contracts@workspace:packages/contracts"],
+
+    "@mokronos/integrations-gateway-api": ["@mokronos/integrations-gateway-api@workspace:packages/core/api"],
+
+    "@mokronos/integrations-gateway-core": ["@mokronos/integrations-gateway-core@workspace:packages/core/gateway"],
+
+    "@mokronos/integrations-host": ["@mokronos/integrations-host@workspace:packages/integrations"],
+
+    "@mokronos/integrations-host-cloudflare": ["@mokronos/integrations-host-cloudflare@workspace:apps/host-cloudflare"],
+
+    "@mokronos/integrations-observability": ["@mokronos/integrations-observability@workspace:packages/observability"],
+
+    "@mokronos/integrations-platform-demo": ["@mokronos/integrations-platform-demo@workspace:apps/platform-demo"],
 
     "@msgpackr-extract/msgpackr-extract-darwin-arm64": ["@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.4", "", { "os": "darwin", "cpu": "arm64" }, "sha512-LCkGo6JDfaBhgST7UpPWgNgLINpcpabaHfyz5OBx75nUYxBsaEPxjnyNjWpeb/xBup/682QnBfRBy2/LvPutZQ=="],
 
@@ -873,7 +879,7 @@
 
     "path-key": ["path-key@3.1.1", "", {}, "sha512-ojmeN0qd+y0jszEtoY48r0Peq5dwMEkIlCOu6Q5f41lfkswXuKtYrhgoTpLnyIcHm24Uhqx+5Tqm2InSwLhE6Q=="],
 
-    "path-to-regexp": ["path-to-regexp@6.3.0", "", {}, "sha512-Yhpw4T9C6hPpgPeA28us07OJeqZ5EzQTkbfwuhsUg0c237RomFoETJgmp2sa3F/41gfLE6G5cqcYwznmeEeOlQ=="],
+    "path-to-regexp": ["path-to-regexp@8.4.2", "", {}, "sha512-qRcuIdP69NPm4qbACK+aDogI5CBDMi1jKe0ry5rSQJz8JVLsC7jV8XpiJjGRLLol3N+R5ihGYcrPLTno6pAdBA=="],
 
     "pathe": ["pathe@2.0.3", "", {}, "sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w=="],
 
@@ -1075,8 +1081,6 @@
 
     "node-gyp-build-optional-packages/detect-libc": ["detect-libc@2.1.2", "", {}, "sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ=="],
 
-    "oas/path-to-regexp": ["path-to-regexp@8.4.2", "", {}, "sha512-qRcuIdP69NPm4qbACK+aDogI5CBDMi1jKe0ry5rSQJz8JVLsC7jV8XpiJjGRLLol3N+R5ihGYcrPLTno6pAdBA=="],
-
     "oas-normalize/@readme/openapi-parser": ["@readme/openapi-parser@7.0.1", "", { "dependencies": { "@apidevtools/json-schema-ref-parser": "^15.5.1", "@readme/better-ajv-errors": "^2.3.2", "@readme/openapi-schemas": "^4.0.0", "@types/json-schema": "^7.0.15", "ajv": "^8.20.0", "ajv-draft-04": "^1.0.0" }, "peerDependencies": { "openapi-types": ">=7" } }, "sha512-FW+qN1TGlCVKK4xE6pKCS6QdR0EBaC95LC2pnmY3+oVK0tDJ1iAIOmK1SYiDAayId7WInnYyemwBImpvmBV2xQ=="],
 
     "sharp/detect-libc": ["detect-libc@2.1.2", "", {}, "sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ=="],
@@ -1084,6 +1088,8 @@
     "tsx/esbuild": ["esbuild@0.28.1", "", { "optionalDependencies": { "@esbuild/aix-ppc64": "0.28.1", "@esbuild/android-arm": "0.28.1", "@esbuild/android-arm64": "0.28.1", "@esbuild/android-x64": "0.28.1", "@esbuild/darwin-arm64": "0.28.1", "@esbuild/darwin-x64": "0.28.1", "@esbuild/freebsd-arm64": "0.28.1", "@esbuild/freebsd-x64": "0.28.1", "@esbuild/linux-arm": "0.28.1", "@esbuild/linux-arm64": "0.28.1", "@esbuild/linux-ia32": "0.28.1", "@esbuild/linux-loong64": "0.28.1", "@esbuild/linux-mips64el": "0.28.1", "@esbuild/linux-ppc64": "0.28.1", "@esbuild/linux-riscv64": "0.28.1", "@esbuild/linux-s390x": "0.28.1", "@esbuild/linux-x64": "0.28.1", "@esbuild/netbsd-arm64": "0.28.1", "@esbuild/netbsd-x64": "0.28.1", "@esbuild/openbsd-arm64": "0.28.1", "@esbuild/openbsd-x64": "0.28.1", "@esbuild/openharmony-arm64": "0.28.1", "@esbuild/sunos-x64": "0.28.1", "@esbuild/win32-arm64": "0.28.1", "@esbuild/win32-ia32": "0.28.1", "@esbuild/win32-x64": "0.28.1" }, "bin": { "esbuild": "bin/esbuild" } }, "sha512-HrJrvZv5ayxBzPfwphOoNzkzOIIlifzk0KJrGK2c8R4+LKpMtpYLQeUdjnwjWv/LZlkH2laZk+4w78pi99D4Vw=="],
 
     "wrangler/esbuild": ["esbuild@0.28.1", "", { "optionalDependencies": { "@esbuild/aix-ppc64": "0.28.1", "@esbuild/android-arm": "0.28.1", "@esbuild/android-arm64": "0.28.1", "@esbuild/android-x64": "0.28.1", "@esbuild/darwin-arm64": "0.28.1", "@esbuild/darwin-x64": "0.28.1", "@esbuild/freebsd-arm64": "0.28.1", "@esbuild/freebsd-x64": "0.28.1", "@esbuild/linux-arm": "0.28.1", "@esbuild/linux-arm64": "0.28.1", "@esbuild/linux-ia32": "0.28.1", "@esbuild/linux-loong64": "0.28.1", "@esbuild/linux-mips64el": "0.28.1", "@esbuild/linux-ppc64": "0.28.1", "@esbuild/linux-riscv64": "0.28.1", "@esbuild/linux-s390x": "0.28.1", "@esbuild/linux-x64": "0.28.1", "@esbuild/netbsd-arm64": "0.28.1", "@esbuild/netbsd-x64": "0.28.1", "@esbuild/openbsd-arm64": "0.28.1", "@esbuild/openbsd-x64": "0.28.1", "@esbuild/openharmony-arm64": "0.28.1", "@esbuild/sunos-x64": "0.28.1", "@esbuild/win32-arm64": "0.28.1", "@esbuild/win32-ia32": "0.28.1", "@esbuild/win32-x64": "0.28.1" }, "bin": { "esbuild": "bin/esbuild" } }, "sha512-HrJrvZv5ayxBzPfwphOoNzkzOIIlifzk0KJrGK2c8R4+LKpMtpYLQeUdjnwjWv/LZlkH2laZk+4w78pi99D4Vw=="],
+
+    "wrangler/path-to-regexp": ["path-to-regexp@6.3.0", "", {}, "sha512-Yhpw4T9C6hPpgPeA28us07OJeqZ5EzQTkbfwuhsUg0c237RomFoETJgmp2sa3F/41gfLE6G5cqcYwznmeEeOlQ=="],
 
     "@esbuild-kit/core-utils/esbuild/@esbuild/android-arm": ["@esbuild/android-arm@0.18.20", "", { "os": "android", "cpu": "arm" }, "sha512-fyi7TDI/ijKKNZTUJAQqiG5T7YjJXgnzkURqmGj13C6dCqckZBLdl4h7bkhHt/t0WP+zO9/zwroDvANaOqO5Sw=="],
 

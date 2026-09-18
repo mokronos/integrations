@@ -1,1 +1,1 @@
-export { gatewayStore, openStore, temporaryDirectory, testServices } from "@integrations/gateway-core/test-fixtures"
+export { gatewayStore, openStore, temporaryDirectory, testServices } from "@mokronos/integrations-gateway-core/test-fixtures"

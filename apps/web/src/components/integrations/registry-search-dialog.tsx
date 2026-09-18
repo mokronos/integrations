@@ -1,4 +1,4 @@
-import { whenPresent } from "@integrations/contracts"
+import { whenPresent } from "@mokronos/integrations-contracts"
 import { Download, Search } from "lucide-react"
 import { useState } from "react"
 import { useNavigate } from "react-router"
@@ -23,7 +23,7 @@ import { keys, useInvalidate, useMutation } from "@/lib/queries"
 import {
   decodeIntegrationSearchFilter
 } from "@/lib/schemas"
-import type { IntegrationSearchKind, IntegrationSearchMatch } from "@integrations/contracts"
+import type { IntegrationSearchKind, IntegrationSearchMatch } from "@mokronos/integrations-contracts"
 const ALL_KINDS = "__all__"
 const kindOptions = [
   { value: ALL_KINDS, label: "Any kind" },

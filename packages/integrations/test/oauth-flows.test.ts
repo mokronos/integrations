@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
-import { ConnectionName, IntegrationSlug } from "@integrations/contracts"
+import { ConnectionName, IntegrationSlug } from "@mokronos/integrations-contracts"
 import { AuthTemplateSlug, OAuthClientSlug } from "../src/catalog/ids.ts"
 import { McpClient } from "../src/mcp/client.ts"
 import { OAuthFlows } from "../src/oauth/flows.ts"

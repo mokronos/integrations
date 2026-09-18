@@ -5,8 +5,8 @@ import { LibsqlClient } from "@effect/sql-libsql"
 import { Clock, Context, Effect, Layer } from "effect"
 import { Reactivity } from "effect/unstable/reactivity"
 import { SqlClient, SqlError } from "effect/unstable/sql"
-import type { Encryption } from "@integrations/integrations"
-import { webCrypto } from "@integrations/contracts"
+import type { Encryption } from "@mokronos/integrations-host"
+import { webCrypto } from "@mokronos/integrations-contracts"
 import {
   AccessProfileId,
   Alias,
@@ -25,7 +25,7 @@ import type {
   Client,
   PendingApproval
 } from "./domain.ts"
-import { applyIntegrationMigrations } from "@integrations/integrations"
+import { applyIntegrationMigrations } from "@mokronos/integrations-host"
 import { applyGatewayMigrations } from "./migrate.ts"
 
 import {
@@ -58,7 +58,7 @@ export interface GatewayStoreOptions {
 export class GatewayStoreService extends Context.Service<
   GatewayStoreService,
   GatewayStore
->()("@integrations/gateway-core/GatewayStore") {
+>()("@mokronos/integrations-gateway-core/GatewayStore") {
   static readonly layer = (
     options: GatewayStoreOptions
   ): Layer.Layer<GatewayStoreService, GatewayStoreError, SqlClient.SqlClient> =>

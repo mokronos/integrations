@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest"
 import { Context, Effect, Layer, Option } from "effect"
-import { ConnectionName, IntegrationSlug } from "@integrations/contracts"
+import { ConnectionName, IntegrationSlug } from "@mokronos/integrations-contracts"
 import { captureOpenApiTools } from "../src/catalog/capture.ts"
 import type { HttpCall } from "../src/tool.ts"
 import { missingArguments, splitArguments } from "../src/openapi/arguments.ts"

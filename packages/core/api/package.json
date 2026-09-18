@@ -1,10 +1,19 @@
 {
-  "name": "@integrations/gateway-api",
+  "name": "@mokronos/integrations-gateway-api",
   "version": "0.2.0",
-  "private": true,
   "type": "module",
   "description": "Gateway HTTP API definitions, handlers, and server assembly.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mokronos/integrations.git",
+    "directory": "packages/core/api"
+  },
+  "homepage": "https://github.com/mokronos/integrations#readme",
+  "bugs": "https://github.com/mokronos/integrations/issues",
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "src",
     "dist",
@@ -25,15 +34,18 @@
     }
   },
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json"
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "prepack": "bun run build"
   },
   "dependencies": {
     "@effect/platform-bun": "catalog:",
     "@modelcontextprotocol/server": "^2.0.0",
-    "@integrations/contracts": "workspace:*",
-    "@integrations/gateway-core": "workspace:*",
-    "@integrations/integrations": "workspace:*",
-    "@integrations/observability": "workspace:*",
+    "@mokronos/integrations-contracts": "workspace:*",
+    "@mokronos/integrations-gateway-core": "workspace:*",
+    "@mokronos/integrations-host": "workspace:*",
+    "@mokronos/integrations-observability": "workspace:*"
+  },
+  "peerDependencies": {
     "effect": "catalog:"
   },
   "devDependencies": {

@@ -3,7 +3,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Schema } from "effect"
 import { FetchHttpClient, HttpBody, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { serveGateway } from "@mokronos/integrations"
-import { aliasForConnection, ConnectionName, IntegrationSlug } from "@integrations/gateway-core"
+import { aliasForConnection, ConnectionName, IntegrationSlug } from "@mokronos/integrations-gateway-core"
 import { temporaryDirectory, testServices } from "./fixtures.ts"
 
 const services = Layer.merge(testServices, FetchHttpClient.layer)

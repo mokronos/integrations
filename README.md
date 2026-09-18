@@ -99,15 +99,24 @@ running across a change serves the older wire shape to newly started clients.
 ## Embedding
 
 An application that owns its process and database does not need the HTTP
-API to reach the gateway. `gatewayCoreLayer` from `@integrations/gateway-api`
-provides the store, the integration host, and OAuth sessions as Effect
-services on whatever `SqlClient` the application supplies. From there
-`listEffectiveTools` returns an agent's tools with schemas and
-`invokeAsClient` executes under the same policy, approval, and audit path the
-`/v1/execute` route uses. Both packages export their Drizzle schemas under
-`./schema`, so the application's migration pipeline can carry the gateway's
-tables; pass `migrate: false` and the gateway trusts the tables are there.
-`apps/platform-demo/` is the smallest working example.
+API to reach the gateway. `gatewayCoreLayer` from
+`@mokronos/integrations-gateway-core` provides the store, the integration
+host, and OAuth sessions as Effect services on whatever `SqlClient` the
+application supplies. From there `listEffectiveTools` returns an agent's tools
+with schemas and `invokeAsClient` executes under the same policy, approval,
+and audit path the `/v1/execute` route uses. The core and the host export
+their Drizzle schemas under `./schema`, so the application's migration
+pipeline can carry the gateway's tables; pass `migrate: false` and the gateway
+trusts the tables are there. `apps/platform-demo/` is the smallest working
+example.
+
+The embeddable packages are `@mokronos/integrations-contracts`,
+`@mokronos/integrations-host` and `@mokronos/integrations-gateway-core`. They
+run on Node or Bun and declare `effect`, `@effect/sql-libsql`, `drizzle-orm`
+and `@libsql/client` as peer dependencies, so the application holds the one
+copy of each. Pass `publicUrlOf` and serve `GET /v1/oauth/callback` yourself;
+without a public URL, OAuth needs the loopback authorizer that only the Bun
+host in `@mokronos/integrations-gateway-api` provides.
 
 ## Delegated access
 

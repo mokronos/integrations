@@ -1,4 +1,4 @@
-import { whenPresentMap } from "@integrations/contracts"
+import { whenPresentMap } from "@mokronos/integrations-contracts"
 import { Check, Circle, LoaderCircle } from "lucide-react"
 import { useState } from "react"
 import { useNavigate } from "react-router"

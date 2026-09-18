@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Context, Effect, Option } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
-import { ConnectionName, IntegrationSlug, whenPresent } from "@integrations/contracts"
+import { ConnectionName, IntegrationSlug, whenPresent } from "@mokronos/integrations-contracts"
 import { catalogStoreFake, stubIntegrations, stubIntegrationsContext } from "./stubs.ts"
 import { gatewayStore, testServices } from "./fixtures.ts"
 import {
@@ -12,11 +12,12 @@ import {
   OAuthError,
   OAuthFlows,
   OAuthState
-} from "@integrations/integrations"
-import type { OAuthClientRecord } from "@integrations/integrations"
-import type { OAuthOperations } from "@integrations/gateway-core"
-import type { Connection } from "@integrations/contracts"
+} from "@mokronos/integrations-host"
+import type { OAuthClientRecord } from "@mokronos/integrations-host"
+import type { OAuthOperations } from "@mokronos/integrations-gateway-core"
+import type { Connection } from "@mokronos/integrations-contracts"
 import { createGatewayHandler, createOAuthSessions } from "./gateway.ts"
+import { authorizeInBrowser } from "../src/oauth-browser.ts"
 
 const oauthMethod = {
   id: "google-oauth",
@@ -257,7 +258,7 @@ describe("remote oauth flows", () => {
   it.effect("local mode still owns an ephemeral listener and needs no public URL", () =>
     Effect.gen(function*() {
       const fake = fakeAuth()
-      const sessions = createOAuthSessions(fake.host)
+      const sessions = createOAuthSessions(fake.host, { authorizeLocally: authorizeInBrowser })
 
       const session = yield* sessions.start(startGoogle)
 

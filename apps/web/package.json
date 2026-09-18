@@ -13,9 +13,9 @@
   "dependencies": {
     "@base-ui/react": "catalog:",
     "@fontsource-variable/geist": "catalog:",
-    "@integrations/contracts": "workspace:*",
-    "@integrations/gateway-api": "workspace:*",
-    "@integrations/gateway-core": "workspace:*",
+    "@mokronos/integrations-contracts": "workspace:*",
+    "@mokronos/integrations-gateway-api": "workspace:*",
+    "@mokronos/integrations-gateway-core": "workspace:*",
     "@mokronos/integrations-client": "workspace:*",
     "@tailwindcss/vite": "catalog:",
     "@tanstack/react-query": "catalog:",

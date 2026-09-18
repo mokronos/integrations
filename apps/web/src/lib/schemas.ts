@@ -17,15 +17,15 @@ import {
   PolicyDecision as PolicyDecisionSchema,
   PendingApproval,
   McpSurface
-} from "@integrations/contracts"
-import { IntegrationSearchKind, OAuthSessionView } from "@integrations/contracts"
+} from "@mokronos/integrations-contracts"
+import { IntegrationSearchKind, OAuthSessionView } from "@mokronos/integrations-contracts"
 import {
   AuthMethod,
   Connection,
   Tool,
   ToolSummary,
   IntegrationOverview
-} from "@integrations/contracts"
+} from "@mokronos/integrations-contracts"
 
 export type {
   McpSurface,
@@ -55,7 +55,7 @@ export type {
   ConnectionRef,
   PolicyDecision,
   ApprovalDestinationId
-} from "@integrations/contracts"
+} from "@mokronos/integrations-contracts"
 
 
 

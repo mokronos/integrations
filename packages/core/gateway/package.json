@@ -1,10 +1,19 @@
 {
-  "name": "@integrations/gateway-core",
+  "name": "@mokronos/integrations-gateway-core",
   "version": "0.2.0",
-  "private": true,
   "type": "module",
   "description": "Gateway domain, persistence, authorization, and execution policy.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mokronos/integrations.git",
+    "directory": "packages/core/gateway"
+  },
+  "homepage": "https://github.com/mokronos/integrations#readme",
+  "bugs": "https://github.com/mokronos/integrations/issues",
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "src",
     "dist",
@@ -25,8 +34,7 @@
     },
     "./test-fixtures": {
       "development": "./test/fixtures.ts",
-      "bun": "./test/fixtures.ts",
-      "default": "./test/fixtures.ts"
+      "bun": "./test/fixtures.ts"
     },
     "./schema": {
       "development": "./src/db/schema.ts",
@@ -37,15 +45,17 @@
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
-    "db:generate": "drizzle-kit generate && bun run ../../../scripts/embed-migrations.ts --package . --out src/store-migrations.gen.ts --name gatewayMigrations --type-import @integrations/integrations"
+    "db:generate": "drizzle-kit generate && bun run ../../../scripts/embed-migrations.ts --package . --out src/store-migrations.gen.ts --name gatewayMigrations --type-import @mokronos/integrations-host",
+    "prepack": "bun run build"
   },
   "dependencies": {
     "@cfworker/json-schema": "catalog:",
+    "@mokronos/integrations-contracts": "workspace:*",
+    "@mokronos/integrations-host": "workspace:*"
+  },
+  "peerDependencies": {
     "@effect/sql-libsql": "catalog:",
-    "@integrations/contracts": "workspace:*",
-    "@integrations/integrations": "workspace:*",
     "@libsql/client": "catalog:",
-    "@mokronos/integrations-client": "workspace:*",
     "drizzle-orm": "catalog:",
     "effect": "catalog:"
   },

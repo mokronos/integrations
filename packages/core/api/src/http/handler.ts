@@ -27,21 +27,17 @@ import {
   ProvisioningLayer,
   SystemLayer
 } from "./handlers.ts"
-import {
-  ControlPlaneAssets,
-  GatewayConfig,
-  OAuthFlowSessions,
-  SessionPolicy
-} from "./services.ts"
+import { ControlPlaneAssets, GatewayConfig, SessionPolicy } from "./services.ts"
 import { ErrorCapture, traceIdFor } from "./observability.ts"
 import type { ErrorSink } from "./observability.ts"
 import type { GatewaySettings, SignInPolicy } from "./services.ts"
-import { defaultMaxUploadBytes, NonNegativeIntFromString, whenPresent } from "@integrations/contracts"
-import type { IntegrationServices } from "@integrations/integrations"
-import { GatewayStoreService } from "@integrations/gateway-core"
-import { webCryptoLayer } from "@integrations/contracts"
-import type { GatewayStore } from "@integrations/gateway-core"
-import type { OAuthSessions } from "@integrations/gateway-core"
+import { defaultMaxUploadBytes, NonNegativeIntFromString, whenPresent } from "@mokronos/integrations-contracts"
+import type { IntegrationServices } from "@mokronos/integrations-host"
+import { GatewayStoreService, OAuthFlowSessions } from "@mokronos/integrations-gateway-core"
+import type { GatewayCoreServices } from "@mokronos/integrations-gateway-core"
+import { webCryptoLayer } from "@mokronos/integrations-contracts"
+import type { GatewayStore } from "@mokronos/integrations-gateway-core"
+import type { OAuthSessions } from "@mokronos/integrations-gateway-core"
 import type { WebAssets } from "../web-assets.ts"
 import { createMcpGatewayHandler } from "./mcp.ts"
 
@@ -49,8 +45,6 @@ export interface GatewayRequestContext {
   readonly localSecret?: string
   readonly remoteAddress?: string
 }
-
-export type GatewayCoreServices = GatewayStoreService | IntegrationServices | OAuthFlowSessions
 
 export const gatewayServicesContext = (input: {
   readonly store: GatewayStore

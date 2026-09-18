@@ -1,6 +1,6 @@
 import { Context, Effect, Option } from "effect"
-import { BlobStore, CatalogStore, Integrations, McpClient, OAuthFlows, OpenApiInvoker, SpecCache, ToolNotFoundError } from "@integrations/integrations"
-import type { IntegrationServices } from "@integrations/integrations"
+import { BlobStore, CatalogStore, Integrations, McpClient, OAuthFlows, OpenApiInvoker, SpecCache, ToolNotFoundError } from "@mokronos/integrations-host"
+import type { IntegrationServices } from "@mokronos/integrations-host"
 
 export const stubIntegrations = (
   overrides: Partial<Integrations["Service"]> = {}

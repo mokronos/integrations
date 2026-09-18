@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
-import { whenPresent } from "@integrations/contracts"
+import { whenPresent } from "@mokronos/integrations-contracts"
 import {
   ConnectionName,
   createGatewayHandler,
@@ -17,8 +17,8 @@ import {
 import type { ConnectionRef } from "./gateway.ts"
 import { stubIntegrationsContext } from "./stubs.ts"
 import { gatewayStore, testServices } from "./fixtures.ts"
-import type { IntegrationServices } from "@integrations/integrations"
-import type { GoogleIdentityOAuth } from "@integrations/gateway-core"
+import type { IntegrationServices } from "@mokronos/integrations-host"
+import type { GoogleIdentityOAuth } from "@mokronos/integrations-gateway-core"
 
 const JsonBody = Schema.Record(Schema.String, Schema.Json)
 

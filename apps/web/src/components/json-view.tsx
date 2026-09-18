@@ -1,7 +1,7 @@
 import { ChevronRight } from "lucide-react"
 import { useState } from "react"
-import type { Json } from "@integrations/contracts"
-import { isJsonObject } from "@integrations/contracts"
+import type { Json } from "@mokronos/integrations-contracts"
+import { isJsonObject } from "@mokronos/integrations-contracts"
 
 import { Button } from "@/components/ui/button"
 import { CopyButton, copyButtonOverlay } from "@/components/ui/copy-button"

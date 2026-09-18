@@ -35,7 +35,7 @@ import {
   TenantId,
   OAuthClientSubmission,
   OAuthSessionView
-} from "@integrations/contracts"
+} from "@mokronos/integrations-contracts"
 import {
   Alias,
   ApprovalStatus,
@@ -62,7 +62,7 @@ import {
   PositiveIntFromString,
   Tool,
   ToolSummary
-} from "@integrations/contracts"
+} from "@mokronos/integrations-contracts"
 import { Authority } from "./middleware.ts"
 import { Forbidden, ForbiddenError, RequiredAccess, Unmetered } from "./identity.ts"
 
@@ -823,7 +823,7 @@ const AuthGroup = HttpApiGroup.make("auth")
   }).annotate(RequiredAccess, "human"))
   .middleware(Authority)
 
-export const GatewayApi = HttpApi.make("@integrations/gateway-api/gateway")
+export const GatewayApi = HttpApi.make("@mokronos/integrations-gateway-api/gateway")
   .add(SystemGroup)
   .add(FallbackGroup)
   .add(DelegatedGroup)

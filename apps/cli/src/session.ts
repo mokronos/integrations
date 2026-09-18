@@ -14,7 +14,7 @@ import type { GatewayClient } from "@mokronos/integrations-client"
 import { cliError, IntegrationsCliError } from "./connection.ts"
 import { openBrowser } from "./connection.ts"
 import type { ChildProcessSpawner } from "effect/unstable/process"
-import { optionalText, whenPresentMap } from "@integrations/contracts"
+import { optionalText, whenPresentMap } from "@mokronos/integrations-contracts"
 
 const OperatorSession = Schema.Struct({
   url: Schema.String,

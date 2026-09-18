@@ -1,4 +1,4 @@
-import { whenPresent, whenPresentMap } from "@integrations/contracts"
+import { whenPresent, whenPresentMap } from "@mokronos/integrations-contracts"
 import type { GatewayClient } from "@mokronos/integrations-client"
 import type { HttpClient } from "effect/unstable/http"
 import { Duration, Effect, Option, Schedule, Schema } from "effect"

@@ -13,20 +13,21 @@ import {
   userOwner,
   whenPresent,
   whenPresentMap
-} from "@integrations/contracts"
-import type { ApprovalId, Client, Json, SubjectId, TenantId } from "@integrations/contracts"
-import { AuthTemplateSlug, Integrations, validateIntegrationNode } from "@integrations/integrations"
-import type { IntegrationServices } from "@integrations/integrations"
+} from "@mokronos/integrations-contracts"
+import type { ApprovalId, Client, Json, SubjectId, TenantId } from "@mokronos/integrations-contracts"
+import { AuthTemplateSlug, Integrations, validateIntegrationNode } from "@mokronos/integrations-host"
+import type { IntegrationServices } from "@mokronos/integrations-host"
 import {
   boundToolAddress,
   deliverDueApprovalNotifications,
   forgetConnection,
   GatewayStoreService,
   reconcileConfigurations
-} from "@integrations/gateway-core"
-import type { InvokeDependencies } from "@integrations/gateway-core"
+} from "@mokronos/integrations-gateway-core"
+import type { InvokeDependencies } from "@mokronos/integrations-gateway-core"
 import { capture, ErrorCapture } from "./observability.ts"
-import { GatewayConfig, OAuthFlowSessions } from "./services.ts"
+import { GatewayConfig } from "./services.ts"
+import { OAuthFlowSessions } from "@mokronos/integrations-gateway-core"
 
 /** Everything a gateway operation may reach for, whichever surface invoked it. */
 export type GatewayOperationServices =

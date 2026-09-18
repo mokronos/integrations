@@ -1,5 +1,5 @@
 import { Schema } from "effect"
-export * from "@integrations/contracts"
+export * from "@mokronos/integrations-contracts"
 export {
   Alias, ApprovalStatus, ConnectionName, IntegrationSlug, ToolName, TenantId, SubjectId, ClientId,
   ApiKeyId, ApiKeyView, AccessProfileId, ApprovalPolicyId, ApprovalId, ApprovalDestinationId,
@@ -8,8 +8,8 @@ export {
   ApprovalDeliveryStatus, ApprovalDeliveryAttempt, Client, PolicyDecision, AccessProfile,
   AccessProfileTool, ApprovalPolicy, ApprovalPolicyTool, PendingApproval, AuditOutcome,
   AuditRecord, ConfigureClient, ToolSnapshot, DriftKind, DriftEntry
-} from "@integrations/contracts"
-import { TenantId, SubjectId, ClientId, Client, ClientCapability, ApprovalDelivery, Alias, ConnectionRef, AccessProfile, AccessProfileTool, ApprovalPolicy, ApprovalPolicyTool, PolicyDecision, ToolName, ApiKeyId } from "@integrations/contracts"
+} from "@mokronos/integrations-contracts"
+import { TenantId, SubjectId, ClientId, Client, ClientCapability, ApprovalDelivery, Alias, ConnectionRef, AccessProfile, AccessProfileTool, ApprovalPolicy, ApprovalPolicyTool, PolicyDecision, ToolName, ApiKeyId } from "@mokronos/integrations-contracts"
 export const ApiKeyHash = Schema.String.pipe(Schema.brand("ApiKeyHash"))
 export type ApiKeyHash = typeof ApiKeyHash.Type
 export const ApiKey = Schema.Struct({ id: ApiKeyId, clientId: ClientId, hash: ApiKeyHash, createdAt: Schema.Date, lastUsedAt: Schema.NullOr(Schema.Date), revokedAt: Schema.NullOr(Schema.Date) })

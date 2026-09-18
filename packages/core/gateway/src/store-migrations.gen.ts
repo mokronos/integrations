@@ -3,7 +3,7 @@
 // One entry per file in db/migrations, in journal order, split on drizzle's
 // statement breakpoints.
 
-import type { Migration } from "@integrations/integrations"
+import type { Migration } from "@mokronos/integrations-host"
 
 export const gatewayMigrations: ReadonlyArray<Migration> = [
   {

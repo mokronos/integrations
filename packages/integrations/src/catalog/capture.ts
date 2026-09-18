@@ -6,7 +6,7 @@ import {
   ToolName,
   toolAddress,
   whenPresent
-} from "@integrations/contracts"
+} from "@mokronos/integrations-contracts"
 import { StorageError } from "../errors.ts"
 import type { McpToolDefinition } from "../mcp/client.ts"
 import { normalizeOutputSchema } from "../mcp/result.ts"

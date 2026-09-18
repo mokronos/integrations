@@ -1,4 +1,4 @@
-import { whenPresent } from "@integrations/contracts"
+import { whenPresent } from "@mokronos/integrations-contracts"
 import { useQuery } from "@tanstack/react-query"
 import { Check, ExternalLink, LoaderCircle } from "lucide-react"
 import { useEffect, useState } from "react"

@@ -1,7 +1,6 @@
 {
-  "name": "@integrations/integrations",
+  "name": "@mokronos/integrations-host",
   "version": "0.2.0",
-  "private": true,
   "type": "module",
   "description": "MCP and OpenAPI catalog, connections, and tool invocation.",
   "license": "MIT",
@@ -11,6 +10,7 @@
     "directory": "packages/integrations"
   },
   "homepage": "https://github.com/mokronos/integrations#readme",
+  "bugs": "https://github.com/mokronos/integrations/issues",
   "keywords": [
     "gateway",
     "integration",
@@ -20,7 +20,11 @@
     "agent"
   ],
   "engines": {
+    "node": ">=22",
     "bun": ">=1.2"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "files": [
     "src",
@@ -45,18 +49,20 @@
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "test:conformance": "bun --bun run --cwd ../.. vitest run packages/integrations/test/conformance/reference",
     "test:remote": "RUN_REMOTE_INTEGRATION_TESTS=1 bun --bun run --cwd ../.. vitest run packages/integrations/test/conformance/remote",
-    "prepublishOnly": "bun run build",
-    "db:generate": "drizzle-kit generate && bun run ../../scripts/embed-migrations.ts --package . --out src/storage/migrations.gen.ts --name integrationMigrations --type-import ./migrate.ts"
+    "db:generate": "drizzle-kit generate && bun run ../../scripts/embed-migrations.ts --package . --out src/storage/migrations.gen.ts --name integrationMigrations --type-import ./migrate.ts",
+    "prepack": "bun run build"
   },
   "dependencies": {
-    "@effect/sql-libsql": "catalog:",
-    "@integrations/contracts": "workspace:*",
-    "@libsql/client": "catalog:",
     "@modelcontextprotocol/client": "2.0.0",
-    "drizzle-orm": "catalog:",
-    "effect": "catalog:",
+    "@mokronos/integrations-contracts": "workspace:*",
     "oas": "catalog:",
     "oas-normalize": "catalog:"
+  },
+  "peerDependencies": {
+    "@effect/sql-libsql": "catalog:",
+    "@libsql/client": "catalog:",
+    "drizzle-orm": "catalog:",
+    "effect": "catalog:"
   },
   "devDependencies": {
     "@modelcontextprotocol/server": "2.0.0",

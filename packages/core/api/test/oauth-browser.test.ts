@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
-import type { AuthMethod, Connection } from "@integrations/contracts"
-import { ConnectionName, IntegrationSlug } from "@integrations/contracts"
+import type { AuthMethod, Connection } from "@mokronos/integrations-contracts"
+import { ConnectionName, IntegrationSlug } from "@mokronos/integrations-contracts"
 import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Option, Result } from "effect"
 import { TestClock } from "effect/testing"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
@@ -12,11 +12,11 @@ import {
   OAuthError,
   OAuthFlows,
   OAuthState
-} from "@integrations/integrations"
-import { authorizeInBrowser, OAuthFlowError } from "../src/oauth.ts"
-import { createOAuthSessions } from "../src/oauth-sessions.ts"
-import type { OAuthOperations } from "../src/oauth.ts"
+} from "@mokronos/integrations-host"
+import { createOAuthSessions, OAuthFlowError } from "@mokronos/integrations-gateway-core"
+import type { OAuthOperations } from "@mokronos/integrations-gateway-core"
 import { testServices } from "./fixtures.ts"
+import { authorizeInBrowser } from "../src/oauth-browser.ts"
 
 const services = Layer.merge(testServices, FetchHttpClient.layer)
 
@@ -271,7 +271,7 @@ describe("shutting down while an authorization is in flight", () => {
   it.live("stop() cancels the flow and releases its listener", () =>
     Effect.gen(function*() {
       const auth = operations()
-      const sessions = createOAuthSessions(auth.host)
+      const sessions = createOAuthSessions(auth.host, { authorizeLocally: authorizeInBrowser })
 
       const session = yield* sessions.start({
         integration: "provider",

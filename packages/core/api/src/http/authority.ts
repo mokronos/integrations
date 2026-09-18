@@ -2,11 +2,11 @@ import { Context, Crypto, Duration, Effect, Layer, Option } from "effect"
 import { RateLimiter } from "effect/unstable/persistence"
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { Authority } from "./middleware.ts"
-import { authenticateClient, authorizeClientCapability, GatewayStoreService } from "@integrations/gateway-core"
-import { SessionTokenHash } from "@integrations/gateway-core"
-import { hashSessionToken } from "@integrations/gateway-core"
-import { webCryptoLayer } from "@integrations/contracts"
-import type { GatewayStore } from "@integrations/gateway-core"
+import { authenticateClient, authorizeClientCapability, GatewayStoreService } from "@mokronos/integrations-gateway-core"
+import { SessionTokenHash } from "@mokronos/integrations-gateway-core"
+import { hashSessionToken } from "@mokronos/integrations-gateway-core"
+import { webCryptoLayer } from "@mokronos/integrations-contracts"
+import type { GatewayStore } from "@mokronos/integrations-gateway-core"
 import {
   Identity,
   Forbidden,
@@ -114,7 +114,7 @@ export interface RequestContext {
 }
 
 export const CurrentRequestContext = Context.Reference<RequestContext>(
-  "@integrations/gateway-api/RequestContext",
+  "@mokronos/integrations-gateway-api/RequestContext",
   { defaultValue: (): RequestContext => ({}) }
 )
 

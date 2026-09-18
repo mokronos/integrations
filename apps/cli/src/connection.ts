@@ -2,7 +2,7 @@ import { Data, Effect, Predicate } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import type { HttpClient } from "effect/unstable/http"
 import { makeGatewayClient, resolveClientConnection } from "@mokronos/integrations-client"
-import { Forbidden } from "@integrations/gateway-api"
+import { Forbidden } from "@mokronos/integrations-gateway-api"
 import type { GatewayClient } from "@mokronos/integrations-client"
 
 export class IntegrationsCliError extends Data.TaggedError("IntegrationsCliError")<{

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import path from "node:path"
 import { gatewayConfigPath } from "@mokronos/integrations-client"
-import { whenPresent } from "@integrations/contracts"
+import { whenPresent } from "@mokronos/integrations-contracts"
 import { Effect, FileSystem, Layer } from "effect"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"

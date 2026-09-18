@@ -8,8 +8,8 @@ import {
   localFileKey,
   LocalFileRef,
   type Json
-} from "@integrations/contracts"
-import { integrationsHome } from "@integrations/contracts/gateway-config"
+} from "@mokronos/integrations-contracts"
+import { integrationsHome } from "@mokronos/integrations-contracts/gateway-config"
 import { cliError, describeError, type IntegrationsCliError } from "./connection.ts"
 
 const decodeHandle = Schema.decodeUnknownOption(BlobHandle)

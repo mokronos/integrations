@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Option } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
-import { isJsonObject } from "@integrations/contracts"
+import { isJsonObject } from "@mokronos/integrations-contracts"
 import { McpClient } from "../../../src/mcp/client.ts"
 import { verifyMcpConformance } from "../support/mcp-conformance.ts"
 

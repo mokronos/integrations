@@ -35,13 +35,13 @@
   },
   "dependencies": {
     "@effect/platform-bun": "catalog:",
-    "@integrations/contracts": "workspace:*",
-    "@integrations/gateway-api": "workspace:*",
-    "@integrations/gateway-core": "workspace:*",
+    "@mokronos/integrations-contracts": "workspace:*",
+    "@mokronos/integrations-gateway-api": "workspace:*",
+    "@mokronos/integrations-gateway-core": "workspace:*",
     "@mokronos/integrations": "workspace:*",
     "@mokronos/integrations-client": "workspace:*",
-    "@integrations/integrations": "workspace:*",
-    "@integrations/observability": "workspace:*",
+    "@mokronos/integrations-host": "workspace:*",
+    "@mokronos/integrations-observability": "workspace:*",
     "effect": "catalog:"
   }
 }

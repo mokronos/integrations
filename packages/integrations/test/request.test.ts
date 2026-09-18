@@ -5,8 +5,8 @@ import { splitArguments } from "../src/openapi/arguments.ts"
 import { buildRequest } from "../src/openapi/request.ts"
 import { captureOpenApiTools } from "../src/catalog/capture.ts"
 import type { HttpCall } from "../src/tool.ts"
-import { ConnectionName, IntegrationSlug } from "@integrations/contracts"
-import type { Json } from "@integrations/contracts"
+import { ConnectionName, IntegrationSlug } from "@mokronos/integrations-contracts"
+import type { Json } from "@mokronos/integrations-contracts"
 
 const document = JSON.stringify({
   openapi: "3.0.3",

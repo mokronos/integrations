@@ -6,7 +6,7 @@ import {
   requiresAuthentication
 } from "../src/catalog/auth-methods.ts"
 import type { CompiledSecurityScheme } from "../src/openapi/compile.ts"
-import type { McpProbe } from "@integrations/contracts"
+import type { McpProbe } from "@mokronos/integrations-contracts"
 
 const probe = (overrides: Partial<McpProbe>): McpProbe => ({
   connected: true,

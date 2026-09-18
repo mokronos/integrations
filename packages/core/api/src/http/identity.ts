@@ -1,11 +1,11 @@
 import { Context, Effect, Option, Schema } from "effect"
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiSchema } from "effect/unstable/httpapi"
-import { RefusalReason, refusalReason } from "@integrations/contracts"
-import type { Client, ClientCapability, SubjectId, TenantId } from "@integrations/contracts"
+import { RefusalReason, refusalReason } from "@mokronos/integrations-contracts"
+import type { Client, ClientCapability, SubjectId, TenantId } from "@mokronos/integrations-contracts"
 // By subpath: the API definition is imported by browser clients, and the
 // gateway-core index reaches the store.
-import { SessionTokenHash } from "@integrations/gateway-core/domain"
+import { SessionTokenHash } from "@mokronos/integrations-gateway-core/domain"
 
 type UnauthorizedReason = Extract<RefusalReason, { readonly code: "unknown-key" | "key-revoked" }>
 type ForbiddenReason = Exclude<RefusalReason, UnauthorizedReason>
@@ -54,12 +54,12 @@ export type Access =
   | "human"
 
 export const RequiredAccess = Context.Reference<Access>(
-  "@integrations/gateway-api/RequiredAccess",
+  "@mokronos/integrations-gateway-api/RequiredAccess",
   { defaultValue: (): Access => "public" }
 )
 
 export const Unmetered = Context.Reference<boolean>(
-  "@integrations/gateway-api/Unmetered",
+  "@mokronos/integrations-gateway-api/Unmetered",
   { defaultValue: (): boolean => false }
 )
 
@@ -76,7 +76,7 @@ export type Caller =
   }
 
 export class Identity extends Context.Service<Identity, Caller>()(
-  "@integrations/gateway-api/Identity"
+  "@mokronos/integrations-gateway-api/Identity"
 ) {}
 
 export const requireClient: Effect.Effect<Client, Forbidden, Identity> = Effect.flatMap(

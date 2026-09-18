@@ -4,7 +4,7 @@ import { CatalogStore } from "../src/catalog/store.ts"
 import { Database } from "../src/storage/database.ts"
 import { temporarySqlLayer } from "../src/runtime.ts"
 import { AuthTemplateSlug, OAuthClientSlug, OAuthState } from "../src/catalog/ids.ts"
-import { ConnectionName, IntegrationSlug } from "@integrations/contracts"
+import { ConnectionName, IntegrationSlug } from "@mokronos/integrations-contracts"
 
 const catalog = CatalogStore.layer.pipe(Layer.provide(Database.layer), Layer.provide(temporarySqlLayer))
 

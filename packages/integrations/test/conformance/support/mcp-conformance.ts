@@ -1,6 +1,6 @@
 import { expect } from "@effect/vitest"
 import { Effect, Option } from "effect"
-import type { Json } from "@integrations/contracts"
+import type { Json } from "@mokronos/integrations-contracts"
 import { McpClient, type McpCredential } from "../../../src/mcp/client.ts"
 
 export interface McpConformanceTarget {

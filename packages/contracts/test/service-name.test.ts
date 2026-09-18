@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { serviceLabel, serviceName, slugify } from "@integrations/contracts"
+import { serviceLabel, serviceName, slugify } from "@mokronos/integrations-contracts"
 import { Option } from "effect"
 
 describe("naming a service after its host", () => {

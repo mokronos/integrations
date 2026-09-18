@@ -22,7 +22,7 @@ export class Database extends Context.Service<
     readonly query: (statement: SqlStatement) => Effect.Effect<ReadonlyArray<SqlRow>, StorageError>
     readonly batch: (statements: ReadonlyArray<SqlStatement>) => Effect.Effect<void, StorageError>
   }
->()("@integrations/integrations/Database") {
+>()("@mokronos/integrations-host/Database") {
   /** The catalog's tables on whatever `SqlClient` the host provides. */
   static readonly layer: Layer.Layer<Database, never, SqlClient.SqlClient> = Layer.effect(
     Database,

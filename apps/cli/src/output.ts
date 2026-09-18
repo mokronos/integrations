@@ -1,4 +1,4 @@
-import { whenTrue } from "@integrations/contracts"
+import { whenTrue } from "@mokronos/integrations-contracts"
 import { Effect, Schema } from "effect"
 
 export const largeListing = 50

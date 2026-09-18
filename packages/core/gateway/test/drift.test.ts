@@ -1,8 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Clock, Effect } from "effect"
 import { TestClock } from "effect/testing"
-import { PositiveInt, ToolAddress } from "@integrations/contracts"
-import type { Tool } from "@integrations/contracts"
+import { PositiveInt, ToolAddress } from "@mokronos/integrations-contracts"
+import type { Tool } from "@mokronos/integrations-contracts"
 import {
   Alias,
   ConnectionName,

@@ -2,24 +2,24 @@ import { Crypto, DateTime, Duration, Effect } from "effect"
 import { HttpServerResponse } from "effect/unstable/http"
 import type { HttpClient } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import { SubjectId, TenantId } from "@integrations/contracts"
-import { LoginHandoffHash } from "@integrations/gateway-core"
-import type { GoogleIdentityOAuth } from "@integrations/gateway-core"
+import { SubjectId, TenantId } from "@mokronos/integrations-contracts"
+import { LoginHandoffHash } from "@mokronos/integrations-gateway-core"
+import type { GoogleIdentityOAuth } from "@mokronos/integrations-gateway-core"
 import {
   googleIdentityAuthorizationUrl,
   googleIdentityCallbackUrl,
   resolveGoogleIdentity
-} from "@integrations/gateway-core"
+} from "@mokronos/integrations-gateway-core"
 import {
   generateLoginHandoff,
   hashLoginHandoff,
   newSubjectId,
   newTenantId
-} from "@integrations/gateway-core"
-import { oauthBrowserPage } from "@integrations/gateway-core"
-import { generateSessionToken, hashPassword, verifyPassword } from "@integrations/gateway-core"
-import type { GatewayStore, GatewayStoreError, LoginRecord } from "@integrations/gateway-core"
-import { GatewayStoreService } from "@integrations/gateway-core"
+} from "@mokronos/integrations-gateway-core"
+import { oauthBrowserPage } from "@mokronos/integrations-gateway-core"
+import { generateSessionToken, hashPassword, verifyPassword } from "@mokronos/integrations-gateway-core"
+import type { GatewayStore, GatewayStoreError, LoginRecord } from "@mokronos/integrations-gateway-core"
+import { GatewayStoreService } from "@mokronos/integrations-gateway-core"
 import {
   ApiBadRequest,
   ApiNotImplemented,

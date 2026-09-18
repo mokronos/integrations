@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Clock, Effect, Layer } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import path from "node:path"
-import { PositiveInt } from "@integrations/contracts"
+import { PositiveInt } from "@mokronos/integrations-contracts"
 import {
   Alias,
   ConnectionName,
