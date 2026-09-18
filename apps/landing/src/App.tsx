@@ -21,7 +21,7 @@ import {
 
 const REPO = "https://github.com/mokronos/integrations"
 const INSTALL =
-  "curl -fsSL https://github.com/mokronos/integrations/releases/latest/download/install.sh | sh"
+  "curl -fsSL https://raw.githubusercontent.com/mokronos/integrations/main/install.sh | sh"
 const INSTALL_SKILL =
   "npx skills add https://github.com/mokronos/integrations/tree/main/.agents/skills/integrations -g"
 const QUICKSTART = [
@@ -78,7 +78,7 @@ const STEPS: ReadonlyArray<Step> = [
   {
     n: "01",
     title: "Install the gateway",
-    body: "Install the release, then run ii install. The local service keeps credentials and enforces policy for every call.",
+    body: "Install from GitHub, then run ii install. The local service keeps credentials and enforces policy for every call.",
     icon: Server
   },
   {
@@ -649,10 +649,10 @@ function GetStarted() {
           </p>
           <div className="mt-7 flex flex-wrap items-center justify-center gap-3 text-center">
             <a
-              href={`${REPO}/releases/latest`}
+              href={REPO}
               className="flex items-center gap-2 rounded-xl bg-orange-500 px-6 py-3 font-semibold text-black transition hover:bg-orange-400"
             >
-              Download latest release
+              View on GitHub
               <ArrowRight className="size-4" />
             </a>
             <a

@@ -9,22 +9,16 @@ One package installs two deliberate command surfaces:
   gateway dashboard action, human login and account management, and local
   gateway lifecycle commands.
 
-Install the latest GitHub release with curl, Git, and Bun 1.2 or newer:
+Install from GitHub with curl, Git, and Bun 1.2 or newer:
 
 ```bash
-curl -fsSL https://github.com/mokronos/integrations/releases/latest/download/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/mokronos/integrations/main/install.sh | sh
 ii install
 ii dashboard
 ```
 
 Use `ii serve -d` instead of `ii install` to run the gateway without registering
 a per-user service. Re-run the installer to upgrade.
-
-To install the current development branch, use:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/mokronos/integrations/main/install.sh | sh
-```
 
 Contributors can clone the repository and run `bun install && bun run
 install:local`; those shims run the checkout's TypeScript sources directly.

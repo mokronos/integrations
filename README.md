@@ -9,10 +9,10 @@ key and invoke logical `{ alias, tool }` addresses through the HTTP API.
 
 ## Quickstart
 
-Install the latest release and start the local gateway:
+Install from GitHub and start the local gateway:
 
 ```bash
-curl -fsSL https://github.com/mokronos/integrations/releases/latest/download/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/mokronos/integrations/main/install.sh | sh
 ii install
 ```
 
@@ -45,16 +45,10 @@ Open the optional control plane with:
 ii dashboard
 ```
 
-The release installer requires curl, Git, and Bun 1.2 or newer. It checks out
-the release under `~/.local/share/integrations`, builds the control plane, and
+The installer requires curl, Git, and Bun 1.2 or newer. It checks out the
+project under `~/.local/share/integrations`, builds the control plane, and
 puts `i` and `ii` on PATH. Override those locations with
 `INTEGRATIONS_INSTALL_DIR` and `INTEGRATIONS_BIN_DIR`.
-
-To install the current development branch instead of a release:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/mokronos/integrations/main/install.sh | sh
-```
 
 Re-run the same command to upgrade. The installer refuses to overwrite local
 changes in its checkout.
