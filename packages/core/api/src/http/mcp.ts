@@ -13,34 +13,26 @@ import {
   whenPresent
 } from "@integrations/contracts"
 import type { Client, Json, PolicyDecision } from "@integrations/contracts"
-import { authenticateClient } from "@integrations/gateway-core"
+import { Integrations } from "@integrations/integrations"
+import type { IntegrationServices } from "@integrations/integrations"
+import { authenticateClient, GatewayStoreService, listEffectiveTools } from "@integrations/gateway-core"
 import type { GatewayStore } from "@integrations/gateway-core"
-import { makeGatewayClient } from "@mokronos/integrations-client"
-import type { GatewayClient } from "@mokronos/integrations-client"
-import { Crypto, Effect, Layer, ManagedRuntime, Predicate } from "effect"
-import { FetchHttpClient, HttpClient } from "effect/unstable/http"
+import { Context, Effect, Layer, ManagedRuntime, Predicate } from "effect"
+import type { HttpClient } from "effect/unstable/http"
 import { agentTools, invokeTool } from "./mcp-tools.ts"
-import type { AgentTool, ToolOutput } from "./mcp-tools.ts"
+import type { AgentTool, McpCaller, ToolOutput } from "./mcp-tools.ts"
 import { capture, ErrorCapture } from "./observability.ts"
 import type { ErrorSink } from "./observability.ts"
+import type { GatewayOperationServices } from "./operations.ts"
+import { GatewayConfig, OAuthFlowSessions } from "./services.ts"
+import type { GatewaySettings } from "./services.ts"
 import { gatewayVersion } from "../version.ts"
 
 /**
- * MCP is a second surface over the same gateway, not a second gateway: every
- * tool call is an ordinary API request that the handler authenticates, meters,
- * and authorizes exactly as it would one arriving over the network.
+ * MCP is a second surface over the same gateway, not a second gateway: its
+ * tools call the operations the HTTP routes call, with the client the key
+ * authenticated as, so policy, approval, and audit are shared by construction.
  */
-export type GatewayDispatch = (request: Request) => Promise<Response>
-
-/** Never resolved: the dispatch answers without the request leaving the process. */
-const loopbackOrigin = "http://gateway.mcp.internal"
-
-/** Nothing to warm up when the other end of the socket is this process. */
-const loopbackFetch = (dispatch: GatewayDispatch): typeof globalThis.fetch =>
-  Object.assign(
-    (input: RequestInfo | URL, init?: RequestInit) => dispatch(new Request(input, init)),
-    { preconnect: () => {} }
-  )
 
 const defaultInputSchema = {
   type: "object",
@@ -79,9 +71,6 @@ const describeEffectiveTool = (tool: {
       ? awaitsApproval
       : `${tool.description}\n\n${awaitsApproval}`
 
-
-// The gateway's routes spell their human-readable text `error`, not `message`,
-// so a failure carrying one reads as empty until it is asked for by name.
 const explains = (failure: Error): failure is Error & { readonly error: string } =>
   "error" in failure && Predicate.isString(failure.error) && failure.error.length > 0
 
@@ -93,9 +82,11 @@ const contentOf = (text: string, isError: boolean) => ({
   isError
 })
 
+type McpRuntime = ManagedRuntime.ManagedRuntime<GatewayOperationServices, never>
+
 const resultOf = (
   runtime: McpRuntime,
-  effect: Effect.Effect<ToolOutput, Error>
+  effect: Effect.Effect<ToolOutput, Error, GatewayOperationServices>
 ) =>
   runtime.runPromise(Effect.match(effect, {
     onSuccess: (output: ToolOutput) => contentOf(JSON.stringify(output.value), output.failed),
@@ -104,19 +95,16 @@ const resultOf = (
 
 export interface McpGatewayOptions {
   readonly store: GatewayStore
-  readonly dispatch: GatewayDispatch
+  readonly services: Context.Context<GatewayStoreService | IntegrationServices | OAuthFlowSessions>
+  readonly settings: GatewaySettings
+  readonly httpClient: Layer.Layer<HttpClient.HttpClient>
   readonly errorCapture?: ErrorSink
 }
-
-type McpRuntime = ManagedRuntime.ManagedRuntime<
-  Crypto.Crypto | ErrorCapture | HttpClient.HttpClient,
-  never
->
 
 const registerAgentTool = (
   server: McpServer,
   runtime: McpRuntime,
-  client: GatewayClient,
+  caller: McpCaller,
   tool: AgentTool
 ): void => {
   server.registerTool(
@@ -126,33 +114,32 @@ const registerAgentTool = (
       description: tool.description,
       inputSchema: fromJsonSchema<Record<string, Json>>(tool.inputSchema)
     },
-    async (arguments_) => resultOf(runtime, tool.run(client, asJson(arguments_)))
+    async (arguments_) => resultOf(runtime, tool.run(caller, asJson(arguments_)))
   )
 }
 
-const serverFor = async (
-  runtime: McpRuntime,
-  secret: string,
-  identity: Client
-): Promise<McpServer> => {
-  const server = new McpServer({ name: "integrations-gateway", version: gatewayVersion })
-  const client = await runtime.runPromise(
-    makeGatewayClient({ url: loopbackOrigin, apiKey: secret })
-  )
+const effectiveToolsOf = (client: Client) =>
+  Effect.gen(function*() {
+    const store = yield* GatewayStoreService
+    const integrations = yield* Integrations
+    return yield* capture(listEffectiveTools(store, client.id, { schemas: true, integrations }))
+  })
 
-  if (identity.mcpSurface === "discovery") {
+const serverFor = async (runtime: McpRuntime, client: Client): Promise<McpServer> => {
+  const server = new McpServer({ name: "integrations-gateway", version: gatewayVersion })
+  const caller: McpCaller = { client }
+
+  if (client.mcpSurface === "discovery") {
     for (const tool of agentTools) {
-      if (tool.capability === undefined || identity.capabilities.includes(tool.capability)) {
-        registerAgentTool(server, runtime, client, tool)
+      if (tool.capability === undefined || client.capabilities.includes(tool.capability)) {
+        registerAgentTool(server, runtime, caller, tool)
       }
     }
     return server
   }
 
-  const effective = await runtime.runPromise(client.delegated.listTools({
-    query: { schemas: true }
-  }))
-  for (const tool of effective.tools) {
+  const effective = await runtime.runPromise(effectiveToolsOf(client))
+  for (const tool of effective) {
     const name = ToolName.make(tool.tool)
     const inputSchema = tool.inputSchema !== undefined && isJsonObject(tool.inputSchema)
       ? objectEntries(tool.inputSchema)
@@ -165,7 +152,7 @@ const serverFor = async (
         inputSchema: fromJsonSchema<Record<string, Json>>(inputSchema)
       },
       async (arguments_) =>
-        resultOf(runtime, invokeTool(client, {
+        resultOf(runtime, invokeTool(caller, {
           alias: tool.alias,
           tool: name,
           arguments: asJson(arguments_)
@@ -182,19 +169,20 @@ export interface McpGatewayHandle {
 
 export const createMcpGatewayHandler = (options: McpGatewayOptions): McpGatewayHandle => {
   const runtime: McpRuntime = ManagedRuntime.make(Layer.mergeAll(
+    Layer.succeedContext(options.services),
+    Layer.succeed(GatewayConfig, options.settings),
     options.errorCapture === undefined
       ? ErrorCapture.logging
       : Layer.succeed(ErrorCapture, options.errorCapture),
-    FetchHttpClient.layer.pipe(
-      Layer.provide(Layer.succeed(FetchHttpClient.Fetch, loopbackFetch(options.dispatch)))
-    ),
+    options.httpClient,
     webCryptoLayer
   ))
+  const authenticate = (secret: string) => runtime.runPromise(capture(authenticateClient(options.store, secret)))
   const handler = createMcpHandler(async ({ authInfo }) => {
     if (authInfo === undefined) throw new Error("Authenticated MCP request has no identity")
-    const authentication = await runtime.runPromise(capture(authenticateClient(options.store, authInfo.token)))
+    const authentication = await authenticate(authInfo.token)
     if (authentication.status !== "authenticated") throw new Error("MCP session key is no longer valid")
-    return serverFor(runtime, authInfo.token, authentication.client)
+    return serverFor(runtime, authentication.client)
   })
 
   return {
@@ -206,9 +194,7 @@ export const createMcpGatewayHandler = (options: McpGatewayOptions): McpGatewayH
           { status: 401, headers: { "www-authenticate": "Bearer" } }
         )
       }
-      const authentication = await runtime.runPromise(
-        capture(authenticateClient(options.store, secret))
-      )
+      const authentication = await authenticate(secret)
       if (authentication.status !== "authenticated") {
         return authenticationFailure(authentication.status)
       }

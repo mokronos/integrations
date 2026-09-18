@@ -33,7 +33,6 @@
     "@integrations/contracts": "workspace:*",
     "@integrations/gateway-core": "workspace:*",
     "@integrations/integrations": "workspace:*",
-    "@mokronos/integrations-client": "workspace:*",
     "@integrations/observability": "workspace:*",
     "effect": "catalog:"
   },

@@ -134,10 +134,15 @@ const failureLayer = () =>
 
 export const defaultMaxBodyBytes = 1024 * 1024
 
-export const gatewayAppLayer = (options: GatewayHandlerOptions) => {
-  const optional = <Key extends string, T>(key: Key, value: T | undefined) =>
-    whenPresent(key, value)
+const settingsOf = (options: GatewayHandlerOptions): GatewaySettings => ({
+  retentionDays: options.retentionDays,
+  ...whenPresent("dashboardUrl", options.dashboardUrl),
+  ...whenPresent("oauthCallbackUrl", options.oauthCallbackUrl),
+  ...whenPresent("mcpUrl", options.mcpUrl),
+  ...whenPresent("registryUrl", options.registryUrl)
+})
 
+export const gatewayAppLayer = (options: GatewayHandlerOptions) => {
   const errorCapture = options.errorCapture === undefined
     ? ErrorCapture.logging
     : Layer.succeed(ErrorCapture, options.errorCapture)
@@ -146,13 +151,7 @@ export const gatewayAppLayer = (options: GatewayHandlerOptions) => {
   const dependencies = Layer.mergeAll(
     errorCapture,
     services,
-    Layer.succeed(GatewayConfig, {
-      retentionDays: options.retentionDays,
-      ...optional("dashboardUrl", options.dashboardUrl),
-      ...optional("oauthCallbackUrl", options.oauthCallbackUrl),
-      ...optional("mcpUrl", options.mcpUrl),
-      ...optional("registryUrl", options.registryUrl)
-    }),
+    Layer.succeed(GatewayConfig, settingsOf(options)),
     options.sessions === undefined
       ? SessionPolicy.closed
       : Layer.succeed(SessionPolicy, options.sessions),
@@ -202,7 +201,13 @@ export interface GatewayHandle {
 export const createGatewayHandler = (options: GatewayHandlerOptions): GatewayHandle => {
   const app = HttpApiBuilder.layer(GatewayApi).pipe(
     Layer.provideMerge(gatewayAppLayer(options)),
-    HttpRouter.provideRequest(Layer.merge(options.httpClient, webCryptoLayer))
+    HttpRouter.provideRequest(Layer.mergeAll(
+      options.httpClient,
+      webCryptoLayer,
+      Layer.succeedContext(gatewayServicesContext(options)),
+      Layer.succeed(GatewayConfig, settingsOf(options)),
+      options.errorCapture === undefined ? ErrorCapture.logging : Layer.succeed(ErrorCapture, options.errorCapture)
+    ))
   )
   const web = HttpEffect.toWebHandlerLayerWith(
     app.pipe(Layer.provide(Layer.merge(
@@ -218,11 +223,11 @@ export const createGatewayHandler = (options: GatewayHandlerOptions): GatewayHan
     requestContext === undefined
       ? undefined
       : Context.makeUnsafe(new Map([[String(CurrentRequestContext.key), requestContext]]))
-  // The MCP surface answers by calling the API it sits in front of, so its
-  // tools cannot drift from the routes the CLI and clients already use.
   const mcp = createMcpGatewayHandler({
     store: options.store,
-    dispatch: (request) => web.handler(request, Context.empty()),
+    services: gatewayServicesContext(options),
+    settings: settingsOf(options),
+    httpClient: options.httpClient,
     ...whenPresent("errorCapture", options.errorCapture)
   })
   return {

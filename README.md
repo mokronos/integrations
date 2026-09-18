@@ -147,8 +147,8 @@ tools: `search`, `discover`, `integrations`, `connect`, `oauth_status`,
 `connections`, `disconnect`, `tools`, `schema`, `execute`, `validate`, and
 `approval`. An agent that speaks MCP can therefore find an integration,
 authorize it, and call it without a terminal. The provisioning ones appear only
-for keys that hold `provision_connections`. Each is served by calling the same
-HTTP route the CLI calls, so the two surfaces cannot drift apart.
+for keys that hold `provision_connections`. Each runs the same gateway operation
+the matching HTTP route runs, so the two surfaces cannot drift apart.
 
 Two things stay CLI-only for now: a tool result carrying a blob handle comes
 back as the handle rather than the bytes, and local file arguments are refused

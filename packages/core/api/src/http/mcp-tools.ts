@@ -1,5 +1,4 @@
-import { Data, Effect, Schema } from "effect"
-import type { GatewayClient } from "@mokronos/integrations-client"
+import { Data, Effect, Option, Schema } from "effect"
 import {
   Alias,
   ApprovalId,
@@ -16,7 +15,25 @@ import {
   ToolName,
   whenPresent
 } from "@integrations/contracts"
-import type { ClientCapability, Json, JsonEncodable } from "@integrations/contracts"
+import type { Client, ClientCapability, Json, JsonEncodable } from "@integrations/contracts"
+import {
+  Integrations,
+  listIntegrationOverviews,
+  provisionIntegration,
+  searchIntegrations
+} from "@integrations/integrations"
+import { GatewayStoreService, invokeAsClient, listEffectiveTools } from "@integrations/gateway-core"
+import { capture } from "./observability.ts"
+import {
+  connectWithCredentials,
+  findClientApproval,
+  invokeDependencies,
+  removeConnectionByName,
+  startOAuthConnection,
+  validateReference
+} from "./operations.ts"
+import type { GatewayOperationServices } from "./operations.ts"
+import { GatewayConfig, OAuthFlowSessions } from "./services.ts"
 
 /** A refusal the gateway never saw: the arguments did not survive this surface. */
 export class ToolRefusal extends Data.TaggedError("ToolRefusal")<{
@@ -32,6 +49,13 @@ export interface ToolOutput {
 
 const ok = (value: JsonEncodable): ToolOutput => ({ value, failed: false })
 
+/** The authenticated client an MCP session speaks for. */
+export interface McpCaller {
+  readonly client: Client
+}
+
+export type ToolRun = Effect.Effect<ToolOutput, Error, GatewayOperationServices>
+
 export interface AgentTool {
   readonly name: string
   readonly title: string
@@ -39,7 +63,7 @@ export interface AgentTool {
   /** Omitted when any client key may call it. */
   readonly capability?: ClientCapability
   readonly inputSchema: Record<string, Json>
-  readonly run: (client: GatewayClient, input: Json) => Effect.Effect<ToolOutput, Error>
+  readonly run: (caller: McpCaller, input: Json) => ToolRun
 }
 
 const jsonSchemaOf = (schema: Schema.Top): Record<string, Json> =>
@@ -53,7 +77,7 @@ const agentTool = <S extends Schema.Top & { readonly DecodingServices: never }>(
   readonly description: string
   readonly capability?: ClientCapability
   readonly input: S
-  readonly run: (client: GatewayClient, input: S["Type"]) => Effect.Effect<ToolOutput, Error>
+  readonly run: (caller: McpCaller, input: S["Type"]) => ToolRun
 }): AgentTool => {
   const decode = Schema.decodeUnknownEffect(definition.input)
   return {
@@ -62,10 +86,10 @@ const agentTool = <S extends Schema.Top & { readonly DecodingServices: never }>(
     description: definition.description,
     ...whenPresent("capability", definition.capability),
     inputSchema: jsonSchemaOf(definition.input),
-    run: (client, input) =>
+    run: (caller, input) =>
       decode(input).pipe(
         Effect.mapError((cause) => refuse(`${definition.name}: ${cause.message}`)),
-        Effect.flatMap((decoded) => definition.run(client, decoded))
+        Effect.flatMap((decoded) => definition.run(caller, decoded))
       )
   }
 }
@@ -102,29 +126,30 @@ const filesUnsupported =
  * own name or reached it through `execute`.
  */
 export const invokeTool = (
-  client: GatewayClient,
+  caller: McpCaller,
   input: {
     readonly alias: Alias
     readonly tool: ToolName
     readonly arguments: Json
   }
-): Effect.Effect<ToolOutput, Error> =>
-  mentionsKey(input.arguments, localFileKey)
-    ? Effect.fail(refuse(filesUnsupported))
-    : Effect.map(
-      client.delegated.execute({
-        payload: { alias: input.alias, tool: input.tool, arguments: input.arguments }
-      }),
-      (outcome) => {
-        const encoded = encodeOutcome(outcome)
-        return {
-          value: outcome.status === "succeeded" && mentionsKey(outcome.result, blobHandleKey)
-            ? { ...objectEntries(asJson(encoded)), note: blobsUnsupported }
-            : encoded,
-          failed: outcome.status === "denied" || outcome.status === "failed" || outcome.status === "invalid"
-        }
-      }
-    )
+): ToolRun =>
+  Effect.gen(function*() {
+    if (mentionsKey(input.arguments, localFileKey)) return yield* refuse(filesUnsupported)
+    const dependencies = yield* invokeDependencies
+    const outcome = yield* capture(invokeAsClient(dependencies, {
+      client: caller.client,
+      alias: input.alias,
+      tool: input.tool,
+      arguments: input.arguments
+    }))
+    const encoded = encodeOutcome(outcome)
+    return {
+      value: outcome.status === "succeeded" && mentionsKey(outcome.result, blobHandleKey)
+        ? { ...objectEntries(asJson(encoded)), note: blobsUnsupported }
+        : encoded,
+      failed: outcome.status === "denied" || outcome.status === "failed" || outcome.status === "invalid"
+    }
+  })
 
 const discoverTool = agentTool({
   name: "discover",
@@ -140,15 +165,12 @@ const discoverTool = agentTool({
     name: Schema.optional(Schema.String),
     verbose: verboseField
   }),
-  run: (client, input) =>
+  run: (_, input) =>
     Effect.map(
-      client.provisioning.discover({
-        payload: {
-          url: input.url,
-          ...whenPresent("connection", input.connection),
-          ...whenPresent("slug", input.slug),
-          ...whenPresent("name", input.name)
-        }
+      provisionIntegration(input.url, {
+        ...whenPresent("connection", input.connection),
+        ...whenPresent("slug", input.slug),
+        ...whenPresent("name", input.name)
       }),
       (discovery) =>
         ok(input.verbose === true
@@ -174,17 +196,18 @@ const searchTool = agentTool({
     kind: Schema.optional(IntegrationSearchKind),
     limit: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 })))
   }),
-  run: (client, input) =>
-    Effect.map(
-      client.provisioning.registrySearch({
-        query: {
+  run: (_, input) =>
+    Effect.gen(function*() {
+      const config = yield* GatewayConfig
+      return ok(yield* searchIntegrations(
+        {
           q: input.query,
           limit: PositiveInt.make(input.limit ?? 5),
           ...whenPresent("kind", input.kind)
-        }
-      }),
-      ok
-    )
+        },
+        whenPresent("registryUrl", config.registryUrl)
+      ))
+    })
 })
 
 const integrationsTool = agentTool({
@@ -193,10 +216,10 @@ const integrationsTool = agentTool({
   description: "List every registered integration and how many of its connections are live.",
   capability: "provision_connections",
   input: Schema.Struct({ verbose: verboseField }),
-  run: (client, input) =>
-    Effect.map(client.provisioning.listIntegrations(), (result) =>
+  run: (_, input) =>
+    Effect.map(capture(listIntegrationOverviews()), (integrations) =>
       ok({
-        integrations: result.integrations.map((integration) =>
+        integrations: integrations.map((integration) =>
           input.verbose === true ? integration : {
             slug: integration.slug,
             name: integration.name,
@@ -213,6 +236,20 @@ const integrationsTool = agentTool({
       }))
 })
 
+const effectiveTools = (
+  caller: McpCaller,
+  filter: { readonly integration?: IntegrationSlug; readonly connection?: ConnectionName }
+) =>
+  Effect.gen(function*() {
+    const store = yield* GatewayStoreService
+    const integrations = yield* Integrations
+    return yield* capture(listEffectiveTools(store, caller.client.id, {
+      schemas: true,
+      integrations,
+      ...whenPresent("integration", filter.integration),
+      ...whenPresent("connection", filter.connection)
+    }))
+  })
 
 const toolsTool = agentTool({
   name: "tools",
@@ -228,20 +265,17 @@ const toolsTool = agentTool({
     offset: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
     verbose: verboseField
   }),
-  run: (client, input) =>
+  run: (caller, input) =>
     Effect.map(
-      client.delegated.listTools({
-        query: {
-          schemas: true,
-          ...whenPresent("integration", input.integration),
-          ...whenPresent("connection", input.connection)
-        }
+      effectiveTools(caller, {
+        ...whenPresent("integration", input.integration),
+        ...whenPresent("connection", input.connection)
       }),
-      (result) => {
+      (tools) => {
         const term = input.filter?.toLowerCase()
         const matching = term === undefined
-          ? result.tools
-          : result.tools.filter((tool) =>
+          ? tools
+          : tools.filter((tool) =>
             tool.tool.toLowerCase().includes(term) ||
             (tool.description ?? "").toLowerCase().includes(term)
           )
@@ -272,18 +306,13 @@ const schemaTool = agentTool({
     "Show one effective tool's description and input/output schemas. Address it the same way " +
     "`execute` does: by the connection alias `tools` reports, plus the tool name.",
   input: Schema.Struct({ alias: Alias, tool: ToolName }),
-  run: (client, input) =>
-    Effect.flatMap(
-      client.delegated.listTools({ query: { schemas: true } }),
-      (result) => {
-        const found = result.tools.find((candidate) =>
-          candidate.alias === input.alias && candidate.tool === input.tool
-        )
-        return found === undefined
-          ? Effect.fail(refuse(`${input.tool} is not available to this key through ${input.alias}`))
-          : Effect.succeed(ok(found))
-      }
-    )
+  run: (caller, input) =>
+    Effect.flatMap(effectiveTools(caller, {}), (tools) => {
+      const found = tools.find((candidate) => candidate.alias === input.alias && candidate.tool === input.tool)
+      return found === undefined
+        ? Effect.fail(refuse(`${input.tool} is not available to this key through ${input.alias}`))
+        : Effect.succeed(ok(found))
+    })
 })
 
 const connectTool = agentTool({
@@ -304,15 +333,14 @@ const connectTool = agentTool({
     timeoutSeconds: Schema.optional(Schema.Number),
     verbose: verboseField
   }),
-  run: (client, input) =>
+  run: (caller, input) =>
     Effect.gen(function*() {
-      const catalog = yield* client.provisioning.listIntegrations()
-      const integration = catalog.integrations.find((candidate) =>
-        candidate.slug === input.integration
-      )
-      if (integration === undefined) {
+      const integrations = yield* Integrations
+      const found = yield* capture(integrations.findIntegration(input.integration))
+      if (Option.isNone(found)) {
         return yield* refuse(`Unknown integration ${input.integration}. Run discover first.`)
       }
+      const integration = found.value
       const oauthMethod = integration.authMethods.find((method) =>
         method.kind === "oauth" &&
         (input.template === undefined || method.template === input.template)
@@ -327,16 +355,15 @@ const connectTool = agentTool({
           }. Name the one you mean with template.`)
       }
 
+      const tenantId = caller.client.tenantId
       if (oauthMethod !== undefined) {
-        const session = yield* client.provisioning.startOAuth({
-          payload: {
-            integration: input.integration,
-            ...whenPresent("connection", input.connection),
-            ...whenPresent("template", input.template),
-            ...whenPresent("clientId", input.clientId),
-            ...whenPresent("clientSecret", input.clientSecret),
-            ...whenPresent("timeoutSeconds", input.timeoutSeconds)
-          }
+        const session = yield* startOAuthConnection(tenantId, {
+          integration: input.integration,
+          ...whenPresent("connection", input.connection),
+          ...whenPresent("template", input.template),
+          ...whenPresent("clientId", input.clientId),
+          ...whenPresent("clientSecret", input.clientSecret),
+          ...whenPresent("timeoutSeconds", input.timeoutSeconds)
         })
         return ok({
           ...session,
@@ -344,13 +371,11 @@ const connectTool = agentTool({
         })
       }
 
-      const connected = yield* client.provisioning.connect({
-        payload: {
-          integration: input.integration,
-          ...whenPresent("connection", input.connection),
-          ...whenPresent("template", input.template),
-          values: input.values ?? {}
-        }
+      const connected = yield* connectWithCredentials(tenantId, {
+        integration: input.integration,
+        ...whenPresent("connection", input.connection),
+        ...whenPresent("template", input.template),
+        values: input.values ?? {}
       })
       return ok(input.verbose === true ? connected : {
         connection: connected.connection,
@@ -367,11 +392,13 @@ const oauthStatusTool = agentTool({
     "a needs-client state is waiting for a human to register an OAuth client at its setup URL.",
   capability: "provision_connections",
   input: Schema.Struct({ sessionId: Schema.String }),
-  run: (client, input) =>
-    Effect.map(
-      client.provisioning.oauthSession({ params: { id: input.sessionId } }),
-      ok
-    )
+  run: (_, input) =>
+    Effect.gen(function*() {
+      const oauth = yield* OAuthFlowSessions
+      const session = yield* capture(oauth.get(input.sessionId))
+      if (session === undefined) return yield* refuse("Unknown or expired OAuth session")
+      return ok(session)
+    })
 })
 
 const connectionsTool = agentTool({
@@ -380,7 +407,11 @@ const connectionsTool = agentTool({
   description: "List every connection this gateway holds, and whether each one still works.",
   capability: "provision_connections",
   input: Schema.Struct({}),
-  run: (client) => Effect.map(client.provisioning.listConnections(), ok)
+  run: () =>
+    Effect.gen(function*() {
+      const integrations = yield* Integrations
+      return ok({ connections: yield* capture(integrations.listConnections()) })
+    })
 })
 
 const disconnectTool = agentTool({
@@ -392,11 +423,9 @@ const disconnectTool = agentTool({
     integration: IntegrationSlug,
     connection: Schema.optional(Schema.String)
   }),
-  run: (client, input) =>
+  run: (caller, input) =>
     Effect.map(
-      client.provisioning.removeConnection({
-        params: { integration: input.integration, name: input.connection ?? "default" }
-      }),
+      removeConnectionByName(caller.client.tenantId, input.integration, input.connection ?? "default"),
       ok
     )
 })
@@ -412,8 +441,8 @@ const executeTool = agentTool({
     tool: ToolName,
     arguments: Schema.optional(Schema.Record(Schema.String, Schema.Json))
   }),
-  run: (client, input) =>
-    invokeTool(client, {
+  run: (caller, input) =>
+    invokeTool(caller, {
       alias: input.alias,
       tool: input.tool,
       arguments: input.arguments ?? {}
@@ -432,19 +461,14 @@ const validateTool = agentTool({
     node: Schema.optional(Schema.Json),
     structural: Schema.optional(Schema.Boolean)
   }),
-  run: (client, input) => {
+  run: (caller, input) => {
     if ((input.address === undefined) === (input.node === undefined)) {
       return Effect.fail(refuse("Provide exactly one of address or node"))
     }
     const node: Json = input.address === undefined
       ? input.node ?? null
       : { source: { kind: "tool", address: input.address } }
-    return Effect.map(
-      client.provisioning.validate({
-        payload: { node, live: input.structural !== true }
-      }),
-      ok
-    )
+    return Effect.map(validateReference(caller.client.id, node, input.structural !== true), ok)
   }
 })
 
@@ -455,11 +479,11 @@ const approvalTool = agentTool({
     "Read one invocation that is waiting on a human, as the key that proposed it. An execute that " +
     "came back pending is collected here once somebody approves it.",
   input: Schema.Struct({ approvalId: ApprovalId }),
-  run: (client, input) =>
-    Effect.map(
-      client.delegated.approval({ params: { id: input.approvalId } }),
-      ok
-    )
+  run: (caller, input) =>
+    Effect.flatMap(findClientApproval(caller.client, input.approvalId), (approval) =>
+      approval === undefined
+        ? Effect.fail(refuse(`Unknown approval ${input.approvalId}`))
+        : Effect.succeed(ok(approval)))
 })
 
 /** The `i` CLI's surface, as tools. Ordered the way an agent meets them. */

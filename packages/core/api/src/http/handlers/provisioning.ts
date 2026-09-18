@@ -1,56 +1,49 @@
+import { whenPresent, whenPresentMap } from "@integrations/contracts"
 import {
-  connectionRefOf,
-  userOwner,
-  whenPresent,
-  whenPresentMap
-} from "@integrations/contracts"
-import {
-  AuthTemplateSlug,
   Integrations,
   listIntegrationOverviews,
   provisionIntegration,
-  searchIntegrations,
-  validateIntegrationNode as validateNode
+  searchIntegrations
 } from "@integrations/integrations"
 import type { IntegrationServices } from "@integrations/integrations"
-import { Effect, Option, Schema } from "effect"
+import { Effect, Option } from "effect"
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import {
-  Alias,
-  ClientId,
-  aliasForConnection,
-  ConnectionName,
-  IntegrationSlug,
-  sameConnectionRef,
-  ToolName
-} from "@integrations/contracts"
-import { boundToolAddress } from "@integrations/gateway-core"
-import {
-  forgetConnection,
-  reconcileConfigurations
-} from "@integrations/gateway-core"
-import { oauthBrowserPage } from "@integrations/gateway-core"
-import type { GatewayStore } from "@integrations/gateway-core"
-import { GatewayStoreService } from "@integrations/gateway-core"
-import {
-  ApiBadRequest,
-  ApiNotFound,
-  GatewayApi
-} from "../api.ts"
+import { ConnectionName } from "@integrations/contracts"
+import { connectionRefOf, forgetConnection, oauthBrowserPage, GatewayStoreService } from "@integrations/gateway-core"
+import { ApiBadRequest, ApiNotFound, GatewayApi } from "../api.ts"
 import { Identity, requireTenant } from "../authority.ts"
-import {
-  GatewayConfig,
-  OAuthFlowSessions
-} from "../services.ts"
+import { GatewayConfig, OAuthFlowSessions } from "../services.ts"
 import { capture } from "../observability.ts"
 import { asApiFailure } from "./host-failure.ts"
+import {
+  connectWithCredentials,
+  OperationRefused,
+  removeConnectionByName,
+  requireSlug as decodeSlug,
+  startOAuthConnection,
+  validateReference
+} from "../operations.ts"
 
-const requireSlug = (value: string): Effect.Effect<IntegrationSlug, ApiNotFound> =>
-  Option.match(Schema.decodeUnknownOption(IntegrationSlug)(value), {
-    onNone: () => Effect.fail(new ApiNotFound({ error: `Unknown integration ${value}` })),
-    onSome: Effect.succeed
-  })
+const refusalAsApiFailure = <A, E, R>(effect: Effect.Effect<A, E | OperationRefused, R>) =>
+  asApiFailure(Effect.catchIf(
+    effect,
+    (failure): failure is OperationRefused => failure instanceof OperationRefused,
+    (refusal) =>
+      Effect.fail(refusal.status === "not-found"
+        ? new ApiNotFound({ error: refusal.message })
+        : new ApiBadRequest({ error: refusal.message }))
+  ))
+
+const requireSlug = (value: string) =>
+  Effect.mapError(decodeSlug(value), (refusal) => new ApiNotFound({ error: refusal.message }))
+
+const refusalAsNotFound = <A, E, R>(effect: Effect.Effect<A, E | OperationRefused, R>) =>
+  Effect.catchIf(
+    effect,
+    (failure): failure is OperationRefused => failure instanceof OperationRefused,
+    (refusal) => Effect.fail(new ApiNotFound({ error: refusal.message }))
+  )
 
 const page = (
   status: number,
@@ -59,101 +52,6 @@ const page = (
   HttpServerResponse.text(oauthBrowserPage(content), {
     status,
     contentType: "text/html; charset=utf-8"
-  })
-
-const normalizeName = (value: string): string => value.toLowerCase().replace(/[^a-z0-9]/g, "")
-
-const selectAuthMethod = (
-  methods: ReadonlyArray<{ readonly id: string; readonly template: string; readonly kind: string }>,
-  template: string | undefined
-): { readonly id: string; readonly template: string; readonly kind: string } | undefined => {
-  if (template !== undefined) {
-    return methods.find((method) => method.template === template || method.id === template)
-  }
-  if (methods.length === 0) return { id: "none", template: "none", kind: "none" }
-  if (methods.length === 1) return methods[0]
-  return methods.find((method) => method.kind === "oauth") ?? methods[0]
-}
-
-const GatewayNodeSource = Schema.Struct({
-  source: Schema.Struct({
-    kind: Schema.Literal("gateway"),
-    alias: Schema.String,
-    tool: Schema.String
-  })
-})
-
-const validateGatewayNode = (
-  dependencies: {
-    readonly store: GatewayStore
-    readonly integrations: Integrations["Service"]
-  },
-  clientId: ClientId | undefined,
-  source: { readonly alias: string; readonly tool: string },
-  live: boolean
-) =>
-  Effect.gen(function*() {
-    const findings: Array<{ severity: string; check: string; message: string }> = []
-    const aliasIsWellFormed = Schema.is(Alias)(source.alias)
-    findings.push(
-      aliasIsWellFormed
-        ? { severity: "info", check: "structural", message: "Gateway integration reference is valid" }
-        : {
-          severity: "error",
-          check: "structural",
-          message: `Alias "${source.alias}" must be lowercase letters, digits, and dashes`
-        }
-    )
-
-    if (aliasIsWellFormed && live) {
-      const accessProfile = clientId === undefined
-        ? undefined
-        : yield* capture(dependencies.store.findAccessProfileForClient(clientId))
-      const approvalPolicy = clientId === undefined
-        ? undefined
-        : yield* capture(dependencies.store.findApprovalPolicyForClient(clientId))
-      const accessTools = accessProfile === undefined
-        ? []
-        : yield* capture(dependencies.store.listAccessProfileTools(accessProfile.id))
-      const approvalTools = approvalPolicy === undefined
-        ? []
-        : yield* capture(dependencies.store.listApprovalPolicyTools(approvalPolicy.id))
-      const accessTool = accessTools.find((tool) => tool.tool === source.tool && aliasForConnection(tool.connection) === source.alias)
-      const approvalTool = accessTool === undefined ? undefined : approvalTools.find((tool) =>
-        tool.tool === source.tool && sameConnectionRef(tool.connection, accessTool.connection))
-      if (clientId === undefined) {
-        findings.push({
-          severity: "error",
-          check: "authorization",
-          message: "Gateway aliases are client-specific; validate this node with i and its client key"
-        })
-      } else if (accessTool === undefined || approvalTool === undefined) {
-        findings.push({
-          severity: "error",
-          check: "authorization",
-          message: `${source.alias}.${source.tool} is not authorized for this key`
-        })
-      } else {
-        findings.push({
-          severity: "info",
-          check: "authorization",
-          message: `${source.alias}.${source.tool} resolves to ${accessTool.connection.integration}/${accessTool.connection.name}`
-        })
-        const address = boundToolAddress(accessTool.connection, ToolName.make(source.tool))
-        const tools = yield* capture(dependencies.integrations.listTools())
-        findings.push(
-          tools.some((candidate) => candidate.address === address)
-            ? { severity: "info", check: "catalog", message: `${source.tool} is available` }
-            : {
-              severity: "error",
-              check: "catalog",
-              message: `${source.tool} is bound but no longer in the catalog: ${address}`
-            }
-        )
-      }
-    }
-
-    return { ok: !findings.some((finding) => finding.severity === "error"), findings }
   })
 
 export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning", (handlers) =>
@@ -219,108 +117,21 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
         )))
       .handle("validate", (request) =>
         Effect.gen(function*() {
-          const body = request.payload
-          const isGatewayNode = Schema.is(GatewayNodeSource)
-          if (isGatewayNode(body.node)) {
-            const caller = yield* Identity
-            const clientId = caller.kind === "client" || caller.kind === "local"
-              ? caller.client.id
-              : undefined
-            const source = Schema.decodeUnknownSync(GatewayNodeSource)(body.node).source
-            return yield* validateGatewayNode(
-              { store: store, integrations },
-              clientId,
-              source,
-              body.live ?? true
-            )
-          }
-          return yield* capture(
-            validateNode(body.node, { live: body.live ?? true })
-              .pipe(Effect.provide(integrationServices))
-          )
+          const caller = yield* Identity
+          const clientId = caller.kind === "client" || caller.kind === "local" ? caller.client.id : undefined
+          return yield* validateReference(clientId, request.payload.node, request.payload.live ?? true)
         }))
       .handle("listConnections", () =>
         Effect.map(capture(integrations.listConnections()), (connections) => ({ connections })))
       .handle("connect", (request) =>
         Effect.gen(function*() {
           const tenantId = yield* requireTenant
-          const body = request.payload
-          const slug = yield* requireSlug(body.integration)
-          const found = yield* capture(integrations.findIntegration(slug))
-          if (Option.isNone(found)) {
-            return yield* new ApiNotFound({ error: `Unknown integration ${body.integration}` })
-          }
-          const integration = found.value
-          const method = selectAuthMethod(integration.authMethods, body.template)
-          if (method === undefined) {
-            return yield* new ApiBadRequest({
-              error: `No auth template named "${body.template}" for ${integration.slug}. Available: ${integration.authMethods.map((candidate) => candidate.template).join(", ")
-                }`
-            })
-          }
-          if (method.kind === "oauth") {
-            return yield* new ApiBadRequest({
-              error: `${integration.slug} uses OAuth; start it at POST /v1/connections/oauth`
-            })
-          }
-          const values = body.values ?? {}
-          const names = Object.keys(values)
-          const connection = yield* asApiFailure(integrations.createConnection({
-            owner: body.subject === undefined ? "org" : userOwner(body.subject),
-            integration: slug,
-            name: ConnectionName.make(body.connection ?? "default"),
-            template: AuthTemplateSlug.make(method.template),
-            ...(names.length === 0
-              ? { value: "" }
-              : names.length === 1 && values["token"] !== undefined
-                ? { value: values["token"] }
-                : { values })
-          }))
-          yield* reconcileConfigurations({ store, integrations, tenantId }).pipe(capture)
-          return {
-            connection,
-            tools: yield* capture(integrations.toolSummaries({
-              integration: slug,
-              connection: connection.name
-            }))
-          }
+          return yield* refusalAsApiFailure(connectWithCredentials(tenantId, request.payload))
         }))
       .handle("startOAuth", (request) =>
         Effect.gen(function*() {
           const tenantId = yield* requireTenant
-          const body = request.payload
-          const slug = yield* requireSlug(body.integration)
-          const found = yield* capture(integrations.findIntegration(slug))
-          if (Option.isNone(found)) {
-            return yield* new ApiNotFound({ error: `Unknown integration ${body.integration}` })
-          }
-          const integration = found.value
-          const method = integration.authMethods.find((candidate) =>
-            body.template === undefined
-              ? candidate.kind === "oauth"
-              : candidate.template === body.template || candidate.id === body.template
-          )
-          if (method === undefined || method.kind !== "oauth") {
-            return yield* new ApiBadRequest({ error: `${integration.slug} has no OAuth auth method` })
-          }
-          return yield* oauth.start({
-            integration: integration.slug,
-            connection: body.connection ?? "default",
-            authMethod: method,
-            bindingTenant: tenantId,
-            ...whenPresent("subject", body.subject),
-            ...whenPresentMap("clientId", body.clientId, (id) => id),
-            ...whenPresentMap("clientSecret", body.clientSecret, (secret) => secret),
-            ...whenPresentMap(
-              "timeoutMs",
-              body.timeoutSeconds === undefined
-                ? undefined
-                : Math.max(1, body.timeoutSeconds) * 1000,
-              (ms) => ms
-            )
-          }).pipe(Effect.mapError((failure) => new ApiBadRequest({
-            error: `${body.integration} could not start an OAuth flow: ${failure.message}`
-          })))
+          return yield* refusalAsApiFailure(startOAuthConnection(tenantId, request.payload))
         }))
       .handle("oauthSession", (request) =>
         Effect.gen(function*() {
@@ -413,34 +224,8 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
       .handle("removeConnection", (request) =>
         Effect.gen(function*() {
           const tenantId = yield* requireTenant
-          const integration = request.params["integration"]
-          const requested = request.params["name"]
-          const connections = yield* capture(integrations.listConnections())
-          const match = connections.find((connection) =>
-            connection.integration === integration &&
-            (connection.name === requested ||
-              normalizeName(connection.name) === normalizeName(requested))
+          return yield* refusalAsNotFound(
+            removeConnectionByName(tenantId, request.params["integration"], request.params["name"])
           )
-          if (match === undefined) {
-            const known = connections
-              .filter((connection) => connection.integration === integration)
-              .map((connection) => connection.name)
-            return yield* new ApiNotFound({
-              error: known.length === 0
-                ? `${integration} has no connections`
-                : `${integration} has no connection ${requested}. Known: ${known.join(", ")}`
-            })
-          }
-          yield* capture(integrations.removeConnection({
-            owner: match.owner,
-            integration: match.integration,
-            name: match.name
-          }))
-          yield* forgetConnection({
-            store,
-            tenantId,
-            connection: connectionRefOf(match.owner, match.integration, match.name)
-          }).pipe(capture)
-          return { removed: true as const, integration, connection: match.name }
         }))
   }))

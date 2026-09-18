@@ -145,7 +145,6 @@
         "@integrations/integrations": "workspace:*",
         "@integrations/observability": "workspace:*",
         "@modelcontextprotocol/server": "^2.0.0",
-        "@mokronos/integrations-client": "workspace:*",
         "effect": "catalog:",
       },
       "devDependencies": {
