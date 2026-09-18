@@ -57,6 +57,7 @@
     "node_modules",
     "**/.tmp/**",
     "apps/web",
+    "apps/landing",
     "apps/host-cloudflare",
     "tools/oxlint/anti-slop"
   ]

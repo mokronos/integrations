@@ -71,7 +71,7 @@
     "db:generate": "bun run --cwd packages/core/gateway db:generate",
     "lint": "oxlint",
     "prepare": "effect-language-service patch",
-    "typecheck": "tsc --build --noEmit && tsc -p apps/web && tsc -p apps/host-cloudflare",
+    "typecheck": "tsc --build --noEmit && tsc -p apps/web && tsc -p apps/landing && tsc -p apps/host-cloudflare",
     "test": "bun --bun run vitest run",
     "verify": "bun run lint && bun run typecheck && bun run test && bun run build:control-plane",
     "build:contracts": "bun run --cwd packages/contracts build",

@@ -1,0 +1,28 @@
+{
+  "name": "integrations-landing",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "description": "Marketing landing page for the integrations gateway, published to GitHub Pages.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@fontsource-variable/geist": "catalog:",
+    "@tailwindcss/vite": "catalog:",
+    "lucide-react": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "tailwindcss": "catalog:"
+  },
+  "devDependencies": {
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:"
+  }
+}
