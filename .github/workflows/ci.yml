@@ -22,3 +22,10 @@ jobs:
       - run: bun run test
       - run: bun run build
       - run: bun run build:control-plane
+      - name: Build and smoke-test standalone executable
+        run: |
+          bun run release:build --target bun-linux-x64-baseline --outfile "${{ runner.temp }}/integrations"
+          ln -s "${{ runner.temp }}/integrations" "${{ runner.temp }}/i"
+          ln -s "${{ runner.temp }}/integrations" "${{ runner.temp }}/ii"
+          "${{ runner.temp }}/i" --help >/dev/null
+          "${{ runner.temp }}/ii" --help >/dev/null

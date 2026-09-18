@@ -78,7 +78,7 @@ const STEPS: ReadonlyArray<Step> = [
   {
     n: "01",
     title: "Install the gateway",
-    body: "Install from GitHub, then run ii install. The local service keeps credentials and enforces policy for every call.",
+    body: "Download the standalone release, then run ii install. No Git, Bun, npm, or local build required.",
     icon: Server
   },
   {

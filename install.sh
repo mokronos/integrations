@@ -1,41 +1,43 @@
 #!/usr/bin/env sh
 set -eu
 
-repository="${INTEGRATIONS_REPOSITORY:-https://github.com/mokronos/integrations.git}"
-install_directory="${INTEGRATIONS_INSTALL_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/integrations}"
-binary_directory="${INTEGRATIONS_BIN_DIR:-}"
-default_ref="main"
-ref="${INTEGRATIONS_REF:-$default_ref}"
+repository="${INTEGRATIONS_REPOSITORY:-mokronos/integrations}"
+binary_directory="${INTEGRATIONS_BIN_DIR:-$HOME/.local/bin}"
+default_version="latest"
+version="${INTEGRATIONS_VERSION:-$default_version}"
+force=false
 
 usage() {
-  printf '%s\n' "Install integrations from GitHub.
+  printf '%s\n' "Install a standalone integrations release from GitHub.
 
 Usage:
-  install.sh [--ref <branch-or-tag>] [--dir <directory>] [--bin-dir <directory>]
+  install.sh [--version <vX.Y.Z>] [--bin-dir <directory>] [--force]
 
 Defaults:
-  ref:       $default_ref
-  checkout:  $install_directory
-  binaries:  first existing directory of ~/.bun/bin or ~/.local/bin
+  version:    $default_version
+  binaries:   $binary_directory
+
+The installer downloads a platform release, verifies its SHA-256 checksum,
+and installs the integrations executable as both i and ii. Git, Bun, npm, and
+a source checkout are not required.
 "
 }
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --ref)
-      [ "$#" -ge 2 ] || { printf '%s\n' "error: --ref requires a value" >&2; exit 1; }
-      ref="$2"
-      shift 2
-      ;;
-    --dir)
-      [ "$#" -ge 2 ] || { printf '%s\n' "error: --dir requires a value" >&2; exit 1; }
-      install_directory="$2"
+    --version)
+      [ "$#" -ge 2 ] || { printf '%s\n' "error: --version requires a value" >&2; exit 1; }
+      version="$2"
       shift 2
       ;;
     --bin-dir)
       [ "$#" -ge 2 ] || { printf '%s\n' "error: --bin-dir requires a value" >&2; exit 1; }
       binary_directory="$2"
       shift 2
+      ;;
+    --force)
+      force=true
+      shift
       ;;
     --help|-h)
       usage
@@ -49,48 +51,98 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-command -v git >/dev/null 2>&1 || { printf '%s\n' "error: git is required" >&2; exit 1; }
-command -v bun >/dev/null 2>&1 || { printf '%s\n' "error: Bun 1.2 or newer is required: https://bun.sh" >&2; exit 1; }
-git check-ref-format --branch "$ref" >/dev/null 2>&1 || {
-  printf '%s\n' "error: invalid Git branch or tag: $ref" >&2
+command -v curl >/dev/null 2>&1 || { printf '%s\n' "error: curl is required" >&2; exit 1; }
+command -v tar >/dev/null 2>&1 || { printf '%s\n' "error: tar is required" >&2; exit 1; }
+command -v install >/dev/null 2>&1 || { printf '%s\n' "error: install is required" >&2; exit 1; }
+
+case "$(uname -s)" in
+  Linux) platform="linux" ;;
+  Darwin) platform="darwin" ;;
+  *) printf '%s\n' "error: only Linux and macOS are supported" >&2; exit 1 ;;
+esac
+
+case "$(uname -m)" in
+  x86_64|amd64) architecture="x64" ;;
+  arm64|aarch64) architecture="arm64" ;;
+  *) printf '%s\n' "error: unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+esac
+
+asset="integrations-$platform-$architecture.tar.gz"
+if [ "$version" = "latest" ]; then
+  release_url="https://github.com/$repository/releases/latest/download"
+else
+  printf '%s\n' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || {
+    printf '%s\n' "error: version must look like v0.2.0" >&2
+    exit 1
+  }
+  release_url="https://github.com/$repository/releases/download/$version"
+fi
+
+temporary_directory="$(mktemp -d)"
+trap 'rm -rf "$temporary_directory"' EXIT HUP INT TERM
+
+curl -fsSL --proto '=https' --tlsv1.2 "$release_url/$asset" -o "$temporary_directory/$asset"
+curl -fsSL --proto '=https' --tlsv1.2 "$release_url/SHA256SUMS" -o "$temporary_directory/SHA256SUMS"
+
+expected="$(awk -v asset="$asset" '$2 == asset { print $1; exit }' "$temporary_directory/SHA256SUMS")"
+printf '%s\n' "$expected" | grep -Eq '^[0-9a-fA-F]{64}$' || {
+  printf '%s\n' "error: release checksum for $asset is missing or invalid" >&2
   exit 1
 }
 
-if [ -e "$install_directory" ]; then
-  [ -d "$install_directory/.git" ] || {
-    printf '%s\n' "error: $install_directory exists but is not a Git checkout" >&2
-    exit 1
-  }
-  origin="$(git -C "$install_directory" remote get-url origin)"
-  [ "$origin" = "$repository" ] || {
-    printf '%s\n' "error: $install_directory belongs to $origin, not $repository" >&2
-    exit 1
-  }
-  [ -z "$(git -C "$install_directory" status --porcelain)" ] || {
-    printf '%s\n' "error: $install_directory has local changes; preserve or discard them before updating" >&2
-    exit 1
-  }
-  git -C "$install_directory" fetch --depth 1 origin "$ref"
-  git -C "$install_directory" checkout --detach FETCH_HEAD
+if command -v sha256sum >/dev/null 2>&1; then
+  actual="$(sha256sum "$temporary_directory/$asset" | awk '{ print $1 }')"
+elif command -v shasum >/dev/null 2>&1; then
+  actual="$(shasum -a 256 "$temporary_directory/$asset" | awk '{ print $1 }')"
 else
-  mkdir -p "$(dirname "$install_directory")"
-  git clone --depth 1 --branch "$ref" "$repository" "$install_directory"
+  printf '%s\n' "error: sha256sum or shasum is required" >&2
+  exit 1
 fi
+[ "$actual" = "$expected" ] || { printf '%s\n' "error: checksum verification failed for $asset" >&2; exit 1; }
 
-cd "$install_directory"
-bun install --frozen-lockfile
-bun run build:control-plane
+tar -xzf "$temporary_directory/$asset" -C "$temporary_directory"
+[ -f "$temporary_directory/integrations" ] || { printf '%s\n' "error: release archive does not contain integrations" >&2; exit 1; }
 
-if [ -n "$binary_directory" ]; then
-  bun run install:local --dir "$binary_directory"
-else
-  bun run install:local
+mkdir -p "$binary_directory"
+managed=false
+if [ -f "$binary_directory/integrations" ] &&
+  [ -L "$binary_directory/i" ] && [ "$(readlink "$binary_directory/i")" = "integrations" ] &&
+  [ -L "$binary_directory/ii" ] && [ "$(readlink "$binary_directory/ii")" = "integrations" ]; then
+  managed=true
 fi
+for target in "$binary_directory/integrations" "$binary_directory/i" "$binary_directory/ii"; do
+  if [ -d "$target" ] && [ ! -L "$target" ]; then
+    printf '%s\n' "error: refusing to replace directory $target" >&2
+    exit 1
+  fi
+  if [ -e "$target" ] || [ -L "$target" ]; then
+    [ "$managed" = true ] || [ "$force" = true ] || {
+      printf '%s\n' "error: $target already exists; use --force to replace it" >&2
+      exit 1
+    }
+  fi
+done
 
-printf '%s\n' "
-integrations installed from $ref.
+install -m 755 "$temporary_directory/integrations" "$binary_directory/integrations.new"
+mv "$binary_directory/integrations.new" "$binary_directory/integrations"
+ln -sf integrations "$binary_directory/i"
+ln -sf integrations "$binary_directory/ii"
 
-Start it at login (Linux or macOS):
+case ":${PATH:-}:" in
+  *:"$binary_directory":*) ;;
+  *) printf '%s\n' "warning: $binary_directory is not on PATH" >&2 ;;
+esac
+for command_name in i ii; do
+  installed="$binary_directory/$command_name"
+  resolved="$(command -v "$command_name" 2>/dev/null || true)"
+  if [ -n "$resolved" ] && [ "$resolved" != "$installed" ]; then
+    printf '%s\n' "warning: PATH resolves $command_name to $resolved instead of $installed" >&2
+  fi
+done
+
+printf '%s\n' "integrations $version installed in $binary_directory.
+
+Start the local gateway at login:
   ii install
 
 Or start it for this session:

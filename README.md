@@ -45,13 +45,17 @@ Open the optional control plane with:
 ii dashboard
 ```
 
-The installer requires curl, Git, and Bun 1.2 or newer. It checks out the
-project under `~/.local/share/integrations`, builds the control plane, and
-puts `i` and `ii` on PATH. Override those locations with
-`INTEGRATIONS_INSTALL_DIR` and `INTEGRATIONS_BIN_DIR`.
+The installer requires curl and tar. It downloads the latest standalone binary
+for Linux or macOS, verifies its SHA-256 checksum, and installs `i` and `ii`
+under `~/.local/bin`. Git, Bun, npm, and a source checkout are not required.
+Override the destination with `INTEGRATIONS_BIN_DIR`.
 
-Re-run the same command to upgrade. The installer refuses to overwrite local
-changes in its checkout.
+Re-run the same command to upgrade. To pin a release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mokronos/integrations/main/install.sh \
+  | sh -s -- --version v0.2.0
+```
 
 `i` mirrors the public TypeScript client: agents can discover integrations,
 manage connections, inspect schemas, invoke effective policy tools, and poll

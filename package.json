@@ -67,6 +67,7 @@
     "i": "bun run apps/cli/src/agent.ts",
     "ii": "bun run apps/cli/src/main.ts",
     "install:local": "bun run apps/cli/install-local.ts",
+    "release:build": "bun run scripts/build-release.ts",
     "refresh": "bun run build:gateway && bun run scripts/refresh.ts",
     "db:generate": "bun run --cwd packages/core/gateway db:generate",
     "lint": "oxlint",
