@@ -5,7 +5,8 @@ import {
   AccessProfileId, Alias, ApiKeyHash, ApiKeyId, ApprovalDelivery, ApprovalDeliveryId, McpSurface,
   ApprovalDestinationId, ApprovalId,
   ApprovalPolicyId, AuditId, ClientId, ConnectionName, IntegrationSlug,
-  LoginHandoffHash, SessionTokenHash, SubjectId, TenantId, ToolName
+  LoginHandoffHash, SessionTokenHash, SubjectId, TenantId, ToolName,
+  OAuthApplicationId, OAuthGrantId, OAuthApplicationKind
 } from "./domain.ts"
 import type {
   AccessProfile, AccessProfileTool, ApiKey, ApprovalDeliveryAttempt, ApprovalDestination, ApprovalPolicy, ApprovalPolicyTool,
@@ -14,6 +15,10 @@ import type {
 } from "./domain.ts"
 import { PasswordHash } from "./passwords.ts"
 import type { IdentityOAuthStateRecord, LoginRecord } from "./store-contract.ts"
+import { OAuthSecretHash, OAuthTokenKind } from "./mcp-oauth.ts"
+import type {
+  OAuthApplication, OAuthAuthorizationCode, OAuthAuthorizationRequest, OAuthGrant, OAuthToken
+} from "./mcp-oauth.ts"
 
 type PickedRow = Record<string, Row[string]>
 
@@ -100,6 +105,72 @@ const ApiKeyRow = Schema.Struct({
   revoked_at: NullableNumber
 })
 
+const OAuthApplicationRow = Schema.Struct({
+  id: Schema.String,
+  kind: OAuthApplicationKind,
+  client_identifier: Schema.String,
+  name: Schema.String,
+  redirect_uris_json: Schema.String,
+  metadata_json: Schema.String,
+  created_at: Schema.Number,
+  updated_at: Schema.Number,
+  revoked_at: NullableNumber
+})
+
+const OAuthAuthorizationRequestRow = Schema.Struct({
+  id: Schema.String,
+  application_id: Schema.String,
+  redirect_uri: Schema.String,
+  state: NullableString,
+  code_challenge: Schema.String,
+  resource: Schema.String,
+  scope: Schema.Literal("mcp"),
+  created_at: Schema.Number,
+  expires_at: Schema.Number,
+  consumed_at: NullableNumber
+})
+
+const OAuthGrantRow = Schema.Struct({
+  id: Schema.String,
+  application_id: Schema.String,
+  subject_id: Schema.String,
+  tenant_id: Schema.String,
+  client_id: Schema.String,
+  resource: Schema.String,
+  scope: Schema.Literal("mcp"),
+  created_at: Schema.Number,
+  last_used_at: NullableNumber,
+  revoked_at: NullableNumber
+})
+
+const OAuthAuthorizationCodeRow = Schema.Struct({
+  hash: Schema.String,
+  grant_id: Schema.String,
+  application_id: Schema.String,
+  redirect_uri: Schema.String,
+  code_challenge: Schema.String,
+  resource: Schema.String,
+  scope: Schema.Literal("mcp"),
+  created_at: Schema.Number,
+  expires_at: Schema.Number,
+  consumed_at: NullableNumber
+})
+
+const OAuthTokenRow = Schema.Struct({
+  hash: Schema.String,
+  kind: OAuthTokenKind,
+  family_id: Schema.String,
+  grant_id: Schema.String,
+  application_id: Schema.String,
+  resource: Schema.String,
+  scope: Schema.Literal("mcp"),
+  created_at: Schema.Number,
+  expires_at: Schema.Number,
+  used_at: NullableNumber,
+  revoked_at: NullableNumber,
+  replaced_by_hash: NullableString
+})
+
 const ConfigurationRow = Schema.Struct({
   id: Schema.String,
   tenant_id: Schema.String,
@@ -170,6 +241,9 @@ const ApprovalDeliveryRow = Schema.Struct({
 const AuditRow = Schema.Struct({
   id: Schema.String,
   client_id: NullableString,
+  oauth_grant_id: NullableString,
+  oauth_application_id: NullableString,
+  authorized_by_subject_id: NullableString,
   alias: NullableString,
   tool: NullableString,
   owner: Schema.NullOr(Schema.Literals(["org", "user"])),
@@ -222,7 +296,7 @@ const approvalColumns = [
   "created_at", "expires_at", "decided_at", "decided_by", "result", "error", "collected_at"
 ]
 const auditColumns = [
-  "id", "client_id", "alias", "tool", "owner", "subject", "integration",
+  "id", "client_id", "oauth_grant_id", "oauth_application_id", "authorized_by_subject_id", "alias", "tool", "owner", "subject", "integration",
   "connection_name", "decision", "outcome", "message", "created_at"
 ]
 const snapshotColumns = [
@@ -425,6 +499,107 @@ export const toApiKey = (row: Row): ApiKey => {
   }
 }
 
+const stringArrayFromJson = jsonDecoder(
+  "redirect_uris_json",
+  Schema.fromJsonString(Schema.Array(Schema.String))
+)
+
+export const toOAuthApplication = (row: Row): OAuthApplication => {
+  const decoded = rowDecoder("gateway_oauth_application", OAuthApplicationRow)(pick(row, [
+    "id", "kind", "client_identifier", "name", "redirect_uris_json", "metadata_json",
+    "created_at", "updated_at", "revoked_at"
+  ]))
+  return {
+    id: OAuthApplicationId.make(decoded.id),
+    kind: decoded.kind,
+    clientIdentifier: decoded.client_identifier,
+    name: decoded.name,
+    redirectUris: stringArrayFromJson(decoded.redirect_uris_json),
+    metadata: parseJsonColumn(decoded.metadata_json),
+    createdAt: date(decoded.created_at),
+    updatedAt: date(decoded.updated_at),
+    revokedAt: nullableDate(decoded.revoked_at)
+  }
+}
+
+export const toOAuthAuthorizationRequest = (row: Row): OAuthAuthorizationRequest => {
+  const decoded = rowDecoder("gateway_oauth_authorization_request", OAuthAuthorizationRequestRow)(pick(row, [
+    "id", "application_id", "redirect_uri", "state", "code_challenge", "resource", "scope",
+    "created_at", "expires_at", "consumed_at"
+  ]))
+  return {
+    id: decoded.id,
+    applicationId: OAuthApplicationId.make(decoded.application_id),
+    redirectUri: decoded.redirect_uri,
+    state: decoded.state,
+    codeChallenge: decoded.code_challenge,
+    resource: decoded.resource,
+    scope: decoded.scope,
+    createdAt: date(decoded.created_at),
+    expiresAt: date(decoded.expires_at),
+    consumedAt: nullableDate(decoded.consumed_at)
+  }
+}
+
+export const toOAuthGrant = (row: Row): OAuthGrant => {
+  const decoded = rowDecoder("gateway_oauth_grant", OAuthGrantRow)(pick(row, [
+    "id", "application_id", "subject_id", "tenant_id", "client_id", "resource", "scope",
+    "created_at", "last_used_at", "revoked_at"
+  ]))
+  return {
+    id: OAuthGrantId.make(decoded.id),
+    applicationId: OAuthApplicationId.make(decoded.application_id),
+    subjectId: SubjectId.make(decoded.subject_id),
+    tenantId: TenantId.make(decoded.tenant_id),
+    clientId: ClientId.make(decoded.client_id),
+    resource: decoded.resource,
+    scope: decoded.scope,
+    createdAt: date(decoded.created_at),
+    lastUsedAt: nullableDate(decoded.last_used_at),
+    revokedAt: nullableDate(decoded.revoked_at)
+  }
+}
+
+export const toOAuthAuthorizationCode = (row: Row): OAuthAuthorizationCode => {
+  const decoded = rowDecoder("gateway_oauth_authorization_code", OAuthAuthorizationCodeRow)(pick(row, [
+    "hash", "grant_id", "application_id", "redirect_uri", "code_challenge", "resource", "scope",
+    "created_at", "expires_at", "consumed_at"
+  ]))
+  return {
+    hash: OAuthSecretHash.make(decoded.hash),
+    grantId: OAuthGrantId.make(decoded.grant_id),
+    applicationId: OAuthApplicationId.make(decoded.application_id),
+    redirectUri: decoded.redirect_uri,
+    codeChallenge: decoded.code_challenge,
+    resource: decoded.resource,
+    scope: decoded.scope,
+    createdAt: date(decoded.created_at),
+    expiresAt: date(decoded.expires_at),
+    consumedAt: nullableDate(decoded.consumed_at)
+  }
+}
+
+export const toOAuthToken = (row: Row): OAuthToken => {
+  const decoded = rowDecoder("gateway_oauth_token", OAuthTokenRow)(pick(row, [
+    "hash", "kind", "family_id", "grant_id", "application_id", "resource", "scope",
+    "created_at", "expires_at", "used_at", "revoked_at", "replaced_by_hash"
+  ]))
+  return {
+    hash: OAuthSecretHash.make(decoded.hash),
+    kind: decoded.kind,
+    familyId: decoded.family_id,
+    grantId: OAuthGrantId.make(decoded.grant_id),
+    applicationId: OAuthApplicationId.make(decoded.application_id),
+    resource: decoded.resource,
+    scope: decoded.scope,
+    createdAt: date(decoded.created_at),
+    expiresAt: date(decoded.expires_at),
+    usedAt: nullableDate(decoded.used_at),
+    revokedAt: nullableDate(decoded.revoked_at),
+    replacedByHash: decoded.replaced_by_hash === null ? null : OAuthSecretHash.make(decoded.replaced_by_hash)
+  }
+}
+
 const toConnectionRef = (fields: {
   readonly owner: "org" | "user"
   readonly subject: string | null
@@ -509,6 +684,9 @@ export const toAuditRecord = (row: Row): AuditRecord => {
   return {
     id: AuditId.make(decoded.id),
     clientId: decoded.client_id === null ? null : ClientId.make(decoded.client_id),
+    oauthGrantId: decoded.oauth_grant_id === null ? null : OAuthGrantId.make(decoded.oauth_grant_id),
+    oauthApplicationId: decoded.oauth_application_id === null ? null : OAuthApplicationId.make(decoded.oauth_application_id),
+    authorizedBySubjectId: decoded.authorized_by_subject_id === null ? null : SubjectId.make(decoded.authorized_by_subject_id),
     alias: decoded.alias === null ? null : Alias.make(decoded.alias),
     tool: decoded.tool === null ? null : ToolName.make(decoded.tool),
     connection: decoded.owner === null || decoded.integration === null || decoded.connection_name === null

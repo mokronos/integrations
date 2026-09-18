@@ -17,6 +17,7 @@ import { Integrations } from "@integrations/integrations"
 import type { IntegrationServices } from "@integrations/integrations"
 import { authenticateClient, GatewayStoreService, listEffectiveTools } from "@integrations/gateway-core"
 import type { GatewayStore } from "@integrations/gateway-core"
+import type { OAuthActor } from "@integrations/gateway-core"
 import { Context, Effect, Layer, ManagedRuntime, Predicate } from "effect"
 import type { HttpClient } from "effect/unstable/http"
 import { agentTools, invokeTool } from "./mcp-tools.ts"
@@ -99,6 +100,15 @@ export interface McpGatewayOptions {
   readonly settings: GatewaySettings
   readonly httpClient: Layer.Layer<HttpClient.HttpClient>
   readonly errorCapture?: ErrorSink
+  readonly oauth?: {
+    readonly authenticate: (token: string) => Promise<{
+      readonly client: Client
+      readonly actor: OAuthActor
+      readonly expiresAt: Date
+      readonly scope: "mcp"
+    } | undefined>
+    readonly challenge: (error?: string) => string
+  }
 }
 
 const registerAgentTool = (
@@ -125,9 +135,9 @@ const effectiveToolsOf = (client: Client) =>
     return yield* capture(listEffectiveTools(store, client.id, { schemas: true, integrations }))
   })
 
-const serverFor = async (runtime: McpRuntime, client: Client): Promise<McpServer> => {
+const serverFor = async (runtime: McpRuntime, client: Client, oauthActor?: OAuthActor): Promise<McpServer> => {
   const server = new McpServer({ name: "integrations-gateway", version: gatewayVersion })
-  const caller: McpCaller = { client }
+  const caller: McpCaller = { client, ...whenPresent("oauthActor", oauthActor) }
 
   if (client.mcpSurface === "discovery") {
     for (const tool of agentTools) {
@@ -178,11 +188,21 @@ export const createMcpGatewayHandler = (options: McpGatewayOptions): McpGatewayH
     webCryptoLayer
   ))
   const authenticate = (secret: string) => runtime.runPromise(capture(authenticateClient(options.store, secret)))
+  const resolve = async (secret: string) => {
+    if (secret.startsWith("wfoa_") && options.oauth !== undefined) {
+      const oauth = await options.oauth.authenticate(secret)
+      return oauth === undefined ? undefined : { client: oauth.client, actor: oauth.actor, scope: oauth.scope }
+    }
+    const apiKey = await authenticate(secret)
+    return apiKey.status === "authenticated"
+      ? { client: apiKey.client, scope: apiKey.client.capabilities.join(" ") }
+      : apiKey
+  }
   const handler = createMcpHandler(async ({ authInfo }) => {
     if (authInfo === undefined) throw new Error("Authenticated MCP request has no identity")
-    const authentication = await authenticate(authInfo.token)
-    if (authentication.status !== "authenticated") throw new Error("MCP session key is no longer valid")
-    return serverFor(runtime, authentication.client)
+    const authentication = await resolve(authInfo.token)
+    if (authentication === undefined || "status" in authentication) throw new Error("MCP credential is no longer valid")
+    return serverFor(runtime, authentication.client, authentication.actor)
   })
 
   return {
@@ -190,19 +210,25 @@ export const createMcpGatewayHandler = (options: McpGatewayOptions): McpGatewayH
       const secret = presentedSecret(request)
       if (secret === undefined || secret.length === 0) {
         return Response.json(
-          { error: "An API key is required" },
-          { status: 401, headers: { "www-authenticate": "Bearer" } }
+          { error: "An MCP credential is required" },
+          { status: 401, headers: { "www-authenticate": options.oauth?.challenge() ?? "Bearer" } }
         )
       }
-      const authentication = await authenticate(secret)
-      if (authentication.status !== "authenticated") {
+      const authentication = await resolve(secret)
+      if (authentication === undefined) {
+        return Response.json(
+          { error: "Invalid access token" },
+          { status: 401, headers: { "www-authenticate": options.oauth?.challenge("invalid_token") ?? "Bearer" } }
+        )
+      }
+      if ("status" in authentication) {
         return authenticationFailure(authentication.status)
       }
       return handler.fetch(request, {
         authInfo: {
           token: secret,
           clientId: authentication.client.id,
-          scopes: [...authentication.client.capabilities]
+          scopes: authentication.scope.split(" ").filter((scope) => scope.length > 0)
         }
       })
     },

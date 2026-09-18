@@ -4,6 +4,7 @@ export {
   Alias, ApprovalStatus, ConnectionName, IntegrationSlug, ToolName, TenantId, SubjectId, ClientId,
   ApiKeyId, ApiKeyView, AccessProfileId, ApprovalPolicyId, ApprovalId, ApprovalDestinationId,
   ApprovalDeliveryId, AuditId, ConnectionRef, connectionSubject, connectionRefKey,
+  OAuthApplicationId, OAuthGrantId, OAuthApplicationKind, OAuthGrantView,
   sameConnectionRef, aliasForConnection, ClientCapability, ApprovalDelivery, McpSurface, ApprovalDestination,
   ApprovalDeliveryStatus, ApprovalDeliveryAttempt, Client, PolicyDecision, AccessProfile,
   AccessProfileTool, ApprovalPolicy, ApprovalPolicyTool, PendingApproval, AuditOutcome,
@@ -19,6 +20,7 @@ export type SessionTokenHash = typeof SessionTokenHash.Type
 export const LoginHandoffHash = Schema.String.pipe(Schema.brand("LoginHandoffHash"))
 export type LoginHandoffHash = typeof LoginHandoffHash.Type
 export const defaultTenantId = TenantId.make("default")
+export const defaultLocalSubjectId = SubjectId.make("local-operator")
 export const Tenant = Schema.Struct({ id: TenantId, name: Schema.String, createdAt: Schema.Date })
 export type Tenant = typeof Tenant.Type
 export const Subject = Schema.Struct({ id: SubjectId, tenantId: TenantId, createdAt: Schema.Date })

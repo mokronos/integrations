@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import * as gateway from "@/lib/gateway"
-import { apiKeyPlaceholder, mcpConfiguration } from "@/lib/mcp"
+import { apiKeyPlaceholder, mcpConfiguration, mcpOAuthConfiguration } from "@/lib/mcp"
 import { keys, useClients, useIntegrations, useInvalidate, useMcpUrl, useMutation, useQuery } from "@/lib/queries"
 import type { Connection, IntegrationOverview } from "@/lib/schemas"
 
@@ -136,7 +136,7 @@ export function OnboardingRoute() {
         <QueryError error={issue.error} />
         {secret !== undefined ? <CopyField value={secret} label="Client key" /> : null}
         <Tabs defaultValue="mcp"><TabsList><TabsTrigger value="mcp">MCP</TabsTrigger><TabsTrigger value="cli">CLI</TabsTrigger></TabsList>
-          <TabsContent value="mcp" className="space-y-3"><p className="text-muted-foreground text-sm">Add this server to your agent’s MCP configuration.</p><QueryError error={mcpUrl.error} />{mcpUrl.data ? <CopyField value={mcpConfiguration(client.name, mcpUrl.data, secret ?? apiKeyPlaceholder)} label="MCP configuration" multiline /> : <p className="text-sm">The gateway needs a reachable public URL before it can provide an MCP configuration.</p>}</TabsContent>
+          <TabsContent value="mcp" className="space-y-4"><p className="text-muted-foreground text-sm">Use browser login when your MCP client supports OAuth. You will choose the Gateway Client during authorization.</p><QueryError error={mcpUrl.error} />{mcpUrl.data ? <><CopyField value={mcpOAuthConfiguration(mcpUrl.data)} label="Browser login configuration" multiline /><div className="border-t pt-4"><p className="text-muted-foreground mb-3 text-sm">For headless agents, use the API key configuration.</p><CopyField value={mcpConfiguration(client.name, mcpUrl.data, secret ?? apiKeyPlaceholder)} label="API key configuration" multiline /></div></> : <p className="text-sm">The gateway needs a reachable public URL before it can provide an MCP configuration.</p>}</TabsContent>
           <TabsContent value="cli" className="space-y-3"><p className="text-muted-foreground text-sm">Install the CLI from GitHub and set these variables in your agent’s environment.</p><CopyField value="curl -fsSL https://github.com/mokronos/integrations/releases/latest/download/install.sh | sh" label="Install command" /><CopyField value={`export INTEGRATIONS_URL=${JSON.stringify(window.location.origin)}\nexport INTEGRATIONS_API_KEY=${JSON.stringify(secret ?? apiKeyPlaceholder)}\ni --help`} label="CLI configuration" multiline /></TabsContent>
         </Tabs>
         <div className="flex justify-between"><Button variant="ghost" onClick={() => go("connect")}><ArrowLeft className="size-4" />Back</Button><Button disabled={secret === undefined} onClick={() => go("verify")}>Test the connection<ArrowRight className="size-4" /></Button></div>

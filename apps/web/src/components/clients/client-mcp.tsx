@@ -11,7 +11,7 @@ import {
   CardTitle
 } from "@/components/ui/card"
 import { CopyField } from "@/components/ui/copy-field"
-import { apiKeyPlaceholder, mcpConfiguration } from "@/lib/mcp"
+import { apiKeyPlaceholder, mcpConfiguration, mcpOAuthConfiguration } from "@/lib/mcp"
 import { useApiKeys, useMcpUrl } from "@/lib/queries"
 
 export function ClientMcp({ clientId, clientName, disabled }: {
@@ -28,9 +28,7 @@ export function ClientMcp({ clientId, clientName, disabled }: {
       <CardHeader>
         <CardTitle className="flex items-center gap-2"><Plug className="size-4" /> Connect over MCP</CardTitle>
         <CardDescription>
-          {liveKeys === 0
-            ? "Issue a key, then paste it in place of the placeholder. The plaintext is shown once."
-            : `Authenticate with one of the ${liveKeys} live ${liveKeys === 1 ? "key" : "keys"} in place of the placeholder.`}
+          Connect with browser login, then choose the Gateway Client the MCP application may act as.
         </CardDescription>
         <CardAction>
           <IssueKeyButton clientId={clientId} clientName={clientName} disabled={disabled} variant={liveKeys === 0 ? "default" : "outline"} />
@@ -49,7 +47,17 @@ export function ClientMcp({ clientId, clientName, disabled }: {
             <Field label="Endpoint">
               <CopyField value={url} label="Endpoint" />
             </Field>
-            <Field label="Client configuration">
+            <Field label="Browser login configuration">
+              <CopyField
+                value={mcpOAuthConfiguration(url)}
+                label="OAuth configuration"
+                multiline
+              />
+            </Field>
+            <Field label="API key configuration">
+              <p className="text-muted-foreground mb-1.5 text-xs">
+                For headless agents, replace the placeholder with an API key shown once when issued.
+              </p>
               <CopyField
                 value={mcpConfiguration(clientName, url, apiKeyPlaceholder)}
                 label="Configuration"

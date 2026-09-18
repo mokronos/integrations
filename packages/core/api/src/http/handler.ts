@@ -44,6 +44,7 @@ import type { GatewayStore } from "@integrations/gateway-core"
 import type { OAuthSessions } from "@integrations/gateway-core"
 import type { WebAssets } from "../web-assets.ts"
 import { createMcpGatewayHandler } from "./mcp.ts"
+import { createMcpOAuthHandler } from "./mcp-oauth.ts"
 
 export interface GatewayRequestContext {
   readonly localSecret?: string
@@ -223,20 +224,31 @@ export const createGatewayHandler = (options: GatewayHandlerOptions): GatewayHan
     requestContext === undefined
       ? undefined
       : Context.makeUnsafe(new Map([[String(CurrentRequestContext.key), requestContext]]))
+  const oauth = createMcpOAuthHandler({
+    store: options.store,
+    settings: settingsOf(options),
+    httpClient: options.httpClient,
+    ...whenPresent("registrationLimitPerMinute", options.rateLimits?.addressPerMinute)
+  })
   const mcp = createMcpGatewayHandler({
     store: options.store,
     services: gatewayServicesContext(options),
     settings: settingsOf(options),
     httpClient: options.httpClient,
-    ...whenPresent("errorCapture", options.errorCapture)
+    ...whenPresent("errorCapture", options.errorCapture),
+    oauth
   })
   return {
-    handle: (request, requestContext) =>
-      new URL(request.url).pathname === "/mcp"
+    handle: async (request, requestContext) => {
+      const oauthResponse = await oauth.handle(request, requestContext)
+      if (oauthResponse !== undefined) return oauthResponse
+      return new URL(request.url).pathname === "/mcp"
         ? mcp.handle(request)
-        : web.handler(request, contextFor(requestContext) ?? Context.empty()),
+        : web.handler(request, contextFor(requestContext) ?? Context.empty())
+    },
     dispose: async () => {
       await mcp.dispose()
+      await oauth.dispose()
       await web.dispose()
     }
   }

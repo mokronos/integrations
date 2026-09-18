@@ -26,7 +26,8 @@ export const keys = {
   apiKeys: (clientId: string) => ["clients", clientId, "keys"] as const,
   approvals: (status: ApprovalStatus | "all") => ["approvals", status] as const,
   audit: (input: AuditQuery) => ["audit", input] as const,
-  oauthSession: (id: string) => ["oauth-session", id] as const
+  oauthSession: (id: string) => ["oauth-session", id] as const,
+  oauthGrants: ["oauth-grants"] as const
 }
 
 export const useIntegrations = () =>
@@ -107,6 +108,9 @@ export const useApprovals = (status: ApprovalStatus | "all") =>
 
 export const useAudit = (input: AuditQuery) =>
   useQuery({ queryKey: keys.audit(input), queryFn: () => gateway.listAudit(input) })
+
+export const useOAuthGrants = () =>
+  useQuery({ queryKey: keys.oauthGrants, queryFn: gateway.listOAuthGrants })
 
 export type { UseMutationResult, UseQueryResult }
 

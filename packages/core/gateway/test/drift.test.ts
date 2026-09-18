@@ -250,7 +250,8 @@ describe("gateway maintenance", () => {
         expiredApprovals: 0,
         expiredAuditArguments: 0,
         deletedSessions: 0,
-        expiredIdentityFlows: 0
+        expiredIdentityFlows: 0,
+        expiredOAuthState: 0
       })
     }).pipe(Effect.provide(testServices)))
 

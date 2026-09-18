@@ -5,6 +5,7 @@ import type { HttpClient } from "effect/unstable/http"
 import type { Integrations } from "@integrations/integrations"
 import { ToolAddress } from "@integrations/contracts"
 import type { OAuthSessions } from "./oauth-sessions.ts"
+import type { OAuthActor } from "./mcp-oauth.ts"
 import { invalidArguments } from "./arguments.ts"
 import { authorizeClientInvocation, authorizeInvocation } from "./authorize.ts"
 import { defaultApprovalExpiryHours, defaultArgumentRetentionDays } from "./config.ts"
@@ -18,6 +19,7 @@ import type {
   ApprovalId,
   Authorized,
   Client,
+  ClientId,
   ConnectionName,
   Authorization,
   ConnectionRef,
@@ -58,7 +60,8 @@ const auditFor = (
   outcome: RecordAuditInput["outcome"],
   message: string | null,
   argumentsValue: Json,
-  retentionDays: number
+  retentionDays: number,
+  oauthActor?: OAuthActor
 ): Effect.Effect<RecordAuditInput, never, Crypto.Crypto> =>
   Effect.all([newAuditId, DateTime.now]).pipe(Effect.map(([id, at]): RecordAuditInput => ({
   tenantId: authorization.client.tenantId,
@@ -70,6 +73,7 @@ const auditFor = (
   decision: authorization.decision,
   outcome,
   message,
+  ...whenPresent("oauthActor", oauthActor),
   arguments: {
     value: argumentsValue,
     expiresAt: DateTime.toDateUtc(DateTime.addDuration(at, Duration.days(retentionDays)))
@@ -85,7 +89,8 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function*(
     readonly onApprovalCreated?: InvokeDependencies["onApprovalCreated"]
   },
   authorization: Extract<Authorization, { status: "authorized" }>,
-  argumentsValue: Json
+  argumentsValue: Json,
+  oauthActor?: OAuthActor
 ): Effect.fn.Return<InvocationOutcome, GatewayStoreError, Crypto.Crypto | HttpClient.HttpClient> {
   const { store, retentionDays } = dependencies
   const pending = (approvalId: ApprovalId, expiresAt: Date): InvocationOutcome => {
@@ -123,7 +128,8 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function*(
         existing.error === null ? "succeeded" : "failed",
         `approval ${existing.id} collected`,
         argumentsValue,
-        retentionDays
+        retentionDays,
+        oauthActor
       ))
       return existing.error === null
         ? { status: "succeeded", result: existing.result }
@@ -134,7 +140,7 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function*(
       : `approval ${existing.id} was denied${existing.decidedBy === null ? "" : ` by ${existing.decidedBy}`
       }`
     yield* store.recordAudit(
-      yield* auditFor(authorization, "denied", reason, argumentsValue, retentionDays)
+      yield* auditFor(authorization, "denied", reason, argumentsValue, retentionDays, oauthActor)
     )
     return { status: "denied", reason }
   }
@@ -155,7 +161,7 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function*(
   })
   if (approval.id !== id) return pending(approval.id, approval.expiresAt)
   yield* store.recordAudit(
-    yield* auditFor(authorization, "pending", `approval ${approval.id}`, argumentsValue, retentionDays)
+    yield* auditFor(authorization, "pending", `approval ${approval.id}`, argumentsValue, retentionDays, oauthActor)
   )
   const outcome = pending(approval.id, approval.expiresAt)
   if (dependencies.onApprovalCreated !== undefined) {
@@ -180,6 +186,8 @@ const settle = Effect.fn("Invocation.settle")(function*(
     readonly alias: Alias
     readonly tool: ToolName
     readonly arguments: Json
+    readonly oauthActor?: OAuthActor
+    readonly callerClientId?: ClientId
   }
 ): Effect.fn.Return<InvocationOutcome, GatewayStoreError, Crypto.Crypto | HttpClient.HttpClient> {
   const { store, integrations } = dependencies
@@ -191,7 +199,8 @@ const settle = Effect.fn("Invocation.settle")(function*(
     yield* store.recordAudit({
       tenantId,
       id: (yield* newAuditId),
-      clientId: null,
+      clientId: input.callerClientId ?? null,
+      ...whenPresent("oauthActor", input.oauthActor),
       alias: input.alias,
       tool: input.tool,
       connection: null,
@@ -218,14 +227,16 @@ const settle = Effect.fn("Invocation.settle")(function*(
         ...whenPresent("onApprovalCreated", dependencies.onApprovalCreated)
       },
       authorization,
-      input.arguments
+      input.arguments,
+      input.oauthActor
     )
   }
 
   return yield* executeAuthorized(
     { store, integrations, retentionDays },
     authorization,
-    input.arguments
+    input.arguments,
+    input.oauthActor
   )
 })
 
@@ -309,6 +320,7 @@ export const invokeThroughGateway = Effect.fn("Invocation.invokeThroughGateway")
     readonly tool: ToolName
     readonly arguments: Json
     readonly subject?: SubjectId
+    readonly oauthActor?: OAuthActor
   }
 ): Effect.fn.Return<InvocationOutcome, GatewayStoreError, Crypto.Crypto | HttpClient.HttpClient> {
   const authorization = yield* authorizeInvocation(dependencies.store, input)
@@ -327,10 +339,14 @@ export const invokeAsClient = Effect.fn("Invocation.invokeAsClient")(function*(
     readonly tool: ToolName
     readonly arguments: Json
     readonly subject?: SubjectId
+    readonly oauthActor?: OAuthActor
   }
 ): Effect.fn.Return<InvocationOutcome, GatewayStoreError, Crypto.Crypto | HttpClient.HttpClient> {
   const authorization = yield* authorizeClientInvocation(dependencies.store, input.client, input)
-  return yield* settle(dependencies, input.client.tenantId, authorization, input)
+  return yield* settle(dependencies, input.client.tenantId, authorization, {
+    ...input,
+    callerClientId: input.client.id
+  })
 })
 
 export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(function*(
@@ -340,7 +356,8 @@ export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(funct
     readonly retentionDays: number
   },
   authorization: Extract<Authorization, { status: "authorized" }>,
-  argumentsValue: Json
+  argumentsValue: Json,
+  oauthActor?: OAuthActor
 ): Effect.fn.Return<
   Extract<InvocationOutcome, { status: "succeeded" | "failed" }>,
   GatewayStoreError,
@@ -350,13 +367,13 @@ export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(funct
   const invocation = yield* Effect.result(dependencies.integrations.execute(address, argumentsValue))
   if (invocation._tag === "Success") {
     yield* dependencies.store.recordAudit(
-      yield* auditFor(authorization, "succeeded", null, argumentsValue, dependencies.retentionDays)
+      yield* auditFor(authorization, "succeeded", null, argumentsValue, dependencies.retentionDays, oauthActor)
     )
     return { status: "succeeded", result: invocation.success }
   }
   const message = invocation.failure.message
   yield* dependencies.store.recordAudit(
-    yield* auditFor(authorization, "failed", message, argumentsValue, dependencies.retentionDays)
+    yield* auditFor(authorization, "failed", message, argumentsValue, dependencies.retentionDays, oauthActor)
   )
   return { status: "failed", message }
 })

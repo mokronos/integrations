@@ -8,6 +8,14 @@ The integrations gateway connects external tool providers to agents while keepin
 An agent-facing security principal with one or more API keys and assigned access and approval configuration.
 _Avoid_: CLI, SDK, API key
 
+**OAuth application**:
+An external MCP program that requests delegated access to the gateway.
+_Avoid_: Client, Gateway Client
+
+**OAuth grant**:
+A person's revocable authorization for an OAuth application to act as a particular Client.
+_Avoid_: Login session, API key
+
 **Access profile**:
 A reusable set of connections and tools that a client is allowed to discover and invoke.
 _Avoid_: Approval policy, permissions policy

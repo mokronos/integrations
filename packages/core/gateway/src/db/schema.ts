@@ -152,6 +152,79 @@ export const gatewayApiKey = sqliteTable("gateway_api_key", {
   revokedAt: integer("revoked_at")
 })
 
+export const gatewayOauthApplication = sqliteTable("gateway_oauth_application", {
+  id: text("id").primaryKey(),
+  kind: text("kind").notNull(),
+  clientIdentifier: text("client_identifier").notNull().unique(),
+  name: text("name").notNull(),
+  redirectUrisJson: text("redirect_uris_json").notNull(),
+  metadataJson: text("metadata_json").notNull(),
+  createdAt: createdAt(),
+  updatedAt: integer("updated_at").notNull(),
+  revokedAt: integer("revoked_at")
+})
+
+export const gatewayOauthAuthorizationRequest = sqliteTable("gateway_oauth_authorization_request", {
+  id: text("id").primaryKey(),
+  applicationId: text("application_id").notNull().references(() => gatewayOauthApplication.id, { onDelete: "cascade" }),
+  redirectUri: text("redirect_uri").notNull(),
+  state: text("state"),
+  codeChallenge: text("code_challenge").notNull(),
+  resource: text("resource").notNull(),
+  scope: text("scope").notNull(),
+  createdAt: createdAt(),
+  expiresAt: integer("expires_at").notNull(),
+  consumedAt: integer("consumed_at")
+})
+
+export const gatewayOauthGrant = sqliteTable("gateway_oauth_grant", {
+  id: text("id").primaryKey(),
+  applicationId: text("application_id").notNull().references(() => gatewayOauthApplication.id, { onDelete: "cascade" }),
+  subjectId: text("subject_id").notNull().references(() => gatewaySubject.id, { onDelete: "cascade" }),
+  tenantId: text("tenant_id").notNull().references(() => gatewayTenant.id, { onDelete: "cascade" }),
+  clientId: text("client_id").notNull().references(() => gatewayClient.id, { onDelete: "cascade" }),
+  resource: text("resource").notNull(),
+  scope: text("scope").notNull(),
+  createdAt: createdAt(),
+  lastUsedAt: integer("last_used_at"),
+  revokedAt: integer("revoked_at")
+}, (table) => [
+  uniqueIndex("gateway_oauth_grant_binding").on(
+    table.applicationId, table.subjectId, table.clientId, table.resource, table.scope
+  )
+])
+
+export const gatewayOauthAuthorizationCode = sqliteTable("gateway_oauth_authorization_code", {
+  hash: text("hash").primaryKey(),
+  grantId: text("grant_id").notNull().references(() => gatewayOauthGrant.id, { onDelete: "cascade" }),
+  applicationId: text("application_id").notNull().references(() => gatewayOauthApplication.id, { onDelete: "cascade" }),
+  redirectUri: text("redirect_uri").notNull(),
+  codeChallenge: text("code_challenge").notNull(),
+  resource: text("resource").notNull(),
+  scope: text("scope").notNull(),
+  createdAt: createdAt(),
+  expiresAt: integer("expires_at").notNull(),
+  consumedAt: integer("consumed_at")
+})
+
+export const gatewayOauthToken = sqliteTable("gateway_oauth_token", {
+  hash: text("hash").primaryKey(),
+  kind: text("kind").notNull(),
+  familyId: text("family_id").notNull(),
+  grantId: text("grant_id").notNull().references(() => gatewayOauthGrant.id, { onDelete: "cascade" }),
+  applicationId: text("application_id").notNull().references(() => gatewayOauthApplication.id, { onDelete: "cascade" }),
+  resource: text("resource").notNull(),
+  scope: text("scope").notNull(),
+  createdAt: createdAt(),
+  expiresAt: integer("expires_at").notNull(),
+  usedAt: integer("used_at"),
+  revokedAt: integer("revoked_at"),
+  replacedByHash: text("replaced_by_hash")
+}, (table) => [
+  index("gateway_oauth_token_family").on(table.familyId),
+  index("gateway_oauth_token_grant").on(table.grantId)
+])
+
 export const gatewayExternalIdentity = sqliteTable("gateway_external_identity", {
   provider: text("provider").notNull(),
   providerSubject: text("provider_subject").notNull(),
@@ -252,6 +325,9 @@ export const gatewayAudit = sqliteTable("gateway_audit", {
   id: text("id").primaryKey(),
   tenantId: text("tenant_id").notNull().references(() => gatewayTenant.id, { onDelete: "cascade" }),
   clientId: text("client_id"),
+  oauthGrantId: text("oauth_grant_id"),
+  oauthApplicationId: text("oauth_application_id"),
+  authorizedBySubjectId: text("authorized_by_subject_id"),
   alias: text("alias"),
   tool: text("tool"),
   owner: text("owner"),
