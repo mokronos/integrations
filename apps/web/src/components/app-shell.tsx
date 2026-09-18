@@ -2,7 +2,9 @@ import { Suspense, useState } from "react"
 import { NavLink, Outlet, useNavigate } from "react-router"
 import {
   Activity,
-  KeyRound,
+  BellRing,
+  Bot,
+  Inbox,
   LayoutDashboard,
   LogOut,
   Moon,
@@ -27,11 +29,11 @@ import { useSession } from "@/components/auth-gate"
 const navigation = [
   { to: "/", label: "Overview", icon: LayoutDashboard },
   { to: "/integrations", label: "Integrations", icon: Plug },
-  { to: "/clients", label: "Clients", icon: KeyRound },
+  { to: "/clients", label: "Clients", icon: Bot },
   { to: "/access-profiles", label: "Access profiles", icon: FileKey2 },
   { to: "/approval-policies", label: "Approval policies", icon: ShieldCheck },
-  { to: "/approvals", label: "Approvals", icon: ShieldCheck },
-  { to: "/approval-destinations", label: "Approval destinations", icon: ShieldCheck },
+  { to: "/approvals", label: "Approvals", icon: Inbox },
+  { to: "/approval-destinations", label: "Approval destinations", icon: BellRing },
   { to: "/activity", label: "Activity", icon: Activity },
   { to: "/account", label: "Account", icon: UserRound }
 ] as const
@@ -124,9 +126,13 @@ export function AppShell({
                     : "hover:bg-sidebar-accent/50"
                 )}
             >
-              <item.icon className="size-4" />
-              {expanded ? item.label : null}
-              {item.to === "/approvals" ? <PendingBadge compact={!expanded} /> : null}
+              {({ isActive }) => (
+                <>
+                  <item.icon className={cn("size-4", isActive && "text-primary")} />
+                  {expanded ? item.label : null}
+                  {item.to === "/approvals" ? <PendingBadge compact={!expanded} /> : null}
+                </>
+              )}
             </NavLink>
           ))}
         </nav>

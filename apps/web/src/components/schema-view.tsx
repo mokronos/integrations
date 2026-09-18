@@ -11,6 +11,8 @@ import {
   isExpandable,
   type JsonSchemaNode,
   resolve,
+  type TypeKind,
+  typeKind,
   typeLabel,
   valueLabel
 } from "@/lib/json-schema"
@@ -18,6 +20,15 @@ import { cn } from "@/lib/utils"
 import { pluralise } from "@/lib/format"
 
 const maxDepth = 8
+
+const typeColor = {
+  string: "text-syntax-string",
+  number: "text-syntax-number",
+  boolean: "text-syntax-keyword",
+  structure: "text-syntax-structure",
+  literal: "text-syntax-literal",
+  other: "text-muted-foreground"
+} satisfies Record<TypeKind, string>
 
 function SchemaRow({
   name,
@@ -52,8 +63,8 @@ function SchemaRow({
       </ItemMedia>
       <ItemContent>
         <ItemTitle className="flex-wrap gap-x-2 gap-y-0.5">
-          <span className="truncate font-mono">{name}</span>
-          <span className="text-muted-foreground font-mono text-xs font-normal">
+          <span className="text-syntax-key truncate font-mono">{name}</span>
+          <span className={cn("font-mono text-xs font-normal", typeColor[typeKind(schema)])}>
             {typeLabel(schema, root)}
           </span>
           {showRequired
@@ -61,7 +72,7 @@ function SchemaRow({
               <span
                 className={cn(
                   "text-xs font-normal",
-                  required ? "text-foreground/70" : "text-muted-foreground"
+                  required ? "text-primary" : "text-muted-foreground"
                 )}
               >
                 {required ? "required" : "optional"}
@@ -71,7 +82,7 @@ function SchemaRow({
           {schema.default === undefined
             ? null
             : (
-              <span className="text-muted-foreground font-mono text-xs font-normal">
+              <span className="text-syntax-literal font-mono text-xs font-normal">
                 = {valueLabel(schema.default)}
               </span>
             )}

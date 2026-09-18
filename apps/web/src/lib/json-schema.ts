@@ -142,6 +142,25 @@ export const typeLabel = (schema: JsonSchemaNode, root: JsonSchemaNode): string 
   return "any"
 }
 
+export type TypeKind = "string" | "number" | "boolean" | "structure" | "literal" | "other"
+
+export const typeKind = (schema: JsonSchemaNode): TypeKind => {
+  if (schema.$ref !== undefined || schema.allOf !== undefined) return "structure"
+  if (schema.const !== undefined || schema.enum !== undefined) return "literal"
+  if (schema.oneOf !== undefined || schema.anyOf !== undefined) return "other"
+  const names = typeNames(schema)
+  if (names.length !== 1) return "other"
+  switch (names[0]) {
+    case "string": return "string"
+    case "number":
+    case "integer": return "number"
+    case "boolean": return "boolean"
+    case "object":
+    case "array": return "structure"
+    default: return "other"
+  }
+}
+
 export interface SchemaProperty {
   readonly name: string
   readonly schema: JsonSchemaNode

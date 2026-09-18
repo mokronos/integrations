@@ -19,15 +19,15 @@ const highlight = (text: string): ReadonlyArray<React.ReactNode> => {
     const [whole, string, colon, keyword, number] = match
     if (string !== undefined) {
       nodes.push(
-        <span key={start} className={colon === undefined ? "text-emerald-600 dark:text-emerald-400" : "text-sky-700 dark:text-sky-300"}>
+        <span key={start} className={colon === undefined ? "text-syntax-string" : "text-syntax-key"}>
           {string}
         </span>
       )
       if (colon !== undefined) nodes.push(colon)
     } else if (keyword !== undefined) {
-      nodes.push(<span key={start} className="text-amber-600 dark:text-amber-400">{whole}</span>)
+      nodes.push(<span key={start} className="text-syntax-keyword">{whole}</span>)
     } else if (number !== undefined) {
-      nodes.push(<span key={start} className="text-violet-600 dark:text-violet-400">{whole}</span>)
+      nodes.push(<span key={start} className="text-syntax-number">{whole}</span>)
     }
     cursor = start + whole.length
   }

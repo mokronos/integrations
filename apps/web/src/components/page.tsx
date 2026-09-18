@@ -1,5 +1,5 @@
-import type { ReactNode } from "react"
-import { AlertTriangle, RefreshCw } from "lucide-react"
+import { useState, type ReactNode } from "react"
+import { AlertTriangle, Check, RefreshCw } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -33,16 +33,20 @@ export function Page({
   )
 }
 
-export function ReloadButton({
-  onClick,
-  busy
-}: {
-  readonly onClick: () => void
-  readonly busy: boolean
-}) {
+export function ReloadButton({ onClick }: { readonly onClick: () => Promise<void> }) {
+  const [state, setState] = useState<"idle" | "busy" | "done">("idle")
+  const refresh = () => {
+    setState("busy")
+    void onClick().finally(() => {
+      setState("done")
+      setTimeout(() => setState("idle"), 1200)
+    })
+  }
   return (
-    <Button variant="outline" size="icon" onClick={onClick} disabled={busy} aria-label="Refresh">
-      <RefreshCw className={cn("size-4", busy && "animate-spin")} />
+    <Button variant="outline" size="icon" onClick={refresh} disabled={state !== "idle"} aria-label="Refresh">
+      {state === "done"
+        ? <Check className="size-4 animate-in fade-in zoom-in-50 duration-200" />
+        : <RefreshCw className={cn("size-4", state === "busy" && "animate-spin")} />}
     </Button>
   )
 }

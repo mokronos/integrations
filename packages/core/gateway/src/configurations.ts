@@ -77,12 +77,27 @@ export const reconcileConfigurations = Effect.fn("Configurations.reconcile")(fun
   readonly integrations: ConfigurationCatalog
   readonly tenantId: Client["tenantId"]
 }): Effect.fn.Return<DefaultConfigurations, GatewayStoreError | StorageError> {
-  const [catalog, accessProfile, approvalPolicies] = yield* Effect.all([
+  const [catalog, accessProfile, accessProfiles, approvalPolicies] = yield* Effect.all([
     catalogConfigurationTools(input.integrations),
     input.store.findDefaultAccessProfile(input.tenantId),
+    input.store.listAccessProfiles(input.tenantId),
     input.store.listApprovalPolicies(input.tenantId)
   ])
   const approvalPolicy = approvalPolicies.find((policy) => policy.isDefault)
+
+  const liveConnections = new Set(catalog.map((entry) => connectionRefKey(entry.connection)))
+  const gone = (row: { readonly connection: ConnectionRef }): boolean =>
+    row.connection.owner === "org" && !liveConnections.has(connectionRefKey(row.connection))
+  yield* Effect.forEach(accessProfiles, (profile) => Effect.gen(function*() {
+    const tools = yield* input.store.listAccessProfileTools(profile.id)
+    const remaining = tools.filter((tool) => !gone(tool))
+    if (remaining.length !== tools.length) yield* input.store.replaceAccessProfileTools(profile.id, remaining)
+  }), { discard: true })
+  yield* Effect.forEach(approvalPolicies, (policy) => Effect.gen(function*() {
+    const tools = yield* input.store.listApprovalPolicyTools(policy.id)
+    const remaining = tools.filter((tool) => !gone(tool))
+    if (remaining.length !== tools.length) yield* input.store.replaceApprovalPolicyTools(policy.id, remaining)
+  }), { discard: true })
 
   if (accessProfile !== undefined) {
     const existing = yield* input.store.listAccessProfileTools(accessProfile.id)
@@ -99,7 +114,7 @@ export const reconcileConfigurations = Effect.fn("Configurations.reconcile")(fun
   // administrator granted by hand. Those the catalog does not know default to
   // asking a human, the same way unclassified tools do.
   const granted = (yield* Effect.forEach(
-    yield* input.store.listAccessProfiles(input.tenantId),
+    accessProfiles,
     (profile) => input.store.listAccessProfileTools(profile.id)
   )).flat()
   yield* Effect.forEach(approvalPolicies, (policy) => Effect.gen(function*() {

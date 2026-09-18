@@ -11,7 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { connectionLabel, when } from "@/lib/format"
 import type { AuditQuery } from "@/lib/gateway"
 import { whenPresent } from "@integrations/contracts"
-import { useAudit } from "@/lib/queries"
+import { refetchAll, useAudit } from "@/lib/queries"
 import { decodeAuditOutcomeFilter, instantFilter } from "@/lib/schemas"
 import type { AuditOutcome, AuditRecord } from "@/lib/schemas"
 
@@ -70,7 +70,7 @@ export function ExecutionsRoute() {
     <Page
       title="Activity"
       description="Every attempt to call through this gateway, allowed or not. Filtered and paged at the gateway so the permanent trail stays useful as it grows."
-      actions={<ReloadButton onClick={() => void audit.refetch()} busy={audit.isFetching} />}
+      actions={<ReloadButton onClick={() => refetchAll(audit)} />}
     >
       <QueryError error={audit.error} />
       <Card>

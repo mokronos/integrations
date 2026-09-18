@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/input"
 import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item"
 import { pluralise } from "@/lib/format"
 import * as gateway from "@/lib/gateway"
-import { useIntegrations, useMutation } from "@/lib/queries"
+import { refetchAll, useIntegrations, useMutation } from "@/lib/queries"
 export function IntegrationsRoute() {
   const navigate = useNavigate()
   const { slug } = useParams()
@@ -66,10 +66,7 @@ export function IntegrationsRoute() {
             <RefreshCcw className={drift.isPending ? "size-4 animate-spin" : "size-4"} />
             Check drift
           </Button>
-          <ReloadButton
-            onClick={() => void integrations.refetch()}
-            busy={integrations.isFetching}
-          />
+          <ReloadButton onClick={() => refetchAll(integrations)} />
         </>
       }
     >

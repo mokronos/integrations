@@ -4,7 +4,7 @@ import { useSearchParams } from "react-router"
 import { toast } from "sonner"
 
 import { JsonView } from "@/components/json-view"
-import { LoadingRows, Page, QueryError, ReloadButton } from "@/components/page"
+import { LoadingRows, Page, QueryError } from "@/components/page"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -156,7 +156,6 @@ export function ApprovalsRoute() {
     <Page
       title="Approvals"
       description="Calls frozen awaiting a human. The gateway performs an approved call itself, so approving discharges one invocation rather than handing over the capability."
-      actions={<ReloadButton onClick={() => void approvals.refetch()} busy={approvals.isFetching} />}
     >
       <Tabs value={filter} onValueChange={(value) => setFilter(decodeApprovalFilter(value))}>
         <TabsList>

@@ -107,6 +107,40 @@ describe("access profiles and approval policies", () => {
       ).toEqual([[ToolName.make("createEvent"), "allow"], [ToolName.make("sendEmail"), "require_approval"]])
     }).pipe(Effect.provide(testServices)))
 
+  it.effect("drops grants and decisions for org connections the catalog no longer has", () =>
+    Effect.gen(function*() {
+      const gateway = yield* store
+      const accessProfile = yield* gateway.findDefaultAccessProfile(defaultTenantId)
+      const approvalPolicy = yield* gateway.findDefaultApprovalPolicy(defaultTenantId)
+      if (accessProfile === undefined || approvalPolicy === undefined) {
+        throw new Error("missing defaults")
+      }
+      const template = { owner: "user" as const, integration: IntegrationSlug.make("mail"), name: ConnectionName.make("own") }
+      yield* gateway.replaceAccessProfileTools(accessProfile.id, [
+        { connection: connection("mail", "primary"), tool: ToolName.make("sendEmail") },
+        { connection: connection("legacy", "default"), tool: ToolName.make("ping") },
+        { connection: template, tool: ToolName.make("sendEmail") }
+      ])
+      yield* gateway.replaceApprovalPolicyTools(approvalPolicy.id, [
+        { connection: connection("legacy", "default"), tool: ToolName.make("ping"), decision: "allow" }
+      ])
+
+      yield* reconcileConfigurations({
+        store: gateway,
+        tenantId: defaultTenantId,
+        integrations: catalog([summary("mail", "primary", "sendEmail", "allow")])
+      })
+
+      expect(
+        (yield* gateway.listAccessProfileTools(accessProfile.id))
+          .map((row) => [row.connection.owner, row.connection.integration, row.tool]).sort()
+      ).toEqual([["org", "mail", "sendEmail"], ["user", "mail", "sendEmail"]])
+      expect(
+        (yield* gateway.listApprovalPolicyTools(approvalPolicy.id))
+          .map((row) => [row.connection.owner, row.connection.integration, row.tool, row.decision]).sort()
+      ).toEqual([["org", "mail", "sendEmail", "allow"], ["user", "mail", "sendEmail", "require_approval"]])
+    }).pipe(Effect.provide(testServices)))
+
   it.effect("uses the access profile for reach and the approval policy for decisions", () =>
     Effect.gen(function*() {
       const gateway = yield* store

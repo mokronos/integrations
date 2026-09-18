@@ -120,3 +120,6 @@ export const useInvalidate = () => {
 }
 
 export { useMutation, useQuery, useQueryClient }
+
+export const refetchAll = (...queries: ReadonlyArray<Pick<UseQueryResult, "refetch">>): Promise<void> =>
+  Promise.all(queries.map((query) => query.refetch())).then(() => undefined)

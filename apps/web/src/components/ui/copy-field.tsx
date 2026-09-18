@@ -11,13 +11,17 @@ export function CopyField({ value, label, multiline = false, className }: {
     <div className={cn("relative", className)}>
       <code
         className={cn(
-          "bg-background block min-w-0 rounded border py-1.5 pr-10 pl-2 font-mono text-xs",
-          multiline ? "whitespace-pre overflow-x-auto" : "break-all"
+          "bg-background block min-w-0 rounded border pr-10 pl-2 font-mono text-xs",
+          multiline ? "whitespace-pre overflow-x-auto py-1.5" : "flex min-h-9 items-center break-all py-1"
         )}
       >
         {value}
       </code>
-      <CopyButton value={value} label={label} className={copyButtonOverlay} />
+      <CopyButton
+        value={value}
+        label={label}
+        className={multiline ? copyButtonOverlay : "absolute inset-y-0 right-1 my-auto"}
+      />
     </div>
   )
 }
