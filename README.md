@@ -7,6 +7,67 @@ executing calls under policy.
 The gateway is the only component that sees credentials. Clients receive an API
 key and invoke logical `{ alias, tool }` addresses through the HTTP API.
 
+## Quickstart
+
+Install the latest release and start the local gateway:
+
+```bash
+curl -fsSL https://github.com/mokronos/integrations/releases/latest/download/install.sh | sh
+ii install
+```
+
+Add the integrations skill globally to your agent:
+
+```bash
+npx skills add https://github.com/mokronos/integrations/tree/main/.agents/skills/integrations -g
+```
+
+Start a new agent session and ask it to use an integration. For example:
+
+```bash
+check my open issues on linear
+```
+
+The skill teaches the agent to discover, connect, inspect, and call integrations
+directly with `i`.
+
+## Gateway and dashboard
+
+`i` is a client for the gateway, so a gateway must be running. `ii install`
+registers and starts the local gateway as a per-user service on Linux or macOS.
+Use `ii serve -d` instead to run it only for the current session. A separately
+hosted gateway can be used instead by setting `INTEGRATIONS_URL` and
+`INTEGRATIONS_API_KEY`.
+
+Open the optional control plane with:
+
+```bash
+ii dashboard
+```
+
+The release installer requires curl, Git, and Bun 1.2 or newer. It checks out
+the release under `~/.local/share/integrations`, builds the control plane, and
+puts `i` and `ii` on PATH. Override those locations with
+`INTEGRATIONS_INSTALL_DIR` and `INTEGRATIONS_BIN_DIR`.
+
+To install the current development branch instead of a release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mokronos/integrations/main/install.sh | sh
+```
+
+Re-run the same command to upgrade. The installer refuses to overwrite local
+changes in its checkout.
+
+`i` mirrors the public TypeScript client: agents can discover integrations,
+manage connections, inspect schemas, invoke effective policy tools, and poll
+their own approvals. `ii` is its strict operator superset, adding every
+dashboard action, human login/account commands, and local gateway lifecycle
+commands.
+
+State defaults to `~/.integrations`; set `INTEGRATIONS_HOME` to use another
+directory.
+
 ## Surfaces
 
 | Path | Purpose |
@@ -23,39 +84,6 @@ key and invoke logical `{ alias, tool }` addresses through the HTTP API.
 | `packages/contracts/` | Shared vocabulary and wire contracts |
 
 `VISION.md` records product direction.
-
-## Install
-
-Install the latest GitHub release with curl, Git, and Bun 1.2 or newer:
-
-```bash
-curl -fsSL https://github.com/mokronos/integrations/releases/latest/download/install.sh | sh
-ii install
-ii dashboard
-```
-
-`ii install` registers the gateway as a per-user service on Linux or macOS. Use
-`ii serve -d` instead to run it for the current session. The installer checks
-out the release under `~/.local/share/integrations`, builds the control plane,
-and puts `i` and `ii` on PATH. Override those locations with
-`INTEGRATIONS_INSTALL_DIR` and `INTEGRATIONS_BIN_DIR`.
-
-To install the current development branch instead of a release:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/mokronos/integrations/main/install.sh | sh
-```
-
-Re-run the same command to upgrade. The installer refuses to overwrite local
-changes in its checkout.
-
-`i` mirrors the public TypeScript client: agents can discover integrations,
-manage connections, inspect schemas, invoke effective policy tools, and poll their own
-approvals. `ii` is its strict operator superset, adding every dashboard action,
-human login/account commands, and local gateway lifecycle commands.
-
-State defaults to `~/.integrations`; set `INTEGRATIONS_HOME` to use another
-directory.
 
 ## Development
 

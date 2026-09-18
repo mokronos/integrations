@@ -35,7 +35,12 @@ const ConnectionsOutput = Schema.Struct({
 })
 const ToolsOutput = Schema.Struct({
   count: Schema.Number,
-  tools: Schema.Array(Schema.Struct({ tool: Schema.String, connection: Schema.String })),
+  next: Schema.String,
+  tools: Schema.Array(Schema.Struct({
+    alias: Schema.String,
+    tool: Schema.String,
+    connection: Schema.String
+  })),
   showing: Schema.optional(Schema.Number)
 })
 const WindowedToolsOutput = Schema.Struct({
@@ -376,13 +381,21 @@ describe("integrations CLI acceptance", () => {
 
         const tools = yield* integrations(["tools", slug])
         expect(tools.exitCode, tools.stderr).toBe(0)
-        expect(tools.stdout).toContain("tickets.create")
+        const toolsOutput = parseOutput(ToolsOutput, tools.stdout)
 
         const listed = parseOutput(ConnectionsOutput, (yield* integrations(["connections"])).stdout)
         const address = listed.connections[0]?.address ?? ""
         const connectionName = listed.connections[0]?.name ?? ""
+        const alias = orgAlias(slug, connectionName)
 
-        const schema = yield* integrations(["schema", orgAlias(slug, connectionName), "tickets.create"])
+        expect(toolsOutput.tools).toEqual([{
+          alias,
+          connection: connectionName,
+          tool: "tickets.create"
+        }])
+        expect(toolsOutput.next).toBe(`i schema ${alias} tickets.create`)
+
+        const schema = yield* integrations(["schema", alias, "tickets.create"])
         expect(schema.exitCode, schema.stderr).toBe(0)
         expect(schema.stdout).toContain("title")
         expect(address).toMatch(new RegExp(`^tools\\.${slug}\\.org\\.`))
@@ -497,6 +510,8 @@ describe("integrations CLI acceptance", () => {
       )
       expect(visible.tools.map((tool) => tool.tool)).toEqual(["tickets.create"])
       expect(visible.tools[0]?.connection).toBe(connectionName)
+      expect(visible.tools[0]?.alias).toBe(orgAlias(slug, connectionName))
+      expect(visible.next).toBe(`i schema ${orgAlias(slug, connectionName)} tickets.create`)
       const visibleSchema = yield* clientCli([
         "schema", orgAlias(slug, connectionName), "tickets.create"
       ], sandbox)

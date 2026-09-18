@@ -3,11 +3,12 @@ import { Effect, Result } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import {
   GatewayProtocolError,
+  GatewayUnavailableError,
   gatewayProtocolVersion,
   makeGatewayClient
 } from "../src/index.ts"
 
-const transportOf = (protocolVersion: number) => {
+const transportOf = (protocolVersion: number | "unavailable") => {
   let metadataRequests = 0
   const authenticatedRequests: Array<Headers> = []
   const implementation = async (
@@ -17,6 +18,7 @@ const transportOf = (protocolVersion: number) => {
     const url = String(input)
     if (url.endsWith("/v1/metadata")) {
       metadataRequests += 1
+      if (protocolVersion === "unavailable") throw new Error("connection refused")
       return Response.json({ ok: true, protocolVersion, gatewayVersion: "test" })
     }
     if (url.endsWith("/v1/connections")) {
@@ -44,7 +46,26 @@ const withClient = <A, E>(
     Effect.provideService(FetchHttpClient.Fetch, transport.fetch)
   )
 
-describe("gateway protocol compatibility", () => {
+describe("gateway metadata", () => {
+  it.effect("reports an unreachable gateway separately from protocol incompatibility", () =>
+    Effect.gen(function*() {
+      const transport = transportOf("unavailable")
+
+      const result = yield* withClient(
+        transport,
+        "https://gateway.example",
+        (client) => Effect.result(client.metadata)
+      )
+
+      expect(Result.isFailure(result)).toBe(true)
+      const failure = Result.isFailure(result) ? result.failure : undefined
+      expect(failure).toBeInstanceOf(GatewayUnavailableError)
+      expect(String(failure)).toContain("Gateway at https://gateway.example is unavailable")
+      expect(String(failure)).toContain("Retry the same command")
+      expect(transport.metadataRequests()).toBe(1)
+      expect(transport.authenticatedRequests()).toHaveLength(0)
+    }))
+
   it.effect("rejects an incompatible gateway before sending an authenticated request", () =>
     Effect.gen(function*() {
       const transport = transportOf(gatewayProtocolVersion + 1)

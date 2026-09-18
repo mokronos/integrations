@@ -254,20 +254,30 @@ export const toolsCommand = (runGateway: GatewayTask) => Command.make(
           text(tool["tool"]).toLowerCase().includes(term) ||
           text(tool["description"]).toLowerCase().includes(term)
         )
+      const visible = page(
+        sortedBy(matching, (tool) => text(tool["name"])),
+        window(limit, offset)
+      )
+      const only = visible.items.length === 1 ? record(visible.items[0]) : undefined
+      const alias = text(only?.["alias"])
+      const tool = text(only?.["tool"])
       return listing(
-        page(sortedBy(matching, (tool) => text(tool["name"])), window(limit, offset)),
+        visible,
         {
           key: "tools",
           narrowing: "narrow with --filter <text>, or window with --limit/--offset",
           verbose,
           empty: term === undefined ? "No tools available." : `No tools match "${term}".`,
-          next: "i schema <alias> <tool>",
+          next: alias.length > 0 && tool.length > 0
+            ? `i schema ${alias} ${tool}`
+            : "i schema <alias> <tool>",
           extra: {
             integration,
             ...whenPresent("connection", Option.getOrUndefined(connection))
           },
           row: (tool) =>
             verbose ? tool : {
+              alias: tool["alias"] ?? null,
               connection: record(tool["connection"])["name"] ?? null,
               tool: tool["tool"] ?? null,
               decision: tool["decision"] ?? null,

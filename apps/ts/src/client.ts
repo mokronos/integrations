@@ -49,14 +49,30 @@ export class GatewayProtocolError extends Error {
   }
 }
 
+export class GatewayUnavailableError extends Schema.TaggedError<GatewayUnavailableError>()(
+  "GatewayUnavailableError",
+  {
+    url: Schema.String,
+    message: Schema.String
+  }
+) {}
+
 const decodeGatewayMetadata = Schema.decodeUnknownEffect(GatewayMetadata)
 
 export const readGatewayMetadata = Effect.fn("GatewayClient.readMetadata")(function*(
   url: string
-): Effect.fn.Return<GatewayMetadata, GatewayProtocolError, HttpClient.HttpClient> {
-  const response = yield* HttpClient.get(`${url.replace(/\/+$/, "")}/v1/metadata`).pipe(
+): Effect.fn.Return<
+  GatewayMetadata,
+  GatewayProtocolError | GatewayUnavailableError,
+  HttpClient.HttpClient
+> {
+  const base = url.replace(/\/+$/, "")
+  const response = yield* HttpClient.get(`${base}/v1/metadata`).pipe(
     Effect.mapError((cause) =>
-      new GatewayProtocolError(undefined, `metadata could not be read: ${cause.message}`)
+      new GatewayUnavailableError({
+        url: base,
+        message: `Gateway at ${base} is unavailable: ${cause.message}. Retry the same command once the gateway is running.`
+      })
     )
   )
   if (response.status < 200 || response.status >= 300) {
@@ -91,7 +107,7 @@ const makeEndpoints = (
    * is refused before an authenticated request reaches it rather than after.
    * The check is cached, so it costs one request per client, not one per call.
    */
-  compatible: Effect.Effect<unknown, GatewayProtocolError>
+  compatible: Effect.Effect<unknown, GatewayProtocolError | GatewayUnavailableError>
 ) =>
   HttpApiClient.makeWith(GatewayApi, {
     baseUrl: options.url.replace(/\/+$/, ""),
@@ -103,7 +119,10 @@ const makeEndpoints = (
 
 export interface GatewayClient extends GatewayEndpoints {
   readonly url: string
-  readonly metadata: Effect.Effect<GatewayMetadata, GatewayProtocolError>
+  readonly metadata: Effect.Effect<
+    GatewayMetadata,
+    GatewayProtocolError | GatewayUnavailableError
+  >
   readonly health: Effect.Effect<boolean>
 }
 

@@ -16,13 +16,31 @@ import {
   ShieldCheck,
   Terminal,
   Users,
-  Workflow,
   Zap
 } from "lucide-react"
 
 const REPO = "https://github.com/mokronos/integrations"
 const INSTALL =
   "curl -fsSL https://github.com/mokronos/integrations/releases/latest/download/install.sh | sh"
+const INSTALL_SKILL =
+  "npx skills add https://github.com/mokronos/integrations/tree/main/.agents/skills/integrations -g"
+const QUICKSTART = [
+  {
+    n: "1",
+    title: "Install and start",
+    command: `${INSTALL}\nii install`
+  },
+  {
+    n: "2",
+    title: "Add the skill",
+    command: INSTALL_SKILL
+  },
+  {
+    n: "3",
+    title: "Ask your agent",
+    command: "Use integrations to connect Linear and list my open issues."
+  }
+] as const
 
 interface Integration {
   readonly name: string
@@ -59,27 +77,27 @@ interface Step {
 const STEPS: ReadonlyArray<Step> = [
   {
     n: "01",
-    title: "Add an integration",
-    body: "Paste an OpenAPI spec URL or point at an MCP server. The gateway indexes every tool, detects auth methods, and derives safe defaults.",
-    icon: Plug
+    title: "Install the gateway",
+    body: "Install the release, then run ii install. The local service keeps credentials and enforces policy for every call.",
+    icon: Server
   },
   {
     n: "02",
-    title: "Create a connection",
-    body: "Authorize once — OAuth, bearer token, or API key. Credentials live in the gateway only; clients never see them.",
-    icon: KeyRound
+    title: "Add the agent skill",
+    body: "Install the integrations skill globally. It teaches your agent the complete i workflow, from discovery through execution.",
+    icon: Braces
   },
   {
     n: "03",
-    title: "Set reusable policies",
-    body: "Grant connections per client with an access profile, and decide per tool whether it runs immediately or needs human approval.",
-    icon: ShieldCheck
+    title: "Ask for an outcome",
+    body: "Tell your agent what you need in plain language. It uses i directly to find the service, connect it, inspect schemas, and call tools.",
+    icon: Terminal
   },
   {
     n: "04",
-    title: "Point every agent at it",
-    body: "One CLI, one TypeScript client, one MCP endpoint. Every harness shares the same catalog, the same auth, the same policy.",
-    icon: Workflow
+    title: "Keep control",
+    body: "Credentials stay in the gateway. Safe reads run immediately; writes and unknown operations wait for human approval.",
+    icon: ShieldCheck
   }
 ]
 
@@ -92,19 +110,20 @@ const CODE_TABS: ReadonlyArray<{ readonly id: CodeTab; readonly label: string }>
 ]
 
 const CODE_SNIPPETS = {
-  cli: `# agents live here — discovery to execution, no credentials in hand
-i search "send email"          # find integrations by intent
-i discover gmail               # auth methods + schemas
-i tools                        # your effective tools
-i schema org_gmail_work sendMessage
-i execute org_gmail_work sendMessage '{"to":"ada@example.com"}'`,
+  cli: `# the skill teaches your agent this complete workflow
+i integrations
+i search linear
+i discover https://mcp.linear.app/mcp
+i connect mcp_linear_app
+i tools mcp_linear_app --filter list_issues
+# tools returns the exact alias and next schema command
+# schema returns the exact next execute command`,
   gateway: `# agent harness -> sandbox -> client -> gateway -> integration
 #                                        -> human (approval)
 
 # safe reads run immediately, writes pause for a human:
-#   approval-required + execution id -> resume after decision
-i approval --pending
-i execute exec_01H9... --resume`,
+#   {"status":"pending","approvalId":"approval_..."}
+i approval approval_...`,
   mcp: `# any MCP-compatible client shares the same catalog
 npx add-mcp http://127.0.0.1:4788/mcp --transport http --name integrations
 
@@ -282,21 +301,37 @@ function Hero() {
           OpenAPI · MCP · OAuth — one catalog for every agent
         </a>
         <h1 className="mx-auto mt-7 max-w-3xl text-5xl font-semibold tracking-tighter text-balance sm:text-6xl">
-          Every API your agents need. <span className="text-orange-400">One gateway.</span>
+          Give your agent every API. <span className="text-orange-400">Just ask.</span>
         </h1>
         <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-pretty text-neutral-400">
-          integrations is the agent-facing gateway for discovering external APIs, holding their
-          credentials, assigning reusable tool policies to clients, and executing calls under
-          policy.
+          Install the gateway, add one skill, and your agent uses the
+          <span className="font-mono text-[0.9em] text-neutral-200"> i</span> CLI directly to
+          discover, connect, and call external services under your policies.
         </p>
-        <div className="mx-auto mt-9 flex max-w-xl items-center gap-2 rounded-xl border border-white/10 bg-neutral-950/90 p-2 pl-4 text-left shadow-2xl shadow-orange-500/5">
-          <Terminal className="size-4 shrink-0 text-orange-400" />
-          <code className="min-w-0 flex-1 truncate font-mono text-[13px] text-neutral-200">
-            {INSTALL} | sh
-          </code>
-          <CopyButton text={`${INSTALL} | sh`} />
+        <div className="mx-auto mt-9 max-w-4xl overflow-hidden rounded-2xl border border-white/10 bg-neutral-950/90 text-left shadow-2xl shadow-orange-500/5">
+          <div className="flex items-center gap-2 border-b border-white/10 px-4 py-3">
+            <Terminal className="size-4 text-orange-400" />
+            <span className="text-sm font-semibold">Local quickstart</span>
+            <span className="ml-auto text-xs text-neutral-500">Linux · macOS</span>
+          </div>
+          <div className="divide-y divide-white/5">
+            {QUICKSTART.map((step) => (
+              <div key={step.n} className="flex items-start gap-3 px-4 py-3">
+                <span className="grid size-6 shrink-0 place-items-center rounded-full bg-orange-500/15 font-mono text-xs font-semibold text-orange-300">
+                  {step.n}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-medium text-neutral-400">{step.title}</p>
+                  <code className="mt-1 block whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed text-neutral-200">
+                    {step.command}
+                  </code>
+                </div>
+                <CopyButton text={step.command} />
+              </div>
+            ))}
+          </div>
         </div>
-        <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
           <a
             href="#get-started"
             className="flex items-center gap-2 rounded-xl bg-orange-500 px-6 py-3 font-semibold text-black transition hover:bg-orange-400"
@@ -312,7 +347,7 @@ function Hero() {
             View on GitHub
           </a>
         </div>
-        <dl className="mx-auto mt-14 grid max-w-3xl grid-cols-1 gap-3 sm:grid-cols-3">
+        <dl className="mx-auto mt-12 grid max-w-3xl grid-cols-1 gap-3 sm:grid-cols-3">
           {[
             { icon: Globe, k: "Any API", v: "OpenAPI specs + MCP servers" },
             { icon: Lock, k: "Zero key sprawl", v: "Gateway holds all credentials" },
@@ -386,7 +421,7 @@ function HowItWorks() {
           How it works
         </p>
         <h2 className="mx-auto mt-4 max-w-xl text-center text-3xl font-semibold tracking-tight text-balance">
-          Configure once. Every agent shares it.
+          Install once. Then ask your agent.
         </h2>
         <div className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {STEPS.map((step) => (
@@ -583,22 +618,36 @@ function GetStarted() {
   return (
     <section id="get-started" className="scroll-mt-20 pb-24">
       <div className="mx-auto max-w-6xl px-6">
-        <div className="rounded-3xl border border-white/10 bg-neutral-950/80 p-10 text-center sm:p-14">
+        <div className="rounded-3xl border border-white/10 bg-neutral-950/80 p-8 sm:p-14">
           <h2 className="mx-auto max-w-xl text-3xl font-semibold tracking-tight text-balance">
-            Give every agent the same tools, safely.
+            From zero to agent-powered integrations
           </h2>
-          <p className="mx-auto mt-4 max-w-lg text-neutral-400">
-            Install the latest release, register the gateway as a service, and open the dashboard
-            to add your first integration.
+          <p className="mx-auto mt-4 max-w-2xl text-neutral-400">
+            The local gateway must be running for <span className="font-mono text-neutral-200">i</span> to work.
+            After that, the skill gives your agent the full workflow.
           </p>
-          <div className="mx-auto mt-8 flex max-w-xl items-center gap-2 rounded-xl border border-white/10 bg-black/60 p-2 pl-4 text-left">
-            <Terminal className="size-4 shrink-0 text-orange-400" />
-            <code className="min-w-0 flex-1 truncate font-mono text-[13px] text-neutral-200">
-              ii install && ii dashboard
-            </code>
-            <CopyButton text="ii install && ii dashboard" />
+          <div className="mt-9 grid gap-3 text-left lg:grid-cols-3">
+            {QUICKSTART.map((step) => (
+              <div key={step.n} className="flex min-w-0 flex-col rounded-2xl border border-white/10 bg-black/60 p-5">
+                <div className="flex items-center gap-3">
+                  <span className="grid size-7 shrink-0 place-items-center rounded-full bg-orange-500 font-mono text-sm font-semibold text-black">
+                    {step.n}
+                  </span>
+                  <h3 className="font-semibold">{step.title}</h3>
+                </div>
+                <div className="mt-4 flex min-h-24 items-start gap-2 rounded-xl border border-white/5 bg-white/[0.03] p-3">
+                  <code className="min-w-0 flex-1 whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed text-neutral-300">
+                    {step.command}
+                  </code>
+                  <CopyButton text={step.command} />
+                </div>
+              </div>
+            ))}
           </div>
-          <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
+          <p className="mt-6 text-center text-sm text-neutral-500">
+            Want a visual control plane? Run <span className="font-mono text-neutral-300">ii dashboard</span> after installation.
+          </p>
+          <div className="mt-7 flex flex-wrap items-center justify-center gap-3 text-center">
             <a
               href={`${REPO}/releases/latest`}
               className="flex items-center gap-2 rounded-xl bg-orange-500 px-6 py-3 font-semibold text-black transition hover:bg-orange-400"
