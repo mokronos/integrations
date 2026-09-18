@@ -20,7 +20,7 @@ vocabulary come from `@integrations/contracts`.
 
 | Library | Does |
 | --- | --- |
-| `@modelcontextprotocol/sdk` | MCP transports and framing, plus the OAuth 2.1 flow primitives — which serve OpenAPI connections too, so there is one OAuth implementation |
+| `@modelcontextprotocol/client` | MCP transports and framing, plus the OAuth 2.1 flow primitives — which serve OpenAPI connections too, so there is one OAuth implementation |
 | `oas` | Projects an OpenAPI operation's parameters and responses into JSON Schema |
 | `oas-normalize` | Parses, upconverts Swagger 2.0, and bundles a document |
 | `@effect/sql-libsql` | The SQLite driver behind the local host's `SqlClient` |

@@ -30,13 +30,10 @@
   "observability": {
     "enabled": true
   },
-  // Vendored third-party code drags two unshippable modules into the graph:
-  // an MCP stdio transport that the runtime gate disables anyway, and a DNS
-  // resolver behind a code path nothing calls. Both become build-time stubs.
+  // Vendored third-party code drags a DNS resolver into the graph behind a
+  // code path nothing calls. It becomes a build-time stub.
   "alias": {
-    "dns/promises": "./src/stubs/empty.ts",
-    "@modelcontextprotocol/sdk/client/stdio.js": "./src/stubs/empty.ts",
-    "@modelcontextprotocol/sdk/client/stdio": "./src/stubs/empty.ts"
+    "dns/promises": "./src/stubs/empty.ts"
   },
   "vars": {
     // OAuth callbacks land here; matches the deployed workers.dev origin.
