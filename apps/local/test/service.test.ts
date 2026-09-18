@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Layer, Schema } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import { GatewayMetadata } from "@mokronos/integrations-contracts"
+import { gatewayVersion } from "@mokronos/integrations-gateway-api"
 import {
   defaultTenantId,
   gatewayConfigPath,
@@ -33,7 +34,7 @@ describe("gateway service", () => {
 
       const response = yield* HttpClient.get(`${running.url}/v1/metadata`)
       const metadata = Schema.decodeUnknownSync(GatewayMetadata)(yield* response.json)
-      expect(metadata.gatewayVersion).toBe("0.2.0")
+      expect(metadata.gatewayVersion).toBe(gatewayVersion)
       expect(response.headers["cache-control"]).toBe("no-store")
     }).pipe(Effect.provide(services)))
 
