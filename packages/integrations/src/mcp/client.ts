@@ -67,9 +67,9 @@ const connect = (
 ): Effect.Effect<Client, McpError> =>
   Effect.tryPromise({
     try: async () => {
-      const client = new Client(clientInfo, {
-        versionNegotiation: { mode: { pin: PROTOCOL_VERSION } }
-      })
+      // `auto` probes for the modern era and falls back to the 2025 handshake,
+      // so one client reaches both a current server and an older one.
+      const client = new Client(clientInfo, { versionNegotiation: { mode: "auto" } })
       await client.connect(
         new StreamableHTTPClientTransport(new URL(endpoint), {
           requestInit: { headers: credentialHeaders(credential) }
@@ -179,12 +179,6 @@ const DiscoverResponse = Schema.Struct({
 })
 
 const decodeDiscoverResponse = Schema.decodeUnknownEffect(DiscoverResponse)
-
-const MODERN_ERROR_CODES: ReadonlyArray<number> = [
-  -32022,
-  -32021,
-  -32020
-]
 
 const lastEventData = (body: string): Option.Option<string> =>
   Option.fromNullishOr(
@@ -309,6 +303,49 @@ export class McpClient extends Context.Service<
         return tools.length
       })
 
+      /**
+       * What a server says about itself over a live session. Older servers do
+       * not answer `server/discover`, so this is the only description they can
+       * give, and it is enough: name, instructions, and how many tools it has.
+       */
+      const describeSession = Effect.fn("McpClient.describeSession")(function*(
+        endpoint: string,
+        fallback: { readonly name: string; readonly slug: string },
+        authority: Option.Option<{ readonly supportsDynamicRegistration: boolean; readonly scopes: ReadonlyArray<string> }>
+      ) {
+        const described = yield* withClient(endpoint, Option.none(), (session) =>
+          Effect.sync(() => ({
+            serverName: session.getServerVersion()?.name ?? null,
+            instructions: session.getInstructions() ?? null,
+            hasTools: session.getServerCapabilities()?.tools !== undefined
+          })))
+        const toolCount = described.hasTools
+          ? (yield* listTools(endpoint, Option.none())).length
+          : 0
+        return yield* Schema.decodeUnknownEffect(McpProbe)({
+          connected: true,
+          requiresAuthentication: Option.isSome(authority),
+          requiresOAuth: Option.isSome(authority),
+          supportsDynamicRegistration: Option.match(authority, {
+            onNone: () => false,
+            onSome: (found) => found.supportsDynamicRegistration
+          }),
+          scopes: Option.match(authority, {
+            onNone: (): ReadonlyArray<string> => [],
+            onSome: (found) => found.scopes
+          }),
+          name: described.serverName ?? fallback.name,
+          slug: described.serverName === null
+            ? fallback.slug
+            : Option.getOrElse(slugify(described.serverName), () => fallback.slug),
+          toolCount,
+          serverName: described.serverName,
+          instructions: described.instructions
+        }).pipe(Effect.mapError((cause) =>
+          new McpError({ endpoint, detail: "Could not describe probe", cause })
+        ))
+      })
+
       const probe = Effect.fn("McpClient.probe")(function*(endpoint: string) {
         const { response, body } = yield* probeDiscovery(client, endpoint)
         const name = fallbackName(endpoint)
@@ -348,29 +385,20 @@ export class McpClient extends Context.Service<
           )
         )
 
-        if (answered.result === undefined) {
-          const code = answered.error?.code
-          return yield* new McpError({
-            endpoint,
-            detail: code !== undefined && MODERN_ERROR_CODES.includes(code)
-              ? `it speaks MCP but not protocol revision ${PROTOCOL_VERSION} ` +
-                `(${answered.error?.message ?? `error ${code}`})`
-              : `it refused server/discover (${answered.error?.message ?? "no result"})`
-          })
+        const authority = yield* inspectAuthority(endpoint, response.headers)
+
+        // A server that refuses `server/discover`, or that does not offer this
+        // host's revision, is an older server rather than an unusable one: the
+        // session handshake still reaches it.
+        if (
+          answered.result === undefined ||
+          !answered.result.supportedVersions.includes(PROTOCOL_VERSION)
+        ) {
+          return yield* describeSession(endpoint, { name, slug }, authority)
         }
 
         const discovered = answered.result
-        if (!discovered.supportedVersions.includes(PROTOCOL_VERSION)) {
-          return yield* new McpError({
-            endpoint,
-            detail: `it supports protocol revisions ${discovered.supportedVersions.join(", ")}, ` +
-              `and this host speaks only ${PROTOCOL_VERSION}`
-          })
-        }
-
         const toolCount = yield* countTools(endpoint, discovered.capabilities)
-
-        const authority = yield* inspectAuthority(endpoint, response.headers)
         const serverName = discovered._meta?.["io.modelcontextprotocol/serverInfo"]?.name ?? null
         return yield* Schema.decodeUnknownEffect(McpProbe)({
           connected: true,
