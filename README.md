@@ -25,7 +25,7 @@ npx skills add https://github.com/mokronos/integrations/tree/main/.agents/skills
 Start a new agent session and ask it to use an integration. For example:
 
 ```bash
-check my open issues on linear
+Check my open linear issues
 ```
 
 The skill teaches the agent to discover, connect, inspect, and call integrations

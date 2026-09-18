@@ -38,7 +38,7 @@ const QUICKSTART = [
   {
     n: "3",
     title: "Ask your agent",
-    command: "Use integrations to connect Linear and list my open issues."
+    command: "Check my open linear issues"
   }
 ] as const
 
