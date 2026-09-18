@@ -4,7 +4,8 @@ import { toast } from "sonner"
 
 import { Page } from "@/components/page"
 import { useSession } from "@/components/auth-gate"
-import { changeEmail, changePassword, deleteAccount } from "@/lib/gateway"
+import { changeEmail, changePassword, deleteAccount, revokeOAuthGrant } from "@/lib/gateway"
+import { keys, useInvalidate, useMutation, useOAuthGrants } from "@/lib/queries"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
   AlertDialog,
@@ -35,7 +36,7 @@ export function AccountRoute() {
   if (session.kind !== "session") {
     return (
       <Page title="Account" description="This local control plane is authenticated by its loopback credential.">
-        <Card className="max-w-2xl">
+        <div className="grid max-w-2xl gap-6"><Card>
           <CardHeader>
             <CardTitle>Local operator</CardTitle>
             <CardDescription>
@@ -44,7 +45,7 @@ export function AccountRoute() {
               remains on loopback.
             </CardDescription>
           </CardHeader>
-        </Card>
+        </Card><OAuthApplicationsCard /></div>
       </Page>
     )
   }
@@ -69,6 +70,8 @@ export function AccountRoute() {
           </CardHeader>
         </Card>
 
+        <OAuthApplicationsCard />
+
         <Card>
           <CardHeader>
             <CardTitle>Sign-in methods</CardTitle>
@@ -85,6 +88,52 @@ export function AccountRoute() {
         <DeleteAccountCard hasPassword={session.hasPassword} />
       </div>
     </Page>
+  )
+}
+
+function OAuthApplicationsCard() {
+  const grants = useOAuthGrants()
+  const invalidate = useInvalidate()
+  const revoke = useMutation({
+    mutationFn: revokeOAuthGrant,
+    onSuccess: () => invalidate(keys.oauthGrants)
+  })
+  const active = grants.data?.filter((grant) => grant.revokedAt === null) ?? []
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Connected MCP applications</CardTitle>
+        <CardDescription>
+          Browser-authorized applications. Revoking one immediately invalidates its access and refresh tokens.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {grants.isPending ? <p className="text-muted-foreground text-sm">Loading connections…</p> : null}
+        {grants.error ? <Alert variant="destructive"><AlertTitle>Could not load applications</AlertTitle><AlertDescription>{grants.error.message}</AlertDescription></Alert> : null}
+        {!grants.isPending && active.length === 0 ? <p className="text-muted-foreground text-sm">No MCP applications are connected.</p> : null}
+        {active.map((grant) => (
+          <div key={grant.id} className="flex items-start justify-between gap-4 rounded-lg border p-3">
+            <div className="min-w-0 text-sm">
+              <p className="font-medium">{grant.applicationName}</p>
+              <p className="text-muted-foreground">Acts as {grant.clientName} · authorized by {grant.subjectEmail}</p>
+              <p className="text-muted-foreground mt-1 text-xs">
+                {grant.applicationKind === "cimd" ? "Client metadata document" : "Dynamic registration"}
+                {grant.lastUsedAt === null ? " · Not used yet" : ` · Last used ${grant.lastUsedAt.toLocaleString()}`}
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={revoke.isPending && revoke.variables === grant.id}
+              onClick={() => revoke.mutate(grant.id)}
+            >
+              Revoke
+            </Button>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
   )
 }
 

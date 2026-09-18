@@ -11,6 +11,8 @@ import {
   AccessProfileId,
   ApprovalPolicyId,
   LoginHandoffHash,
+  OAuthApplicationId,
+  OAuthGrantId,
   SubjectId,
   TenantId
 } from "./domain.ts"
@@ -38,6 +40,11 @@ export const sha256Hex = (text: string): Effect.Effect<string, never, Crypto.Cry
   Effect.flatMap(Crypto.Crypto, (crypto) =>
     Effect.orDie(crypto.digest("SHA-256", utf8Bytes(text)))
   ).pipe(Effect.map(Encoding.encodeHex))
+
+export const sha256Base64Url = (text: string): Effect.Effect<string, never, Crypto.Crypto> =>
+  Effect.flatMap(Crypto.Crypto, (crypto) =>
+    Effect.orDie(crypto.digest("SHA-256", utf8Bytes(text)))
+  ).pipe(Effect.map(Encoding.encodeBase64Url))
 
 const prefixedSecret = (prefix: string): Effect.Effect<string, never, Crypto.Crypto> =>
   Effect.map(randomBytes(secretBytes), (bytes) => `${prefix}${Encoding.encodeBase64Url(bytes)}`)
@@ -117,3 +124,16 @@ export const newSubjectId: Effect.Effect<SubjectId, never, Crypto.Crypto> = Effe
   uuid,
   SubjectId.make
 )
+export const newOAuthApplicationId: Effect.Effect<OAuthApplicationId, never, Crypto.Crypto> = Effect.map(
+  uuid,
+  OAuthApplicationId.make
+)
+export const newOAuthGrantId: Effect.Effect<OAuthGrantId, never, Crypto.Crypto> = Effect.map(
+  uuid,
+  OAuthGrantId.make
+)
+export const newOAuthRequestId: Effect.Effect<string, never, Crypto.Crypto> = prefixedSecret("wfor_")
+export const newOAuthAuthorizationCode: Effect.Effect<string, never, Crypto.Crypto> = prefixedSecret("wfoc_")
+export const newOAuthAccessToken: Effect.Effect<string, never, Crypto.Crypto> = prefixedSecret("wfoa_")
+export const newOAuthRefreshToken: Effect.Effect<string, never, Crypto.Crypto> = prefixedSecret("wforf_")
+export const newOAuthTokenFamilyId: Effect.Effect<string, never, Crypto.Crypto> = Effect.map(uuid, (value) => value)

@@ -17,3 +17,10 @@ export const mcpConfiguration = (
   }, null, 2)
 
 export const apiKeyPlaceholder = "<api-key>"
+
+export const mcpOAuthConfiguration = (url: string): string =>
+  JSON.stringify({
+    mcpServers: {
+      integrations_gateway: { type: "http", url }
+    }
+  }, null, 2)

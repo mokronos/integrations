@@ -89,5 +89,23 @@ export const gatewayMigrations: ReadonlyArray<Migration> = [
     statements: [
       "ALTER TABLE `gateway_client` ADD `mcp_surface` text DEFAULT 'tools' NOT NULL;"
     ]
+  },
+  {
+    id: 6,
+    name: "0006_brave_human_cannonball",
+    statements: [
+      "CREATE TABLE `gateway_oauth_application` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`kind` text NOT NULL,\n\t`client_identifier` text NOT NULL,\n\t`name` text NOT NULL,\n\t`redirect_uris_json` text NOT NULL,\n\t`metadata_json` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`updated_at` integer NOT NULL,\n\t`revoked_at` integer\n);",
+      "CREATE UNIQUE INDEX `gateway_oauth_application_client_identifier_unique` ON `gateway_oauth_application` (`client_identifier`);",
+      "CREATE TABLE `gateway_oauth_authorization_code` (\n\t`hash` text PRIMARY KEY NOT NULL,\n\t`grant_id` text NOT NULL,\n\t`application_id` text NOT NULL,\n\t`redirect_uri` text NOT NULL,\n\t`code_challenge` text NOT NULL,\n\t`resource` text NOT NULL,\n\t`scope` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`expires_at` integer NOT NULL,\n\t`consumed_at` integer,\n\tFOREIGN KEY (`grant_id`) REFERENCES `gateway_oauth_grant`(`id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`application_id`) REFERENCES `gateway_oauth_application`(`id`) ON UPDATE no action ON DELETE cascade\n);",
+      "CREATE TABLE `gateway_oauth_authorization_request` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`application_id` text NOT NULL,\n\t`redirect_uri` text NOT NULL,\n\t`state` text,\n\t`code_challenge` text NOT NULL,\n\t`resource` text NOT NULL,\n\t`scope` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`expires_at` integer NOT NULL,\n\t`consumed_at` integer,\n\tFOREIGN KEY (`application_id`) REFERENCES `gateway_oauth_application`(`id`) ON UPDATE no action ON DELETE cascade\n);",
+      "CREATE TABLE `gateway_oauth_grant` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`application_id` text NOT NULL,\n\t`subject_id` text NOT NULL,\n\t`tenant_id` text NOT NULL,\n\t`client_id` text NOT NULL,\n\t`resource` text NOT NULL,\n\t`scope` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`last_used_at` integer,\n\t`revoked_at` integer,\n\tFOREIGN KEY (`application_id`) REFERENCES `gateway_oauth_application`(`id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`subject_id`) REFERENCES `gateway_subject`(`id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`tenant_id`) REFERENCES `gateway_tenant`(`id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`client_id`) REFERENCES `gateway_client`(`id`) ON UPDATE no action ON DELETE cascade\n);",
+      "CREATE UNIQUE INDEX `gateway_oauth_grant_binding` ON `gateway_oauth_grant` (`application_id`,`subject_id`,`client_id`,`resource`,`scope`);",
+      "CREATE TABLE `gateway_oauth_token` (\n\t`hash` text PRIMARY KEY NOT NULL,\n\t`kind` text NOT NULL,\n\t`family_id` text NOT NULL,\n\t`grant_id` text NOT NULL,\n\t`application_id` text NOT NULL,\n\t`resource` text NOT NULL,\n\t`scope` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`expires_at` integer NOT NULL,\n\t`used_at` integer,\n\t`revoked_at` integer,\n\t`replaced_by_hash` text,\n\tFOREIGN KEY (`grant_id`) REFERENCES `gateway_oauth_grant`(`id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`application_id`) REFERENCES `gateway_oauth_application`(`id`) ON UPDATE no action ON DELETE cascade\n);",
+      "CREATE INDEX `gateway_oauth_token_family` ON `gateway_oauth_token` (`family_id`);",
+      "CREATE INDEX `gateway_oauth_token_grant` ON `gateway_oauth_token` (`grant_id`);",
+      "ALTER TABLE `gateway_audit` ADD `oauth_grant_id` text;",
+      "ALTER TABLE `gateway_audit` ADD `oauth_application_id` text;",
+      "ALTER TABLE `gateway_audit` ADD `authorized_by_subject_id` text;"
+    ]
   }
 ]

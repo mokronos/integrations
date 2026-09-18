@@ -23,6 +23,10 @@ export const ApprovalDeliveryId = Schema.String.pipe(Schema.brand("ApprovalDeliv
 export type ApprovalDeliveryId = typeof ApprovalDeliveryId.Type
 export const AuditId = Schema.String.pipe(Schema.brand("AuditId"))
 export type AuditId = typeof AuditId.Type
+export const OAuthApplicationId = Schema.String.pipe(Schema.brand("OAuthApplicationId"))
+export type OAuthApplicationId = typeof OAuthApplicationId.Type
+export const OAuthGrantId = Schema.String.pipe(Schema.brand("OAuthGrantId"))
+export type OAuthGrantId = typeof OAuthGrantId.Type
 
 /**
  * A connection as policy names it. A user-owned reference without a subject is
@@ -116,8 +120,26 @@ export const InvocationOutcome = Schema.Union([InvocationSucceeded, InvocationPe
 export type InvocationOutcome = typeof InvocationOutcome.Type
 export const AuditOutcome = Schema.Literals(["succeeded", "failed", "denied", "pending"])
 export type AuditOutcome = typeof AuditOutcome.Type
-export const AuditRecord = Schema.Struct({ id: AuditId, clientId: Schema.NullOr(ClientId), alias: Schema.NullOr(Alias), tool: Schema.NullOr(ToolName), connection: Schema.NullOr(ConnectionRef), subject: Schema.NullOr(SubjectId), decision: Schema.NullOr(PolicyDecision), outcome: AuditOutcome, message: Schema.NullOr(Schema.String), createdAt: Schema.Date })
+export const AuditRecord = Schema.Struct({ id: AuditId, clientId: Schema.NullOr(ClientId), oauthGrantId: Schema.NullOr(OAuthGrantId), oauthApplicationId: Schema.NullOr(OAuthApplicationId), authorizedBySubjectId: Schema.NullOr(SubjectId), alias: Schema.NullOr(Alias), tool: Schema.NullOr(ToolName), connection: Schema.NullOr(ConnectionRef), subject: Schema.NullOr(SubjectId), decision: Schema.NullOr(PolicyDecision), outcome: AuditOutcome, message: Schema.NullOr(Schema.String), createdAt: Schema.Date })
 export type AuditRecord = typeof AuditRecord.Type
+
+export const OAuthApplicationKind = Schema.Literals(["cimd", "dcr"])
+export type OAuthApplicationKind = typeof OAuthApplicationKind.Type
+export const OAuthGrantView = Schema.Struct({
+  id: OAuthGrantId,
+  applicationId: OAuthApplicationId,
+  applicationKind: OAuthApplicationKind,
+  applicationName: Schema.String,
+  clientId: ClientId,
+  clientName: Schema.String,
+  subjectId: SubjectId,
+  subjectEmail: Schema.String,
+  scope: Schema.Literal("mcp"),
+  createdAt: Schema.Date,
+  lastUsedAt: Schema.NullOr(Schema.Date),
+  revokedAt: Schema.NullOr(Schema.Date)
+})
+export type OAuthGrantView = typeof OAuthGrantView.Type
 export const ConfigureClient = Schema.Struct({ name: Schema.String.check(Schema.isMinLength(1)), tools: Schema.Array(Schema.Struct({ connection: ConnectionRef, tool: ToolName, decision: PolicyDecision })).check(Schema.isMinLength(1)) })
 export type ConfigureClient = typeof ConfigureClient.Type
 export const ToolSnapshot = Schema.Struct({ integration: IntegrationSlug, connection: ConnectionName, tool: ToolName, inputSchema: Schema.NullOr(Schema.Json), outputSchema: Schema.NullOr(Schema.Json), syncedAt: Schema.Date })

@@ -18,6 +18,7 @@ import {
   PendingApproval,
   McpSurface
 } from "@mokronos/integrations-contracts"
+import { OAuthGrantView } from "@mokronos/integrations-contracts"
 import { IntegrationSearchKind, OAuthSessionView } from "@mokronos/integrations-contracts"
 import {
   AuthMethod,
@@ -46,6 +47,35 @@ export type {
 }
 
 export type { ApprovalDestination, ApprovalDeliveryAttempt }
+export type { OAuthGrantView }
+
+export const OAuthGrantWire = Schema.Struct({
+  id: Schema.String,
+  applicationId: Schema.String,
+  applicationKind: Schema.Literals(["cimd", "dcr"]),
+  applicationName: Schema.String,
+  clientId: Schema.String,
+  clientName: Schema.String,
+  subjectId: Schema.String,
+  subjectEmail: Schema.String,
+  scope: Schema.Literal("mcp"),
+  createdAt: Schema.DateFromString,
+  lastUsedAt: Schema.NullOr(Schema.DateFromString),
+  revokedAt: Schema.NullOr(Schema.DateFromString)
+})
+export type OAuthGrantWire = typeof OAuthGrantWire.Type
+
+export const OAuthConsentView = Schema.Struct({
+  request: Schema.Struct({ id: Schema.String, scope: Schema.Literal("mcp"), resource: Schema.String }),
+  application: Schema.Struct({
+    id: Schema.String,
+    kind: Schema.Literals(["cimd", "dcr"]),
+    name: Schema.String,
+    clientIdentifier: Schema.String
+  }),
+  clients: Schema.Array(Client)
+})
+export type OAuthConsentView = typeof OAuthConsentView.Type
 
 export { ApprovalStatusSchema, ConnectionRefSchema, PolicyDecisionSchema }
 export type {

@@ -1,4 +1,4 @@
-import { Effect, Predicate } from "effect"
+import { Effect, Predicate, Schema } from "effect"
 import { FetchHttpClient, HttpClientError } from "effect/unstable/http"
 import { HttpApiClient } from "effect/unstable/httpapi"
 import { GatewayApi } from "@mokronos/integrations-gateway-api/definition"
@@ -19,6 +19,7 @@ import type {
   AccessProfileToolInput,
   ApprovalPolicyToolInput
 } from "@/lib/schemas"
+import { OAuthConsentView, OAuthGrantWire } from "@/lib/schemas"
 
 /**
  * What the dashboard shows when a call fails. The endpoints fail with the
@@ -437,3 +438,40 @@ export const deleteAccount = async (input: {
 }): Promise<void> => {
   await run(endpoints.auth.deleteAccount({ payload: input }))
 }
+
+const rawJson = async <A>(path: string, schema: Schema.Decoder<A>, init?: RequestInit): Promise<A> => {
+  const response = await fetch(path, { credentials: "same-origin", ...init })
+  const body = await response.json()
+  if (!response.ok) {
+    const failure = Schema.decodeUnknownOption(Schema.Struct({ error: Schema.String }))(body)
+    throw new GatewayError({
+      message: failure._tag === "Some" ? failure.value.error : `Request failed with ${response.status}`,
+      status: response.status,
+      method: init?.method ?? "GET",
+      path
+    })
+  }
+  return await Effect.runPromise(Schema.decodeUnknownEffect(schema)(body).pipe(
+    Effect.mapError((cause) => new GatewayError({ message: cause.message, path }))
+  ))
+}
+
+export const getOAuthConsent = async (id: string) =>
+  await rawJson(`/v1/oauth/authorization-request?id=${encodeURIComponent(id)}`, OAuthConsentView)
+
+export const decideOAuthConsent = async (id: string, decision:
+  | { readonly decision: "deny" }
+  | { readonly decision: "approve"; readonly clientId: string }
+) => await rawJson(
+  `/v1/oauth/authorization-request?id=${encodeURIComponent(id)}`,
+  Schema.Struct({ redirect: Schema.String }),
+  { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(decision) }
+)
+
+export const listOAuthGrants = async () =>
+  await rawJson("/v1/oauth/grants", Schema.Array(OAuthGrantWire))
+
+export const revokeOAuthGrant = async (id: string) =>
+  await rawJson(`/v1/oauth/grants/${encodeURIComponent(id)}`, Schema.Struct({ revoked: Schema.Boolean }), {
+    method: "DELETE"
+  })

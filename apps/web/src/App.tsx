@@ -18,6 +18,7 @@ const AccessProfilesRoute = lazy(() => import("@/routes/policies").then((route) 
 const AccessProfileDetailRoute = lazy(() => import("@/routes/policies").then((route) => ({ default: route.AccessProfileDetailRoute })))
 const ApprovalPoliciesRoute = lazy(() => import("@/routes/policies").then((route) => ({ default: route.ApprovalPoliciesRoute })))
 const ApprovalPolicyDetailRoute = lazy(() => import("@/routes/policies").then((route) => ({ default: route.ApprovalPolicyDetailRoute })))
+const OAuthConsentRoute = lazy(() => import("@/routes/oauth-consent").then((route) => ({ default: route.OAuthConsentRoute })))
 
 export default function App() {
   const [dark, setDark] = useState(() => localStorage.getItem("gateway-theme") !== "light")
@@ -32,6 +33,7 @@ export default function App() {
     <>
       <AuthGate>
         <Routes>
+          <Route path="/oauth/consent" element={<OAuthConsentRoute />} />
           <Route element={<AppShell dark={dark} onDarkChange={setDark} />}>
             <Route index element={<OverviewRoute />} />
             <Route path="/onboarding" element={<OnboardingRoute />} />

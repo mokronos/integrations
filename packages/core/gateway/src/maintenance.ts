@@ -6,6 +6,7 @@ export type MaintenanceResult = {
   readonly expiredAuditArguments: number
   readonly deletedSessions: number
   readonly expiredIdentityFlows: number
+  readonly expiredOAuthState: number
 }
 
 export const runMaintenance = Effect.fn("Maintenance.run")(function*(
@@ -17,7 +18,8 @@ export const runMaintenance = Effect.fn("Maintenance.run")(function*(
     expiredApprovals: yield* store.expireApprovals(at),
     expiredAuditArguments: yield* store.expireAuditArguments(at),
     deletedSessions: yield* store.deleteExpiredSessions(at),
-    expiredIdentityFlows: yield* store.deleteExpiredIdentityFlows(at)
+    expiredIdentityFlows: yield* store.deleteExpiredIdentityFlows(at),
+    expiredOAuthState: yield* store.deleteExpiredOAuthState(at)
   }
 })
 

@@ -8,9 +8,14 @@ import type {
   AuthSession, Client, ConfigureClient, ClientCapability, ClientId, ConnectionName, ConnectionRef,
   ExternalIdentity, IdentityProvider, IntegrationSlug, Login, LoginHandoff,
   LoginHandoffHash, PendingApproval, PolicyDecision, SessionTokenHash, Subject,
-  SubjectId, Tenant, TenantId, ToolName, ToolSnapshot
+  SubjectId, Tenant, TenantId, ToolName, ToolSnapshot, OAuthApplicationId, OAuthGrantId,
+  OAuthGrantView
 } from "./domain.ts"
 import type { PasswordHash } from "./passwords.ts"
+import type {
+  OAuthActor, OAuthApplication, OAuthAuthorizationCode, OAuthAuthorizationRequest,
+  OAuthGrant, OAuthSecretHash, OAuthToken
+} from "./mcp-oauth.ts"
 
 export interface CreateTenantInput {
   readonly id?: TenantId
@@ -100,6 +105,7 @@ export interface RecordAuditInput {
   readonly tenantId: TenantId
   readonly id: AuditId
   readonly clientId: ClientId | null
+  readonly oauthActor?: OAuthActor
   readonly alias: Alias | null
   readonly tool: ToolName | null
   readonly connection: ConnectionRef | null
@@ -193,6 +199,7 @@ export interface GatewayStore {
     stateHash: LoginHandoffHash
   ): Effect.Effect<IdentityOAuthStateRecord | undefined, GatewayStoreError>
   deleteExpiredIdentityFlows(now: Date): Effect.Effect<number, GatewayStoreError>
+  deleteExpiredOAuthState(now: Date): Effect.Effect<number, GatewayStoreError>
 
   createConfiguredClient(input: ConfigureClient & {
     readonly tenantId: TenantId
@@ -241,6 +248,52 @@ export interface GatewayStore {
   findApiKeyByHash(hash: ApiKeyHash): Effect.Effect<{ readonly key: ApiKey; readonly client: Client } | undefined, GatewayStoreError>
   touchApiKey(id: ApiKeyId): Effect.Effect<void, GatewayStoreError>
   revokeApiKey(id: ApiKeyId): Effect.Effect<void, GatewayStoreError>
+
+  upsertOAuthApplication(input: {
+    readonly id: OAuthApplicationId
+    readonly kind: "cimd" | "dcr"
+    readonly clientIdentifier: string
+    readonly name: string
+    readonly redirectUris: ReadonlyArray<string>
+    readonly metadata: typeof Schema.Json.Type
+  }): Effect.Effect<OAuthApplication, GatewayStoreError>
+  findOAuthApplication(clientIdentifier: string): Effect.Effect<OAuthApplication | undefined, GatewayStoreError>
+  findOAuthApplicationById(id: OAuthApplicationId): Effect.Effect<OAuthApplication | undefined, GatewayStoreError>
+  createOAuthAuthorizationRequest(input: Omit<OAuthAuthorizationRequest, "createdAt" | "consumedAt">): Effect.Effect<OAuthAuthorizationRequest, GatewayStoreError>
+  getOAuthAuthorizationRequest(id: string): Effect.Effect<OAuthAuthorizationRequest | undefined, GatewayStoreError>
+  consumeOAuthAuthorizationRequest(id: string): Effect.Effect<OAuthAuthorizationRequest | undefined, GatewayStoreError>
+  findOrCreateOAuthGrant(input: {
+    readonly id: OAuthGrantId
+    readonly applicationId: OAuthApplicationId
+    readonly subjectId: SubjectId
+    readonly tenantId: TenantId
+    readonly clientId: ClientId
+    readonly resource: string
+    readonly scope: "mcp"
+  }): Effect.Effect<OAuthGrant, GatewayStoreError>
+  listOAuthGrants(tenantId: TenantId): Effect.Effect<ReadonlyArray<OAuthGrantView>, GatewayStoreError>
+  revokeOAuthGrant(tenantId: TenantId, id: OAuthGrantId): Effect.Effect<boolean, GatewayStoreError>
+  createOAuthAuthorizationCode(input: Omit<OAuthAuthorizationCode, "createdAt" | "consumedAt">): Effect.Effect<void, GatewayStoreError>
+  consumeOAuthAuthorizationCode(hash: OAuthSecretHash): Effect.Effect<OAuthAuthorizationCode | undefined, GatewayStoreError>
+  createOAuthTokens(tokens: ReadonlyArray<Omit<OAuthToken, "createdAt" | "usedAt" | "revokedAt" | "replacedByHash">>): Effect.Effect<void, GatewayStoreError>
+  rotateOAuthRefreshToken(input: {
+    readonly hash: OAuthSecretHash
+    readonly applicationId: OAuthApplicationId
+    readonly resource: string
+    readonly accessHash: OAuthSecretHash
+    readonly refreshHash: OAuthSecretHash
+    readonly accessExpiresAt: Date
+    readonly refreshExpiresAt: Date
+  }): Effect.Effect<OAuthToken | "reused" | undefined, GatewayStoreError>
+  resolveOAuthAccessToken(input: {
+    readonly hash: OAuthSecretHash
+    readonly resource: string
+  }): Effect.Effect<{
+    readonly client: Client
+    readonly actor: OAuthActor
+    readonly expiresAt: Date
+    readonly scope: "mcp"
+  } | undefined, GatewayStoreError>
 
   createAccessProfile(input: CreateAccessProfileInput): Effect.Effect<AccessProfile, GatewayStoreError>
   updateAccessProfile(tenantId: TenantId, id: AccessProfileId, name: string): Effect.Effect<AccessProfile, GatewayStoreError>

@@ -23,6 +23,7 @@ import {
   searchIntegrations
 } from "@mokronos/integrations-host"
 import { GatewayStoreService, invokeAsClient, listEffectiveTools } from "@mokronos/integrations-gateway-core"
+import type { OAuthActor } from "@mokronos/integrations-gateway-core"
 import { capture } from "./observability.ts"
 import {
   connectWithCredentials,
@@ -53,6 +54,7 @@ const ok = (value: JsonEncodable): ToolOutput => ({ value, failed: false })
 /** The authenticated client an MCP session speaks for. */
 export interface McpCaller {
   readonly client: Client
+  readonly oauthActor?: OAuthActor
 }
 
 export type ToolRun = Effect.Effect<ToolOutput, Error, GatewayOperationServices>
@@ -141,7 +143,8 @@ export const invokeTool = (
       client: caller.client,
       alias: input.alias,
       tool: input.tool,
-      arguments: input.arguments
+      arguments: input.arguments,
+      ...whenPresent("oauthActor", caller.oauthActor)
     }))
     const encoded = encodeOutcome(outcome)
     return {

@@ -16,10 +16,14 @@ import {
   ApprovalPolicyId,
   ClientId,
   defaultApprovalDelivery,
+  defaultLocalSubjectId,
   defaultTenantId,
   SessionTokenHash,
   TenantId,
-  ToolName
+  ToolName,
+  OAuthApplicationId,
+  OAuthGrantId,
+  SubjectId
 } from "./domain.ts"
 import type {
   Client,
@@ -32,7 +36,8 @@ import {
   millis, toAccessProfile, toAccessProfileTool, toApiKey, toApproval,
   toApprovalPolicy, toApprovalPolicyTool, toAuditRecord, toAuthSession, toClient,
   toApprovalDeliveryAttempt, toApprovalDestination, toExternalIdentity, toIdentityOAuthState, toLoginHandoff, toLoginRecord,
-  toSnapshot, toSubject, toTenant
+  toSnapshot, toSubject, toTenant, toOAuthApplication, toOAuthAuthorizationRequest,
+  toOAuthGrant, toOAuthAuthorizationCode, toOAuthToken
 } from "./store-rows.ts"
 export {
   GatewayStoreError,
@@ -490,6 +495,23 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
       return states + handoffs
     })),
 
+    deleteExpiredOAuthState: (at) => operation("deleteExpiredOAuthState", Effect.gen(function*() {
+      const expiresAt = millis(at)
+      const requests = yield* changed(
+        "DELETE FROM gateway_oauth_authorization_request WHERE expires_at <= ? RETURNING id",
+        [expiresAt]
+      )
+      const codes = yield* changed(
+        "DELETE FROM gateway_oauth_authorization_code WHERE expires_at <= ? RETURNING hash",
+        [expiresAt]
+      )
+      const tokens = yield* changed(
+        "DELETE FROM gateway_oauth_token WHERE expires_at <= ? RETURNING hash",
+        [expiresAt]
+      )
+      return requests + codes + tokens
+    })),
+
     createConfiguredClient: (input) => operation("createConfiguredClient", Effect.gen(function*() {
       const at = yield* now
       yield* batch([
@@ -814,6 +836,265 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
           )
         })
       ),
+
+    upsertOAuthApplication: (input) => operation("upsertOAuthApplication", Effect.gen(function*() {
+      const timestamp = yield* now
+      yield* run(
+        `INSERT INTO gateway_oauth_application
+           (id, kind, client_identifier, name, redirect_uris_json, metadata_json, created_at, updated_at, revoked_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+         ON CONFLICT (client_identifier) DO UPDATE SET
+           kind = excluded.kind,
+           name = excluded.name,
+           redirect_uris_json = excluded.redirect_uris_json,
+           metadata_json = excluded.metadata_json,
+           updated_at = excluded.updated_at,
+           revoked_at = NULL`,
+        [
+          input.id,
+          input.kind,
+          input.clientIdentifier,
+          input.name,
+          JSON.stringify(input.redirectUris),
+          JSON.stringify(input.metadata),
+          timestamp,
+          timestamp
+        ]
+      )
+      const row = yield* one(
+        "SELECT * FROM gateway_oauth_application WHERE client_identifier = ?",
+        [input.clientIdentifier]
+      )
+      if (row === undefined) return yield* Effect.die(new Error("Failed to store OAuth application"))
+      return toOAuthApplication(row)
+    })),
+
+    findOAuthApplication: (clientIdentifier) => operation("findOAuthApplication", Effect.gen(function*() {
+      const row = yield* one(
+        "SELECT * FROM gateway_oauth_application WHERE client_identifier = ? AND revoked_at IS NULL",
+        [clientIdentifier]
+      )
+      return row === undefined ? undefined : toOAuthApplication(row)
+    })),
+
+    findOAuthApplicationById: (id) => operation("findOAuthApplicationById", Effect.gen(function*() {
+      const row = yield* one(
+        "SELECT * FROM gateway_oauth_application WHERE id = ? AND revoked_at IS NULL",
+        [id]
+      )
+      return row === undefined ? undefined : toOAuthApplication(row)
+    })),
+
+    createOAuthAuthorizationRequest: (input) => operation("createOAuthAuthorizationRequest", Effect.gen(function*() {
+      yield* run(
+        `INSERT INTO gateway_oauth_authorization_request
+           (id, application_id, redirect_uri, state, code_challenge, resource, scope, created_at, expires_at, consumed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+        [input.id, input.applicationId, input.redirectUri, input.state, input.codeChallenge,
+          input.resource, input.scope, yield* now, millis(input.expiresAt)]
+      )
+      const row = yield* one("SELECT * FROM gateway_oauth_authorization_request WHERE id = ?", [input.id])
+      if (row === undefined) return yield* Effect.die(new Error("Failed to store OAuth authorization request"))
+      return toOAuthAuthorizationRequest(row)
+    })),
+
+    getOAuthAuthorizationRequest: (id) => operation("getOAuthAuthorizationRequest", Effect.gen(function*() {
+      const row = yield* one(
+        `SELECT * FROM gateway_oauth_authorization_request
+          WHERE id = ? AND consumed_at IS NULL AND expires_at > ?`,
+        [id, yield* now]
+      )
+      return row === undefined ? undefined : toOAuthAuthorizationRequest(row)
+    })),
+
+    consumeOAuthAuthorizationRequest: (id) => operation("consumeOAuthAuthorizationRequest", Effect.gen(function*() {
+      const row = yield* one(
+        `UPDATE gateway_oauth_authorization_request SET consumed_at = ?
+          WHERE id = ? AND consumed_at IS NULL AND expires_at > ? RETURNING *`,
+        [yield* now, id, yield* now]
+      )
+      return row === undefined ? undefined : toOAuthAuthorizationRequest(row)
+    })),
+
+    findOrCreateOAuthGrant: (input) => operation("findOrCreateOAuthGrant", Effect.gen(function*() {
+      if (input.subjectId === defaultLocalSubjectId) {
+        yield* run(
+          "INSERT INTO gateway_subject (id, tenant_id, created_at) VALUES (?, ?, ?) ON CONFLICT (id) DO NOTHING",
+          [defaultLocalSubjectId, input.tenantId, yield* now]
+        )
+      }
+      yield* run(
+        `INSERT INTO gateway_oauth_grant
+           (id, application_id, subject_id, tenant_id, client_id, resource, scope, created_at, last_used_at, revoked_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+         ON CONFLICT (application_id, subject_id, client_id, resource, scope)
+         DO UPDATE SET revoked_at = NULL`,
+        [input.id, input.applicationId, input.subjectId, input.tenantId, input.clientId,
+          input.resource, input.scope, yield* now]
+      )
+      const row = yield* one(
+        `SELECT * FROM gateway_oauth_grant
+          WHERE application_id = ? AND subject_id = ? AND client_id = ? AND resource = ? AND scope = ?`,
+        [input.applicationId, input.subjectId, input.clientId, input.resource, input.scope]
+      )
+      if (row === undefined) return yield* Effect.die(new Error("Failed to store OAuth grant"))
+      return toOAuthGrant(row)
+    })),
+
+    listOAuthGrants: (tenantId) => operation("listOAuthGrants", Effect.gen(function*() {
+      const rows = yield* all(
+        `SELECT g.*, a.kind AS application_kind, a.name AS application_name,
+                c.name AS client_name, COALESCE(l.email, 'Local operator') AS subject_email
+           FROM gateway_oauth_grant g
+           JOIN gateway_oauth_application a ON a.id = g.application_id
+           JOIN gateway_client c ON c.id = g.client_id
+           LEFT JOIN gateway_login l ON l.subject_id = g.subject_id
+          WHERE g.tenant_id = ? ORDER BY g.created_at DESC`,
+        [tenantId]
+      )
+      return rows.map((row) => ({
+        id: OAuthGrantId.make(String(row["id"] ?? "")),
+        applicationId: OAuthApplicationId.make(String(row["application_id"] ?? "")),
+        applicationKind: row["application_kind"] === "dcr" ? "dcr" as const : "cimd" as const,
+        applicationName: String(row["application_name"] ?? ""),
+        clientId: ClientId.make(String(row["client_id"] ?? "")),
+        clientName: String(row["client_name"] ?? ""),
+        subjectId: SubjectId.make(String(row["subject_id"] ?? "")),
+        subjectEmail: String(row["subject_email"] ?? ""),
+        scope: "mcp" as const,
+        createdAt: new Date(Number(row["created_at"] ?? 0)),
+        lastUsedAt: row["last_used_at"] === null || row["last_used_at"] === undefined
+          ? null
+          : new Date(Number(row["last_used_at"])),
+        revokedAt: row["revoked_at"] === null || row["revoked_at"] === undefined
+          ? null
+          : new Date(Number(row["revoked_at"]))
+      }))
+    })),
+
+    revokeOAuthGrant: (tenantId, id) => operation("revokeOAuthGrant", Effect.gen(function*() {
+      const timestamp = yield* now
+      return yield* sql.withTransaction(Effect.gen(function*() {
+        const revoked = yield* changed(
+          `UPDATE gateway_oauth_grant SET revoked_at = ?
+            WHERE tenant_id = ? AND id = ? AND revoked_at IS NULL RETURNING id`,
+          [timestamp, tenantId, id]
+        )
+        if (revoked > 0) {
+          yield* run(
+            "UPDATE gateway_oauth_token SET revoked_at = ? WHERE grant_id = ? AND revoked_at IS NULL",
+            [timestamp, id]
+          )
+        }
+        return revoked > 0
+      }))
+    })),
+
+    createOAuthAuthorizationCode: (input) => operation("createOAuthAuthorizationCode", Effect.gen(function*() {
+      yield* run(
+        `INSERT INTO gateway_oauth_authorization_code
+           (hash, grant_id, application_id, redirect_uri, code_challenge, resource, scope, created_at, expires_at, consumed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+        [input.hash, input.grantId, input.applicationId, input.redirectUri, input.codeChallenge,
+          input.resource, input.scope, yield* now, millis(input.expiresAt)]
+      )
+    })),
+
+    consumeOAuthAuthorizationCode: (hash) => operation("consumeOAuthAuthorizationCode", Effect.gen(function*() {
+      const row = yield* one(
+        `DELETE FROM gateway_oauth_authorization_code
+          WHERE hash = ? AND consumed_at IS NULL AND expires_at > ? RETURNING *`,
+        [hash, yield* now]
+      )
+      if (row === undefined) {
+        yield* run("DELETE FROM gateway_oauth_authorization_code WHERE hash = ?", [hash])
+      }
+      return row === undefined ? undefined : toOAuthAuthorizationCode(row)
+    })),
+
+    createOAuthTokens: (tokens) => operation("createOAuthTokens", Effect.gen(function*() {
+      const timestamp = yield* now
+      yield* batch(tokens.map((token) => ({
+        sql: `INSERT INTO gateway_oauth_token
+          (hash, kind, family_id, grant_id, application_id, resource, scope, created_at, expires_at, used_at, revoked_at, replaced_by_hash)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL)`,
+        args: [token.hash, token.kind, token.familyId, token.grantId, token.applicationId,
+          token.resource, token.scope, timestamp, millis(token.expiresAt)]
+      })))
+    })),
+
+    rotateOAuthRefreshToken: (input) => operation("rotateOAuthRefreshToken", sql.withTransaction(Effect.gen(function*() {
+      const timestamp = yield* now
+      const row = yield* one(
+        `SELECT t.* FROM gateway_oauth_token t
+          JOIN gateway_oauth_grant g ON g.id = t.grant_id
+          JOIN gateway_oauth_application a ON a.id = t.application_id
+         WHERE t.hash = ? AND t.kind = 'refresh' AND t.application_id = ? AND t.resource = ? AND t.expires_at > ?
+           AND t.revoked_at IS NULL AND g.revoked_at IS NULL AND a.revoked_at IS NULL`,
+        [input.hash, input.applicationId, input.resource, timestamp]
+      )
+      if (row === undefined) return undefined
+      const token = toOAuthToken(row)
+      if (token.usedAt !== null || token.replacedByHash !== null) {
+        yield* run(
+          "UPDATE gateway_oauth_token SET revoked_at = ? WHERE family_id = ? AND revoked_at IS NULL",
+          [timestamp, token.familyId]
+        )
+        return "reused" as const
+      }
+      yield* run(
+        "UPDATE gateway_oauth_token SET used_at = ?, replaced_by_hash = ? WHERE hash = ?",
+        [timestamp, input.refreshHash, input.hash]
+      )
+      const replacements = [
+        { hash: input.accessHash, kind: "access" as const, expiresAt: input.accessExpiresAt },
+        {
+          hash: input.refreshHash,
+          kind: "refresh" as const,
+          expiresAt: new Date(Math.min(input.refreshExpiresAt.getTime(), token.expiresAt.getTime()))
+        }
+      ]
+      for (const replacement of replacements) {
+        yield* run(
+          `INSERT INTO gateway_oauth_token
+            (hash, kind, family_id, grant_id, application_id, resource, scope, created_at, expires_at, used_at, revoked_at, replaced_by_hash)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL)`,
+          [replacement.hash, replacement.kind, token.familyId, token.grantId,
+            token.applicationId, token.resource, token.scope, timestamp,
+            millis(replacement.expiresAt)]
+        )
+      }
+      return token
+    }))),
+
+    resolveOAuthAccessToken: (input) => operation("resolveOAuthAccessToken", Effect.gen(function*() {
+      const timestamp = yield* now
+      const row = yield* one(
+        `SELECT t.*, g.subject_id, g.client_id
+           FROM gateway_oauth_token t
+           JOIN gateway_oauth_grant g ON g.id = t.grant_id
+           JOIN gateway_oauth_application a ON a.id = t.application_id
+           JOIN gateway_client c ON c.id = g.client_id
+          WHERE t.hash = ? AND t.kind = 'access' AND t.resource = ? AND t.expires_at > ?
+            AND t.revoked_at IS NULL AND g.revoked_at IS NULL AND a.revoked_at IS NULL
+            AND c.revoked_at IS NULL`,
+        [input.hash, input.resource, timestamp]
+      )
+      if (row === undefined) return undefined
+      const token = toOAuthToken(row)
+      const client = yield* requireClient(ClientId.make(String(row["client_id"] ?? "")))
+      yield* run("UPDATE gateway_oauth_grant SET last_used_at = ? WHERE id = ?", [timestamp, token.grantId])
+      return {
+        client,
+        actor: {
+          grantId: token.grantId,
+          applicationId: token.applicationId,
+          subjectId: SubjectId.make(String(row["subject_id"] ?? ""))
+        },
+        expiresAt: token.expiresAt,
+        scope: token.scope
+      }
+    })),
 
     createAccessProfile: (input) => operation("createAccessProfile", Effect.gen(function*() {
       const timestamp = yield* now
@@ -1146,12 +1427,16 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
       const connection = input.connection
       yield* run(
         `INSERT INTO gateway_audit
-           (id, tenant_id, client_id, alias, tool, owner, subject, integration, connection_name, decision, outcome, message, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, tenant_id, client_id, oauth_grant_id, oauth_application_id, authorized_by_subject_id,
+            alias, tool, owner, subject, integration, connection_name, decision, outcome, message, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           input.id,
           input.tenantId,
           input.clientId,
+          input.oauthActor?.grantId ?? null,
+          input.oauthActor?.applicationId ?? null,
+          input.oauthActor?.subjectId ?? null,
           input.alias,
           input.tool,
           connection === null ? null : connection.owner,
