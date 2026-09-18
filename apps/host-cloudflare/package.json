@@ -14,10 +14,10 @@
   },
   "dependencies": {
     "@effect/sql-d1": "catalog:",
-    "@mokronos/integrations-contracts": "workspace:*",
-    "@mokronos/integrations-gateway-api": "workspace:*",
-    "@mokronos/integrations-gateway-core": "workspace:*",
-    "@mokronos/integrations-host": "workspace:*",
+    "@mokronos/integrations-contracts": "workspace:^",
+    "@mokronos/integrations-gateway-api": "workspace:^",
+    "@mokronos/integrations-gateway-core": "workspace:^",
+    "@mokronos/integrations-host": "workspace:^",
     "effect": "catalog:"
   },
   "devDependencies": {

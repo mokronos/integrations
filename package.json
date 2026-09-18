@@ -2,7 +2,7 @@
   "name": "integrations-monorepo",
   "private": true,
   "type": "module",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "workspaces": [
     "apps/*",
     "packages/*",
@@ -87,7 +87,7 @@
     "@effect/language-service": "catalog:",
     "@effect/platform-bun": "catalog:",
     "@effect/vitest": "catalog:",
-    "@mokronos/integrations-client": "workspace:*",
+    "@mokronos/integrations-client": "workspace:^",
     "@oxlint/plugins": "catalog:",
     "@types/bun": "catalog:",
     "effect-solutions": "catalog:",

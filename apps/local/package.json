@@ -1,6 +1,6 @@
 {
   "name": "@mokronos/integrations",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "type": "module",
   "description": "Local Bun host for the integrations gateway.",
   "license": "MIT",
@@ -45,10 +45,10 @@
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
-    "@mokronos/integrations-contracts": "workspace:*",
-    "@mokronos/integrations-gateway-api": "workspace:*",
-    "@mokronos/integrations-gateway-core": "workspace:*",
-    "@mokronos/integrations-client": "workspace:*",
+    "@mokronos/integrations-contracts": "workspace:^",
+    "@mokronos/integrations-gateway-api": "workspace:^",
+    "@mokronos/integrations-gateway-core": "workspace:^",
+    "@mokronos/integrations-client": "workspace:^",
     "effect": "catalog:"
   }
 }

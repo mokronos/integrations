@@ -15,9 +15,9 @@
   "dependencies": {
     "@effect/platform-bun": "catalog:",
     "@effect/sql-libsql": "catalog:",
-    "@mokronos/integrations-contracts": "workspace:*",
-    "@mokronos/integrations-gateway-core": "workspace:*",
-    "@mokronos/integrations-host": "workspace:*",
+    "@mokronos/integrations-contracts": "workspace:^",
+    "@mokronos/integrations-gateway-core": "workspace:^",
+    "@mokronos/integrations-host": "workspace:^",
     "@libsql/client": "catalog:",
     "drizzle-orm": "catalog:",
     "effect": "catalog:"

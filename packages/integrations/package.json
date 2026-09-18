@@ -1,6 +1,6 @@
 {
   "name": "@mokronos/integrations-host",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "type": "module",
   "description": "MCP and OpenAPI catalog, connections, and tool invocation.",
   "license": "MIT",
@@ -54,7 +54,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/client": "2.0.0",
-    "@mokronos/integrations-contracts": "workspace:*",
+    "@mokronos/integrations-contracts": "workspace:^",
     "oas": "catalog:",
     "oas-normalize": "catalog:"
   },

@@ -1,6 +1,6 @@
 {
   "name": "@mokronos/integrations-client",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "type": "module",
   "description": "Thin client for the integration gateway. Auth, HTTP, decode \u2014 no integration logic.",
   "license": "MIT",
@@ -48,8 +48,8 @@
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
-    "@mokronos/integrations-contracts": "workspace:*",
-    "@mokronos/integrations-gateway-api": "workspace:*",
+    "@mokronos/integrations-contracts": "workspace:^",
+    "@mokronos/integrations-gateway-api": "workspace:^",
     "effect": "catalog:"
   }
 }

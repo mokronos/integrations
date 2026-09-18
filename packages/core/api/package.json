@@ -1,6 +1,6 @@
 {
   "name": "@mokronos/integrations-gateway-api",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "type": "module",
   "description": "Gateway HTTP API definitions, handlers, and server assembly.",
   "license": "MIT",
@@ -40,10 +40,10 @@
   "dependencies": {
     "@effect/platform-bun": "catalog:",
     "@modelcontextprotocol/server": "^2.0.0",
-    "@mokronos/integrations-contracts": "workspace:*",
-    "@mokronos/integrations-gateway-core": "workspace:*",
-    "@mokronos/integrations-host": "workspace:*",
-    "@mokronos/integrations-observability": "workspace:*"
+    "@mokronos/integrations-contracts": "workspace:^",
+    "@mokronos/integrations-gateway-core": "workspace:^",
+    "@mokronos/integrations-host": "workspace:^",
+    "@mokronos/integrations-observability": "workspace:^"
   },
   "peerDependencies": {
     "effect": "catalog:"

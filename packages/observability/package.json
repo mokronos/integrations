@@ -1,6 +1,6 @@
 {
   "name": "@mokronos/integrations-observability",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "type": "module",
   "description": "Shared OTLP tracing and logging for the integrations gateway and CLIs.",
   "license": "MIT",
@@ -43,7 +43,7 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@mokronos/integrations-contracts": "workspace:*"
+    "@mokronos/integrations-contracts": "workspace:^"
   },
   "peerDependencies": {
     "effect": "catalog:"
