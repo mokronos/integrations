@@ -223,7 +223,7 @@ jobs:
           RELEASE_NAME: ${{ needs.preflight.outputs.name }}
         run: |
           set -euo pipefail
-          args=(--title "$RELEASE_NAME" --generate-notes --target "${{ needs.preflight.outputs.ref }}")
+          args=(--title "$RELEASE_NAME" --generate-notes)
           if [[ "${{ needs.preflight.outputs.is_prerelease }}" == "true" ]]; then
             args+=(--prerelease)
           fi
@@ -232,7 +232,12 @@ jobs:
           else
             args+=(--latest=false)
           fi
+          # A stable release is cut from a tag that already exists, so it is
+          # named rather than targeted; only a nightly creates its own tag and
+          # needs the commit to hang it on.
           if [[ "${{ needs.preflight.outputs.channel }}" == "stable" ]]; then
             args+=(--verify-tag)
+          else
+            args+=(--target "${{ needs.preflight.outputs.ref }}")
           fi
           gh release create "$RELEASE_TAG" "${{ runner.temp }}/release/"* "${args[@]}"
