@@ -1,6 +1,6 @@
 {
   "name": "@mokronos/integrations-host",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "type": "module",
   "description": "MCP and OpenAPI catalog, connections, and tool invocation.",
   "license": "MIT",

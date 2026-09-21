@@ -1,6 +1,6 @@
 {
   "name": "@mokronos/integrations",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "type": "module",
   "description": "Local Bun host for the integrations gateway.",
   "license": "MIT",

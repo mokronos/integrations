@@ -1,6 +1,6 @@
 {
   "name": "@mokronos/integrations-cli",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Agent-facing i CLI and its human/operator ii superset for the integration gateway.",

@@ -1,1 +1,1 @@
-export const gatewayVersion = "0.2.3"
+export const gatewayVersion = "0.3.0"
