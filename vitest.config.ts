@@ -10,7 +10,7 @@ export default defineConfig({
     conditions: ["development"]
   },
   test: {
-    include: ["{apps,packages}/**/test/**/*.test.ts"],
+    include: ["{apps,packages}/**/test/**/*.test.ts", "scripts/**/*.test.ts"],
     exclude: ["**/node_modules/**", ".reference/**"],
     testTimeout: 30_000,
     hookTimeout: 30_000

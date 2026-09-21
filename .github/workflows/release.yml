@@ -2,24 +2,43 @@ name: Release
 
 on:
   push:
-    tags: ["v*.*.*"]
+    tags:
+      - "v*.*.*"
+      - "!v*-nightly.*"
+  schedule:
+    # Nightly, away from the top of the hour where scheduled jobs pile up.
+    - cron: "17 3 * * *"
   workflow_dispatch:
     inputs:
-      tag:
-        description: Existing vX.Y.Z tag to release
+      channel:
+        description: Release channel
         required: true
+        default: nightly
+        type: choice
+        options: [nightly, stable]
+      tag:
+        description: Existing vX.Y.Z tag to release (stable only)
+        required: false
         type: string
 
 concurrency:
-  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  group: release-${{ (github.event_name == 'schedule' || inputs.channel == 'nightly') && 'nightly' || github.event.inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
-  verify:
+  preflight:
     runs-on: ubuntu-latest
+    outputs:
+      channel: ${{ steps.meta.outputs.channel }}
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      name: ${{ steps.meta.outputs.name }}
+      is_prerelease: ${{ steps.meta.outputs.is_prerelease }}
+      make_latest: ${{ steps.meta.outputs.make_latest }}
+      ref: ${{ steps.meta.outputs.ref }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -28,29 +47,81 @@ jobs:
         with:
           bun-version: 1.3.14
       - run: bun install --frozen-lockfile
-      - run: bun run verify
-      - name: Verify coordinated package versions
+      - id: meta
+        name: Resolve release version
         env:
-          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          DISPATCH_TAG: ${{ github.event.inputs.tag }}
+          NIGHTLY_DATE: ${{ github.run_started_at }}
+          RUN_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
-          version="${RELEASE_TAG#v}"
-          for manifest in \
-            packages/integrations/package.json \
-            packages/contracts/package.json \
-            packages/observability/package.json \
-            packages/core/gateway/package.json \
-            packages/core/api/package.json \
-            apps/ts/package.json \
-            apps/local/package.json \
-            apps/cli/package.json
-          do
-            jq -er --arg version "$version" '.version == $version' "$manifest" >/dev/null
+          if [[ "${GITHUB_EVENT_NAME}" == "schedule" || ( "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${{ inputs.channel }}" == "nightly" ) ]]; then
+            bun run scripts/release-version.ts resolve \
+              --channel nightly \
+              --date "$(date -u -d "$NIGHTLY_DATE" +%Y%m%d)" \
+              --run-number "$RUN_NUMBER" \
+              --sha "$GITHUB_SHA"
+            echo "ref=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          else
+            bun run scripts/release-version.ts resolve \
+              --channel stable \
+              --version "${DISPATCH_TAG:-$GITHUB_REF_NAME}"
+            echo "ref=${DISPATCH_TAG:-$GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+  verify:
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - run: bun run verify
+      # A stable tag must already carry its version in the manifests. A nightly
+      # is cut from an unstamped `main`, so the version is applied at build time
+      # and never committed back.
+      - name: Verify coordinated package versions
+        if: needs.preflight.outputs.channel == 'stable'
+        run: bun run scripts/release-version.ts verify --version "${{ needs.preflight.outputs.version }}"
+
+  packages:
+    needs: [preflight, verify]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - name: Stamp release version
+        run: bun run scripts/release-version.ts apply --version "${{ needs.preflight.outputs.version }}"
+      # Each package's `prepack` builds only itself, so the dependency order is
+      # established up front: gateway-core compiles against the host's and the
+      # contracts' emitted types.
+      - run: bun run build:gateway
+      - name: Pack publishable packages
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ runner.temp }}/packages"
+          mapfile -t directories < <(bun run scripts/release-version.ts packages)
+          for directory in "${directories[@]}"; do
+            (cd "$directory" && bun pm pack --destination "${{ runner.temp }}/packages")
           done
-          grep -F "gatewayVersion = \"$version\"" packages/core/api/src/version.ts >/dev/null
+          ls -1 "${{ runner.temp }}/packages"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-packages
+          path: ${{ runner.temp }}/packages/*.tgz
+          if-no-files-found: error
 
   build:
-    needs: verify
+    needs: [preflight, verify]
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -70,11 +141,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ needs.preflight.outputs.ref }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.14
       - run: bun install --frozen-lockfile
+      - name: Stamp release version
+        run: bun run scripts/release-version.ts apply --version "${{ needs.preflight.outputs.version }}"
       - run: bun run build:control-plane
       - name: Build standalone executable
         run: |
@@ -115,22 +188,26 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: build
+    needs: [preflight, build, packages]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ needs.preflight.outputs.ref }}
       - uses: actions/download-artifact@v4
         with:
           pattern: integrations-*
           path: ${{ runner.temp }}/release
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-packages
+          path: ${{ runner.temp }}/release
       - name: Prepare version-pinned installer
         env:
-          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
         run: |
           set -euo pipefail
           sed "s/^default_version=.*/default_version=\"$RELEASE_TAG\"/" install.sh > "${{ runner.temp }}/release/install.sh"
@@ -138,8 +215,24 @@ jobs:
           sh -n "${{ runner.temp }}/release/install.sh"
           cd "${{ runner.temp }}/release"
           sha256sum integrations-*.tar.gz > SHA256SUMS
+          sha256sum mokronos-*.tgz > PACKAGES-SHA256SUMS
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
-        run: gh release create "$RELEASE_TAG" "${{ runner.temp }}/release/"* --generate-notes --verify-tag
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+          RELEASE_NAME: ${{ needs.preflight.outputs.name }}
+        run: |
+          set -euo pipefail
+          args=(--title "$RELEASE_NAME" --generate-notes --target "${{ needs.preflight.outputs.ref }}")
+          if [[ "${{ needs.preflight.outputs.is_prerelease }}" == "true" ]]; then
+            args+=(--prerelease)
+          fi
+          if [[ "${{ needs.preflight.outputs.make_latest }}" == "true" ]]; then
+            args+=(--latest)
+          else
+            args+=(--latest=false)
+          fi
+          if [[ "${{ needs.preflight.outputs.channel }}" == "stable" ]]; then
+            args+=(--verify-tag)
+          fi
+          gh release create "$RELEASE_TAG" "${{ runner.temp }}/release/"* "${args[@]}"
