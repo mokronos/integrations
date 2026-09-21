@@ -87,8 +87,32 @@ const integrations: Integrations["Service"] = {
   execute: notUsed("Integrations.execute")
 }
 
-const operations = (behaviour: { readonly completeFails?: string } = {}) => {
+/**
+ * Holds the token exchange open, so a test can act while the flow is still
+ * mid-callback and its listener is therefore still bound.
+ */
+interface CompleteGate {
+  readonly entered: Deferred.Deferred<void>
+  readonly release: Deferred.Deferred<void>
+}
+
+const completeGate = (): CompleteGate => ({
+  entered: Deferred.makeUnsafe<void>(),
+  release: Deferred.makeUnsafe<void>()
+})
+
+const operations = (
+  behaviour: {
+    readonly completeFails?: string
+    readonly completeGate?: CompleteGate
+  } = {}
+) => {
   let redirectUri: string | undefined
+  const gate = behaviour.completeGate
+  const held = gate === undefined ? Effect.void : Effect.suspend(() => {
+    Deferred.doneUnsafe(gate.entered, Exit.void)
+    return Deferred.await(gate.release)
+  })
   const host: Context.Context<OAuthOperations> = Context.empty().pipe(
     Context.add(OAuthFlows, {
       probe: notUsed("probe"),
@@ -102,19 +126,20 @@ const operations = (behaviour: { readonly completeFails?: string } = {}) => {
         })
       },
       complete: () =>
-        behaviour.completeFails === undefined
-          ? Effect.succeed({
-            owner: "org" as const,
-            integration: IntegrationSlug.make("provider"),
-            connection: ConnectionName.make("primary"),
-            template: AuthTemplateSlug.make("oauth"),
-            clientOwner: "org" as const,
-            client: OAuthClientSlug.make("provider-wf"),
-            scope: Option.none(),
-            expiresAt: Option.none(),
-            renewable: true
-          })
-          : Effect.fail(new OAuthError({ stage: "complete", detail: behaviour.completeFails })),
+        Effect.flatMap(held, () =>
+          behaviour.completeFails === undefined
+            ? Effect.succeed({
+              owner: "org" as const,
+              integration: IntegrationSlug.make("provider"),
+              connection: ConnectionName.make("primary"),
+              template: AuthTemplateSlug.make("oauth"),
+              clientOwner: "org" as const,
+              client: OAuthClientSlug.make("provider-wf"),
+              scope: Option.none(),
+              expiresAt: Option.none(),
+              renewable: true
+            })
+            : Effect.fail(new OAuthError({ stage: "complete", detail: behaviour.completeFails }))),
       accessToken: notUsed("accessToken")
     }),
     Context.add(CatalogStore, catalogStore),
@@ -235,13 +260,19 @@ describe("authorizing through the loopback listener", () => {
 
   it.live("refuses a second callback once one is in flight", () =>
     Effect.gen(function*() {
-      const auth = operations()
+      const gate = completeGate()
+      const auth = operations({ completeGate: gate })
       const { fiber, redirectUri } = yield* started(auth)
 
-      yield* callback(redirectUri, { state: "state-123", code: "auth-code" })
+      const first = yield* Effect.forkChild(
+        callback(redirectUri, { state: "state-123", code: "auth-code" })
+      )
+      yield* Deferred.await(gate.entered)
       const replay = yield* callback(redirectUri, { state: "state-123", code: "auth-code" })
 
       expect(replay.status).toBe(409)
+      yield* Deferred.succeed(gate.release, undefined)
+      expect((yield* Fiber.join(first)).status).toBe(200)
       expect(yield* Fiber.join(fiber)).toEqual(connected)
     }).pipe(Effect.provide(services)))
 
