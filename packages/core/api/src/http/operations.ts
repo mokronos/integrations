@@ -244,7 +244,7 @@ const validateGatewayNode = Effect.fn("Gateway.validateGatewayNode")(function*(
       : {
         severity: "error",
         check: "structural",
-        message: `Alias "${source.alias}" must be lowercase letters, digits, and dashes`
+        message: `Alias "${source.alias}" must be lowercase letters, digits, and underscores`
       }
   )
 

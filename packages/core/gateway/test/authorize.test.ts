@@ -80,7 +80,7 @@ const seed = Effect.fnUntraced(function*(store: GatewayStore, options: {
 const invoke = (
   store: GatewayStore,
   secret: string,
-  alias = "org_sharepoint_default",
+  alias = "org___sharepoint___default",
   tool = "getDocument"
 ) =>
   authorizeInvocation(store, {
@@ -109,7 +109,7 @@ describe("gateway authorization", () => {
       const store = yield* gatewayStore()
       const { key } = yield* seed(store, { connection: userConnection })
 
-      const result = yield* invoke(store, key.secret, "user_sebastian_gmail_work")
+      const result = yield* invoke(store, key.secret, "user___sebastian___gmail___work")
 
       expect(result.status).toBe("authorized")
       if (result.status !== "authorized") return
@@ -167,8 +167,8 @@ describe("gateway authorization", () => {
       const store = yield* gatewayStore()
       const { key } = yield* seed(store)
 
-      const unauthorizedTool = yield* invoke(store, key.secret, "org_sharepoint_default", "deleteDocument")
-      const unknownAlias = yield* invoke(store, key.secret, "nothing-here", "getDocument")
+      const unauthorizedTool = yield* invoke(store, key.secret, "org___sharepoint___default", "deleteDocument")
+      const unknownAlias = yield* invoke(store, key.secret, "nothing_here", "getDocument")
 
       expect(unauthorizedTool.status).toBe("not-authorized")
       expect(unknownAlias.status).toBe(unauthorizedTool.status)
@@ -192,7 +192,7 @@ describe("gateway authorization", () => {
       ])
 
       expect((yield* invoke(store, key.secret)).status).toBe("not-authorized")
-      expect((yield* invoke(store, key.secret, "user_sebastian_gmail_work", "search")).status)
+      expect((yield* invoke(store, key.secret, "user___sebastian___gmail___work", "search")).status)
         .toBe("authorized")
     }).pipe(Effect.provide(testServices)))
 
@@ -296,7 +296,7 @@ describe("delegated tools", () => {
         subject: SubjectId.make("sebastian")
       })
 
-      expect(aliasForConnection(delegationTemplate)).toBe("user_gmail_work")
+      expect(aliasForConnection(delegationTemplate)).toBe("user___gmail___work")
       expect(result.status).toBe("authorized")
       if (result.status !== "authorized") return
       expect(result.connection).toEqual(userConnection)

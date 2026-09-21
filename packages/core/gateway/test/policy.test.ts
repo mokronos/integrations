@@ -165,14 +165,14 @@ describe("access profiles and approval policies", () => {
 
       expect(yield* listEffectiveTools(gateway, client.id)).toEqual([
         {
-          alias: Alias.make("org_calendar_primary"),
+          alias: Alias.make("org___calendar___primary"),
           tool: ToolName.make("createEvent"),
           connection: connection("calendar", "primary"),
           decision: "allow",
           delegated: false
         },
         {
-          alias: Alias.make("org_mail_primary"),
+          alias: Alias.make("org___mail___primary"),
           tool: ToolName.make("sendEmail"),
           connection: connection("mail", "primary"),
           decision: "require_approval",
@@ -180,15 +180,15 @@ describe("access profiles and approval policies", () => {
         }
       ])
       const authorized = yield* authorizeInvocation(gateway, {
-        secret: key.secret, alias: Alias.make("org_mail_primary"), tool: ToolName.make("sendEmail")
+        secret: key.secret, alias: Alias.make("org___mail___primary"), tool: ToolName.make("sendEmail")
       })
       expect(authorized.status).toBe("authorized")
       const calendar = yield* authorizeInvocation(gateway, {
-        secret: key.secret, alias: Alias.make("org_calendar_primary"), tool: ToolName.make("createEvent")
+        secret: key.secret, alias: Alias.make("org___calendar___primary"), tool: ToolName.make("createEvent")
       })
       expect(calendar.status).toBe("authorized")
       const outsideApproval = yield* authorizeInvocation(gateway, {
-        secret: key.secret, alias: Alias.make("org_mail_primary"), tool: ToolName.make("archiveEmail")
+        secret: key.secret, alias: Alias.make("org___mail___primary"), tool: ToolName.make("archiveEmail")
       })
       expect(outsideApproval.status).toBe("not-authorized")
     }).pipe(Effect.provide(testServices)))

@@ -200,7 +200,7 @@ describe("the encrypted store", () => {
         clientId: client.id,
         approvalPolicyId: approvalPolicy.id,
         accessProfileId: accessProfile.id,
-        alias: Alias.make("gmail-work"),
+        alias: Alias.make("org___gmail___work"),
         tool: ToolName.make("sendEmail"),
         arguments: argumentsValue,
         expiresAt: new Date((yield* Clock.currentTimeMillis) + 60_000)
@@ -213,7 +213,7 @@ describe("the encrypted store", () => {
       const metAgain = yield* store.findUncollectedApproval({
         tenantId: defaultTenantId,
         clientId: client.id,
-        alias: Alias.make("gmail-work"),
+        alias: Alias.make("org___gmail___work"),
         approvalPolicyId: approvalPolicy.id,
         accessProfileId: accessProfile.id,
         tool: ToolName.make("sendEmail"),
@@ -234,7 +234,7 @@ describe("the encrypted store", () => {
         clientId: client.id,
         approvalPolicyId: approvalPolicy.id,
         accessProfileId: accessProfile.id,
-        alias: Alias.make("gmail-work"),
+        alias: Alias.make("org___gmail___work"),
         tool: ToolName.make("sendEmail"),
         arguments: {},
         expiresAt: new Date((yield* Clock.currentTimeMillis) + 60_000)
@@ -298,7 +298,7 @@ describe("the encrypted store", () => {
             client.id,
             approvalPolicy.id,
             accessProfile.id,
-            Alias.make("gmail-work"),
+            Alias.make("org___gmail___work"),
             ToolName.make("sendEmail"),
             canonicalArguments({ to: "old@example.com" }),
             expiresAt
@@ -309,7 +309,7 @@ describe("the encrypted store", () => {
       const metAgain = yield* store.findUncollectedApproval({
         tenantId: defaultTenantId,
         clientId: client.id,
-        alias: Alias.make("gmail-work"),
+        alias: Alias.make("org___gmail___work"),
         approvalPolicyId: approvalPolicy.id,
         accessProfileId: accessProfile.id,
         tool: ToolName.make("sendEmail"),

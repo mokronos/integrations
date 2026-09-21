@@ -297,7 +297,7 @@ describe("gateway store", () => {
         clientId: client.id,
         approvalPolicyId: approvalPolicy.id,
         accessProfileId: accessProfile.id,
-        alias: Alias.make("gmail-work"),
+        alias: Alias.make("org___gmail___work"),
         tool: ToolName.make("sendEmail"),
         arguments: { to: ["customer@example.com"], subject: "Follow up" },
         expiresAt: yield* notYet
@@ -343,7 +343,7 @@ describe("gateway store", () => {
         clientId: client.id,
         approvalPolicyId: approvalPolicy.id,
         accessProfileId: accessProfile.id,
-        alias: Alias.make("gmail-work"),
+        alias: Alias.make("org___gmail___work"),
         tool: ToolName.make("sendEmail"),
         arguments: {},
         expiresAt: yield* notYet
@@ -366,7 +366,7 @@ describe("gateway store", () => {
         tenantId: defaultTenantId,
         id: yield* newAuditId,
         clientId: client.id,
-        alias: Alias.make("gmail-work"),
+        alias: Alias.make("org___gmail___work"),
         tool: ToolName.make("sendEmail"),
         connection,
         decision: "allow",
@@ -468,7 +468,7 @@ describe("gateway store", () => {
         clientId: mine.id,
         approvalPolicyId: mine.approvalPolicyId,
         accessProfileId: mine.accessProfileId,
-        alias: Alias.make("gmail-work"),
+        alias: Alias.make("org___gmail___work"),
         tool: ToolName.make("sendEmail"),
         arguments: {},
         expiresAt: yield* notYet

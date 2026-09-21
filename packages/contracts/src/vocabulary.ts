@@ -1,6 +1,10 @@
 import { Schema } from "effect"
 
-const slugPattern = /^[a-z0-9][a-z0-9_-]*$/
+/**
+ * Separators are single and internal. Alias segments are joined by a run of
+ * three underscores, so parts must never be able to grow a run that long.
+ */
+const slugPattern = /^[a-z0-9]+(?:[_-][a-z0-9]+)*$/
 
 export const IntegrationSlug = Schema.String.check(Schema.isPattern(slugPattern)).pipe(
   Schema.brand("IntegrationSlug")
@@ -24,7 +28,8 @@ export const ConnectionOwner = Schema.Union([
 ])
 export type ConnectionOwner = typeof ConnectionOwner.Type
 
-export const Alias = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_-]*$/)).pipe(
+/** Aliases address tools in generated code, so they stay valid JS identifiers. */
+export const Alias = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_]*$/)).pipe(
   Schema.brand("Alias")
 )
 export type Alias = typeof Alias.Type

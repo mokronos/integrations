@@ -337,7 +337,7 @@ describe("gateway http surface", () => {
       expect(response.body["accessProfileId"]).not.toBe(accessProfile.id)
       const id = String(response.body["id"])
       const tools = yield* call("GET", `/v1/clients/${id}/tools`, { local: true })
-      expect(tools.body["tools"]).toMatchObject([{ alias: "org_gmail_work", tool: "sendEmail", decision: "require_approval" }])
+      expect(tools.body["tools"]).toMatchObject([{ alias: "org___gmail___work", tool: "sendEmail", decision: "require_approval" }])
       const approvalPolicyId = String(response.body["approvalPolicyId"])
       expect((yield* store.listApprovalPolicyTools(ApprovalPolicyId.make(approvalPolicyId))).map((entry) => ({
         tool: entry.tool,
@@ -381,7 +381,7 @@ describe("gateway http surface", () => {
 
       const listed = yield* Effect.promise(() => client.listTools())
       expect(listed.tools).toContainEqual(expect.objectContaining({
-        name: "user_sebastian_gmail_work__sendEmail",
+        name: "user___sebastian___gmail___work__sendEmail",
         description: "Send an email",
         inputSchema: expect.objectContaining({ type: "object" })
       }))
@@ -389,7 +389,7 @@ describe("gateway http surface", () => {
 
       const called = yield* Effect.promise(() =>
         client.callTool({
-          name: "user_sebastian_gmail_work__sendEmail",
+          name: "user___sebastian___gmail___work__sendEmail",
           arguments: { to: "a@b.c" }
         }))
       expect(called.isError).not.toBe(true)
@@ -425,17 +425,17 @@ describe("gateway http surface", () => {
 
       const tools = yield* mcpJson(client, "tools", { integration: "gmail" })
       expect(tools["tools"]).toEqual([{
-        alias: "user_sebastian_gmail_work",
+        alias: "user___sebastian___gmail___work",
         tool: "sendEmail",
         decision: "allow",
         description: "Send an email"
       }])
 
-      const schema = yield* mcpJson(client, "schema", { alias: "user_sebastian_gmail_work", tool: "sendEmail" })
+      const schema = yield* mcpJson(client, "schema", { alias: "user___sebastian___gmail___work", tool: "sendEmail" })
       expect(schema["inputSchema"]).toMatchObject({ type: "object" })
 
       const executed = yield* mcpJson(client, "execute", {
-        alias: "user_sebastian_gmail_work",
+        alias: "user___sebastian___gmail___work",
         tool: "sendEmail",
         arguments: { to: "a@b.c" }
       })
@@ -467,7 +467,7 @@ describe("gateway http surface", () => {
 
       const refused = yield* Effect.promise(() =>
         client.callTool({
-          name: "user_sebastian_gmail_work__sendEmail",
+          name: "user___sebastian___gmail___work__sendEmail",
           arguments: { to: "a@b.c", attachment: { "@integrations/file": "/tmp/report.pdf" } }
         }))
       expect(refused.isError).toBe(true)
@@ -517,7 +517,7 @@ describe("gateway http surface", () => {
       expect(response.status).toBe(200)
       expect(response.body["tools"]).toEqual([
         {
-          alias: "user_sebastian_gmail_work",
+          alias: "user___sebastian___gmail___work",
           tool: "sendEmail",
           connection: { owner: "user", subject: "sebastian", integration: "gmail", name: "work" },
           decision: "allow",
@@ -548,18 +548,18 @@ describe("gateway http surface", () => {
 
       const tools = yield* call("GET", "/v1/tools")
       expect(tools.body["tools"]).toEqual([{
-        alias: "user_gmail_work",
+        alias: "user___gmail___work",
         tool: "sendEmail",
         connection: { owner: "user", integration: "gmail", name: "work" },
         decision: "allow",
         delegated: true
       }])
 
-      const anonymous = yield* call("POST", "/v1/execute", { body: { alias: "user_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } } })
+      const anonymous = yield* call("POST", "/v1/execute", { body: { alias: "user___gmail___work", tool: "sendEmail", arguments: { to: "a@b.c" } } })
       expect(anonymous.status).toBe(403)
 
       const first = yield* call("POST", "/v1/execute", {
-        body: { alias: "user_gmail_work", tool: "sendEmail", subject: "sebastian", arguments: { to: "a@b.c" } }
+        body: { alias: "user___gmail___work", tool: "sendEmail", subject: "sebastian", arguments: { to: "a@b.c" } }
       })
       expect(first.status).toBe(200)
       expect(first.body["status"]).toBe("authorization-required")
@@ -577,7 +577,7 @@ describe("gateway http surface", () => {
       })
 
       const response = yield* call("POST", "/v1/execute", {
-        body: { alias: "user_gmail_work", tool: "sendEmail", subject: "sebastian", arguments: { to: "a@b.c" } }
+        body: { alias: "user___gmail___work", tool: "sendEmail", subject: "sebastian", arguments: { to: "a@b.c" } }
       })
 
       expect(response.status).toBe(200)
@@ -624,7 +624,7 @@ describe("gateway http surface", () => {
       const { call, calls } = yield* setup()
 
       const response = yield* call("POST", "/v1/execute", {
-        body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } }
+        body: { alias: "user___sebastian___gmail___work", tool: "sendEmail", arguments: { to: "a@b.c" } }
       })
 
       expect(response.status).toBe(200)
@@ -638,7 +638,7 @@ describe("gateway http surface", () => {
       const { call, calls } = yield* setup()
 
       const response = yield* call("POST", "/v1/execute", {
-        body: { alias: "user_sebastian_gmail_work", tool: "deleteEverything" }
+        body: { alias: "user___sebastian___gmail___work", tool: "deleteEverything" }
       })
 
       expect(response.status).toBe(403)
@@ -650,7 +650,7 @@ describe("gateway http surface", () => {
       const { call, calls } = yield* setup({ decision: "require_approval" })
 
       const response = yield* call("POST", "/v1/execute", {
-        body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } }
+        body: { alias: "user___sebastian___gmail___work", tool: "sendEmail", arguments: { to: "a@b.c" } }
       })
 
       expect(response.status).toBe(200)
@@ -664,7 +664,7 @@ describe("gateway http surface", () => {
       const { call, calls, store } = yield* setup({ decision: "require_approval" })
 
       const response = yield* call("POST", "/v1/execute", {
-        body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: 5 } }
+        body: { alias: "user___sebastian___gmail___work", tool: "sendEmail", arguments: { to: 5 } }
       })
 
       expect(response.status).toBe(400)
@@ -680,7 +680,7 @@ describe("gateway http surface", () => {
       const { call } = yield* setup({ fail: true })
 
       const response = yield* call("POST", "/v1/execute", {
-        body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } }
+        body: { alias: "user___sebastian___gmail___work", tool: "sendEmail", arguments: { to: "a@b.c" } }
       })
 
       expect(response.status).toBe(502)
@@ -690,7 +690,7 @@ describe("gateway http surface", () => {
   it.effect("rejects a malformed body at the boundary", () =>
     Effect.gen(function*() {
       const { call } = yield* setup()
-      const response = yield* call("POST", "/v1/execute", { body: { alias: "user_sebastian_gmail_work" } })
+      const response = yield* call("POST", "/v1/execute", { body: { alias: "user___sebastian___gmail___work" } })
       expect(response.status).toBe(400)
     }).pipe(Effect.provide(testServices)))
 
@@ -754,7 +754,7 @@ describe("gateway http surface", () => {
     Effect.gen(function*() {
       const { call, store, client, accessProfile, approvalPolicy } = yield* setup({ decision: "require_approval" })
       const frozen = yield* call("POST", "/v1/execute", {
-        body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } }
+        body: { alias: "user___sebastian___gmail___work", tool: "sendEmail", arguments: { to: "a@b.c" } }
       })
       const approvalId = String(frozen.body["approvalId"])
 
@@ -837,7 +837,7 @@ describe("gateway http surface", () => {
         dashboardUrl: "https://gateway.example"
       })
       const response = yield* call("POST", "/v1/execute", {
-        body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } }
+        body: { alias: "user___sebastian___gmail___work", tool: "sendEmail", arguments: { to: "a@b.c" } }
       })
       expect(response.body["approvalUrl"]).toBe(
         `https://gateway.example/approvals?approval=${String(response.body["approvalId"])}`
@@ -847,7 +847,7 @@ describe("gateway http surface", () => {
   it.effect("revoking a client through the API cancels its frozen calls", () =>
     Effect.gen(function*() {
       const { call, client } = yield* setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })
-      yield* call("POST", "/v1/execute", { body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } } })
+      yield* call("POST", "/v1/execute", { body: { alias: "user___sebastian___gmail___work", tool: "sendEmail", arguments: { to: "a@b.c" } } })
 
       const response = yield* call("POST", `/v1/clients/${client.id}/revoke`, { body: {} })
 
@@ -972,7 +972,7 @@ describe("gateway approval settlement", () => {
         capabilities: ["provision_connections", "administer_gateway"]
       })
       const frozen = yield* call("POST", "/v1/execute", {
-        body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } }
+        body: { alias: "user___sebastian___gmail___work", tool: "sendEmail", arguments: { to: "a@b.c" } }
       })
       const approvalId = String(frozen.body["approvalId"])
 
@@ -992,7 +992,7 @@ describe("gateway approval settlement", () => {
     Effect.gen(function*() {
       const { call, calls } = yield* setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })
       const frozen = yield* call("POST", "/v1/execute", {
-        body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } }
+        body: { alias: "user___sebastian___gmail___work", tool: "sendEmail", arguments: { to: "a@b.c" } }
       })
       const approvalId = String(frozen.body["approvalId"])
       expect(calls).toHaveLength(0)
@@ -1011,7 +1011,7 @@ describe("gateway approval settlement", () => {
     Effect.gen(function*() {
       const { call } = yield* setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })
       const frozen = yield* call("POST", "/v1/execute", {
-        body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } }
+        body: { alias: "user___sebastian___gmail___work", tool: "sendEmail", arguments: { to: "a@b.c" } }
       })
       const approvalId = String(frozen.body["approvalId"])
 
@@ -1034,7 +1034,7 @@ describe("gateway approval settlement", () => {
         capabilities: ["provision_connections", "administer_gateway"]
       })
       const frozen = yield* reassigned.call("POST", "/v1/execute", {
-        body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } }
+        body: { alias: "user___sebastian___gmail___work", tool: "sendEmail", arguments: { to: "a@b.c" } }
       })
       const emptyProfile = yield* reassigned.store.createAccessProfile({
         id: (yield* newAccessProfileId),
@@ -1058,7 +1058,7 @@ describe("gateway approval settlement", () => {
         capabilities: ["provision_connections", "administer_gateway"]
       })
       const stale = yield* emptied.call("POST", "/v1/execute", {
-        body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } }
+        body: { alias: "user___sebastian___gmail___work", tool: "sendEmail", arguments: { to: "a@b.c" } }
       })
       yield* emptied.store.replaceAccessProfileTools(emptied.accessProfile.id, [])
       expect((yield* emptied.call(
@@ -1073,7 +1073,7 @@ describe("gateway approval settlement", () => {
     Effect.gen(function*() {
       const { call, calls } = yield* setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })
       const frozen = yield* call("POST", "/v1/execute", {
-        body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } }
+        body: { alias: "user___sebastian___gmail___work", tool: "sendEmail", arguments: { to: "a@b.c" } }
       })
       const approvalId = String(frozen.body["approvalId"])
 
@@ -1090,7 +1090,7 @@ describe("gateway approval settlement", () => {
 describe("frozen calls and retries", () => {
   /** The one call these tests freeze, retry and collect. */
   const sendEmail = (args: Record<string, typeof Schema.Json.Type> = { to: "a@b.c" }) => ({
-    body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: args }
+    body: { alias: "user___sebastian___gmail___work", tool: "sendEmail", arguments: args }
   })
 
   it.effect("different arguments are a different frozen call", () =>
@@ -1166,7 +1166,7 @@ describe("provisioning surface", () => {
       })
 
       const report = yield* call("POST", "/v1/validate", {
-        body: { node: { source: { kind: "gateway", alias: "user_sebastian_gmail_work", tool: "sendEmail" } } }
+        body: { node: { source: { kind: "gateway", alias: "user___sebastian___gmail___work", tool: "sendEmail" } } }
       })
 
       expect(report.status).toBe(200)
@@ -1182,7 +1182,7 @@ describe("provisioning surface", () => {
       const { call } = yield* setup({ capabilities: ["provision_connections", "administer_gateway"] })
 
       const report = yield* call("POST", "/v1/validate", {
-        body: { node: { source: { kind: "gateway", alias: "user_sebastian_gmail_work", tool: "deleteEverything" } } }
+        body: { node: { source: { kind: "gateway", alias: "user___sebastian___gmail___work", tool: "deleteEverything" } } }
       })
 
       expect(report.body["ok"]).toBe(false)
@@ -1301,8 +1301,8 @@ describe("provisioning surface", () => {
   it.effect("filters and windows the audit trail, and says how much there is", () =>
     Effect.gen(function*() {
       const { call } = yield* setup({ capabilities: ["provision_connections", "administer_gateway"] })
-      yield* call("POST", "/v1/execute", { body: { alias: "user_sebastian_gmail_work", tool: "sendEmail", arguments: { to: "a@b.c" } } })
-      yield* call("POST", "/v1/execute", { body: { alias: "user_sebastian_gmail_work", tool: "nope" } })
+      yield* call("POST", "/v1/execute", { body: { alias: "user___sebastian___gmail___work", tool: "sendEmail", arguments: { to: "a@b.c" } } })
+      yield* call("POST", "/v1/execute", { body: { alias: "user___sebastian___gmail___work", tool: "nope" } })
 
       const all = yield* call("GET", "/v1/audit")
       expect(all.body["total"]).toBe(2)

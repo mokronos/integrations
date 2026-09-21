@@ -55,8 +55,17 @@ export const delegationTemplateOf = (connection: ConnectionRef): ConnectionRef =
 export const connectionRefKey = (connection: ConnectionRef): string => [connection.owner, connectionSubject(connection) ?? "", connection.integration, connection.name].join("\u0000")
 export const sameConnectionRef = (left: ConnectionRef, right: ConnectionRef): boolean => connectionRefKey(left) === connectionRefKey(right)
 const utf8 = new TextEncoder()
-const aliasPart = (value: string): string => Array.from(utf8.encode(value), (byte) => byte >= 0x61 && byte <= 0x7a || byte >= 0x30 && byte <= 0x39 ? String.fromCharCode(byte) : `-${byte.toString(16).padStart(2, "0")}`).join("")
-export const aliasForConnection = (connection: ConnectionRef): Alias => Alias.make([connection.owner, ...connection.owner === "user" && connection.subject !== undefined ? [aliasPart(connection.subject)] : [], aliasPart(connection.integration), aliasPart(connection.name)].join("_"))
+/**
+ * Segments are joined by three underscores, so each one keeps its own runs to
+ * at most two and the joiner stays unambiguous. Slugs already arrive with
+ * single internal separators, so a `_` is carried through as itself and only
+ * `-` has to widen; that keeps the readable part of a name readable.
+ */
+const aliasJoiner = "___"
+const aliasSlugPart = (value: string): string => value.replaceAll("-", "__")
+/** Subject ids come from an identity provider, so nothing about them is assumed. */
+const aliasSubjectPart = (value: string): string => Array.from(utf8.encode(value), (byte) => byte >= 0x61 && byte <= 0x7a || byte >= 0x30 && byte <= 0x39 ? String.fromCharCode(byte) : `__${byte.toString(16).padStart(2, "0")}`).join("")
+export const aliasForConnection = (connection: ConnectionRef): Alias => Alias.make([connection.owner, ...connection.owner === "user" && connection.subject !== undefined ? [aliasSubjectPart(connection.subject)] : [], aliasSlugPart(connection.integration), aliasSlugPart(connection.name)].join(aliasJoiner))
 
 export const ClientCapability = Schema.Literals(["provision_connections", "administer_gateway"])
 export type ClientCapability = typeof ClientCapability.Type

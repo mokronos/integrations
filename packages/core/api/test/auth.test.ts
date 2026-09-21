@@ -398,7 +398,7 @@ describe("what a session may do", () => {
     expect(tools.body["message"]).toBe("This credential does not hold the required permission")
 
     const execute = yield* setup_.call("POST", "/v1/execute", {
-      body: { alias: "org_gmail_work", tool: "sendEmail" },
+      body: { alias: "org___gmail___work", tool: "sendEmail" },
       cookie: human.cookie,
       headers: { origin: "http://gateway.test", "sec-fetch-site": "same-origin" }
     })
@@ -592,7 +592,7 @@ describe("attribution", () => {
     yield* setup_.store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
 
     const frozen = yield* setup_.call("POST", "/v1/execute", {
-      body: { alias: "org_gmail_work", tool: "sendEmail", arguments: {} },
+      body: { alias: "org___gmail___work", tool: "sendEmail", arguments: {} },
       headers: { authorization: `Bearer ${key.secret}` }
     })
     expect(frozen.body["status"]).toBe("pending")

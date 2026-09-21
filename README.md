@@ -148,7 +148,7 @@ host in `@mokronos/integrations-gateway-api` provides.
 
 A tool can act for the person the agent is serving rather than for the
 organisation. The administrator grants it on a delegation template: a
-user-owned connection with no subject, so its alias reads `user_gmail_work`
+user-owned connection with no subject, so its alias reads `user___gmail___work`
 rather than naming anyone. Every invocation of such a tool names a subject,
 the gateway's id for that person, which an administrator mirrors from the
 application's own users through `POST /v1/subjects`.
