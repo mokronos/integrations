@@ -122,6 +122,33 @@ service unit or a `serve` started by hand — and starts one from these sources 
 the same port. A gateway keeps the modules Bun loaded at startup, so one left
 running across a change serves the older wire shape to newly started clients.
 
+## Packages
+
+The libraries are published to GitHub Packages under the `@mokronos` scope:
+`integrations-contracts`, `integrations-observability`, `integrations-host`,
+`integrations-gateway-core`, `integrations-gateway-api` and
+`integrations-client`. One release publishes all six under the same version, so
+they are installed as a set.
+
+GitHub Packages authenticates every read, a public one included, so a consumer
+needs a token with the `read:packages` scope and an `.npmrc` beside its
+manifest:
+
+```
+@mokronos:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
+```
+
+```bash
+bun add @mokronos/integrations-gateway-core
+```
+
+Nightlies are published under the `nightly` dist-tag and never become `latest`,
+so `bun add @mokronos/integrations-client@nightly` is the only way to reach
+one. Every release also attaches the packed tarballs and their checksums to the
+GitHub release, which is what to read when a published version has to be
+audited or mirrored.
+
 ## Embedding
 
 An application that owns its process and database does not need the HTTP
@@ -136,7 +163,7 @@ pipeline can carry the gateway's tables; pass `migrate: false` and the gateway
 trusts the tables are there. `apps/platform-demo/` is the smallest working
 example.
 
-The embeddable packages are `@mokronos/integrations-contracts`,
+The packages to embed are `@mokronos/integrations-contracts`,
 `@mokronos/integrations-host` and `@mokronos/integrations-gateway-core`. They
 run on Node or Bun and declare `effect`, `@effect/sql-libsql`, `drizzle-orm`
 and `@libsql/client` as peer dependencies, so the application holds the one
@@ -174,8 +201,8 @@ client's MCP surface, set in the dashboard.
 With the `tools` surface the server exposes that client's effective tools under
 `<connection-alias>__<tool-name>`, so tools from multiple enabled connections
 remain distinct. A connection alias spells out the whole reference —
-`org_github_work`, or `user_sebastian_github_work` for a connection held on one
-person's behalf — so no two connections can share one.
+`org___github___work`, or `user___sebastian___github___work` for a connection
+held on one person's behalf — so no two connections can share one.
 
 With the `discovery` surface it instead offers the `i` CLI's own commands as
 tools: `search`, `discover`, `integrations`, `connect`, `oauth_status`,

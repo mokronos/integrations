@@ -22,7 +22,7 @@
   },
   "publishConfig": {
     "access": "public",
-    "registry": "https://registry.npmjs.org"
+    "registry": "https://npm.pkg.github.com"
   },
   "files": [
     "src",
@@ -45,7 +45,7 @@
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
-    "prepublishOnly": "bun run build"
+    "prepack": "bun run build"
   },
   "dependencies": {
     "@mokronos/integrations-contracts": "workspace:^",

@@ -27,13 +27,17 @@ export const releasePackageFiles = [
 export const gatewayVersionFile = "packages/core/api/src/version.ts"
 
 /**
- * The packages published as release assets. Consumers install them from the
- * release download URL, so this list is also the order they are packed in.
+ * The packages published to the registry, in dependency order. Every
+ * dependency one of them holds on another is rewritten from the workspace
+ * protocol to a published range before packing.
  */
 export const publishablePackageDirectories = [
   "packages/contracts",
+  "packages/observability",
   "packages/integrations",
-  "packages/core/gateway"
+  "packages/core/gateway",
+  "packages/core/api",
+  "apps/ts"
 ] as const
 
 /**
@@ -79,6 +83,15 @@ export class ReleaseVersionMismatchError extends Data.TaggedError("ReleaseVersio
   }
 }
 
+export class UnresolvedWorkspaceDependencyError extends Data.TaggedError("UnresolvedWorkspaceDependencyError")<{
+  readonly file: string
+  readonly entry: string
+}> {
+  override get message(): string {
+    return `${this.file} still declares ${this.entry}, which resolves for this repository alone.`
+  }
+}
+
 export class ReleaseVersionNotFoundError extends Data.TaggedError("ReleaseVersionNotFoundError")<{
   readonly file: string
 }> {
@@ -99,7 +112,7 @@ const commitShaPattern = /^[0-9a-f]{7,40}$/i
 const manifestVersionPattern = /^ {2}"version": "[^"]*"/m
 const gatewayVersionPattern = /^export const gatewayVersion = ".*"$/m
 
-const PackageJson = Schema.Struct({ version: Schema.NonEmptyString })
+const PackageJson = Schema.Struct({ name: Schema.NonEmptyString, version: Schema.NonEmptyString })
 const decodePackageJson = Schema.decodeUnknownSync(Schema.fromJsonString(PackageJson))
 
 /** Drops any prerelease or build suffix, leaving the `X.Y.Z` core. */
@@ -171,6 +184,32 @@ export const renderGatewayVersion = (
   gatewayVersionPattern.test(source)
     ? Effect.succeed(source.replace(gatewayVersionPattern, `export const gatewayVersion = "${version}"`))
     : Effect.fail(new ReleaseVersionNotFoundError({ file: gatewayVersionFile }))
+
+const workspaceDependencyPattern = /"(@[^"]+)": "workspace:[^"]*"/g
+
+/**
+ * Replaces each workspace dependency with the range the release publishes it
+ * under. `bun pm pack` would otherwise take the range from the lockfile, which
+ * keeps recording the version a workspace package had when it was first
+ * resolved, and ship a dependency on a version that was never published.
+ */
+export const renderReleaseDependencies = (
+  file: string,
+  source: string,
+  versions: ReadonlyMap<string, string>
+): Effect.Effect<string, UnresolvedWorkspaceDependencyError> => {
+  const rendered = source.replace(
+    workspaceDependencyPattern,
+    (entry: string, name: string) => {
+      const version = versions.get(name)
+      return version === undefined ? entry : `"${name}": "^${version}"`
+    }
+  )
+  const unresolved = rendered.match(/"[^"]+": "workspace:[^"]*"/)
+  return unresolved === null
+    ? Effect.succeed(rendered)
+    : Effect.fail(new UnresolvedWorkspaceDependencyError({ file, entry: unresolved[0] }))
+}
 
 const read = (file: string): string => readFileSync(path.join(repositoryRoot, file), "utf8")
 const write = (file: string, contents: string): void => writeFileSync(path.join(repositoryRoot, file), contents)
@@ -251,13 +290,26 @@ const verifyCommand = Command.make("verify", { version: Flag.string("version") }
     yield* Effect.log(`verified ${version} across ${releasePackageFiles.length} manifest(s)`)
   }))
 
+const linkCommand = Command.make("link", {}, () =>
+  Effect.gen(function*() {
+    const files = publishablePackageDirectories.map((directory) => `${directory}/package.json`)
+    const versions = new Map(files.map((file) => {
+      const manifest = decodePackageJson(read(file))
+      return [manifest.name, manifest.version] as const
+    }))
+    for (const file of files) {
+      write(file, yield* renderReleaseDependencies(file, read(file), versions))
+    }
+    yield* Effect.log(`linked ${versions.size} package(s) by published range`)
+  }))
+
 const packagesCommand = Command.make("packages", {}, () =>
   Effect.sync(() => {
     for (const directory of publishablePackageDirectories) console.log(directory)
   }))
 
 const command = Command.make("release-version").pipe(
-  Command.withSubcommands([resolveCommand, applyCommand, verifyCommand, packagesCommand])
+  Command.withSubcommands([resolveCommand, applyCommand, verifyCommand, linkCommand, packagesCommand])
 )
 
 if (import.meta.main) {

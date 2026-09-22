@@ -105,6 +105,11 @@ jobs:
       # established up front: gateway-core compiles against the host's and the
       # contracts' emitted types.
       - run: bun run build:gateway
+      # A packed manifest leaves this repository, where `workspace:` means
+      # nothing, and `bun pm pack` would resolve it against a lockfile that
+      # still records the version each package had when it was first installed.
+      - name: Pin intra-workspace dependencies to the published range
+        run: bun run scripts/release-version.ts link
       - name: Pack publishable packages
         run: |
           set -euo pipefail
@@ -241,3 +246,37 @@ jobs:
             args+=(--target "${{ needs.preflight.outputs.ref }}")
           fi
           gh release create "$RELEASE_TAG" "${{ runner.temp }}/release/"* "${args[@]}"
+
+  publish:
+    needs: [preflight, release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-packages
+          path: ${{ runner.temp }}/packages
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://npm.pkg.github.com
+          scope: "@mokronos"
+      # The packages carry the registry in `publishConfig`; the step above only
+      # supplies the credential that goes with it.
+      - name: Publish to GitHub Packages
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ needs.preflight.outputs.make_latest }}" == "true" ]]; then
+            dist_tag=latest
+          elif [[ "${{ needs.preflight.outputs.channel }}" == "nightly" ]]; then
+            dist_tag=nightly
+          else
+            dist_tag=next
+          fi
+          for tarball in "${{ runner.temp }}"/packages/*.tgz; do
+            npm publish "$tarball" --tag "$dist_tag"
+          done

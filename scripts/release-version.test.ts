@@ -8,6 +8,7 @@ import {
   releasePackageFiles,
   renderGatewayVersion,
   renderManifestVersion,
+  renderReleaseDependencies,
   stableCore,
   stableMetadata
 } from "./release-version.ts"
@@ -140,4 +141,41 @@ describe("release surface", () => {
       assert.include(releasePackageFiles, `${directory}/package.json`)
     }
   })
+})
+
+describe("renderReleaseDependencies", () => {
+  const versions = new Map([
+    ["@mokronos/integrations-contracts", "0.3.1-nightly.20260921.4"],
+    ["@mokronos/integrations-host", "0.3.1-nightly.20260921.4"]
+  ])
+
+  const manifest = `{
+  "name": "@mokronos/integrations-gateway-core",
+  "dependencies": {
+    "@cfworker/json-schema": "^4.1.1",
+    "@mokronos/integrations-contracts": "workspace:^",
+    "@mokronos/integrations-host": "workspace:*"
+  },
+  "peerDependencies": {
+    "effect": "catalog:"
+  }
+}
+`
+
+  it.effect("pins every workspace dependency to the published range", () =>
+    Effect.gen(function*() {
+      const linked = yield* renderReleaseDependencies("packages/core/gateway/package.json", manifest, versions)
+      assert.include(linked, `"@mokronos/integrations-contracts": "^0.3.1-nightly.20260921.4"`)
+      assert.include(linked, `"@mokronos/integrations-host": "^0.3.1-nightly.20260921.4"`)
+      assert.include(linked, `"@cfworker/json-schema": "^4.1.1"`)
+      assert.include(linked, `"effect": "catalog:"`)
+    }))
+
+  it.effect("fails on a workspace dependency the release does not publish", () =>
+    Effect.gen(function*() {
+      const unpublished = `{\n  "dependencies": { "@mokronos/integrations-client": "workspace:^" }\n}\n`
+      const error = yield* Effect.flip(renderReleaseDependencies("apps/ts/package.json", unpublished, versions))
+      assert.equal(error._tag, "UnresolvedWorkspaceDependencyError")
+      assert.include(error.message, "@mokronos/integrations-client")
+    }))
 })

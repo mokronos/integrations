@@ -71,8 +71,8 @@ asset="integrations-$platform-$architecture.tar.gz"
 if [ "$version" = "latest" ]; then
   release_url="https://github.com/$repository/releases/latest/download"
 else
-  printf '%s\n' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || {
-    printf '%s\n' "error: version must look like v0.2.0" >&2
+  printf '%s\n' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' || {
+    printf '%s\n' "error: version must look like v0.2.0 or v0.2.4-nightly.20260921.4" >&2
     exit 1
   }
   release_url="https://github.com/$repository/releases/download/$version"
