@@ -57,7 +57,7 @@ function ToolCard({ tool }: { readonly tool: Tool }) {
         render={
           <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} />
         }
-        className="cursor-pointer select-none hover:bg-muted"
+        className="cursor-pointer flex-nowrap select-none hover:bg-muted"
       >
         <ItemMedia>
             <ChevronRight
@@ -65,10 +65,10 @@ function ToolCard({ tool }: { readonly tool: Tool }) {
               className={cn("size-4 transition-transform", open && "rotate-90")}
             />
           </ItemMedia>
-          <ItemContent>
-            <ItemTitle>
+          <ItemContent className="min-w-0">
+            <ItemTitle className="max-w-full min-w-0">
               <span className="min-w-0 truncate">{tool.name}</span>
-              <Badge variant="outline">{tool.connection}</Badge>
+              <Badge variant="outline" className="shrink-0">{tool.connection}</Badge>
             </ItemTitle>
             {tool.description.length === 0
               ? null
