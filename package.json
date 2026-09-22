@@ -70,6 +70,7 @@
     "release:build": "bun run scripts/build-release.ts",
     "refresh": "bun run build:gateway && bun run scripts/refresh.ts",
     "db:generate": "bun run --cwd packages/core/gateway db:generate",
+    "db:reset": "bun run scripts/db-reset.ts",
     "lint": "oxlint",
     "prepare": "effect-language-service patch",
     "typecheck": "tsc --build --noEmit && tsc -p apps/web && tsc -p apps/landing && tsc -p apps/host-cloudflare",
