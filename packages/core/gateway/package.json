@@ -1,6 +1,6 @@
 {
   "name": "@integragents/gateway-core",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "description": "Gateway domain, persistence, authorization, and execution policy.",
   "license": "MIT",

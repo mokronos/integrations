@@ -1,6 +1,6 @@
 {
   "name": "@integragents/gateway-api",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "description": "Gateway HTTP API definitions, handlers, and server assembly.",
   "license": "MIT",

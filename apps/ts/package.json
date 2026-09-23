@@ -1,6 +1,6 @@
 {
   "name": "@integragents/client",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "description": "Thin client for the integration gateway. Auth, HTTP, decode \u2014 no integration logic.",
   "license": "MIT",

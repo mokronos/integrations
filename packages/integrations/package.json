@@ -1,6 +1,6 @@
 {
   "name": "@integragents/host",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "description": "MCP and OpenAPI catalog, connections, and tool invocation.",
   "license": "MIT",

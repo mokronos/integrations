@@ -1,6 +1,6 @@
 {
   "name": "@integragents/local",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "description": "Local Bun host for the integrations gateway.",
   "license": "MIT",
