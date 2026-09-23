@@ -1,6 +1,7 @@
 import { Plug } from "lucide-react"
 import { useState } from "react"
 
+import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 
 const logoUrl = (host: string, size: number): string =>
@@ -27,9 +28,10 @@ export function IntegrationIcon({
   readonly size?: number
   readonly className?: string
 }) {
-  const [failed, setFailed] = useState(false)
+  const [failedHost, setFailedHost] = useState<string | undefined>()
+  const [loadedHost, setLoadedHost] = useState<string | undefined>()
 
-  if (host === undefined || failed) {
+  if (host === undefined || failedHost === host) {
     return (
       <Plug
         aria-hidden
@@ -40,15 +42,19 @@ export function IntegrationIcon({
   }
 
   return (
-    <img
-      src={logoUrl(host, size)}
-      alt=""
-      width={size}
-      height={size}
-      loading="lazy"
-      onError={() => setFailed(true)}
-      className={cn("shrink-0 rounded-sm object-contain", className)}
-      style={{ width: size, height: size }}
-    />
+    <span className={cn("relative inline-block shrink-0", className)} style={{ width: size, height: size }}>
+      {loadedHost === host ? null : <Skeleton className="absolute inset-0 size-full" />}
+      <img
+        src={logoUrl(host, size)}
+        alt=""
+        width={size}
+        height={size}
+        loading="lazy"
+        onLoad={() => setLoadedHost(host)}
+        onError={() => setFailedHost(host)}
+        className={cn("rounded-sm object-contain", loadedHost === host ? "opacity-100" : "opacity-0")}
+        style={{ width: size, height: size }}
+      />
+    </span>
   )
 }

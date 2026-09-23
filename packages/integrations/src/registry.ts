@@ -26,53 +26,25 @@ const RegistrySearchResponse = Schema.Struct({
   results: Schema.Array(Schema.Struct({
     domain: Schema.String,
     name: Schema.String,
-    description: Schema.String
+    description: Schema.String,
+    surfaces: Schema.Array(Schema.Struct({
+      kind: Schema.Literals(["mcp", "openapi", "graphql", "cli"]),
+      slug: Schema.String,
+      url: Schema.optional(Schema.String)
+    }))
   }))
-})
-
-const RegistrySurface = Schema.Struct({
-  type: Schema.Literals(["http", "openapi", "graphql", "mcp", "cli"]),
-  slug: Schema.String,
-  name: Schema.String,
-  url: Schema.optional(Schema.String),
-  spec: Schema.optional(Schema.String),
-  transports: Schema.optional(Schema.Array(Schema.String)),
-  command: Schema.optional(Schema.String)
-})
-type RegistrySurface = typeof RegistrySurface.Type
-
-const RegistrySurfaceResponse = Schema.Struct({
-  surfaces: Schema.Array(RegistrySurface)
 })
 
 const decodeSearch = Schema.decodeUnknownEffect(
   Schema.fromJsonString(RegistrySearchResponse)
 )
-const decodeSurfaces = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(RegistrySurfaceResponse)
-)
 const decodeQuery = Schema.decodeUnknownEffect(IntegrationSearchQuery)
 
-const discoveryUrlFor = (surface: RegistrySurface): string | undefined => {
-  switch (surface.type) {
-    case "mcp":
-      return surface.url
-    case "http":
-    case "openapi":
-      return surface.spec ?? surface.url
-    case "graphql":
-    case "cli":
-      return undefined
-  }
-}
-
-const toSearchSurface = (surface: RegistrySurface): IntegrationSearchSurface => ({
-  type: surface.type,
+const toSearchSurface = (surface: typeof RegistrySearchResponse.Type.results[number]["surfaces"][number]): IntegrationSearchSurface => ({
+  type: surface.kind,
   slug: surface.slug,
-  name: surface.name,
-  ...whenPresent("url", discoveryUrlFor(surface)),
-  ...whenPresent("transports", surface.transports),
-  ...whenPresent("command", surface.command)
+  name: surface.kind === "mcp" ? "MCP" : surface.kind === "openapi" ? "OpenAPI" : surface.kind,
+  ...whenPresent("url", surface.url)
 })
 
 const fetchText = Effect.fn("registry.fetchText")((url: URL) =>
@@ -85,19 +57,6 @@ const fetchText = Effect.fn("registry.fetchText")((url: URL) =>
     }))
   )
 )
-
-const surfacesFor = (registryUrl: string, domain: string) =>
-  fetchText(new URL(`/api/${encodeURIComponent(domain)}/surface`, registryUrl)).pipe(
-    Effect.flatMap(decodeSurfaces),
-    Effect.map((parsed) => parsed.surfaces.map(toSearchSurface)),
-    Effect.catch((failure): Effect.Effect<ReadonlyArray<IntegrationSearchSurface>> =>
-      Effect.as(
-        Effect.logWarning(`Registry could not describe ${domain}: ${failure.message}`).pipe(
-          Effect.annotateLogs({ domain, operation: "registry.surfacesFor" })
-        ),
-        []
-      ))
-  )
 
 export const search = Effect.fn("registry.search")(function* (
   query: IntegrationSearchQuery,
@@ -125,15 +84,12 @@ export const search = Effect.fn("registry.search")(function* (
     }))
   )
 
-  const results = yield* Effect.forEach(
-    parsed.results,
-    (result) =>
-      Effect.map(surfacesFor(registryUrl, result.domain), (surfaces) => ({
-        ...result,
-        surfaces
-      })),
-    { concurrency: 8 }
-  )
+  const results = parsed.results.map((result) => ({
+    domain: result.domain,
+    name: result.name,
+    description: result.description,
+    surfaces: result.surfaces.map(toSearchSurface)
+  }))
   return { query: text, results } satisfies IntegrationSearchResponse
 })
 

@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gateway clients and authentication</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #111318; color: #eef0f6; }
+    * { box-sizing: border-box; }
+    body { max-width: 1100px; margin: auto; padding: 32px 20px 64px; line-height: 1.5; }
+    h1 { font-size: clamp(1.8rem, 4vw, 2.7rem); margin: 0 0 8px; }
+    h2 { font-size: 1.3rem; margin: 34px 0 14px; }
+    p { margin: 0 0 14px; color: #b8bfce; }
+    .lead { font-size: 1.1rem; max-width: 800px; }
+    .flow { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap: 12px; align-items: center; margin: 24px 0; }
+    .stack { display: grid; gap: 10px; }
+    .box { border: 1px solid #374053; border-radius: 12px; padding: 14px 16px; background: #1b202a; min-height: 76px; }
+    .box strong { display: block; font-size: 1rem; }
+    .box small { display: block; color: #abb5c8; margin-top: 3px; }
+    .blue { border-color: #477bbb; background: #17283b; }
+    .green { border-color: #4e9c81; background: #19302a; }
+    .amber { border-color: #a98144; background: #302719; }
+    .arrow { color: #91a4be; text-align: center; font-size: 1.5rem; }
+    .arrow small { display: block; font-size: .72rem; line-height: 1.2; max-width: 98px; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .card { border: 1px solid #374053; background: #1b202a; padding: 18px; border-radius: 12px; }
+    .card h3 { margin: 0 0 8px; font-size: 1.05rem; }
+    .card p { margin: 0; }
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #29384e; color: #bdd7ff; font-size: .78rem; margin-bottom: 8px; }
+    .callout { border-left: 4px solid #dbab59; background: #302719; padding: 16px 18px; border-radius: 0 10px 10px 0; }
+    .callout p { color: #e7d7bc; margin: 0; }
+    table { width: 100%; border-collapse: collapse; background: #1b202a; border-radius: 12px; overflow: hidden; }
+    th, td { padding: 12px 14px; text-align: left; border-bottom: 1px solid #374053; vertical-align: top; }
+    th { background: #283140; }
+    tr:last-child td { border-bottom: 0; }
+    code { color: #c6d9ff; }
+    @media (max-width: 760px) {
+      .flow { grid-template-columns: 1fr; }
+      .arrow { transform: rotate(90deg); height: 26px; }
+      .arrow small { display: none; }
+      .grid { grid-template-columns: 1fr; }
+      table, tbody, tr, td, th { display: block; }
+      thead { display: none; }
+      tr { border-bottom: 1px solid #374053; }
+      td { border: 0; padding: 7px 14px; }
+      td:first-child { padding-top: 14px; font-weight: 700; }
+      td:last-child { padding-bottom: 14px; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Who can do what in the gateway?</h1>
+  <p class="lead">A <strong>Gateway Client</strong> is an agent-facing identity. An API key or MCP OAuth grant identifies the Client. The CLI, SDK, and MCP are ways to reach the gateway; they do not define the Client's permissions.</p>
+
+  <h2>Agent path</h2>
+  <div class="flow" aria-label="Agent applications present a client credential to the gateway, which applies client rules">
+    <div class="stack">
+      <div class="box"><strong><code>i</code> CLI</strong><small>Agent commands over HTTP</small></div>
+      <div class="box"><strong>TypeScript SDK</strong><small>Gateway HTTP API</small></div>
+      <div class="box"><strong>MCP application</strong><small>Gateway /mcp endpoint</small></div>
+    </div>
+    <div class="arrow" aria-hidden="true">→<small>API key or MCP OAuth grant</small></div>
+    <div class="box blue"><strong>Gateway Client</strong><small>One identity, possibly several API keys. An MCP OAuth grant also selects one Client.</small></div>
+    <div class="arrow" aria-hidden="true">→<small>gateway enforces</small></div>
+    <div class="stack">
+      <div class="box green"><strong>Capabilities</strong><small>Provision connections? Administer gateway?</small></div>
+      <div class="box green"><strong>Access profile</strong><small>Which connected tools may be called?</small></div>
+      <div class="box green"><strong>Approval policy</strong><small>Which calls need a person?</small></div>
+    </div>
+  </div>
+
+  <h2>Operator path</h2>
+  <div class="flow" aria-label="The dashboard and ii use an operator session or administrative credential">
+    <div class="stack">
+      <div class="box"><strong>Dashboard</strong><small>Signed-in browser or local operator access</small></div>
+      <div class="box"><strong><code>ii</code> CLI</strong><small>Uses saved operator session first</small></div>
+    </div>
+    <div class="arrow" aria-hidden="true">→<small>session or admin key</small></div>
+    <div class="box amber"><strong>Gateway control plane</strong><small>Manage clients, keys, profiles, connections, and audit.</small></div>
+    <div class="arrow" aria-hidden="true">→</div>
+    <div class="box amber"><strong>Human-only actions</strong><small>Approval decisions and account actions require a signed-in or local operator, not a client API key.</small></div>
+  </div>
+
+  <h2>What each control means</h2>
+  <div class="grid">
+    <div class="card"><span class="tag">Client capability</span><h3>Provision connections</h3><p>Allows this Client to discover integrations and create or remove gateway connections. Off by default for dashboard-created clients.</p></div>
+    <div class="card"><span class="tag">Client capability</span><h3>Administer gateway</h3><p>Allows this Client's key to manage clients, keys, profiles, and other administrative resources through HTTP. It does not create MCP admin tools.</p></div>
+    <div class="card"><span class="tag">Tool permission</span><h3>Access profile</h3><p>Lists the tools on existing connections this Client may use. The provisioning switch can be off while tool use still works.</p></div>
+    <div class="card"><span class="tag">Tool decision</span><h3>Approval policy</h3><p>Decides whether a permitted tool runs immediately or waits for a person. It does not grant access by itself.</p></div>
+  </div>
+
+  <h2>Current local behavior</h2>
+  <div class="callout"><p>The built-in local Client currently has <code>provision_connections</code> and <code>administer_gateway</code>. Local <code>i</code> falls back to its key from <code>gateway.json</code>. <code>ii</code> uses a saved operator session first, but also falls back to that key. So <code>i</code> lacks admin commands, yet the credential available to it has admin authority.</p></div>
+
+  <h2>Desired local split</h2>
+  <table>
+    <thead><tr><th>Program</th><th>Credential</th><th>Intended authority</th></tr></thead>
+    <tbody>
+      <tr><td><code>i</code></td><td>Separate agent Client key</td><td>Tool use; optionally provisioning for the search → discover → connect workflow. No gateway administration.</td></tr>
+      <tr><td><code>ii</code></td><td>Operator session or separate admin credential</td><td>Gateway administration and connection management. Human-only actions use operator access.</td></tr>
+      <tr><td>Dashboard</td><td>Signed-in session or local operator access</td><td>Control plane, including human-only decisions.</td></tr>
+    </tbody>
+  </table>
+</body>
+</html>

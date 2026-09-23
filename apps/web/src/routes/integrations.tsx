@@ -12,14 +12,38 @@ import {
   integrationHost
 } from "@/components/integrations/integration-icon"
 import { RegistrySearchDialog } from "@/components/integrations/registry-search-dialog"
-import { LoadingRows, Page, QueryError, ReloadButton } from "@/components/page"
+import { Page, QueryError, ReloadButton } from "@/components/page"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item"
+import { Skeleton } from "@/components/ui/skeleton"
 import { pluralise } from "@/lib/format"
 import * as gateway from "@/lib/gateway"
 import { refetchAll, useIntegrations, useMutation } from "@/lib/queries"
+
+function IntegrationsSkeleton() {
+  return (
+    <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(14rem,18rem)_minmax(0,1fr)] xl:grid-cols-[20rem_minmax(0,1fr)]" aria-hidden>
+      <Card className="h-fit">
+        <CardHeader><Skeleton className="h-9 w-full" /></CardHeader>
+        <CardContent className="space-y-2">
+          {Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-16 w-full" />)}
+        </CardContent>
+      </Card>
+      <Card className="min-h-96">
+        <CardHeader className="space-y-3">
+          <Skeleton className="h-7 w-48" />
+          <Skeleton className="h-4 w-2/3" />
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-14 w-full" />)}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
 export function IntegrationsRoute() {
   const navigate = useNavigate()
   const { slug } = useParams()
@@ -73,7 +97,7 @@ export function IntegrationsRoute() {
       <QueryError error={integrations.error} />
 
       {integrations.isPending
-        ? <LoadingRows />
+        ? <IntegrationsSkeleton />
         : all.length === 0
           ? (
             <Card>

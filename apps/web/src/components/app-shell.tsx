@@ -21,6 +21,7 @@ import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
+import { Skeleton } from "@/components/ui/skeleton"
 import { logOut } from "@/lib/gateway"
 import { useApprovals } from "@/lib/queries"
 import { cn } from "@/lib/utils"
@@ -174,7 +175,14 @@ export function AppShell({
         </div>
       </aside>
       <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
-        <Suspense fallback={<p className="text-muted-foreground p-6 text-sm">Loading view…</p>}>
+        <Suspense fallback={
+          <div className="flex flex-1 flex-col gap-6 p-4 sm:p-6" aria-hidden>
+            <div className="space-y-2"><Skeleton className="h-8 w-48" /><Skeleton className="h-4 w-72 max-w-full" /></div>
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {Array.from({ length: 6 }, (_, index) => <Skeleton key={index} className="h-32 w-full" />)}
+            </div>
+          </div>
+        }>
           <Outlet />
         </Suspense>
       </main>

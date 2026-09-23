@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Select } from "@/components/ui/select"
+import { Skeleton } from "@/components/ui/skeleton"
 
 export function OAuthConsentRoute() {
   const requestId = new URLSearchParams(window.location.search).get("request") ?? ""
@@ -46,12 +47,12 @@ export function OAuthConsentRoute() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><ShieldCheck className="size-5" /> Authorize MCP access</CardTitle>
           <CardDescription>
-            {view === undefined ? "Loading authorization request…" : `${view.application.name} wants to connect to this gateway.`}
+            {view === undefined ? <Skeleton className="h-5 w-64 max-w-full" /> : `${view.application.name} wants to connect to this gateway.`}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
           {error === undefined ? null : <Alert variant="destructive"><AlertTitle>Authorization failed</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
-          {view === undefined ? null : (
+          {view === undefined ? <div className="space-y-5" aria-hidden><Skeleton className="h-24 w-full" /><Skeleton className="h-20 w-full" /><Skeleton className="h-12 w-full" /></div> : (
             <>
               <div className="rounded-md border p-3 text-sm">
                 <p className="font-medium">{view.application.name}</p>

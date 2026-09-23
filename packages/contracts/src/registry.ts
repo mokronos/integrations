@@ -4,7 +4,7 @@ export const IntegrationSearchKind = Schema.Literals(["mcp", "openapi", "graphql
 export type IntegrationSearchKind = typeof IntegrationSearchKind.Type
 
 export const IntegrationSearchQuery = Schema.Struct({
-  q: Schema.String.check(Schema.isMinLength(1), Schema.isTrimmed()),
+  q: Schema.String.check(Schema.isTrimmed()),
   kind: Schema.optional(IntegrationSearchKind),
   limit: Schema.optional(
     Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))

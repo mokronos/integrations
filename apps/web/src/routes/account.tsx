@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Skeleton } from "@/components/ui/skeleton"
 
 export function AccountRoute() {
   const session = useSession()
@@ -109,7 +110,7 @@ function OAuthApplicationsCard() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        {grants.isPending ? <p className="text-muted-foreground text-sm">Loading connections…</p> : null}
+        {grants.isPending ? <div className="space-y-3" aria-hidden><Skeleton className="h-20 w-full" /><Skeleton className="h-20 w-full" /></div> : null}
         {grants.error ? <Alert variant="destructive"><AlertTitle>Could not load applications</AlertTitle><AlertDescription>{grants.error.message}</AlertDescription></Alert> : null}
         {!grants.isPending && active.length === 0 ? <p className="text-muted-foreground text-sm">No MCP applications are connected.</p> : null}
         {active.map((grant) => (
