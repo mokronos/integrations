@@ -23,7 +23,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import * as gateway from "@/lib/gateway"
 import { apiKeyPlaceholder } from "@/lib/mcp"
 import { keys, useClients, useIntegrations, useInvalidate, useMcpUrl, useMutation, useQuery } from "@/lib/queries"
-import type { Connection, IntegrationOverview } from "@/lib/schemas"
+import type { ClientId, Connection, IntegrationOverview } from "@mokronos/integrations-contracts"
 
 const Step = Schema.Literals(["connect", "access", "agent", "verify"])
 type Step = typeof Step.Type
@@ -62,7 +62,7 @@ export function OnboardingRoute() {
     void navigate("/")
   }
   const issue = useMutation({
-    mutationFn: (clientId: string) => gateway.issueKey(clientId),
+    mutationFn: (clientId: ClientId) => gateway.issueKey(clientId),
     onSuccess: () => invalidate(keys.clients, keys.overview)
   })
   const secret = issue.variables === client?.id ? issue.data?.secret : undefined

@@ -24,6 +24,7 @@ import {
   AuthLayer,
   DelegatedLayer,
   FallbackLayer,
+  OAuthLayer,
   ProvisioningLayer,
   SystemLayer
 } from "./handlers.ts"
@@ -159,7 +160,8 @@ export const gatewayAppLayer = (options: GatewayHandlerOptions) => {
     DelegatedLayer,
     ProvisioningLayer,
     AdministrativeLayer,
-    AuthLayer
+    AuthLayer,
+    OAuthLayer
   ).pipe(Layer.provide(dependencies))
 
   const platform = Layer.mergeAll(

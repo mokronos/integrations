@@ -19,23 +19,30 @@ import * as gateway from "@/lib/gateway"
 import { connectionLabel } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { keys, refetchAll, useAccessProfiles, useApiKeys, useApprovalPolicies, useClients, useClientTools, useIntegrations, useInvalidate, useMutation } from "@/lib/queries"
-import type { EffectiveTool, IntegrationOverview } from "@/lib/schemas"
+import { Option, Schema } from "effect"
+import { ClientId, type AccessProfileId, type ApprovalPolicyId, type IntegrationOverview } from "@mokronos/integrations-contracts"
+
+type EffectiveTool = Awaited<ReturnType<typeof gateway.listClientTools>>[number]
+const decodeClientId = Schema.decodeUnknownOption(ClientId)
 
 export function ClientDetailRoute() {
-  const { clientId } = useParams()
+  const clientId = Option.getOrUndefined(decodeClientId(useParams()["clientId"]))
+  return clientId === undefined ? null : <ClientDetail clientId={clientId} />
+}
+
+function ClientDetail({ clientId }: { readonly clientId: ClientId }) {
   const clients = useClients()
   const profiles = useAccessProfiles()
   const policies = useApprovalPolicies()
   const tools = useClientTools(clientId)
   const integrations = useIntegrations()
-  const apiKeys = useApiKeys(clientId ?? "")
+  const apiKeys = useApiKeys(clientId)
   const invalidate = useInvalidate()
   const navigate = useNavigate()
   const client = clients.data?.find((item) => item.id === clientId)
-  const rename = useMutation({ mutationFn: (name: string) => gateway.renameClient(clientId ?? "", name), onSuccess: (renamed) => { invalidate(keys.clients); toast.success(`Now called ${renamed.name}`) }, onError: (error: Error) => toast.error("Could not rename client", { description: error.message }) })
-  const assignProfile = useMutation({ mutationFn: (id: string) => gateway.assignAccessProfile(clientId ?? "", id), onSuccess: () => { invalidate(keys.clients, keys.accessProfiles, keys.clientTools(clientId ?? "")); toast.success("Access profile assigned") } })
-  const assignPolicy = useMutation({ mutationFn: (id: string) => gateway.assignApprovalPolicy(clientId ?? "", id), onSuccess: () => { invalidate(keys.clients, keys.approvalPolicies, keys.clientTools(clientId ?? "")); toast.success("Approval policy assigned") } })
-  if (clientId === undefined) return null
+  const rename = useMutation({ mutationFn: (name: string) => gateway.renameClient(clientId, name), onSuccess: (renamed) => { invalidate(keys.clients); toast.success(`Now called ${renamed.name}`) }, onError: (error: Error) => toast.error("Could not rename client", { description: error.message }) })
+  const assignProfile = useMutation({ mutationFn: (id: AccessProfileId) => gateway.assignAccessProfile(clientId, id), onSuccess: () => { invalidate(keys.clients, keys.accessProfiles, keys.clientTools(clientId)); toast.success("Access profile assigned") } })
+  const assignPolicy = useMutation({ mutationFn: (id: ApprovalPolicyId) => gateway.assignApprovalPolicy(clientId, id), onSuccess: () => { invalidate(keys.clients, keys.approvalPolicies, keys.clientTools(clientId)); toast.success("Approval policy assigned") } })
   const liveKeys = (apiKeys.data ?? []).filter((entry) => entry.revokedAt === null).length
   const revoked = client !== undefined && client.revokedAt !== null
   const toolList = tools.data ?? []

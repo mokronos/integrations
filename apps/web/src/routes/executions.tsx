@@ -13,8 +13,8 @@ import { when } from "@/lib/format"
 import type { AuditQuery } from "@/lib/gateway"
 import { whenPresent } from "@mokronos/integrations-contracts"
 import { refetchAll, useAudit, useIntegrations } from "@/lib/queries"
-import { decodeAuditOutcomeFilter, instantFilter } from "@/lib/schemas"
-import type { AuditOutcome, AuditRecord } from "@/lib/schemas"
+import { Option, Schema } from "effect"
+import { AuditOutcome, type AuditRecord } from "@mokronos/integrations-contracts"
 
 function AuditStrategy({ strategy }: { readonly strategy: AuditRecord["decision"] }) {
   const label = strategy === "allow" ? "Runs immediately" : strategy === "require_approval" ? "Requires approval" : "No policy strategy applied"
@@ -38,6 +38,10 @@ function AuditDecision({ record }: { readonly record: AuditRecord }) {
 
 const limits = [50, 100, 250, 500] as const
 const ALL = "all"
+const decodeOutcomeFilter = Schema.decodeUnknownSync(Schema.Union([AuditOutcome, Schema.Literal(ALL)]))
+const decodeInstant = Schema.decodeUnknownOption(Schema.DateFromString)
+const instantFilter = (value: string): string | undefined =>
+  Option.getOrUndefined(Option.map(decodeInstant(value), (date) => date.toISOString()))
 const outcomeOptions = [
   { value: ALL, label: "Any outcome" },
   { value: "succeeded", label: "Succeeded" },
@@ -93,7 +97,7 @@ export function ExecutionsRoute() {
           <Input aria-label="Client ID" value={draft.clientId} onChange={(event) => setDraft({ ...draft, clientId: event.target.value })} placeholder="Client ID" />
           <Input aria-label="Alias" value={draft.alias} onChange={(event) => setDraft({ ...draft, alias: event.target.value })} placeholder="Alias" />
           <Input aria-label="Tool" value={draft.tool} onChange={(event) => setDraft({ ...draft, tool: event.target.value })} placeholder="Tool" />
-          <Select aria-label="Outcome" value={draft.outcome} onValueChange={(value) => setDraft({ ...draft, outcome: decodeAuditOutcomeFilter(value) })} items={outcomeOptions} />
+          <Select aria-label="Outcome" value={draft.outcome} onValueChange={(value) => setDraft({ ...draft, outcome: decodeOutcomeFilter(value) })} items={outcomeOptions} />
           <Input type="datetime-local" value={draft.since} onChange={(event) => setDraft({ ...draft, since: event.target.value })} aria-label="Since" />
           <div className="flex gap-1">
             <Button onClick={() => { setFilters(draft); setOffset(0) }}><Filter className="size-3" /> Apply</Button>

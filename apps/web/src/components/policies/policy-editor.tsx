@@ -17,7 +17,7 @@ import * as gateway from "@/lib/gateway"
 import { connectionLabel, pluralise } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { keys, useIntegrations, useInvalidate, useMutation } from "@/lib/queries"
-import type { AccessProfileTool, ApprovalPolicyTool, ConnectionRef, IntegrationOverview, PolicyDecision } from "@/lib/schemas"
+import type { AccessProfileId, AccessProfileTool, ApprovalPolicyId, ApprovalPolicyTool, ConnectionRef, IntegrationOverview, PolicyDecision } from "@mokronos/integrations-contracts"
 
 type RouteTool = { readonly connection: ConnectionRef; readonly name: string; readonly description: string }
 const keyOf = (connection: ConnectionRef, tool: string) => `${connectionLabel(connection)}:${tool}`
@@ -28,7 +28,7 @@ const catalogTools = (integrations: ReturnType<typeof useIntegrations>["data"]):
     return integration.tools.filter((tool) => tool.owner === "org" && tool.connection === connection.name).map((tool) => ({ connection: ref, name: tool.name, description: tool.description }))
   }))
 
-export function AccessProfileEditor({ id, storedTools, assignedClientCount }: { readonly id: string; readonly storedTools: ReadonlyArray<AccessProfileTool>; readonly assignedClientCount: number }) {
+export function AccessProfileEditor({ id, storedTools, assignedClientCount }: { readonly id: AccessProfileId; readonly storedTools: ReadonlyArray<AccessProfileTool>; readonly assignedClientCount: number }) {
   const integrations = useIntegrations()
   const invalidate = useInvalidate()
   const [enabled, setEnabled] = useState(() => new Set(storedTools.map((tool) => keyOf(tool.connection, tool.tool))))
@@ -57,7 +57,7 @@ function ToolSwitch({ label, checked, onCheckedChange }: { readonly label: strin
   return <span className="flex shrink-0 items-center gap-2 font-sans text-xs font-normal"><span className="text-muted-foreground">{label}</span><Switch checked={checked} onCheckedChange={onCheckedChange} /></span>
 }
 
-export function ApprovalPolicyEditor({ id, storedTools, assignedClientCount }: { readonly id: string; readonly storedTools: ReadonlyArray<ApprovalPolicyTool>; readonly assignedClientCount: number }) {
+export function ApprovalPolicyEditor({ id, storedTools, assignedClientCount }: { readonly id: ApprovalPolicyId; readonly storedTools: ReadonlyArray<ApprovalPolicyTool>; readonly assignedClientCount: number }) {
   const integrations = useIntegrations()
   const invalidate = useInvalidate()
   const [decisions, setDecisions] = useState(() => new Map(storedTools.map((tool) => [keyOf(tool.connection, tool.tool), tool.decision])))

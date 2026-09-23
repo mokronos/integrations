@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react"
+import { createContext, useContext, useState, type ReactNode } from "react"
 import { LogIn } from "lucide-react"
 import { toast } from "sonner"
 
@@ -13,37 +13,17 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import {
-  fetchAuthProviders,
-  fetchMe,
-  GatewayError,
-  logIn,
-  signUp,
-  type Me
-} from "@/lib/gateway"
-import type { AuthProviders } from "@/lib/schemas"
+import { GatewayError, logIn, signUp, type Me } from "@/lib/gateway"
+import { useAuthProviders, useMe, useMutation } from "@/lib/queries"
 
 const SessionContext = createContext<Me | undefined>(undefined)
 
 export const useSession = (): Me | undefined => useContext(SessionContext)
 
 export function AuthGate({ children }: { readonly children: ReactNode }) {
-  const [me, setMe] = useState<Me | "checking">("checking")
+  const me = useMe()
 
-  const refresh = useCallback(async () => {
-    try {
-      setMe(await fetchMe())
-    } catch (error) {
-      console.error("session check failed", error)
-      setMe({ authenticated: false })
-    }
-  }, [])
-
-  useEffect(() => {
-    void refresh()
-  }, [refresh])
-
-  if (me === "checking") {
+  if (me.isPending) {
     return (
       <div className="flex min-h-svh items-center justify-center">
         <p className="text-muted-foreground text-sm">Connecting to the gateway…</p>
@@ -51,24 +31,22 @@ export function AuthGate({ children }: { readonly children: ReactNode }) {
     )
   }
 
-  if (!me.authenticated) {
-    return <AuthCard onAuthenticated={refresh} />
+  if (me.data?.authenticated !== true) {
+    return <AuthCard onAuthenticated={() => me.refetch().then(() => undefined)} />
   }
 
   return (
-    <SessionContext value={me}>
+    <SessionContext value={me.data}>
       {children}
     </SessionContext>
   )
 }
 
-function AuthCard({ onAuthenticated }: { readonly onAuthenticated: () => Promise<void> }) {
-  const [tab, setTab] = useState<"signin" | "signup">("signin")
-  const [providers, setProviders] = useState<AuthProviders | undefined>()
+type OnAuthenticated = () => Promise<void>
 
-  useEffect(() => {
-    void fetchAuthProviders().then(setProviders).catch(() => setProviders(undefined))
-  }, [])
+function AuthCard({ onAuthenticated }: { readonly onAuthenticated: OnAuthenticated }) {
+  const [tab, setTab] = useState<"signin" | "signup">("signin")
+  const providers = useAuthProviders().data
 
   const google = providers?.google
   const continueWithGoogle = () => {
@@ -133,28 +111,17 @@ function AuthCard({ onAuthenticated }: { readonly onAuthenticated: () => Promise
   )
 }
 
-function SignInForm({ onAuthenticated }: { readonly onAuthenticated: () => Promise<void> }) {
+function SignInForm({ onAuthenticated }: { readonly onAuthenticated: OnAuthenticated }) {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
-  const [busy, setBusy] = useState(false)
-
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault()
-    setBusy(true)
-    try {
-      await logIn({ email, password })
-      await onAuthenticated()
-    } catch (error) {
-      toast.error("Sign in failed", {
-        description: error instanceof Error ? error.message : undefined
-      })
-    } finally {
-      setBusy(false)
-    }
-  }
+  const signIn = useMutation({
+    mutationFn: () => logIn({ email, password }),
+    onSuccess: onAuthenticated,
+    onError: (error: Error) => toast.error("Sign in failed", { description: error.message })
+  })
 
   return (
-    <form onSubmit={(event) => void submit(event)} className="mt-4 grid gap-4">
+    <form onSubmit={(event) => { event.preventDefault(); signIn.mutate() }} className="mt-4 grid gap-4">
       <div className="grid gap-2">
         <Label htmlFor="signin-email">Email</Label>
         <Input
@@ -177,8 +144,8 @@ function SignInForm({ onAuthenticated }: { readonly onAuthenticated: () => Promi
           onChange={(event) => setPassword(event.target.value)}
         />
       </div>
-      <Button type="submit" disabled={busy}>
-        {busy ? "Signing in…" : "Sign in"}
+      <Button type="submit" disabled={signIn.isPending}>
+        {signIn.isPending ? "Signing in…" : "Sign in"}
       </Button>
     </form>
   )
@@ -188,35 +155,22 @@ function SignUpForm({
   onAuthenticated,
   onClosed
 }: {
-  readonly onAuthenticated: () => Promise<void>
+  readonly onAuthenticated: OnAuthenticated
   readonly onClosed: () => void
 }) {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [tenantName, setTenantName] = useState("")
-  const [busy, setBusy] = useState(false)
-
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault()
-    setBusy(true)
-    try {
-      await signUp({ email, password, tenantName })
-      await onAuthenticated()
-    } catch (error) {
-      if (error instanceof GatewayError && error.status === 403) {
-        onClosed()
-        return
-      }
-      toast.error("Could not create the account", {
-        description: error instanceof Error ? error.message : undefined
-      })
-    } finally {
-      setBusy(false)
-    }
-  }
+  const create = useMutation({
+    mutationFn: () => signUp({ email, password, tenantName }),
+    onSuccess: onAuthenticated,
+    onError: (error: Error) => error instanceof GatewayError && error.code === "signup-closed"
+      ? onClosed()
+      : toast.error("Could not create the account", { description: error.message })
+  })
 
   return (
-    <form onSubmit={(event) => void submit(event)} className="mt-4 grid gap-4">
+    <form onSubmit={(event) => { event.preventDefault(); create.mutate() }} className="mt-4 grid gap-4">
       <div className="grid gap-2">
         <Label htmlFor="signup-email">Email</Label>
         <Input
@@ -254,8 +208,8 @@ function SignUpForm({
           The first account claims this gateway — signup closes afterwards.
         </p>
       </div>
-      <Button type="submit" disabled={busy}>
-        {busy ? "Creating…" : "Create account"}
+      <Button type="submit" disabled={create.isPending}>
+        {create.isPending ? "Creating…" : "Create account"}
       </Button>
     </form>
   )

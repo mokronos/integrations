@@ -30,6 +30,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
+import { pluralise } from "@/lib/format"
 
 export function AccountRoute() {
   const session = useSession()
@@ -50,22 +51,15 @@ export function AccountRoute() {
       </Page>
     )
   }
-  const email = session.email
-
   return (
-    <Page
-      title="Account"
-      description={`Signed in as ${email}.`}
-    >
+    <Page title="Account" description={`Signed in as ${session.email}.`}>
       <div className="grid max-w-2xl gap-6">
         <Card>
           <CardHeader>
             <CardTitle>Workspace</CardTitle>
             <CardDescription>
               Tenant{" "}
-              <code className="text-xs">
-                {session && "tenantId" in session ? session.tenantId : "?"}
-              </code>
+              <code className="text-xs">{session.tenantId}</code>
               . Connections, clients, and approvals are private to it.
             </CardDescription>
           </CardHeader>
@@ -142,21 +136,11 @@ function ChangeEmailCard() {
   const navigate = useNavigate()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
-  const [busy, setBusy] = useState(false)
-
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault()
-    setBusy(true)
-    try {
-      await changeEmail({ email, password })
-      navigate(0)
-    } catch (error) {
-      toast.error("Could not change email", {
-        description: error instanceof Error ? error.message : undefined
-      })
-      setBusy(false)
-    }
-  }
+  const save = useMutation({
+    mutationFn: () => changeEmail({ email, password }),
+    onSuccess: () => navigate(0),
+    onError: (error: Error) => toast.error("Could not change email", { description: error.message })
+  })
 
   return (
     <Card>
@@ -164,7 +148,7 @@ function ChangeEmailCard() {
         <CardTitle>Change email</CardTitle>
         <CardDescription>Confirm with your current password.</CardDescription>
       </CardHeader>
-      <form onSubmit={(event) => void submit(event)}>
+      <form onSubmit={(event) => { event.preventDefault(); save.mutate() }}>
         <CardContent className="grid gap-4">
           <div className="grid gap-2">
             <Label htmlFor="new-email">New email</Label>
@@ -190,8 +174,8 @@ function ChangeEmailCard() {
           </div>
         </CardContent>
         <CardFooter>
-          <Button type="submit" disabled={busy}>
-            {busy ? "Saving…" : "Update email"}
+          <Button type="submit" disabled={save.isPending || save.isSuccess}>
+            {save.isPending ? "Saving…" : "Update email"}
           </Button>
         </CardFooter>
       </form>
@@ -203,31 +187,18 @@ function ChangePasswordCard({ hasPassword }: { readonly hasPassword: boolean }) 
   const navigate = useNavigate()
   const [currentPassword, setCurrentPassword] = useState("")
   const [newPassword, setNewPassword] = useState("")
-  const [busy, setBusy] = useState(false)
-
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault()
-    setBusy(true)
-    try {
-      const revoked = hasPassword
-        ? await changePassword({ currentPassword, newPassword })
-        : await changePassword({ newPassword })
+  const save = useMutation({
+    mutationFn: () => changePassword(hasPassword ? { currentPassword, newPassword } : { newPassword }),
+    onSuccess: (revoked) => {
       toast.success("Password updated", {
-        description: revoked > 0
-          ? `${revoked} other session${revoked === 1 ? "" : "s"} signed out.`
-          : undefined
+        description: revoked > 0 ? `${pluralise(revoked, "other session")} signed out.` : undefined
       })
       setCurrentPassword("")
       setNewPassword("")
       if (!hasPassword) navigate(0)
-    } catch (error) {
-      toast.error("Could not change password", {
-        description: error instanceof Error ? error.message : undefined
-      })
-    } finally {
-      setBusy(false)
-    }
-  }
+    },
+    onError: (error: Error) => toast.error("Could not change password", { description: error.message })
+  })
 
   return (
     <Card>
@@ -239,7 +210,7 @@ function ChangePasswordCard({ hasPassword }: { readonly hasPassword: boolean }) 
             : "A password enables email changes and password-confirmed account deletion."}
         </CardDescription>
       </CardHeader>
-      <form onSubmit={(event) => void submit(event)}>
+      <form onSubmit={(event) => { event.preventDefault(); save.mutate() }}>
         <CardContent className="grid gap-4">
           {hasPassword
             ? (
@@ -271,8 +242,8 @@ function ChangePasswordCard({ hasPassword }: { readonly hasPassword: boolean }) 
           </div>
         </CardContent>
         <CardFooter>
-          <Button type="submit" disabled={busy}>
-            {busy ? "Saving…" : hasPassword ? "Update password" : "Add password"}
+          <Button type="submit" disabled={save.isPending}>
+            {save.isPending ? "Saving…" : hasPassword ? "Update password" : "Add password"}
           </Button>
         </CardFooter>
       </form>
@@ -283,21 +254,13 @@ function ChangePasswordCard({ hasPassword }: { readonly hasPassword: boolean }) 
 function DeleteAccountCard({ hasPassword }: { readonly hasPassword: boolean }) {
   const [password, setPassword] = useState("")
   const [open, setOpen] = useState(false)
-  const [busy, setBusy] = useState(false)
   const navigate = useNavigate()
-
-  const submit = async () => {
-    setBusy(true)
-    try {
-      await deleteAccount(hasPassword ? { password } : {})
-      navigate(0)
-    } catch (error) {
-      toast.error("Could not delete the account", {
-        description: error instanceof Error ? error.message : undefined
-      })
-      setBusy(false)
-    }
-  }
+  const remove = useMutation({
+    mutationFn: () => deleteAccount({ password }),
+    onSuccess: () => navigate(0),
+    onError: (error: Error) => toast.error("Could not delete the account", { description: error.message })
+  })
+  const busy = remove.isPending || remove.isSuccess
 
   return (
     <Card className="border-destructive/50">
@@ -343,7 +306,7 @@ function DeleteAccountCard({ hasPassword }: { readonly hasPassword: boolean }) {
                 disabled={busy || !hasPassword || password.length === 0}
                 onClick={(event) => {
                   event.preventDefault()
-                  void submit()
+                  remove.mutate()
                 }}
               >
                 {busy ? "Deleting…" : "Delete forever"}

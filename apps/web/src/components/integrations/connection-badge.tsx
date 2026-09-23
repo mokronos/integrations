@@ -1,6 +1,6 @@
 
 import { Badge } from "@/components/ui/badge"
-import type { IntegrationOverview } from "@/lib/schemas"
+import type { IntegrationOverview } from "@mokronos/integrations-contracts"
 
 export function ConnectionBadge({ integration }: { readonly integration: IntegrationOverview }) {
   const connected = integration.connections.filter((connection) => connection.status === "connected").length

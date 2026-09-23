@@ -204,6 +204,22 @@ function SchemaChildren({
   }
 }
 
+function SchemaPanel({ label, summary, children }: {
+  readonly label: string
+  readonly summary?: string
+  readonly children: React.ReactNode
+}) {
+  return (
+    <div className="min-w-0 self-start rounded-lg border">
+      <div className="flex min-w-0 items-center gap-2 border-b px-3 py-2">
+        <p className="text-muted-foreground text-xs tracking-wide uppercase">{label}</p>
+        {summary === undefined ? null : <p className="text-muted-foreground ml-auto text-xs tabular-nums">{summary}</p>}
+      </div>
+      {children}
+    </div>
+  )
+}
+
 export function SchemaView({
   schema,
   definitions,
@@ -213,53 +229,30 @@ export function SchemaView({
   readonly definitions?: { readonly [key: string]: Schema.Json } | undefined
   readonly label: string
 }) {
-  const decoded = decodeJsonSchema(schema, definitions)
-
   if (schema === undefined || schema === null) {
     return (
-      <div className="min-w-0 self-start rounded-lg border">
-        <p className="text-muted-foreground border-b px-3 py-2 text-xs tracking-wide uppercase">
-          {label}
-        </p>
+      <SchemaPanel label={label}>
         <p className="text-muted-foreground px-3 py-2.5 text-sm">Not declared.</p>
-      </div>
+      </SchemaPanel>
     )
   }
 
-  if (Option.isNone(decoded)) {
-    return (
-      <div className="min-w-0 self-start rounded-lg border">
-        <p className="text-muted-foreground border-b px-3 py-2 text-xs tracking-wide uppercase">
-          {label}
-        </p>
-        <div className="p-2">
-          <JsonView value={schema} label="raw document" />
-        </div>
-      </div>
-    )
-  }
+  const raw = (bordered: boolean) => (
+    <div className={cn("p-2", bordered && "border-t")}>
+      <JsonView value={schema} label="raw document" />
+    </div>
+  )
+  const decoded = decodeJsonSchema(schema, definitions)
+  if (Option.isNone(decoded)) return <SchemaPanel label={label}>{raw(false)}</SchemaPanel>
 
   const root = decoded.value
   const fields = fieldCount(root)
-
   return (
-    <div className="min-w-0 self-start rounded-lg border">
-      <div className="flex min-w-0 items-center gap-2 border-b px-3 py-2">
-        <p className="text-muted-foreground text-xs tracking-wide uppercase">{label}</p>
-        <p className="text-muted-foreground ml-auto text-xs tabular-nums">
-          {fields === 0 ? typeLabel(root, root) : pluralise(fields, "field")}
-        </p>
-      </div>
+    <SchemaPanel label={label} summary={fields === 0 ? typeLabel(root, root) : pluralise(fields, "field")}>
       {fields === 0
-        ? (
-          <p className="text-muted-foreground px-3 py-2.5 text-sm">
-            {root.description ?? "No fields."}
-          </p>
-        )
+        ? <p className="text-muted-foreground px-3 py-2.5 text-sm">{root.description ?? "No fields."}</p>
         : <div className="p-1"><SchemaChildren schema={root} root={root} depth={0} /></div>}
-      <div className="border-t p-2">
-        <JsonView value={schema} label="raw document" />
-      </div>
-    </div>
+      {raw(true)}
+    </SchemaPanel>
   )
 }

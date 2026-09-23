@@ -1,4 +1,5 @@
-import { type IntegrationSearchKind, type IntegrationSearchMatch, whenPresent } from "@mokronos/integrations-contracts"
+import { Schema } from "effect"
+import { IntegrationSearchKind, type IntegrationSearchMatch, whenPresent } from "@mokronos/integrations-contracts"
 import { Download, Search, X } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router"
@@ -21,7 +22,6 @@ import { Select } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import * as gateway from "@/lib/gateway"
 import { keys, useInvalidate, useMutation, useQuery } from "@/lib/queries"
-import { decodeIntegrationSearchFilter } from "@/lib/schemas"
 
 const ALL_KINDS = "__all__"
 const kindOptions = [
@@ -31,6 +31,7 @@ const kindOptions = [
 ] as const
 
 type KindFilter = IntegrationSearchKind | typeof ALL_KINDS
+const decodeKindFilter = Schema.decodeUnknownSync(Schema.Union([IntegrationSearchKind, Schema.Literal(ALL_KINDS)]))
 
 const installableSurfaces = (result: IntegrationSearchMatch, kind: KindFilter) =>
   result.surfaces.filter((surface) =>
@@ -205,7 +206,7 @@ export function RegistrySearchDialog({ onInstalled }: { readonly onInstalled?: (
           <Select
             className="w-full sm:w-36"
             value={kind}
-            onValueChange={(value) => setKind(decodeIntegrationSearchFilter(value))}
+            onValueChange={(value) => setKind(decodeKindFilter(value))}
             items={kindOptions}
           />
         </div>

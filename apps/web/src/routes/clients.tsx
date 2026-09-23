@@ -1,4 +1,6 @@
 import { useState } from "react"
+import type { AccessProfileId, ApprovalPolicyId } from "@mokronos/integrations-contracts"
+import { whenPresent } from "@mokronos/integrations-contracts"
 import { toast } from "sonner"
 import { LoadingRows, Page, QueryError, ReloadButton } from "@/components/page"
 import { RowLink, rowNavigates } from "@/components/ui/row-link"
@@ -19,9 +21,9 @@ import { keys, refetchAll, useAccessProfiles, useApprovalPolicies, useClients, u
 function CreateClientDialog() {
   const profiles = useAccessProfiles(); const policies = useApprovalPolicies(); const invalidate = useInvalidate()
   const profileList = (profiles.data ?? []).map((item) => item.accessProfile); const policyList = (policies.data ?? []).map((item) => item.approvalPolicy)
-  const [open, setOpen] = useState(false); const [name, setName] = useState(""); const [chosenProfileId, setProfileId] = useState<string | undefined>(); const [chosenPolicyId, setPolicyId] = useState<string | undefined>()
+  const [open, setOpen] = useState(false); const [name, setName] = useState(""); const [chosenProfileId, setProfileId] = useState<AccessProfileId | undefined>(); const [chosenPolicyId, setPolicyId] = useState<ApprovalPolicyId | undefined>()
   const profileId = chosenProfileId ?? defaultResourceId(profileList); const policyId = chosenPolicyId ?? defaultResourceId(policyList)
-  const create = useMutation({ mutationFn: () => gateway.createClient({ name: name.trim(), accessProfileId: profileId, approvalPolicyId: policyId, capabilities: [], approvalDelivery: { returnLink: true } }), onSuccess: (client) => { invalidate(keys.clients); setOpen(false); toast.success(`Created ${client.name}`) }, onError: (error: Error) => toast.error("Could not create client", { description: error.message }) })
+  const create = useMutation({ mutationFn: () => gateway.createClient({ name: name.trim(), ...whenPresent("accessProfileId", profileId), ...whenPresent("approvalPolicyId", policyId), capabilities: [], approvalDelivery: { returnLink: true } }), onSuccess: (client) => { invalidate(keys.clients); setOpen(false); toast.success(`Created ${client.name}`) }, onError: (error: Error) => toast.error("Could not create client", { description: error.message }) })
   return <Dialog open={open} onOpenChange={setOpen}><DialogTrigger render={<Button />}>New client</DialogTrigger><DialogContent><DialogHeader><DialogTitle>New client</DialogTitle><DialogDescription>Assign reusable access and approval configuration.</DialogDescription></DialogHeader><div className="space-y-4"><div><Label htmlFor="client-name">Name</Label><Input id="client-name" value={name} onChange={(event) => setName(event.target.value)} /></div><ResourceSelect label="Access profile" value={profileId} onChange={setProfileId} resources={profileList} /><ResourceSelect label="Approval policy" value={policyId} onChange={setPolicyId} resources={policyList} /></div><DialogFooter><Button disabled={!name.trim() || create.isPending} onClick={() => create.mutate()}>Create</Button></DialogFooter></DialogContent></Dialog>
 }
 

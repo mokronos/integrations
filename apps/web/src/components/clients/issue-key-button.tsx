@@ -1,6 +1,7 @@
 import { KeyRound, Plug } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
+import type { ClientId } from "@mokronos/integrations-contracts"
 
 import { Button } from "@/components/ui/button"
 import { CopyField } from "@/components/ui/copy-field"
@@ -17,7 +18,7 @@ import { mcpConfiguration } from "@/lib/mcp"
 import { keys, useInvalidate, useMcpUrl, useMutation } from "@/lib/queries"
 
 export function IssueKeyButton({ clientId, clientName, disabled, variant = "default" }: {
-  readonly clientId: string
+  readonly clientId: ClientId
   readonly clientName: string
   readonly disabled: boolean
   readonly variant?: "default" | "outline"

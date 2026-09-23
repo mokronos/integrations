@@ -149,6 +149,22 @@ export const OAuthGrantView = Schema.Struct({
   revokedAt: Schema.NullOr(Schema.Date)
 })
 export type OAuthGrantView = typeof OAuthGrantView.Type
+export const OAuthConsentView = Schema.Struct({
+  request: Schema.Struct({ id: Schema.String, scope: Schema.Literal("mcp"), resource: Schema.String }),
+  application: Schema.Struct({
+    id: OAuthApplicationId,
+    kind: OAuthApplicationKind,
+    name: Schema.String,
+    clientIdentifier: Schema.String
+  }),
+  clients: Schema.Array(Client)
+})
+export type OAuthConsentView = typeof OAuthConsentView.Type
+export const OAuthConsentDecision = Schema.Union([
+  Schema.Struct({ decision: Schema.Literal("deny") }),
+  Schema.Struct({ decision: Schema.Literal("approve"), clientId: ClientId })
+])
+export type OAuthConsentDecision = typeof OAuthConsentDecision.Type
 export const ConfigureClient = Schema.Struct({ name: Schema.String.check(Schema.isMinLength(1)), tools: Schema.Array(Schema.Struct({ connection: ConnectionRef, tool: ToolName, decision: PolicyDecision })).check(Schema.isMinLength(1)) })
 export type ConfigureClient = typeof ConfigureClient.Type
 export const ToolSnapshot = Schema.Struct({ integration: IntegrationSlug, connection: ConnectionName, tool: ToolName, inputSchema: Schema.NullOr(Schema.Json), outputSchema: Schema.NullOr(Schema.Json), syncedAt: Schema.Date })

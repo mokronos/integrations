@@ -34,6 +34,10 @@ import {
   SubjectId,
   TenantId,
   OAuthClientSubmission,
+  OAuthConsentDecision,
+  OAuthConsentView,
+  OAuthGrantId,
+  OAuthGrantView,
   OAuthSessionView
 } from "@mokronos/integrations-contracts"
 import {
@@ -249,6 +253,12 @@ class ApiNotFound extends Schema.TaggedError<ApiNotFound>()(
   { error: Schema.String }
 ) {}
 const ApiNotFoundError = ApiNotFound.pipe(HttpApiSchema.status(404))
+
+class ApiGone extends Schema.TaggedError<ApiGone>()(
+  "ApiGone",
+  { error: Schema.String }
+) {}
+const ApiGoneError = ApiGone.pipe(HttpApiSchema.status(410))
 
 class ApiNotImplemented extends Schema.TaggedError<ApiNotImplemented>()(
   "ApiNotImplemented",
@@ -824,6 +834,27 @@ const AuthGroup = HttpApiGroup.make("auth")
   }).annotate(RequiredAccess, "human"))
   .middleware(Authority)
 
+const OAuthGroup = HttpApiGroup.make("oauth")
+  .add(HttpApiEndpoint.get("consent", "/v1/oauth/authorization-request", {
+    query: { id: Schema.String },
+    success: OAuthConsentView,
+    error: [ApiNotFoundError, ApiGoneError]
+  }).annotate(RequiredAccess, "human"))
+  .add(HttpApiEndpoint.post("decideConsent", "/v1/oauth/authorization-request", {
+    query: { id: Schema.String },
+    payload: OAuthConsentDecision,
+    success: Schema.Struct({ redirect: Schema.String }),
+    error: [ApiNotFoundError, ApiGoneError, ApiBadRequestError]
+  }).annotate(RequiredAccess, "human"))
+  .add(HttpApiEndpoint.get("listGrants", "/v1/oauth/grants", {
+    success: Schema.Struct({ grants: Schema.Array(OAuthGrantView) })
+  }).annotate(RequiredAccess, "human"))
+  .add(HttpApiEndpoint.delete("revokeGrant", "/v1/oauth/grants/:id", {
+    params: { id: OAuthGrantId },
+    success: Schema.Struct({ revoked: Schema.Boolean })
+  }).annotate(RequiredAccess, "human"))
+  .middleware(Authority)
+
 export const GatewayApi = HttpApi.make("@mokronos/integrations-gateway-api/gateway")
   .add(SystemGroup)
   .add(FallbackGroup)
@@ -831,9 +862,11 @@ export const GatewayApi = HttpApi.make("@mokronos/integrations-gateway-api/gatew
   .add(ProvisioningGroup)
   .add(AdministrativeGroup)
   .add(AuthGroup)
+  .add(OAuthGroup)
 
 export {
   ApiBadRequest,
+  ApiGone,
   ApiNotFound,
   ApiNotImplemented,
   Authority,

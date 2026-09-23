@@ -1,11 +1,12 @@
 import { toast } from "sonner"
+import type { ClientId } from "@mokronos/integrations-contracts"
 
 import { ConfirmButton } from "@/components/ui/confirm-button"
 import * as gateway from "@/lib/gateway"
 import { keys, useInvalidate, useMutation } from "@/lib/queries"
 
 export function RevokeClientButton({ clientId, clientName, onRevoked }: {
-  readonly clientId: string
+  readonly clientId: ClientId
   readonly clientName: string
   readonly onRevoked?: () => void
 }) {

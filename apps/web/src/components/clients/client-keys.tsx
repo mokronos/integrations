@@ -24,11 +24,11 @@ import {
 import { when } from "@/lib/format"
 import * as gateway from "@/lib/gateway"
 import { keys, useApiKeys, useInvalidate, useMutation } from "@/lib/queries"
-import type { ApiKeySummary } from "@/lib/schemas"
+import type { ApiKeyView, ClientId } from "@mokronos/integrations-contracts"
 
 function KeyRow({ keySummary, clientId }: {
-  readonly keySummary: ApiKeySummary
-  readonly clientId: string
+  readonly keySummary: ApiKeyView
+  readonly clientId: ClientId
 }) {
   const invalidate = useInvalidate()
   const revoke = useMutation({
@@ -61,7 +61,7 @@ function KeyRow({ keySummary, clientId }: {
 }
 
 export function ClientKeys({ clientId, clientName, disabled }: {
-  readonly clientId: string
+  readonly clientId: ClientId
   readonly clientName: string
   readonly disabled: boolean
 }) {

@@ -1,4 +1,4 @@
-import { Check, ChevronRight, ExternalLink, Pencil, Search, Trash2, Unplug, X } from "lucide-react"
+import { ChevronRight, ExternalLink, Search, Unplug } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useNavigate } from "react-router"
 import { toast } from "sonner"
@@ -8,20 +8,11 @@ import { SchemaView } from "@/components/schema-view"
 import { AuthMethodDetails } from "@/components/integrations/auth-method-details"
 import { OperationError } from "@/components/integrations/operation-feedback"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger
-} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { ConfirmButton } from "@/components/ui/confirm-button"
+import { EditableTitle } from "@/components/ui/editable-title"
 import { Input } from "@/components/ui/input"
 import { Item, ItemActions, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item"
 import { Separator } from "@/components/ui/separator"
@@ -32,7 +23,7 @@ import {
   type Connection,
   type IntegrationOverview,
   type Tool
-} from "@/lib/schemas"
+} from "@mokronos/integrations-contracts"
 import { cn } from "@/lib/utils"
 import { ConnectDialog } from "./connect-dialog"
 import { ConnectionBadge } from "./connection-badge"
@@ -106,12 +97,9 @@ function ToolCard({ tool }: { readonly tool: Tool }) {
 function RemoveIntegration({ integration }: { readonly integration: IntegrationOverview }) {
   const invalidate = useInvalidate()
   const navigate = useNavigate()
-  const [open, setOpen] = useState(false)
-
   const remove = useMutation({
     mutationFn: () => gateway.removeIntegration(integration.slug),
     onSuccess: (result) => {
-      setOpen(false)
       invalidate(keys.integrations, keys.connections, keys.overview)
       toast.success(`${integration.name} removed`, {
         description: result.connections.length === 0
@@ -125,124 +113,89 @@ function RemoveIntegration({ integration }: { readonly integration: IntegrationO
   })
 
   return (
-    <AlertDialog open={open} onOpenChange={setOpen}>
-      <AlertDialogTrigger
-        render={
-          <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" />
-        }
-      >
-        <Trash2 className="size-3" />
-        Remove
-      </AlertDialogTrigger>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Remove {integration.name}?</AlertDialogTitle>
-          <AlertDialogDescription>
-            The gateway forgets this integration and its tools. Any workflow
-            addressing them stops resolving. Discovering the same URL again
-            installs it fresh.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        {integration.connections.length === 0
-          ? null
-          : (
-            <div className="space-y-1 text-sm">
-              <p>
-                {pluralise(integration.connections.length, "connection")} goes with it,
-                along with the stored credentials and every policy rule naming them:
-              </p>
-              <ul className="text-muted-foreground list-inside list-disc font-mono text-xs">
-                {integration.connections.map((connection) => (
-                  <li key={connection.address}>{connection.name}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={remove.isPending}>Keep it</AlertDialogCancel>
-          <AlertDialogAction
-            disabled={remove.isPending}
-            onClick={(event) => {
-              event.preventDefault()
-              remove.mutate()
-            }}
-          >
-            {remove.isPending ? "Removing…" : "Remove"}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <ConfirmButton
+      label="Remove"
+      title={`Remove ${integration.name}?`}
+      description="The gateway forgets this integration and its tools. Any workflow addressing them stops resolving. Discovering the same URL again installs it fresh."
+      confirmLabel="Remove"
+      pendingLabel="Removing…"
+      pending={remove.isPending}
+      onConfirm={() => remove.mutateAsync().then(() => undefined)}
+    >
+      {integration.connections.length === 0
+        ? null
+        : (
+          <div className="space-y-1 text-sm">
+            <p>
+              {pluralise(integration.connections.length, "connection")} goes with it,
+              along with the stored credentials and every policy rule naming them:
+            </p>
+            <ul className="text-muted-foreground list-inside list-disc font-mono text-xs">
+              {integration.connections.map((connection) => (
+                <li key={connection.address}>{connection.name}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+    </ConfirmButton>
   )
 }
 
 function IntegrationName({ integration }: { readonly integration: IntegrationOverview }) {
   const invalidate = useInvalidate()
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(integration.name)
-
   const rename = useMutation({
-    mutationFn: () => gateway.renameIntegration({ slug: integration.slug, name: draft.trim() }),
+    mutationFn: (name: string) => gateway.renameIntegration({ slug: integration.slug, name }),
     onSuccess: (result) => {
-      setEditing(false)
       invalidate(keys.integrations, keys.overview)
       toast.success(`Now called ${result.name}`)
     },
     onError: (error: Error) => toast.error("Could not rename it", { description: error.message })
   })
-
-  const start = () => {
-    setDraft(integration.name)
-    setEditing(true)
-  }
-
-  if (!editing) {
-    return (
-      <>
-        <CardTitle className="min-w-0 truncate">{integration.name}</CardTitle>
-        <Button variant="ghost" size="sm" onClick={start} aria-label="Rename">
-          <Pencil className="size-3" />
-        </Button>
-      </>
-    )
-  }
-
   return (
-    <form
-      className="flex min-w-0 items-center gap-1"
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (draft.trim().length > 0) rename.mutate()
-      }}
-    >
-      <Input
-        autoFocus
-        className="h-8 w-48"
-        value={draft}
-        aria-label="Integration name"
-        onChange={(event) => setDraft(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") setEditing(false)
-        }}
-      />
-      <Button
-        type="submit"
-        variant="ghost"
-        size="sm"
-        aria-label="Save name"
-        disabled={rename.isPending || draft.trim().length === 0}
-      >
-        <Check className="size-3" />
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        aria-label="Cancel rename"
-        onClick={() => setEditing(false)}
-      >
-        <X className="size-3" />
-      </Button>
-    </form>
+    <CardTitle className="min-w-0 truncate">
+      <EditableTitle value={integration.name} onSave={(name) => rename.mutate(name)} saving={rename.isPending} />
+    </CardTitle>
+  )
+}
+
+function ConnectionRow({ integration, connection, onDisconnect, disconnecting }: {
+  readonly integration: IntegrationOverview
+  readonly connection: Connection
+  readonly onDisconnect: () => void
+  readonly disconnecting: boolean
+}) {
+  return (
+    <li className="min-w-0">
+      <Item variant="outline" size="sm">
+        <ItemContent>
+          <ItemTitle>
+            <ConnectionIdentity connection={connectionRefOf(connection.owner, connection.integration, connection.name)} integration={integration} showIntegration={false} />
+            <Badge variant={connection.status === "connected" ? "default" : "destructive"}>
+              {connection.status === "connected" ? "connected" : "reauthorization required"}
+            </Badge>
+          </ItemTitle>
+          <ItemDescription className="flex flex-wrap items-center gap-2">
+            <span>{expiry(connection)}</span>
+            <span>via {connectionAuthLabel(integration, connection)}</span>
+          </ItemDescription>
+          {connection.oauthScope === undefined || connection.oauthScope === null
+            ? null
+            : <ItemDescription>OAuth scopes: {connection.oauthScope}</ItemDescription>}
+          {connection.missingOAuthScopes === undefined || connection.missingOAuthScopes.length === 0
+            ? null
+            : <ItemDescription className="text-destructive">Missing scopes: {connection.missingOAuthScopes.join(", ")}</ItemDescription>}
+          {connection.error === undefined ? null : (
+            <p className="text-destructive mt-1 text-xs">{connection.error}</p>
+          )}
+        </ItemContent>
+        <ItemActions>
+          <Button variant="ghost" size="sm" onClick={onDisconnect} disabled={disconnecting}>
+            <Unplug className="size-3" />
+            Disconnect
+          </Button>
+        </ItemActions>
+      </Item>
+    </li>
   )
 }
 
@@ -340,42 +293,13 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
               : (
                 <ul className="space-y-2">
                   {integration.connections.map((connection) => (
-                    <li key={connection.address} className="min-w-0">
-                      <Item variant="outline" size="sm">
-                        <ItemContent>
-                          <ItemTitle>
-                            <ConnectionIdentity connection={connectionRefOf(connection.owner, connection.integration, connection.name)} integration={integration} showIntegration={false} />
-                            <Badge variant={connection.status === "connected" ? "default" : "destructive"}>
-                              {connection.status === "connected" ? "connected" : "reauthorization required"}
-                            </Badge>
-                          </ItemTitle>
-                          <ItemDescription className="flex flex-wrap items-center gap-2">
-                            <span>{expiry(connection)}</span>
-                            <span>via {connectionAuthLabel(integration, connection)}</span>
-                          </ItemDescription>
-                          {connection.oauthScope === undefined || connection.oauthScope === null
-                            ? null
-                            : <ItemDescription>OAuth scopes: {connection.oauthScope}</ItemDescription>}
-                          {connection.missingOAuthScopes === undefined || connection.missingOAuthScopes.length === 0
-                            ? null
-                            : <ItemDescription className="text-destructive">Missing scopes: {connection.missingOAuthScopes.join(", ")}</ItemDescription>}
-                          {connection.error === undefined ? null : (
-                            <p className="text-destructive mt-1 text-xs">{connection.error}</p>
-                          )}
-                        </ItemContent>
-                        <ItemActions>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => disconnect.mutate(connection)}
-                            disabled={disconnect.isPending}
-                          >
-                            <Unplug className="size-3" />
-                            Disconnect
-                          </Button>
-                        </ItemActions>
-                      </Item>
-                    </li>
+                    <ConnectionRow
+                      key={connection.address}
+                      integration={integration}
+                      connection={connection}
+                      onDisconnect={() => disconnect.mutate(connection)}
+                      disconnecting={disconnect.isPending}
+                    />
                   ))}
                 </ul>
               )}

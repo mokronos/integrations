@@ -21,8 +21,8 @@ import {
   useApprovalDestinations,
   useClientApprovalDestinations
 } from "@/lib/queries"
-import { decodeMcpSurface } from "@/lib/schemas"
-import type { ApprovalDestinationId, Client, McpSurface } from "@/lib/schemas"
+import { Schema } from "effect"
+import { McpSurface, type ApprovalDestinationId, type Client, type ClientCapability } from "@mokronos/integrations-contracts"
 
 const mcpSurfaceOptions: ReadonlyArray<{ readonly value: McpSurface; readonly label: string; readonly description: string }> = [
   { value: "tools", label: "Tools", description: "Every tool this client may call appears as its own MCP tool. Best for agents that just need to do work." },
@@ -68,11 +68,10 @@ export function ClientSettings({ client }: { readonly client: Client }) {
 
   const save = useMutation({
     mutationFn: () => {
-      const capabilities: Array<"provision_connections" | "administer_gateway"> = []
+      const capabilities: Array<ClientCapability> = []
       if (mayProvision) capabilities.push("provision_connections")
       if (mayAdminister) capabilities.push("administer_gateway")
-      return gateway.updateClientSettings({
-        clientId: client.id,
+      return gateway.updateClientSettings(client.id, {
         capabilities,
         approvalDelivery: { returnLink },
         mcpSurface
@@ -103,7 +102,7 @@ export function ClientSettings({ client }: { readonly client: Client }) {
           <Select
             className="w-full sm:w-72"
             value={mcpSurface}
-            onValueChange={(next) => { if (next !== null) setMcpSurface(decodeMcpSurface(next)) }}
+            onValueChange={(next) => { if (next !== null) setMcpSurface(Schema.decodeUnknownSync(McpSurface)(next)) }}
             items={mcpSurfaceOptions}
             disabled={disabled}
           />

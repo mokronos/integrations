@@ -20,6 +20,8 @@ const Consent = Schema.Struct({
   clients: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String }))
 })
 const Redirect = Schema.Struct({ redirect: Schema.String })
+const Grants = Schema.Struct({ grants: Schema.Array(Schema.Struct({ id: Schema.String, subjectEmail: Schema.String })) })
+const Revocation = Schema.Struct({ revoked: Schema.Boolean })
 const Tokens = Schema.Struct({
   access_token: Schema.String,
   refresh_token: Schema.String,
@@ -238,10 +240,18 @@ describe("MCP OAuth authorization server", () => {
       })
       expect(invalidatedFamily.status).toBe(401)
 
-      const grants = yield* gateway.store.listOAuthGrants(defaultTenantId)
+      const listed = yield* request(gateway.handle, "/v1/oauth/grants", undefined, gateway.key.secret)
+      expect(listed.status).toBe(200)
+      const { grants } = Schema.decodeUnknownSync(Grants)(yield* Effect.promise(() => listed.json()))
       expect(grants).toHaveLength(1)
       expect(grants[0]?.subjectEmail).toBe("Local operator")
-      expect(yield* gateway.store.revokeOAuthGrant(defaultTenantId, grants[0]!.id)).toBe(true)
+      const revocation = yield* request(
+        gateway.handle,
+        `/v1/oauth/grants/${encodeURIComponent(grants[0]?.id ?? "")}`,
+        { method: "DELETE" },
+        gateway.key.secret
+      )
+      expect(Schema.decodeUnknownSync(Revocation)(yield* Effect.promise(() => revocation.json()))).toEqual({ revoked: true })
       const revoked = yield* request(gateway.handle, "/mcp", {
         method: "GET",
         headers: { authorization: `Bearer ${tokens.access_token}` }

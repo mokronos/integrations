@@ -1,18 +1,8 @@
-import {
-  ClientId,
-  OAuthGrantId,
-  whenPresent,
-  webCryptoLayer
-} from "@mokronos/integrations-contracts"
+import { whenPresent, webCryptoLayer } from "@mokronos/integrations-contracts"
 import type { Client } from "@mokronos/integrations-contracts"
 import {
-  hashSessionToken,
-  authenticateClient,
-  defaultLocalSubjectId,
   newOAuthAccessToken,
   newOAuthApplicationId,
-  newOAuthAuthorizationCode,
-  newOAuthGrantId,
   newOAuthRefreshToken,
   newOAuthRequestId,
   newOAuthTokenFamilyId,
@@ -48,11 +38,6 @@ const DcrMetadata = Schema.Struct({
   application_type: Schema.optional(Schema.String)
 })
 
-const ConsentDecision = Schema.Union([
-  Schema.Struct({ decision: Schema.Literal("deny") }),
-  Schema.Struct({ decision: Schema.Literal("approve"), clientId: ClientId })
-])
-
 class OAuthClientMetadataError extends Schema.TaggedError<OAuthClientMetadataError>()(
   "OAuthClientMetadataError",
   { message: Schema.String }
@@ -72,16 +57,6 @@ const json = <A>(body: A, status = 200, headers: HeadersInit = {}): Response =>
 
 const oauthError = (error: string, description: string, status = 400): Response =>
   json({ error, error_description: description }, status)
-
-const sessionCookie = (request: Request): string | undefined => {
-  const header = request.headers.get("cookie")
-  if (header === null) return undefined
-  for (const part of header.split(";")) {
-    const [name, ...value] = part.split("=")
-    if (name?.trim() === "wf_session") return value.join("=").trim() || undefined
-  }
-  return undefined
-}
 
 const isLoopback = (hostname: string): boolean =>
   hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" || hostname === "::1"
@@ -149,14 +124,19 @@ const metadataJson = (metadata: typeof ClientMetadata.Type): typeof Schema.Json.
   ...whenPresent("application_type", metadata.application_type)
 })
 
-const sameOrigin = (request: Request): boolean => {
-  const origin = request.headers.get("origin")
-  if (origin === null) return true
-  return parsedUrl(origin)?.origin === new URL(request.url).origin
-}
-
 const bearerChallenge = (metadataUrl: string, error?: string): string =>
   `Bearer resource_metadata="${metadataUrl}", scope="mcp"${error === undefined ? "" : `, error="${error}"`}`
+
+const oauthResourceUrl = (settings: GatewaySettings): URL | undefined => {
+  const resource = settings.mcpUrl?.()
+  const url = resource === undefined ? undefined : parsedUrl(resource)
+  return url !== undefined && (url.protocol === "https:" || (url.protocol === "http:" && isLoopback(url.hostname)))
+    ? url
+    : undefined
+}
+
+export const mcpOAuthIssuer = (settings: GatewaySettings): string | undefined =>
+  oauthResourceUrl(settings)?.origin
 
 export interface McpOAuthAuthentication {
   readonly client: Client
@@ -169,7 +149,7 @@ export interface McpOAuthHandle {
   readonly enabled: boolean
   readonly resource: string | undefined
   readonly metadataUrl: string | undefined
-  handle(request: Request, context?: { readonly localSecret?: string; readonly remoteAddress?: string }): Promise<Response | undefined>
+  handle(request: Request, context?: { readonly remoteAddress?: string }): Promise<Response | undefined>
   authenticate(token: string): Promise<McpOAuthAuthentication | undefined>
   challenge(error?: string): string
   dispose(): Promise<void>
@@ -182,12 +162,10 @@ export const createMcpOAuthHandler = (options: {
   readonly registrationLimitPerMinute?: number
 }): McpOAuthHandle => {
   const resource = options.settings.mcpUrl?.()
-  const resourceUrl = resource === undefined ? undefined : parsedUrl(resource)
-  const enabled = resourceUrl !== undefined && (
-    resourceUrl.protocol === "https:" || (resourceUrl.protocol === "http:" && isLoopback(resourceUrl.hostname))
-  )
-  const issuer = enabled && resourceUrl !== undefined ? resourceUrl.origin : undefined
-  const metadataUrl = enabled && resourceUrl !== undefined
+  const resourceUrl = oauthResourceUrl(options.settings)
+  const enabled = resourceUrl !== undefined
+  const issuer = mcpOAuthIssuer(options.settings)
+  const metadataUrl = resourceUrl !== undefined
     ? `${resourceUrl.origin}/.well-known/oauth-protected-resource${resourceUrl.pathname === "/" ? "" : resourceUrl.pathname}`
     : undefined
   const runtime: OAuthRuntime = ManagedRuntime.make(Layer.merge(options.httpClient, webCryptoLayer))
@@ -237,19 +215,6 @@ export const createMcpOAuthHandler = (options: {
       redirectUris: metadata.redirect_uris,
       metadata: metadataJson(metadata)
     })
-  })
-
-  const currentSession = (request: Request, context?: { readonly localSecret?: string }) => Effect.gen(function*() {
-    const secret = sessionCookie(request)
-    if (secret !== undefined) return yield* store.findLiveSession(yield* hashSessionToken(secret))
-    if (context?.localSecret === undefined) return undefined
-    const authentication = yield* authenticateClient(store, context.localSecret)
-    if (authentication.status !== "authenticated") return undefined
-    return {
-      tenantId: authentication.client.tenantId,
-      subjectId: defaultLocalSubjectId,
-      email: `local:${authentication.client.name}`
-    }
   })
 
   const protectedResourceMetadata = () => json({
@@ -333,72 +298,6 @@ export const createMcpOAuthHandler = (options: {
       expiresAt: DateTime.toDateUtc(DateTime.addDuration(yield* DateTime.now, Duration.minutes(10)))
     })
     return Response.redirect(`${issuer}/oauth/consent?request=${encodeURIComponent(id)}`, 302)
-  })
-
-  const consentView = (request: Request, id: string, context?: { readonly localSecret?: string }) => Effect.gen(function*() {
-    const session = yield* currentSession(request, context)
-    if (session === undefined) return json({ error: "Sign in to continue" }, 401)
-    const pending = yield* store.getOAuthAuthorizationRequest(id)
-    if (pending === undefined) return json({ error: "Authorization request is expired or already used" }, 410)
-    const application = yield* store.findOAuthApplicationById(pending.applicationId)
-    const clients = (yield* store.listClients(session.tenantId)).filter((client) => client.revokedAt === null)
-    if (application === undefined) return json({ error: "OAuth application is no longer available" }, 410)
-    return json({
-      request: { id: pending.id, scope: pending.scope, resource: pending.resource },
-      application: { id: application.id, kind: application.kind, name: application.name, clientIdentifier: application.clientIdentifier },
-      clients
-    })
-  })
-
-  const decideConsent = (request: Request, id: string, context?: { readonly localSecret?: string }) => Effect.gen(function*() {
-    if (!sameOrigin(request)) return json({ error: "Cross-site requests are not permitted" }, 403)
-    const session = yield* currentSession(request, context)
-    if (session === undefined) return json({ error: "Sign in to continue" }, 401)
-    const declared = Number(request.headers.get("content-length") ?? 0)
-    if (declared > 64 * 1024) return json({ error: "Consent decision is too large" }, 413)
-    const body = yield* Effect.promise(() => request.text())
-    if (body.length > 64 * 1024) return json({ error: "Consent decision is too large" }, 413)
-    const decoded = Schema.decodeUnknownExit(Schema.fromJsonString(ConsentDecision))(body)
-    if (Exit.isFailure(decoded)) return json({ error: "Invalid consent decision" }, 400)
-    const pending = yield* store.getOAuthAuthorizationRequest(id)
-    if (pending === undefined) return json({ error: "Authorization request is expired or already used" }, 410)
-    const redirect = new URL(pending.redirectUri)
-    if (pending.state !== null) redirect.searchParams.set("state", pending.state)
-    redirect.searchParams.set("iss", issuer ?? "")
-    if (decoded.value.decision === "deny") {
-      if ((yield* store.consumeOAuthAuthorizationRequest(id)) === undefined) {
-        return json({ error: "Authorization request is expired or already used" }, 410)
-      }
-      redirect.searchParams.set("error", "access_denied")
-      return json({ redirect: redirect.toString() })
-    }
-    const client = yield* store.findClientById(session.tenantId, decoded.value.clientId)
-    if (client === undefined || client.revokedAt !== null) return json({ error: "Gateway Client is not available" }, 400)
-    if ((yield* store.consumeOAuthAuthorizationRequest(id)) === undefined) {
-      return json({ error: "Authorization request is expired or already used" }, 410)
-    }
-    const grant = yield* store.findOrCreateOAuthGrant({
-      id: yield* newOAuthGrantId,
-      applicationId: pending.applicationId,
-      subjectId: session.subjectId,
-      tenantId: session.tenantId,
-      clientId: client.id,
-      resource: pending.resource,
-      scope: pending.scope
-    })
-    const code = yield* newOAuthAuthorizationCode
-    yield* store.createOAuthAuthorizationCode({
-      hash: OAuthSecretHash.make(yield* sha256Hex(code)),
-      grantId: grant.id,
-      applicationId: grant.applicationId,
-      redirectUri: pending.redirectUri,
-      codeChallenge: pending.codeChallenge,
-      resource: pending.resource,
-      scope: pending.scope,
-      expiresAt: DateTime.toDateUtc(DateTime.addDuration(yield* DateTime.now, Duration.minutes(5)))
-    })
-    redirect.searchParams.set("code", code)
-    return json({ redirect: redirect.toString() })
   })
 
   const issueInitialTokens = (code: string, verifier: string, clientIdentifier: string, redirectUri: string, requestedResource: string) => Effect.gen(function*() {
@@ -485,19 +384,6 @@ export const createMcpOAuthHandler = (options: {
     })
   })
 
-  const grants = (request: Request, context?: { readonly localSecret?: string }) => Effect.gen(function*() {
-    const session = yield* currentSession(request, context)
-    if (session === undefined) return json({ error: "Sign in to continue" }, 401)
-    return json(yield* store.listOAuthGrants(session.tenantId))
-  })
-
-  const revokeGrant = (request: Request, id: string, context?: { readonly localSecret?: string }) => Effect.gen(function*() {
-    if (!sameOrigin(request)) return json({ error: "Cross-site requests are not permitted" }, 403)
-    const session = yield* currentSession(request, context)
-    if (session === undefined) return json({ error: "Sign in to continue" }, 401)
-    return json({ revoked: yield* store.revokeOAuthGrant(session.tenantId, OAuthGrantId.make(id)) })
-  })
-
   const run = <E>(effect: Effect.Effect<Response, E, HttpClient.HttpClient | Crypto.Crypto>): Promise<Response> =>
     runtime.runPromise(effect.pipe(Effect.catchCause(() => Effect.succeed(oauthError("server_error", "The authorization server could not complete the request", 500)))))
 
@@ -529,10 +415,6 @@ export const createMcpOAuthHandler = (options: {
       }
       if (request.method === "GET" && url.pathname === "/oauth/authorize") return run(authorize(request))
       if (request.method === "POST" && url.pathname === "/oauth/token") return run(token(request))
-      if (request.method === "GET" && url.pathname === "/v1/oauth/authorization-request") return run(consentView(request, url.searchParams.get("id") ?? "", context))
-      if (request.method === "POST" && url.pathname === "/v1/oauth/authorization-request") return run(decideConsent(request, url.searchParams.get("id") ?? "", context))
-      if (request.method === "GET" && url.pathname === "/v1/oauth/grants") return run(grants(request, context))
-      if (request.method === "DELETE" && url.pathname.startsWith("/v1/oauth/grants/")) return run(revokeGrant(request, decodeURIComponent(url.pathname.slice("/v1/oauth/grants/".length)), context))
       return undefined
     },
     dispose: () => runtime.dispose()

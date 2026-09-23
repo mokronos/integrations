@@ -1,34 +1,43 @@
-import {
-  useMutation,
-  useQuery,
-  useQueryClient
-} from "@tanstack/react-query"
-import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query"
+import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useCallback } from "react"
+import type { UseQueryResult } from "@tanstack/react-query"
+import type {
+  AccessProfileId,
+  ApprovalId,
+  ApprovalPolicyId,
+  ApprovalStatus,
+  ClientId
+} from "@mokronos/integrations-contracts"
 
 import * as gateway from "@/lib/gateway"
-import type { ApprovalStatus } from "@/lib/schemas"
 import type { AuditQuery } from "@/lib/gateway"
 
 export const keys = {
+  me: ["me"] as const,
+  authProviders: ["auth-providers"] as const,
   integrations: ["integrations"] as const,
-  integrationTools: (slug: string) => ["integrations", slug, "tools"] as const,
   connections: ["connections"] as const,
   overview: ["overview"] as const,
   clients: ["clients"] as const,
   approvalDestinations: ["approval-destinations"] as const,
-  clientApprovalDestinations: (id: string) => ["clients", id, "approval-destinations"] as const,
-  approvalDeliveries: (id: string) => ["approvals", id, "deliveries"] as const,
+  clientApprovalDestinations: (id: ClientId) => ["clients", id, "approval-destinations"] as const,
+  approvalDeliveries: (id: ApprovalId) => ["approvals", id, "deliveries"] as const,
   accessProfiles: ["access-profiles"] as const,
-  accessProfile: (id: string) => ["access-profiles", id] as const,
+  accessProfile: (id: AccessProfileId | undefined) => ["access-profiles", id] as const,
   approvalPolicies: ["approval-policies"] as const,
-  approvalPolicy: (id: string) => ["approval-policies", id] as const,
-  clientTools: (clientId: string) => ["clients", clientId, "tools"] as const,
-  apiKeys: (clientId: string) => ["clients", clientId, "keys"] as const,
+  approvalPolicy: (id: ApprovalPolicyId | undefined) => ["approval-policies", id] as const,
+  clientTools: (id: ClientId | undefined) => ["clients", id, "tools"] as const,
+  apiKeys: (id: ClientId) => ["clients", id, "keys"] as const,
   approvals: (status: ApprovalStatus | "all") => ["approvals", status] as const,
   audit: (input: AuditQuery) => ["audit", input] as const,
-  oauthSession: (id: string) => ["oauth-session", id] as const,
+  oauthSession: (id: string | undefined) => ["oauth-session", id] as const,
   oauthGrants: ["oauth-grants"] as const
 }
+
+export const useMe = () => useQuery({ queryKey: keys.me, queryFn: gateway.fetchMe })
+
+export const useAuthProviders = () =>
+  useQuery({ queryKey: keys.authProviders, queryFn: gateway.fetchAuthProviders })
 
 export const useIntegrations = () =>
   useQuery({
@@ -44,13 +53,6 @@ export const useOAuthCallbackUrl = () =>
     select: (response) => response.oauthCallbackUrl
   })
 
-export const useIntegrationTools = (slug: string | undefined) =>
-  useQuery({
-    queryKey: keys.integrationTools(slug ?? ""),
-    queryFn: () => gateway.listIntegrationTools(slug ?? ""),
-    enabled: slug !== undefined
-  })
-
 export const useConnections = () =>
   useQuery({ queryKey: keys.connections, queryFn: gateway.listConnections })
 
@@ -60,13 +62,6 @@ export const useClients = () =>
     queryFn: gateway.listClients,
     select: (response) => response.clients
   })
-export const useApprovalDestinations = () => useQuery({ queryKey: keys.approvalDestinations, queryFn: gateway.listApprovalDestinations })
-export const useClientApprovalDestinations = (id: string) => useQuery({
-  queryKey: keys.clientApprovalDestinations(id), queryFn: () => gateway.getClientApprovalDestinations(id)
-})
-export const useApprovalDeliveries = (id: string) => useQuery({
-  queryKey: keys.approvalDeliveries(id), queryFn: () => gateway.listApprovalDeliveries(id), refetchInterval: 5_000
-})
 
 export const useMcpUrl = () =>
   useQuery({
@@ -75,34 +70,56 @@ export const useMcpUrl = () =>
     select: (response) => response.mcpUrl
   })
 
+export const useApprovalDestinations = () =>
+  useQuery({ queryKey: keys.approvalDestinations, queryFn: gateway.listApprovalDestinations })
+
+export const useClientApprovalDestinations = (id: ClientId) =>
+  useQuery({
+    queryKey: keys.clientApprovalDestinations(id),
+    queryFn: () => gateway.getClientApprovalDestinations(id)
+  })
+
+export const useApprovalDeliveries = (id: ApprovalId) =>
+  useQuery({
+    queryKey: keys.approvalDeliveries(id),
+    queryFn: () => gateway.listApprovalDeliveries(id),
+    refetchInterval: 5_000
+  })
+
 export const useOverview = () =>
   useQuery({ queryKey: keys.overview, queryFn: gateway.fetchOverview, refetchInterval: 5_000 })
 
-export const useAccessProfiles = () => useQuery({ queryKey: keys.accessProfiles, queryFn: gateway.listAccessProfiles })
-export const useAccessProfile = (id: string | undefined) =>
+export const useAccessProfiles = () =>
+  useQuery({ queryKey: keys.accessProfiles, queryFn: gateway.listAccessProfiles })
+
+export const useAccessProfile = (id: AccessProfileId | undefined) =>
   useQuery({
-    queryKey: keys.accessProfile(id ?? ""), queryFn: () => gateway.getAccessProfile(id ?? ""), enabled: id !== undefined
-  })
-export const useApprovalPolicies = () => useQuery({ queryKey: keys.approvalPolicies, queryFn: gateway.listApprovalPolicies })
-export const useApprovalPolicy = (id: string | undefined) =>
-  useQuery({
-    queryKey: keys.approvalPolicy(id ?? ""), queryFn: () => gateway.getApprovalPolicy(id ?? ""), enabled: id !== undefined
+    queryKey: keys.accessProfile(id),
+    queryFn: id === undefined ? skipToken : () => gateway.getAccessProfile(id)
   })
 
-export const useApiKeys = (clientId: string) =>
-  useQuery({ queryKey: keys.apiKeys(clientId), queryFn: () => gateway.listKeys(clientId) })
+export const useApprovalPolicies = () =>
+  useQuery({ queryKey: keys.approvalPolicies, queryFn: gateway.listApprovalPolicies })
 
-export const useClientTools = (clientId: string | undefined) =>
+export const useApprovalPolicy = (id: ApprovalPolicyId | undefined) =>
   useQuery({
-    queryKey: keys.clientTools(clientId ?? ""),
-    queryFn: () => gateway.listClientTools(clientId ?? ""),
-    enabled: clientId !== undefined
+    queryKey: keys.approvalPolicy(id),
+    queryFn: id === undefined ? skipToken : () => gateway.getApprovalPolicy(id)
+  })
+
+export const useApiKeys = (id: ClientId) =>
+  useQuery({ queryKey: keys.apiKeys(id), queryFn: () => gateway.listKeys(id) })
+
+export const useClientTools = (id: ClientId | undefined) =>
+  useQuery({
+    queryKey: keys.clientTools(id),
+    queryFn: id === undefined ? skipToken : () => gateway.listClientTools(id)
   })
 
 export const useApprovals = (status: ApprovalStatus | "all") =>
   useQuery({
     queryKey: keys.approvals(status),
-    queryFn: () => (status === "all" ? gateway.listApprovals() : gateway.listApprovals(status)),
+    queryFn: () => gateway.listApprovals(status === "all" ? undefined : status),
     refetchInterval: status === "pending" || status === "executing" || status === "all" ? 5_000 : false
   })
 
@@ -112,18 +129,23 @@ export const useAudit = (input: AuditQuery) =>
 export const useOAuthGrants = () =>
   useQuery({ queryKey: keys.oauthGrants, queryFn: gateway.listOAuthGrants })
 
-export type { UseMutationResult, UseQueryResult }
+export const useOAuthSession = (id: string | undefined) =>
+  useQuery({
+    queryKey: keys.oauthSession(id),
+    queryFn: id === undefined ? skipToken : () => gateway.pollOAuth(id),
+    refetchInterval: (query) => query.state.data?.state.status === "pending" ? 1_500 : false
+  })
 
 export const useInvalidate = () => {
   const client = useQueryClient()
-  return (...groups: ReadonlyArray<ReadonlyArray<string>>) => {
+  return useCallback((...groups: ReadonlyArray<ReadonlyArray<string | undefined>>) => {
     for (const group of groups) {
       void client.invalidateQueries({ queryKey: group })
     }
-  }
+  }, [client])
 }
 
-export { useMutation, useQuery, useQueryClient }
+export { useMutation, useQuery }
 
 export const refetchAll = (...queries: ReadonlyArray<Pick<UseQueryResult, "refetch">>): Promise<void> =>
   Promise.all(queries.map((query) => query.refetch())).then(() => undefined)

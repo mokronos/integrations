@@ -13,8 +13,10 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { until, when } from "@/lib/format"
 import * as gateway from "@/lib/gateway"
 import { useApprovalDeliveries, useApprovals, useIntegrations, useInvalidate, useMutation } from "@/lib/queries"
-import { decodeApprovalFilter } from "@/lib/schemas"
-import type { ApprovalStatus, IntegrationOverview, PendingApproval } from "@/lib/schemas"
+import { Schema } from "effect"
+import { ApprovalStatus, type IntegrationOverview, type PendingApproval } from "@mokronos/integrations-contracts"
+
+const decodeApprovalFilter = Schema.decodeUnknownSync(Schema.Union([ApprovalStatus, Schema.Literal("all")]))
 
 const statusVariant = {
   pending: "default",
@@ -49,8 +51,8 @@ function ApprovalCard({
   const decide = useMutation({
     mutationFn: (verdict: "approve" | "deny") =>
       verdict === "approve"
-        ? gateway.approveApproval({ id: approval.id })
-        : gateway.denyApproval({ id: approval.id }),
+        ? gateway.approveApproval(approval.id)
+        : gateway.denyApproval(approval.id),
     onSuccess: (response, verdict) => {
       invalidate(["approvals"], ["audit"])
       if (response.approval?.error) toast.error("Approved, but the call failed", { description: response.approval.error })

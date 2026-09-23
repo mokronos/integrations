@@ -2,7 +2,7 @@ import { aliasForConnection, connectionRefOf } from "@mokronos/integrations-cont
 
 import { IntegrationIcon, integrationHost } from "@/components/integrations/integration-icon"
 import { Badge } from "@/components/ui/badge"
-import type { ConnectionRef, IntegrationOverview } from "@/lib/schemas"
+import type { ConnectionRef, IntegrationOverview } from "@mokronos/integrations-contracts"
 import { cn } from "@/lib/utils"
 
 const connectionName = (connection: ConnectionRef, integration: IntegrationOverview | undefined): string => {

@@ -1,6 +1,5 @@
 import { whenPresent } from "@mokronos/integrations-contracts"
-import { useQuery } from "@tanstack/react-query"
-import { Check, ExternalLink, LoaderCircle } from "lucide-react"
+import { Check } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useSearchParams } from "react-router"
 
@@ -15,10 +14,9 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import * as gateway from "@/lib/gateway"
-import { keys, useIntegrations, useInvalidate, useMutation, useOAuthCallbackUrl } from "@/lib/queries"
+import { keys, useIntegrations, useInvalidate, useMutation, useOAuthCallbackUrl, useOAuthSession } from "@/lib/queries"
+import { AwaitingAuthorization, OAuthClientFields } from "./oauth-flow"
 import { OAuthSetupPanel } from "./oauth-setup-panel"
 
 /**
@@ -27,41 +25,30 @@ import { OAuthSetupPanel } from "./oauth-setup-panel"
  */
 export function OAuthSetupDialog() {
   const [params, setParams] = useSearchParams()
-  const sessionId = params.get("setup")
+  const sessionId = params.get("setup") ?? undefined
   const invalidate = useInvalidate()
   const { data: callbackUrl } = useOAuthCallbackUrl()
   const { data: integrations } = useIntegrations()
   const [clientId, setClientId] = useState("")
   const [clientSecret, setClientSecret] = useState("")
-  const [authorizationUrl, setAuthorizationUrl] = useState<string | undefined>()
+  const session = useOAuthSession(sessionId)
 
-  const session = useQuery({
-    queryKey: keys.oauthSession(sessionId ?? ""),
-    queryFn: () => gateway.pollOAuth(sessionId ?? ""),
-    enabled: sessionId !== null,
-    refetchInterval: (query) =>
-      query.state.data?.state.status === "pending" ? 1_500 : false
-  })
-
-  const state = session.data?.state
   const integration = integrations?.find((candidate) => candidate.slug === session.data?.integration)
   const method = integration?.authMethods.find((candidate) => candidate.kind === "oauth")
 
   const submit = useMutation({
-    mutationFn: () =>
-      gateway.provideOAuthClient(sessionId ?? "", {
+    mutationFn: (id: string) =>
+      gateway.provideOAuthClient(id, {
         clientId: clientId.trim(),
         ...whenPresent("clientSecret", clientSecret.length === 0 ? undefined : clientSecret)
       }),
     onSuccess: (resumed) => {
       setClientSecret("")
-      invalidate(keys.oauthSession(sessionId ?? ""), keys.integrations, keys.connections)
-      if (resumed.state.status === "pending") {
-        setAuthorizationUrl(resumed.state.authorizationUrl)
-        window.open(resumed.state.authorizationUrl, "_blank", "noopener")
-      }
+      invalidate(keys.oauthSession(resumed.id))
+      if (resumed.state.status === "pending") window.open(resumed.state.authorizationUrl, "_blank", "noopener")
     }
   })
+  const state = session.data?.state ?? submit.data?.state
 
   useEffect(() => {
     if (state?.status === "connected") invalidate(keys.integrations, keys.connections)
@@ -73,11 +60,10 @@ export function OAuthSetupDialog() {
     setParams(next, { replace: true })
     setClientId("")
     setClientSecret("")
-    setAuthorizationUrl(undefined)
     submit.reset()
   }
 
-  if (sessionId === null) return null
+  if (sessionId === undefined) return null
 
   return (
     <Dialog open onOpenChange={(next) => next ? undefined : close()}>
@@ -123,49 +109,19 @@ export function OAuthSetupDialog() {
             />
           )
           : state.status === "pending"
-          ? (
-            <Alert>
-              <LoaderCircle className="animate-spin" />
-              <AlertTitle>Waiting for provider authorization</AlertTitle>
-              <AlertDescription className="space-y-2">
-                <p>The application was saved. Finish the provider's consent page.</p>
-                {(authorizationUrl ?? state.authorizationUrl) === undefined ? null : (
-                  <a
-                    className="inline-flex items-center gap-1 font-medium"
-                    href={authorizationUrl ?? state.authorizationUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Open authorization page <ExternalLink className="size-3" />
-                  </a>
-                )}
-              </AlertDescription>
-            </Alert>
-          )
+          ? <AwaitingAuthorization description="The application was saved. Finish the provider's consent page." authorizationUrl={state.authorizationUrl} />
           : (
             <div className="space-y-4">
               {method === undefined
                 ? null
                 : <OAuthSetupPanel method={method} callbackUrl={callbackUrl} />}
-              <div className="space-y-1.5">
-                <Label htmlFor="setup-client-id">OAuth client ID</Label>
-                <Input
-                  id="setup-client-id"
-                  value={clientId}
-                  onChange={(event) => setClientId(event.target.value)}
-                  placeholder="From the provider console"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="setup-client-secret">Client secret</Label>
-                <Input
-                  id="setup-client-secret"
-                  type="password"
-                  value={clientSecret}
-                  onChange={(event) => setClientSecret(event.target.value)}
-                  placeholder="Leave empty if the provider issues none"
-                />
-              </div>
+              <OAuthClientFields
+                idPrefix="setup"
+                clientId={clientId}
+                clientSecret={clientSecret}
+                onClientIdChange={setClientId}
+                onClientSecretChange={setClientSecret}
+              />
               {submit.error === null ? null : (
                 <OperationError
                   title="The provider rejected that application"
@@ -180,7 +136,7 @@ export function OAuthSetupDialog() {
           {state?.status === "needs-client"
             ? (
               <Button
-                onClick={() => submit.mutate()}
+                onClick={() => submit.mutate(sessionId)}
                 disabled={submit.isPending || clientId.trim().length === 0}
               >
                 {submit.isPending ? "Saving…" : "Save and authorize"}

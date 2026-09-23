@@ -5,7 +5,7 @@ import { Link } from "react-router"
 import { IntegrationIcon, integrationHost } from "@/components/integrations/integration-icon"
 import { Badge } from "@/components/ui/badge"
 import { pluralise } from "@/lib/format"
-import type { IntegrationOverview } from "@/lib/schemas"
+import type { IntegrationOverview } from "@mokronos/integrations-contracts"
 import { cn } from "@/lib/utils"
 
 export const useIntegrationCollapse = (integrationCount: number) => {
