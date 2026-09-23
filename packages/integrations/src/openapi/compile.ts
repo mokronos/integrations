@@ -3,9 +3,9 @@ import type { Operation } from "oas/operation"
 import OASNormalize from "oas-normalize"
 import { Effect, Option, Schema } from "effect"
 import { describeCause, SpecError } from "../errors.ts"
-import { HttpMethod, ParameterLocation, whenPresent } from "@mokronos/integrations-contracts"
-import type { HttpMethod as HttpMethodType, ParameterLocation as ParameterLocationType } from "@mokronos/integrations-contracts"
-import { OpenApiPreview } from "@mokronos/integrations-contracts"
+import { HttpMethod, ParameterLocation, whenPresent } from "@integragents/contracts"
+import type { HttpMethod as HttpMethodType, ParameterLocation as ParameterLocationType } from "@integragents/contracts"
+import { OpenApiPreview } from "@integragents/contracts"
 import {
   asJson,
   isJsonBoolean,
@@ -15,7 +15,7 @@ import {
   property,
   stringEntries,
   type Json
-} from "@mokronos/integrations-contracts"
+} from "@integragents/contracts"
 
 export interface CompiledParameter {
   readonly name: string

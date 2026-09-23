@@ -7,7 +7,7 @@ import type {
   ApprovalPolicyId,
   ApprovalStatus,
   ClientId
-} from "@mokronos/integrations-contracts"
+} from "@integragents/contracts"
 
 import * as gateway from "@/lib/gateway"
 import type { AuditQuery } from "@/lib/gateway"

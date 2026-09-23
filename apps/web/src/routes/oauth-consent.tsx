@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { ShieldCheck } from "lucide-react"
-import type { ClientId, OAuthConsentDecision } from "@mokronos/integrations-contracts"
+import type { ClientId, OAuthConsentDecision } from "@integragents/contracts"
 
 import { getOAuthConsent, decideOAuthConsent } from "@/lib/gateway"
 import { useMutation } from "@/lib/queries"

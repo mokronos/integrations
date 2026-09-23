@@ -1,4 +1,4 @@
-# @mokronos/integrations-observability
+# @integragents/observability
 
 Tracing and logging for the gateway and the CLIs.
 

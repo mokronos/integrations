@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
-import type { AuthMethod, Connection } from "@mokronos/integrations-contracts"
-import { ConnectionName, IntegrationSlug } from "@mokronos/integrations-contracts"
+import type { AuthMethod, Connection } from "@integragents/contracts"
+import { ConnectionName, IntegrationSlug } from "@integragents/contracts"
 import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Option, Result } from "effect"
 import { TestClock } from "effect/testing"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
@@ -12,9 +12,9 @@ import {
   OAuthError,
   OAuthFlows,
   OAuthState
-} from "@mokronos/integrations-host"
-import { createOAuthSessions, OAuthFlowError } from "@mokronos/integrations-gateway-core"
-import type { OAuthOperations } from "@mokronos/integrations-gateway-core"
+} from "@integragents/host"
+import { createOAuthSessions, OAuthFlowError } from "@integragents/gateway-core"
+import type { OAuthOperations } from "@integragents/gateway-core"
 import { testServices } from "./fixtures.ts"
 import { authorizeInBrowser } from "../src/oauth-browser.ts"
 

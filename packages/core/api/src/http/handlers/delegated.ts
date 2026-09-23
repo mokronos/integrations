@@ -1,8 +1,8 @@
 import {
   whenPresent,
   whenPresentMap
-} from "@mokronos/integrations-contracts"
-import { BlobStore, Integrations } from "@mokronos/integrations-host"
+} from "@integragents/contracts"
+import { BlobStore, Integrations } from "@integragents/host"
 import { Effect, Stream } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
@@ -10,9 +10,9 @@ import {
   BlobId,
   blobHandleKey,
   ToolName
-} from "@mokronos/integrations-contracts"
-import { invokeThroughGateway, listEffectiveTools } from "@mokronos/integrations-gateway-core"
-import { GatewayStoreService } from "@mokronos/integrations-gateway-core"
+} from "@integragents/contracts"
+import { invokeThroughGateway, listEffectiveTools } from "@integragents/gateway-core"
+import { GatewayStoreService } from "@integragents/gateway-core"
 import {
   ApiNotFound,
   GatewayApi

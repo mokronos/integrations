@@ -22,7 +22,7 @@ import {
   useClientApprovalDestinations
 } from "@/lib/queries"
 import { Schema } from "effect"
-import { McpSurface, type ApprovalDestinationId, type Client, type ClientCapability } from "@mokronos/integrations-contracts"
+import { McpSurface, type ApprovalDestinationId, type Client, type ClientCapability } from "@integragents/contracts"
 
 const mcpSurfaceOptions: ReadonlyArray<{ readonly value: McpSurface; readonly label: string; readonly description: string }> = [
   { value: "tools", label: "Tools", description: "Every tool this client may call appears as its own MCP tool. Best for agents that just need to do work." },

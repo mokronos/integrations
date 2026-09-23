@@ -1,4 +1,4 @@
-import { whenPresent, type AuthMethod, type IntegrationOverview } from "@mokronos/integrations-contracts"
+import { whenPresent, type AuthMethod, type IntegrationOverview } from "@integragents/contracts"
 import { Check } from "lucide-react"
 import { useEffect, useState } from "react"
 

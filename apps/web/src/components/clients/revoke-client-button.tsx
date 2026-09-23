@@ -1,5 +1,5 @@
 import { toast } from "sonner"
-import type { ClientId } from "@mokronos/integrations-contracts"
+import type { ClientId } from "@integragents/contracts"
 
 import { ConfirmButton } from "@/components/ui/confirm-button"
 import * as gateway from "@/lib/gateway"

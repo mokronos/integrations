@@ -1,14 +1,13 @@
 {
-  "name": "@mokronos/integrations-cli",
+  "name": "@integragents/cli",
   "version": "0.3.0",
-  "private": true,
   "type": "module",
   "description": "Agent-facing i CLI and its human/operator ii superset for the integration gateway.",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/mokronos/integrations.git",
-    "directory": "apps/integrations/cli"
+    "directory": "apps/cli"
   },
   "homepage": "https://github.com/mokronos/integrations#readme",
   "bugs": "https://github.com/mokronos/integrations/issues",
@@ -25,8 +24,14 @@
   "engines": {
     "bun": ">=1.2"
   },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
   "files": [
     "src",
+    "!src/standalone.ts",
+    "!src/embedded-web.d.ts",
     "README.md"
   ],
   "scripts": {
@@ -35,13 +40,13 @@
   },
   "dependencies": {
     "@effect/platform-bun": "catalog:",
-    "@mokronos/integrations-contracts": "workspace:^",
-    "@mokronos/integrations-gateway-api": "workspace:^",
-    "@mokronos/integrations-gateway-core": "workspace:^",
-    "@mokronos/integrations": "workspace:^",
-    "@mokronos/integrations-client": "workspace:^",
-    "@mokronos/integrations-host": "workspace:^",
-    "@mokronos/integrations-observability": "workspace:^",
+    "@integragents/contracts": "workspace:^",
+    "@integragents/gateway-api": "workspace:^",
+    "@integragents/gateway-core": "workspace:^",
+    "@integragents/local": "workspace:^",
+    "@integragents/client": "workspace:^",
+    "@integragents/host": "workspace:^",
+    "@integragents/observability": "workspace:^",
     "effect": "catalog:"
   }
 }

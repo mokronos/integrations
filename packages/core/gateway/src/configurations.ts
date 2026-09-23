@@ -1,4 +1,4 @@
-import type { Integrations, StorageError } from "@mokronos/integrations-host"
+import type { Integrations, StorageError } from "@integragents/host"
 import { Effect } from "effect"
 import {
   connectionRefKey,

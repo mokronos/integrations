@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Option } from "effect"
-import { ConnectionName, connectionAddress, IntegrationSlug, parseToolAddress, slugify, ToolName, toolAddress } from "@mokronos/integrations-contracts"
+import { ConnectionName, connectionAddress, IntegrationSlug, parseToolAddress, slugify, ToolName, toolAddress } from "@integragents/contracts"
 
 describe("tool addresses", () => {
   const parts = {

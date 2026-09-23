@@ -1,8 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Layer, Schema } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
-import { GatewayMetadata } from "@mokronos/integrations-contracts"
-import { gatewayVersion } from "@mokronos/integrations-gateway-api"
+import { GatewayMetadata } from "@integragents/contracts"
+import { gatewayVersion } from "@integragents/gateway-api"
 import {
   defaultTenantId,
   gatewayConfigPath,

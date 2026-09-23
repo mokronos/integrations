@@ -81,7 +81,7 @@ directory.
 | `packages/core/api/` | Typed HTTP API, handlers, and server assembly |
 | `apps/local/` | Local Bun host and service lifecycle |
 | `apps/cli/` | `i` delegated client CLI and `ii` operator CLI |
-| `apps/ts/` | `@mokronos/integrations-client`, the thin TypeScript gateway client |
+| `apps/ts/` | `@integragents/client`, the thin TypeScript gateway client |
 | `apps/web/` | Browser control plane |
 | `apps/host-cloudflare/` | Cloudflare Worker host |
 | `apps/platform-demo/` | An application embedding the gateway core in-process, on its own database |
@@ -140,27 +140,17 @@ record shape, queries, and OTLP export.
 
 ## Packages
 
-The libraries are published to GitHub Packages under the `@mokronos` scope:
-`integrations-contracts`, `integrations-observability`, `integrations-host`,
-`integrations-gateway-core`, `integrations-gateway-api` and
-`integrations-client`. One release publishes all six under the same version, so
+The packages are published to npm under the `@integragents` scope:
+`contracts`, `observability`, `host`, `gateway-core`, `gateway-api`, `client`,
+`local` and `cli`. One release publishes all of them under the same version, so
 they are installed as a set.
 
-GitHub Packages authenticates every read, a public one included, so a consumer
-needs a token with the `read:packages` scope and an `.npmrc` beside its
-manifest:
-
-```
-@mokronos:registry=https://npm.pkg.github.com
-//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
-```
-
 ```bash
-bun add @mokronos/integrations-gateway-core
+bun add @integragents/gateway-core
 ```
 
 Nightlies are published under the `nightly` dist-tag and never become `latest`,
-so `bun add @mokronos/integrations-client@nightly` is the only way to reach
+so `bun add @integragents/client@nightly` is the only way to reach
 one. Every release also attaches the packed tarballs and their checksums to the
 GitHub release, which is what to read when a published version has to be
 audited or mirrored.
@@ -169,7 +159,7 @@ audited or mirrored.
 
 An application that owns its process and database does not need the HTTP
 API to reach the gateway. `gatewayCoreLayer` from
-`@mokronos/integrations-gateway-core` provides the store, the integration
+`@integragents/gateway-core` provides the store, the integration
 host, and OAuth sessions as Effect services on whatever `SqlClient` the
 application supplies. From there `listEffectiveTools` returns an agent's tools
 with schemas and `invokeAsClient` executes under the same policy, approval,
@@ -179,13 +169,13 @@ pipeline can carry the gateway's tables; pass `migrate: false` and the gateway
 trusts the tables are there. `apps/platform-demo/` is the smallest working
 example.
 
-The packages to embed are `@mokronos/integrations-contracts`,
-`@mokronos/integrations-host` and `@mokronos/integrations-gateway-core`. They
+The packages to embed are `@integragents/contracts`,
+`@integragents/host` and `@integragents/gateway-core`. They
 run on Node or Bun and declare `effect`, `@effect/sql-libsql`, `drizzle-orm`
 and `@libsql/client` as peer dependencies, so the application holds the one
 copy of each. Pass `publicUrlOf` and serve `GET /v1/oauth/callback` yourself;
 without a public URL, OAuth needs the loopback authorizer that only the Bun
-host in `@mokronos/integrations-gateway-api` provides.
+host in `@integragents/gateway-api` provides.
 
 ## Delegated access
 

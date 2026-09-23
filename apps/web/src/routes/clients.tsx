@@ -1,6 +1,6 @@
 import { useState } from "react"
-import type { AccessProfileId, ApprovalPolicyId } from "@mokronos/integrations-contracts"
-import { whenPresent } from "@mokronos/integrations-contracts"
+import type { AccessProfileId, ApprovalPolicyId } from "@integragents/contracts"
+import { whenPresent } from "@integragents/contracts"
 import { toast } from "sonner"
 import { LoadingRows, Page, QueryError, ReloadButton } from "@/components/page"
 import { RowLink, rowNavigates } from "@/components/ui/row-link"

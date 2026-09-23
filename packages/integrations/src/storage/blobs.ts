@@ -15,7 +15,7 @@ import {
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { Context, Effect, Layer, Schema, Stream } from "effect"
-import { BlobId } from "@mokronos/integrations-contracts"
+import { BlobId } from "@integragents/contracts"
 import { StorageError } from "../errors.ts"
 import { describeCause } from "../errors.ts"
 
@@ -50,7 +50,7 @@ export class BlobStore extends Context.Service<
     >
     readonly discard: (id: BlobId) => Effect.Effect<void>
   }
->()("@mokronos/integrations-host/BlobStore") {
+>()("@integragents/host/BlobStore") {
   static readonly fileLayer = (directory: string): Layer.Layer<BlobStore> =>
     Layer.effect(BlobStore, Effect.sync(() => fileBlobStore(path.join(directory, "blobs"))))
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Context, Effect, Option } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
-import { ConnectionName, IntegrationSlug, whenPresent } from "@mokronos/integrations-contracts"
+import { ConnectionName, IntegrationSlug, whenPresent } from "@integragents/contracts"
 import { catalogStoreFake, stubIntegrations, stubIntegrationsContext } from "./stubs.ts"
 import { gatewayStore, testServices } from "./fixtures.ts"
 import {
@@ -12,10 +12,10 @@ import {
   OAuthError,
   OAuthFlows,
   OAuthState
-} from "@mokronos/integrations-host"
-import type { OAuthClientRecord } from "@mokronos/integrations-host"
-import type { OAuthOperations } from "@mokronos/integrations-gateway-core"
-import type { Connection } from "@mokronos/integrations-contracts"
+} from "@integragents/host"
+import type { OAuthClientRecord } from "@integragents/host"
+import type { OAuthOperations } from "@integragents/gateway-core"
+import type { Connection } from "@integragents/contracts"
 import { createGatewayHandler, createOAuthSessions } from "./gateway.ts"
 import { authorizeInBrowser } from "../src/oauth-browser.ts"
 

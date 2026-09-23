@@ -1,9 +1,9 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Cause, Context, Effect, Exit, Option, Result } from "effect"
-import { IntegrationSlug } from "@mokronos/integrations-contracts"
+import { IntegrationSlug } from "@integragents/contracts"
 import { Integrations } from "../src/integrations.ts"
 import { SpecError } from "../src/errors.ts"
-import type { EndpointClassification, Integration } from "@mokronos/integrations-contracts"
+import type { EndpointClassification, Integration } from "@integragents/contracts"
 import { installClassified } from "../src/provision.ts"
 
 const classification: EndpointClassification = {

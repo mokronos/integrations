@@ -1,7 +1,7 @@
 import { KeyRound, LockKeyhole, ShieldCheck, Unlock } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
-import type { AuthMethod } from "@mokronos/integrations-contracts"
+import type { AuthMethod } from "@integragents/contracts"
 import { cn } from "@/lib/utils"
 
 const kindDetails = {

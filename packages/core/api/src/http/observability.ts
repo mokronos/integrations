@@ -1,7 +1,7 @@
 import { Cause, Context, Effect, Layer, Option, Result } from "effect"
-import { whenPresent } from "@mokronos/integrations-contracts"
-import { GatewayStoreError, OAuthSessionError, PasswordError } from "@mokronos/integrations-gateway-core"
-import { StorageError } from "@mokronos/integrations-host"
+import { whenPresent } from "@integragents/contracts"
+import { GatewayStoreError, OAuthSessionError, PasswordError } from "@integragents/gateway-core"
+import { StorageError } from "@integragents/host"
 
 export interface CaptureContext {
   readonly operation?: string
@@ -32,7 +32,7 @@ const loggingCapture: ErrorSink = {
 }
 
 export class ErrorCapture extends Context.Service<ErrorCapture, ErrorSink>()(
-  "@mokronos/integrations-gateway-api/ErrorCapture"
+  "@integragents/gateway-api/ErrorCapture"
 ) {
   static readonly logging: Layer.Layer<ErrorCapture> = Layer.succeed(ErrorCapture, loggingCapture)
 

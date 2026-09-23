@@ -3,7 +3,7 @@ import { BunHttpClient } from "@effect/platform-bun"
 import { Data, Effect, Layer } from "effect"
 import { Command, Flag } from "effect/unstable/cli"
 import { HttpClient } from "effect/unstable/http"
-import { defaultGatewayPort } from "@mokronos/integrations-client"
+import { defaultGatewayPort } from "@integragents/client"
 import { cliLayer, commandSpan } from "./telemetry.ts"
 import { controlPlaneSubcommands, operatorClientSubcommands } from "./commands.ts"
 import { authenticationSubcommands } from "./auth-commands.ts"
@@ -33,7 +33,7 @@ const loopbackWarning = (host: string): void => {
 }
 
 const runForeground = async (port: number, host: string): Promise<void> => {
-  const { serveGateway } = await import("@mokronos/integrations")
+  const { serveGateway } = await import("@integragents/local")
   const running = await serveGateway({ port, hostname: host, httpClient: BunHttpClient.layer })
   await Effect.runPromise(writeStdoutLine(`integrations gateway listening at ${running.url}`))
   loopbackWarning(host)
@@ -92,7 +92,7 @@ const dashboardCommand = Command.make(
   ({ print }) =>
     Effect.gen(function*() {
       const { readGatewayConfig, integrationsHome } = yield* Effect.promise(() =>
-        import("@mokronos/integrations-client")
+        import("@integragents/client")
       )
       const config = yield* Effect.promise(() => readGatewayConfig(integrationsHome()))
       if (config === undefined) {

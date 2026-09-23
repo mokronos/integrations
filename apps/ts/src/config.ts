@@ -3,4 +3,4 @@
  * read it without depending on this client. Re-exported here because it is
  * part of this package's published surface.
  */
-export * from "@mokronos/integrations-contracts/gateway-config"
+export * from "@integragents/contracts/gateway-config"

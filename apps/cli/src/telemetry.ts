@@ -1,8 +1,8 @@
 import { Effect, Layer } from "effect"
 import { BunServices } from "@effect/platform-bun"
-import { integrationsHome } from "@mokronos/integrations-client"
-import { traceFilePath } from "@mokronos/integrations-contracts/gateway-config"
-import { telemetryLayer } from "@mokronos/integrations-observability"
+import { integrationsHome } from "@integragents/client"
+import { traceFilePath } from "@integragents/contracts/gateway-config"
+import { telemetryLayer } from "@integragents/observability"
 import packageMetadata from "../package.json" with { type: "json" }
 
 /** Platform services plus telemetry: stdout stays the command's, spans land in the CLI trace file. */

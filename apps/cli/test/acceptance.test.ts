@@ -2,8 +2,8 @@ import path from "node:path"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Schema } from "effect"
 import { FetchHttpClient, HttpBody, HttpClient, HttpClientRequest } from "effect/unstable/http"
-import { serveGateway } from "@mokronos/integrations"
-import { aliasForConnection, ConnectionName, IntegrationSlug } from "@mokronos/integrations-gateway-core"
+import { serveGateway } from "@integragents/local"
+import { aliasForConnection, ConnectionName, IntegrationSlug } from "@integragents/gateway-core"
 import { temporaryDirectory, testServices } from "./fixtures.ts"
 
 const services = Layer.merge(testServices, FetchHttpClient.layer)
@@ -101,18 +101,11 @@ const startVendor = Effect.acquireRelease(
               domain: "acceptance.test",
               name: "Acceptance Tickets",
               description: "Creates tickets for the acceptance journey",
-              kinds: ["openapi"],
-              url: baseUrl
-            }]
-          })
-        }
-        if (url.pathname === "/api/acceptance.test/surface") {
-          return Response.json({
-            surfaces: [{
-              type: "openapi",
-              slug: "acceptance-tickets",
-              name: "Acceptance Tickets",
-              spec: `${baseUrl}/openapi.json`
+              surfaces: [{
+                kind: "openapi",
+                slug: "acceptance-tickets",
+                url: `${baseUrl}/openapi.json`
+              }]
             }]
           })
         }

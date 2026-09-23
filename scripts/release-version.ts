@@ -37,7 +37,9 @@ export const publishablePackageDirectories = [
   "packages/integrations",
   "packages/core/gateway",
   "packages/core/api",
-  "apps/ts"
+  "apps/ts",
+  "apps/local",
+  "apps/cli"
 ] as const
 
 /**

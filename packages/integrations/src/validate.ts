@@ -7,7 +7,7 @@ import {
   type IntegrationNodeSource,
   type IntegrationValidationFinding,
   type IntegrationValidationReport
-} from "@mokronos/integrations-contracts"
+} from "@integragents/contracts"
 
 const finding = (
   severity: IntegrationValidationFinding["severity"],

@@ -1,4 +1,4 @@
-import type { AccessProfileId, ApprovalPolicyId } from "@mokronos/integrations-contracts"
+import type { AccessProfileId, ApprovalPolicyId } from "@integragents/contracts"
 
 import * as gateway from "@/lib/gateway"
 import { keys } from "@/lib/queries"

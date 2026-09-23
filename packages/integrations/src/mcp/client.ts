@@ -9,15 +9,15 @@ import { Context, Effect, Layer, Option, Schema } from "effect"
 import { HttpBody, HttpClient, HttpClientResponse } from "effect/unstable/http"
 import type { Headers } from "effect/unstable/http"
 import { describeCause, McpError } from "../errors.ts"
-import { serviceName, slugify } from "@mokronos/integrations-contracts"
-import { whenPresent } from "@mokronos/integrations-contracts"
-import { isJsonObject, parseJsonString, type Json, type JsonObject } from "@mokronos/integrations-contracts"
-import { McpEra, McpProbe } from "@mokronos/integrations-contracts"
-import { tracedFetch } from "@mokronos/integrations-observability"
+import { serviceName, slugify } from "@integragents/contracts"
+import { whenPresent } from "@integragents/contracts"
+import { isJsonObject, parseJsonString, type Json, type JsonObject } from "@integragents/contracts"
+import { McpEra, McpProbe } from "@integragents/contracts"
+import { tracedFetch } from "@integragents/observability"
 
 const PROTOCOL_VERSION = "2026-07-28"
 
-const clientInfo = { name: "@mokronos/integrations-host", version: "0.2.0" } as const
+const clientInfo = { name: "@integragents/host", version: "0.2.0" } as const
 
 const requestMeta = {
   "io.modelcontextprotocol/protocolVersion": PROTOCOL_VERSION,
@@ -302,7 +302,7 @@ export class McpClient extends Context.Service<
       input: Json
     ) => Effect.Effect<Json, McpError>
   }
->()("@mokronos/integrations-host/McpClient") {
+>()("@integragents/host/McpClient") {
   static readonly layer: Layer.Layer<McpClient, never, HttpClient.HttpClient> = Layer.effect(
     McpClient,
     Effect.gen(function* () {

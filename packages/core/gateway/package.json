@@ -1,5 +1,5 @@
 {
-  "name": "@mokronos/integrations-gateway-core",
+  "name": "@integragents/gateway-core",
   "version": "0.3.0",
   "type": "module",
   "description": "Gateway domain, persistence, authorization, and execution policy.",
@@ -13,7 +13,7 @@
   "bugs": "https://github.com/mokronos/integrations/issues",
   "publishConfig": {
     "access": "public",
-    "registry": "https://npm.pkg.github.com"
+    "registry": "https://registry.npmjs.org"
   },
   "files": [
     "src",
@@ -46,13 +46,13 @@
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
-    "db:generate": "drizzle-kit generate && bun run ../../../scripts/embed-migrations.ts --package . --out src/store-migrations.gen.ts --name gatewayMigrations --type-import @mokronos/integrations-host",
+    "db:generate": "drizzle-kit generate && bun run ../../../scripts/embed-migrations.ts --package . --out src/store-migrations.gen.ts --name gatewayMigrations --type-import @integragents/host",
     "prepack": "bun run build"
   },
   "dependencies": {
     "@cfworker/json-schema": "catalog:",
-    "@mokronos/integrations-contracts": "workspace:^",
-    "@mokronos/integrations-host": "workspace:^"
+    "@integragents/contracts": "workspace:^",
+    "@integragents/host": "workspace:^"
   },
   "peerDependencies": {
     "@effect/sql-libsql": "catalog:",

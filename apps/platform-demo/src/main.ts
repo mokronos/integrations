@@ -8,7 +8,7 @@ import { LibsqlClient } from "@effect/sql-libsql"
 import { Context, Effect, Layer, ManagedRuntime, Predicate, Schema } from "effect"
 import { Reactivity } from "effect/unstable/reactivity"
 import { SqlClient } from "effect/unstable/sql"
-import { webCryptoLayer, whenPresent } from "@mokronos/integrations-contracts"
+import { webCryptoLayer, whenPresent } from "@integragents/contracts"
 import {
   Alias,
   ClientId,
@@ -23,10 +23,10 @@ import {
   resolveEncryption,
   SubjectId,
   ToolName
-} from "@mokronos/integrations-gateway-core"
-import type { GatewayCoreServices } from "@mokronos/integrations-gateway-core"
-import { ConnectionName, IntegrationSlug } from "@mokronos/integrations-contracts"
-import { AuthTemplateSlug, Integrations } from "@mokronos/integrations-host"
+} from "@integragents/gateway-core"
+import type { GatewayCoreServices } from "@integragents/gateway-core"
+import { ConnectionName, IntegrationSlug } from "@integragents/contracts"
+import { AuthTemplateSlug, Integrations } from "@integragents/host"
 import { page } from "./page.ts"
 import type { AgentView, PageModel } from "./page.ts"
 

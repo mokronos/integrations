@@ -1,5 +1,5 @@
 {
-  "name": "@mokronos/integrations-host",
+  "name": "@integragents/host",
   "version": "0.3.0",
   "type": "module",
   "description": "MCP and OpenAPI catalog, connections, and tool invocation.",
@@ -25,7 +25,7 @@
   },
   "publishConfig": {
     "access": "public",
-    "registry": "https://npm.pkg.github.com"
+    "registry": "https://registry.npmjs.org"
   },
   "files": [
     "src",
@@ -55,8 +55,8 @@
   },
   "dependencies": {
     "@modelcontextprotocol/client": "2.0.0",
-    "@mokronos/integrations-contracts": "workspace:^",
-    "@mokronos/integrations-observability": "workspace:^",
+    "@integragents/contracts": "workspace:^",
+    "@integragents/observability": "workspace:^",
     "oas": "catalog:",
     "oas-normalize": "catalog:"
   },

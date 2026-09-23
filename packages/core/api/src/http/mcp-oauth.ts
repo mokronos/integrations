@@ -1,5 +1,5 @@
-import { whenPresent, webCryptoLayer } from "@mokronos/integrations-contracts"
-import type { Client } from "@mokronos/integrations-contracts"
+import { whenPresent, webCryptoLayer } from "@integragents/contracts"
+import type { Client } from "@integragents/contracts"
 import {
   newOAuthAccessToken,
   newOAuthApplicationId,
@@ -9,8 +9,8 @@ import {
   OAuthSecretHash,
   sha256Base64Url,
   sha256Hex
-} from "@mokronos/integrations-gateway-core"
-import type { GatewayStore, OAuthActor } from "@mokronos/integrations-gateway-core"
+} from "@integragents/gateway-core"
+import type { GatewayStore, OAuthActor } from "@integragents/gateway-core"
 import { Crypto, DateTime, Duration, Effect, Exit, Layer, ManagedRuntime, Schema } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import type { GatewaySettings } from "./services.ts"

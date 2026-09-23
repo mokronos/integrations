@@ -2,7 +2,7 @@ import { createHash } from "node:crypto"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Option, Schema, Stream } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
-import { BlobHandle, blobHandleKey } from "@mokronos/integrations-contracts"
+import { BlobHandle, blobHandleKey } from "@integragents/contracts"
 import { OpenApiInvoker } from "../src/openapi/invoke.ts"
 import { BlobStore } from "../src/storage/blobs.ts"
 

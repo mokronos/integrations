@@ -6,7 +6,7 @@ import {
   OAuthGrantId,
   SubjectId,
   TenantId
-} from "@mokronos/integrations-contracts"
+} from "@integragents/contracts"
 
 export const OAuthSecretHash = Schema.String.pipe(Schema.brand("OAuthSecretHash"))
 export type OAuthSecretHash = typeof OAuthSecretHash.Type

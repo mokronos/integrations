@@ -5,7 +5,7 @@ import path from "node:path"
 import { Data, Duration, Effect, Result, Schedule } from "effect"
 import { HttpClient } from "effect/unstable/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { defaultGatewayPort, integrationsHome, readGatewayConfig } from "@mokronos/integrations-client"
+import { defaultGatewayPort, integrationsHome, readGatewayConfig } from "@integragents/client"
 
 export class ServiceError extends Data.TaggedError("ServiceError")<{
   readonly message: string

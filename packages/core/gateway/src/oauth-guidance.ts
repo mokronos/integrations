@@ -1,4 +1,4 @@
-import type { AuthMethod } from "@mokronos/integrations-contracts"
+import type { AuthMethod } from "@integragents/contracts"
 
 const integrationsOf = (url: string | undefined): string | undefined => {
   try {

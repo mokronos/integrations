@@ -9,12 +9,12 @@ import {
   readGatewayMetadata,
   readGatewayConfig,
   resolveOperatorConnection
-} from "@mokronos/integrations-client"
-import type { GatewayClient } from "@mokronos/integrations-client"
+} from "@integragents/client"
+import type { GatewayClient } from "@integragents/client"
 import { cliError, IntegrationsCliError } from "./connection.ts"
 import { openBrowser } from "./connection.ts"
 import type { ChildProcessSpawner } from "effect/unstable/process"
-import { optionalText, whenPresentMap } from "@mokronos/integrations-contracts"
+import { optionalText, whenPresentMap } from "@integragents/contracts"
 
 const OperatorSession = Schema.Struct({
   url: Schema.String,

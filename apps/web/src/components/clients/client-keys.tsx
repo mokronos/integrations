@@ -24,7 +24,7 @@ import {
 import { when } from "@/lib/format"
 import * as gateway from "@/lib/gateway"
 import { keys, useApiKeys, useInvalidate, useMutation } from "@/lib/queries"
-import type { ApiKeyView, ClientId } from "@mokronos/integrations-contracts"
+import type { ApiKeyView, ClientId } from "@integragents/contracts"
 
 function KeyRow({ keySummary, clientId }: {
   readonly keySummary: ApiKeyView

@@ -4,8 +4,8 @@ import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { describeCause, InvocationError, SpecError, StorageError } from "../errors.ts"
 import type { HttpCall } from "../tool.ts"
 import { missingArguments, splitArguments } from "./arguments.ts"
-import { AuthPlacement } from "@mokronos/integrations-contracts"
-import { parseJsonString, whenPresent, type Json } from "@mokronos/integrations-contracts"
+import { AuthPlacement } from "@integragents/contracts"
+import { parseJsonString, whenPresent, type Json } from "@integragents/contracts"
 import {
   binaryNote,
   blobHandleKey,
@@ -13,7 +13,7 @@ import {
   filenameFromDisposition,
   isTextualContentType,
   oversizeNote
-} from "@mokronos/integrations-contracts"
+} from "@integragents/contracts"
 import { BlobStore } from "../storage/blobs.ts"
 
 export interface ResolvedCredential {
@@ -111,7 +111,7 @@ export class OpenApiInvoker extends Context.Service<
       call: OpenApiCall
     ) => Effect.Effect<Json, InvocationError | SpecError | StorageError>
   }
->()("@mokronos/integrations-host/OpenApiInvoker") {
+>()("@integragents/host/OpenApiInvoker") {
   static readonly layer: Layer.Layer<
     OpenApiInvoker,
     never,

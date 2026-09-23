@@ -1,6 +1,6 @@
 import { dirname } from "node:path"
 import { Cause, Context, Effect, Exit, FileSystem, Layer, Option, Schema, Semaphore, Tracer } from "effect"
-import { whenPresent } from "@mokronos/integrations-contracts"
+import { whenPresent } from "@integragents/contracts"
 
 const maxFileBytes = 10 * 1024 * 1024
 const rotatedFiles = 5
@@ -170,7 +170,7 @@ const open = Effect.fnUntraced(function*(path: string) {
 export class TraceFile extends Context.Service<TraceFile, {
   readonly record: (span: TraceRecord) => void
   readonly flush: Effect.Effect<void>
-}>()("@mokronos/integrations-observability/TraceFile") {
+}>()("@integragents/observability/TraceFile") {
   static readonly layer = (path: string): Layer.Layer<TraceFile, never, FileSystem.FileSystem> =>
     Layer.effect(TraceFile, open(path))
 }

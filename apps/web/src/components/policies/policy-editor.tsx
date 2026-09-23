@@ -1,7 +1,7 @@
 import { ChevronRight, Search } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
-import { ConnectionName, IntegrationSlug } from "@mokronos/integrations-contracts"
+import { ConnectionName, IntegrationSlug } from "@integragents/contracts"
 
 import { IntegrationHeading, useIntegrationCollapse } from "@/components/integrations/integration-heading"
 import { ConnectionIdentity } from "@/components/integrations/connection-identity"
@@ -17,7 +17,7 @@ import * as gateway from "@/lib/gateway"
 import { connectionLabel, pluralise } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { keys, useIntegrations, useInvalidate, useMutation } from "@/lib/queries"
-import type { AccessProfileId, AccessProfileTool, ApprovalPolicyId, ApprovalPolicyTool, ConnectionRef, IntegrationOverview, PolicyDecision } from "@mokronos/integrations-contracts"
+import type { AccessProfileId, AccessProfileTool, ApprovalPolicyId, ApprovalPolicyTool, ConnectionRef, IntegrationOverview, PolicyDecision } from "@integragents/contracts"
 
 type RouteTool = { readonly connection: ConnectionRef; readonly name: string; readonly description: string }
 const keyOf = (connection: ConnectionRef, tool: string) => `${connectionLabel(connection)}:${tool}`

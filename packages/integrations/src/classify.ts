@@ -1,6 +1,6 @@
 import { Effect, Option, Result } from "effect"
-import { serviceName, slugify } from "@mokronos/integrations-contracts"
-import type { EndpointClassification } from "@mokronos/integrations-contracts"
+import { serviceName, slugify } from "@integragents/contracts"
+import type { EndpointClassification } from "@integragents/contracts"
 import { DetectionError } from "./errors.ts"
 import { McpClient } from "./mcp/client.ts"
 import { SpecCache } from "./openapi/cache.ts"

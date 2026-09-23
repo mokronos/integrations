@@ -1,4 +1,4 @@
-import { whenPresent } from "@mokronos/integrations-contracts"
+import { whenPresent } from "@integragents/contracts"
 import { Check } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useSearchParams } from "react-router"

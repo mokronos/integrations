@@ -1,4 +1,4 @@
-# @mokronos/integrations
+# @integragents/local
 
 The integration gateway. Holds connections and credentials, intersects reusable
 policies with client-specific connection grants, and performs invocations — so callers

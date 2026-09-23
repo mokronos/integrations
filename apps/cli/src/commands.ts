@@ -1,4 +1,4 @@
-import type { GatewayClient } from "@mokronos/integrations-client"
+import type { GatewayClient } from "@integragents/client"
 import type { HttpClient } from "effect/unstable/http"
 import { Effect } from "effect"
 import { approvalCommand, approvalsCommand, approveCommand, auditCommand, denyCommand, driftCommand, maintenanceCommand } from "./commands/approvals-audit.ts"

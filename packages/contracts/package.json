@@ -1,5 +1,5 @@
 {
-  "name": "@mokronos/integrations-contracts",
+  "name": "@integragents/contracts",
   "version": "0.3.0",
   "type": "module",
   "description": "The shared vocabulary and wire contracts every component agrees on.",
@@ -23,7 +23,7 @@
   },
   "publishConfig": {
     "access": "public",
-    "registry": "https://npm.pkg.github.com"
+    "registry": "https://registry.npmjs.org"
   },
   "files": [
     "src",

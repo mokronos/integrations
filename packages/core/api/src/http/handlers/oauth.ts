@@ -7,7 +7,7 @@ import {
   newOAuthGrantId,
   OAuthSecretHash,
   sha256Hex
-} from "@mokronos/integrations-gateway-core"
+} from "@integragents/gateway-core"
 import { ApiBadRequest, ApiGone, ApiNotFound, GatewayApi } from "../api.ts"
 import { Forbidden, Identity } from "../authority.ts"
 import { mcpOAuthIssuer } from "../mcp-oauth.ts"

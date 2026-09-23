@@ -90,7 +90,7 @@
     "@effect/platform-bun": "catalog:",
     "@effect/vitest": "catalog:",
     "@modelcontextprotocol/server": "^2.0.0",
-    "@mokronos/integrations-client": "workspace:^",
+    "@integragents/client": "workspace:^",
     "@oxlint/plugins": "catalog:",
     "@types/bun": "catalog:",
     "effect-solutions": "catalog:",

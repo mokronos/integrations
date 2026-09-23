@@ -2,7 +2,7 @@ import { ChevronRight, ExternalLink, Search, Unplug } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useNavigate } from "react-router"
 import { toast } from "sonner"
-import { connectionRefOf } from "@mokronos/integrations-contracts"
+import { connectionRefOf } from "@integragents/contracts"
 
 import { SchemaView } from "@/components/schema-view"
 import { AuthMethodDetails } from "@/components/integrations/auth-method-details"
@@ -23,7 +23,7 @@ import {
   type Connection,
   type IntegrationOverview,
   type Tool
-} from "@mokronos/integrations-contracts"
+} from "@integragents/contracts"
 import { cn } from "@/lib/utils"
 import { ConnectDialog } from "./connect-dialog"
 import { ConnectionBadge } from "./connection-badge"

@@ -1,5 +1,5 @@
 {
-  "name": "@mokronos/integrations-gateway-api",
+  "name": "@integragents/gateway-api",
   "version": "0.3.0",
   "type": "module",
   "description": "Gateway HTTP API definitions, handlers, and server assembly.",
@@ -13,7 +13,7 @@
   "bugs": "https://github.com/mokronos/integrations/issues",
   "publishConfig": {
     "access": "public",
-    "registry": "https://npm.pkg.github.com"
+    "registry": "https://registry.npmjs.org"
   },
   "files": [
     "src",
@@ -41,10 +41,10 @@
   "dependencies": {
     "@effect/platform-bun": "catalog:",
     "@modelcontextprotocol/server": "^2.0.0",
-    "@mokronos/integrations-contracts": "workspace:^",
-    "@mokronos/integrations-gateway-core": "workspace:^",
-    "@mokronos/integrations-host": "workspace:^",
-    "@mokronos/integrations-observability": "workspace:^"
+    "@integragents/contracts": "workspace:^",
+    "@integragents/gateway-core": "workspace:^",
+    "@integragents/host": "workspace:^",
+    "@integragents/observability": "workspace:^"
   },
   "peerDependencies": {
     "effect": "catalog:"

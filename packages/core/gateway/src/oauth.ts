@@ -7,9 +7,9 @@ import {
   probeOAuthServer,
   registerOAuthClient,
   startOAuthFlow
-} from "@mokronos/integrations-host"
-import type { CatalogStore, Integrations, OAuthFlows } from "@mokronos/integrations-host"
-import { AuthMethod, Connection, ConnectionOwner, whenPresent } from "@mokronos/integrations-contracts"
+} from "@integragents/host"
+import type { CatalogStore, Integrations, OAuthFlows } from "@integragents/host"
+import { AuthMethod, Connection, ConnectionOwner, whenPresent } from "@integragents/contracts"
 import { oauthSetupGuidance } from "./oauth-guidance.ts"
 
 export class OAuthFlowError extends Schema.TaggedError<OAuthFlowError>()(

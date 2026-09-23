@@ -1,5 +1,5 @@
 import { Clock, Effect, Schema } from "effect"
-import type { Integrations } from "@mokronos/integrations-host"
+import type { Integrations } from "@integragents/host"
 import {
   aliasForConnection,
   ApprovalId,

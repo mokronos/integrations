@@ -1,7 +1,7 @@
 import { Effect, Option, Schema } from "effect"
 import { SpecError } from "../errors.ts"
-import { isJsonBoolean, isJsonObject, isJsonString, type Json } from "@mokronos/integrations-contracts"
-import { whenPresent } from "@mokronos/integrations-contracts"
+import { isJsonBoolean, isJsonObject, isJsonString, type Json } from "@integragents/contracts"
+import { whenPresent } from "@integragents/contracts"
 
 
 const DiscoverySchemaRef = Schema.Struct({

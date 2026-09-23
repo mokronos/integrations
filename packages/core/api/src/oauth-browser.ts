@@ -1,15 +1,15 @@
 import { Deferred, Duration, Effect } from "effect"
 import type { Scope } from "effect"
-import type { Connection } from "@mokronos/integrations-contracts"
-import { completeOAuthFlow } from "@mokronos/integrations-host"
+import type { Connection } from "@integragents/contracts"
+import { completeOAuthFlow } from "@integragents/host"
 import {
   decodeAuthorizationRequest,
   OAuthFlowError,
   oauthBrowserPage,
   oauthStep,
   prepareFlow
-} from "@mokronos/integrations-gateway-core"
-import type { AuthorizationRequest, OAuthOperations } from "@mokronos/integrations-gateway-core"
+} from "@integragents/gateway-core"
+import type { AuthorizationRequest, OAuthOperations } from "@integragents/gateway-core"
 
 export const oauthBrowserResponse = (options: {
   readonly title: string

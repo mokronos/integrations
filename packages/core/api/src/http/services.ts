@@ -1,6 +1,6 @@
 import { Context, Effect, Layer } from "effect"
-import type { GoogleIdentityOAuth } from "@mokronos/integrations-gateway-core"
-import type { GatewayStoreError } from "@mokronos/integrations-gateway-core"
+import type { GoogleIdentityOAuth } from "@integragents/gateway-core"
+import type { GatewayStoreError } from "@integragents/gateway-core"
 import type { WebAssets } from "../web-assets.ts"
 
 export interface SignInPolicy {
@@ -11,7 +11,7 @@ export interface SignInPolicy {
 }
 
 export class SessionPolicy extends Context.Service<SessionPolicy, SignInPolicy>()(
-  "@mokronos/integrations-gateway-api/SessionPolicy"
+  "@integragents/gateway-api/SessionPolicy"
 ) {
   static readonly closed: Layer.Layer<SessionPolicy> = Layer.succeed(SessionPolicy, {
     signupOpen: () => Effect.succeed(false),
@@ -28,13 +28,13 @@ export interface GatewaySettings {
 }
 
 export class GatewayConfig extends Context.Service<GatewayConfig, GatewaySettings>()(
-  "@mokronos/integrations-gateway-api/GatewayConfig"
+  "@integragents/gateway-api/GatewayConfig"
 ) {}
 
 export class ControlPlaneAssets extends Context.Service<
   ControlPlaneAssets,
   { readonly assets: WebAssets | undefined }
->()("@mokronos/integrations-gateway-api/ControlPlaneAssets") {
+>()("@integragents/gateway-api/ControlPlaneAssets") {
   static readonly layerOf = (assets: WebAssets | undefined): Layer.Layer<ControlPlaneAssets> =>
     Layer.succeed(ControlPlaneAssets, { assets })
 }

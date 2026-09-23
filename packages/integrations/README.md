@@ -1,8 +1,8 @@
-# @mokronos/integrations-host
+# @integragents/host
 
 One catalog of MCP endpoints and OpenAPI documents, the connections that
 authorize them, and one way to call a tool. Wire contracts and the shared
-vocabulary come from `@mokronos/integrations-contracts`.
+vocabulary come from `@integragents/contracts`.
 
 ## Layout
 

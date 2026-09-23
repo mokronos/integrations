@@ -220,7 +220,7 @@ jobs:
           sh -n "${{ runner.temp }}/release/install.sh"
           cd "${{ runner.temp }}/release"
           sha256sum integrations-*.tar.gz > SHA256SUMS
-          sha256sum mokronos-*.tgz > PACKAGES-SHA256SUMS
+          sha256sum integragents-*.tgz > PACKAGES-SHA256SUMS
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -252,7 +252,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
+      id-token: write
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -261,13 +261,11 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-          registry-url: https://npm.pkg.github.com
-          scope: "@mokronos"
-      # The packages carry the registry in `publishConfig`; the step above only
-      # supplies the credential that goes with it.
-      - name: Publish to GitHub Packages
-        env:
-          NODE_AUTH_TOKEN: ${{ github.token }}
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing authenticates through the run's OIDC token, which
+      # needs npm 11.5.1 or later.
+      - run: npm install -g npm@latest
+      - name: Publish to npm
         run: |
           set -euo pipefail
           if [[ "${{ needs.preflight.outputs.make_latest }}" == "true" ]]; then

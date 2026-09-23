@@ -1,5 +1,5 @@
 import path from "node:path"
-import { isTelemetryEnvVar } from "@mokronos/integrations-observability"
+import { isTelemetryEnvVar } from "@integragents/observability"
 
 export const serviceLabel = "dev.mokronos.integrations"
 

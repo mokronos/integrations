@@ -8,7 +8,7 @@ import { ForbiddenError, GatewayFailureError, Identity, UnauthorizedError } from
  */
 export class Authority extends HttpApiMiddleware.Service<Authority, {
   provides: Identity
-}>()("@mokronos/integrations-gateway-api/Authority", {
+}>()("@integragents/gateway-api/Authority", {
   // Every request passes through here, so this is where a client learns any call can end in a 500.
   error: [UnauthorizedError, ForbiddenError, GatewayFailureError]
 }) {}

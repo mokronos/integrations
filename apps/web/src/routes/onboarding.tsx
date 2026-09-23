@@ -3,8 +3,8 @@ import { Link, useNavigate, useSearchParams } from "react-router"
 import { ArrowLeft, ArrowRight, Check, CheckCircle2, KeyRound, Plug, ShieldCheck } from "lucide-react"
 import { Effect, Option, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
-import { ConnectionName, IntegrationSlug, ToolName } from "@mokronos/integrations-contracts"
-import { makeGatewayClient } from "@mokronos/integrations-client/client"
+import { ConnectionName, IntegrationSlug, ToolName } from "@integragents/contracts"
+import { makeGatewayClient } from "@integragents/client/client"
 
 import { useSession } from "@/components/auth-gate"
 import { AgentConnect } from "@/components/clients/agent-connect"
@@ -23,7 +23,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import * as gateway from "@/lib/gateway"
 import { apiKeyPlaceholder } from "@/lib/mcp"
 import { keys, useClients, useIntegrations, useInvalidate, useMcpUrl, useMutation, useQuery } from "@/lib/queries"
-import type { ClientId, Connection, IntegrationOverview } from "@mokronos/integrations-contracts"
+import type { ClientId, Connection, IntegrationOverview } from "@integragents/contracts"
 
 const Step = Schema.Literals(["connect", "access", "agent", "verify"])
 type Step = typeof Step.Type

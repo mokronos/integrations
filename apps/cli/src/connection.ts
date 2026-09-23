@@ -1,9 +1,9 @@
 import { Data, Effect, Predicate } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import type { HttpClient } from "effect/unstable/http"
-import { makeGatewayClient, resolveClientConnection } from "@mokronos/integrations-client"
-import { Forbidden, GatewayFailure } from "@mokronos/integrations-gateway-api"
-import type { GatewayClient } from "@mokronos/integrations-client"
+import { makeGatewayClient, resolveClientConnection } from "@integragents/client"
+import { Forbidden, GatewayFailure } from "@integragents/gateway-api"
+import type { GatewayClient } from "@integragents/client"
 
 export class IntegrationsCliError extends Data.TaggedError("IntegrationsCliError")<{
   readonly message: string

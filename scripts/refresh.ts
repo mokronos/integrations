@@ -2,7 +2,7 @@ import { Effect, Layer } from "effect"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import type { ChildProcessSpawner } from "effect/unstable/process"
 import { FetchHttpClient, type HttpClient } from "effect/unstable/http"
-import { defaultGatewayPort, integrationsHome, readGatewayConfig } from "@mokronos/integrations-client"
+import { defaultGatewayPort, integrationsHome, readGatewayConfig } from "@integragents/client"
 import {
   installLocal,
   operatorProgram,

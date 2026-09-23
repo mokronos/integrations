@@ -1,5 +1,5 @@
 {
-  "name": "@mokronos/integrations-observability",
+  "name": "@integragents/observability",
   "version": "0.3.0",
   "type": "module",
   "description": "Tracing and logging for the integrations gateway and CLIs: a local trace file, console logs, and OTLP export.",
@@ -24,7 +24,7 @@
   },
   "publishConfig": {
     "access": "public",
-    "registry": "https://npm.pkg.github.com"
+    "registry": "https://registry.npmjs.org"
   },
   "files": [
     "src",
@@ -44,7 +44,7 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@mokronos/integrations-contracts": "workspace:^"
+    "@integragents/contracts": "workspace:^"
   },
   "peerDependencies": {
     "effect": "catalog:"

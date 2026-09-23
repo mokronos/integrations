@@ -1,5 +1,5 @@
 import { Plug } from "lucide-react"
-import type { ClientId } from "@mokronos/integrations-contracts"
+import type { ClientId } from "@integragents/contracts"
 
 import { AgentConnect } from "@/components/clients/agent-connect"
 import { IssueKeyButton } from "@/components/clients/issue-key-button"

@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { describe, expect, it } from "@effect/vitest"
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
 import { ConfigProvider, Effect, Layer, Schema } from "effect"
-import { makeTelemetry, TraceRecord } from "@mokronos/integrations-observability"
+import { makeTelemetry, TraceRecord } from "@integragents/observability"
 
 const decodeRecord = Schema.decodeUnknownSync(Schema.fromJsonString(TraceRecord))
 

@@ -1,8 +1,8 @@
-import type { GatewayClient } from "@mokronos/integrations-client"
+import type { GatewayClient } from "@integragents/client"
 import type { HttpClient } from "effect/unstable/http"
 import { Effect, Option, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
-import { Alias, InvocationOutcome, SubjectId, whenPresentMap } from "@mokronos/integrations-contracts"
+import { Alias, InvocationOutcome, SubjectId, whenPresentMap } from "@integragents/contracts"
 import type { IntegrationsCliError } from "../connection.ts"
 import { cliError, connectToGateway, describeError } from "../connection.ts"
 import {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, Option } from "effect"
 import { compileSpec, previewOf, resolveServer } from "../src/openapi/compile.ts"
 import { convertGoogleDiscovery, isGoogleDiscoveryUrl } from "../src/openapi/google-discovery.ts"
-import { isJsonObject, property, type Json } from "@mokronos/integrations-contracts"
+import { isJsonObject, property, type Json } from "@integragents/contracts"
 
 const spec = JSON.stringify({
   openapi: "3.0.3",

@@ -1,4 +1,4 @@
-# @mokronos/integrations-client
+# @integragents/client
 
 TypeScript client for a gateway's delegated API. It resolves a gateway
 connection, sends authenticated requests, and decodes the response; connection
@@ -9,5 +9,5 @@ types derived from those schemas. Responses are decoded at the HTTP boundary;
 methods never return an unvalidated generic JSON object.
 
 Browser applications can import `createGatewayClient` from
-`@mokronos/integrations-client/client`. This entry point contains HTTP calls and
+`@integragents/client/client`. This entry point contains HTTP calls and
 schemas; local filesystem configuration is exported separately by the package root.

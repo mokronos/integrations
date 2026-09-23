@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:crypto"
 import { Encoding } from "effect"
-import { concatBytes, decodeBase64Field, utf8Text } from "@mokronos/integrations-contracts"
+import { concatBytes, decodeBase64Field, utf8Text } from "@integragents/contracts"
 
 const envelopePrefix = "enc.v1$"
 

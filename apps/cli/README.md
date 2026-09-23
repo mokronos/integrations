@@ -1,4 +1,4 @@
-# @mokronos/integrations-cli
+# @integragents/cli
 
 One package installs two deliberate command surfaces:
 
@@ -25,5 +25,11 @@ are not required.
 Pin a release with `sh -s -- --version v0.2.0` after the pipe. Contributors can
 clone the repository and run `bun install && bun run install:local`; those
 development shims run the checkout's TypeScript sources directly.
+
+With Bun installed, the same CLI is also available from npm:
+
+```bash
+bun add -g @integragents/cli
+```
 
 Run `i --help` or `ii --help` for the full command surface.

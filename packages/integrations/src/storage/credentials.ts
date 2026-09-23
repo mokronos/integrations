@@ -36,7 +36,7 @@ export class CredentialStore extends Context.Service<
     readonly set: (key: CredentialKey, value: string) => Effect.Effect<void, StorageError>
     readonly remove: (key: CredentialKey) => Effect.Effect<void, StorageError>
   }
->()("@mokronos/integrations-host/CredentialStore") {
+>()("@integragents/host/CredentialStore") {
   /** Credentials sealed at rest in the `credential` table of the host's `SqlClient`. */
   static readonly sqlLayer = (
     encryption: Encryption

@@ -13,9 +13,9 @@ import { OpenApiInvoker } from "../src/openapi/invoke.ts"
 import { SpecCache } from "../src/openapi/cache.ts"
 import { stubbedLayer } from "../src/runtime.ts"
 import { AuthTemplateSlug } from "../src/catalog/ids.ts"
-import { ConnectionName, connectionAddress, IntegrationSlug } from "@mokronos/integrations-contracts"
-import { ToolAddress } from "@mokronos/integrations-contracts"
-import type { McpProbe } from "@mokronos/integrations-contracts"
+import { ConnectionName, connectionAddress, IntegrationSlug } from "@integragents/contracts"
+import { ToolAddress } from "@integragents/contracts"
+import type { McpProbe } from "@integragents/contracts"
 
 const notesProbe: McpProbe = {
   connected: true,

@@ -2,8 +2,8 @@ import {
   NonNegativeInt,
   PositiveInt,
   whenPresentMap
-} from "@mokronos/integrations-contracts"
-import { Integrations } from "@mokronos/integrations-host"
+} from "@integragents/contracts"
+import { Integrations } from "@integragents/host"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
@@ -14,9 +14,9 @@ import {
   AccessProfileId,
   ApprovalPolicyId,
   ToolName
-} from "@mokronos/integrations-contracts"
-import type { DriftReport } from "@mokronos/integrations-gateway-core"
-import { refreshIntegrationSnapshot } from "@mokronos/integrations-gateway-core"
+} from "@integragents/contracts"
+import type { DriftReport } from "@integragents/gateway-core"
+import { refreshIntegrationSnapshot } from "@integragents/gateway-core"
 import {
   approveApproval,
   catalogConfigurationTools,
@@ -24,7 +24,7 @@ import {
   denyApproval,
   listEffectiveTools,
   reconcileConfigurations
-} from "@mokronos/integrations-gateway-core"
+} from "@integragents/gateway-core"
 import {
   generateApiKey,
   generateApprovalSigningSecret,
@@ -33,10 +33,10 @@ import {
   newApprovalPolicyId,
   newClientId,
   newSubjectId
-} from "@mokronos/integrations-gateway-core"
-import { runMaintenance } from "@mokronos/integrations-gateway-core"
-import { deliverDueApprovalNotifications } from "@mokronos/integrations-gateway-core"
-import { GatewayStoreService } from "@mokronos/integrations-gateway-core"
+} from "@integragents/gateway-core"
+import { runMaintenance } from "@integragents/gateway-core"
+import { deliverDueApprovalNotifications } from "@integragents/gateway-core"
+import { GatewayStoreService } from "@integragents/gateway-core"
 import {
   ApiBadRequest,
   ApiNotFound,

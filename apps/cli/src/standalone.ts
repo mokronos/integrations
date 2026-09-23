@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { mkdir } from "node:fs/promises"
 import path from "node:path"
-import { integrationsHome } from "@mokronos/integrations-client"
+import { integrationsHome } from "@integragents/client"
 import { embeddedWebAssets } from "integrations:embedded-web"
 import packageMetadata from "../package.json" with { type: "json" }
 import { main as agentMain } from "./agent.ts"

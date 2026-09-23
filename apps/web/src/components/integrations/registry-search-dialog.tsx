@@ -1,5 +1,5 @@
 import { Schema } from "effect"
-import { IntegrationSearchKind, type IntegrationSearchMatch, whenPresent } from "@mokronos/integrations-contracts"
+import { IntegrationSearchKind, type IntegrationSearchMatch, whenPresent } from "@integragents/contracts"
 import { Download, Search, X } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router"

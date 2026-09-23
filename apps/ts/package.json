@@ -1,5 +1,5 @@
 {
-  "name": "@mokronos/integrations-client",
+  "name": "@integragents/client",
   "version": "0.3.0",
   "type": "module",
   "description": "Thin client for the integration gateway. Auth, HTTP, decode \u2014 no integration logic.",
@@ -22,7 +22,7 @@
   },
   "publishConfig": {
     "access": "public",
-    "registry": "https://npm.pkg.github.com"
+    "registry": "https://registry.npmjs.org"
   },
   "files": [
     "src",
@@ -48,8 +48,8 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@mokronos/integrations-contracts": "workspace:^",
-    "@mokronos/integrations-gateway-api": "workspace:^",
+    "@integragents/contracts": "workspace:^",
+    "@integragents/gateway-api": "workspace:^",
     "effect": "catalog:"
   }
 }

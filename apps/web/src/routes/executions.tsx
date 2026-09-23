@@ -11,10 +11,10 @@ import { Select } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { when } from "@/lib/format"
 import type { AuditQuery } from "@/lib/gateway"
-import { whenPresent } from "@mokronos/integrations-contracts"
+import { whenPresent } from "@integragents/contracts"
 import { refetchAll, useAudit, useIntegrations } from "@/lib/queries"
 import { Option, Schema } from "effect"
-import { AuditOutcome, type AuditRecord } from "@mokronos/integrations-contracts"
+import { AuditOutcome, type AuditRecord } from "@integragents/contracts"
 
 function AuditStrategy({ strategy }: { readonly strategy: AuditRecord["decision"] }) {
   const label = strategy === "allow" ? "Runs immediately" : strategy === "require_approval" ? "Requires approval" : "No policy strategy applied"

@@ -12,7 +12,7 @@ import {
   McpEra,
   ToolAddress,
   whenPresent
-} from "@mokronos/integrations-contracts"
+} from "@integragents/contracts"
 import { Tool, ToolCall } from "../tool.ts"
 import type { Tool as IntegrationTool } from "../tool.ts"
 
@@ -308,7 +308,7 @@ export class CatalogStore extends Context.Service<
       content: string
     ) => Effect.Effect<void, StorageError>
   }
->()("@mokronos/integrations-host/CatalogStore") {
+>()("@integragents/host/CatalogStore") {
   static readonly layer: Layer.Layer<CatalogStore, never, Database> = Layer.effect(
     CatalogStore,
     Effect.gen(function* () {

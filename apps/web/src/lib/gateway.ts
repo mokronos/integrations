@@ -1,7 +1,7 @@
 import { Effect, Predicate } from "effect"
 import { FetchHttpClient, HttpClientError } from "effect/unstable/http"
 import { HttpApiClient } from "effect/unstable/httpapi"
-import { GatewayApi, GatewayFailure } from "@mokronos/integrations-gateway-api/definition"
+import { GatewayApi, GatewayFailure } from "@integragents/gateway-api/definition"
 import {
   Alias,
   ClientId,
@@ -24,7 +24,7 @@ import {
   type OAuthConsentDecision,
   type OAuthGrantId,
   type PolicyDecision
-} from "@mokronos/integrations-contracts"
+} from "@integragents/contracts"
 
 export class GatewayError extends Error {
   readonly status: number | undefined

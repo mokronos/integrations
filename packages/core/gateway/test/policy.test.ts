@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { ToolAddress } from "@mokronos/integrations-contracts"
-import type { Integrations } from "@mokronos/integrations-host"
+import { ToolAddress } from "@integragents/contracts"
+import type { Integrations } from "@integragents/host"
 import {
   Alias,
   ClientId,

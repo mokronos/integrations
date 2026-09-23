@@ -1,7 +1,7 @@
 import { ExternalLink } from "lucide-react"
 
 import { CopyField } from "@/components/ui/copy-field"
-import type { AuthMethod } from "@mokronos/integrations-contracts"
+import type { AuthMethod } from "@integragents/contracts"
 
 type OAuthProvider = "google" | "microsoft" | "other"
 

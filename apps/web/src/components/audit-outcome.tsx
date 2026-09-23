@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge"
-import type { AuditOutcome } from "@mokronos/integrations-contracts"
+import type { AuditOutcome } from "@integragents/contracts"
 
 const outcomes = {
   succeeded: { label: "Succeeded", variant: "secondary" },

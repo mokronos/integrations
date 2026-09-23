@@ -1,9 +1,9 @@
 import { Context, Effect, Layer } from "effect"
 import type { HttpClient } from "effect/unstable/http"
 import { SqlClient } from "effect/unstable/sql"
-import { whenPresent } from "@mokronos/integrations-contracts"
-import { BlobStore, integrationLayer, Integrations } from "@mokronos/integrations-host"
-import type { IntegrationServices, StorageError } from "@mokronos/integrations-host"
+import { whenPresent } from "@integragents/contracts"
+import { BlobStore, integrationLayer, Integrations } from "@integragents/host"
+import type { IntegrationServices, StorageError } from "@integragents/host"
 import { deliverDueApprovalNotifications } from "./approval-delivery.ts"
 import { reconcileConfigurations } from "./configurations.ts"
 import type { Encryption } from "./crypto.ts"
@@ -14,7 +14,7 @@ import type { LocalAuthorizer, OAuthOperations } from "./oauth.ts"
 import { GatewayStoreError, GatewayStoreService } from "./store.ts"
 
 export class OAuthFlowSessions extends Context.Service<OAuthFlowSessions, OAuthSessions>()(
-  "@mokronos/integrations-gateway-core/OAuthFlowSessions"
+  "@integragents/gateway-core/OAuthFlowSessions"
 ) {}
 
 export type GatewayCoreServices = GatewayStoreService | IntegrationServices | OAuthFlowSessions

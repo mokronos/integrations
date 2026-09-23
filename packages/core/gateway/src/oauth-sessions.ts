@@ -1,9 +1,9 @@
-import { AuthMethod, OAuthSessionState, SubjectId, TenantId, userOwner, whenPresent } from "@mokronos/integrations-contracts"
+import { AuthMethod, OAuthSessionState, SubjectId, TenantId, userOwner, whenPresent } from "@integragents/contracts"
 
 import { Clock, Context, Deferred, Effect, Exit, Schema, Scope } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
-import { webCrypto } from "@mokronos/integrations-contracts"
-import { completeOAuthFlow } from "@mokronos/integrations-host"
+import { webCrypto } from "@integragents/contracts"
+import { completeOAuthFlow } from "@integragents/host"
 import { OAuthFlowError, startRemoteAuthorization } from "./oauth.ts"
 import type { LocalAuthorizer, OAuthOperations } from "./oauth.ts"
 

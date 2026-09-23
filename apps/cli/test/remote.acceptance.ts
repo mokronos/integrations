@@ -4,7 +4,7 @@ import {
   gatewayProtocolVersion,
   makeGatewayClient,
   readGatewayMetadata
-} from "@mokronos/integrations-client"
+} from "@integragents/client"
 
 const RemoteUrl = Schema.String.pipe(Schema.refine((value): value is string => {
   try {

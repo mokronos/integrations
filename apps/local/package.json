@@ -1,5 +1,5 @@
 {
-  "name": "@mokronos/integrations",
+  "name": "@integragents/local",
   "version": "0.3.0",
   "type": "module",
   "description": "Local Bun host for the integrations gateway.",
@@ -42,13 +42,13 @@
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json && bun run build:web",
     "build:web": "bun run --cwd ../web build && rm -rf web && cp -R ../web/dist web",
-    "prepublishOnly": "bun run build"
+    "prepack": "bun run build"
   },
   "dependencies": {
-    "@mokronos/integrations-contracts": "workspace:^",
-    "@mokronos/integrations-gateway-api": "workspace:^",
-    "@mokronos/integrations-gateway-core": "workspace:^",
-    "@mokronos/integrations-client": "workspace:^",
+    "@integragents/contracts": "workspace:^",
+    "@integragents/gateway-api": "workspace:^",
+    "@integragents/gateway-core": "workspace:^",
+    "@integragents/client": "workspace:^",
     "effect": "catalog:"
   }
 }

@@ -2,11 +2,11 @@ import { randomBytes } from "node:crypto"
 import path from "node:path"
 import { Context, Effect, FileSystem, Layer, Scope } from "effect"
 import { SqlClient } from "effect/unstable/sql"
-import { temporaryDirectory } from "@mokronos/integrations-contracts/test-fixtures"
+import { temporaryDirectory } from "@integragents/contracts/test-fixtures"
 import { createEncryption, createGatewayStore, libsqlLayer } from "../src/index.ts"
 import type { GatewayStore } from "../src/index.ts"
 
-export { temporaryDirectory, testServices } from "@mokronos/integrations-contracts/test-fixtures"
+export { temporaryDirectory, testServices } from "@integragents/contracts/test-fixtures"
 
 export const testEncryption = createEncryption(randomBytes(32))
 

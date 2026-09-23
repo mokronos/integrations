@@ -1,6 +1,6 @@
 import { createWriteStream, mkdirSync, readFileSync } from "node:fs"
 import path from "node:path"
-import type { GatewayClient } from "@mokronos/integrations-client"
+import type { GatewayClient } from "@integragents/client"
 import { Effect, Schema, Stream } from "effect"
 import {
   BlobHandle,
@@ -8,8 +8,8 @@ import {
   localFileKey,
   LocalFileRef,
   type Json
-} from "@mokronos/integrations-contracts"
-import { integrationsHome } from "@mokronos/integrations-contracts/gateway-config"
+} from "@integragents/contracts"
+import { integrationsHome } from "@integragents/contracts/gateway-config"
 import { cliError, describeError, type IntegrationsCliError } from "./connection.ts"
 
 const decodeHandle = Schema.decodeUnknownOption(BlobHandle)

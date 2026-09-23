@@ -20,7 +20,7 @@ import { connectionLabel } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { keys, refetchAll, useAccessProfiles, useApiKeys, useApprovalPolicies, useClients, useClientTools, useIntegrations, useInvalidate, useMutation } from "@/lib/queries"
 import { Option, Schema } from "effect"
-import { ClientId, type AccessProfileId, type ApprovalPolicyId, type IntegrationOverview } from "@mokronos/integrations-contracts"
+import { ClientId, type AccessProfileId, type ApprovalPolicyId, type IntegrationOverview } from "@integragents/contracts"
 
 type EffectiveTool = Awaited<ReturnType<typeof gateway.listClientTools>>[number]
 const decodeClientId = Schema.decodeUnknownOption(ClientId)

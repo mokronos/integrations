@@ -1,7 +1,7 @@
 import { KeyRound, Plug } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
-import type { ClientId } from "@mokronos/integrations-contracts"
+import type { ClientId } from "@integragents/contracts"
 
 import { Button } from "@/components/ui/button"
 import { CopyField } from "@/components/ui/copy-field"

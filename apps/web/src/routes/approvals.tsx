@@ -14,7 +14,7 @@ import { until, when } from "@/lib/format"
 import * as gateway from "@/lib/gateway"
 import { useApprovalDeliveries, useApprovals, useIntegrations, useInvalidate, useMutation } from "@/lib/queries"
 import { Schema } from "effect"
-import { ApprovalStatus, type IntegrationOverview, type PendingApproval } from "@mokronos/integrations-contracts"
+import { ApprovalStatus, type IntegrationOverview, type PendingApproval } from "@integragents/contracts"
 
 const decodeApprovalFilter = Schema.decodeUnknownSync(Schema.Union([ApprovalStatus, Schema.Literal("all")]))
 

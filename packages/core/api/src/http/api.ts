@@ -39,7 +39,7 @@ import {
   OAuthGrantId,
   OAuthGrantView,
   OAuthSessionView
-} from "@mokronos/integrations-contracts"
+} from "@integragents/contracts"
 import {
   Alias,
   ApprovalStatus,
@@ -66,7 +66,7 @@ import {
   PositiveIntFromString,
   Tool,
   ToolSummary
-} from "@mokronos/integrations-contracts"
+} from "@integragents/contracts"
 import { Authority } from "./middleware.ts"
 import { Forbidden, ForbiddenError, GatewayFailure, RequiredAccess, Unmetered } from "./identity.ts"
 
@@ -855,7 +855,7 @@ const OAuthGroup = HttpApiGroup.make("oauth")
   }).annotate(RequiredAccess, "human"))
   .middleware(Authority)
 
-export const GatewayApi = HttpApi.make("@mokronos/integrations-gateway-api/gateway")
+export const GatewayApi = HttpApi.make("@integragents/gateway-api/gateway")
   .add(SystemGroup)
   .add(FallbackGroup)
   .add(DelegatedGroup)

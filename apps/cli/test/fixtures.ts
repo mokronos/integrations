@@ -1,1 +1,1 @@
-export { temporaryDirectory, testServices } from "@mokronos/integrations-contracts/test-fixtures"
+export { temporaryDirectory, testServices } from "@integragents/contracts/test-fixtures"
