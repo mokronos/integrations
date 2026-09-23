@@ -1,5 +1,6 @@
 import { Plug } from "lucide-react"
 
+import { AgentConnect } from "@/components/clients/agent-connect"
 import { IssueKeyButton } from "@/components/clients/issue-key-button"
 import { LoadingRows } from "@/components/page"
 import {
@@ -11,7 +12,7 @@ import {
   CardTitle
 } from "@/components/ui/card"
 import { CopyField } from "@/components/ui/copy-field"
-import { apiKeyPlaceholder, mcpConfiguration, mcpOAuthConfiguration } from "@/lib/mcp"
+import { apiKeyPlaceholder } from "@/lib/mcp"
 import { useApiKeys, useMcpUrl } from "@/lib/queries"
 
 export function ClientMcp({ clientId, clientName, disabled }: {
@@ -47,22 +48,8 @@ export function ClientMcp({ clientId, clientName, disabled }: {
             <Field label="Endpoint">
               <CopyField value={url} label="Endpoint" />
             </Field>
-            <Field label="Browser login configuration">
-              <CopyField
-                value={mcpOAuthConfiguration(url)}
-                label="OAuth configuration"
-                multiline
-              />
-            </Field>
-            <Field label="API key configuration">
-              <p className="text-muted-foreground mb-1.5 text-xs">
-                For headless agents, replace the placeholder with an API key shown once when issued.
-              </p>
-              <CopyField
-                value={mcpConfiguration(clientName, url, apiKeyPlaceholder)}
-                label="Configuration"
-                multiline
-              />
+            <Field label="Add to your coding agent">
+              <AgentConnect clientName={clientName} url={url} apiKey={apiKeyPlaceholder} />
             </Field>
           </>}
       </CardContent>

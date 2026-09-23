@@ -2,7 +2,7 @@ import { ApprovalStatus } from "./domain.ts"
 import type { Row } from "@libsql/client"
 import { Schema } from "effect"
 import {
-  AccessProfileId, Alias, ApiKeyHash, ApiKeyId, ApprovalDelivery, ApprovalDeliveryId, McpSurface,
+  AccessProfileId, ApiKeyHash, ApiKeyId, ApprovalDelivery, ApprovalDeliveryId, McpSurface,
   ApprovalDestinationId, ApprovalId,
   ApprovalPolicyId, AuditId, ClientId, ConnectionName, IntegrationSlug,
   LoginHandoffHash, SessionTokenHash, SubjectId, TenantId, ToolName,
@@ -663,7 +663,7 @@ export const toApproval = (row: Row, open: (text: string) => string = identity):
     clientId: ClientId.make(decoded.client_id),
     approvalPolicyId: ApprovalPolicyId.make(decoded.approval_policy_id),
     accessProfileId: AccessProfileId.make(decoded.access_profile_id),
-    alias: Alias.make(decoded.alias),
+    alias: decoded.alias,
     tool: ToolName.make(decoded.tool),
     arguments: parseJsonColumn(open(decoded.arguments)),
     status: decoded.status,
@@ -687,7 +687,7 @@ export const toAuditRecord = (row: Row): AuditRecord => {
     oauthGrantId: decoded.oauth_grant_id === null ? null : OAuthGrantId.make(decoded.oauth_grant_id),
     oauthApplicationId: decoded.oauth_application_id === null ? null : OAuthApplicationId.make(decoded.oauth_application_id),
     authorizedBySubjectId: decoded.authorized_by_subject_id === null ? null : SubjectId.make(decoded.authorized_by_subject_id),
-    alias: decoded.alias === null ? null : Alias.make(decoded.alias),
+    alias: decoded.alias,
     tool: decoded.tool === null ? null : ToolName.make(decoded.tool),
     connection: decoded.owner === null || decoded.integration === null || decoded.connection_name === null
       ? null

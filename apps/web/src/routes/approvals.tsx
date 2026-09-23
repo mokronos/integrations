@@ -4,6 +4,7 @@ import { useSearchParams } from "react-router"
 import { toast } from "sonner"
 
 import { JsonView } from "@/components/json-view"
+import { ToolIdentity } from "@/components/integrations/connection-identity"
 import { LoadingRows, Page, QueryError } from "@/components/page"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -11,9 +12,9 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { until, when } from "@/lib/format"
 import * as gateway from "@/lib/gateway"
-import { useApprovalDeliveries, useApprovals, useInvalidate, useMutation } from "@/lib/queries"
+import { useApprovalDeliveries, useApprovals, useIntegrations, useInvalidate, useMutation } from "@/lib/queries"
 import { decodeApprovalFilter } from "@/lib/schemas"
-import type { ApprovalStatus, PendingApproval } from "@/lib/schemas"
+import type { ApprovalStatus, IntegrationOverview, PendingApproval } from "@/lib/schemas"
 
 const statusVariant = {
   pending: "default",
@@ -27,10 +28,12 @@ const statusVariant = {
 
 function ApprovalCard({
   approval,
-  selected
+  selected,
+  integrations
 }: {
   readonly approval: PendingApproval
   readonly selected: boolean
+  readonly integrations: ReadonlyArray<IntegrationOverview>
 }) {
   const invalidate = useInvalidate()
   const [expired, setExpired] = useState(false)
@@ -64,9 +67,7 @@ function ApprovalCard({
       <CardContent className="space-y-3 p-4">
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={statusVariant[approval.status]}>{approval.status}</Badge>
-          <code className="font-mono text-sm font-medium">
-            {approval.alias}.{approval.tool}
-          </code>
+          <ToolIdentity connection={null} alias={approval.alias} tool={approval.tool} integrations={integrations} />
           <span className="text-muted-foreground text-xs">
             asked {when(approval.createdAt)}
           </span>
@@ -143,6 +144,7 @@ export function ApprovalsRoute() {
   const selected = searchParams.get("approval")
   const [filter, setFilter] = useState<ApprovalStatus | "all">("pending")
   const approvals = useApprovals(filter)
+  const integrations = useIntegrations()
 
   useEffect(() => {
     if (selected === null || approvals.isPending) return
@@ -184,7 +186,7 @@ export function ApprovalsRoute() {
         : (
           <div className="space-y-3">
             {(approvals.data ?? []).map((approval) => (
-              <ApprovalCard key={approval.id} approval={approval} selected={approval.id === selected} />
+              <ApprovalCard key={approval.id} approval={approval} selected={approval.id === selected} integrations={integrations.data ?? []} />
             ))}
           </div>
         )}

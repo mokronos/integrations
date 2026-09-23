@@ -3,9 +3,13 @@ export {
   defaultGatewayPort,
   GatewayConfigFile,
   gatewayConfigPath,
+  operatorGatewayConfigPath,
   readGatewayConfig,
+  readOperatorGatewayConfig,
   resolveClientConnection,
-  writeGatewayConfig
+  resolveOperatorConnection,
+  writeGatewayConfig,
+  writeOperatorGatewayConfig
 } from "@mokronos/integrations-contracts/gateway-config"
 
 export const defaultArgumentRetentionDays = 30

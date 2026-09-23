@@ -1,5 +1,5 @@
 import { whenPresentMap } from "@mokronos/integrations-contracts"
-import { Check, Circle, LoaderCircle } from "lucide-react"
+import { Check, Circle } from "lucide-react"
 import { useState } from "react"
 import { useNavigate } from "react-router"
 
@@ -20,38 +20,6 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import * as gateway from "@/lib/gateway"
 import { keys, useInvalidate, useMutation } from "@/lib/queries"
-
-const discoverySteps = [
-  "Reach the endpoint",
-  "Identify MCP or OpenAPI",
-  "Inspect supported authentication",
-  "Install the integration",
-  "Open a connection when no credential is required"
-] as const
-
-function DiscoveryProgress() {
-  return (
-    <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
-      <div className="flex items-center gap-2 font-medium">
-        <LoaderCircle className="size-4 animate-spin" />
-        Inspecting endpoint
-      </div>
-      <ol className="space-y-1.5 text-xs">
-        {discoverySteps.map((step, index) => (
-          <li key={step} className="text-muted-foreground flex items-center gap-2">
-            {index === 0
-              ? <LoaderCircle className="size-3 animate-spin" />
-              : <Circle className="size-3" />}
-            {step}
-          </li>
-        ))}
-      </ol>
-      <p className="text-muted-foreground text-xs">
-        The gateway performs these checks as one operation. Completed details appear here when it responds.
-      </p>
-    </div>
-  )
-}
 
 function DiscoveryResult({
   result,
@@ -176,7 +144,6 @@ export function DiscoverDialog({ onInstalled }: { readonly onInstalled?: (slug: 
                 </p>
               </div>
 
-              {discover.isPending ? <DiscoveryProgress /> : null}
               {discover.error === null ? null : (
                 <OperationError title="Discovery failed" step="Endpoint inspection and installation" error={discover.error} />
               )}

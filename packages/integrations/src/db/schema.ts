@@ -6,6 +6,7 @@ export const integration = sqliteTable("integration", {
   description: text("description").notNull().default(""),
   kind: text("kind").notNull(),
   endpoint: text("endpoint"),
+  mcpEra: text("mcp_era"),
   specSource: text("spec_source"),
   specFormat: text("spec_format"),
   baseUrl: text("base_url"),

@@ -103,7 +103,7 @@ export type ApprovalDeliveryStatus = typeof ApprovalDeliveryStatus.Type
 export const ApprovalDeliveryAttempt = Schema.Struct({ id: ApprovalDeliveryId, approvalId: ApprovalId, destinationId: ApprovalDestinationId, destinationName: Schema.String, status: ApprovalDeliveryStatus, attempts: Schema.Number, nextAttemptAt: Schema.NullOr(Schema.Date), deliveredAt: Schema.NullOr(Schema.Date), lastError: Schema.NullOr(Schema.String) })
 export type ApprovalDeliveryAttempt = typeof ApprovalDeliveryAttempt.Type
 
-export const PendingApproval = Schema.Struct({ id: ApprovalId, clientId: ClientId, approvalPolicyId: ApprovalPolicyId, accessProfileId: AccessProfileId, alias: Alias, tool: ToolName, arguments: Schema.Json, status: ApprovalStatus, createdAt: Schema.Date, expiresAt: Schema.Date, decidedAt: Schema.NullOr(Schema.Date), decidedBy: Schema.NullOr(Schema.String), result: Schema.NullOr(Schema.Json), error: Schema.NullOr(Schema.String), collectedAt: Schema.NullOr(Schema.Date) })
+export const PendingApproval = Schema.Struct({ id: ApprovalId, clientId: ClientId, approvalPolicyId: ApprovalPolicyId, accessProfileId: AccessProfileId, alias: Schema.String, tool: ToolName, arguments: Schema.Json, status: ApprovalStatus, createdAt: Schema.Date, expiresAt: Schema.Date, decidedAt: Schema.NullOr(Schema.Date), decidedBy: Schema.NullOr(Schema.String), result: Schema.NullOr(Schema.Json), error: Schema.NullOr(Schema.String), collectedAt: Schema.NullOr(Schema.Date) })
 export type PendingApproval = typeof PendingApproval.Type
 export const InvocationSucceeded = Schema.Struct({ status: Schema.Literal("succeeded"), result: Schema.Json })
 export type InvocationSucceeded = typeof InvocationSucceeded.Type
@@ -129,7 +129,7 @@ export const InvocationOutcome = Schema.Union([InvocationSucceeded, InvocationPe
 export type InvocationOutcome = typeof InvocationOutcome.Type
 export const AuditOutcome = Schema.Literals(["succeeded", "failed", "denied", "pending"])
 export type AuditOutcome = typeof AuditOutcome.Type
-export const AuditRecord = Schema.Struct({ id: AuditId, clientId: Schema.NullOr(ClientId), oauthGrantId: Schema.NullOr(OAuthGrantId), oauthApplicationId: Schema.NullOr(OAuthApplicationId), authorizedBySubjectId: Schema.NullOr(SubjectId), alias: Schema.NullOr(Alias), tool: Schema.NullOr(ToolName), connection: Schema.NullOr(ConnectionRef), subject: Schema.NullOr(SubjectId), decision: Schema.NullOr(PolicyDecision), outcome: AuditOutcome, message: Schema.NullOr(Schema.String), createdAt: Schema.Date })
+export const AuditRecord = Schema.Struct({ id: AuditId, clientId: Schema.NullOr(ClientId), oauthGrantId: Schema.NullOr(OAuthGrantId), oauthApplicationId: Schema.NullOr(OAuthApplicationId), authorizedBySubjectId: Schema.NullOr(SubjectId), alias: Schema.NullOr(Schema.String), tool: Schema.NullOr(ToolName), connection: Schema.NullOr(ConnectionRef), subject: Schema.NullOr(SubjectId), decision: Schema.NullOr(PolicyDecision), outcome: AuditOutcome, message: Schema.NullOr(Schema.String), createdAt: Schema.Date })
 export type AuditRecord = typeof AuditRecord.Type
 
 export const OAuthApplicationKind = Schema.Literals(["cimd", "dcr"])

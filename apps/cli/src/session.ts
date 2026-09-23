@@ -8,7 +8,7 @@ import {
   makeGatewayClient,
   readGatewayMetadata,
   readGatewayConfig,
-  resolveClientConnection
+  resolveOperatorConnection
 } from "@mokronos/integrations-client"
 import type { GatewayClient } from "@mokronos/integrations-client"
 import { cliError, IntegrationsCliError } from "./connection.ts"
@@ -305,10 +305,10 @@ export const connectToControlPlane = Effect.fn("session.connectToControlPlane")(
   function*(): Effect.fn.Return<ControlPlaneClient, IntegrationsCliError, HttpClient.HttpClient> {
     const session = yield* readOperatorSession()
     if (session === undefined) {
-      const connection = yield* attempt(() => resolveClientConnection())
+      const connection = yield* attempt(() => resolveOperatorConnection())
       if (connection === undefined) {
         return yield* cliError(
-          "No operator credential found. Sign in with `ii login`, or configure an administrative API key."
+          "No operator credential found. Sign in with `ii login`, or set INTEGRATIONS_URL and INTEGRATIONS_ADMIN_API_KEY."
         )
       }
       yield* verifyGateway(connection.url)
@@ -340,10 +340,10 @@ export const connectToOperatorGateway = Effect.fn("session.connectToOperatorGate
   function*(): Effect.fn.Return<GatewayClient, IntegrationsCliError, HttpClient.HttpClient> {
     const session = yield* readOperatorSession()
     if (session === undefined) {
-      const connection = yield* attempt(() => resolveClientConnection())
+      const connection = yield* attempt(() => resolveOperatorConnection())
       if (connection === undefined) {
         return yield* cliError(
-          "No operator credential found. Sign in with `ii login`, or configure an administrative API key."
+          "No operator credential found. Sign in with `ii login`, or set INTEGRATIONS_URL and INTEGRATIONS_ADMIN_API_KEY."
         )
       }
       return yield* makeGatewayClient(connection)

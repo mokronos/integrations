@@ -15,6 +15,20 @@ import { stubbedLayer } from "../src/runtime.ts"
 import { AuthTemplateSlug } from "../src/catalog/ids.ts"
 import { ConnectionName, connectionAddress, IntegrationSlug } from "@mokronos/integrations-contracts"
 import { ToolAddress } from "@mokronos/integrations-contracts"
+import type { McpProbe } from "@mokronos/integrations-contracts"
+
+const notesProbe: McpProbe = {
+  connected: true,
+  requiresAuthentication: false,
+  requiresOAuth: false,
+  supportsDynamicRegistration: false,
+  scopes: [],
+  name: "Notes",
+  slug: "notes",
+  era: "legacy",
+  serverName: "Notes",
+  instructions: "A notebook."
+}
 
 const stubMcp = (options: {
   readonly readOnly?: boolean
@@ -33,7 +47,7 @@ const stubMcp = (options: {
         scopes: [],
         name: "Notes",
         slug: "notes",
-        toolCount: 2,
+        era: "legacy",
         serverName: "Notes",
         instructions: "A notebook."
       }),
@@ -51,15 +65,18 @@ const stubMcp = (options: {
               inputSchema: { type: "object", properties: { q: { type: "string" } } },
               annotations: { readOnlyHint: options.readOnly ?? true }
             }
-        return Effect.succeed([
-        searchNotes,
-        {
-          name: "write_note",
-          description: "Add a note.",
-          inputSchema: { type: "object", properties: { body: { type: "string" } } },
-          annotations: { readOnlyHint: false }
-        }
-      ])
+        return Effect.succeed({
+          era: "legacy",
+          tools: [
+            searchNotes,
+            {
+              name: "write_note",
+              description: "Add a note.",
+              inputSchema: { type: "object", properties: { body: { type: "string" } } },
+              annotations: { readOnlyHint: false }
+            }
+          ]
+        })
       },
       callTool: (_endpoint, credential, tool) => {
         options.onCall?.(tool, Option.map(credential, (value) => value.headerValue))
@@ -89,7 +106,8 @@ const install = Effect.fn("install")(function* () {
   yield* host.addMcp({
     endpoint: "https://notes.example.com/mcp",
     name: "Notes",
-    slug: notes
+    slug: notes,
+    probe: notesProbe
   })
   return yield* host.createConnection({
     owner: "org",
@@ -277,7 +295,8 @@ describe("the catalog", () => {
       yield* host.addMcp({
         endpoint: "https://notes.example.com/mcp",
         name: "Notes",
-        slug: notes
+        slug: notes,
+        probe: notesProbe
       })
       const address = connectionAddress({ owner: "org", integration: notes, connection: primary })
       yield* host.createConnection({
@@ -328,7 +347,8 @@ describe("connections", () => {
       yield* host.addMcp({
         endpoint: "https://notes.example.com/mcp",
         name: "Notes",
-        slug: notes
+        slug: notes,
+        probe: notesProbe
       })
       const address = connectionAddress({ owner: "org", integration: notes, connection: primary })
       yield* host.createConnection({
@@ -393,14 +413,17 @@ describe("tools", () => {
           probe: () => Effect.succeed({
             connected: true, requiresAuthentication: false, requiresOAuth: false,
             supportsDynamicRegistration: false, scopes: [], name: "Notes", slug: "notes",
-            toolCount: 2, serverName: "Notes", instructions: null
+            era: "legacy", serverName: "Notes", instructions: null
           }),
-          listTools: () => Effect.succeed(shrunk
-            ? [{ name: "search_notes", description: "", annotations: { readOnlyHint: true } }]
-            : [
-              { name: "search_notes", description: "", annotations: { readOnlyHint: true } },
-              { name: "write_note", description: "", annotations: { readOnlyHint: false } }
-            ]),
+          listTools: () => Effect.succeed({
+            era: "legacy",
+            tools: shrunk
+              ? [{ name: "search_notes", description: "", annotations: { readOnlyHint: true } }]
+              : [
+                { name: "search_notes", description: "", annotations: { readOnlyHint: true } },
+                { name: "write_note", description: "", annotations: { readOnlyHint: false } }
+              ]
+          }),
           callTool: () => Effect.succeed({ content: [] })
         }))
       )
@@ -503,15 +526,18 @@ describe("tools", () => {
             scopes: [],
             name: "Notes",
             slug: "notes",
-            toolCount: 0,
+            era: "legacy",
             serverName: "Notes",
             instructions: null
           }),
-          listTools: () => Effect.succeed([{
-            name: "search_notes",
-            description: "Search the notebook.",
-            annotations: { readOnlyHint: true }
-          }]),
+          listTools: () => Effect.succeed({
+            era: "legacy",
+            tools: [{
+              name: "search_notes",
+              description: "Search the notebook.",
+              annotations: { readOnlyHint: true }
+            }]
+          }),
           callTool: () => Effect.succeed({
             content: [{ type: "text", text: "the notebook is locked" }],
             isError: true

@@ -1,0 +1,1 @@
+ALTER TABLE `integration` ADD `mcp_era` text;

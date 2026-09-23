@@ -1,26 +1,40 @@
 import { useMemo, useState } from "react"
-import { Activity, ChevronLeft, ChevronRight, Filter, X } from "lucide-react"
+import { Activity, Check, ChevronLeft, ChevronRight, Clock3, Filter, Minus, ShieldCheck, X, Zap } from "lucide-react"
 
+import { AuditOutcomeBadge } from "@/components/audit-outcome"
 import { LoadingRows, Page, QueryError, ReloadButton } from "@/components/page"
-import { Badge } from "@/components/ui/badge"
+import { ToolIdentity } from "@/components/integrations/connection-identity"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { connectionLabel, when } from "@/lib/format"
+import { when } from "@/lib/format"
 import type { AuditQuery } from "@/lib/gateway"
 import { whenPresent } from "@mokronos/integrations-contracts"
-import { refetchAll, useAudit } from "@/lib/queries"
+import { refetchAll, useAudit, useIntegrations } from "@/lib/queries"
 import { decodeAuditOutcomeFilter, instantFilter } from "@/lib/schemas"
 import type { AuditOutcome, AuditRecord } from "@/lib/schemas"
 
-const outcomeVariant = {
-  succeeded: "secondary",
-  failed: "destructive",
-  denied: "destructive",
-  pending: "default"
-} satisfies Readonly<Record<AuditRecord["outcome"], "default" | "secondary" | "destructive">>
+function AuditStrategy({ strategy }: { readonly strategy: AuditRecord["decision"] }) {
+  const label = strategy === "allow" ? "Runs immediately" : strategy === "require_approval" ? "Requires approval" : "No policy strategy applied"
+  const Icon = strategy === "allow" ? Zap : strategy === "require_approval" ? ShieldCheck : Minus
+  return <span role="img" aria-label={label} title={label} className="inline-flex size-8 items-center justify-center rounded-md bg-muted text-muted-foreground"><Icon aria-hidden className="size-4" /></span>
+}
+
+function AuditDecision({ record }: { readonly record: AuditRecord }) {
+  const label = record.outcome === "pending"
+    ? "No decision at request time"
+    : record.outcome === "denied"
+    ? "Denied"
+    : record.decision === "require_approval"
+    ? "Approved"
+    : record.decision === "allow"
+    ? "Allowed immediately"
+    : "No decision recorded"
+  const Icon = record.outcome === "pending" ? Clock3 : record.outcome === "denied" ? X : record.decision === null ? Minus : Check
+  return <span role="img" aria-label={label} title={label} className="inline-flex size-8 items-center justify-center rounded-md bg-muted text-muted-foreground"><Icon aria-hidden className="size-4" /></span>
+}
 
 const limits = [50, 100, 250, 500] as const
 const ALL = "all"
@@ -29,7 +43,7 @@ const outcomeOptions = [
   { value: "succeeded", label: "Succeeded" },
   { value: "failed", label: "Failed" },
   { value: "denied", label: "Denied" },
-  { value: "pending", label: "Pending" },
+  { value: "pending", label: "Approval requested" },
 ] as const
 const limitOptions = limits.map((candidate) => ({ value: String(candidate), label: candidate }))
 
@@ -60,6 +74,7 @@ export function ExecutionsRoute() {
     ...whenPresent("since", instantFilter(filters.since))
   }), [filters, limit, offset])
   const audit = useAudit(query)
+  const integrations = useIntegrations()
   const records = audit.data?.records ?? []
   const total = audit.data?.total ?? 0
   const start = total === 0 ? 0 : offset + 1
@@ -69,12 +84,12 @@ export function ExecutionsRoute() {
   return (
     <Page
       title="Activity"
-      description="Every attempt to call through this gateway, allowed or not. Filtered and paged at the gateway so the permanent trail stays useful as it grows."
+      description="A permanent history of gateway calls. An approval request remains here after it is decided."
       actions={<ReloadButton onClick={() => refetchAll(audit)} />}
     >
       <QueryError error={audit.error} />
       <Card>
-        <CardContent className="grid gap-2 p-3 md:grid-cols-2 xl:grid-cols-[1.2fr_1fr_1fr_0.8fr_1.1fr_auto]">
+        <CardContent className="grid min-w-0 gap-2 p-3 md:grid-cols-2 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1.1fr)_auto]">
           <Input aria-label="Client ID" value={draft.clientId} onChange={(event) => setDraft({ ...draft, clientId: event.target.value })} placeholder="Client ID" />
           <Input aria-label="Alias" value={draft.alias} onChange={(event) => setDraft({ ...draft, alias: event.target.value })} placeholder="Alias" />
           <Input aria-label="Tool" value={draft.tool} onChange={(event) => setDraft({ ...draft, tool: event.target.value })} placeholder="Tool" />
@@ -90,16 +105,16 @@ export function ExecutionsRoute() {
       {audit.isPending ? <LoadingRows rows={6} /> : (
         <Card><CardContent className="p-0">
           <Table>
-            <TableHeader><TableRow><TableHead>When</TableHead><TableHead>Outcome</TableHead><TableHead>Call</TableHead><TableHead>Client</TableHead><TableHead>Connection</TableHead><TableHead>Decision</TableHead><TableHead>Detail</TableHead></TableRow></TableHeader>
+            <TableHeader><TableRow><TableHead>When</TableHead><TableHead>Outcome</TableHead><TableHead>Tool and connection</TableHead><TableHead>Client</TableHead><TableHead>Strategy</TableHead><TableHead>Decision</TableHead><TableHead>Detail</TableHead></TableRow></TableHeader>
             <TableBody>{records.length === 0
               ? <TableRow><TableCell colSpan={7}><div className="text-muted-foreground flex flex-col items-center gap-2 py-10 text-sm"><Activity className="size-5" />No matching execution records.</div></TableCell></TableRow>
               : records.map((record) => <TableRow key={record.id}>
                 <TableCell className="text-muted-foreground whitespace-nowrap text-sm">{when(record.createdAt)}</TableCell>
-                <TableCell><Badge variant={outcomeVariant[record.outcome]}>{record.outcome}</Badge></TableCell>
-                <TableCell className="font-mono text-sm">{record.alias === null && record.tool === null ? "—" : `${record.alias ?? "?"}.${record.tool ?? "?"}`}</TableCell>
+                <TableCell><AuditOutcomeBadge outcome={record.outcome} /></TableCell>
+                <TableCell className="min-w-52 whitespace-normal"><ToolIdentity connection={record.connection} alias={record.alias} tool={record.tool} integrations={integrations.data ?? []} /></TableCell>
                 <TableCell className="text-muted-foreground font-mono text-xs">{record.clientId ?? "—"}</TableCell>
-                <TableCell className="text-muted-foreground font-mono text-xs">{record.connection === null ? "—" : connectionLabel(record.connection)}</TableCell>
-                <TableCell className="text-sm">{record.decision ?? "—"}</TableCell>
+                <TableCell><AuditStrategy strategy={record.decision} /></TableCell>
+                <TableCell><AuditDecision record={record} /></TableCell>
                 <TableCell className="text-muted-foreground max-w-xs truncate text-sm">{record.message ?? "—"}</TableCell>
               </TableRow>)}</TableBody>
           </Table>

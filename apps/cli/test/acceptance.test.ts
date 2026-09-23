@@ -192,6 +192,8 @@ const startGateway = Effect.fnUntraced(function*(registryUrl?: string) {
   )
   const config = yield* Effect.promise(() => Bun.file(path.join(home, "gateway.json")).text())
   const { apiKey } = parseOutput(ApiKeyConfig, config)
+  const operatorConfig = yield* Effect.promise(() => Bun.file(path.join(home, "operator-gateway.json")).text())
+  const { apiKey: adminApiKey } = parseOutput(ApiKeyConfig, operatorConfig)
   return {
     home,
     url: gateway.url,
@@ -201,6 +203,7 @@ const startGateway = Effect.fnUntraced(function*(registryUrl?: string) {
       INTEGRATIONS_HOME: home,
       INTEGRATIONS_URL: gateway.url,
       INTEGRATIONS_API_KEY: apiKey,
+      INTEGRATIONS_ADMIN_API_KEY: adminApiKey,
       ACCEPTANCE_TOKEN: "acceptance-secret",
       NO_COLOR: "1"
     }
@@ -247,6 +250,16 @@ const loginOperator = Effect.fnUntraced(function*(
 })
 
 describe("integrations CLI acceptance", () => {
+  it.live("local ii uses the operator key while i uses the agent key", () =>
+    Effect.gen(function*() {
+      const gateway = yield* startGateway()
+      const environment = { ...gateway.environment, INTEGRATIONS_ADMIN_API_KEY: undefined }
+      const listed = yield* run(operatorCli, ["clients"], environment)
+      expect(listed.exitCode, listed.stderr).toBe(0)
+      const connected = yield* run(agentCli, ["connections"], environment)
+      expect(connected.exitCode, connected.stderr).toBe(0)
+    }).pipe(Effect.provide(services)), 30_000)
+
   it.live("a remote ii uses a login session while i uses only its delegated API key", () =>
     Effect.gen(function*() {
       const gateway = yield* startRemoteGateway()

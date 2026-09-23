@@ -63,6 +63,13 @@ their own approvals. `ii` is its strict operator superset, adding every
 dashboard action, human login/account commands, and local gateway lifecycle
 commands.
 
+The local gateway creates separate credentials for these commands. `i` reads
+the agent key from `~/.integrations/gateway.json`; it can provision connections
+but cannot administer clients or keys. Without a saved operator session, `ii`
+reads its administrator key from `~/.integrations/operator-gateway.json`.
+For a remote gateway, configure `INTEGRATIONS_URL` and `INTEGRATIONS_API_KEY`
+for `i`, or `INTEGRATIONS_URL` and `INTEGRATIONS_ADMIN_API_KEY` for `ii`.
+
 State defaults to `~/.integrations`; set `INTEGRATIONS_HOME` to use another
 directory.
 
@@ -198,7 +205,7 @@ MCP clients connect to the Streamable HTTP endpoint at `/mcp` and send their
 gateway API key as a bearer token. What the server advertises depends on the
 client's MCP surface, set in the dashboard.
 
-With the `tools` surface the server exposes that client's effective tools under
+With the `tools` surface the server exposes that client's tools under
 `<connection-alias>__<tool-name>`, so tools from multiple enabled connections
 remain distinct. A connection alias spells out the whole reference —
 `org___github___work`, or `user___sebastian___github___work` for a connection

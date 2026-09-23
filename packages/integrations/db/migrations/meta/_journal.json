@@ -8,6 +8,13 @@
       "when": 1789660624202,
       "tag": "0000_integrations_baseline",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1790125094447,
+      "tag": "0001_stiff_thor_girl",
+      "breakpoints": true
     }
   ]
 }

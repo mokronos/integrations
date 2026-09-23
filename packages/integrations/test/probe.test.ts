@@ -99,7 +99,7 @@ describe("probing an MCP endpoint", () => {
       const found = yield* probe(yield* startServer({ publishes: true, scopes: [scope] }))
 
       expect(found.connected).toBe(true)
-      expect(found.toolCount).toBe(1)
+      expect(found.era).toBe("modern")
       expect(found.serverName).toBe("StatelessServer")
       expect(found.requiresAuthentication).toBe(true)
       expect(found.requiresOAuth).toBe(true)

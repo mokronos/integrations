@@ -15,7 +15,7 @@ const malformedServer = (
   ).pipe(Effect.map((server) => `http://127.0.0.1:${server.port}/mcp`))
 
 const listTools = (endpoint: string) =>
-  Effect.flatMap(McpClient, (host) => host.listTools(endpoint, Option.none()))
+  Effect.flatMap(McpClient, (host) => host.listTools({ endpoint, era: Option.none() }, Option.none()))
 
 describe("malformed MCP servers", () => {
   it.live("rejects a non-JSON initialize response", () =>

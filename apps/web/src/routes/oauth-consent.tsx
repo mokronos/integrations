@@ -70,7 +70,7 @@ export function OAuthConsentRoute() {
                 />
                 {selectedClient === undefined ? null : (
                   <div className="text-muted-foreground rounded-md bg-muted p-3 text-xs">
-                    <p>Surface: {selectedClient.mcpSurface === "tools" ? "Effective tools" : "Gateway commands"}</p>
+                    <p>Surface: {selectedClient.mcpSurface === "tools" ? "Tools" : "Gateway commands"}</p>
                     <p>Scope: {view.request.scope}</p>
                     <p>Capabilities: {selectedClient.capabilities.join(", ") || "tool access only"}</p>
                   </div>

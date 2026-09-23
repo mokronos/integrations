@@ -7,11 +7,13 @@ import { ConnectionName, IntegrationSlug, ToolName } from "@mokronos/integration
 import { makeGatewayClient } from "@mokronos/integrations-client/client"
 
 import { useSession } from "@/components/auth-gate"
+import { AgentConnect } from "@/components/clients/agent-connect"
 import { ConnectDialog } from "@/components/integrations/connect-dialog"
 import { DiscoverDialog } from "@/components/integrations/discover-dialog"
 import { RegistrySearchDialog } from "@/components/integrations/registry-search-dialog"
 import { LoadingRows, QueryError } from "@/components/page"
 import { Badge } from "@/components/ui/badge"
+import { AuditOutcomeBadge } from "@/components/audit-outcome"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { CopyField } from "@/components/ui/copy-field"
@@ -19,7 +21,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import * as gateway from "@/lib/gateway"
-import { apiKeyPlaceholder, mcpConfiguration, mcpOAuthConfiguration } from "@/lib/mcp"
+import { apiKeyPlaceholder } from "@/lib/mcp"
 import { keys, useClients, useIntegrations, useInvalidate, useMcpUrl, useMutation, useQuery } from "@/lib/queries"
 import type { Connection, IntegrationOverview } from "@/lib/schemas"
 
@@ -136,7 +138,7 @@ export function OnboardingRoute() {
         <QueryError error={issue.error} />
         {secret !== undefined ? <CopyField value={secret} label="Client key" /> : null}
         <Tabs defaultValue="mcp"><TabsList><TabsTrigger value="mcp">MCP</TabsTrigger><TabsTrigger value="cli">CLI</TabsTrigger></TabsList>
-          <TabsContent value="mcp" className="space-y-4"><p className="text-muted-foreground text-sm">Use browser login when your MCP client supports OAuth. You will choose the Gateway Client during authorization.</p><QueryError error={mcpUrl.error} />{mcpUrl.data ? <><CopyField value={mcpOAuthConfiguration(mcpUrl.data)} label="Browser login configuration" multiline /><div className="border-t pt-4"><p className="text-muted-foreground mb-3 text-sm">For headless agents, use the API key configuration.</p><CopyField value={mcpConfiguration(client.name, mcpUrl.data, secret ?? apiKeyPlaceholder)} label="API key configuration" multiline /></div></> : <p className="text-sm">The gateway needs a reachable public URL before it can provide an MCP configuration.</p>}</TabsContent>
+          <TabsContent value="mcp" className="space-y-4"><QueryError error={mcpUrl.error} />{mcpUrl.data ? <AgentConnect clientName={client.name} url={mcpUrl.data} apiKey={secret ?? apiKeyPlaceholder} /> : <p className="text-sm">The gateway needs a reachable public URL before it can provide an MCP configuration.</p>}</TabsContent>
           <TabsContent value="cli" className="space-y-3"><p className="text-muted-foreground text-sm">Install the CLI from GitHub and set these variables in your agent’s environment.</p><CopyField value="curl -fsSL https://raw.githubusercontent.com/mokronos/integrations/main/install.sh | sh" label="Install command" /><CopyField value={`export INTEGRATIONS_URL=${JSON.stringify(window.location.origin)}\nexport INTEGRATIONS_API_KEY=${JSON.stringify(secret ?? apiKeyPlaceholder)}\ni --help`} label="CLI configuration" multiline /></TabsContent>
         </Tabs>
         <div className="flex justify-between"><Button variant="ghost" onClick={() => go("connect")}><ArrowLeft className="size-4" />Back</Button><Button disabled={secret === undefined} onClick={() => go("verify")}>Test the connection<ArrowRight className="size-4" /></Button></div>
@@ -144,7 +146,7 @@ export function OnboardingRoute() {
         <Card><CardContent className="space-y-5 py-6">
           <div className="space-y-2"><p className="font-medium">1. Verify your agent’s access</p><p className="text-muted-foreground text-sm">Check that its key can list the tools you enabled.</p><Button variant="outline" disabled={verify.isPending || secret === undefined} onClick={() => verify.mutate()}>{verify.isPending ? "Checking…" : "Verify access"}</Button>{secret === undefined ? <Button variant="link" onClick={() => go("agent")}>Return to issue a key</Button> : null}<QueryError error={verify.error} />{verify.isSuccess ? <p role="status" className="flex items-center gap-2 text-sm"><CheckCircle2 className="size-4 text-primary" />Connected. {verify.data.tools.length} tools available to this client.</p> : null}</div>
           <div className="space-y-3 border-t pt-5"><p className="font-medium">2. Ask your agent to try a tool</p><CopyField value="List the tools available through my integrations gateway. Pick a read-only tool, explain what it will read, and call it. If approval is required, show me the approval link and wait for my decision." label="First task" multiline /><p className="text-muted-foreground text-sm">For an action that changes something, ask your agent to prepare the call. Review its exact arguments in <Link to="/approvals" target="_blank" className="text-foreground underline">Approvals</Link> before allowing it to run.</p></div>
-          <div className="space-y-2 border-t pt-5"><p className="font-medium">Activity from {client.name}</p><QueryError error={activity.error} />{activity.data?.records.length ? activity.data.records.map((record) => <div key={record.id} className="flex items-center justify-between gap-3 text-sm"><code className="min-w-0 truncate">{record.tool ?? "Access check"}</code><Badge variant={record.outcome === "failed" || record.outcome === "denied" ? "destructive" : "secondary"}>{record.outcome}</Badge></div>) : <p className="text-muted-foreground text-sm">Waiting for your first call. This updates automatically.</p>}</div>
+          <div className="space-y-2 border-t pt-5"><p className="font-medium">Activity from {client.name}</p><QueryError error={activity.error} />{activity.data?.records.length ? activity.data.records.map((record) => <div key={record.id} className="flex items-center justify-between gap-3 text-sm"><code className="min-w-0 truncate">{record.tool ?? "Access check"}</code><AuditOutcomeBadge outcome={record.outcome} /></div>) : <p className="text-muted-foreground text-sm">Waiting for your first call. This updates automatically.</p>}</div>
         </CardContent></Card>
         <div className="flex justify-between"><Button variant="ghost" onClick={() => go("agent")}><ArrowLeft className="size-4" />Configuration</Button><Button onClick={finish}>Open dashboard<ArrowRight className="size-4" /></Button></div>
       </>}

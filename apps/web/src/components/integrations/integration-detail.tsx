@@ -2,6 +2,7 @@ import { Check, ChevronRight, ExternalLink, Pencil, Search, Trash2, Unplug, X } 
 import { useMemo, useState } from "react"
 import { useNavigate } from "react-router"
 import { toast } from "sonner"
+import { connectionRefOf } from "@mokronos/integrations-contracts"
 
 import { SchemaView } from "@/components/schema-view"
 import { AuthMethodDetails } from "@/components/integrations/auth-method-details"
@@ -35,6 +36,7 @@ import {
 import { cn } from "@/lib/utils"
 import { ConnectDialog } from "./connect-dialog"
 import { ConnectionBadge } from "./connection-badge"
+import { ConnectionIdentity } from "./connection-identity"
 import { IntegrationIcon, integrationHost } from "./integration-icon"
 const isConnected = (integration: IntegrationOverview): boolean =>
   integration.connections.some((connection) => connection.status === "connected")
@@ -74,9 +76,6 @@ function ToolCard({ tool }: { readonly tool: Tool }) {
               ? null
               : <ItemDescription className="truncate">{tool.description}</ItemDescription>}
           </ItemContent>
-          <code className="text-muted-foreground hidden max-w-[40%] shrink-0 truncate font-mono text-xs sm:block">
-            {tool.address}
-          </code>
       </Item>
 
       {open
@@ -345,17 +344,12 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
                       <Item variant="outline" size="sm">
                         <ItemContent>
                           <ItemTitle className="flex-wrap">
-                            <span>{connection.name}</span>
+                            <ConnectionIdentity connection={connectionRefOf(connection.owner, connection.integration, connection.name)} integration={integration} showIntegration={false} />
                             <Badge variant={connection.status === "connected" ? "default" : "destructive"}>
                               {connection.status === "connected" ? "connected" : "reauthorization required"}
                             </Badge>
-                            <Badge variant="outline">{connection.owner}</Badge>
                           </ItemTitle>
                           <ItemDescription className="flex flex-wrap items-center gap-2">
-                            {connection.identityLabel === undefined
-                                || connection.identityLabel === null
-                              ? null
-                              : <span>{connection.identityLabel}</span>}
                             <span>{expiry(connection)}</span>
                             <span>via {connectionAuthLabel(integration, connection)}</span>
                           </ItemDescription>

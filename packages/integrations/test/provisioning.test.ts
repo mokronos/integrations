@@ -10,7 +10,19 @@ const classification: EndpointClassification = {
   kind: "mcp",
   endpoint: "https://gmailmcp.googleapis.com/mcp/v1",
   name: "Gmailmcp",
-  slug: "gmailmcp"
+  slug: "gmailmcp",
+  probe: {
+    connected: true,
+    requiresAuthentication: false,
+    requiresOAuth: false,
+    supportsDynamicRegistration: false,
+    scopes: [],
+    name: "Gmailmcp",
+    slug: "gmailmcp",
+    era: "modern",
+    serverName: null,
+    instructions: null
+  }
 }
 
 const installed = (

@@ -1,17 +1,26 @@
 import { Schema } from "effect"
 
-import { AuthMethod, Integration } from "./integration.ts"
+import { AuthMethod, Integration, McpProbe } from "./integration.ts"
 import { Tool } from "./tool.ts"
 
 export const IntegrationKind = Schema.Literals(["mcp", "openapi"])
 export type IntegrationKind = typeof IntegrationKind.Type
 
-export const EndpointClassification = Schema.Struct({
-  kind: IntegrationKind,
-  endpoint: Schema.String,
-  name: Schema.String,
-  slug: Schema.String
-})
+export const EndpointClassification = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("mcp"),
+    endpoint: Schema.String,
+    name: Schema.String,
+    slug: Schema.String,
+    probe: McpProbe
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("openapi"),
+    endpoint: Schema.String,
+    name: Schema.String,
+    slug: Schema.String
+  })
+])
 export type EndpointClassification = typeof EndpointClassification.Type
 
 export const IntegrationDiscovery = Schema.Struct({

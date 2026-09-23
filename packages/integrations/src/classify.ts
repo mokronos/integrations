@@ -21,7 +21,8 @@ const asMcp = (
       kind: "mcp",
       endpoint: url,
       name: probe.name,
-      slug: probe.slug
+      slug: probe.slug,
+      probe
     }
     return classified
   }).pipe(

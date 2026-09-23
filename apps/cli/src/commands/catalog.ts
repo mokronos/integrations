@@ -292,7 +292,7 @@ export const schemaCommand = (runGateway: GatewayTask) => Command.make(
   "schema",
   {
     alias: Argument.string("alias").pipe(Argument.withDescription("Connection alias, as listed by `i tools`")),
-    tool: Argument.string("tool").pipe(Argument.withDescription("Effective tool name")),
+    tool: Argument.string("tool").pipe(Argument.withDescription("Tool name")),
     verbose: verboseFlag()
   },
   ({ alias, tool, verbose }) =>

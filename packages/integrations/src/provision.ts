@@ -47,7 +47,7 @@ export const installClassified = Effect.fn("Integrations.install")(function*(
   }
 
   if (decoded.kind === "mcp") {
-    yield* host.addMcp({ endpoint: decoded.endpoint, name: decoded.name, slug })
+    yield* host.addMcp({ endpoint: decoded.endpoint, name: decoded.name, slug, probe: decoded.probe })
   } else {
     yield* host.addOpenApi({ spec: decoded.endpoint, slug, name: decoded.name })
   }

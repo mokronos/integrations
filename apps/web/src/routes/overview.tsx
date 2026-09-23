@@ -12,8 +12,9 @@ import {
 } from "lucide-react"
 
 import { useSession } from "@/components/auth-gate"
+import { AuditOutcomeBadge } from "@/components/audit-outcome"
+import { ToolIdentity } from "@/components/integrations/connection-identity"
 import { LoadingRows, Page, QueryError } from "@/components/page"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -25,7 +26,7 @@ import {
 } from "@/components/ui/card"
 import { Item, ItemContent, ItemMedia, ItemTitle } from "@/components/ui/item"
 import { when } from "@/lib/format"
-import { useOverview } from "@/lib/queries"
+import { useIntegrations, useOverview } from "@/lib/queries"
 
 function Stat({
   label,
@@ -77,6 +78,7 @@ function SetupStep({ complete, children, to }: {
 
 export function OverviewRoute() {
   const overview = useOverview()
+  const integrations = useIntegrations()
   const session = useSession()
   const connected = overview.data?.connections ?? 0
   const clients = overview.data?.clients ?? 0
@@ -135,13 +137,9 @@ export function OverviewRoute() {
               : (overview.data?.recentActivity ?? []).length === 0
               ? <div className="text-muted-foreground flex items-center gap-2 py-8 text-sm"><Activity className="size-4" />No calls yet.</div>
               : <div className="divide-y">{(overview.data?.recentActivity ?? []).map((record) => (
-                <div key={record.id} className="flex items-center gap-3 py-3">
-                  <Badge variant={record.outcome === "succeeded" ? "secondary" : record.outcome === "pending" ? "default" : "destructive"}>
-                    {record.outcome}
-                  </Badge>
-                  <code className="min-w-0 flex-1 truncate font-mono text-xs">
-                    {record.alias === null || record.tool === null ? "unresolved call" : `${record.alias}.${record.tool}`}
-                  </code>
+                <div key={record.id} className="flex min-w-0 items-center gap-3 py-3">
+                  <AuditOutcomeBadge outcome={record.outcome} />
+                  <ToolIdentity connection={record.connection} alias={record.alias} tool={record.tool} integrations={integrations.data ?? []} className="flex-1" />
                   <span className="text-muted-foreground whitespace-nowrap text-xs">{when(record.createdAt)}</span>
                 </div>
               ))}</div>}

@@ -42,6 +42,9 @@ export const Integration = Schema.Struct({
 })
 export type Integration = typeof Integration.Type
 
+export const McpEra = Schema.Literals(["modern", "legacy"])
+export type McpEra = typeof McpEra.Type
+
 export const McpProbe = Schema.Struct({
   connected: Schema.Boolean,
   requiresAuthentication: Schema.Boolean,
@@ -50,7 +53,7 @@ export const McpProbe = Schema.Struct({
   scopes: Schema.Array(Schema.String),
   name: Schema.String,
   slug: Schema.String,
-  toolCount: Schema.NullOr(Schema.Number),
+  era: Schema.NullOr(McpEra),
   serverName: Schema.NullOr(Schema.String),
   instructions: Schema.NullOr(Schema.String)
 })

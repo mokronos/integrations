@@ -40,6 +40,6 @@ describe("official MCP SDK reference server", () => {
 
       expect(probe.connected).toBe(true)
       expect(probe.serverName).toBe("official-sdk-reference")
-      expect(probe.toolCount).toBe(1)
+      expect(probe.era).toBe("modern")
     }).pipe(Effect.provide(services)))
 })

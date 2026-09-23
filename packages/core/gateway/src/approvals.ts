@@ -89,7 +89,7 @@ export const approveApproval = Effect.fn("Approvals.approve")(function*(
       accessProfileTool,
       approvalPolicy,
       approvalPolicyTool,
-      alias: approval.alias,
+      alias: aliasForConnection(accessProfileTool.connection),
       connection: accessProfileTool.connection,
       subject: connectionSubject(accessProfileTool.connection) ?? null,
       decision: approvalPolicyTool.decision

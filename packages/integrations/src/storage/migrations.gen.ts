@@ -20,5 +20,12 @@ export const integrationMigrations: ReadonlyArray<Migration> = [
       "CREATE TABLE `tool` (\n\t`address` text PRIMARY KEY NOT NULL,\n\t`owner` text NOT NULL,\n\t`integration` text NOT NULL,\n\t`connection` text NOT NULL,\n\t`name` text NOT NULL,\n\t`description` text DEFAULT '' NOT NULL,\n\t`read_only` integer DEFAULT 0 NOT NULL,\n\t`input_schema` text,\n\t`output_schema` text,\n\t`call` text NOT NULL,\n\t`captured_at` integer NOT NULL\n);",
       "CREATE INDEX `tool_by_connection` ON `tool` (`integration`,`owner`,`connection`);"
     ]
+  },
+  {
+    id: 1,
+    name: "0001_stiff_thor_girl",
+    statements: [
+      "ALTER TABLE `integration` ADD `mcp_era` text;"
+    ]
   }
 ]

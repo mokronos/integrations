@@ -16,7 +16,8 @@ export const verifyMcpConformance = (
 ): Effect.Effect<void, Error, McpClient> =>
   Effect.gen(function*() {
     const host = yield* McpClient
-    const tools = yield* host.listTools(target.endpoint, target.credential)
+    const server = { endpoint: target.endpoint, era: Option.none() }
+    const { tools } = yield* host.listTools(server, target.credential)
     const names = tools.map((tool) => tool.name)
 
     expect(new Set(names).size).toBe(names.length)
@@ -27,7 +28,7 @@ export const verifyMcpConformance = (
     expect(tool?.inputSchema).toBeDefined()
 
     const result = yield* host.callTool(
-      target.endpoint,
+      server,
       target.credential,
       target.expectedTool,
       target.input

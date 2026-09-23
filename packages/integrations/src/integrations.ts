@@ -22,9 +22,10 @@ import {
 } from "./errors.ts"
 import { OAuthClientSlug } from "./catalog/ids.ts"
 import { connectionAddress, ConnectionName, IntegrationSlug } from "@mokronos/integrations-contracts"
+import type { McpProbe } from "@mokronos/integrations-contracts"
 import { AuthTemplateSlug } from "./catalog/ids.ts"
 import { McpClient } from "./mcp/client.ts"
-import type { McpCredential } from "./mcp/client.ts"
+import type { McpCredential, McpServer } from "./mcp/client.ts"
 import { OAuthFlows } from "./oauth/flows.ts"
 import { resolveServer } from "./openapi/compile.ts"
 import { OpenApiInvoker } from "./openapi/invoke.ts"
@@ -70,6 +71,7 @@ export interface AddMcpOptions {
   readonly endpoint: string
   readonly name: string
   readonly slug: IntegrationSlug
+  readonly probe: McpProbe
 }
 
 export interface AddOpenApiOptions {
@@ -243,7 +245,7 @@ export class Integrations extends Context.Service<
         }
       )
 
-      const requireEndpoint = Effect.fn("Integrations.requireEndpoint")(
+      const requireMcpServer = Effect.fn("Integrations.requireMcpServer")(
         function* (integration: IntegrationRecord) {
           if (integration.endpoint === undefined) {
             return yield* new InvalidInputError({
@@ -251,7 +253,24 @@ export class Integrations extends Context.Service<
               detail: `${integration.slug} records no MCP endpoint`
             })
           }
-          return integration.endpoint
+          const server: McpServer = {
+            endpoint: integration.endpoint,
+            era: Option.fromNullishOr(integration.mcpEra)
+          }
+          return server
+        }
+      )
+
+      const listMcpTools = Effect.fn("Integrations.listMcpTools")(
+        function* (integration: IntegrationRecord, credential: Option.Option<ResolvedCredential>) {
+          const listing = yield* mcp.listTools(
+            yield* requireMcpServer(integration),
+            mcpCredential(credential)
+          )
+          if (integration.mcpEra !== listing.era) {
+            yield* store.putIntegration({ ...integration, mcpEra: listing.era })
+          }
+          return listing.tools
         }
       )
 
@@ -359,10 +378,7 @@ export class Integrations extends Context.Service<
           const captured = integration.kind === "mcp"
             ? yield* captureMcpTools(
               target,
-              yield* mcp.listTools(
-                yield* requireEndpoint(integration),
-                mcpCredential(credential)
-              ),
+              yield* listMcpTools(integration, credential),
               capturedAt
             )
             : yield* captureOpenApiTools(
@@ -433,7 +449,7 @@ export class Integrations extends Context.Service<
 
           if (tool.call.kind === "mcp") {
             const raw = yield* mcp.callTool(
-              yield* requireEndpoint(integration),
+              yield* requireMcpServer(integration),
               mcpCredential(credential),
               tool.call.tool,
               input
@@ -461,16 +477,16 @@ export class Integrations extends Context.Service<
       )
 
       const addMcp = Effect.fn("Integrations.addMcp")(function* (options: AddMcpOptions) {
-        const probe = yield* mcp.probe(options.endpoint)
         const now = yield* Clock.currentTimeMillis
         yield* store.putIntegration({
           slug: options.slug,
           name: options.name,
-          description: probe.instructions ?? "",
+          description: options.probe.instructions ?? "",
           kind: "mcp",
           endpoint: options.endpoint,
+          ...whenPresent("mcpEra", options.probe.era ?? undefined),
           displayUrl: options.endpoint,
-          authMethods: mcpAuthMethods(probe, options.endpoint),
+          authMethods: mcpAuthMethods(options.probe, options.endpoint),
           createdAt: now
         })
         return options.slug

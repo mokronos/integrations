@@ -3,18 +3,21 @@ import { useState } from "react"
 import { toast } from "sonner"
 import { ConnectionName, IntegrationSlug } from "@mokronos/integrations-contracts"
 
+import { IntegrationHeading, useIntegrationCollapse } from "@/components/integrations/integration-heading"
+import { ConnectionIdentity } from "@/components/integrations/connection-identity"
 import { QueryError } from "@/components/page"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Item, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import * as gateway from "@/lib/gateway"
 import { connectionLabel, pluralise } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { keys, useIntegrations, useInvalidate, useMutation } from "@/lib/queries"
-import type { AccessProfileTool, ApprovalPolicyTool, ConnectionRef, PolicyDecision } from "@/lib/schemas"
+import type { AccessProfileTool, ApprovalPolicyTool, ConnectionRef, IntegrationOverview, PolicyDecision } from "@/lib/schemas"
 
 type RouteTool = { readonly connection: ConnectionRef; readonly name: string; readonly description: string }
 const keyOf = (connection: ConnectionRef, tool: string) => `${connectionLabel(connection)}:${tool}`
@@ -47,7 +50,7 @@ export function AccessProfileEditor({ id, storedTools, assignedClientCount }: { 
   }} render={(tool) => {
     const key = keyOf(tool.connection, tool.name)
     return <ToolSwitch label={enabled.has(key) ? "Enabled" : "Disabled"} checked={enabled.has(key)} onCheckedChange={(checked) => toggle([key], checked)} />
-  }} save={() => save.mutate()} saving={save.isPending} error={integrations.error} />
+  }} save={() => save.mutate()} saving={save.isPending} error={integrations.error} integrations={integrations.data ?? []} loading={integrations.isPending} />
 }
 
 function ToolSwitch({ label, checked, onCheckedChange }: { readonly label: string; readonly checked: boolean; readonly onCheckedChange: (checked: boolean) => void }) {
@@ -68,24 +71,31 @@ export function ApprovalPolicyEditor({ id, storedTools, assignedClientCount }: {
   return <ToolEditor title="Approval decisions" description="Choose whether each connected tool runs immediately or waits for human approval." catalog={catalog} assignedClientCount={assignedClientCount} render={(tool) => {
     const value = decision(tool)
     return <ToolSwitch label={value === "require_approval" ? "Requires approval" : "Runs immediately"} checked={value === "require_approval"} onCheckedChange={(checked) => setDecisions((current) => new Map(current).set(keyOf(tool.connection, tool.name), checked ? "require_approval" : "allow"))} />
-  }} save={() => save.mutate()} saving={save.isPending} error={integrations.error} />
+  }} save={() => save.mutate()} saving={save.isPending} error={integrations.error} integrations={integrations.data ?? []} loading={integrations.isPending} />
 }
 
-const matches = (tool: RouteTool, query: string): boolean => {
+const matches = (tool: RouteTool, query: string, integrationName: string): boolean => {
   const needle = query.trim().toLowerCase()
   if (needle.length === 0) return true
-  return `${connectionLabel(tool.connection)} ${tool.name} ${tool.description}`
+  return `${integrationName} ${connectionLabel(tool.connection)} ${tool.name} ${tool.description}`
     .toLowerCase()
     .includes(needle)
 }
 
-function ToolEditor({ title, description, catalog, assignedClientCount, render, renderGroup, save, saving, error }: { readonly title: string; readonly description: string; readonly catalog: ReadonlyArray<RouteTool>; readonly assignedClientCount: number; readonly render: (tool: RouteTool) => React.ReactNode; readonly renderGroup?: (tools: ReadonlyArray<RouteTool>) => React.ReactNode; readonly save: () => void; readonly saving: boolean; readonly error: Error | null }) {
+function ToolEditor({ title, description, catalog, integrations, loading, assignedClientCount, render, renderGroup, save, saving, error }: { readonly title: string; readonly description: string; readonly catalog: ReadonlyArray<RouteTool>; readonly integrations: ReadonlyArray<IntegrationOverview>; readonly loading: boolean; readonly assignedClientCount: number; readonly render: (tool: RouteTool) => React.ReactNode; readonly renderGroup?: (tools: ReadonlyArray<RouteTool>) => React.ReactNode; readonly save: () => void; readonly saving: boolean; readonly error: Error | null }) {
   const [query, setQuery] = useState("")
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
   const searching = query.trim().length > 0
-  const groups = [...Map.groupBy(catalog, (tool) => connectionLabel(tool.connection))]
-    .map(([connection, tools]) => ({ connection, tools: tools.filter((tool) => matches(tool, query)) }))
-    .filter((group) => group.tools.length > 0)
+  const collapse = useIntegrationCollapse(new Set(catalog.map((tool) => tool.connection.integration)).size)
+  const bySlug = new Map(integrations.map((integration) => [integration.slug, integration]))
+  const groups = [...Map.groupBy(catalog, (tool) => tool.connection.integration)]
+    .map(([slug, tools]) => {
+      const integration = bySlug.get(slug)
+      const matching = tools.filter((tool) => matches(tool, query, integration?.name ?? slug))
+      return { slug, integration, toolCount: matching.length, connections: [...Map.groupBy(matching, (tool) => connectionLabel(tool.connection))] }
+    })
+    .filter((group) => group.toolCount > 0)
+    .sort((left, right) => (left.integration?.name ?? left.slug).localeCompare(right.integration?.name ?? right.slug))
 
   return <div className="space-y-4">
     {assignedClientCount > 0 ? <Alert><AlertDescription>Saving affects all {assignedClientCount} assigned client{assignedClientCount === 1 ? "" : "s"} immediately.</AlertDescription></Alert> : null}
@@ -96,41 +106,49 @@ function ToolEditor({ title, description, catalog, assignedClientCount, render, 
         <p className="text-muted-foreground text-sm">{description}</p>
       </CardHeader>
       <CardContent className="space-y-4">
-        {catalog.length === 0 ? null : <div className="relative">
+        {catalog.length === 0 || loading ? null : <div className="relative">
           <Search aria-hidden className="text-muted-foreground absolute left-2.5 top-1/2 size-4 -translate-y-1/2" />
-          <Input className="pl-8" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search connections and tools…" aria-label="Search connections and tools" />
+          <Input className="pl-8" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search integrations, connections, and tools…" aria-label="Search integrations, connections, and tools" />
         </div>}
-        {groups.map(({ connection, tools }) => {
-          const open = searching || expanded.has(connection)
-          return <section key={connection} className="space-y-2">
-            <div className="flex items-center gap-2 border-b pb-2">
-              <Item
-                size="sm"
-                className="min-w-0 flex-1 cursor-pointer select-none hover:bg-muted"
-                render={
-                  <button type="button" aria-expanded={open} onClick={() => setExpanded((current) => {
-                    const next = new Set(current)
-                    if (next.has(connection)) next.delete(connection); else next.add(connection)
-                    return next
-                  })} />
-                }
-              >
-                <ChevronRight aria-hidden className={cn("size-4 shrink-0 transition-transform", open && "rotate-90")} />
-                <ItemContent><ItemTitle className="font-mono font-medium">{connection}</ItemTitle></ItemContent>
-                {renderGroup === undefined ? <span className="text-muted-foreground shrink-0 text-xs">{pluralise(tools.length, "tool")}</span> : null}
-              </Item>
-              {renderGroup?.(tools)}
-            </div>
-            {open ? tools.map((tool) => <Item key={keyOf(tool.connection, tool.name)} size="sm" render={<label />} className="cursor-pointer select-none hover:bg-muted"><ItemContent><ItemTitle className="font-mono font-normal">{tool.name}</ItemTitle>{tool.description.length === 0 ? null : <ItemDescription className="line-clamp-2">{tool.description}</ItemDescription>}</ItemContent>{render(tool)}</Item>) : null}
+        {loading ? Array.from({ length: 2 }, (_, index) => <div key={index} className="space-y-3 rounded-xl border p-4" aria-hidden><div className="flex items-center gap-3"><Skeleton className="size-10" /><Skeleton className="h-5 w-36" /></div><Skeleton className="h-12 w-full" /></div>) : groups.map(({ slug, integration, toolCount, connections }) => {
+          const integrationOpen = searching || collapse.isOpen(slug)
+          return <section key={slug} className="min-w-0 overflow-hidden rounded-xl border">
+            <div className={cn("bg-muted/20 p-3", integrationOpen && "border-b")}><IntegrationHeading slug={slug} integration={integration} toolCount={toolCount} open={integrationOpen} onToggle={() => collapse.toggle(slug)} /></div>
+            {integrationOpen ? <div className="space-y-3 p-3">
+              {connections.map(([connection, tools]) => {
+                const open = searching || expanded.has(connection)
+                return <div key={connection} className="space-y-2">
+                  <div className="flex min-w-0 flex-col gap-2 border-b pb-2 sm:flex-row sm:items-center">
+                    <Item
+                      size="sm"
+                      className="min-w-0 flex-1 flex-nowrap cursor-pointer select-none hover:bg-muted"
+                      render={
+                        <button type="button" aria-expanded={open} onClick={() => setExpanded((current) => {
+                          const next = new Set(current)
+                          if (next.has(connection)) next.delete(connection); else next.add(connection)
+                          return next
+                        })} />
+                      }
+                    >
+                      <ChevronRight aria-hidden className={cn("size-4 shrink-0 transition-transform", open && "rotate-90")} />
+                      <ItemContent className="min-w-0">{tools[0] === undefined ? null : <ConnectionIdentity connection={tools[0].connection} integration={integration} showIntegration={false} />}</ItemContent>
+                      {renderGroup === undefined ? <span className="text-muted-foreground shrink-0 text-xs">{pluralise(tools.length, "tool")}</span> : null}
+                    </Item>
+                    {renderGroup?.(tools)}
+                  </div>
+                  {open ? tools.map((tool) => <Item key={keyOf(tool.connection, tool.name)} size="sm" render={<label />} className="min-w-0 flex-nowrap cursor-pointer select-none hover:bg-muted"><ItemContent className="min-w-0"><ItemTitle className="min-w-0 break-all font-mono font-normal">{tool.name}</ItemTitle>{tool.description.length === 0 ? null : <ItemDescription className="line-clamp-2">{tool.description}</ItemDescription>}</ItemContent>{render(tool)}</Item>) : null}
+                </div>
+              })}
+            </div> : null}
           </section>
         })}
-        {catalog.length === 0
+        {!loading && catalog.length === 0
           ? <p className="text-muted-foreground py-6 text-center text-sm">No connected tools are available.</p>
-          : groups.length === 0
+          : !loading && groups.length === 0
           ? <p className="text-muted-foreground py-6 text-center text-sm">Nothing matches “{query.trim()}”.</p>
           : null}
       </CardContent>
-      <CardFooter className="justify-end"><Button onClick={save} disabled={saving}>{saving ? "Saving..." : "Save"}</Button></CardFooter>
+      <CardFooter className="justify-end"><Button onClick={save} disabled={saving || loading}>{saving ? "Saving..." : "Save"}</Button></CardFooter>
     </Card>
   </div>
 }

@@ -106,10 +106,10 @@ export const operatorExecuteCommand = Command.make(
   "execute",
   {
     target: Argument.string("alias").pipe(
-      Argument.withDescription("Effective tool alias")
+      Argument.withDescription("Tool alias")
     ),
     second: Argument.string("tool").pipe(
-      Argument.withDescription("Effective tool name")
+      Argument.withDescription("Tool name")
     ),
     third: Argument.string("json").pipe(
       Argument.optional,
@@ -153,10 +153,10 @@ export const clientExecuteCommand = Command.make(
   "execute",
   {
     alias: Argument.string("alias").pipe(
-      Argument.withDescription("Effective tool alias")
+      Argument.withDescription("Tool alias")
     ),
     tool: Argument.string("tool").pipe(
-      Argument.withDescription("Effective tool name")
+      Argument.withDescription("Tool name")
     ),
     json: Argument.string("json").pipe(
       Argument.optional,

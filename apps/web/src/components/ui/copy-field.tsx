@@ -12,7 +12,7 @@ export function CopyField({ value, label, multiline = false, className }: {
       <code
         className={cn(
           "bg-background block min-w-0 rounded border pr-10 pl-2 font-mono text-xs",
-          multiline ? "whitespace-pre overflow-x-auto py-1.5" : "flex min-h-9 items-center break-all py-1"
+          multiline ? "whitespace-pre overflow-x-auto py-2.25" : "flex min-h-9 items-center break-all py-1"
         )}
       >
         {value}

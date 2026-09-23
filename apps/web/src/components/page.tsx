@@ -57,7 +57,7 @@ export function QueryError({ error }: { readonly error: Error | null | undefined
     <Alert variant="destructive">
       <AlertTriangle />
       <AlertTitle>The gateway refused that</AlertTitle>
-      <AlertDescription>
+      <AlertDescription className="min-w-0 break-words">
         {error.message}
       </AlertDescription>
     </Alert>

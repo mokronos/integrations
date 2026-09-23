@@ -259,7 +259,7 @@ const toolsTool = agentTool({
   name: "tools",
   title: "List the tools this key may call",
   description:
-    "List the effective tools this key may call, with the approval decision each one carries. " +
+    "List the tools this key may call, with the approval decision each one carries. " +
     "Narrow with integration, connection, or filter; ask for verbose to include input schemas.",
   input: Schema.Struct({
     integration: Schema.optional(IntegrationSlug),
@@ -307,7 +307,7 @@ const schemaTool = agentTool({
   name: "schema",
   title: "Show one tool's schemas",
   description:
-    "Show one effective tool's description and input/output schemas. Address it the same way " +
+    "Show one tool's description and input/output schemas. Address it the same way " +
     "`execute` does: by the connection alias `tools` reports, plus the tool name.",
   input: Schema.Struct({ alias: Alias, tool: ToolName }),
   run: (caller, input) =>

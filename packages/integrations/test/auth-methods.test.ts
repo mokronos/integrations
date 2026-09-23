@@ -16,7 +16,7 @@ const probe = (overrides: Partial<McpProbe>): McpProbe => ({
   scopes: [],
   name: "Example",
   slug: "example",
-  toolCount: 1,
+  era: "modern",
   serverName: "Example",
   instructions: null,
   ...overrides

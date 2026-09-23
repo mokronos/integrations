@@ -9,6 +9,7 @@ import {
   IntegrationKind,
   IntegrationSlug,
   ConnectionOwner,
+  McpEra,
   ToolAddress,
   whenPresent
 } from "@mokronos/integrations-contracts"
@@ -21,6 +22,7 @@ export const IntegrationRecord = Schema.Struct({
   description: Schema.String,
   kind: IntegrationKind,
   endpoint: Schema.optional(Schema.String),
+  mcpEra: Schema.optional(McpEra),
   specSource: Schema.optional(Schema.String),
   specFormat: Schema.optional(Schema.Literals(["openapi", "google-discovery"])),
   baseUrl: Schema.optional(Schema.String),
@@ -120,6 +122,7 @@ const decodeIntegrationRow = (row: SqlRow) =>
       description: text(row, "description"),
       kind: text(row, "kind"),
       ...whenPresent("endpoint", optionalText(row, "endpoint")),
+      ...whenPresent("mcpEra", optionalText(row, "mcp_era")),
       ...whenPresent("specSource", optionalText(row, "spec_source")),
       ...whenPresent("specFormat", optionalText(row, "spec_format")),
       ...whenPresent("baseUrl", optionalText(row, "base_url")),
@@ -336,14 +339,15 @@ export class CatalogStore extends Context.Service<
         (record: IntegrationRecord) =>
           write({
             sql: `INSERT INTO integration
-                    (slug, name, description, kind, endpoint, spec_source, spec_format,
+                    (slug, name, description, kind, endpoint, mcp_era, spec_source, spec_format,
                      base_url, display_url, auth_methods, created_at)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                   ON CONFLICT(slug) DO UPDATE SET
                     name = excluded.name,
                     description = excluded.description,
                     kind = excluded.kind,
                     endpoint = excluded.endpoint,
+                    mcp_era = excluded.mcp_era,
                     spec_source = excluded.spec_source,
                     spec_format = excluded.spec_format,
                     base_url = excluded.base_url,
@@ -355,6 +359,7 @@ export class CatalogStore extends Context.Service<
               record.description,
               record.kind,
               nullable(record.endpoint),
+              nullable(record.mcpEra),
               nullable(record.specSource),
               nullable(record.specFormat),
               nullable(record.baseUrl),

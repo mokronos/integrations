@@ -1,4 +1,5 @@
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client"
+import type { VersionNegotiationMode } from "@modelcontextprotocol/client"
 import {
   discoverAuthorizationServerMetadata,
   discoverOAuthProtectedResourceMetadata,
@@ -11,7 +12,7 @@ import { describeCause, McpError } from "../errors.ts"
 import { serviceName, slugify } from "@mokronos/integrations-contracts"
 import { whenPresent } from "@mokronos/integrations-contracts"
 import { isJsonObject, parseJsonString, type Json, type JsonObject } from "@mokronos/integrations-contracts"
-import { McpProbe } from "@mokronos/integrations-contracts"
+import { McpEra, McpProbe } from "@mokronos/integrations-contracts"
 
 const PROTOCOL_VERSION = "2026-07-28"
 
@@ -58,39 +59,55 @@ const credentialHeaders = (
     onSome: (present) => ({ [present.headerName]: present.headerValue })
   })
 
+export interface McpServer {
+  readonly endpoint: string
+  readonly era: Option.Option<McpEra>
+}
+
+export interface McpToolListing {
+  readonly tools: ReadonlyArray<McpToolDefinition>
+  readonly era: McpEra
+}
+
+const negotiation = (era: Option.Option<McpEra>): VersionNegotiationMode =>
+  Option.match(era, {
+    onNone: () => "auto",
+    onSome: (known) => known === "modern" ? { pin: PROTOCOL_VERSION } : "legacy"
+  })
+
 const callArguments = (input: Json): JsonObject | undefined =>
   isJsonObject(input) ? input : undefined
 
 const connect = (
-  endpoint: string,
+  server: McpServer,
   credential: Option.Option<McpCredential>
 ): Effect.Effect<Client, McpError> =>
   Effect.tryPromise({
     try: async () => {
-      // `auto` probes for the modern era and falls back to the 2025 handshake,
-      // so one client reaches both a current server and an older one.
-      const client = new Client(clientInfo, { versionNegotiation: { mode: "auto" } })
+      const client = new Client(clientInfo, {
+        versionNegotiation: { mode: negotiation(server.era) }
+      })
       await client.connect(
-        new StreamableHTTPClientTransport(new URL(endpoint), {
+        new StreamableHTTPClientTransport(new URL(server.endpoint), {
           requestInit: { headers: credentialHeaders(credential) }
         })
       )
       return client
     },
     catch: (cause) => new McpError({
-      endpoint,
+      endpoint: server.endpoint,
       detail: describeCause(cause),
       cause
     })
   })
 
 const withClient = <A, E>(
-  endpoint: string,
+  server: McpServer,
   credential: Option.Option<McpCredential>,
   use: (client: Client) => Effect.Effect<A, E>
 ): Effect.Effect<A, E | McpError> =>
   Effect.acquireUseRelease(
-    connect(endpoint, credential),
+    connect(server, credential),
     use,
     (client) => Effect.promise(() => client.close().catch(() => undefined))
   )
@@ -109,18 +126,23 @@ interface McpAuthority {
   readonly scopes: ReadonlyArray<string>
 }
 
+const resourceMetadataUrlOf = (headers: Headers.Headers): Option.Option<URL> =>
+  Option.fromNullishOr(
+    extractWWWAuthenticateParams(new Response(null, { headers: { ...headers } })).resourceMetadataUrl
+  )
+
 const inspectAuthority = (
   endpoint: string,
-  headers: Headers.Headers
+  resourceMetadataUrl: Option.Option<URL>
 ): Effect.Effect<Option.Option<McpAuthority>> =>
   Effect.promise(async () => {
-    const { resourceMetadataUrl } = extractWWWAuthenticateParams(
-      new Response(null, { headers: { ...headers } })
-    )
     try {
       const discovered = await discoverOAuthProtectedResourceMetadata(
         endpoint,
-        resourceMetadataUrl === undefined ? {} : { resourceMetadataUrl }
+        Option.match(resourceMetadataUrl, {
+          onNone: () => ({}),
+          onSome: (url) => ({ resourceMetadataUrl: url })
+        })
       )
       const resource = Schema.decodeUnknownOption(ProtectedResourceMetadata)(discovered)
       const authorizationServer = Option.flatMap(
@@ -152,21 +174,13 @@ const ServerInfo = Schema.Struct({
   version: Schema.optional(Schema.String)
 })
 
-const ServerCapabilities = Schema.Struct({
-  tools: Schema.optional(Schema.Struct({
-    listChanged: Schema.optional(Schema.Boolean)
-  }))
-})
-
 const DiscoverResult = Schema.Struct({
   supportedVersions: Schema.Array(Schema.String),
-  capabilities: ServerCapabilities,
   instructions: Schema.optional(Schema.String),
   _meta: Schema.optional(Schema.Struct({
     "io.modelcontextprotocol/serverInfo": Schema.optional(ServerInfo)
   }))
 })
-type DiscoverResult = typeof DiscoverResult.Type
 
 const JsonRpcError = Schema.Struct({
   code: Schema.Number,
@@ -248,16 +262,38 @@ const fallbackName = (endpoint: string): string => {
   return parsed === undefined ? endpoint : serviceName(parsed.hostname)
 }
 
+const describeProbe = (endpoint: string, probe: McpProbe) =>
+  Schema.decodeUnknownEffect(McpProbe)(probe).pipe(Effect.mapError((cause) =>
+    new McpError({ endpoint, detail: "Could not describe probe", cause })
+  ))
+
+const authorityFields = (authority: Option.Option<McpAuthority>) => ({
+  requiresOAuth: Option.isSome(authority),
+  supportsDynamicRegistration: Option.match(authority, {
+    onNone: () => false,
+    onSome: (found) => found.supportsDynamicRegistration
+  }),
+  scopes: Option.match(authority, {
+    onNone: (): ReadonlyArray<string> => [],
+    onSome: (found) => found.scopes
+  })
+})
+
+const decodeEra = (endpoint: string, client: Client) =>
+  Schema.decodeUnknownEffect(McpEra)(client.getProtocolEra()).pipe(Effect.mapError((cause) =>
+    new McpError({ endpoint, detail: "the session negotiated no protocol era", cause })
+  ))
+
 export class McpClient extends Context.Service<
   McpClient,
   {
     readonly probe: (endpoint: string) => Effect.Effect<McpProbe, McpError>
     readonly listTools: (
-      endpoint: string,
+      server: McpServer,
       credential: Option.Option<McpCredential>
-    ) => Effect.Effect<ReadonlyArray<McpToolDefinition>, McpError>
+    ) => Effect.Effect<McpToolListing, McpError>
     readonly callTool: (
-      endpoint: string,
+      server: McpServer,
       credential: Option.Option<McpCredential>,
       tool: string,
       input: Json
@@ -270,109 +306,65 @@ export class McpClient extends Context.Service<
       const client = yield* HttpClient.HttpClient
 
       const listTools = Effect.fn("McpClient.listTools")((
-        endpoint: string,
+        server: McpServer,
         credential: Option.Option<McpCredential>
       ) =>
-        withClient(endpoint, credential, (client) =>
-          Effect.tryPromise({
-            try: async () => (await client.listTools()).tools,
-            catch: (cause) => new McpError({
-              endpoint,
-              detail: `tools/list failed: ${describeCause(cause)}`,
-              cause
+        withClient(server, credential, (session) =>
+          Effect.gen(function*() {
+            const era = yield* decodeEra(server.endpoint, session)
+            const listed = yield* Effect.tryPromise({
+              try: async () => (await session.listTools()).tools,
+              catch: (cause) => new McpError({
+                endpoint: server.endpoint,
+                detail: `tools/list failed: ${describeCause(cause)}`,
+                cause
+              })
             })
-          }).pipe(
-            Effect.flatMap((tools) =>
-              decodeTools(tools).pipe(Effect.mapError((cause) =>
-                new McpError({
-                  endpoint,
-                  detail: "tools/list returned an unreadable tool",
-                  cause
-                })
-              ))
-            )
-          ))
+            const tools = yield* decodeTools(listed).pipe(Effect.mapError((cause) =>
+              new McpError({
+                endpoint: server.endpoint,
+                detail: "tools/list returned an unreadable tool",
+                cause
+              })
+            ))
+            return { tools, era }
+          }))
       )
 
-      const countTools = Effect.fn("McpClient.countTools")(function*(
-        endpoint: string,
-        capabilities: typeof ServerCapabilities.Type
-      ) {
-        if (capabilities.tools === undefined) return 0
-        const tools = yield* listTools(endpoint, Option.none())
-        return tools.length
-      })
-
       /**
-       * What a server says about itself over a live session. Older servers do
-       * not answer `server/discover`, so this is the only description they can
-       * give, and it is enough: name, instructions, and how many tools it has.
+       * Older servers do not answer `server/discover`, so a legacy session is
+       * the only way they describe themselves.
        */
-      const describeSession = Effect.fn("McpClient.describeSession")(function*(
-        endpoint: string,
-        fallback: { readonly name: string; readonly slug: string },
-        authority: Option.Option<{ readonly supportsDynamicRegistration: boolean; readonly scopes: ReadonlyArray<string> }>
-      ) {
-        const described = yield* withClient(endpoint, Option.none(), (session) =>
+      const describeLegacySession = (endpoint: string) =>
+        withClient({ endpoint, era: Option.some("legacy") }, Option.none(), (session) =>
           Effect.sync(() => ({
             serverName: session.getServerVersion()?.name ?? null,
-            instructions: session.getInstructions() ?? null,
-            hasTools: session.getServerCapabilities()?.tools !== undefined
+            instructions: session.getInstructions() ?? null
           })))
-        const toolCount = described.hasTools
-          ? (yield* listTools(endpoint, Option.none())).length
-          : 0
-        return yield* Schema.decodeUnknownEffect(McpProbe)({
-          connected: true,
-          requiresAuthentication: Option.isSome(authority),
-          requiresOAuth: Option.isSome(authority),
-          supportsDynamicRegistration: Option.match(authority, {
-            onNone: () => false,
-            onSome: (found) => found.supportsDynamicRegistration
-          }),
-          scopes: Option.match(authority, {
-            onNone: (): ReadonlyArray<string> => [],
-            onSome: (found) => found.scopes
-          }),
-          name: described.serverName ?? fallback.name,
-          slug: described.serverName === null
-            ? fallback.slug
-            : Option.getOrElse(slugify(described.serverName), () => fallback.slug),
-          toolCount,
-          serverName: described.serverName,
-          instructions: described.instructions
-        }).pipe(Effect.mapError((cause) =>
-          new McpError({ endpoint, detail: "Could not describe probe", cause })
-        ))
-      })
 
       const probe = Effect.fn("McpClient.probe")(function*(endpoint: string) {
-        const { response, body } = yield* probeDiscovery(client, endpoint)
+        const [{ response, body }, ambientAuthority] = yield* Effect.all([
+          probeDiscovery(client, endpoint),
+          inspectAuthority(endpoint, Option.none())
+        ], { concurrency: "unbounded" })
         const name = fallbackName(endpoint)
         const slug = Option.getOrElse(slugify(name), () => "mcp")
 
         if (response.status === 401 || response.status === 403) {
-          const authority = yield* inspectAuthority(endpoint, response.headers)
-          return yield* Schema.decodeUnknownEffect(McpProbe)({
+          const declared = resourceMetadataUrlOf(response.headers)
+          const authority = Option.isSome(declared)
+            ? yield* inspectAuthority(endpoint, declared)
+            : ambientAuthority
+          return yield* describeProbe(endpoint, {
             connected: false,
             requiresAuthentication: true,
-            requiresOAuth: Option.isSome(authority),
-            supportsDynamicRegistration: Option.match(authority, {
-              onNone: () => false,
-              onSome: (found) => found.supportsDynamicRegistration
-            }),
-            scopes: Option.match(authority, {
-              onNone: (): ReadonlyArray<string> => [],
-              onSome: (found) => found.scopes
-            }),
+            ...authorityFields(authority),
             name,
             slug,
-            toolCount: null,
+            era: null,
             serverName: null,
             instructions: null
-          }).pipe(Effect.mapError((cause) =>
-            new McpError({ endpoint, detail: "Could not describe probe", cause })
-          ))
+          })
         }
 
         const answered = yield* decodeDiscoverResponse(body).pipe(
@@ -385,59 +377,43 @@ export class McpClient extends Context.Service<
           )
         )
 
-        const authority = yield* inspectAuthority(endpoint, response.headers)
+        const modern = answered.result !== undefined &&
+          answered.result.supportedVersions.includes(PROTOCOL_VERSION)
+        const described = modern
+          ? {
+            serverName: answered.result?._meta?.["io.modelcontextprotocol/serverInfo"]?.name ?? null,
+            instructions: answered.result?.instructions ?? null
+          }
+          : yield* describeLegacySession(endpoint)
 
-        // A server that refuses `server/discover`, or that does not offer this
-        // host's revision, is an older server rather than an unusable one: the
-        // session handshake still reaches it.
-        if (
-          answered.result === undefined ||
-          !answered.result.supportedVersions.includes(PROTOCOL_VERSION)
-        ) {
-          return yield* describeSession(endpoint, { name, slug }, authority)
-        }
-
-        const discovered = answered.result
-        const toolCount = yield* countTools(endpoint, discovered.capabilities)
-        const serverName = discovered._meta?.["io.modelcontextprotocol/serverInfo"]?.name ?? null
-        return yield* Schema.decodeUnknownEffect(McpProbe)({
+        return yield* describeProbe(endpoint, {
           connected: true,
-          requiresAuthentication: Option.isSome(authority),
-          requiresOAuth: Option.isSome(authority),
-          supportsDynamicRegistration: Option.match(authority, {
-            onNone: () => false,
-            onSome: (found) => found.supportsDynamicRegistration
-          }),
-          scopes: Option.match(authority, {
-            onNone: (): ReadonlyArray<string> => [],
-            onSome: (found) => found.scopes
-          }),
-          name: serverName ?? name,
-          slug: serverName === null
+          requiresAuthentication: Option.isSome(ambientAuthority),
+          ...authorityFields(ambientAuthority),
+          name: described.serverName ?? name,
+          slug: described.serverName === null
             ? slug
-            : Option.getOrElse(slugify(serverName), () => slug),
-          toolCount,
-          serverName,
-          instructions: discovered.instructions ?? null
-        }).pipe(Effect.mapError((cause) =>
-          new McpError({ endpoint, detail: "Could not describe probe", cause })
-        ))
+            : Option.getOrElse(slugify(described.serverName), () => slug),
+          era: modern ? "modern" : "legacy",
+          serverName: described.serverName,
+          instructions: described.instructions
+        })
       })
 
       const callTool = Effect.fn("McpClient.callTool")((
-        endpoint: string,
+        server: McpServer,
         credential: Option.Option<McpCredential>,
         tool: string,
         input: Json
       ) =>
-        withClient(endpoint, credential, (client) =>
+        withClient(server, credential, (client) =>
           Effect.tryPromise({
             try: () => client.callTool({
               name: tool,
               ...whenPresent("arguments", callArguments(input))
             }),
             catch: (cause) => new McpError({
-              endpoint,
+              endpoint: server.endpoint,
               detail: `tools/call ${tool} failed: ${describeCause(cause)}`,
               cause
             })
@@ -445,7 +421,7 @@ export class McpClient extends Context.Service<
             Effect.flatMap((result) =>
               decodeJson(result).pipe(Effect.mapError((cause) =>
                 new McpError({
-                  endpoint,
+                  endpoint: server.endpoint,
                   detail: `tools/call ${tool} returned a non-JSON result`,
                   cause
                 })

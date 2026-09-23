@@ -7,10 +7,14 @@ import {
   defaultTenantId,
   gatewayConfigPath,
   generateApiKey,
+  localAgentClientName,
   localClientName,
   newClientId,
+  operatorGatewayConfigPath,
   readGatewayConfig,
+  readOperatorGatewayConfig,
   resolveClientConnection,
+  resolveOperatorConnection,
   serveGateway
 } from "../index.ts"
 import { temporaryDirectory, testServices } from "./fixtures.ts"
@@ -38,24 +42,33 @@ describe("gateway service", () => {
       expect(response.headers["cache-control"]).toBe("no-store")
     }).pipe(Effect.provide(services)))
 
-  it.live("bootstraps a local operator client whose recorded key works over the wire", () =>
+  it.live("bootstraps separate local agent and operator clients", () =>
     Effect.gen(function*() {
       const running = yield* gateway
 
       const config = yield* Effect.promise(() => readGatewayConfig(running.service.home))
+      const operatorConfig = yield* Effect.promise(() => readOperatorGatewayConfig(running.service.home))
       expect(config?.port).toBe(running.port)
       expect(config?.apiKey).toMatch(/^wfi_/)
+      expect(operatorConfig?.apiKey).toMatch(/^wfi_/)
+      expect(operatorConfig?.apiKey).not.toBe(config?.apiKey)
 
-      const local = yield* running.service.store.findClientByName(
+      const operator = yield* running.service.store.findClientByName(
         defaultTenantId,
         localClientName
       )
-      expect(local?.capabilities).toEqual(["provision_connections", "administer_gateway"])
+      const agent = yield* running.service.store.findClientByName(defaultTenantId, localAgentClientName)
+      expect(operator?.capabilities).toEqual(["provision_connections", "administer_gateway"])
+      expect(agent?.capabilities).toEqual(["provision_connections"])
 
-      const response = yield* HttpClient.get(`${running.url}/v1/clients`, {
+      const denied = yield* HttpClient.get(`${running.url}/v1/clients`, {
         headers: { authorization: `Bearer ${config?.apiKey ?? ""}` }
       })
-      expect(response.status).toBe(200)
+      expect(denied.status).toBe(403)
+      const allowed = yield* HttpClient.get(`${running.url}/v1/clients`, {
+        headers: { authorization: `Bearer ${operatorConfig?.apiKey ?? ""}` }
+      })
+      expect(allowed.status).toBe(200)
     }).pipe(Effect.provide(services)))
 
   it.live("writes the config file as a credential, not world-readable", () =>
@@ -64,8 +77,33 @@ describe("gateway service", () => {
       const fs = yield* FileSystem.FileSystem
 
       const info = yield* Effect.orDie(fs.stat(gatewayConfigPath(running.service.home)))
+      const operatorInfo = yield* Effect.orDie(fs.stat(operatorGatewayConfigPath(running.service.home)))
 
       expect(Number(info.mode) & 0o777).toBe(0o600)
+      expect(Number(operatorInfo.mode) & 0o777).toBe(0o600)
+    }).pipe(Effect.provide(services)))
+
+  it.live("revokes the former local keys when the gateway restarts", () =>
+    Effect.gen(function*() {
+      const home = yield* temporaryDirectory("gateway-restart-")
+      const first = yield* Effect.acquireRelease(
+        Effect.promise(() => serveGateway({ home, port: 0, httpClient: FetchHttpClient.layer })),
+        (running) => Effect.promise(() => running.stop())
+      )
+      const oldAgent = yield* Effect.promise(() => readGatewayConfig(home))
+      const oldOperator = yield* Effect.promise(() => readOperatorGatewayConfig(home))
+      yield* Effect.promise(() => first.stop())
+
+      const second = yield* Effect.acquireRelease(
+        Effect.promise(() => serveGateway({ home, port: 0, httpClient: FetchHttpClient.layer })),
+        (running) => Effect.promise(() => running.stop())
+      )
+      for (const key of [oldAgent?.apiKey, oldOperator?.apiKey]) {
+        const response = yield* HttpClient.get(`${second.url}/v1/clients`, {
+          headers: { authorization: `Bearer ${key ?? ""}` }
+        })
+        expect(response.status).toBe(401)
+      }
     }).pipe(Effect.provide(services)))
 
   it.live("the control plane's own page is authenticated, a page on another site is not", () =>
@@ -113,6 +151,8 @@ describe("gateway service", () => {
 
       const fromFile = yield* Effect.promise(() =>
         resolveClientConnection({ INTEGRATIONS_HOME: running.service.home }))
+      const operatorFromFile = yield* Effect.promise(() =>
+        resolveOperatorConnection({ INTEGRATIONS_HOME: running.service.home }))
       const fromEnvironment = yield* Effect.promise(() =>
         resolveClientConnection({
           INTEGRATIONS_HOME: running.service.home,
@@ -121,6 +161,8 @@ describe("gateway service", () => {
         }))
 
       expect(fromFile?.url).toBe(running.url)
+      expect(operatorFromFile?.url).toBe(running.url)
+      expect(operatorFromFile?.apiKey).not.toBe(fromFile?.apiKey)
       expect(fromEnvironment?.url).toBe("https://gateway.example")
       expect(fromEnvironment?.apiKey).toBe("wfi_remote")
     }).pipe(Effect.provide(services)))
@@ -131,5 +173,7 @@ describe("gateway service", () => {
 
       expect(yield* Effect.promise(() =>
         resolveClientConnection({ INTEGRATIONS_HOME: home }))).toBeUndefined()
+      expect(yield* Effect.promise(() =>
+        resolveOperatorConnection({ INTEGRATIONS_HOME: home }))).toBeUndefined()
     }).pipe(Effect.provide(services)))
 })

@@ -11,7 +11,8 @@ import {
   OAuthFlowSessions,
   reconcileConfigurations,
   resolveEncryption,
-  writeGatewayConfig
+  writeGatewayConfig,
+  writeOperatorGatewayConfig
 } from "@mokronos/integrations-gateway-core"
 import type { Encryption, GatewayCoreServices, GatewayStore } from "@mokronos/integrations-gateway-core"
 import type { GoogleIdentityOAuth } from "@mokronos/integrations-gateway-core"
@@ -33,6 +34,7 @@ import { defaultRateLimitPerMinute, gatewayEnvironment } from "./config.ts"
 import { telemetryLayer } from "@mokronos/integrations-observability"
 
 export const localClientName = "local"
+export const localAgentClientName = "local-agent"
 
 export interface GatewayService {
   readonly home: string
@@ -298,30 +300,55 @@ export const ensureLocalCredential = Effect.fn("Gateway.ensureLocalCredential")(
   home: string,
   port: number
 ): Effect.fn.Return<string, GatewayStoreError | StorageError, Crypto.Crypto> {
-  const existing = yield* store.findClientByName(defaultTenantId, localClientName)
   const defaults = yield* reconcileConfigurations({ store, integrations, tenantId: defaultTenantId })
-  if (defaults.accessProfile === undefined || defaults.approvalPolicy === undefined) {
+  const accessProfile = defaults.accessProfile
+  const approvalPolicy = defaults.approvalPolicy
+  if (accessProfile === undefined || approvalPolicy === undefined) {
     return yield* new GatewayStoreError({
       operation: "ensureLocalCredential",
       kind: "malformed-row",
       cause: new Error("The default tenant has no default access profile or approval policy")
     })
   }
-  const client = existing ?? (yield* store.createClient({
-    id: (yield* newClientId),
-    tenantId: defaultTenantId,
-    accessProfileId: defaults.accessProfile.id,
-    approvalPolicyId: defaults.approvalPolicy.id,
-    name: localClientName,
-    capabilities: ["provision_connections", "administer_gateway"]
-  }))
-  const key = (yield* generateApiKey)
-  yield* store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
+  const credentialFor = (name: string, capabilities: ReadonlyArray<"provision_connections" | "administer_gateway">) =>
+    Effect.gen(function*() {
+      const existing = yield* store.findClientByName(defaultTenantId, name)
+      const client = existing === undefined
+        ? yield* store.createClient({
+          id: yield* newClientId,
+          tenantId: defaultTenantId,
+          accessProfileId: accessProfile.id,
+          approvalPolicyId: approvalPolicy.id,
+          name,
+          capabilities
+        })
+        : yield* store.updateClientSettings({
+          tenantId: defaultTenantId,
+          id: existing.id,
+          capabilities,
+          approvalDelivery: existing.approvalDelivery,
+          mcpSurface: existing.mcpSurface
+        })
+      for (const key of yield* store.listApiKeys(client.id)) {
+        if (key.revokedAt === null) yield* store.revokeApiKey(key.id)
+      }
+      const key = yield* generateApiKey
+      yield* store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
+      return key.secret
+    })
+  const operatorSecret = yield* credentialFor(localClientName, ["provision_connections", "administer_gateway"])
+  const agentSecret = yield* credentialFor(localAgentClientName, ["provision_connections"])
   yield* Effect.promise(() => writeGatewayConfig(home, {
     port,
     url: `http://127.0.0.1:${port}`,
-    apiKey: key.secret,
+    apiKey: agentSecret,
     pid: process.pid
   }))
-  return key.secret
+  yield* Effect.promise(() => writeOperatorGatewayConfig(home, {
+    port,
+    url: `http://127.0.0.1:${port}`,
+    apiKey: operatorSecret,
+    pid: process.pid
+  }))
+  return operatorSecret
 })

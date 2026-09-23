@@ -1,8 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Clock, Effect, Layer } from "effect"
+import { Clock, Effect, Layer, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import path from "node:path"
-import { PositiveInt } from "@mokronos/integrations-contracts"
+import { AuditRecord, PendingApproval, PositiveInt } from "@mokronos/integrations-contracts"
 import {
   Alias,
   ConnectionName,
@@ -24,6 +24,7 @@ import {
 import type { ConnectionRef, GatewayStore } from "../src/index.ts"
 import { generateLoginHandoff } from "../src/keys.ts"
 import { openStore, temporaryDirectory, testServices } from "./fixtures.ts"
+import { toApproval, toAuditRecord } from "../src/store-rows.ts"
 
 /** The nested path proves the store creates the directory it was pointed at. */
 const store = Effect.flatMap(
@@ -83,6 +84,54 @@ const seedBinding = Effect.fnUntraced(function*(store: GatewayStore) {
 const notYet = Effect.map(Clock.currentTimeMillis, (now) => new Date(now + 60_000))
 
 describe("gateway store", () => {
+  it("reads approved history with its recorded alias", () => {
+    const approval = toApproval({
+      length: 0,
+      id: "approval-1",
+      client_id: "client-1",
+      approval_policy_id: "policy-1",
+      access_profile_id: "profile-1",
+      alias: "org_google-5fdrive-5fapi_default",
+      tool: "save_file",
+      arguments: "{}",
+      status: "approved",
+      created_at: 1_789_526_960_870,
+      expires_at: 1_789_527_020_870,
+      decided_at: 1_789_526_970_870,
+      decided_by: "operator",
+      result: null,
+      error: null,
+      collected_at: null
+    })
+
+    expect(approval.alias).toBe("org_google-5fdrive-5fapi_default")
+    expect(Schema.encodeSync(PendingApproval)(approval).alias).toBe(approval.alias)
+  })
+
+  it("reads historical audit aliases without changing their recorded value", () => {
+    const record = toAuditRecord({
+      length: 0,
+      id: "audit-1",
+      client_id: null,
+      oauth_grant_id: null,
+      oauth_application_id: null,
+      authorized_by_subject_id: null,
+      alias: "org_google-5fdrive-5fapi_default",
+      tool: "list_files",
+      owner: "org",
+      subject: null,
+      integration: "google_drive_api",
+      connection_name: "default",
+      decision: "allow",
+      outcome: "succeeded",
+      message: null,
+      created_at: 1_789_526_960_870
+    })
+
+    expect(record.alias).toBe("org_google-5fdrive-5fapi_default")
+    expect(Schema.encodeSync(AuditRecord)(record).alias).toBe(record.alias)
+  })
+
   it.effect("client setup rolls back its configurations when the client cannot be inserted", () =>
     Effect.gen(function*() {
       const gateway = yield* store

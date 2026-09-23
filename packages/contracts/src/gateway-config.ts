@@ -26,6 +26,9 @@ export type GatewayConfigFile = typeof GatewayConfigFile.Type
 export const gatewayConfigPath = (home: string): string =>
   path.join(home, "gateway.json")
 
+export const operatorGatewayConfigPath = (home: string): string =>
+  path.join(home, "operator-gateway.json")
+
 const decodeConfig = Schema.decodeUnknownSync(Schema.fromJsonString(GatewayConfigFile))
 
 export const readGatewayConfig = async (
@@ -38,15 +41,31 @@ export const readGatewayConfig = async (
   }
 }
 
-export const writeGatewayConfig = async (
-  home: string,
-  config: GatewayConfigFile
-): Promise<void> => {
-  const location = gatewayConfigPath(home)
+export const readOperatorGatewayConfig = async (
+  home: string
+): Promise<GatewayConfigFile | undefined> => {
+  try {
+    return decodeConfig(await readFile(operatorGatewayConfigPath(home), "utf8"))
+  } catch {
+    return undefined
+  }
+}
+
+const writeConfig = async (location: string, config: GatewayConfigFile): Promise<void> => {
   await mkdir(path.dirname(location), { recursive: true, mode: 0o700 })
   await writeFile(location, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 })
   chmodSync(location, 0o600)
 }
+
+export const writeGatewayConfig = async (
+  home: string,
+  config: GatewayConfigFile
+): Promise<void> => writeConfig(gatewayConfigPath(home), config)
+
+export const writeOperatorGatewayConfig = async (
+  home: string,
+  config: GatewayConfigFile
+): Promise<void> => writeConfig(operatorGatewayConfigPath(home), config)
 
 export interface ClientConnection {
   readonly url: string
@@ -62,5 +81,17 @@ export const resolveClientConnection = async (
     return { url, apiKey }
   }
   const config = await readGatewayConfig(integrationsHome(environment))
+  return config === undefined ? undefined : { url: config.url, apiKey: config.apiKey }
+}
+
+export const resolveOperatorConnection = async (
+  environment: NodeJS.ProcessEnv = process.env
+): Promise<ClientConnection | undefined> => {
+  const url = environment["INTEGRATIONS_URL"]
+  const apiKey = environment["INTEGRATIONS_ADMIN_API_KEY"]
+  if (url !== undefined && url.length > 0 && apiKey !== undefined && apiKey.length > 0) {
+    return { url, apiKey }
+  }
+  const config = await readOperatorGatewayConfig(integrationsHome(environment))
   return config === undefined ? undefined : { url: config.url, apiKey: config.apiKey }
 }
