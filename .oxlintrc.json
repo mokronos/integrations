@@ -15,6 +15,7 @@
     ".reference/**",
     ".tmp/**",
     ".wf/**",
+    "**/.alchemy/**",
     "**/dist/**",
     "**/out/**",
     "tools/oxlint/anti-slop/**"

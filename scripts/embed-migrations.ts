@@ -47,10 +47,10 @@ ${entries}
 }
 
 const command = Command.make("embed-migrations", {
-  packageDirectory: Flag.string("package"),
-  output: Flag.string("out"),
-  exportName: Flag.string("name"),
-  typeImport: Flag.string("type-import")
+  packageDirectory: Flag.String("package"),
+  output: Flag.String("out"),
+  exportName: Flag.String("name"),
+  typeImport: Flag.String("type-import")
 }, (flags) =>
   Effect.gen(function*() {
     const packageRoot = path.resolve(flags.packageDirectory)

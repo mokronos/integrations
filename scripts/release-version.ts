@@ -245,11 +245,11 @@ const emit = (metadata: ReleaseMetadata): Effect.Effect<void> =>
   })
 
 const resolveCommand = Command.make("resolve", {
-  channel: Flag.choice("channel", ["stable", "nightly"]),
-  version: Flag.optional(Flag.string("version")),
-  date: Flag.optional(Flag.string("date")),
-  runNumber: Flag.optional(Flag.integer("run-number")),
-  sha: Flag.optional(Flag.string("sha"))
+  channel: Flag.Literals("channel", ["stable", "nightly"]),
+  version: Flag.optional(Flag.String("version")),
+  date: Flag.optional(Flag.String("date")),
+  runNumber: Flag.optional(Flag.Int("run-number")),
+  sha: Flag.optional(Flag.String("sha"))
 }, (flags) =>
   Effect.gen(function*() {
     if (flags.channel === "stable") {
@@ -263,7 +263,7 @@ const resolveCommand = Command.make("resolve", {
     return yield* emit(yield* nightlyMetadata(baseVersion, date, runNumber, sha))
   }))
 
-const applyCommand = Command.make("apply", { version: Flag.string("version") }, (flags) =>
+const applyCommand = Command.make("apply", { version: Flag.String("version") }, (flags) =>
   Effect.gen(function*() {
     const version = flags.version.replace(/^v/, "")
     if (!releaseVersionPattern.test(version)) return yield* new InvalidReleaseVersionError({ version: flags.version })
@@ -274,7 +274,7 @@ const applyCommand = Command.make("apply", { version: Flag.string("version") }, 
     yield* Effect.log(`stamped ${version} across ${releasePackageFiles.length} manifest(s)`)
   }))
 
-const verifyCommand = Command.make("verify", { version: Flag.string("version") }, (flags) =>
+const verifyCommand = Command.make("verify", { version: Flag.String("version") }, (flags) =>
   Effect.gen(function*() {
     const version = flags.version.replace(/^v/, "")
     for (const file of releasePackageFiles) {

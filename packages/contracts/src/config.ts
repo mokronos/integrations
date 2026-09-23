@@ -7,7 +7,7 @@ import { Config, Option } from "effect"
  * whitespace picked up from a copied-in value does not travel with it.
  */
 export const optionalText = (name: string): Config.Config<Option.Option<string>> =>
-  Config.option(Config.string(name)).pipe(
+  Config.option(Config.String(name)).pipe(
     Config.map(Option.flatMap((value) => {
       const trimmed = value.trim()
       return trimmed.length === 0 ? Option.none() : Option.some(trimmed)

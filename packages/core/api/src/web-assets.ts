@@ -53,7 +53,7 @@ export const createWebAssets = (
   options: WebAssetsOptions = {}
 ): Effect.Effect<WebAssets> =>
   Effect.gen(function*() {
-    const configured = yield* Config.option(Config.string("INTEGRATIONS_WEB_DIR"))
+    const configured = yield* Config.option(Config.String("INTEGRATIONS_WEB_DIR"))
     const directory =
       options.directories?.[0] ??
       Option.getOrUndefined(configured) ??

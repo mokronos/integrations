@@ -26,7 +26,7 @@ import {
 } from "@integragents/gateway-core"
 import type { GatewayCoreServices } from "@integragents/gateway-core"
 import { ConnectionName, IntegrationSlug } from "@integragents/contracts"
-import { AuthTemplateSlug, Integrations } from "@integragents/host"
+import { AuthTemplateSlug, BlobStore, Integrations } from "@integragents/host"
 import { page } from "./page.ts"
 import type { AgentView, PageModel } from "./page.ts"
 
@@ -45,7 +45,7 @@ const encryption = await resolveEncryption({
 })
 
 const runtime = ManagedRuntime.make(
-  gatewayCoreLayer({ encryption, blobDirectory: dataDirectory, migrate: false }).pipe(
+  gatewayCoreLayer({ encryption, blobs: BlobStore.fileLayer(dataDirectory), migrate: false }).pipe(
     Layer.provideMerge(Layer.mergeAll(
       LibsqlClient.layer({ liveClient: database }).pipe(Layer.provide(Reactivity.layer)),
       BunHttpClient.layer,

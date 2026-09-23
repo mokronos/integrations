@@ -49,15 +49,15 @@ const runForeground = async (port: number, host: string): Promise<void> => {
 const serveCommand = Command.make(
   "serve",
   {
-    port: Flag.integer("port").pipe(
+    port: Flag.Int("port").pipe(
       Flag.withDefault(defaultGatewayPort),
       Flag.withDescription(`Port to listen on (default: ${defaultGatewayPort})`)
     ),
-    host: Flag.string("host").pipe(
+    host: Flag.String("host").pipe(
       Flag.withDefault("127.0.0.1"),
       Flag.withDescription("Bind address. Anything other than loopback exposes credentials")
     ),
-    detach: Flag.boolean("detach").pipe(
+    detach: Flag.Boolean("detach").pipe(
       Flag.withDefault(false),
       Flag.withAlias("d"),
       Flag.withDescription(
@@ -84,7 +84,7 @@ const serveCommand = Command.make(
 const dashboardCommand = Command.make(
   "dashboard",
   {
-    print: Flag.boolean("print").pipe(
+    print: Flag.Boolean("print").pipe(
       Flag.withDefault(false),
       Flag.withDescription("Print the URL instead of opening a browser")
     )
@@ -121,11 +121,11 @@ const dashboardCommand = Command.make(
 const installCommand = Command.make(
   "install",
   {
-    port: Flag.integer("port").pipe(
+    port: Flag.Int("port").pipe(
       Flag.withDefault(defaultGatewayPort),
       Flag.withDescription(`Port the service listens on (default: ${defaultGatewayPort})`)
     ),
-    verbose: Flag.boolean("verbose").pipe(
+    verbose: Flag.Boolean("verbose").pipe(
       Flag.withDefault(false),
       Flag.withAlias("v"),
       Flag.withDescription("Show service-manager output")
@@ -144,7 +144,7 @@ const installCommand = Command.make(
 const uninstallCommand = Command.make(
   "uninstall",
   {
-    verbose: Flag.boolean("verbose").pipe(
+    verbose: Flag.Boolean("verbose").pipe(
       Flag.withDefault(false),
       Flag.withAlias("v"),
       Flag.withDescription("Show service-manager output")

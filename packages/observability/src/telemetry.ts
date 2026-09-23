@@ -17,8 +17,8 @@ export const isTelemetryEnvVar = (name: string): boolean =>
   name === logLevelEnvVar || name.startsWith("OTEL_")
 
 const settings = Config.all({
-  logLevel: Config.logLevel(logLevelEnvVar).pipe(Config.withDefault("Info" as const)),
-  protocol: Config.literals(["http/protobuf", "http/json"], "OTEL_EXPORTER_OTLP_PROTOCOL").pipe(
+  logLevel: Config.LogLevel(logLevelEnvVar).pipe(Config.withDefault("Info" as const)),
+  protocol: Config.Literals(["http/protobuf", "http/json"], "OTEL_EXPORTER_OTLP_PROTOCOL").pipe(
     Config.withDefault("http/protobuf" as const)
   )
 })

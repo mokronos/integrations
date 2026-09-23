@@ -36,12 +36,14 @@
     ".": {
       "development": "./src/index.ts",
       "bun": "./src/index.ts",
+      "workerd": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
     "./schema": {
       "development": "./src/db/schema.ts",
       "bun": "./src/db/schema.ts",
+      "workerd": "./src/db/schema.ts",
       "types": "./dist/db/schema.d.ts",
       "default": "./dist/db/schema.js"
     }

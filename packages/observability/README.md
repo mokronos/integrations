@@ -13,7 +13,7 @@ Tracing and logging for the gateway and the CLIs.
 | Gateway spans (`ii serve`, detached or installed) | `$INTEGRATIONS_HOME/logs/gateway.trace.ndjson` |
 | CLI spans (`i`, `ii`) | `$INTEGRATIONS_HOME/logs/cli.trace.ndjson` |
 | Gateway console output of a detached or installed gateway | `$INTEGRATIONS_HOME/logs/integrations.log` (info), `integrations.error.log` (warnings and errors) |
-| Cloudflare Worker | Workers Logs, plus OTLP when configured |
+| Cloudflare (`apps/host-cloudflare`) | Workers Logs, plus OTLP when `OTEL_*` is set at deploy |
 
 `$INTEGRATIONS_HOME` defaults to `~/.integrations`.
 
@@ -95,5 +95,5 @@ Grafana is then at <http://localhost:3000>: Tempo has the traces and Loki the lo
 ## Using it
 
 - **A process with one runtime** uses `telemetryLayer(options)`.
-- **A host with several runtimes** calls `makeTelemetry(options)` once, inside a scope that lives as long as the host, and provides `telemetry.layer` to each runtime. The gateway does this for HTTP, MCP and MCP OAuth. Call `telemetry.flush` before a host is frozen, as the Worker does with `ctx.waitUntil`.
+- **A host with several runtimes** calls `makeTelemetry(options)` once, inside a scope that lives as long as the host, and provides `telemetry.layer` to each runtime. The gateway does this for HTTP, MCP and MCP OAuth. Call `telemetry.flush` before a host may be frozen, as the Cloudflare Durable Object does after each request.
 - **Libraries that only accept a `fetch`** get `tracedFetch(context)`, which gives each request a client span and trace headers.

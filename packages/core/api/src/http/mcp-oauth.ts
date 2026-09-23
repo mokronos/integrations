@@ -155,6 +155,15 @@ export interface McpOAuthHandle {
   dispose(): Promise<void>
 }
 
+/** The OAuth authorization server's own endpoints, which the MCP endpoint's clients discover. */
+export const mcpOAuthPaths = {
+  protectedResource: "/.well-known/oauth-protected-resource",
+  authorizationServer: "/.well-known/oauth-authorization-server",
+  register: "/oauth/register",
+  authorize: "/oauth/authorize",
+  token: "/oauth/token"
+} as const
+
 export const createMcpOAuthHandler = (options: {
   readonly store: GatewayStore
   readonly settings: GatewaySettings
@@ -167,7 +176,7 @@ export const createMcpOAuthHandler = (options: {
   const enabled = resourceUrl !== undefined
   const issuer = mcpOAuthIssuer(options.settings)
   const metadataUrl = resourceUrl !== undefined
-    ? `${resourceUrl.origin}/.well-known/oauth-protected-resource${resourceUrl.pathname === "/" ? "" : resourceUrl.pathname}`
+    ? `${resourceUrl.origin}${mcpOAuthPaths.protectedResource}${resourceUrl.pathname === "/" ? "" : resourceUrl.pathname}`
     : undefined
   const runtime: OAuthRuntime = ManagedRuntime.make(Layer.mergeAll(options.httpClient, webCryptoLayer, options.telemetry))
   const store = options.store
@@ -227,9 +236,9 @@ export const createMcpOAuthHandler = (options: {
 
   const authorizationServerMetadata = () => json({
     issuer,
-    authorization_endpoint: `${issuer}/oauth/authorize`,
-    token_endpoint: `${issuer}/oauth/token`,
-    registration_endpoint: `${issuer}/oauth/register`,
+    authorization_endpoint: `${issuer}${mcpOAuthPaths.authorize}`,
+    token_endpoint: `${issuer}${mcpOAuthPaths.token}`,
+    registration_endpoint: `${issuer}${mcpOAuthPaths.register}`,
     response_types_supported: ["code"],
     grant_types_supported: ["authorization_code", "refresh_token"],
     token_endpoint_auth_methods_supported: ["none"],
@@ -413,16 +422,16 @@ export const createMcpOAuthHandler = (options: {
       if (request.method === "OPTIONS" && (url.pathname.startsWith("/oauth/") || url.pathname.startsWith("/.well-known/"))) {
         return new Response(null, { status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-methods": "GET, POST, DELETE, OPTIONS", "access-control-allow-headers": "content-type, authorization" } })
       }
-      if (request.method === "GET" && (url.pathname === metadataUrl?.slice(resourceUrl.origin.length) || url.pathname === "/.well-known/oauth-protected-resource")) return protectedResourceMetadata()
-      if (request.method === "GET" && url.pathname === "/.well-known/oauth-authorization-server") return authorizationServerMetadata()
-      if (request.method === "POST" && url.pathname === "/oauth/register") {
+      if (request.method === "GET" && (url.pathname === metadataUrl?.slice(resourceUrl.origin.length) || url.pathname === mcpOAuthPaths.protectedResource)) return protectedResourceMetadata()
+      if (request.method === "GET" && url.pathname === mcpOAuthPaths.authorizationServer) return authorizationServerMetadata()
+      if (request.method === "POST" && url.pathname === mcpOAuthPaths.register) {
         if (!registrationAllowed(context?.remoteAddress)) {
           return json({ error: "rate_limited", error_description: "Too many client registrations" }, 429, { "retry-after": "60" })
         }
         return run("register", register(request))
       }
-      if (request.method === "GET" && url.pathname === "/oauth/authorize") return run("authorize", authorize(request))
-      if (request.method === "POST" && url.pathname === "/oauth/token") return run("token", token(request))
+      if (request.method === "GET" && url.pathname === mcpOAuthPaths.authorize) return run("authorize", authorize(request))
+      if (request.method === "POST" && url.pathname === mcpOAuthPaths.token) return run("token", token(request))
       return undefined
     },
     dispose: () => runtime.dispose()

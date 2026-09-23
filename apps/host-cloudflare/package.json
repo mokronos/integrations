@@ -3,25 +3,26 @@
   "private": true,
   "version": "0.2.0",
   "type": "module",
-  "description": "The integrations gateway deployed as a Cloudflare Worker: D1 storage, cron-driven maintenance, static dashboard assets.",
+  "description": "The integrations gateway on Cloudflare: one Worker serving the dashboard, the gateway in a SQLite Durable Object, blobs in R2. Provisioned with Alchemy.",
   "license": "MIT",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "deploy:staging": "bun run --cwd ../web build && wrangler deploy --env staging",
-    "tail": "wrangler tail"
+    "dev": "alchemy dev",
+    "deploy": "alchemy deploy",
+    "destroy": "alchemy destroy",
+    "logs": "alchemy logs"
   },
   "dependencies": {
-    "@effect/sql-d1": "catalog:",
+    "@effect/platform-node": "catalog:",
+    "@effect/sql-sqlite-do": "catalog:",
     "@integragents/contracts": "workspace:^",
     "@integragents/gateway-api": "workspace:^",
     "@integragents/gateway-core": "workspace:^",
     "@integragents/host": "workspace:^",
+    "alchemy": "catalog:",
     "effect": "catalog:"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "catalog:",
-    "wrangler": "catalog:"
+    "@cloudflare/workers-types": "catalog:"
   }
 }

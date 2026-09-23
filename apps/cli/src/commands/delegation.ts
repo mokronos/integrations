@@ -15,20 +15,20 @@ import type { ControlPlaneClient } from "../session.ts"
 import { connectToControlPlane } from "../session.ts"
 
 const verboseFlag = () =>
-  Flag.boolean("verbose").pipe(
+  Flag.Boolean("verbose").pipe(
     Flag.withDefault(false),
     Flag.withAlias("v"),
     Flag.withDescription("Show complete objects, pretty-printed")
   )
 
 const limitFlag = () =>
-  Flag.integer("limit").pipe(
+  Flag.Int("limit").pipe(
     Flag.optional,
     Flag.withDescription("Return at most this many rows (default: all of them)")
   )
 
 const offsetFlag = () =>
-  Flag.integer("offset").pipe(
+  Flag.Int("offset").pipe(
     Flag.optional,
     Flag.withDescription("Skip this many rows. Listings are ordered, so a window is stable")
   )
@@ -106,12 +106,12 @@ export const clientsCommand = Command.make(
 export const clientCommand = Command.make(
   "client",
   {
-    name: Argument.string("name"),
-    provision: Flag.boolean("provision").pipe(
+    name: Argument.String("name"),
+    provision: Flag.Boolean("provision").pipe(
       Flag.withDefault(false),
       Flag.withDescription("Allow this client to discover and connect integrations")
     ),
-    administer: Flag.boolean("administer").pipe(
+    administer: Flag.Boolean("administer").pipe(
       Flag.withDefault(false),
       Flag.withDescription("Allow this client to administer clients, keys, access profiles, approval policies, approvals, and audit")
     )
@@ -136,7 +136,7 @@ export const clientCommand = Command.make(
 
 export const keyCommand = Command.make(
   "key",
-  { clientId: Argument.string("client-id") },
+  { clientId: Argument.String("client-id") },
   ({ clientId }) =>
     controlPlaneTask((client) =>
       client.request("POST", `/v1/clients/${encodeURIComponent(clientId)}/keys`, {})
@@ -149,7 +149,7 @@ export const keyCommand = Command.make(
 export const keysCommand = Command.make(
   "keys",
   {
-    clientId: Argument.string("client-id"),
+    clientId: Argument.String("client-id"),
     limit: limitFlag(),
     offset: offsetFlag(),
     verbose: verboseFlag()
@@ -195,7 +195,7 @@ export const accessProfilesCommand = Command.make(
 
 export const accessProfileCommand = Command.make(
   "access-profile",
-  { name: Argument.string("name") },
+  { name: Argument.String("name") },
   ({ name }) =>
     controlPlaneTask((client) => client.request("POST", "/v1/access-profiles", { name })).pipe(
       Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false)))
@@ -205,8 +205,8 @@ export const accessProfileCommand = Command.make(
 export const cloneAccessProfileCommand = Command.make(
   "clone-access-profile",
   {
-    accessProfileId: Argument.string("access-profile-id"),
-    name: Argument.string("name")
+    accessProfileId: Argument.String("access-profile-id"),
+    name: Argument.String("name")
   },
   ({ accessProfileId, name }) =>
     controlPlaneTask((client) => client.request(
@@ -237,10 +237,10 @@ const targetConnections = Effect.fn("Cli.targetConnections")(function*(
 export const accessProfileToolCommand = Command.make(
   "access-profile-tool",
   {
-    accessProfileId: Argument.string("access-profile-id"),
-    integration: Argument.string("integration"),
-    tool: Argument.string("tool"),
-    connection: Flag.string("connection").pipe(
+    accessProfileId: Argument.String("access-profile-id"),
+    integration: Argument.String("integration"),
+    tool: Argument.String("tool"),
+    connection: Flag.String("connection").pipe(
       Flag.optional,
       Flag.withDescription(
         "Write the rule for one connection only (default: every org connection of the integration)"
@@ -307,7 +307,7 @@ export const approvalPoliciesCommand = Command.make(
 
 export const approvalPolicyCommand = Command.make(
   "approval-policy",
-  { name: Argument.string("name") },
+  { name: Argument.String("name") },
   ({ name }) =>
     controlPlaneTask((client) => client.request("POST", "/v1/approval-policies", { name })).pipe(
       Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false)))
@@ -317,8 +317,8 @@ export const approvalPolicyCommand = Command.make(
 export const cloneApprovalPolicyCommand = Command.make(
   "clone-approval-policy",
   {
-    approvalPolicyId: Argument.string("approval-policy-id"),
-    name: Argument.string("name")
+    approvalPolicyId: Argument.String("approval-policy-id"),
+    name: Argument.String("name")
   },
   ({ approvalPolicyId, name }) =>
     controlPlaneTask((client) => client.request(
@@ -331,11 +331,11 @@ export const cloneApprovalPolicyCommand = Command.make(
 export const approvalPolicyToolCommand = Command.make(
   "approval-policy-tool",
   {
-    approvalPolicyId: Argument.string("approval-policy-id"),
-    integration: Argument.string("integration"),
-    tool: Argument.string("tool"),
-    mode: Argument.choice("mode", ["allow", "require-approval"]),
-    connection: Flag.string("connection").pipe(
+    approvalPolicyId: Argument.String("approval-policy-id"),
+    integration: Argument.String("integration"),
+    tool: Argument.String("tool"),
+    mode: Argument.Literals("mode", ["allow", "require-approval"]),
+    connection: Flag.String("connection").pipe(
       Flag.optional,
       Flag.withDescription(
         "Write the decision for one connection only (default: every org connection of the integration)"
@@ -382,8 +382,8 @@ export const approvalPolicyToolCommand = Command.make(
 export const assignAccessProfileCommand = Command.make(
   "assign-access-profile",
   {
-    clientId: Argument.string("client-id"),
-    accessProfileId: Argument.string("access-profile-id")
+    clientId: Argument.String("client-id"),
+    accessProfileId: Argument.String("access-profile-id")
   },
   ({ accessProfileId, clientId }) =>
     controlPlaneTask((client) => client.request(
@@ -396,8 +396,8 @@ export const assignAccessProfileCommand = Command.make(
 export const assignApprovalPolicyCommand = Command.make(
   "assign-approval-policy",
   {
-    clientId: Argument.string("client-id"),
-    approvalPolicyId: Argument.string("approval-policy-id")
+    clientId: Argument.String("client-id"),
+    approvalPolicyId: Argument.String("approval-policy-id")
   },
   ({ approvalPolicyId, clientId }) =>
     controlPlaneTask((client) => client.request(
@@ -410,10 +410,10 @@ export const assignApprovalPolicyCommand = Command.make(
 export const revokeCommand = Command.make(
   "revoke",
   {
-    kind: Argument.choice("kind", ["client", "key"]).pipe(
+    kind: Argument.Literals("kind", ["client", "key"]).pipe(
       Argument.withDescription("What to revoke")
     ),
-    id: Argument.string("id")
+    id: Argument.String("id")
   },
   ({ kind, id }) =>
     controlPlaneTask((client) =>

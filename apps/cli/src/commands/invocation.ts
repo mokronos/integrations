@@ -12,13 +12,13 @@ import {
 import { materializeBlobs, resolveFileArguments } from "../blobs.ts"
 
 const outFlag = () =>
-  Flag.string("out").pipe(
+  Flag.String("out").pipe(
     Flag.optional,
     Flag.withDescription("Write file results to this path instead of the download directory")
   )
 
 const verboseFlag = () =>
-  Flag.boolean("verbose").pipe(
+  Flag.Boolean("verbose").pipe(
     Flag.withDefault(false),
     Flag.withAlias("v"),
     Flag.withDescription("Show complete objects, pretty-printed")
@@ -79,7 +79,7 @@ const settleOutcome = (
     : Effect.succeed(outcome)
 
 const subjectFlag = () =>
-  Flag.string("subject").pipe(
+  Flag.String("subject").pipe(
     Flag.optional,
     Flag.withDescription("The user this call acts for; delegated tools require it")
   )
@@ -105,17 +105,17 @@ const reportOutcome = (
 export const operatorExecuteCommand = Command.make(
   "execute",
   {
-    target: Argument.string("alias").pipe(
+    target: Argument.String("alias").pipe(
       Argument.withDescription("Tool alias")
     ),
-    second: Argument.string("tool").pipe(
+    second: Argument.String("tool").pipe(
       Argument.withDescription("Tool name")
     ),
-    third: Argument.string("json").pipe(
+    third: Argument.String("json").pipe(
       Argument.optional,
       Argument.withDescription("Arguments as JSON (default: {})")
     ),
-    file: Flag.string("file").pipe(
+    file: Flag.String("file").pipe(
       Flag.optional,
       Flag.withDescription("Read the JSON input from a file")
     ),
@@ -152,17 +152,17 @@ export const operatorExecuteCommand = Command.make(
 export const clientExecuteCommand = Command.make(
   "execute",
   {
-    alias: Argument.string("alias").pipe(
+    alias: Argument.String("alias").pipe(
       Argument.withDescription("Tool alias")
     ),
-    tool: Argument.string("tool").pipe(
+    tool: Argument.String("tool").pipe(
       Argument.withDescription("Tool name")
     ),
-    json: Argument.string("json").pipe(
+    json: Argument.String("json").pipe(
       Argument.optional,
       Argument.withDescription("Arguments as JSON (default: {})")
     ),
-    file: Flag.string("file").pipe(
+    file: Flag.String("file").pipe(
       Flag.optional,
       Flag.withDescription("Read the JSON input from a file")
     ),
@@ -196,9 +196,9 @@ export const clientExecuteCommand = Command.make(
 export const validateCommand = (runGateway: GatewayTask) => Command.make(
   "validate",
   {
-    config: Argument.string("json-or-tool-address").pipe(Argument.optional),
-    file: Flag.string("file").pipe(Flag.optional),
-    structural: Flag.boolean("structural").pipe(
+    config: Argument.String("json-or-tool-address").pipe(Argument.optional),
+    file: Flag.String("file").pipe(Flag.optional),
+    structural: Flag.Boolean("structural").pipe(
       Flag.withDefault(false),
       Flag.withDescription("Check the shape only, without checking what resolves")
     ),

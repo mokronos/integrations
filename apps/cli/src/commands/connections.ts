@@ -15,26 +15,26 @@ import {
 } from "../output.ts"
 
 const verboseFlag = () =>
-  Flag.boolean("verbose").pipe(
+  Flag.Boolean("verbose").pipe(
     Flag.withDefault(false),
     Flag.withAlias("v"),
     Flag.withDescription("Show complete objects, pretty-printed")
   )
 
 const limitFlag = () =>
-  Flag.integer("limit").pipe(
+  Flag.Int("limit").pipe(
     Flag.optional,
     Flag.withDescription("Return at most this many rows (default: all of them)")
   )
 
 const offsetFlag = () =>
-  Flag.integer("offset").pipe(
+  Flag.Int("offset").pipe(
     Flag.optional,
     Flag.withDescription("Skip this many rows. Listings are ordered, so a window is stable")
   )
 
 const connectionFlag = () =>
-  Flag.string("connection").pipe(
+  Flag.String("connection").pipe(
     Flag.withDefault("default"),
     Flag.withDescription("Connection name (default: default)")
   )
@@ -119,22 +119,22 @@ const credentialValues = (
 export const connectCommand = (runGateway: GatewayTask) => Command.make(
   "connect",
   {
-    integration: Argument.string("integration"),
+    integration: Argument.String("integration"),
     connection: connectionFlag(),
-    template: Flag.string("template").pipe(Flag.optional),
-    credentialEnv: Flag.string("credential-env").pipe(
+    template: Flag.String("template").pipe(Flag.optional),
+    credentialEnv: Flag.String("credential-env").pipe(
       Flag.optional,
       Flag.withDescription("Environment variable containing an API key or bearer token")
     ),
-    credentialValues: Flag.string("credential-values").pipe(
+    credentialValues: Flag.String("credential-values").pipe(
       Flag.optional,
       Flag.withDescription("Comma-separated VARIABLE=ENV_NAME mappings for multi-value auth")
     ),
-    clientId: Flag.string("client-id").pipe(Flag.optional),
-    clientSecretEnv: Flag.string("client-secret-env").pipe(Flag.optional),
-    noOpen: Flag.boolean("no-open").pipe(Flag.withDefault(false)),
-    timeout: Flag.integer("timeout").pipe(Flag.withDefault(300)),
-    setupTimeout: Flag.integer("setup-timeout").pipe(
+    clientId: Flag.String("client-id").pipe(Flag.optional),
+    clientSecretEnv: Flag.String("client-secret-env").pipe(Flag.optional),
+    noOpen: Flag.Boolean("no-open").pipe(Flag.withDefault(false)),
+    timeout: Flag.Int("timeout").pipe(Flag.withDefault(300)),
+    setupTimeout: Flag.Int("setup-timeout").pipe(
       Flag.withDefault(1800),
       Flag.withDescription(
         "Seconds to wait for a human to register an OAuth client in the dashboard"
@@ -288,7 +288,7 @@ export const connectionsCommand = (runGateway: GatewayTask) => Command.make(
 
 export const disconnectCommand = (runGateway: GatewayTask) => Command.make(
   "disconnect",
-  { integration: Argument.string("integration"), connection: connectionFlag() },
+  { integration: Argument.String("integration"), connection: connectionFlag() },
   ({ integration, connection }) =>
     runGateway((client) =>
       client.provisioning.removeConnection({ params: { integration, name: connection } })).pipe(

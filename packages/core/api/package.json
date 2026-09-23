@@ -24,12 +24,14 @@
     ".": {
       "development": "./src/index.ts",
       "bun": "./src/index.ts",
+      "workerd": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
     "./definition": {
       "development": "./src/http/api.ts",
       "bun": "./src/http/api.ts",
+      "workerd": "./src/http/api.ts",
       "types": "./dist/http/api.d.ts",
       "default": "./dist/http/api.js"
     }

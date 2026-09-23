@@ -18,7 +18,7 @@ import type { Encryption, GatewayCoreServices, GatewayStore } from "@integragent
 import type { GoogleIdentityOAuth } from "@integragents/gateway-core"
 import { whenPresent } from "@integragents/contracts"
 import { webCryptoLayer } from "@integragents/contracts"
-import { Integrations } from "@integragents/host"
+import { BlobStore, Integrations } from "@integragents/host"
 import type { StorageError } from "@integragents/host"
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
 import { Context, Crypto, Effect, Exit, Layer, ManagedRuntime, Option, Scope } from "effect"
@@ -56,6 +56,8 @@ export interface GatewayServiceOptions {
   readonly sqlClient?: Layer.Layer<SqlClient.SqlClient>
   /** The master key. Defaults to the environment's, then the key file under `home`. */
   readonly encryption?: Encryption
+  /** Where uploaded and oversized response bodies live. Defaults to files under `home`. */
+  readonly blobs?: Layer.Layer<BlobStore>
   readonly home?: string
   readonly migrate?: boolean
   readonly maintenance?: boolean
@@ -131,7 +133,7 @@ const buildCoreWith = async (
   const runtime = ManagedRuntime.make(
     gatewayCoreLayer({
       encryption,
-      blobDirectory: home,
+      blobs: options.blobs ?? BlobStore.fileLayer(home),
       publicUrlOf: resolvePublicUrl,
       authorizeLocally: authorizeInBrowser,
       ...whenPresent("migrate", options.migrate),

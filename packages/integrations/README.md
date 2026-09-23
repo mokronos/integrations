@@ -32,7 +32,7 @@ sealing are ours.
 ## Storage
 
 Every table lives on whatever `SqlClient` the host provides: the local host's
-SQLite file, a D1 binding, or the embedding application's own database. The
+SQLite file, a Durable Object's SQLite storage, or the embedding application's own database. The
 catalog tables are declared in `src/db/schema.ts` and applied through the
 `integration_migration` ledger, or by the host's own migration pipeline when it
 owns the schema. Credentials sit in the `credential` table sealed with the

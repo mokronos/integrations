@@ -42,7 +42,7 @@ import type { GatewayStore } from "@integragents/gateway-core"
 import type { OAuthSessions } from "@integragents/gateway-core"
 import type { WebAssets } from "../web-assets.ts"
 import { createMcpGatewayHandler } from "./mcp.ts"
-import { createMcpOAuthHandler } from "./mcp-oauth.ts"
+import { createMcpOAuthHandler, mcpOAuthPaths } from "./mcp-oauth.ts"
 
 export interface GatewayRequestContext {
   readonly localSecret?: string
@@ -193,6 +193,18 @@ export const gatewayAppLayer = (options: GatewayHandlerOptions) => {
 }
 
 
+
+/** Every path the gateway answers, as URL patterns; the rest belongs to the dashboard. */
+export const gatewayRoutes: ReadonlyArray<string> = [
+  "/v1/*",
+  "/mcp",
+  mcpOAuthPaths.protectedResource,
+  `${mcpOAuthPaths.protectedResource}/*`,
+  mcpOAuthPaths.authorizationServer,
+  mcpOAuthPaths.register,
+  mcpOAuthPaths.authorize,
+  mcpOAuthPaths.token
+]
 
 export interface GatewayHandle {
   handle(request: Request, context?: GatewayRequestContext): Promise<Response>

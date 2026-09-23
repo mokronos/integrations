@@ -17,26 +17,26 @@ import {
 } from "../output.ts"
 
 const verboseFlag = () =>
-  Flag.boolean("verbose").pipe(
+  Flag.Boolean("verbose").pipe(
     Flag.withDefault(false),
     Flag.withAlias("v"),
     Flag.withDescription("Show complete objects, pretty-printed")
   )
 
 const limitFlag = () =>
-  Flag.integer("limit").pipe(
+  Flag.Int("limit").pipe(
     Flag.optional,
     Flag.withDescription("Return at most this many rows (default: all of them)")
   )
 
 const offsetFlag = () =>
-  Flag.integer("offset").pipe(
+  Flag.Int("offset").pipe(
     Flag.optional,
     Flag.withDescription("Skip this many rows. Listings are ordered, so a window is stable")
   )
 
 const connectionFlag = () =>
-  Flag.string("connection").pipe(
+  Flag.String("connection").pipe(
     Flag.withDefault("default"),
     Flag.withDescription("Connection name (default: default)")
   )
@@ -99,15 +99,15 @@ const listing = <A>(
 export const discoverCommand = (runGateway: GatewayTask) => Command.make(
   "discover",
   {
-    url: Argument.string("url").pipe(
+    url: Argument.String("url").pipe(
       Argument.withDescription("MCP endpoint or OpenAPI document URL")
     ),
     connection: connectionFlag(),
-    slug: Flag.string("slug").pipe(
+    slug: Flag.String("slug").pipe(
       Flag.optional,
       Flag.withDescription("Address it as this instead of a name derived from the URL")
     ),
-    name: Flag.string("name").pipe(
+    name: Flag.String("name").pipe(
       Flag.optional,
       Flag.withDescription("Show it under this name instead of the derived one")
     ),
@@ -139,14 +139,14 @@ export const discoverCommand = (runGateway: GatewayTask) => Command.make(
 export const searchCommand = (runGateway: GatewayTask) => Command.make(
   "search",
   {
-    query: Argument.string("query").pipe(
+    query: Argument.String("query").pipe(
       Argument.withDescription("Service name, domain, or integration keyword")
     ),
-    kind: Flag.choice("kind", ["mcp", "openapi", "graphql", "cli"]).pipe(
+    kind: Flag.Literals("kind", ["mcp", "openapi", "graphql", "cli"]).pipe(
       Flag.optional,
       Flag.withDescription("Limit results to one integration kind")
     ),
-    limit: Flag.integer("limit").pipe(
+    limit: Flag.Int("limit").pipe(
       Flag.withDefault(5),
       Flag.withDescription("How many results to ask the registry for (default: 5)")
     ),
@@ -170,10 +170,10 @@ export const searchCommand = (runGateway: GatewayTask) => Command.make(
 export const renameCommand = (runGateway: GatewayTask) => Command.make(
   "rename",
   {
-    integration: Argument.string("integration").pipe(
+    integration: Argument.String("integration").pipe(
       Argument.withDescription("Integration slug")
     ),
-    name: Argument.string("name").pipe(
+    name: Argument.String("name").pipe(
       Argument.withDescription("What to show it as from now on")
     ),
     verbose: verboseFlag()
@@ -224,12 +224,12 @@ export const integrationsCommand = (runGateway: GatewayTask) => Command.make(
 export const toolsCommand = (runGateway: GatewayTask) => Command.make(
   "tools",
   {
-    integration: Argument.string("integration"),
-    filter: Flag.string("filter").pipe(
+    integration: Argument.String("integration"),
+    filter: Flag.String("filter").pipe(
       Flag.optional,
       Flag.withDescription("Only list tools whose name or description contains this text")
     ),
-    connection: Flag.string("connection").pipe(
+    connection: Flag.String("connection").pipe(
       Flag.optional,
       Flag.withDescription("Only list tools available through this connection")
     ),
@@ -291,8 +291,8 @@ export const toolsCommand = (runGateway: GatewayTask) => Command.make(
 export const schemaCommand = (runGateway: GatewayTask) => Command.make(
   "schema",
   {
-    alias: Argument.string("alias").pipe(Argument.withDescription("Connection alias, as listed by `i tools`")),
-    tool: Argument.string("tool").pipe(Argument.withDescription("Tool name")),
+    alias: Argument.String("alias").pipe(Argument.withDescription("Connection alias, as listed by `i tools`")),
+    tool: Argument.String("tool").pipe(Argument.withDescription("Tool name")),
     verbose: verboseFlag()
   },
   ({ alias, tool, verbose }) =>

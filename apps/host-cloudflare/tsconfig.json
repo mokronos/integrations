@@ -1,14 +1,13 @@
 {
   "extends": "../../tsconfig.json",
   // Type-checked through this project rather than the root one so the
-  // Cloudflare runtime types can be imported per-file (D1Database & friends)
-  // instead of installed globally, which would fight bun's own globals.
+  // Cloudflare runtime types stay out of bun's globals.
   "compilerOptions": {
     "composite": false,
     "incremental": false,
     "declaration": false,
     "declarationMap": false
   },
-  "include": ["src"],
-  "exclude": ["dist", "node_modules", ".wrangler"]
+  "include": ["src", "test", "alchemy.run.ts"],
+  "exclude": ["dist", "node_modules", ".alchemy"]
 }

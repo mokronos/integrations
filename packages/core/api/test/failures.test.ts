@@ -1,8 +1,9 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Schema } from "effect"
+import { Effect, Layer, Schema, Tracer } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { whenPresent, whenPresentMap } from "@integragents/contracts"
 import { McpError, SpecError } from "@integragents/host"
+import { recordingTracer } from "@integragents/observability"
 import {
   createGatewayHandler,
   defaultTenantId,
@@ -71,6 +72,7 @@ const setup = Effect.fnUntraced(function*(options: {
 
   const { handle } = createGatewayHandler({
     httpClient: FetchHttpClient.layer,
+    telemetry: Layer.succeed(Tracer.Tracer, recordingTracer(Tracer.nativeTracer, "gateway", () => {})),
     integrationServices: stubIntegrationsContext({}, unreachable),
     store: presented,
     retentionDays: 30,

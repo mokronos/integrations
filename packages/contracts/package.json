@@ -34,18 +34,21 @@
     ".": {
       "development": "./src/index.ts",
       "bun": "./src/index.ts",
+      "workerd": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
     "./gateway-config": {
       "development": "./src/gateway-config.ts",
       "bun": "./src/gateway-config.ts",
+      "workerd": "./src/gateway-config.ts",
       "types": "./dist/gateway-config.d.ts",
       "default": "./dist/gateway-config.js"
     },
     "./test-fixtures": {
       "development": "./test/fixtures.ts",
-      "bun": "./test/fixtures.ts"
+      "bun": "./test/fixtures.ts",
+      "workerd": "./test/fixtures.ts"
     }
   },
   "scripts": {

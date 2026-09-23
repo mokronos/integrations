@@ -18,20 +18,20 @@ import type { ControlPlaneClient } from "../session.ts"
 import { connectToControlPlane } from "../session.ts"
 
 const verboseFlag = () =>
-  Flag.boolean("verbose").pipe(
+  Flag.Boolean("verbose").pipe(
     Flag.withDefault(false),
     Flag.withAlias("v"),
     Flag.withDescription("Show complete objects, pretty-printed")
   )
 
 const limitFlag = () =>
-  Flag.integer("limit").pipe(
+  Flag.Int("limit").pipe(
     Flag.optional,
     Flag.withDescription("Return at most this many rows (default: all of them)")
   )
 
 const offsetFlag = () =>
-  Flag.integer("offset").pipe(
+  Flag.Int("offset").pipe(
     Flag.optional,
     Flag.withDescription("Skip this many rows. Listings are ordered, so a window is stable")
   )
@@ -100,7 +100,7 @@ const listing = <A>(
 export const approvalsCommand = Command.make(
   "approvals",
   {
-    status: Flag.choice("status", ["pending", "executing", "approved", "denied", "expired"]).pipe(Flag.optional),
+    status: Flag.Literals("status", ["pending", "executing", "approved", "denied", "expired"]).pipe(Flag.optional),
     limit: limitFlag(),
     offset: offsetFlag(),
     verbose: verboseFlag()
@@ -128,7 +128,7 @@ export const approvalsCommand = Command.make(
 
 export const approvalCommand = Command.make(
   "approval",
-  { id: Argument.string("approval-id"), verbose: verboseFlag() },
+  { id: Argument.String("approval-id"), verbose: verboseFlag() },
   ({ id, verbose }) =>
     gatewayTask((client) => client.delegated.approval({ params: { id: ApprovalId.make(id) } })).pipe(Effect.flatMap((approval) =>
       writeStdoutLine(jsonOutput(approval, verbose))
@@ -139,7 +139,7 @@ export const approvalCommand = Command.make(
 export const approveCommand = Command.make(
   "approve",
   {
-    id: Argument.string("approval-id"),
+    id: Argument.String("approval-id"),
     verbose: verboseFlag()
   },
   ({ id, verbose }) =>
@@ -154,7 +154,7 @@ export const approveCommand = Command.make(
 export const denyCommand = Command.make(
   "deny",
   {
-    id: Argument.string("approval-id"),
+    id: Argument.String("approval-id"),
     verbose: verboseFlag()
   },
   ({ id, verbose }) =>
@@ -168,19 +168,19 @@ export const denyCommand = Command.make(
 export const auditCommand = Command.make(
   "audit",
   {
-    limit: Flag.integer("limit").pipe(
+    limit: Flag.Int("limit").pipe(
       Flag.withDefault(50),
       Flag.withDescription("How many records to read (default: 50)")
     ),
     offset: offsetFlag(),
-    client: Flag.string("client").pipe(Flag.optional, Flag.withDescription("Only this client id")),
-    alias: Flag.string("alias").pipe(Flag.optional, Flag.withDescription("Only this alias")),
-    tool: Flag.string("tool").pipe(Flag.optional, Flag.withDescription("Only this tool")),
-    outcome: Flag.choice("outcome", ["succeeded", "failed", "denied", "pending"]).pipe(
+    client: Flag.String("client").pipe(Flag.optional, Flag.withDescription("Only this client id")),
+    alias: Flag.String("alias").pipe(Flag.optional, Flag.withDescription("Only this alias")),
+    tool: Flag.String("tool").pipe(Flag.optional, Flag.withDescription("Only this tool")),
+    outcome: Flag.Literals("outcome", ["succeeded", "failed", "denied", "pending"]).pipe(
       Flag.optional,
       Flag.withDescription("Only this outcome")
     ),
-    since: Flag.string("since").pipe(
+    since: Flag.String("since").pipe(
       Flag.optional,
       Flag.withDescription("Only records at or after this time (ISO 8601)")
     ),
@@ -213,7 +213,7 @@ export const auditCommand = Command.make(
 export const driftCommand = Command.make(
   "drift",
   {
-    integration: Argument.string("integration").pipe(Argument.optional),
+    integration: Argument.String("integration").pipe(Argument.optional),
     limit: limitFlag(),
     offset: offsetFlag(),
     verbose: verboseFlag()

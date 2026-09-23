@@ -37,7 +37,7 @@ export const gatewayEnvironment: Effect.Effect<
   }).pipe(Effect.mapError((cause) => new Config.ConfigError(cause)))
 
   return {
-    allowSignup: yield* Config.boolean("INTEGRATIONS_ALLOW_SIGNUP").pipe(
+    allowSignup: yield* Config.Boolean("INTEGRATIONS_ALLOW_SIGNUP").pipe(
       Config.withDefault(false)
     ),
     masterKey: yield* optionalText("INTEGRATIONS_MASTER_KEY"),

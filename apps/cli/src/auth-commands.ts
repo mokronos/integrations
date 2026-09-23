@@ -15,7 +15,7 @@ import {
 } from "./session.ts"
 
 const passwordFlag = () =>
-  Flag.redacted("password").pipe(
+  Flag.Redacted("password").pipe(
     Flag.optional,
     Flag.withDescription("Password. Omit to enter it without terminal echo")
   )
@@ -25,7 +25,7 @@ const password = (
   message = "Password"
 ) =>
   Option.match(provided, {
-    onNone: () => Prompt.run(Prompt.password({ message })).pipe(Effect.map(Redacted.value)),
+    onNone: () => Prompt.run(Prompt.Password({ message })).pipe(Effect.map(Redacted.value)),
     onSome: (value) => Effect.succeed(Redacted.value(value))
   })
 
@@ -43,13 +43,13 @@ const controlPlaneTask = (
 export const loginCommand = Command.make(
   "login",
   {
-    email: Argument.string("email").pipe(Argument.optional),
+    email: Argument.String("email").pipe(Argument.optional),
     password: passwordFlag(),
-    noOpen: Flag.boolean("no-open").pipe(
+    noOpen: Flag.Boolean("no-open").pipe(
       Flag.withDefault(false),
       Flag.withDescription("Print the sign-in URL instead of opening a browser")
     ),
-    timeout: Flag.integer("timeout").pipe(
+    timeout: Flag.Int("timeout").pipe(
       Flag.withDefault(300),
       Flag.withDescription("Seconds to wait for browser sign-in")
     )
@@ -82,9 +82,9 @@ export const loginCommand = Command.make(
 export const signupCommand = Command.make(
   "signup",
   {
-    email: Argument.string("email"),
+    email: Argument.String("email"),
     password: passwordFlag(),
-    tenant: Flag.string("tenant").pipe(
+    tenant: Flag.String("tenant").pipe(
       Flag.optional,
       Flag.withDescription("Tenant name for a newly claimed gateway")
     )
@@ -123,7 +123,7 @@ export const whoamiCommand = Command.make(
 const changeEmailCommand = Command.make(
   "email",
   {
-    email: Argument.string("new-email"),
+    email: Argument.String("new-email"),
     password: passwordFlag()
   },
   ({ email, password: provided }) =>
@@ -139,15 +139,15 @@ const changeEmailCommand = Command.make(
 const changePasswordCommand = Command.make(
   "password",
   {
-    current: Flag.redacted("current").pipe(
+    current: Flag.Redacted("current").pipe(
       Flag.optional,
       Flag.withDescription("Current password. Omit to enter it without terminal echo")
     ),
-    next: Flag.redacted("new").pipe(
+    next: Flag.Redacted("new").pipe(
       Flag.optional,
       Flag.withDescription("New password. Omit to enter it without terminal echo")
     ),
-    initial: Flag.boolean("initial").pipe(
+    initial: Flag.Boolean("initial").pipe(
       Flag.withDefault(false),
       Flag.withDescription("Set the first password on an OAuth-only account")
     )
@@ -172,7 +172,7 @@ const deleteAccountCommand = Command.make(
   "delete",
   {
     password: passwordFlag(),
-    yes: Flag.boolean("yes").pipe(
+    yes: Flag.Boolean("yes").pipe(
       Flag.withDefault(false),
       Flag.withDescription("Confirm permanent deletion of this human account")
     )

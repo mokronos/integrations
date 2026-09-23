@@ -71,7 +71,7 @@ export interface AgentTool {
 
 const jsonSchemaOf = (schema: Schema.Top): Record<string, Json> =>
   objectEntries(asJson(
-    Schema.toJsonSchemaDocument(schema, { additionalProperties: false }).schema
+    Schema.toJsonSchemaDocument(schema, { onExcessProperty: "error" }).schema
   ))
 
 const agentTool = <S extends Schema.Top & { readonly DecodingServices: never }>(definition: {

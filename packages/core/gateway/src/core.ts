@@ -2,8 +2,8 @@ import { Context, Effect, Layer } from "effect"
 import type { HttpClient } from "effect/unstable/http"
 import { SqlClient } from "effect/unstable/sql"
 import { whenPresent } from "@integragents/contracts"
-import { BlobStore, integrationLayer, Integrations } from "@integragents/host"
-import type { IntegrationServices, StorageError } from "@integragents/host"
+import { integrationLayer, Integrations } from "@integragents/host"
+import type { BlobStore, IntegrationServices, StorageError } from "@integragents/host"
 import { deliverDueApprovalNotifications } from "./approval-delivery.ts"
 import { reconcileConfigurations } from "./configurations.ts"
 import type { Encryption } from "./crypto.ts"
@@ -22,7 +22,7 @@ export type GatewayCoreServices = GatewayStoreService | IntegrationServices | OA
 export interface GatewayCoreOptions {
   readonly encryption: Encryption
   /** Where uploaded blobs live; the only thing the core keeps outside the database. */
-  readonly blobDirectory: string
+  readonly blobs: Layer.Layer<BlobStore>
   /** Where OAuth callbacks and approval links resolve to, read when needed. */
   readonly publicUrlOf?: () => string | undefined
   /** Completes OAuth on a host-owned loopback listener when there is no public URL. */
@@ -98,7 +98,7 @@ export const gatewayCoreLayer = (
 ): Layer.Layer<GatewayCoreServices, GatewayStoreError | StorageError, SqlClient.SqlClient | HttpClient.HttpClient> => {
   const base = Layer.mergeAll(
     GatewayStoreService.layer({ encryption: options.encryption, ...whenPresent("migrate", options.migrate) }),
-    integrationLayer({ encryption: options.encryption, blobs: BlobStore.fileLayer(options.blobDirectory) })
+    integrationLayer({ encryption: options.encryption, blobs: options.blobs })
   )
   return Layer.mergeAll(
     oauthSessionsLayer(options),
