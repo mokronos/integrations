@@ -107,7 +107,15 @@ const validRedirectUri = (value: string): boolean => {
   return url.protocol === "https:" || (url.protocol === "http:" && isLoopback(url.hostname))
 }
 
-const validCimdIdentifier = (value: string): URL | undefined => {
+const redirectUriRegistered = (registered: ReadonlyArray<string>, requested: string): boolean => {
+  if (registered.includes(requested)) return true
+  const url = parsedUrl(requested)
+  if (url === undefined || url.protocol !== "http:" || !isLoopback(url.hostname)) return false
+  url.port = ""
+  return registered.includes(url.toString())
+}
+
+const validCimdIdentifier =(value: string): URL | undefined => {
   const url = parsedUrl(value)
   if (
     url === undefined || url.protocol !== "https:" || url.pathname === "/" || url.hash !== "" ||
@@ -312,7 +320,7 @@ export const createMcpOAuthHandler = (options: {
       return oauthError("invalid_client", "The OAuth application could not be verified")
     }
     const application = applicationResult.value
-    if (!application.redirectUris.includes(redirectUri)) return oauthError("invalid_request", "redirect_uri is not registered")
+    if (!redirectUriRegistered(application.redirectUris, redirectUri)) return oauthError("invalid_request", "redirect_uri is not registered")
     const id = yield* newOAuthRequestId
     yield* store.createOAuthAuthorizationRequest({
       id,

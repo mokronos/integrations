@@ -87,7 +87,7 @@ describe("MCP OAuth authorization server", () => {
         HttpClient.make((request) => Effect.succeed(HttpClientResponse.fromWeb(request, Response.json({
           client_id: clientIdentifier,
           client_name: "CIMD application",
-          redirect_uris: ["http://127.0.0.1:9876/callback"],
+          redirect_uris: ["http://127.0.0.1/callback"],
           grant_types: ["authorization_code", "refresh_token"],
           response_types: ["code"],
           token_endpoint_auth_method: "none"

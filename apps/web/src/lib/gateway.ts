@@ -439,7 +439,7 @@ export const deleteAccount = async (input: {
   await run(endpoints.auth.deleteAccount({ payload: input }))
 }
 
-const rawJson = async <A>(path: string, schema: Schema.Decoder<A>, init?: RequestInit): Promise<A> => {
+const rawJson = async <A>(path: string, schema: Schema.ConstraintDecoder<A>, init?: RequestInit): Promise<A> => {
   const response = await fetch(path, { credentials: "same-origin", ...init })
   const body = await response.json()
   if (!response.ok) {
@@ -451,7 +451,7 @@ const rawJson = async <A>(path: string, schema: Schema.Decoder<A>, init?: Reques
       path
     })
   }
-  return await Effect.runPromise(Schema.decodeUnknownEffect(schema)(body).pipe(
+  return await Effect.runPromise(Schema.decodeUnknownEffect(Schema.toCodecJson(schema))(body).pipe(
     Effect.mapError((cause) => new GatewayError({ message: cause.message, path }))
   ))
 }
