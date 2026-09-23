@@ -28,8 +28,8 @@ export function OperationError({
             {gatewayError.status === undefined ? null : (
               <><dt>Status</dt><dd>{gatewayError.status}</dd></>
             )}
-            {gatewayError.requestId === undefined ? null : (
-              <><dt>Request ID</dt><dd className="break-all">{gatewayError.requestId}</dd></>
+            {gatewayError.traceId === undefined ? null : (
+              <><dt>Trace ID</dt><dd className="break-all">{gatewayError.traceId}</dd></>
             )}
           </dl>
         )}

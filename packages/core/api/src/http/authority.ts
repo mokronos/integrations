@@ -131,7 +131,7 @@ interface ResolvedAuthority {
   readonly store: GatewayStore
 }
 
-const resolveCaller = Effect.fn("authority.resolveCaller")(function*(
+const resolveCaller = Effect.fn("Authority.resolveCaller")(function*(
   options: ResolvedAuthority,
   headers: Readonly<Record<string, string>>,
   context: RequestContext
@@ -173,7 +173,7 @@ const resolveCaller = Effect.fn("authority.resolveCaller")(function*(
   return { kind: "anonymous" } satisfies Caller
 })
 
-const admit = Effect.fn("authority.admit")(function*(
+const admit = Effect.fn("Authority.admit")(function*(
   options: ResolvedAuthority,
   caller: Caller,
   access: Access,
@@ -207,6 +207,18 @@ const admit = Effect.fn("authority.admit")(function*(
     return yield* refusedOf(authorization.status)
   }
 })
+
+const callerAttributes = (caller: Caller) => {
+  switch (caller.kind) {
+    case "session":
+      return { "caller.kind": caller.kind, "tenant.id": caller.tenantId }
+    case "client":
+    case "local":
+      return { "caller.kind": caller.kind, "client.id": caller.client.id, "tenant.id": caller.client.tenantId }
+    case "anonymous":
+      return { "caller.kind": caller.kind }
+  }
+}
 
 const principalKey = (caller: Caller): Option.Option<string> => {
   switch (caller.kind) {
@@ -271,6 +283,7 @@ export const authorityLayer = (
           const caller = unmetered
             ? ({ kind: "anonymous" } satisfies Caller)
             : yield* resolveCaller(resolved, headers, context)
+          yield* Effect.annotateCurrentSpan(callerAttributes(caller))
 
           if (!unmetered && limits !== undefined) {
             const key = principalKey(caller)

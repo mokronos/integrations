@@ -159,6 +159,7 @@ export const createMcpOAuthHandler = (options: {
   readonly store: GatewayStore
   readonly settings: GatewaySettings
   readonly httpClient: Layer.Layer<HttpClient.HttpClient>
+  readonly telemetry: Layer.Layer<never>
   readonly registrationLimitPerMinute?: number
 }): McpOAuthHandle => {
   const resource = options.settings.mcpUrl?.()
@@ -168,7 +169,7 @@ export const createMcpOAuthHandler = (options: {
   const metadataUrl = resourceUrl !== undefined
     ? `${resourceUrl.origin}/.well-known/oauth-protected-resource${resourceUrl.pathname === "/" ? "" : resourceUrl.pathname}`
     : undefined
-  const runtime: OAuthRuntime = ManagedRuntime.make(Layer.merge(options.httpClient, webCryptoLayer))
+  const runtime: OAuthRuntime = ManagedRuntime.make(Layer.mergeAll(options.httpClient, webCryptoLayer, options.telemetry))
   const store = options.store
   const registrationWindows = new Map<string, number>()
   let registrationMinute = -1
@@ -384,8 +385,15 @@ export const createMcpOAuthHandler = (options: {
     })
   })
 
-  const run = <E>(effect: Effect.Effect<Response, E, HttpClient.HttpClient | Crypto.Crypto>): Promise<Response> =>
-    runtime.runPromise(effect.pipe(Effect.catchCause(() => Effect.succeed(oauthError("server_error", "The authorization server could not complete the request", 500)))))
+  const run = <E>(
+    endpoint: string,
+    effect: Effect.Effect<Response, E, HttpClient.HttpClient | Crypto.Crypto>
+  ): Promise<Response> =>
+    runtime.runPromise(effect.pipe(
+      Effect.tapCause((cause) => Effect.logWarning(`MCP OAuth ${endpoint} failed`, cause)),
+      Effect.catchCause(() => Effect.succeed(oauthError("server_error", "The authorization server could not complete the request", 500))),
+      Effect.withSpan(`McpOAuth.${endpoint}`, { kind: "server" })
+    ))
 
   return {
     enabled,
@@ -411,10 +419,10 @@ export const createMcpOAuthHandler = (options: {
         if (!registrationAllowed(context?.remoteAddress)) {
           return json({ error: "rate_limited", error_description: "Too many client registrations" }, 429, { "retry-after": "60" })
         }
-        return run(register(request))
+        return run("register", register(request))
       }
-      if (request.method === "GET" && url.pathname === "/oauth/authorize") return run(authorize(request))
-      if (request.method === "POST" && url.pathname === "/oauth/token") return run(token(request))
+      if (request.method === "GET" && url.pathname === "/oauth/authorize") return run("authorize", authorize(request))
+      if (request.method === "POST" && url.pathname === "/oauth/token") return run("token", token(request))
       return undefined
     },
     dispose: () => runtime.dispose()

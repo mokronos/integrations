@@ -19,7 +19,7 @@ const isAddressForm = (
   source: IntegrationNodeSource
 ): source is Extract<IntegrationNodeSource, { readonly address: string }> => "address" in source
 
-const liveFindings = Effect.fn("integrationValidation.liveFindings")(function*(
+const liveFindings = Effect.fn("IntegrationValidation.liveFindings")(function*(
   source: IntegrationNodeSource,
   host: Integrations["Service"]
 ) {
@@ -47,7 +47,7 @@ const liveFindings = Effect.fn("integrationValidation.liveFindings")(function*(
   )]
 })
 
-export const validateIntegrationNode = Effect.fn("integrationValidation.validate")(function*(
+export const validateIntegrationNode = Effect.fn("IntegrationValidation.validate")(function*(
   config: typeof Schema.Json.Type,
   options: { readonly live?: boolean } = {}
 ): Effect.fn.Return<IntegrationValidationReport, StorageError, Integrations> {

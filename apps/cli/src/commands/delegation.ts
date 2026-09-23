@@ -216,7 +216,7 @@ export const cloneAccessProfileCommand = Command.make(
     )).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false))))
 ).pipe(Command.withDescription("Clone an access profile and all of its tools"))
 
-const targetConnections = Effect.fn("cli.targetConnections")(function*(
+const targetConnections = Effect.fn("Cli.targetConnections")(function*(
   client: ControlPlaneClient,
   integration: string,
   requested: Option.Option<string>

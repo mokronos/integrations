@@ -5,7 +5,7 @@ import {
   runMaintenance
 } from "@mokronos/integrations-gateway-core"
 import type { D1Database } from "@cloudflare/workers-types"
-import type { AssetsFetcherLike, ScheduledEventLike } from "./cloudflare.ts"
+import type { AssetsFetcherLike, ExecutionContextLike, ScheduledEventLike } from "./cloudflare.ts"
 import { Effect, Layer } from "effect"
 import type { SqlClient } from "effect/unstable/sql"
 import { decodeBase64UrlField } from "@mokronos/integrations-contracts"
@@ -37,24 +37,12 @@ export interface Env {
   readonly INTEGRATIONS_GOOGLE_CLIENT_ID?: string
   readonly INTEGRATIONS_GOOGLE_CLIENT_SECRET?: string
   readonly INTEGRATIONS_ALLOW_SIGNUP?: string
-  readonly INTEGRATIONS_OTLP_ENDPOINT?: string
-  readonly INTEGRATIONS_OTLP_AUTHORIZATION?: string
 }
 
 let servicePromise: Promise<GatewayService> | undefined
 
 const publicUrlOption = (value: string | undefined): { readonly publicUrl?: string } =>
   value === undefined || value.length === 0 ? {} : { publicUrl: value }
-
-const telemetryEndpointOption = (value: string | undefined): { readonly telemetryEndpoint?: string } =>
-  value === undefined || value.length === 0 ? {} : { telemetryEndpoint: value }
-
-const telemetryHeadersOption = (
-  value: string | undefined
-): { readonly telemetryHeaders?: Record<string, string> } =>
-  value === undefined || value.length === 0
-    ? {}
-    : { telemetryHeaders: { authorization: value } }
 
 const googleIdentityOption = (
   clientIdValue: string | undefined,
@@ -100,9 +88,7 @@ const getService = (env: Env): Promise<GatewayService> => {
         env.INTEGRATIONS_GOOGLE_CLIENT_ID,
         env.INTEGRATIONS_GOOGLE_CLIENT_SECRET
       ),
-      ...publicUrlOption(env.INTEGRATIONS_PUBLIC_URL),
-      ...telemetryEndpointOption(env.INTEGRATIONS_OTLP_ENDPOINT),
-      ...telemetryHeadersOption(env.INTEGRATIONS_OTLP_AUTHORIZATION)
+      ...publicUrlOption(env.INTEGRATIONS_PUBLIC_URL)
     })
   })()
   servicePromise.catch(() => {
@@ -127,7 +113,7 @@ const unwrapError = (error: unknown): ErrorView => {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, context: ExecutionContextLike): Promise<Response> {
     const pathname = new URL(request.url).pathname
     if (!pathname.startsWith("/v1/") && pathname !== "/mcp" && env.ASSETS !== undefined) {
       return await env.ASSETS.fetch(request)
@@ -135,10 +121,13 @@ export default {
     try {
       const service = await getService(env)
       const remoteAddress = request.headers.get("CF-Connecting-IP")
-      return await service.handle(
+      const response = await service.handle(
         request,
         remoteAddress === null ? {} : { remoteAddress }
       )
+      // The isolate may freeze once the response is out; this is what gets the batch exported.
+      context.waitUntil(service.flushTelemetry())
+      return response
     } catch (cause) {
       console.error("gateway request failed", request.method, pathname, unwrapError(cause))
       return Response.json(
@@ -150,12 +139,20 @@ export default {
 
   async scheduled(_event: ScheduledEventLike, env: Env): Promise<void> {
     const service = await getService(env)
-    await Effect.runPromise(runMaintenance(service.store))
-    await Effect.runPromise((env.INTEGRATIONS_PUBLIC_URL === undefined
-      ? deliverDueApprovalNotifications({ store: service.store })
-      : deliverDueApprovalNotifications({
-        store: service.store,
-        dashboardUrl: env.INTEGRATIONS_PUBLIC_URL
-      })).pipe(Effect.provide(FetchHttpClient.layer)))
+    const sweep = runMaintenance(service.store).pipe(
+      Effect.andThen(env.INTEGRATIONS_PUBLIC_URL === undefined
+        ? deliverDueApprovalNotifications({ store: service.store })
+        : deliverDueApprovalNotifications({
+          store: service.store,
+          dashboardUrl: env.INTEGRATIONS_PUBLIC_URL
+        })),
+      Effect.withSpan("Maintenance.scheduled"),
+      Effect.provide(Layer.merge(FetchHttpClient.layer, service.telemetry))
+    )
+    try {
+      await Effect.runPromise(sweep)
+    } finally {
+      await service.flushTelemetry()
+    }
   }
 }

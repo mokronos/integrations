@@ -2,6 +2,7 @@ import { describe, expect, test } from "@effect/vitest"
 import {
   launchdPlist,
   serviceArguments,
+  serviceEnvironment,
   serviceLabel,
   systemdQuote,
   systemdUnit
@@ -41,7 +42,7 @@ describe("gateway service definitions", () => {
   })
 
   test("writes a launchd definition under its own label", () => {
-    const plist = launchdPlist(descriptor)
+    const plist = launchdPlist(descriptor, { INTEGRATIONS_HOME: "/tmp/wf" })
 
     expect(plist).toContain(`<string>${serviceLabel}</string>`)
     expect(plist).toContain("<string>serve</string>")
@@ -53,7 +54,7 @@ describe("gateway service definitions", () => {
   test("keeps every program element for a source install", () => {
     const program = ["/home/me/.bun/bin/bun", "/repo/apps/cli/src/main.ts"]
 
-    expect(launchdPlist({ ...descriptor, program }))
+    expect(launchdPlist({ ...descriptor, program }, { INTEGRATIONS_HOME: "/tmp/wf" }))
       .toContain("<string>/repo/apps/cli/src/main.ts</string>")
     expect(systemdUnit({
       program: serviceArguments({ ...descriptor, program }),
@@ -64,5 +65,20 @@ describe("gateway service definitions", () => {
     })).toContain(
       "ExecStart=/home/me/.bun/bin/bun /repo/apps/cli/src/main.ts serve --port 4788"
     )
+  })
+
+  test("carries the installer's telemetry settings into the service and nothing else", () => {
+    expect(serviceEnvironment("/tmp/wf", {
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://127.0.0.1:4318",
+      OTEL_TRACES_EXPORTER: "otlp",
+      INTEGRATIONS_LOG_LEVEL: "Debug",
+      INTEGRATIONS_HOME: "/elsewhere",
+      AWS_SECRET_ACCESS_KEY: "not for the gateway"
+    })).toEqual({
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://127.0.0.1:4318",
+      OTEL_TRACES_EXPORTER: "otlp",
+      INTEGRATIONS_LOG_LEVEL: "Debug",
+      INTEGRATIONS_HOME: "/tmp/wf"
+    })
   })
 })

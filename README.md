@@ -87,6 +87,7 @@ directory.
 | `apps/platform-demo/` | An application embedding the gateway core in-process, on its own database |
 | `packages/integrations/` | The integration host: MCP and OpenAPI catalog, connections, tools |
 | `packages/contracts/` | Shared vocabulary and wire contracts |
+| `packages/observability/` | Trace file, console logs, and OTLP export for every process |
 
 `VISION.md` records product direction.
 
@@ -128,6 +129,14 @@ That reinstalls the `i` and `ii` shims, stops the gateway that is running —
 service unit or a `serve` started by hand — and starts one from these sources on
 the same port. A gateway keeps the modules Bun loaded at startup, so one left
 running across a change serves the older wire shape to newly started clients.
+
+### Debugging
+
+Every gateway and CLI process appends its finished spans to
+`~/.integrations/logs/{gateway,cli}.trace.ndjson`. A failed request reports its
+trace id, and `jq` finds everything that request did. See
+[`packages/observability/README.md`](packages/observability/README.md) for the
+record shape, queries, and OTLP export.
 
 ## Packages
 

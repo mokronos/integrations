@@ -30,6 +30,7 @@ import {
 } from "./handlers.ts"
 import { ControlPlaneAssets, GatewayConfig, SessionPolicy } from "./services.ts"
 import { ErrorCapture, traceIdFor } from "./observability.ts"
+import { GatewayFailure } from "./identity.ts"
 import type { ErrorSink } from "./observability.ts"
 import type { GatewaySettings, SignInPolicy } from "./services.ts"
 import { defaultMaxUploadBytes, NonNegativeIntFromString, whenPresent } from "@mokronos/integrations-contracts"
@@ -70,7 +71,8 @@ export interface GatewayHandlerOptions extends GatewaySettings {
   readonly maxBodyBytes?: number
   readonly maxUploadBytes?: number
   readonly webAssets?: WebAssets
-  readonly observabilityLayer?: Layer.Layer<never>
+  /** The tracer, loggers, and log level every surface of this gateway reports through. */
+  readonly telemetry?: Layer.Layer<never>
   readonly errorCapture?: ErrorSink
 }
 
@@ -92,6 +94,8 @@ const bodyLimitLayer = (limits: { readonly request: number; readonly upload: num
           ))
           : httpEffect
       })))
+
+const encodeGatewayFailure = Schema.encodeSync(GatewayFailure)
 
 const failureLayer = () =>
   HttpRouter.use((router) =>
@@ -118,10 +122,10 @@ const failureLayer = () =>
             traceIdFor(cause),
             (traceId) =>
               HttpServerResponse.jsonUnsafe(
-                {
-                  error: "The gateway could not complete this request",
-                  ...whenPresent("traceId", traceId === "" ? undefined : traceId)
-                },
+                encodeGatewayFailure(new GatewayFailure({
+                  message: "The gateway could not complete this request",
+                  traceId
+                })),
                 { status: 500 }
               )
           )
@@ -196,6 +200,7 @@ export interface GatewayHandle {
 }
 
 export const createGatewayHandler = (options: GatewayHandlerOptions): GatewayHandle => {
+  const telemetry = options.telemetry ?? Layer.empty
   const app = HttpApiBuilder.layer(GatewayApi).pipe(
     Layer.provideMerge(gatewayAppLayer(options)),
     HttpRouter.provideRequest(Layer.mergeAll(
@@ -207,8 +212,8 @@ export const createGatewayHandler = (options: GatewayHandlerOptions): GatewayHan
     ))
   )
   const web = HttpEffect.toWebHandlerLayerWith(
-    app.pipe(Layer.provide(Layer.merge(
-      options.observabilityLayer ?? Layer.empty,
+    app.pipe(Layer.provideMerge(Layer.merge(
+      telemetry,
       HttpMiddleware.layerTracerDisabledForUrls(["/v1/health", "/v1/metadata"])
     ))), {
     toHandler: (context) =>
@@ -224,6 +229,7 @@ export const createGatewayHandler = (options: GatewayHandlerOptions): GatewayHan
     store: options.store,
     settings: settingsOf(options),
     httpClient: options.httpClient,
+    telemetry,
     ...whenPresent("registrationLimitPerMinute", options.rateLimits?.addressPerMinute)
   })
   const mcp = createMcpGatewayHandler({
@@ -231,6 +237,7 @@ export const createGatewayHandler = (options: GatewayHandlerOptions): GatewayHan
     services: gatewayServicesContext(options),
     settings: settingsOf(options),
     httpClient: options.httpClient,
+    telemetry,
     ...whenPresent("errorCapture", options.errorCapture),
     oauth
   })

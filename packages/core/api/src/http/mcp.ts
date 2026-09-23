@@ -18,7 +18,8 @@ import type { IntegrationServices } from "@mokronos/integrations-host"
 import { authenticateClient, GatewayStoreService, listEffectiveTools } from "@mokronos/integrations-gateway-core"
 import type { GatewayStore } from "@mokronos/integrations-gateway-core"
 import type { OAuthActor } from "@mokronos/integrations-gateway-core"
-import { Context, Effect, Layer, ManagedRuntime, Predicate } from "effect"
+import { Context, Effect, Layer, ManagedRuntime, Option, Predicate } from "effect"
+import { Headers, HttpTraceContext } from "effect/unstable/http"
 import type { HttpClient } from "effect/unstable/http"
 import { agentTools, invokeTool } from "./mcp-tools.ts"
 import type { AgentTool, McpCaller, ToolOutput } from "./mcp-tools.ts"
@@ -86,20 +87,43 @@ const contentOf = (text: string, isError: boolean) => ({
 
 type McpRuntime = ManagedRuntime.ManagedRuntime<GatewayOperationServices, never>
 
+/** Continues the caller's trace when its request carried one. */
+const spanOptionsFor = (request: Request | undefined) =>
+  whenPresent(
+    "parent",
+    request === undefined
+      ? undefined
+      : Option.getOrUndefined(HttpTraceContext.fromHeaders(Headers.fromInput(request.headers)))
+  )
+
 const resultOf = (
   runtime: McpRuntime,
+  call: { readonly tool: string; readonly caller: McpCaller; readonly request: Request | undefined },
   effect: Effect.Effect<ToolOutput, Error, GatewayOperationServices>
 ) =>
-  runtime.runPromise(Effect.match(effect, {
-    onSuccess: (output: ToolOutput) => contentOf(JSON.stringify(output.value), output.failed),
-    onFailure: (failure: Error) => contentOf(describeFailure(failure), true)
-  }))
+  runtime.runPromise(effect.pipe(
+    Effect.tap((output) => Effect.annotateCurrentSpan("mcp.tool.failed", output.failed)),
+    Effect.tapError((failure) =>
+      Effect.logInfo("MCP tool call refused", failure).pipe(
+        Effect.annotateLogs({ "error.tag": Predicate.hasProperty(failure, "_tag") ? String(failure._tag) : failure.name })
+      )),
+    Effect.match({
+      onSuccess: (output: ToolOutput) => contentOf(JSON.stringify(output.value), output.failed),
+      onFailure: (failure: Error) => contentOf(describeFailure(failure), true)
+    }),
+    Effect.withSpan("Mcp.callTool", {
+      kind: "server",
+      attributes: { "mcp.tool": call.tool, "client.id": call.caller.client.id },
+      ...spanOptionsFor(call.request)
+    })
+  ))
 
 export interface McpGatewayOptions {
   readonly store: GatewayStore
   readonly services: Context.Context<GatewayStoreService | IntegrationServices | OAuthFlowSessions>
   readonly settings: GatewaySettings
   readonly httpClient: Layer.Layer<HttpClient.HttpClient>
+  readonly telemetry: Layer.Layer<never>
   readonly errorCapture?: ErrorSink
   readonly oauth?: {
     readonly authenticate: (token: string) => Promise<{
@@ -125,7 +149,8 @@ const registerAgentTool = (
       description: tool.description,
       inputSchema: fromJsonSchema<Record<string, Json>>(tool.inputSchema)
     },
-    async (arguments_) => resultOf(runtime, tool.run(caller, asJson(arguments_)))
+    async (arguments_, context) =>
+      resultOf(runtime, { tool: tool.name, caller, request: context.http?.req }, tool.run(caller, asJson(arguments_)))
   )
 }
 
@@ -136,7 +161,12 @@ const effectiveToolsOf = (client: Client) =>
     return yield* capture(listEffectiveTools(store, client.id, { schemas: true, integrations }))
   })
 
-const serverFor = async (runtime: McpRuntime, client: Client, oauthActor?: OAuthActor): Promise<McpServer> => {
+const serverFor = async (
+  runtime: McpRuntime,
+  request: Request | undefined,
+  client: Client,
+  oauthActor?: OAuthActor
+): Promise<McpServer> => {
   const server = new McpServer({ name: "integrations-gateway", version: gatewayVersion })
   const caller: McpCaller = { client, ...whenPresent("oauthActor", oauthActor) }
 
@@ -149,7 +179,9 @@ const serverFor = async (runtime: McpRuntime, client: Client, oauthActor?: OAuth
     return server
   }
 
-  const effective = await runtime.runPromise(effectiveToolsOf(client))
+  const effective = await runtime.runPromise(effectiveToolsOf(client).pipe(
+    Effect.withSpan("Mcp.listTools", { attributes: { "client.id": client.id }, ...spanOptionsFor(request) })
+  ))
   for (const tool of effective) {
     const name = ToolName.make(tool.tool)
     const inputSchema = tool.inputSchema !== undefined && isJsonObject(tool.inputSchema)
@@ -162,8 +194,8 @@ const serverFor = async (runtime: McpRuntime, client: Client, oauthActor?: OAuth
         ...whenPresent("description", describeEffectiveTool(tool)),
         inputSchema: fromJsonSchema<Record<string, Json>>(inputSchema)
       },
-      async (arguments_) =>
-        resultOf(runtime, invokeTool(caller, {
+      async (arguments_, context) =>
+        resultOf(runtime, { tool: toolName(tool.alias, name), caller, request: context.http?.req }, invokeTool(caller, {
           alias: tool.alias,
           tool: name,
           arguments: asJson(arguments_)
@@ -186,24 +218,28 @@ export const createMcpGatewayHandler = (options: McpGatewayOptions): McpGatewayH
       ? ErrorCapture.logging
       : Layer.succeed(ErrorCapture, options.errorCapture),
     options.httpClient,
-    webCryptoLayer
+    webCryptoLayer,
+    options.telemetry
   ))
-  const authenticate = (secret: string) => runtime.runPromise(capture(authenticateClient(options.store, secret)))
-  const resolve = async (secret: string) => {
+  const authenticate = (secret: string, request: Request | undefined) =>
+    runtime.runPromise(capture(authenticateClient(options.store, secret)).pipe(
+      Effect.withSpan("Mcp.authenticate", spanOptionsFor(request))
+    ))
+  const resolve = async (secret: string, request: Request | undefined) => {
     if (secret.startsWith("wfoa_") && options.oauth !== undefined) {
       const oauth = await options.oauth.authenticate(secret)
       return oauth === undefined ? undefined : { client: oauth.client, actor: oauth.actor, scope: oauth.scope }
     }
-    const apiKey = await authenticate(secret)
+    const apiKey = await authenticate(secret, request)
     return apiKey.status === "authenticated"
       ? { client: apiKey.client, scope: apiKey.client.capabilities.join(" ") }
       : apiKey
   }
-  const handler = createMcpHandler(async ({ authInfo }) => {
+  const handler = createMcpHandler(async ({ authInfo, requestInfo }) => {
     if (authInfo === undefined) throw new Error("Authenticated MCP request has no identity")
-    const authentication = await resolve(authInfo.token)
+    const authentication = await resolve(authInfo.token, requestInfo)
     if (authentication === undefined || "status" in authentication) throw new Error("MCP credential is no longer valid")
-    return serverFor(runtime, authentication.client, authentication.actor)
+    return serverFor(runtime, requestInfo, authentication.client, authentication.actor)
   })
 
   return {
@@ -215,7 +251,7 @@ export const createMcpGatewayHandler = (options: McpGatewayOptions): McpGatewayH
           { status: 401, headers: { "www-authenticate": options.oauth?.challenge() ?? "Bearer" } }
         )
       }
-      const authentication = await resolve(secret)
+      const authentication = await resolve(secret, request)
       if (authentication === undefined) {
         return Response.json(
           { error: "Invalid access token" },

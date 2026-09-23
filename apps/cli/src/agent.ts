@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
-import { BunHttpClient, BunServices } from "@effect/platform-bun"
+import { BunHttpClient } from "@effect/platform-bun"
 import { Effect, Layer } from "effect"
 import { Command } from "effect/unstable/cli"
-import { telemetryLayer } from "@mokronos/integrations-observability"
+import { cliLayer, commandSpan } from "./telemetry.ts"
 import { clientSubcommands } from "./commands.ts"
 import packageMetadata from "../package.json" with { type: "json" }
 
@@ -22,11 +22,8 @@ export const main = async (argv: ReadonlyArray<string>): Promise<void> => {
           : Effect.sync(() => {
             process.exitCode = 1
           })),
-      Effect.provide(Layer.mergeAll(
-        BunServices.layer,
-        BunHttpClient.layer,
-        telemetryLayer({ serviceName: "integrations-agent-cli" })
-      ))
+      commandSpan(argv),
+      Effect.provide(Layer.merge(cliLayer("integrations-agent-cli"), BunHttpClient.layer))
     )
   )
 }

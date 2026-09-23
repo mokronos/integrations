@@ -32,6 +32,14 @@ export class Forbidden extends Schema.TaggedError<Forbidden>()(
 
 export const ForbiddenError = Forbidden.pipe(HttpApiSchema.status(403))
 
+/** A request the gateway could not complete; the trace id finds its spans and logs. */
+export class GatewayFailure extends Schema.TaggedError<GatewayFailure>()(
+  "GatewayFailure",
+  { message: Schema.String, traceId: Schema.String }
+) {}
+
+export const GatewayFailureError = GatewayFailure.pipe(HttpApiSchema.status(500))
+
 export const Refused = Schema.Union([Unauthorized, Forbidden])
 export type Refused = typeof Refused.Type
 

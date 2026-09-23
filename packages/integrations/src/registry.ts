@@ -47,7 +47,7 @@ const toSearchSurface = (surface: typeof RegistrySearchResponse.Type.results[num
   ...whenPresent("url", surface.url)
 })
 
-const fetchText = Effect.fn("registry.fetchText")((url: URL) =>
+const fetchText = Effect.fn("Registry.fetchText")((url: URL) =>
   HttpClient.get(url).pipe(
     Effect.flatMap(HttpClientResponse.filterStatusOk),
     Effect.flatMap((response) => response.text),
@@ -58,7 +58,7 @@ const fetchText = Effect.fn("registry.fetchText")((url: URL) =>
   )
 )
 
-export const search = Effect.fn("registry.search")(function* (
+export const search = Effect.fn("Registry.search")(function* (
   query: IntegrationSearchQuery,
   options: SearchIntegrationsOptions = {}
 ) {

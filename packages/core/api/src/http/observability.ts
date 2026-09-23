@@ -1,5 +1,4 @@
 import { Cause, Context, Effect, Layer, Option, Result } from "effect"
-import { webCrypto } from "@mokronos/integrations-contracts"
 import { whenPresent } from "@mokronos/integrations-contracts"
 import { GatewayStoreError, OAuthSessionError, PasswordError } from "@mokronos/integrations-gateway-core"
 import { StorageError } from "@mokronos/integrations-host"
@@ -13,27 +12,23 @@ export interface ErrorSink {
   readonly captureException: (
     cause: Cause.Cause<unknown>,
     context: CaptureContext
-  ) => Effect.Effect<string>
+  ) => Effect.Effect<void>
 }
 
-const newTraceId: Effect.Effect<string> = Effect.map(
-  Effect.orDie(webCrypto.randomUUIDv4),
-  (uuid) => uuid.replaceAll("-", "").slice(0, 12)
+/** The trace this request runs in, which is what an operator looks the failure up by. */
+export const currentTraceId: Effect.Effect<string> = Effect.currentSpan.pipe(
+  Effect.map((span) => span.traceId),
+  Effect.orElseSucceed(() => "untraced")
 )
 
 const loggingCapture: ErrorSink = {
   captureException: (cause, context) =>
-    Effect.gen(function*() {
-      const traceId = yield* newTraceId
-      yield* Effect.logError("Unhandled gateway failure", cause).pipe(
-        Effect.annotateLogs({
-          traceId,
-          ...whenPresent("operation", context.operation),
-          ...whenPresent("kind", context.kind)
-        })
-      )
-      return traceId
-    })
+    Effect.logError("Unhandled gateway failure", cause).pipe(
+      Effect.annotateLogs({
+        ...whenPresent("operation", context.operation),
+        ...whenPresent("kind", context.kind)
+      })
+    )
 }
 
 export class ErrorCapture extends Context.Service<ErrorCapture, ErrorSink>()(
@@ -42,7 +37,7 @@ export class ErrorCapture extends Context.Service<ErrorCapture, ErrorSink>()(
   static readonly logging: Layer.Layer<ErrorCapture> = Layer.succeed(ErrorCapture, loggingCapture)
 
   static readonly noop: Layer.Layer<ErrorCapture> = Layer.succeed(ErrorCapture, {
-    captureException: () => Effect.succeed("")
+    captureException: () => Effect.void
   })
 }
 
@@ -75,9 +70,9 @@ export const capture = <A, E, R>(
           ? error.message
           : "unknown"
         const kind = error instanceof GatewayStoreError ? error.kind : undefined
-        return Effect.flatMap(
-          sink.captureException(Cause.fail(error), { operation, ...whenPresent("kind", kind) }),
-          (traceId) => Effect.die(new CapturedFailure(traceId, operation))
+        return sink.captureException(Cause.fail(error), { operation, ...whenPresent("kind", kind) }).pipe(
+          Effect.andThen(currentTraceId),
+          Effect.flatMap((traceId) => Effect.die(new CapturedFailure(traceId, operation)))
         )
       })
     )
@@ -88,5 +83,7 @@ export const traceIdFor = (cause: Cause.Cause<unknown>): Effect.Effect<string> =
   if (Result.isSuccess(defect) && defect.success instanceof CapturedFailure) {
     return Effect.succeed(defect.success.traceId)
   }
-  return Effect.flatMap(resolveCapture, (sink) => sink.captureException(cause, {}))
+  return Effect.flatMap(resolveCapture, (sink) => sink.captureException(cause, {})).pipe(
+    Effect.andThen(currentTraceId)
+  )
 }

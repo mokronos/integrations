@@ -47,7 +47,7 @@ const asOpenApi = (
     Effect.mapError((cause) => new DetectionError({ url, detail: cause.detail }))
   )
 
-export const classify = Effect.fn("classify")(function* (url: string) {
+export const classify = Effect.fn("Discovery.classify")(function* (url: string) {
   const mcp = yield* Effect.result(asMcp(url))
   if (Result.isSuccess(mcp)) return mcp.success
 

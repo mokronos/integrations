@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
-import { BunHttpClient, BunServices } from "@effect/platform-bun"
+import { BunHttpClient } from "@effect/platform-bun"
 import { Data, Effect, Layer } from "effect"
 import { Command, Flag } from "effect/unstable/cli"
 import { HttpClient } from "effect/unstable/http"
 import { defaultGatewayPort } from "@mokronos/integrations-client"
-import { telemetryLayer } from "@mokronos/integrations-observability"
+import { cliLayer, commandSpan } from "./telemetry.ts"
 import { controlPlaneSubcommands, operatorClientSubcommands } from "./commands.ts"
 import { authenticationSubcommands } from "./auth-commands.ts"
 import { openBrowser } from "./connection.ts"
@@ -182,11 +182,8 @@ export const main = async (argv: ReadonlyArray<string>): Promise<void> => {
           : Effect.sync(() => {
             process.exitCode = 1
           })),
-      Effect.provide(Layer.mergeAll(
-        BunServices.layer,
-        BunHttpClient.layer,
-        telemetryLayer({ serviceName: "integrations-cli" })
-      ))
+      commandSpan(argv),
+      Effect.provide(Layer.merge(cliLayer("integrations-cli"), BunHttpClient.layer))
     )
   )
 }

@@ -15,6 +15,10 @@ export const integrationsHome = (
     : path.resolve(configured)
 }
 
+/** Where a process on this machine appends its finished spans, one JSON object per line. */
+export const traceFilePath = (home: string, process: "gateway" | "cli"): string =>
+  path.join(home, "logs", `${process}.trace.ndjson`)
+
 export const GatewayConfigFile = Schema.Struct({
   port: Schema.Number,
   url: Schema.String,

@@ -31,7 +31,7 @@ const contentTypes = new Map([
 const contentTypeFor = (extension: string): string =>
   contentTypes.get(extension) ?? "application/octet-stream"
 
-const uploadFile = Effect.fn("cli.uploadFile")(function*(
+const uploadFile = Effect.fn("Cli.uploadFile")(function*(
   client: GatewayClient,
   file: string
 ) {
@@ -91,7 +91,7 @@ const destinationFor = (handle: BlobHandle, out: string | undefined): string => 
   return path.join(downloadDirectory(), name)
 }
 
-const fetchBlob = Effect.fn("cli.fetchBlob")(function*(
+const fetchBlob = Effect.fn("Cli.fetchBlob")(function*(
   client: GatewayClient,
   handle: BlobHandle,
   destination: string

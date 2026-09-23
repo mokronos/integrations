@@ -44,7 +44,7 @@ const attempt = <A>(work: () => Promise<A>): Effect.Effect<A, IntegrationsCliErr
         : cliError(cause instanceof Error ? cause.message : String(cause))
   })
 
-export const resolveGatewayUrl = Effect.fn("session.resolveGatewayUrl")(function*(): Effect.fn
+export const resolveGatewayUrl = Effect.fn("Session.resolveGatewayUrl")(function*(): Effect.fn
   .Return<string, IntegrationsCliError> {
   const explicit = yield* Effect.orDie(configuredUrl)
   if (Option.isSome(explicit)) return explicit.value
@@ -55,7 +55,7 @@ export const resolveGatewayUrl = Effect.fn("session.resolveGatewayUrl")(function
   )
 })
 
-export const readOperatorSession = Effect.fn("session.read")(function*(): Effect.fn.Return<
+export const readOperatorSession = Effect.fn("Session.read")(function*(): Effect.fn.Return<
   OperatorSession | undefined,
   IntegrationsCliError
 > {
@@ -72,7 +72,7 @@ export const readOperatorSession = Effect.fn("session.read")(function*(): Effect
   })
 })
 
-export const writeOperatorSession = Effect.fn("session.write")((session: OperatorSession) =>
+export const writeOperatorSession = Effect.fn("Session.write")((session: OperatorSession) =>
   attempt(async () => {
     const destination = operatorSessionPath()
     await mkdir(path.dirname(destination), { recursive: true, mode: 0o700 })
@@ -81,7 +81,7 @@ export const writeOperatorSession = Effect.fn("session.write")((session: Operato
   })
 )
 
-export const clearOperatorSession = Effect.fn("session.clear")(() =>
+export const clearOperatorSession = Effect.fn("Session.clear")(() =>
   attempt(() => rm(operatorSessionPath(), { force: true }))
 )
 
@@ -97,7 +97,7 @@ const messageFrom = (payload: typeof Schema.Json.Type, fallback: string): string
   return fallback
 }
 
-const responseJson = Effect.fn("session.responseJson")((
+const responseJson = Effect.fn("Session.responseJson")((
   response: HttpClientResponse.HttpClientResponse
 ) =>
   response.text.pipe(
@@ -112,7 +112,7 @@ const responseJson = Effect.fn("session.responseJson")((
   )
 )
 
-const gatewayCall = Effect.fn("session.call")(function*(
+const gatewayCall = Effect.fn("Session.call")(function*(
   method: HttpMethod.HttpMethod,
   url: string,
   options: {
@@ -176,7 +176,7 @@ const verifyGateway = (url: string): Effect.Effect<void, IntegrationsCliError, H
     Effect.asVoid
   )
 
-export const loginOperator = Effect.fn("session.login")(function*(input: {
+export const loginOperator = Effect.fn("Session.login")(function*(input: {
   readonly email: string
   readonly password: string
 }): Effect.fn.Return<OperatorSession, IntegrationsCliError, HttpClient.HttpClient> {
@@ -197,7 +197,7 @@ export const loginOperator = Effect.fn("session.login")(function*(input: {
   return session
 })
 
-export const loginOperatorInBrowser = Effect.fn("session.loginInBrowser")(function*(options: {
+export const loginOperatorInBrowser = Effect.fn("Session.loginInBrowser")(function*(options: {
   readonly noOpen?: boolean
   readonly timeoutSeconds?: number
   readonly onAuthorization?: (url: string) => Promise<void>
@@ -253,7 +253,7 @@ export const loginOperatorInBrowser = Effect.fn("session.loginInBrowser")(functi
   return settled
 })
 
-export const signupOperator = Effect.fn("session.signup")(function*(input: {
+export const signupOperator = Effect.fn("Session.signup")(function*(input: {
   readonly email: string
   readonly password: string
   readonly tenantName?: string
@@ -288,7 +288,7 @@ const controlPlaneRequest = (
   url: string,
   headers: Record<string, string>
 ): ControlPlaneClient["request"] =>
-  Effect.fn("session.controlPlaneRequest")(function*(method, route, body) {
+  Effect.fn("Session.controlPlaneRequest")(function*(method, route, body) {
     const { response, payload } = yield* gatewayCall(method, `${url}${route}`, {
       headers,
       ...whenPresentMap("body", body, (present) => present)
@@ -301,7 +301,7 @@ const controlPlaneRequest = (
     return payload
   })
 
-export const connectToControlPlane = Effect.fn("session.connectToControlPlane")(
+export const connectToControlPlane = Effect.fn("Session.connectToControlPlane")(
   function*(): Effect.fn.Return<ControlPlaneClient, IntegrationsCliError, HttpClient.HttpClient> {
     const session = yield* readOperatorSession()
     if (session === undefined) {
@@ -336,7 +336,7 @@ export const connectToControlPlane = Effect.fn("session.connectToControlPlane")(
   }
 )
 
-export const connectToOperatorGateway = Effect.fn("session.connectToOperatorGateway")(
+export const connectToOperatorGateway = Effect.fn("Session.connectToOperatorGateway")(
   function*(): Effect.fn.Return<GatewayClient, IntegrationsCliError, HttpClient.HttpClient> {
     const session = yield* readOperatorSession()
     if (session === undefined) {
@@ -358,7 +358,7 @@ export const connectToOperatorGateway = Effect.fn("session.connectToOperatorGate
   }
 )
 
-export const logoutOperator = Effect.fn("session.logout")(function*(): Effect.fn.Return<
+export const logoutOperator = Effect.fn("Session.logout")(function*(): Effect.fn.Return<
   void,
   IntegrationsCliError,
   HttpClient.HttpClient

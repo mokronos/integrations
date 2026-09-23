@@ -68,7 +68,7 @@ import {
   ToolSummary
 } from "@mokronos/integrations-contracts"
 import { Authority } from "./middleware.ts"
-import { Forbidden, ForbiddenError, RequiredAccess, Unmetered } from "./identity.ts"
+import { Forbidden, ForbiddenError, GatewayFailure, RequiredAccess, Unmetered } from "./identity.ts"
 
 const Json = Schema.Json
 
@@ -871,6 +871,7 @@ export {
   ApiNotImplemented,
   Authority,
   Forbidden,
+  GatewayFailure,
   HandoffCollected,
   HandoffExpired,
   HandoffUnknown,

@@ -1,4 +1,5 @@
 import path from "node:path"
+import { isTelemetryEnvVar } from "@mokronos/integrations-observability"
 
 export const serviceLabel = "dev.mokronos.integrations"
 
@@ -12,6 +13,14 @@ export interface ServiceDescriptor {
   readonly home: string
   readonly port: number
 }
+
+/** What the installed gateway runs with: its home, plus the telemetry settings of whoever installed it. */
+export const serviceEnvironment = (home: string, environment: NodeJS.ProcessEnv) => ({
+  ...Object.fromEntries(Object.entries(environment).filter(
+    (entry): entry is [string, string] => entry[1] !== undefined && isTelemetryEnvVar(entry[0])
+  )),
+  INTEGRATIONS_HOME: home
+})
 
 export const serviceArguments = (descriptor: ServiceDescriptor): ReadonlyArray<string> => [
   ...descriptor.program,
@@ -69,14 +78,17 @@ const xmlEscape = (value: string): string =>
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&apos;")
 
-export const launchdPlist = (descriptor: ServiceDescriptor): string => `<?xml version="1.0" encoding="UTF-8"?>
+export const launchdPlist = (
+  descriptor: ServiceDescriptor,
+  environment: Readonly<Record<string, string>>
+): string => `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>${serviceLabel}</string>
   <key>ProgramArguments</key><array>
     ${serviceArguments(descriptor).map((value) => `<string>${xmlEscape(value)}</string>`).join("\n    ")}
   </array>
-  <key>EnvironmentVariables</key><dict><key>INTEGRATIONS_HOME</key><string>${xmlEscape(descriptor.home)}</string></dict>
+  <key>EnvironmentVariables</key><dict>${Object.entries(environment).map(([key, value]) => `<key>${xmlEscape(key)}</key><string>${xmlEscape(value)}</string>`).join("")}</dict>
   <key>WorkingDirectory</key><string>${xmlEscape(descriptor.home)}</string>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>

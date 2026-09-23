@@ -2,7 +2,7 @@
   "name": "@mokronos/integrations-observability",
   "version": "0.3.0",
   "type": "module",
-  "description": "Shared OTLP tracing and logging for the integrations gateway and CLIs.",
+  "description": "Tracing and logging for the integrations gateway and CLIs: a local trace file, console logs, and OTLP export.",
   "license": "MIT",
   "repository": {
     "type": "git",

@@ -13,6 +13,7 @@ import { serviceName, slugify } from "@mokronos/integrations-contracts"
 import { whenPresent } from "@mokronos/integrations-contracts"
 import { isJsonObject, parseJsonString, type Json, type JsonObject } from "@mokronos/integrations-contracts"
 import { McpEra, McpProbe } from "@mokronos/integrations-contracts"
+import { tracedFetch } from "@mokronos/integrations-observability"
 
 const PROTOCOL_VERSION = "2026-07-28"
 
@@ -82,24 +83,26 @@ const connect = (
   server: McpServer,
   credential: Option.Option<McpCredential>
 ): Effect.Effect<Client, McpError> =>
-  Effect.tryPromise({
-    try: async () => {
-      const client = new Client(clientInfo, {
-        versionNegotiation: { mode: negotiation(server.era) }
-      })
-      await client.connect(
-        new StreamableHTTPClientTransport(new URL(server.endpoint), {
-          requestInit: { headers: credentialHeaders(credential) }
+  Effect.flatMap(Effect.context<never>(), (context) =>
+    Effect.tryPromise({
+      try: async () => {
+        const client = new Client(clientInfo, {
+          versionNegotiation: { mode: negotiation(server.era) }
         })
-      )
-      return client
-    },
-    catch: (cause) => new McpError({
-      endpoint: server.endpoint,
-      detail: describeCause(cause),
-      cause
-    })
-  })
+        await client.connect(
+          new StreamableHTTPClientTransport(new URL(server.endpoint), {
+            requestInit: { headers: credentialHeaders(credential) },
+            fetch: tracedFetch(context)
+          })
+        )
+        return client
+      },
+      catch: (cause) => new McpError({
+        endpoint: server.endpoint,
+        detail: describeCause(cause),
+        cause
+      })
+    }))
 
 const withClient = <A, E>(
   server: McpServer,

@@ -39,7 +39,7 @@ const decodeJsonText = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Jso
 /** Printed as it travelled: the decoded outcome carries a Date, JSON does not. */
 const encodeOutcome = Schema.encodeSync(InvocationOutcome)
 
-const readJsonArgument = Effect.fn("cli.readJsonArgument")(function*(
+const readJsonArgument = Effect.fn("Cli.readJsonArgument")(function*(
   inline_: string | undefined,
   file: string | undefined
 ): Effect.fn.Return<typeof Schema.Json.Type, IntegrationsCliError> {

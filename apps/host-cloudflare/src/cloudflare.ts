@@ -5,3 +5,7 @@ export interface AssetsFetcherLike {
 export interface ScheduledEventLike {
   readonly cron: string
 }
+
+export interface ExecutionContextLike {
+  waitUntil(promise: Promise<void>): void
+}

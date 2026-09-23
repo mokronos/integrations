@@ -1,7 +1,7 @@
 import { Effect, Predicate } from "effect"
 import { FetchHttpClient, HttpClientError } from "effect/unstable/http"
 import { HttpApiClient } from "effect/unstable/httpapi"
-import { GatewayApi } from "@mokronos/integrations-gateway-api/definition"
+import { GatewayApi, GatewayFailure } from "@mokronos/integrations-gateway-api/definition"
 import {
   Alias,
   ClientId,
@@ -30,7 +30,7 @@ export class GatewayError extends Error {
   readonly status: number | undefined
   readonly method: string | undefined
   readonly path: string | undefined
-  readonly requestId: string | undefined
+  readonly traceId: string | undefined
   readonly code: string | undefined
 
   constructor(options: {
@@ -39,14 +39,14 @@ export class GatewayError extends Error {
     readonly method?: string | undefined
     readonly path?: string | undefined
     readonly status?: number | undefined
-    readonly requestId?: string | undefined
+    readonly traceId?: string | undefined
   }) {
     super(options.message)
     this.name = "GatewayError"
     this.status = options.status
     this.method = options.method
     this.path = options.path
-    this.requestId = options.requestId
+    this.traceId = options.traceId
     this.code = options.code
   }
 }
@@ -57,14 +57,20 @@ const messageOf = (failure: Error): string =>
     : failure.message
 
 const asGatewayError = (failure: Error): GatewayError => {
+  if (failure instanceof GatewayFailure) {
+    return new GatewayError({
+      message: `${failure.message} (trace ${failure.traceId})`,
+      status: 500,
+      traceId: failure.traceId
+    })
+  }
   if (HttpClientError.isHttpClientError(failure)) {
     const response = "response" in failure ? failure.response : undefined
     return new GatewayError({
       message: failure.message,
       method: failure.request.method,
       path: failure.request.url,
-      ...whenPresent("status", response?.status),
-      ...whenPresent("requestId", response?.headers["x-request-id"])
+      ...whenPresent("status", response?.status)
     })
   }
   return new GatewayError({

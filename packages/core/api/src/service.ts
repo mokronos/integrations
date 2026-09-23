@@ -20,7 +20,8 @@ import { whenPresent } from "@mokronos/integrations-contracts"
 import { webCryptoLayer } from "@mokronos/integrations-contracts"
 import { Integrations } from "@mokronos/integrations-host"
 import type { StorageError } from "@mokronos/integrations-host"
-import { Context, Crypto, Effect, Layer, ManagedRuntime, Option } from "effect"
+import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
+import { Context, Crypto, Effect, Exit, Layer, ManagedRuntime, Option, Scope } from "effect"
 import type { HttpClient } from "effect/unstable/http"
 import { SqlClient } from "effect/unstable/sql"
 import { isLoopbackAddress, mayBorrowLocalCredential } from "./http/loopback.ts"
@@ -28,10 +29,12 @@ import { createGatewayHandler } from "./http/handler.ts"
 import type { GatewayHandle, GatewayHandlerOptions, GatewayRequestContext } from "./http/handler.ts"
 import type { RateLimits } from "./http/authority.ts"
 import { authorizeInBrowser } from "./oauth-browser.ts"
-import { integrationsHome } from "./paths.ts"
+import { integrationsHome, traceFilePath } from "./paths.ts"
 import { createWebAssets } from "./web-assets.ts"
 import { defaultRateLimitPerMinute, gatewayEnvironment } from "./config.ts"
-import { telemetryLayer } from "@mokronos/integrations-observability"
+import { makeTelemetry } from "@mokronos/integrations-observability"
+import type { Telemetry } from "@mokronos/integrations-observability"
+import { gatewayVersion } from "./version.ts"
 
 export const localClientName = "local"
 export const localAgentClientName = "local-agent"
@@ -40,6 +43,10 @@ export interface GatewayService {
   readonly home: string
   readonly store: GatewayStore
   readonly handle: (request: Request, context?: GatewayRequestContext) => Promise<Response>
+  /** The gateway's tracer and loggers, for work a host runs outside a request. */
+  readonly telemetry: Layer.Layer<never>
+  /** Writes out buffered spans and logs; a host that may be frozen between requests awaits it. */
+  flushTelemetry(): Promise<void>
   close(): Promise<void>
 }
 
@@ -61,8 +68,8 @@ export interface GatewayServiceOptions {
   readonly allowSignup?: boolean
   readonly rateLimitPerMinute?: number
   readonly maxBodyBytes?: number
-  readonly telemetryEndpoint?: string
-  readonly telemetryHeaders?: Record<string, string>
+  /** Where finished spans are appended. Without one they only leave over OTLP, when configured. */
+  readonly traceFile?: string
 }
 
 interface GatewayCore {
@@ -70,6 +77,7 @@ interface GatewayCore {
   readonly services: Context.Context<GatewayCoreServices>
   readonly store: GatewayStore
   readonly handlerOptions: GatewayHandlerOptions
+  readonly telemetry: Telemetry
   readonly disposeCore: () => Promise<void>
 }
 
@@ -79,7 +87,38 @@ const signupOpen = (
 ): Effect.Effect<boolean, GatewayStoreError> =>
   explicitlyAllowed ? Effect.succeed(true) : store.countLogins().pipe(Effect.map((count) => count === 0))
 
+const startTelemetry = async (traceFile: string | undefined) => {
+  const scope = await Effect.runPromise(Scope.make())
+  const telemetry = await Effect.runPromise(makeTelemetry({
+    serviceName: "integrations-gateway",
+    serviceVersion: gatewayVersion,
+    console: "leveled",
+    traceFile
+  }).pipe(Scope.provide(scope), Effect.provide(BunFileSystem.layer)))
+  return { telemetry, stop: () => Effect.runPromise(Scope.close(scope, Exit.void)) }
+}
+
 const buildCore = async (options: GatewayServiceOptions): Promise<GatewayCore> => {
+  const { telemetry, stop } = await startTelemetry(options.traceFile)
+  try {
+    const core = await buildCoreWith(options, telemetry)
+    return {
+      ...core,
+      disposeCore: async () => {
+        await core.disposeCore()
+        await stop()
+      }
+    }
+  } catch (error) {
+    await stop()
+    throw error
+  }
+}
+
+const buildCoreWith = async (
+  options: GatewayServiceOptions,
+  telemetry: Telemetry
+): Promise<GatewayCore> => {
   const environment = await Effect.runPromise(gatewayEnvironment)
   const home = options.home ?? integrationsHome()
   const encryption = options.encryption ?? await resolveEncryption({
@@ -97,9 +136,10 @@ const buildCore = async (options: GatewayServiceOptions): Promise<GatewayCore> =
       authorizeLocally: authorizeInBrowser,
       ...whenPresent("migrate", options.migrate),
       ...whenPresent("maintenance", options.maintenance)
-    }).pipe(Layer.provide(Layer.merge(
+    }).pipe(Layer.provide(Layer.mergeAll(
       options.sqlClient ?? libsqlLayer(`${home}/gateway.sqlite`),
-      options.httpClient
+      options.httpClient,
+      telemetry.layer
     )))
   )
   let services: Context.Context<GatewayCoreServices>
@@ -135,6 +175,7 @@ const buildCore = async (options: GatewayServiceOptions): Promise<GatewayCore> =
     home,
     services,
     store,
+    telemetry,
     disposeCore: () => runtime.dispose(),
     handlerOptions: {
       store,
@@ -146,11 +187,7 @@ const buildCore = async (options: GatewayServiceOptions): Promise<GatewayCore> =
       mcpUrl: withOrigin("/mcp"),
       dashboardUrl: resolvePublicUrl,
       rateLimits,
-      observabilityLayer: telemetryLayer({
-        serviceName: "integrations-gateway",
-        ...whenPresent("endpoint", options.telemetryEndpoint),
-        ...whenPresent("headers", options.telemetryHeaders)
-      }),
+      telemetry: telemetry.layer,
       ...whenPresent("maxBodyBytes", options.maxBodyBytes),
       sessions: {
         signupOpen: () => signupOpen(store, options.allowSignup ?? environment.allowSignup),
@@ -173,6 +210,8 @@ export const createGatewayService = async (
     home: core.home,
     store: core.store,
     handle: (request, context) => handle.handle(request, context),
+    telemetry: core.telemetry.layer,
+    flushTelemetry: () => Effect.runPromise(core.telemetry.flush),
     close: async () => {
       if (closed) return
       closed = true
@@ -207,6 +246,7 @@ export const serveGateway = async (options: ServeOptions): Promise<RunningGatewa
   const requestedPort = options.port ?? defaultGatewayPort
   const core = await buildCore({
     ...options,
+    traceFile: traceFilePath(options.home ?? integrationsHome(), "gateway"),
     secureCookies: !boundToLoopback,
     ...whenPresent(
       "localCallbackOrigin",
@@ -240,6 +280,8 @@ export const serveGateway = async (options: ServeOptions): Promise<RunningGatewa
       home: core.home,
       store: core.store,
       handle: (request, context) => handle.handle(request, context),
+      telemetry: core.telemetry.layer,
+      flushTelemetry: () => Effect.runPromise(core.telemetry.flush),
       close: async () => {
         if (stopped) return
         stopped = true

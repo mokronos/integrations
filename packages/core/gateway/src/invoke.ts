@@ -191,6 +191,14 @@ const settle = Effect.fn("Invocation.settle")(function*(
   }
 ): Effect.fn.Return<InvocationOutcome, GatewayStoreError, Crypto.Crypto | HttpClient.HttpClient> {
   const { store, integrations } = dependencies
+  yield* Effect.annotateCurrentSpan({ "tool.alias": input.alias, "tool.name": input.tool })
+  if (authorization.status === "authorized") {
+    yield* Effect.annotateCurrentSpan({
+      "connection.integration": authorization.connection.integration,
+      "connection.name": authorization.connection.name,
+      "policy.decision": authorization.decision
+    })
+  }
   const retentionDays = dependencies.argumentRetentionDays ?? defaultArgumentRetentionDays
   const expiryHours = dependencies.approvalExpiryHours ?? defaultApprovalExpiryHours
 
@@ -238,7 +246,7 @@ const settle = Effect.fn("Invocation.settle")(function*(
     input.arguments,
     input.oauthActor
   )
-})
+}, Effect.tap((outcome) => Effect.annotateCurrentSpan("invocation.outcome", outcome.status)))
 
 /**
  * Arguments are checked against the tool's declared input schema before any

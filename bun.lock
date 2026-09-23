@@ -11,7 +11,7 @@
         "@effect/language-service": "catalog:",
         "@effect/platform-bun": "catalog:",
         "@effect/vitest": "catalog:",
-        "@mokronos/integrations-client": "workspace:*",
+        "@mokronos/integrations-client": "workspace:^",
         "@oxlint/plugins": "catalog:",
         "@types/bun": "catalog:",
         "effect-solutions": "catalog:",
@@ -22,7 +22,7 @@
     },
     "apps/cli": {
       "name": "@mokronos/integrations-cli",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "bin": {
         "i": "src/agent.ts",
         "ii": "src/main.ts",
@@ -78,7 +78,7 @@
     },
     "apps/local": {
       "name": "@mokronos/integrations",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "dependencies": {
         "@mokronos/integrations-client": "workspace:*",
         "@mokronos/integrations-contracts": "workspace:*",
@@ -106,7 +106,7 @@
     },
     "apps/ts": {
       "name": "@mokronos/integrations-client",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "dependencies": {
         "@mokronos/integrations-contracts": "workspace:*",
         "@mokronos/integrations-gateway-api": "workspace:*",
@@ -149,14 +149,14 @@
     },
     "packages/contracts": {
       "name": "@mokronos/integrations-contracts",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "peerDependencies": {
         "effect": "catalog:",
       },
     },
     "packages/core/api": {
       "name": "@mokronos/integrations-gateway-api",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "dependencies": {
         "@effect/platform-bun": "catalog:",
         "@modelcontextprotocol/server": "^2.0.0",
@@ -174,7 +174,7 @@
     },
     "packages/core/gateway": {
       "name": "@mokronos/integrations-gateway-core",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "dependencies": {
         "@cfworker/json-schema": "catalog:",
         "@mokronos/integrations-contracts": "workspace:*",
@@ -192,10 +192,11 @@
     },
     "packages/integrations": {
       "name": "@mokronos/integrations-host",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "dependencies": {
         "@modelcontextprotocol/client": "2.0.0",
-        "@mokronos/integrations-contracts": "workspace:*",
+        "@mokronos/integrations-contracts": "workspace:^",
+        "@mokronos/integrations-observability": "workspace:^",
         "oas": "catalog:",
         "oas-normalize": "catalog:",
       },
@@ -212,9 +213,9 @@
     },
     "packages/observability": {
       "name": "@mokronos/integrations-observability",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "dependencies": {
-        "@mokronos/integrations-contracts": "workspace:*",
+        "@mokronos/integrations-contracts": "workspace:^",
       },
       "peerDependencies": {
         "effect": "catalog:",

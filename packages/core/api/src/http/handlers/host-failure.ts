@@ -22,8 +22,12 @@ export const asApiFailure = <A, E, R>(
         "DetectionError",
         "OAuthFlowError"
       ],
-      (failure) => Effect.fail(new ApiBadRequest({
-        error: failure instanceof Error ? failure.message : String(failure)
-      }))
+      (failure) => {
+        const message = failure instanceof Error ? failure.message : String(failure)
+        return Effect.logInfo(`Request refused: ${message}`).pipe(
+          Effect.annotateLogs({ "error.tag": failure._tag }),
+          Effect.andThen(Effect.fail(new ApiBadRequest({ error: message })))
+        )
+      }
     )
   )
