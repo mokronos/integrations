@@ -19,6 +19,18 @@ This project is in an early stage of development.
 
 - Never use `any` or `unknown`. Model every compile-time-known shape with Effect Schema (the schema is the single source of truth; derive TS types via `typeof X.Type`), brand identifiers where mix-ups are possible, and parse external/dynamic data at the boundary with `Schema.decodeUnknown*` instead of casting. No `as` casts to silence the compiler.
 
+## Two ways to hurt yourself
+
+1. **Killing by pattern.** Your own shell's argv contains the same paths and ports as the process you mean, so `pkill -f` / `pgrep | kill` can kill you or another gateway on this machine. Stop only a PID you recorded at spawn, or the listener of your port (`ss -ltnpH 'sport = :<port>'`) after checking `/proc/<pid>/cwd` is this checkout.
+2. **Testing on the live gateway.** `~/.integrations` is the developer's real gateway, database, and keys, in use while you work. Test in a sandbox (`test-integrations-app`). The live install is touched only by the After Task Routine.
+
+## Verifying
+
+- **Smallest proof first.** Run `bun --bun run vitest run <test files>` for the tests covering your change, then `bun run lint` and `bun run typecheck`. Run the full `bun run test` before committing a change that crosses packages.
+- **Test behavior.** A test earns its place by catching a regression in logic or wire behavior; one that restates the implementation does not.
+- **Run it for real.** Changes to the dashboard, the gateway's HTTP/MCP behavior, or CLI output get one pass in a sandbox with the `test-integrations-app` skill. UI claims in your reply come with screenshots.
+- **Debug from traces.** When something fails, read the trace before adding logging: every process appends its spans to `$INTEGRATIONS_HOME/logs/*.trace.ndjson`, and a failed request prints `(trace <id>)`. Queries are in `packages/observability/README.md`.
+
 ## After Task Routine
 - refresh the local install of cli + gateway + dashboard, etc. when you finish a task or commit something
 

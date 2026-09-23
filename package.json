@@ -89,6 +89,7 @@
     "@effect/language-service": "catalog:",
     "@effect/platform-bun": "catalog:",
     "@effect/vitest": "catalog:",
+    "@modelcontextprotocol/server": "^2.0.0",
     "@mokronos/integrations-client": "workspace:^",
     "@oxlint/plugins": "catalog:",
     "@types/bun": "catalog:",
