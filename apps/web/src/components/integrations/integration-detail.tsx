@@ -59,7 +59,7 @@ function ToolCard({ tool }: { readonly tool: Tool }) {
         render={
           <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} />
         }
-        className="cursor-pointer flex-nowrap select-none hover:bg-muted"
+        className="cursor-pointer select-none hover:bg-muted"
       >
         <ItemMedia>
             <ChevronRight
@@ -67,8 +67,8 @@ function ToolCard({ tool }: { readonly tool: Tool }) {
               className={cn("size-4 transition-transform", open && "rotate-90")}
             />
           </ItemMedia>
-          <ItemContent className="min-w-0">
-            <ItemTitle className="max-w-full min-w-0">
+          <ItemContent>
+            <ItemTitle>
               <span className="min-w-0 truncate">{tool.name}</span>
               <Badge variant="outline" className="shrink-0">{tool.connection}</Badge>
             </ItemTitle>
@@ -198,7 +198,7 @@ function IntegrationName({ integration }: { readonly integration: IntegrationOve
   if (!editing) {
     return (
       <>
-        <CardTitle className="min-w-0 break-words">{integration.name}</CardTitle>
+        <CardTitle className="min-w-0 truncate">{integration.name}</CardTitle>
         <Button variant="ghost" size="sm" onClick={start} aria-label="Rename">
           <Pencil className="size-3" />
         </Button>
@@ -271,11 +271,11 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
     <div className="min-w-0 space-y-4">
       <Card>
         <CardHeader>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             <IntegrationIcon host={integrationHost(integration)} size={20} />
             <IntegrationName integration={integration} />
             <ConnectionBadge integration={integration} />
-            <div className="ml-auto flex items-center gap-1">
+            <div className="ml-auto flex shrink-0 items-center gap-1">
               <ConnectDialog key={integration.slug} integration={integration} />
               <RemoveIntegration integration={integration} />
             </div>
@@ -343,7 +343,7 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
                     <li key={connection.address} className="min-w-0">
                       <Item variant="outline" size="sm">
                         <ItemContent>
-                          <ItemTitle className="flex-wrap">
+                          <ItemTitle>
                             <ConnectionIdentity connection={connectionRefOf(connection.owner, connection.integration, connection.name)} integration={integration} showIntegration={false} />
                             <Badge variant={connection.status === "connected" ? "default" : "destructive"}>
                               {connection.status === "connected" ? "connected" : "reauthorization required"}

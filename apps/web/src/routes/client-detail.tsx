@@ -144,7 +144,7 @@ function EffectiveTools({ tools, integrations }: {
                   <div className="divide-y">
                     {connectionTools.map((tool) => {
                       const description = integration?.tools.find((entry) => entry.name === tool.tool && entry.connection === tool.connection.name)?.description
-                      return <div key={`${tool.alias}:${tool.tool}`} className="flex min-w-0 flex-wrap items-center gap-3 px-4 py-3">
+                      return <div key={`${tool.alias}:${tool.tool}`} className="flex min-w-0 items-center gap-3 px-4 py-3">
                         <div className="min-w-0 flex-1">
                           <p className="break-all font-mono text-sm font-medium">{tool.tool}</p>
                           {description ? <p className="text-muted-foreground line-clamp-1 text-xs">{description}</p> : null}

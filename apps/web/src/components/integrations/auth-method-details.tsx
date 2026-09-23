@@ -70,8 +70,8 @@ export function AuthMethodDetails({
           <Icon className="size-4" />
         </div>
         <div className="min-w-0 flex-1 space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium">{method.label}</span>
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="min-w-0 truncate font-medium">{method.label}</span>
             <Badge variant="outline">{details.label}</Badge>
             {selected ? <Badge>selected</Badge> : null}
           </div>

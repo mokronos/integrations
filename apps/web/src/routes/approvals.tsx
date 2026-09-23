@@ -65,9 +65,11 @@ function ApprovalCard({
       className={selected ? "ring-2 ring-primary" : undefined}
     >
       <CardContent className="space-y-3 p-4">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex min-w-0 items-start gap-2">
+          <ToolIdentity connection={null} alias={approval.alias} tool={approval.tool} integrations={integrations} className="min-h-0 flex-1" />
           <Badge variant={statusVariant[approval.status]}>{approval.status}</Badge>
-          <ToolIdentity connection={null} alias={approval.alias} tool={approval.tool} integrations={integrations} />
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
           <span className="text-muted-foreground text-xs">
             asked {when(approval.createdAt)}
           </span>

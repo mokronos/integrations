@@ -121,7 +121,7 @@ function ToolEditor({ title, description, catalog, integrations, loading, assign
                   <div className="flex min-w-0 flex-col gap-2 border-b pb-2 sm:flex-row sm:items-center">
                     <Item
                       size="sm"
-                      className="min-w-0 flex-1 flex-nowrap cursor-pointer select-none hover:bg-muted"
+                      className="min-w-0 flex-1 cursor-pointer select-none hover:bg-muted"
                       render={
                         <button type="button" aria-expanded={open} onClick={() => setExpanded((current) => {
                           const next = new Set(current)
@@ -131,12 +131,12 @@ function ToolEditor({ title, description, catalog, integrations, loading, assign
                       }
                     >
                       <ChevronRight aria-hidden className={cn("size-4 shrink-0 transition-transform", open && "rotate-90")} />
-                      <ItemContent className="min-w-0">{tools[0] === undefined ? null : <ConnectionIdentity connection={tools[0].connection} integration={integration} showIntegration={false} />}</ItemContent>
+                      <ItemContent>{tools[0] === undefined ? null : <ConnectionIdentity connection={tools[0].connection} integration={integration} showIntegration={false} />}</ItemContent>
                       {renderGroup === undefined ? <span className="text-muted-foreground shrink-0 text-xs">{pluralise(tools.length, "tool")}</span> : null}
                     </Item>
                     {renderGroup?.(tools)}
                   </div>
-                  {open ? tools.map((tool) => <Item key={keyOf(tool.connection, tool.name)} size="sm" render={<label />} className="min-w-0 flex-nowrap cursor-pointer select-none hover:bg-muted"><ItemContent className="min-w-0"><ItemTitle className="min-w-0 break-all font-mono font-normal">{tool.name}</ItemTitle>{tool.description.length === 0 ? null : <ItemDescription className="line-clamp-2">{tool.description}</ItemDescription>}</ItemContent>{render(tool)}</Item>) : null}
+                  {open ? tools.map((tool) => <Item key={keyOf(tool.connection, tool.name)} size="sm" render={<label />} className="min-w-0 cursor-pointer select-none hover:bg-muted"><ItemContent><ItemTitle className="min-w-0 break-all font-mono font-normal">{tool.name}</ItemTitle>{tool.description.length === 0 ? null : <ItemDescription className="line-clamp-2">{tool.description}</ItemDescription>}</ItemContent>{render(tool)}</Item>) : null}
                 </div>
               })}
             </div> : null}

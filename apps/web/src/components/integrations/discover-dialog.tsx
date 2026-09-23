@@ -31,9 +31,9 @@ function DiscoveryResult({
   return (
     <div className="space-y-4">
       <div className="rounded-lg border p-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <Check className="size-4" />
-          <span className="font-medium">{result.integration.name} installed</span>
+        <div className="flex min-w-0 items-center gap-2">
+          <Check className="size-4 shrink-0" />
+          <span className="min-w-0 truncate font-medium">{result.integration.name} installed</span>
           <Badge variant="outline">{result.classification.kind === "mcp" ? "MCP" : "OpenAPI"}</Badge>
         </div>
         <ol className="text-muted-foreground mt-3 space-y-1.5 text-xs">
