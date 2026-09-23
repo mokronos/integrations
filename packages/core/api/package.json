@@ -40,6 +40,7 @@
   },
   "dependencies": {
     "@effect/platform-bun": "catalog:",
+    "@effect/platform-node-shared": "catalog:",
     "@modelcontextprotocol/server": "^2.0.0",
     "@integragents/contracts": "workspace:^",
     "@integragents/gateway-core": "workspace:^",

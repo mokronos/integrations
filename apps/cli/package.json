@@ -40,6 +40,7 @@
   },
   "dependencies": {
     "@effect/platform-bun": "catalog:",
+    "@effect/platform-node-shared": "catalog:",
     "@integragents/contracts": "workspace:^",
     "@integragents/gateway-api": "workspace:^",
     "@integragents/gateway-core": "workspace:^",
