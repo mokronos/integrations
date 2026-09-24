@@ -1,4 +1,4 @@
-import { index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core"
+import { blob, index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core"
 
 export const integration = sqliteTable("integration", {
   slug: text("slug").primaryKey(),
@@ -89,3 +89,18 @@ export const credential = sqliteTable("credential", {
   key: text("key").primaryKey(),
   sealed: text("sealed").notNull()
 })
+
+/** Blobs kept in the database, for hosts that store them there instead of on disk. */
+export const storedBlob = sqliteTable("blob", {
+  id: text("id").primaryKey(),
+  contentType: text("content_type").notNull(),
+  filename: text("filename"),
+  bytes: integer("bytes").notNull(),
+  createdAt: integer("created_at").notNull()
+})
+
+export const storedBlobChunk = sqliteTable("blob_chunk", {
+  blob: text("blob").notNull(),
+  seq: integer("seq").notNull(),
+  data: blob("data", { mode: "buffer" }).notNull()
+}, (table) => [primaryKey({ columns: [table.blob, table.seq] })])

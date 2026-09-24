@@ -15,6 +15,13 @@
       "when": 1790125094447,
       "tag": "0001_stiff_thor_girl",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1790209393495,
+      "tag": "0002_stale_warstar",
+      "breakpoints": true
     }
   ]
 }

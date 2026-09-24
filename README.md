@@ -83,7 +83,7 @@ directory.
 | `apps/cli/` | `i` delegated client CLI and `ii` operator CLI |
 | `apps/ts/` | `@integragents/client`, the thin TypeScript gateway client |
 | `apps/web/` | Browser control plane |
-| `apps/host-cloudflare/` | Cloudflare host: Worker, SQLite Durable Object, and R2, provisioned with Alchemy |
+| `apps/host-cloudflare/` | Cloudflare host: a Worker and a SQLite Durable Object, provisioned with Alchemy |
 | `apps/platform-demo/` | An application embedding the gateway core in-process, on its own database |
 | `packages/integrations/` | The integration host: MCP and OpenAPI catalog, connections, tools |
 | `packages/contracts/` | Shared vocabulary and wire contracts |

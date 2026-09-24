@@ -57,7 +57,7 @@ export interface GatewayServiceOptions {
   /** The master key. Defaults to the environment's, then the key file under `home`. */
   readonly encryption?: Encryption
   /** Where uploaded and oversized response bodies live. Defaults to files under `home`. */
-  readonly blobs?: Layer.Layer<BlobStore>
+  readonly blobs?: Layer.Layer<BlobStore, never, SqlClient.SqlClient>
   readonly home?: string
   readonly migrate?: boolean
   readonly maintenance?: boolean

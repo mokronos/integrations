@@ -7,7 +7,9 @@ The gateway on Cloudflare, provisioned with [Alchemy](https://alchemy.run):
 - The gateway runs in a single SQLite-backed Durable Object. Its storage is the
   gateway's database, with the same schema, migrations, and transactions as the
   local SQLite file.
-- Blobs live in R2.
+- Blobs are rows in that same SQLite storage (`BlobStore.sqlLayer`), chunked
+  under the 2 MB value limit. `src/r2-blobs.ts` is the R2 alternative, ready
+  for when R2 is enabled on the account: swap `blobs` in `src/gateway.ts`.
 - A cron trigger runs maintenance every five minutes.
 - The master key is generated once per stage and kept in that stage's Alchemy
   state. Destroying the stage destroys the key and everything it sealed.

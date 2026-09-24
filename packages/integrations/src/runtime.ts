@@ -56,7 +56,7 @@ export const applyIntegrationMigrations = (sql: SqlClient.SqlClient) =>
 
 export interface IntegrationLayerOptions {
   readonly encryption: Encryption
-  readonly blobs: Layer.Layer<BlobStore>
+  readonly blobs: Layer.Layer<BlobStore, never, SqlClient.SqlClient>
 }
 
 /**

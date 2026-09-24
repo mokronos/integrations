@@ -16,7 +16,9 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { Context, Effect, Layer, Schema, Stream } from "effect"
 import { BlobId } from "@integragents/contracts"
+import { SqlClient } from "effect/unstable/sql"
 import { StorageError } from "../errors.ts"
+import { sqlBlobStore } from "./sql-blobs.ts"
 import { describeCause } from "../errors.ts"
 
 export interface StoredBlob {
@@ -53,6 +55,10 @@ export class BlobStore extends Context.Service<
 >()("@integragents/host/BlobStore") {
   static readonly fileLayer = (directory: string): Layer.Layer<BlobStore> =>
     Layer.effect(BlobStore, Effect.sync(() => fileBlobStore(path.join(directory, "blobs"))))
+
+  /** Blobs in the host's database, for hosts without a durable disk. */
+  static readonly sqlLayer: Layer.Layer<BlobStore, never, SqlClient.SqlClient> =
+    Layer.effect(BlobStore, Effect.map(SqlClient.SqlClient, sqlBlobStore))
 
   static readonly temporaryLayer: Layer.Layer<BlobStore> = Layer.effect(
     BlobStore,

@@ -37,3 +37,7 @@ catalog tables are declared in `src/db/schema.ts` and applied through the
 `integration_migration` ledger, or by the host's own migration pipeline when it
 owns the schema. Credentials sit in the `credential` table sealed with the
 host's master key, so a database dump is not a secret spill.
+
+Blobs (binary or oversized response bodies, and uploaded files) go to the
+`BlobStore` the host picks: `BlobStore.fileLayer` keeps them on disk,
+`BlobStore.sqlLayer` in the `blob` and `blob_chunk` tables of the same database.

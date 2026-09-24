@@ -10,7 +10,9 @@ import {
 } from "@integragents/gateway-core"
 import { Effect, Layer, Schema } from "effect"
 import { FetchHttpClient, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
-import { Blobs, r2BlobStore } from "./blobs.ts"
+
+/** Blobs share the object's SQLite storage; `r2Blobs` from ./r2-blobs.ts replaces this once R2 is enabled. */
+const blobs = Effect.succeed(BlobStore.sqlLayer)
 
 const GatewayEnvironment = Schema.Struct({
   INTEGRATIONS_MASTER_KEY: Schema.String,
@@ -25,7 +27,7 @@ const GatewayEnvironment = Schema.Struct({
 export class Gateway extends Cloudflare.DurableObject<Gateway>()(
   "Gateway",
   Effect.gen(function*() {
-    const bucket = yield* Cloudflare.R2.ReadWriteBucket(Blobs)
+    const blobStore = yield* blobs
     const environment = yield* Cloudflare.WorkerEnvironment
     return Effect.gen(function*() {
       const state = yield* Cloudflare.DurableObjectState
@@ -35,7 +37,7 @@ export class Gateway extends Cloudflare.DurableObject<Gateway>()(
         createGatewayService({
           httpClient: FetchHttpClient.layer,
           sqlClient: SqliteClient.layer({ storage: state.raw.storage }),
-          blobs: Layer.succeed(BlobStore, r2BlobStore(bucket)),
+          blobs: blobStore,
           encryption: createEncryption(masterKey),
           maintenance: false,
           secureCookies: true
@@ -65,5 +67,5 @@ export class Gateway extends Cloudflare.DurableObject<Gateway>()(
           )
       }
     })
-  }).pipe(Effect.provide(Cloudflare.R2.ReadWriteBucketBinding))
+  })
 ) {}

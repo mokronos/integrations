@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.2.0",
   "type": "module",
-  "description": "The integrations gateway on Cloudflare: one Worker serving the dashboard, the gateway in a SQLite Durable Object, blobs in R2. Provisioned with Alchemy.",
+  "description": "The integrations gateway on Cloudflare: one Worker serving the dashboard, the gateway and its blobs in a SQLite Durable Object. Provisioned with Alchemy.",
   "license": "MIT",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",

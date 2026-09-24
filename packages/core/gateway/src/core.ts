@@ -22,7 +22,7 @@ export type GatewayCoreServices = GatewayStoreService | IntegrationServices | OA
 export interface GatewayCoreOptions {
   readonly encryption: Encryption
   /** Where uploaded blobs live; the only thing the core keeps outside the database. */
-  readonly blobs: Layer.Layer<BlobStore>
+  readonly blobs: Layer.Layer<BlobStore, never, SqlClient.SqlClient>
   /** Where OAuth callbacks and approval links resolve to, read when needed. */
   readonly publicUrlOf?: () => string | undefined
   /** Completes OAuth on a host-owned loopback listener when there is no public URL. */

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import * as Cloudflare from "alchemy/Cloudflare"
 import { RuntimeContext } from "alchemy"
-import { Effect, Encoding, Stream } from "effect"
+import { Effect, Encoding, Layer, Stream } from "effect"
 import { BlobId } from "@integragents/contracts"
 import { BlobStore, StorageError } from "@integragents/host"
 
@@ -29,7 +29,7 @@ const missing = (id: BlobId) => new StorageError({ message: `Blob ${id} does not
 const r2 = <A>(message: string, operation: Effect.Effect<A, Cloudflare.R2.R2Error, RuntimeContext>) =>
   operation.pipe(Effect.mapError(storageFailure(message)), Effect.provide(RuntimeContext.phantom))
 
-export const r2BlobStore = (bucket: Cloudflare.R2.ReadWriteBucketClient): BlobStore["Service"] => {
+const r2BlobStore = (bucket: Cloudflare.R2.ReadWriteBucketClient): BlobStore["Service"] => {
   const body = (id: BlobId, options?: Cloudflare.R2.GetOptions) =>
     r2(`Could not read blob ${id}`, bucket.get(id, options)).pipe(
       Effect.flatMap((object) => object === null ? Effect.fail(missing(id)) : Effect.succeed(object))
@@ -112,3 +112,9 @@ export const r2BlobStore = (bucket: Cloudflare.R2.ReadWriteBucketClient): BlobSt
     discard: (id) => Effect.ignore(r2(`Could not discard blob ${id}`, bucket.delete(id)))
   }
 }
+
+/** The gateway's blob store in R2, once R2 is enabled on the account. */
+export const r2Blobs = Cloudflare.R2.ReadWriteBucket(Blobs).pipe(
+  Effect.map((bucket) => Layer.succeed(BlobStore, r2BlobStore(bucket))),
+  Effect.provide(Cloudflare.R2.ReadWriteBucketBinding)
+)

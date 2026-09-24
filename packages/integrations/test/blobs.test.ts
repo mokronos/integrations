@@ -4,12 +4,13 @@ import { Effect, Layer, Option, Schema, Stream } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { BlobHandle, blobHandleKey } from "@integragents/contracts"
 import { OpenApiInvoker } from "../src/openapi/invoke.ts"
+import { temporarySqlLayer } from "../src/runtime.ts"
 import { BlobStore } from "../src/storage/blobs.ts"
 
-const services = OpenApiInvoker.layer.pipe(
-  Layer.provideMerge(BlobStore.temporaryLayer),
-  Layer.provide(FetchHttpClient.layer)
-)
+const stores = [
+  ["files", BlobStore.temporaryLayer],
+  ["the database", BlobStore.sqlLayer.pipe(Layer.provide(temporarySqlLayer))]
+] as const
 
 const decodeHandle = Schema.decodeUnknownSync(BlobHandle)
 
@@ -94,7 +95,13 @@ const invoke = (baseUrl: string, path: string, maxInlineBytes: number) =>
       maxInlineBytes
     }))
 
-describe("byte-faithful responses", () => {
+for (const [where, store] of stores) {
+const services = OpenApiInvoker.layer.pipe(
+  Layer.provideMerge(store),
+  Layer.provide(FetchHttpClient.layer)
+)
+
+describe(`byte-faithful responses, with blobs in ${where}`, () => {
   it.live("preserves binary content exactly instead of decoding it as text", () =>
     Effect.gen(function*() {
       const running = yield* server
@@ -154,4 +161,30 @@ describe("byte-faithful responses", () => {
       const result = yield* invoke(running.url.origin, "/small", 64 * 1024)
       expect(result).toEqual({ ok: true })
     }).pipe(Effect.provide(services), Effect.scoped))
+
+  it.effect("keeps a blob larger than any one stored piece whole, prefix by prefix and streamed", () =>
+    Effect.gen(function*() {
+      const blobs = yield* BlobStore
+      const large = new Uint8Array(2_500_000).map((_, index) => (index * 31 + 7) % 256)
+      const pieces = [large.subarray(0, 700_000), large.subarray(700_000, 1_900_000), large.subarray(1_900_000)]
+      const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex")
+      const stored = yield* blobs.write({ contentType: "application/octet-stream", filename: undefined }, Stream.fromIterable(pieces))
+
+      expect(stored.bytes).toBe(large.length)
+      expect(stored.sha256).toBe(sha256(large))
+      expect(sha256(yield* blobs.readAll(stored.id))).toBe(stored.sha256)
+      expect(sha256(yield* blobs.readPrefix(stored.id, 1_100_000))).toBe(sha256(large.subarray(0, 1_100_000)))
+
+      const opened = yield* blobs.open(stored.id)
+      expect(opened.metadata).toEqual({ contentType: "application/octet-stream", filename: undefined, bytes: large.length })
+      const streamed = yield* Stream.runCollect(opened.content)
+      expect(sha256(Buffer.concat(streamed))).toBe(stored.sha256)
+
+      const empty = yield* blobs.write({ contentType: "text/plain", filename: "empty.txt" }, Stream.empty)
+      expect(yield* blobs.readAll(empty.id)).toEqual(new Uint8Array(0))
+
+      yield* blobs.discard(stored.id)
+      expect((yield* Effect.flip(blobs.readAll(stored.id)))._tag).toBe("StorageError")
+    }).pipe(Effect.provide(services), Effect.scoped))
 })
+}
