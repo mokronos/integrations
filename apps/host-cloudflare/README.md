@@ -1,5 +1,8 @@
 # @integragents/host-cloudflare
 
+Experimental. The local and self-hosted gateways in the root README are the
+supported paths.
+
 The gateway on Cloudflare, provisioned with [Alchemy](https://alchemy.run):
 
 - One Worker serves the dashboard as static assets and forwards the gateway's

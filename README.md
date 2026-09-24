@@ -31,13 +31,25 @@ Check my open linear issues
 The skill teaches the agent to discover, connect, inspect, and call integrations
 directly with `i`.
 
-## Gateway and dashboard
+## Where the gateway runs
 
-`i` is a client for the gateway, so a gateway must be running. `ii install`
-registers and starts the local gateway as a per-user service on Linux or macOS.
-Use `ii serve -d` instead to run it only for the current session. A separately
-hosted gateway can be used instead by setting `INTEGRATIONS_URL` and
-`INTEGRATIONS_API_KEY`.
+`i` is a client for the gateway, so a gateway must be running. Pick one of:
+
+- **Local (recommended).** `ii install` registers and starts the gateway as a
+  per-user service on Linux or macOS, so it survives reboots and `i` finds it
+  with no configuration. Use `ii serve -d` instead to run it only for the
+  current session.
+- **Self-hosted.** Run the same binary on a machine you control to share one
+  gateway across machines or a team. See [Self-hosting](#self-hosting).
+- **Embedded.** Run the gateway core in-process on your application's own
+  database. See [Embedding](#embedding).
+
+`apps/host-cloudflare/` also runs the gateway on Cloudflare Workers. It is
+experimental: blobs are stored as chunked rows in the Durable Object's SQLite
+until R2 is enabled, so the local and self-hosted paths are the ones to rely
+on.
+
+## Dashboard
 
 Open the optional control plane with:
 
@@ -67,11 +79,34 @@ The local gateway creates separate credentials for these commands. `i` reads
 the agent key from `~/.integrations/gateway.json`; it can provision connections
 but cannot administer clients or keys. Without a saved operator session, `ii`
 reads its administrator key from `~/.integrations/operator-gateway.json`.
-For a remote gateway, configure `INTEGRATIONS_URL` and `INTEGRATIONS_API_KEY`
-for `i`, or `INTEGRATIONS_URL` and `INTEGRATIONS_ADMIN_API_KEY` for `ii`.
+For a remote gateway, see [Self-hosting](#self-hosting).
 
 State defaults to `~/.integrations`; set `INTEGRATIONS_HOME` to use another
 directory.
+
+## Self-hosting
+
+On the server, install as above and serve on a non-loopback address behind a
+TLS-terminating reverse proxy. `INTEGRATIONS_PUBLIC_URL` is the URL OAuth
+providers redirect back to:
+
+```bash
+INTEGRATIONS_PUBLIC_URL=https://integrations.example.com ii serve --host 0.0.0.0
+```
+
+The gateway writes its agent key to `~/.integrations/gateway.json` and its
+administrator key to `~/.integrations/operator-gateway.json` on the server.
+Point each client machine at it:
+
+```bash
+export INTEGRATIONS_URL=https://integrations.example.com
+export INTEGRATIONS_API_KEY=...        # for i
+export INTEGRATIONS_ADMIN_API_KEY=...  # for ii
+```
+
+Anything other than loopback exposes the gateway, and with it every credential
+it holds, to whoever can reach the port. Keep it behind TLS and a network you
+trust.
 
 ## Surfaces
 
@@ -83,7 +118,7 @@ directory.
 | `apps/cli/` | `i` delegated client CLI and `ii` operator CLI |
 | `apps/ts/` | `@integragents/client`, the thin TypeScript gateway client |
 | `apps/web/` | Browser control plane |
-| `apps/host-cloudflare/` | Cloudflare host: a Worker and a SQLite Durable Object, provisioned with Alchemy |
+| `apps/host-cloudflare/` | Experimental Cloudflare host: a Worker and a SQLite Durable Object, provisioned with Alchemy |
 | `apps/platform-demo/` | An application embedding the gateway core in-process, on its own database |
 | `packages/integrations/` | The integration host: MCP and OpenAPI catalog, connections, tools |
 | `packages/contracts/` | Shared vocabulary and wire contracts |
