@@ -226,7 +226,7 @@ export const createMcpGatewayHandler = (options: McpGatewayOptions): McpGatewayH
       Effect.withSpan("Mcp.authenticate", spanOptionsFor(request))
     ))
   const resolve = async (secret: string, request: Request | undefined) => {
-    if (secret.startsWith("wfoa_") && options.oauth !== undefined) {
+    if (secret.startsWith("igoa_") && options.oauth !== undefined) {
       const oauth = await options.oauth.authenticate(secret)
       return oauth === undefined ? undefined : { client: oauth.client, actor: oauth.actor, scope: oauth.scope }
     }

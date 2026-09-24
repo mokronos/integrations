@@ -102,7 +102,7 @@ const setup = Effect.fnUntraced(function*(options: SetupOptions = {}) {
   const call = Effect.fnUntraced(function*(method: string, pathname: string, init: CallInit = {}) {
     const headers = {
       "content-type": "application/json",
-      ...whenPresent("cookie", init.cookie === undefined ? undefined : `wf_session=${init.cookie}`),
+      ...whenPresent("cookie", init.cookie === undefined ? undefined : `integrations_session=${init.cookie}`),
       ...init.headers
     }
     const response = yield* Effect.promise(() =>
@@ -117,7 +117,7 @@ const setup = Effect.fnUntraced(function*(options: SetupOptions = {}) {
   })
 
   const cookieValue = (setCookie: string | null): string => {
-    const match = /^wf_session=([^;]+)/.exec(setCookie ?? "")
+    const match = /^integrations_session=([^;]+)/.exec(setCookie ?? "")
     if (match?.[1] === undefined) throw new Error(`no session cookie in ${String(setCookie)}`)
     return match[1]
   }
@@ -201,7 +201,7 @@ describe("signup", () => {
     expect(tenant).toBeDefined()
     const subjects = yield* setup_.store.listSubjects(TenantId.make(human.tenantId))
     expect(subjects).toHaveLength(1)
-    expect(human.cookie).toMatch(/^wfs_/)
+    expect(human.cookie).toMatch(/^igs_/)
 
     const me = yield* setup_.call("GET", "/v1/auth/me", { cookie: human.cookie })
     expect(me.body["authenticated"]).toBe(true)
@@ -275,7 +275,7 @@ describe("login", () => {
     })
 
     expect(login.status).toBe(200)
-    expect(login.setCookie).toContain("wf_session=wfs_")
+    expect(login.setCookie).toContain("integrations_session=igs_")
     }).pipe(Effect.provide(testServices)))
 
   it.effect("answers the same for unknown email and wrong password", () =>
@@ -312,7 +312,7 @@ describe("Google identity and CLI handoff", () => {
     const handoff = yield* setup_.call("POST", "/v1/auth/cli/start")
     expect(handoff.status).toBe(201)
     const requestId = String(handoff.body["requestId"])
-    expect(requestId).toMatch(/^wfl_/)
+    expect(requestId).toMatch(/^igl_/)
 
     const start = yield* Effect.promise(() => setup_.handle(new Request(String(handoff.body["authorizationUrl"]))))
     expect(start.status).toBe(302)
@@ -326,7 +326,7 @@ describe("Google identity and CLI handoff", () => {
     expect(collected.body["status"]).toBe("authenticated")
     expect(collected.body["email"]).toBe("google@example.com")
     const token = String(collected.body["token"])
-    expect(token).toMatch(/^wfs_/)
+    expect(token).toMatch(/^igs_/)
     const replay = yield* setup_.call("GET", `/v1/auth/cli/${encodeURIComponent(requestId)}`)
     expect(replay.status).toBe(410)
 
@@ -361,7 +361,7 @@ describe("Google identity and CLI handoff", () => {
     )))
     expect(callback.status).toBe(302)
     expect(callback.headers.get("location")).toBe("/approvals?approval=ap_1")
-    expect(callback.headers.get("set-cookie")).toContain("wf_session=wfs_")
+    expect(callback.headers.get("set-cookie")).toContain("integrations_session=igs_")
 
     const unsafeStart = yield* Effect.promise(() => setup_.handle(new Request(
       "http://gateway.test/v1/auth/google/start?returnTo=%2F%2Fevil.example"
@@ -551,7 +551,7 @@ describe("credential precedence", () => {
 
     const response = yield* setup_.call("GET", "/v1/clients", {
       cookie: human.cookie,
-      headers: { authorization: "Bearer wfi_not-a-real-key" }
+      headers: { authorization: "Bearer igk_not-a-real-key" }
     })
     expect(response.status).toBe(401)
     expect(response.body["code"]).toBe("unknown-key")

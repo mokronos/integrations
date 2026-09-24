@@ -49,7 +49,8 @@ const decodeTokenResponse = Schema.decodeUnknownEffect(TokenResponse)
 
 const RegisteredClient = Schema.Struct({
   client_id: Schema.String,
-  client_secret: Schema.optional(Schema.String)
+  client_secret: Schema.optional(Schema.String),
+  token_endpoint_auth_method: Schema.optional(Schema.String)
 })
 
 const decodeRegisteredClient = Schema.decodeUnknownEffect(RegisteredClient)
@@ -96,12 +97,14 @@ const discover = (
 const resourceUrl = (resource: string | undefined): URL | undefined =>
   resource === undefined ? undefined : new URL(resource)
 
+const requestedTokenAuthMethod = "client_secret_post"
+
 const clientMetadata = (redirectUri: string, scopes: ReadonlyArray<string>) => ({
   client_name: "integrations gateway",
   redirect_uris: [redirectUri],
   grant_types: ["authorization_code", "refresh_token"],
   response_types: ["code"],
-  token_endpoint_auth_method: "client_secret_post",
+  token_endpoint_auth_method: requestedTokenAuthMethod,
   ...whenPresent("scope", scopes.length === 0 ? undefined : scopes.join(" "))
 })
 
@@ -122,6 +125,7 @@ const clientInformation = (
 ) => ({
   client_id: record.clientId,
   ...whenPresent("client_secret", Option.getOrUndefined(secret)),
+  ...whenPresent("token_endpoint_auth_method", record.tokenAuthMethod),
   redirect_uris: noRedirectUris
 })
 
@@ -129,11 +133,7 @@ const metadataOf = (record: OAuthClientRecord) => ({
   issuer: record.issuer ?? record.authorizationUrl,
   authorization_endpoint: record.authorizationUrl,
   token_endpoint: record.tokenUrl,
-  response_types_supported: ["code"],
-  ...whenPresent(
-    "token_endpoint_auth_methods_supported",
-    record.tokenAuthMethods.length === 0 ? undefined : [...record.tokenAuthMethods]
-  )
+  response_types_supported: ["code"]
 })
 
 export interface StartOptions {
@@ -178,7 +178,6 @@ export class OAuthFlows extends Context.Service<
       readonly issuer?: string
       readonly resource?: string
       readonly scopes: ReadonlyArray<string>
-      readonly tokenAuthMethods?: ReadonlyArray<string>
     }) => Effect.Effect<OAuthClientSlug, OAuthError | StorageError>
     readonly createClient: (options: {
       readonly owner: ConnectionOwner
@@ -275,7 +274,6 @@ export class OAuthFlows extends Context.Service<
           readonly issuer?: string
           readonly resource?: string
           readonly scopes: ReadonlyArray<string>
-          readonly tokenAuthMethods?: ReadonlyArray<string>
         }) {
           const registered = yield* Effect.tryPromise({
             try: () => registerClient(options.authorizationUrl, {
@@ -321,7 +319,7 @@ export class OAuthFlows extends Context.Service<
             ...whenPresent("issuer", options.issuer),
             ...whenPresent("resource", options.resource),
             scopes: options.scopes,
-            tokenAuthMethods: options.tokenAuthMethods ?? []
+            tokenAuthMethod: decoded.token_endpoint_auth_method ?? requestedTokenAuthMethod
           })
           if (decoded.client_secret !== undefined) {
             yield* credentials.set(
@@ -353,8 +351,7 @@ export class OAuthFlows extends Context.Service<
           authorizationUrl: options.authorizationUrl,
           tokenUrl: options.tokenUrl,
           ...whenPresent("resource", options.resource),
-          scopes: options.scopes ?? [],
-          tokenAuthMethods: []
+          scopes: options.scopes ?? []
         })
         if (options.clientSecret !== undefined && options.clientSecret.length > 0) {
           yield* credentials.set(

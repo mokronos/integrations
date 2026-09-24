@@ -59,7 +59,7 @@ export const OAuthClientRecord = Schema.Struct({
   issuer: Schema.optional(Schema.String),
   resource: Schema.optional(Schema.String),
   scopes: Schema.Array(Schema.String),
-  tokenAuthMethods: Schema.Array(Schema.String)
+  tokenAuthMethod: Schema.optional(Schema.String)
 })
 export type OAuthClientRecord = typeof OAuthClientRecord.Type
 
@@ -155,10 +155,6 @@ const decodeConnectionRow = (row: SqlRow) =>
 const decodeOAuthClientRow = (row: SqlRow) =>
   Effect.gen(function* () {
     const scopes = yield* decodeStrings(text(row, "scopes"), "scopes")
-    const tokenAuthMethods = yield* decodeStrings(
-      text(row, "token_auth_methods"),
-      "token_auth_methods"
-    )
     return yield* Schema.decodeUnknownEffect(OAuthClientRecord)({
       owner: text(row, "owner"),
       slug: text(row, "slug"),
@@ -170,7 +166,7 @@ const decodeOAuthClientRow = (row: SqlRow) =>
       ...whenPresent("issuer", optionalText(row, "issuer")),
       ...whenPresent("resource", optionalText(row, "resource")),
       scopes,
-      tokenAuthMethods
+      ...whenPresent("tokenAuthMethod", optionalText(row, "token_auth_method"))
     }).pipe(Effect.mapError((cause) =>
       new StorageError({ message: `Malformed oauth_client row ${text(row, "slug")}`, cause })
     ))
@@ -274,6 +270,9 @@ export class CatalogStore extends Context.Service<
       readonly name: ConnectionName
     }) => Effect.Effect<void, StorageError>
 
+    readonly listOAuthClients: (
+      integration: IntegrationSlug
+    ) => Effect.Effect<ReadonlyArray<OAuthClientRecord>, StorageError>
     readonly findOAuthClient: (reference: {
       readonly owner: ConnectionOwner
       readonly slug: OAuthClientSlug
@@ -382,6 +381,7 @@ export class CatalogStore extends Context.Service<
         (slug: IntegrationSlug) =>
           database.batch([
             { sql: "DELETE FROM connection WHERE integration = ?", params: [slug] },
+            { sql: "DELETE FROM oauth_client WHERE integration = ?", params: [slug] },
             { sql: "DELETE FROM integration WHERE slug = ?", params: [slug] }
           ])
       )
@@ -457,6 +457,16 @@ export class CatalogStore extends Context.Service<
           })
       )
 
+      const listOAuthClients = Effect.fn("CatalogStore.listOAuthClients")(
+        function* (integration: IntegrationSlug) {
+          const rows = yield* database.query({
+            sql: "SELECT * FROM oauth_client WHERE integration = ?",
+            params: [integration]
+          })
+          return yield* Effect.forEach(rows, decodeOAuthClientRow)
+        }
+      )
+
       const findOAuthClient = Effect.fn("CatalogStore.findOAuthClient")(
         function* (reference: {
           readonly owner: ConnectionOwner
@@ -477,7 +487,7 @@ export class CatalogStore extends Context.Service<
           write({
             sql: `INSERT INTO oauth_client
                     (owner, slug, integration, client_id, authorization_url, token_url,
-                     registration_endpoint, issuer, resource, scopes, token_auth_methods,
+                     registration_endpoint, issuer, resource, scopes, token_auth_method,
                      created_at)
                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                   ON CONFLICT(owner, slug) DO UPDATE SET
@@ -489,7 +499,7 @@ export class CatalogStore extends Context.Service<
                     issuer = excluded.issuer,
                     resource = excluded.resource,
                     scopes = excluded.scopes,
-                    token_auth_methods = excluded.token_auth_methods`,
+                    token_auth_method = excluded.token_auth_method`,
             params: [
               record.owner,
               record.slug,
@@ -501,7 +511,7 @@ export class CatalogStore extends Context.Service<
               nullable(record.issuer),
               nullable(record.resource),
               JSON.stringify(record.scopes),
-              JSON.stringify(record.tokenAuthMethods),
+              nullable(record.tokenAuthMethod),
               Date.now()
             ]
           })
@@ -654,6 +664,7 @@ export class CatalogStore extends Context.Service<
         listConnections,
         putConnection,
         removeConnection,
+        listOAuthClients,
         findOAuthClient,
         putOAuthClient,
         putOAuthFlow,

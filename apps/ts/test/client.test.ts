@@ -40,7 +40,7 @@ const withClient = <A, E>(
   url: string,
   use: (client: Effect.Success<ReturnType<typeof makeGatewayClient>>) => Effect.Effect<A, E>
 ): Effect.Effect<A, E> =>
-  makeGatewayClient({ url, apiKey: "wfi_test" }).pipe(
+  makeGatewayClient({ url, apiKey: "igk_test" }).pipe(
     Effect.flatMap(use),
     Effect.provide(FetchHttpClient.layer),
     Effect.provideService(FetchHttpClient.Fetch, transport.fetch)
@@ -110,6 +110,6 @@ describe("gateway metadata", () => {
       expect(observed.health).toBe(true)
       expect(transport.metadataRequests()).toBe(1)
       expect(transport.authenticatedRequests()).toHaveLength(1)
-      expect(transport.authenticatedRequests()[0]?.get("authorization")).toBe("Bearer wfi_test")
+      expect(transport.authenticatedRequests()[0]?.get("authorization")).toBe("Bearer igk_test")
     }))
 })

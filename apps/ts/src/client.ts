@@ -29,7 +29,7 @@ const authorize = (options: GatewayClientOptions) =>
   "apiKey" in options
     ? HttpClientRequest.setHeader("authorization", `Bearer ${options.apiKey}`)
     : HttpClientRequest.setHeaders({
-      cookie: `wf_session=${options.sessionToken}`,
+      cookie: `integrations_session=${options.sessionToken}`,
       origin: options.url
     })
 

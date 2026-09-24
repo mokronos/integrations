@@ -42,5 +42,13 @@ export const integrationMigrations: ReadonlyArray<Migration> = [
     statements: [
       "CREATE INDEX `blob_created_at` ON `blob` (`created_at`);"
     ]
+  },
+  {
+    id: 4,
+    name: "0004_shallow_madame_hydra",
+    statements: [
+      "ALTER TABLE `oauth_client` ADD `token_auth_method` text;",
+      "ALTER TABLE `oauth_client` DROP COLUMN `token_auth_methods`;"
+    ]
   }
 ]

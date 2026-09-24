@@ -258,7 +258,7 @@ export const createMcpOAuthHandler = (options: {
       return oauthError("invalid_client_metadata", "Client metadata is not valid")
     }
     const id = yield* newOAuthApplicationId
-    const clientIdentifier = `wfo_client_${id}`
+    const clientIdentifier = `igo_client_${id}`
     const application = yield* store.upsertOAuthApplication({
       id,
       kind: "dcr",

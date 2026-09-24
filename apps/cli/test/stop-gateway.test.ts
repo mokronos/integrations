@@ -36,7 +36,7 @@ const writeConfig = Effect.fnUntraced(function*(
     JSON.stringify({
       port: config.port,
       url: `http://127.0.0.1:${config.port}`,
-      apiKey: "wfi_test",
+      apiKey: "igk_test",
       ...whenPresent("pid", config.pid)
     })
   ))

@@ -17,7 +17,7 @@ import {
   TenantId
 } from "./domain.ts"
 
-const keyPrefix = "wfi_"
+const keyPrefix = "igk_"
 
 /** Bytes of entropy behind every secret we mint. */
 const secretBytes = 32
@@ -76,7 +76,7 @@ export interface IssuedLoginHandoff {
 
 export const generateLoginHandoff: Effect.Effect<IssuedLoginHandoff, never, Crypto.Crypto> = Effect
   .gen(function*() {
-    const secret = yield* prefixedSecret("wfl_")
+    const secret = yield* prefixedSecret("igl_")
     return { secret, hash: yield* hashLoginHandoff(secret) }
   })
 
@@ -86,10 +86,10 @@ export const hashLoginHandoff = (
   Effect.map(sha256Hex(secret), LoginHandoffHash.make)
 
 export const generateApprovalSigningSecret: Effect.Effect<string, never, Crypto.Crypto> =
-  prefixedSecret("wfs_")
+  prefixedSecret("igs_")
 
 /** Session tokens carry the same prefix and entropy as approval secrets. */
-export const sessionSecret: Effect.Effect<string, never, Crypto.Crypto> = prefixedSecret("wfs_")
+export const sessionSecret: Effect.Effect<string, never, Crypto.Crypto> = prefixedSecret("igs_")
 
 export const newClientId: Effect.Effect<ClientId, never, Crypto.Crypto> = Effect.map(
   uuid,
@@ -132,8 +132,8 @@ export const newOAuthGrantId: Effect.Effect<OAuthGrantId, never, Crypto.Crypto> 
   uuid,
   OAuthGrantId.make
 )
-export const newOAuthRequestId: Effect.Effect<string, never, Crypto.Crypto> = prefixedSecret("wfor_")
-export const newOAuthAuthorizationCode: Effect.Effect<string, never, Crypto.Crypto> = prefixedSecret("wfoc_")
-export const newOAuthAccessToken: Effect.Effect<string, never, Crypto.Crypto> = prefixedSecret("wfoa_")
-export const newOAuthRefreshToken: Effect.Effect<string, never, Crypto.Crypto> = prefixedSecret("wforf_")
+export const newOAuthRequestId: Effect.Effect<string, never, Crypto.Crypto> = prefixedSecret("igor_")
+export const newOAuthAuthorizationCode: Effect.Effect<string, never, Crypto.Crypto> = prefixedSecret("igoc_")
+export const newOAuthAccessToken: Effect.Effect<string, never, Crypto.Crypto> = prefixedSecret("igoa_")
+export const newOAuthRefreshToken: Effect.Effect<string, never, Crypto.Crypto> = prefixedSecret("igorf_")
 export const newOAuthTokenFamilyId: Effect.Effect<string, never, Crypto.Crypto> = Effect.map(uuid, (value) => value)

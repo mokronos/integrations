@@ -29,6 +29,13 @@
       "when": 1790263553341,
       "tag": "0003_wet_stick",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1790264641268,
+      "tag": "0004_shallow_madame_hydra",
+      "breakpoints": true
     }
   ]
 }

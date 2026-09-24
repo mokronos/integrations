@@ -164,7 +164,7 @@ const decoded = <A>(
 const sessionToken = (
   response: HttpClientResponse.HttpClientResponse
 ): Effect.Effect<string, IntegrationsCliError> => {
-  const match = /(?:^|;\s*)wf_session=([^;]+)/.exec(response.headers["set-cookie"] ?? "")
+  const match = /(?:^|;\s*)integrations_session=([^;]+)/.exec(response.headers["set-cookie"] ?? "")
   return match?.[1] === undefined
     ? Effect.fail(cliError("The gateway accepted the login but did not return a session"))
     : Effect.succeed(match[1])
@@ -329,7 +329,7 @@ export const connectToControlPlane = Effect.fn("Session.connectToControlPlane")(
     return {
       url: session.url,
       request: controlPlaneRequest(session.url, {
-        cookie: `wf_session=${session.token}`,
+        cookie: `integrations_session=${session.token}`,
         origin: session.url
       })
     }
@@ -366,6 +366,6 @@ export const logoutOperator = Effect.fn("Session.logout")(function*(): Effect.fn
   const session = yield* readOperatorSession()
   if (session === undefined) return
   yield* gatewayCall("POST", `${session.url}/v1/auth/logout`, {
-    headers: { cookie: `wf_session=${session.token}`, origin: session.url }
+    headers: { cookie: `integrations_session=${session.token}`, origin: session.url }
   }).pipe(Effect.ignore, Effect.ensuring(Effect.orDie(clearOperatorSession())))
 })

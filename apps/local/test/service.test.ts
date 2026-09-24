@@ -49,8 +49,8 @@ describe("gateway service", () => {
       const config = yield* Effect.promise(() => readGatewayConfig(running.service.home))
       const operatorConfig = yield* Effect.promise(() => readOperatorGatewayConfig(running.service.home))
       expect(config?.port).toBe(running.port)
-      expect(config?.apiKey).toMatch(/^wfi_/)
-      expect(operatorConfig?.apiKey).toMatch(/^wfi_/)
+      expect(config?.apiKey).toMatch(/^igk_/)
+      expect(operatorConfig?.apiKey).toMatch(/^igk_/)
       expect(operatorConfig?.apiKey).not.toBe(config?.apiKey)
 
       const operator = yield* running.service.store.findClientByName(
@@ -157,14 +157,14 @@ describe("gateway service", () => {
         resolveClientConnection({
           INTEGRATIONS_HOME: running.service.home,
           INTEGRATIONS_URL: "https://gateway.example",
-          INTEGRATIONS_API_KEY: "wfi_remote"
+          INTEGRATIONS_API_KEY: "igk_remote"
         }))
 
       expect(fromFile?.url).toBe(running.url)
       expect(operatorFromFile?.url).toBe(running.url)
       expect(operatorFromFile?.apiKey).not.toBe(fromFile?.apiKey)
       expect(fromEnvironment?.url).toBe("https://gateway.example")
-      expect(fromEnvironment?.apiKey).toBe("wfi_remote")
+      expect(fromEnvironment?.apiKey).toBe("igk_remote")
     }).pipe(Effect.provide(services)))
 
   it.live("reports no connection when neither environment nor config exists", () =>

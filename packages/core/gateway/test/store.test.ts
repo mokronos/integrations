@@ -246,7 +246,7 @@ describe("gateway store", () => {
         tenantId: defaultTenantId,
         name: "phone",
         url: "https://notify.example/approvals",
-        signingSecret: "wfs_secret"
+        signingSecret: "igs_secret"
       })
       yield* gateway.replaceClientApprovalDestinations(
         defaultTenantId,

@@ -504,7 +504,7 @@ describe("gateway http surface", () => {
   it.effect("rejects an unknown key with 401 and a revoked client with 403", () =>
     Effect.gen(function*() {
       const { call, client, store } = yield* setup()
-      expect((yield* call("GET", "/v1/tools", { secret: "wfi_nope" })).status).toBe(401)
+      expect((yield* call("GET", "/v1/tools", { secret: "igk_nope" })).status).toBe(401)
 
       yield* store.revokeClient(defaultTenantId, client.id)
       expect((yield* call("GET", "/v1/tools")).status).toBe(403)
@@ -785,7 +785,7 @@ describe("gateway http surface", () => {
       const keyResponse = yield* call("POST", `/v1/clients/${clientId}/keys`, { body: {} })
       expect(keyResponse.status).toBe(201)
       const secret = String(keyResponse.body["secret"])
-      expect(secret).toMatch(/^wfi_/)
+      expect(secret).toMatch(/^igk_/)
 
       const stored = yield* store.listApiKeys(clientId)
       expect(JSON.stringify(stored)).not.toContain(secret)
@@ -800,7 +800,7 @@ describe("gateway http surface", () => {
         body: { name: "phone", url: "https://notify.example/approvals" }
       })
       expect(created.status).toBe(201)
-      expect(String(created.body["signingSecret"])).toMatch(/^wfs_/)
+      expect(String(created.body["signingSecret"])).toMatch(/^igs_/)
       const destination = Schema.decodeUnknownSync(Schema.Struct({ id: Schema.String }))(created.body["destination"])
       const destinationId = destination.id
       const assigned = yield* call("POST", `/v1/clients/${clientId}/approval-destinations`, {
@@ -1158,7 +1158,7 @@ describe("frozen calls and retries", () => {
 })
 
 describe("provisioning surface", () => {
-  it.effect("validates the node shape a workflow actually authors", () =>
+  it.effect("validates a node that addresses a gateway tool", () =>
     Effect.gen(function*() {
       const { call } = yield* setup({
         capabilities: ["provision_connections", "administer_gateway"],

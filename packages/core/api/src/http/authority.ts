@@ -32,7 +32,7 @@ export {
 import { capture } from "./observability.ts"
 export type { Caller, Refused } from "./identity.ts"
 
-const sessionCookieName = "wf_session"
+const sessionCookieName = "integrations_session"
 
 export const readSessionCookieValue = (header: string | undefined): Option.Option<string> => {
   if (header === undefined) return Option.none()

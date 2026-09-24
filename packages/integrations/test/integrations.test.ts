@@ -4,6 +4,7 @@ import { CatalogStore } from "../src/catalog/store.ts"
 import {
   CredentialStore,
   connectionCredentialKey,
+  oauthClientCredentialKey,
   writeTokens
 } from "../src/storage/credentials.ts"
 import { Integrations } from "../src/integrations.ts"
@@ -12,7 +13,7 @@ import { OAuthFlows } from "../src/oauth/flows.ts"
 import { OpenApiInvoker } from "../src/openapi/invoke.ts"
 import { SpecCache } from "../src/openapi/cache.ts"
 import { stubbedLayer } from "../src/runtime.ts"
-import { AuthTemplateSlug } from "../src/catalog/ids.ts"
+import { AuthTemplateSlug, OAuthClientSlug } from "../src/catalog/ids.ts"
 import { ConnectionName, connectionAddress, IntegrationSlug } from "@integragents/contracts"
 import { ToolAddress } from "@integragents/contracts"
 import type { McpProbe } from "@integragents/contracts"
@@ -311,6 +312,35 @@ describe("the catalog", () => {
       const after = yield* credentials.get(connectionCredentialKey(address))
       const held = { before: Option.isSome(before), after: Option.isSome(after) }
       expect(held).toEqual({ before: true, after: false })
+    }).pipe(Effect.provide(testIntegrations())))
+
+  it.effect("forgets its OAuth clients, so adding it again registers afresh", () =>
+    Effect.gen(function*() {
+      const host = yield* Integrations
+      const oauth = yield* OAuthFlows
+      const store = yield* CatalogStore
+      const credentials = yield* CredentialStore
+      yield* host.addMcp({
+        endpoint: "https://notes.example.com/mcp",
+        name: "Notes",
+        slug: notes,
+        probe: notesProbe
+      })
+      const client = { owner: "org" as const, slug: OAuthClientSlug.make("notes-gateway") }
+      yield* oauth.createClient({
+        ...client,
+        integration: notes,
+        authorizationUrl: "https://notes.example.com/authorize",
+        tokenUrl: "https://notes.example.com/token",
+        clientId: "client-1",
+        clientSecret: "secret-1"
+      })
+      yield* host.removeIntegration(notes)
+      const left = {
+        client: Option.isSome(yield* store.findOAuthClient(client)),
+        secret: Option.isSome(yield* credentials.get(oauthClientCredentialKey(client.owner, client.slug)))
+      }
+      expect(left).toEqual({ client: false, secret: false })
     }).pipe(Effect.provide(testIntegrations())))
 })
 

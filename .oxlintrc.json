@@ -14,7 +14,6 @@
     ".windsurf/**",
     ".reference/**",
     ".tmp/**",
-    ".wf/**",
     "**/.alchemy/**",
     "**/dist/**",
     "**/out/**",

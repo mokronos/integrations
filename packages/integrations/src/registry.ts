@@ -22,16 +22,18 @@ export interface SearchIntegrationsOptions {
 
 const integrationsRegistryUrl = "https://integrations.sh"
 
+const RegistrySurface = Schema.Struct({
+  kind: Schema.Literals(["mcp", "openapi", "graphql", "cli"]),
+  slug: Schema.String,
+  url: Schema.optional(Schema.String)
+})
+
 const RegistrySearchResponse = Schema.Struct({
   results: Schema.Array(Schema.Struct({
     domain: Schema.String,
     name: Schema.String,
     description: Schema.String,
-    surfaces: Schema.Array(Schema.Struct({
-      kind: Schema.Literals(["mcp", "openapi", "graphql", "cli"]),
-      slug: Schema.String,
-      url: Schema.optional(Schema.String)
-    }))
+    surfaces: Schema.optional(Schema.Array(RegistrySurface))
   }))
 })
 
@@ -40,7 +42,7 @@ const decodeSearch = Schema.decodeUnknownEffect(
 )
 const decodeQuery = Schema.decodeUnknownEffect(IntegrationSearchQuery)
 
-const toSearchSurface = (surface: typeof RegistrySearchResponse.Type.results[number]["surfaces"][number]): IntegrationSearchSurface => ({
+const toSearchSurface = (surface: typeof RegistrySurface.Type): IntegrationSearchSurface => ({
   type: surface.kind,
   slug: surface.slug,
   name: surface.kind === "mcp" ? "MCP" : surface.kind === "openapi" ? "OpenAPI" : surface.kind,
@@ -84,12 +86,16 @@ export const search = Effect.fn("Registry.search")(function* (
     }))
   )
 
-  const results = parsed.results.map((result) => ({
-    domain: result.domain,
-    name: result.name,
-    description: result.description,
-    surfaces: result.surfaces.map(toSearchSurface)
-  }))
+  const results = parsed.results.flatMap((result) =>
+    result.surfaces === undefined || result.surfaces.length === 0
+      ? []
+      : [{
+        domain: result.domain,
+        name: result.name,
+        description: result.description,
+        surfaces: result.surfaces.map(toSearchSurface)
+      }]
+  )
   return { query: text, results } satisfies IntegrationSearchResponse
 })
 

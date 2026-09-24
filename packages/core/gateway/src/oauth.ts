@@ -134,7 +134,7 @@ export const prepareFlow = Effect.fn("OAuth.prepareFlow")(function*(
       detail: "Could not discover OAuth authorization and token endpoints"
     })
   }
-  const clientSlug = `${input.integration}-wf`
+  const clientSlug = `${input.integration}-gateway`
   const reusable = input.clientId !== undefined
     ? false
     : Option.isSome(
@@ -178,11 +178,7 @@ export const prepareFlow = Effect.fn("OAuth.prepareFlow")(function*(
         tokenUrl,
         scopes,
         ...whenPresent("issuer", discovered?.issuer),
-        ...whenPresent("resource", resource),
-        ...whenPresent(
-          "tokenEndpointAuthMethodsSupported",
-          discovered?.tokenEndpointAuthMethodsSupported
-        )
+        ...whenPresent("resource", resource)
       }))
   }
   const started = yield* oauthStep("start", `Could not start authorization for ${input.integration}`,

@@ -105,7 +105,7 @@ describe("OAuth flows", () => {
     authorizationUrl: "https://auth.example.com/authorize",
     tokenUrl: "https://auth.example.com/token",
     scopes: ["read", "write"],
-    tokenAuthMethods: ["client_secret_post"]
+    tokenAuthMethod: "client_secret_post"
   }
 
   it.effect("round-trips a client, arrays included, and holds no secret", () =>

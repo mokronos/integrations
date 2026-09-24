@@ -133,7 +133,7 @@ describe("gateway authorization", () => {
       const store = yield* gatewayStore()
       yield* seed(store)
 
-      expect((yield* invoke(store, "wfi_not-a-real-key")).status).toBe("unknown-key")
+      expect((yield* invoke(store, "igk_not-a-real-key")).status).toBe("unknown-key")
     }).pipe(Effect.provide(testServices)))
 
   it.effect("denies every key of a revoked client", () =>
@@ -364,7 +364,7 @@ describe("gateway capability authorization", () => {
         capabilities: ["provision_connections", "administer_gateway"]
       })
 
-      expect((yield* authorizeClientCapability(store, "wfi_nope", "administer_gateway")).status)
+      expect((yield* authorizeClientCapability(store, "igk_nope", "administer_gateway")).status)
         .toBe("unknown-key")
 
       yield* store.revokeClient(defaultTenantId, client.id)

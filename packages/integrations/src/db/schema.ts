@@ -66,7 +66,7 @@ export const oauthClient = sqliteTable("oauth_client", {
   issuer: text("issuer"),
   resource: text("resource"),
   scopes: text("scopes").notNull().default("[]"),
-  tokenAuthMethods: text("token_auth_methods").notNull().default("[]"),
+  tokenAuthMethod: text("token_auth_method"),
   createdAt: integer("created_at").notNull()
 }, (table) => [primaryKey({ columns: [table.owner, table.slug] })])
 

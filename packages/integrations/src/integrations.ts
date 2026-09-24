@@ -8,7 +8,7 @@ import { captureMcpTools, captureOpenApiTools } from "./catalog/capture.ts"
 import { CatalogStore } from "./catalog/store.ts"
 import type { ConnectionRecord, IntegrationRecord } from "./catalog/store.ts"
 import type { Tool as IntegrationTool } from "./tool.ts"
-import { connectionCredentialKey, CredentialStore } from "./storage/credentials.ts"
+import { connectionCredentialKey, CredentialStore, oauthClientCredentialKey } from "./storage/credentials.ts"
 import {
   ConnectionNotFoundError,
   IntegrationNotFoundError,
@@ -602,6 +602,9 @@ export class Integrations extends Context.Service<
               integration: slug,
               name: connection.name
             }))
+          const clients = yield* store.listOAuthClients(slug)
+          yield* Effect.forEach(clients, (client) =>
+            credentials.remove(oauthClientCredentialKey(client.owner, client.slug)))
           yield* store.removeIntegration(slug)
         }
       )

@@ -91,7 +91,7 @@ const fakeAuth = (behaviour: {
           connection: ConnectionName.make("default"),
           template: AuthTemplateSlug.make("google"),
           clientOwner: "org" as const,
-          client: OAuthClientSlug.make("client-google-wf"),
+          client: OAuthClientSlug.make("client-google-gateway"),
           scope: Option.none(),
           expiresAt: Option.none(),
           renewable: true
@@ -133,13 +133,12 @@ describe("remote oauth flows", () => {
 
   const storedClient = {
     owner: "org" as const,
-    slug: OAuthClientSlug.make("google-wf"),
+    slug: OAuthClientSlug.make("google-gateway"),
     integration: IntegrationSlug.make("google"),
     clientId: "already-registered",
     authorizationUrl: manualMethod.oauth.authorizationUrl,
     tokenUrl: manualMethod.oauth.tokenUrl,
-    scopes: [],
-    tokenAuthMethods: []
+    scopes: []
   }
 
   it.effect("parks the session for a human when the provider needs an app of its own", () =>

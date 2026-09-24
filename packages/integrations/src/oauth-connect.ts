@@ -41,7 +41,6 @@ export interface RegisterOAuthClientOptions {
   readonly issuer?: string
   readonly resource?: string
   readonly scopes: ReadonlyArray<string>
-  readonly tokenEndpointAuthMethodsSupported?: ReadonlyArray<string>
 }
 
 export const registerOAuthClient = Effect.fn("OAuthConnect.registerClient")(function*(
@@ -60,8 +59,7 @@ export const registerOAuthClient = Effect.fn("OAuthConnect.registerClient")(func
     tokenUrl: options.tokenUrl,
     ...whenPresent("issuer", options.issuer),
     ...whenPresent("resource", options.resource),
-    scopes: options.scopes,
-    ...whenPresent("tokenAuthMethods", options.tokenEndpointAuthMethodsSupported)
+    scopes: options.scopes
   })
 })
 

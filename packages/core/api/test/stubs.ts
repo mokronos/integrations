@@ -43,6 +43,7 @@ const catalogStore: CatalogStore["Service"] = {
   listConnections: dies("CatalogStore.listConnections"),
   putConnection: dies("CatalogStore.putConnection"),
   removeConnection: dies("CatalogStore.removeConnection"),
+  listOAuthClients: dies("CatalogStore.listOAuthClients"),
   findOAuthClient: dies("CatalogStore.findOAuthClient"),
   putOAuthClient: dies("CatalogStore.putOAuthClient"),
   putOAuthFlow: dies("CatalogStore.putOAuthFlow"),

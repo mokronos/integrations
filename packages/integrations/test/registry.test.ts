@@ -22,6 +22,10 @@ describe("integration registry", () => {
                 { kind: "mcp", slug: "example-mcp", url: "https://example.com/mcp" },
                 { kind: "openapi", slug: "example-api", url: "https://example.com/openapi.json" }
               ]
+            }, {
+              domain: "nothing.example",
+              name: "nothing.example",
+              description: "No developer endpoints found"
             }]
           })
         }
@@ -33,6 +37,7 @@ describe("integration registry", () => {
         ).pipe(Effect.provide(FetchHttpClient.layer))
 
         expect(paths).toEqual(["/api/search?q=&limit=100"])
+        expect(response.results.map((result) => result.domain)).toEqual(["example.com"])
         expect(response.results[0]?.surfaces).toEqual([
           { type: "mcp", slug: "example-mcp", name: "MCP", url: "https://example.com/mcp" },
           { type: "openapi", slug: "example-api", name: "OpenAPI", url: "https://example.com/openapi.json" }

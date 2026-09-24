@@ -39,7 +39,7 @@ const connected: Connection = {
   template: "oauth",
   address: "tools.provider.org.primary",
   provider: "oauth",
-  oauthClient: "provider-wf",
+  oauthClient: "provider-gateway",
   oauthClientOwner: "org",
   oauthScope: null,
   expiresAt: null,
@@ -59,6 +59,7 @@ const catalogStore: CatalogStore["Service"] = {
   removeIntegration: notUsed("CatalogStore.removeIntegration"),
   listConnections: notUsed("CatalogStore.listConnections"),
   removeConnection: notUsed("CatalogStore.removeConnection"),
+  listOAuthClients: notUsed("CatalogStore.listOAuthClients"),
   findOAuthClient: notUsed("CatalogStore.findOAuthClient"),
   putOAuthClient: notUsed("CatalogStore.putOAuthClient"),
   putOAuthFlow: notUsed("CatalogStore.putOAuthFlow"),
@@ -117,7 +118,7 @@ const operations = (
     Context.add(OAuthFlows, {
       probe: notUsed("probe"),
       registerDynamicClient: notUsed("registerDynamicClient"),
-      createClient: () => Effect.succeed(OAuthClientSlug.make("provider-wf")),
+      createClient: () => Effect.succeed(OAuthClientSlug.make("provider-gateway")),
       start: (options) => {
         redirectUri = options.redirectUri
         return Effect.succeed({
@@ -134,7 +135,7 @@ const operations = (
               connection: ConnectionName.make("primary"),
               template: AuthTemplateSlug.make("oauth"),
               clientOwner: "org" as const,
-              client: OAuthClientSlug.make("provider-wf"),
+              client: OAuthClientSlug.make("provider-gateway"),
               scope: Option.none(),
               expiresAt: Option.none(),
               renewable: true
