@@ -3,7 +3,7 @@ import {
   PositiveInt,
   whenPresentMap
 } from "@integragents/contracts"
-import { Integrations } from "@integragents/host"
+import { BlobStore, Integrations } from "@integragents/host"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
@@ -70,6 +70,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
   Effect.gen(function*() {
     const store = yield* GatewayStoreService
     const integrations = yield* Integrations
+    const blobs = yield* BlobStore
     const config = yield* GatewayConfig
     return handlers
       .handle("overview", () =>
@@ -529,7 +530,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           return { reports }
         }))
       .handle("maintenance", () => Effect.gen(function*() {
-        const report = yield* capture(runMaintenance(store))
+        const report = yield* capture(runMaintenance(store, blobs))
         yield* capture(deliverDueApprovalNotifications({
           store,
           ...whenPresentMap("dashboardUrl", config.dashboardUrl?.(), (url) => url)

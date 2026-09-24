@@ -2,8 +2,8 @@ import { Context, Effect, Layer } from "effect"
 import type { HttpClient } from "effect/unstable/http"
 import { SqlClient } from "effect/unstable/sql"
 import { whenPresent } from "@integragents/contracts"
-import { integrationLayer, Integrations } from "@integragents/host"
-import type { BlobStore, IntegrationServices, StorageError } from "@integragents/host"
+import { BlobStore, integrationLayer, Integrations } from "@integragents/host"
+import type { IntegrationServices, StorageError } from "@integragents/host"
 import { deliverDueApprovalNotifications } from "./approval-delivery.ts"
 import { reconcileConfigurations } from "./configurations.ts"
 import type { Encryption } from "./crypto.ts"
@@ -79,10 +79,11 @@ const reconcileOnStart: Layer.Layer<never, GatewayStoreError | StorageError, Gat
 
 const maintenanceLayer = (
   publicUrlOf: (() => string | undefined) | undefined
-): Layer.Layer<never, never, GatewayStoreService | HttpClient.HttpClient> =>
+): Layer.Layer<never, never, GatewayStoreService | BlobStore | HttpClient.HttpClient> =>
   Layer.effectDiscard(Effect.gen(function*() {
     const store = yield* GatewayStoreService
-    yield* Effect.forkScoped(maintenanceLoop(store, {
+    const blobs = yield* BlobStore
+    yield* Effect.forkScoped(maintenanceLoop(store, blobs, {
       afterSweep: Effect.suspend(() =>
         deliverDueApprovalNotifications({ store, ...whenPresent("dashboardUrl", publicUrlOf?.()) }))
     }))

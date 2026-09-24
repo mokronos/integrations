@@ -55,7 +55,7 @@ export class Gateway extends Cloudflare.DurableObject<Gateway>()(
           return HttpServerResponse.fromWeb(response)
         }),
         maintain: () =>
-          runMaintenance(service.store).pipe(
+          runMaintenance(service.store, service.blobs).pipe(
             Effect.andThen(deliverDueApprovalNotifications({
               store: service.store,
               dashboardUrl: env.INTEGRATIONS_PUBLIC_URL

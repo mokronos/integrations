@@ -239,7 +239,8 @@ const MaintenanceReport = Schema.Struct({
   expiredAuditArguments: Schema.Number,
   deletedSessions: Schema.Number,
   expiredIdentityFlows: Schema.Number,
-  expiredOAuthState: Schema.Number
+  expiredOAuthState: Schema.Number,
+  expiredBlobs: Schema.Number
 })
 
 class ApiBadRequest extends Schema.TaggedError<ApiBadRequest>()(

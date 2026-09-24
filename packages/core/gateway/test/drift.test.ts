@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Clock, Effect } from "effect"
+import { Clock, Context, Effect, Layer } from "effect"
 import { TestClock } from "effect/testing"
 import { PositiveInt, ToolAddress } from "@integragents/contracts"
 import type { Tool } from "@integragents/contracts"
@@ -19,10 +19,16 @@ import {
   runMaintenance,
   ToolName
 } from "../src/index.ts"
-import type { ConnectionRef, ToolCatalogReader, ToolSnapshot } from "../src/index.ts"
+import type { ConnectionRef, GatewayStore, ToolCatalogReader, ToolSnapshot } from "../src/index.ts"
+import { BlobStore } from "@integragents/host"
 import { gatewayStore, testServices } from "./fixtures.ts"
 
 const store = gatewayStore("gateway-drift-")
+
+const maintain = (gateway: GatewayStore) =>
+  Layer.build(BlobStore.temporaryLayer).pipe(
+    Effect.flatMap((context) => runMaintenance(gateway, Context.get(context, BlobStore)))
+  )
 
 const snapshot = (tool: string, input: ToolSnapshot["inputSchema"]): ToolSnapshot => ({
   integration: IntegrationSlug.make("tickets"),
@@ -175,7 +181,7 @@ describe("gateway maintenance", () => {
       const stale = yield* freeze("create", new Date((yield* Clock.currentTimeMillis) - 1_000))
       const fresh = yield* freeze("close", new Date((yield* Clock.currentTimeMillis) + 60_000))
 
-      const result = yield* runMaintenance(gateway)
+      const result = yield* maintain(gateway)
 
       expect(result.expiredApprovals).toBe(1)
       expect((yield* gateway.getApproval(defaultTenantId, stale.id))?.status).toBe("expired")
@@ -211,12 +217,12 @@ describe("gateway maintenance", () => {
         expiresAt: new Date((yield* Clock.currentTimeMillis) + 60_000)
       })
 
-      expect((yield* runMaintenance(gateway)).expiredApprovals).toBe(0)
+      expect((yield* maintain(gateway)).expiredApprovals).toBe(0)
       expect((yield* gateway.getApproval(defaultTenantId, frozen.id))?.status).toBe("pending")
 
       yield* TestClock.adjust("2 minutes")
 
-      expect((yield* runMaintenance(gateway)).expiredApprovals).toBe(1)
+      expect((yield* maintain(gateway)).expiredApprovals).toBe(1)
       expect((yield* gateway.getApproval(defaultTenantId, frozen.id))?.status).toBe("expired")
     }).pipe(Effect.provide(testServices)))
 
@@ -236,7 +242,7 @@ describe("gateway maintenance", () => {
         arguments: { value: { body: "PII" }, expiresAt: new Date((yield* Clock.currentTimeMillis) - 1_000) }
       })
 
-      const result = yield* runMaintenance(gateway)
+      const result = yield* maintain(gateway)
 
       expect(result.expiredAuditArguments).toBe(1)
       expect(yield* gateway.listAudit(defaultTenantId, { limit: PositiveInt.make(10) }))
@@ -246,12 +252,13 @@ describe("gateway maintenance", () => {
   it.effect("is safe to run when there is nothing to do", () =>
     Effect.gen(function*() {
       const gateway = yield* store
-      expect(yield* runMaintenance(gateway)).toEqual({
+      expect(yield* maintain(gateway)).toEqual({
         expiredApprovals: 0,
         expiredAuditArguments: 0,
         deletedSessions: 0,
         expiredIdentityFlows: 0,
-        expiredOAuthState: 0
+        expiredOAuthState: 0,
+        expiredBlobs: 0
       })
     }).pipe(Effect.provide(testServices)))
 
@@ -270,7 +277,7 @@ describe("gateway maintenance", () => {
         expiresAt: expiredAt
       })
 
-      expect((yield* runMaintenance(gateway)).expiredIdentityFlows).toBe(2)
+      expect((yield* maintain(gateway)).expiredIdentityFlows).toBe(2)
       expect(yield* gateway.getLoginHandoff(handoff.hash)).toBeUndefined()
       expect(yield* gateway.consumeIdentityOAuthState(state.hash)).toBeUndefined()
     }).pipe(Effect.provide(testServices)))

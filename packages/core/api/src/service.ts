@@ -42,6 +42,7 @@ export const localAgentClientName = "local-agent"
 export interface GatewayService {
   readonly home: string
   readonly store: GatewayStore
+  readonly blobs: BlobStore["Service"]
   readonly handle: (request: Request, context?: GatewayRequestContext) => Promise<Response>
   /** The gateway's tracer and loggers, for work a host runs outside a request. */
   readonly telemetry: Layer.Layer<never>
@@ -211,6 +212,7 @@ export const createGatewayService = async (
   return {
     home: core.home,
     store: core.store,
+    blobs: Context.get(core.services, BlobStore),
     handle: (request, context) => handle.handle(request, context),
     telemetry: core.telemetry.layer,
     flushTelemetry: () => Effect.runPromise(core.telemetry.flush),
@@ -281,6 +283,7 @@ export const serveGateway = async (options: ServeOptions): Promise<RunningGatewa
     const service: GatewayService = {
       home: core.home,
       store: core.store,
+      blobs: Context.get(core.services, BlobStore),
       handle: (request, context) => handle.handle(request, context),
       telemetry: core.telemetry.layer,
       flushTelemetry: () => Effect.runPromise(core.telemetry.flush),

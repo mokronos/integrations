@@ -59,7 +59,8 @@ const stubBlobStore: BlobStore["Service"] = {
   readAll: dies("BlobStore.readAll"),
   readPrefix: dies("BlobStore.readPrefix"),
   open: dies("BlobStore.open"),
-  discard: dies("BlobStore.discard")
+  discard: dies("BlobStore.discard"),
+  expire: dies("BlobStore.expire")
 }
 
 export const stubIntegrationsContext = (

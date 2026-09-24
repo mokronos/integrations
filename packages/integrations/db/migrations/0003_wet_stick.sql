@@ -1,0 +1,1 @@
+CREATE INDEX `blob_created_at` ON `blob` (`created_at`);

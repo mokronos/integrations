@@ -109,7 +109,22 @@ const r2BlobStore = (bucket: Cloudflare.R2.ReadWriteBucketClient): BlobStore["Se
         }))
       ),
 
-    discard: (id) => Effect.ignore(r2(`Could not discard blob ${id}`, bucket.delete(id)))
+    discard: (id) => Effect.ignore(r2(`Could not discard blob ${id}`, bucket.delete(id))),
+
+    expire: (before) => {
+      const page = (cursor: string | undefined, expired: number): Effect.Effect<number, StorageError> =>
+        r2("Could not list blobs", bucket.list(cursor === undefined ? {} : { cursor })).pipe(
+          Effect.flatMap((listed) => {
+            const keys = listed.objects.filter((object) => object.uploaded < before).map((object) => object.key)
+            const deleted = keys.length === 0 ? Effect.void : r2("Could not expire blobs", bucket.delete(keys))
+            return Effect.andThen(
+              deleted,
+              listed.truncated ? page(listed.cursor, expired + keys.length) : Effect.succeed(expired + keys.length)
+            )
+          })
+        )
+      return page(undefined, 0)
+    }
   }
 }
 

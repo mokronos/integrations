@@ -186,5 +186,19 @@ describe(`byte-faithful responses, with blobs in ${where}`, () => {
       yield* blobs.discard(stored.id)
       expect((yield* Effect.flip(blobs.readAll(stored.id)))._tag).toBe("StorageError")
     }).pipe(Effect.provide(services), Effect.scoped))
+
+  it.live("expires only the blobs stored before the cutoff", () =>
+    Effect.gen(function*() {
+      const blobs = yield* BlobStore
+      const old = yield* blobs.write({ contentType: "application/zip", filename: undefined }, Stream.succeed(zipBytes))
+      yield* Effect.sleep("20 millis")
+      const cutoff = new Date()
+      yield* Effect.sleep("20 millis")
+      const fresh = yield* blobs.write({ contentType: "application/zip", filename: undefined }, Stream.succeed(zipBytes))
+
+      expect(yield* blobs.expire(cutoff)).toBe(1)
+      expect((yield* Effect.flip(blobs.readAll(old.id)))._tag).toBe("StorageError")
+      expect(yield* blobs.readAll(fresh.id)).toEqual(zipBytes)
+    }).pipe(Effect.provide(services), Effect.scoped))
 })
 }

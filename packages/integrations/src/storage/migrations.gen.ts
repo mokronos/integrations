@@ -35,5 +35,12 @@ export const integrationMigrations: ReadonlyArray<Migration> = [
       "CREATE TABLE `blob` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`content_type` text NOT NULL,\n\t`filename` text,\n\t`bytes` integer NOT NULL,\n\t`created_at` integer NOT NULL\n);",
       "CREATE TABLE `blob_chunk` (\n\t`blob` text NOT NULL,\n\t`seq` integer NOT NULL,\n\t`data` blob NOT NULL,\n\tPRIMARY KEY(`blob`, `seq`)\n);"
     ]
+  },
+  {
+    id: 3,
+    name: "0003_wet_stick",
+    statements: [
+      "CREATE INDEX `blob_created_at` ON `blob` (`created_at`);"
+    ]
   }
 ]

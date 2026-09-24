@@ -3,9 +3,11 @@ import {
   closeSync,
   createReadStream,
   createWriteStream,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   openSync,
+  readdirSync,
   readFileSync,
   readSync,
   rmSync,
@@ -51,6 +53,8 @@ export class BlobStore extends Context.Service<
       StorageError
     >
     readonly discard: (id: BlobId) => Effect.Effect<void>
+    /** Deletes every blob stored before the cutoff and returns how many went. */
+    readonly expire: (before: Date) => Effect.Effect<number, StorageError>
   }
 >()("@integragents/host/BlobStore") {
   static readonly fileLayer = (directory: string): Layer.Layer<BlobStore> =>
@@ -91,6 +95,12 @@ const fileBlobStore = (directory: string): BlobStore["Service"] => {
         }
       },
       catch: storageFailure(`Could not read blob ${id}`)
+    })
+
+  const discard = (id: BlobId) =>
+    Effect.sync(() => {
+      rmSync(contentPath(id), { force: true })
+      rmSync(metadataPath(id), { force: true })
     })
 
   return {
@@ -171,10 +181,21 @@ const fileBlobStore = (directory: string): BlobStore["Service"] => {
         ).pipe(Stream.map((chunk: Uint8Array) => new Uint8Array(chunk)))
       })),
 
-    discard: (id) =>
-      Effect.sync(() => {
-        rmSync(contentPath(id), { force: true })
-        rmSync(metadataPath(id), { force: true })
-      })
+    discard,
+
+    expire: (before) =>
+      Effect.try({
+        try: () =>
+          existsSync(directory)
+            ? readdirSync(directory)
+              .filter((name) => name.endsWith(".json"))
+              .map((name) => BlobId.make(name.slice(0, -".json".length)))
+              .filter((id) => statSync(metadataPath(id)).mtimeMs < before.getTime())
+            : [],
+        catch: storageFailure(`Could not list blobs in ${directory}`)
+      }).pipe(
+        Effect.tap(Effect.forEach(discard, { discard: true })),
+        Effect.map((expired) => expired.length)
+      )
   }
 }

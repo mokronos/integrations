@@ -11,6 +11,7 @@ const chunkBytes = 1024 * 1024
 
 const Bytes = Schema.Union([Schema.Uint8Array, Schema.instanceOf(ArrayBuffer)])
 const ChunkRows = Schema.Array(Schema.Struct({ data: Bytes }))
+const IdRows = Schema.Array(Schema.Struct({ id: Schema.String }))
 const MetadataRows = Schema.Array(Schema.Struct({
   content_type: Schema.String,
   filename: Schema.NullOr(Schema.String),
@@ -133,6 +134,17 @@ export const sqlBlobStore = (sql: SqlClient.SqlClient): BlobStore["Service"] => 
         )
       })),
 
-    discard
+    discard,
+
+    expire: (before) =>
+      sql.withTransaction(Effect.gen(function*() {
+        yield* sql`DELETE FROM blob_chunk WHERE blob IN (SELECT id FROM blob WHERE created_at < ${before.getTime()})`
+        return yield* sql`DELETE FROM blob WHERE created_at < ${before.getTime()} RETURNING id`.pipe(
+          Effect.flatMap(Schema.decodeUnknownEffect(IdRows))
+        )
+      })).pipe(
+        Effect.map((expired) => expired.length),
+        Effect.mapError(failure("Could not expire blobs"))
+      )
   }
 }

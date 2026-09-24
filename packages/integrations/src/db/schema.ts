@@ -97,7 +97,7 @@ export const storedBlob = sqliteTable("blob", {
   filename: text("filename"),
   bytes: integer("bytes").notNull(),
   createdAt: integer("created_at").notNull()
-})
+}, (table) => [index("blob_created_at").on(table.createdAt)])
 
 export const storedBlobChunk = sqliteTable("blob_chunk", {
   blob: text("blob").notNull(),
