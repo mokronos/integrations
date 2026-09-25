@@ -155,7 +155,6 @@ export interface CompletedAuthorization {
   readonly client: OAuthClientSlug
   readonly scope: Option.Option<string>
   readonly expiresAt: Option.Option<number>
-  readonly renewable: boolean
 }
 
 export interface OAuthAccess {
@@ -440,8 +439,9 @@ export class OAuthFlows extends Context.Service<
         yield* writeTokens(credentials, connectionCredentialKey(address), tokens)
         return {
           scope: Option.fromNullishOr(options.response.scope),
-          expiresAt: Option.fromNullishOr(expiresAt),
-          renewable: options.response.refresh_token !== undefined
+          expiresAt: options.response.refresh_token === undefined
+            ? Option.fromNullishOr(expiresAt)
+            : Option.none()
         }
       })
 
@@ -505,8 +505,7 @@ export class OAuthFlows extends Context.Service<
           clientOwner: flow.clientOwner,
           client: flow.clientSlug,
           scope: stored.scope,
-          expiresAt: stored.expiresAt,
-          renewable: stored.renewable
+          expiresAt: stored.expiresAt
         }
       })
 
@@ -535,7 +534,7 @@ export class OAuthFlows extends Context.Service<
         if (!spent) {
           return Option.some({
             value: tokens.accessToken,
-            ...whenPresent("expiresAt", tokens.expiresAt)
+            ...whenPresent("expiresAt", tokens.refreshToken === undefined ? tokens.expiresAt : undefined)
           })
         }
 

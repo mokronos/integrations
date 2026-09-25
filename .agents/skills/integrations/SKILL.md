@@ -78,6 +78,10 @@ protocol mismatch or inspect the CLI source code.
 - Read `schema` for the one tool you settled on before calling it — don't dump
   every schema.
 
+## Composition
+
+When you have a task, that involves multiple steps that don't require you to look at the intermediate results, try to check the schemas of all required tools first in parallel, then compose the rest of the task with the available tools, instead of calling each tool after each other.
+
 ## Everything else
 
 ```bash

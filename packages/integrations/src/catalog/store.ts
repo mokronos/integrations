@@ -43,7 +43,6 @@ export const ConnectionRecord = Schema.Struct({
   oauthClient: Schema.optional(Schema.String),
   oauthClientOwner: Schema.optional(ConnectionOwner),
   oauthScope: Schema.optional(Schema.String),
-  expiresAt: Schema.optional(Schema.Number),
   createdAt: Schema.Number
 })
 export type ConnectionRecord = typeof ConnectionRecord.Type
@@ -95,11 +94,6 @@ const number = (row: SqlRow, column: string): number => {
   return Predicate.isNumber(value) ? value : Number(value ?? 0)
 }
 
-const optionalNumber = (row: SqlRow, column: string): number | undefined => {
-  const value = row[column]
-  return Predicate.isNumber(value) ? value : undefined
-}
-
 const decodeJsonArray = <A>(schema: Schema.Codec<A>) => {
   const decode = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(schema)))
   return (raw: string, column: string): Effect.Effect<ReadonlyArray<A>, StorageError> =>
@@ -146,7 +140,6 @@ const decodeConnectionRow = (row: SqlRow) =>
     ...whenPresent("oauthClient", optionalText(row, "oauth_client")),
     ...whenPresent("oauthClientOwner", optionalText(row, "oauth_client_owner")),
     ...whenPresent("oauthScope", optionalText(row, "oauth_scope")),
-    ...whenPresent("expiresAt", optionalNumber(row, "expires_at")),
     createdAt: number(row, "created_at")
   }).pipe(Effect.mapError((cause) =>
     new StorageError({ message: `Malformed connection row ${text(row, "name")}`, cause })
@@ -417,8 +410,8 @@ export class CatalogStore extends Context.Service<
             sql: `INSERT INTO connection
                     (owner, integration, name, template, provider, identity_label,
                      description, oauth_client, oauth_client_owner, oauth_scope,
-                     expires_at, created_at)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     created_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                   ON CONFLICT(owner, integration, name) DO UPDATE SET
                     template = excluded.template,
                     provider = excluded.provider,
@@ -426,8 +419,7 @@ export class CatalogStore extends Context.Service<
                     description = excluded.description,
                     oauth_client = excluded.oauth_client,
                     oauth_client_owner = excluded.oauth_client_owner,
-                    oauth_scope = excluded.oauth_scope,
-                    expires_at = excluded.expires_at`,
+                    oauth_scope = excluded.oauth_scope`,
             params: [
               record.owner,
               record.integration,
@@ -439,7 +431,6 @@ export class CatalogStore extends Context.Service<
               nullable(record.oauthClient),
               nullable(record.oauthClientOwner),
               nullable(record.oauthScope),
-              nullable(record.expiresAt),
               record.createdAt
             ]
           })

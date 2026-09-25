@@ -137,8 +137,7 @@ const operations = (
               clientOwner: "org" as const,
               client: OAuthClientSlug.make("provider-gateway"),
               scope: Option.none(),
-              expiresAt: Option.none(),
-              renewable: true
+              expiresAt: Option.none()
             })
             : Effect.fail(new OAuthError({ stage: "complete", detail: behaviour.completeFails }))),
       accessToken: notUsed("accessToken")

@@ -157,7 +157,6 @@ export const completeOAuthFlow = Effect.fn("OAuthConnect.complete")(function*(
     oauthClient: completed.client,
     oauthClientOwner: completed.clientOwner,
     ...whenPresent("oauthScope", Option.getOrUndefined(completed.scope)),
-    ...whenPresent("expiresAt", Option.getOrUndefined(completed.expiresAt)),
     createdAt: now
   }
   yield* store.putConnection(record)
@@ -181,7 +180,7 @@ export const completeOAuthFlow = Effect.fn("OAuthConnect.complete")(function*(
   }
 
   const expiry = Option.getOrUndefined(completed.expiresAt)
-  const renewalWarning = completed.renewable || expiry === undefined
+  const renewalWarning = expiry === undefined
     ? undefined
     : `Connected, but ${record.integration} issued no refresh token: this ` +
       `connection stops working at ${new Date(expiry).toISOString()} and has to ` +

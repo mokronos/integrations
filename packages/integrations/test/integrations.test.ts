@@ -166,7 +166,6 @@ describe("the catalog", () => {
         provider: "oauth",
         oauthClient: "notes-client",
         oauthClientOwner: "org",
-        expiresAt: now - 1,
         createdAt: now
       })
       yield* writeTokens(
@@ -213,7 +212,6 @@ describe("the catalog", () => {
         provider: "oauth",
         oauthClient: "notes-client",
         oauthClientOwner: "org",
-        expiresAt: now - 1,
         createdAt: now
       })
       yield* writeTokens(
@@ -231,6 +229,51 @@ describe("the catalog", () => {
       expect(connection?.status).toBe("connected")
       expect(connection?.expiresAt).toBe(tokenExpiry)
       expect(connection?.error).toBeUndefined()
+    }).pipe(Effect.provide(testIntegrations())))
+
+  it.effect("reports no expiry for an OAuth grant that renews itself", () =>
+    Effect.gen(function*() {
+      const now = yield* Clock.currentTimeMillis
+      const store = yield* CatalogStore
+      const credentials = yield* CredentialStore
+      yield* store.putIntegration({
+        slug: notes,
+        name: "Notes",
+        description: "A notebook.",
+        kind: "mcp",
+        endpoint: "https://notes.example.com/mcp",
+        authMethods: [{
+          id: "oauth2",
+          label: "OAuth",
+          kind: "oauth",
+          template: "oauth2"
+        }],
+        createdAt: now
+      })
+      yield* store.putConnection({
+        owner: "org",
+        integration: notes,
+        name: primary,
+        template: AuthTemplateSlug.make("oauth2"),
+        provider: "oauth",
+        oauthClient: "notes-client",
+        oauthClientOwner: "org",
+        createdAt: now
+      })
+      yield* writeTokens(
+        credentials,
+        connectionCredentialKey(connectionAddress({
+          owner: "org",
+          integration: notes,
+          connection: primary
+        })),
+        { accessToken: "current", refreshToken: "renew", expiresAt: now + 3_600_000 }
+      )
+      const connections = yield* (yield* Integrations).listConnections()
+      const connection = connections[0]
+
+      expect(connection?.status).toBe("connected")
+      expect(connection?.expiresAt).toBeNull()
     }).pipe(Effect.provide(testIntegrations())))
 
   it.effect("takes a connection's tools with it when the integration goes", () =>

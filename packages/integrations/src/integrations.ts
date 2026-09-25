@@ -132,7 +132,7 @@ const toConnection = (
     oauthClientOwner: record.oauthClientOwner ?? null,
     oauthScope: record.oauthScope ?? null,
     missingOAuthScopes: [],
-    expiresAt: health.expiresAt ?? record.expiresAt ?? null,
+    expiresAt: health.expiresAt ?? null,
     status: health.status,
     ...whenPresent("error", health.error)
   }).pipe(Effect.mapError((cause) =>

@@ -45,7 +45,7 @@ describe("MCP auth methods", () => {
     expect(requiresAuthentication(methods)).toBe(false)
   })
 
-  it("offers OAuth, and reports registration, when the challenge points at metadata", () => {
+  it("offers OAuth first, with a bearer token as the alternative, when the challenge points at metadata", () => {
     const methods = mcpAuthMethods(
       probe({
         connected: false,
@@ -58,6 +58,7 @@ describe("MCP auth methods", () => {
     expect(methods[0]?.kind).toBe("oauth")
     expect(methods[0]?.oauth?.discoveryUrl).toBe("https://mcp.linear.app/mcp")
     expect(methods[0]?.oauth?.supportsDynamicRegistration).toBe(true)
+    expect(methods.map((method) => method.template)).toEqual(["oauth2", "bearer"])
     expect(requiresAuthentication(methods)).toBe(true)
   })
 
@@ -71,8 +72,7 @@ describe("MCP auth methods", () => {
       }),
       "https://gmailmcp.googleapis.com/mcp/v1"
     )
-    expect(methods).toHaveLength(1)
-    expect(methods[0]?.kind).toBe("oauth")
+    expect(methods.map((method) => method.template)).toEqual(["oauth2", "bearer"])
     expect(methods[0]?.oauth?.scopes).toEqual([
       "https://www.googleapis.com/auth/gmail.readonly"
     ])
@@ -84,6 +84,7 @@ describe("MCP auth methods", () => {
       probe({ connected: false, requiresAuthentication: true }),
       "https://mcp.example.com/mcp"
     )
+    expect(methods).toHaveLength(1)
     expect(methods[0]?.kind).toBe("header")
     expect(methods[0]?.placements?.[0]).toEqual({
       carrier: "header",

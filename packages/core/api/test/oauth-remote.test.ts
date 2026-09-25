@@ -94,8 +94,7 @@ const fakeAuth = (behaviour: {
           clientOwner: "org" as const,
           client: OAuthClientSlug.make("client-google-gateway"),
           scope: Option.none(),
-          expiresAt: Option.none(),
-          renewable: true
+          expiresAt: Option.none()
         })
       },
       accessToken: dies("accessToken")

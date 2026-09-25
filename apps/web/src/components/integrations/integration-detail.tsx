@@ -32,11 +32,6 @@ import { IntegrationIcon, integrationHost } from "./integration-icon"
 const isConnected = (integration: IntegrationOverview): boolean =>
   integration.connections.some((connection) => connection.status === "connected")
 
-const expiry = (connection: Connection): string =>
-  connection.expiresAt === undefined || connection.expiresAt === null
-    ? "no expiry"
-    : `expires ${when(new Date(connection.expiresAt))}`
-
 const connectionAuthLabel = (
   integration: IntegrationOverview,
   connection: Connection
@@ -175,7 +170,9 @@ function ConnectionRow({ integration, connection, onDisconnect, disconnecting }:
             </Badge>
           </ItemTitle>
           <ItemDescription className="flex flex-wrap items-center gap-2">
-            <span>{expiry(connection)}</span>
+            {connection.expiresAt === undefined || connection.expiresAt === null
+              ? null
+              : <span>expires {when(new Date(connection.expiresAt))}</span>}
             <span>via {connectionAuthLabel(integration, connection)}</span>
           </ItemDescription>
           {connection.oauthScope === undefined || connection.oauthScope === null

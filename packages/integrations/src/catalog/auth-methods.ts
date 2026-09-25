@@ -23,31 +23,31 @@ const noAuthMethod: AuthMethod = {
   template: "none"
 }
 
+const bearerMethod: AuthMethod = {
+  id: "bearer",
+  label: "Bearer token",
+  kind: "header",
+  template: "bearer",
+  placements: bearerPlacements
+}
+
 export const mcpAuthMethods = (
   probe: McpProbe,
   endpoint: string
 ): ReadonlyArray<AuthMethod> => {
   if (!probe.requiresAuthentication) return [noAuthMethod]
-  if (probe.requiresOAuth) {
-    return [{
-      id: "oauth2",
-      label: "OAuth",
-      kind: "oauth",
-      template: "oauth2",
-      oauth: {
-        discoveryUrl: endpoint,
-        supportsDynamicRegistration: probe.supportsDynamicRegistration,
-        ...whenPresent("scopes", probe.scopes.length === 0 ? undefined : probe.scopes)
-      }
-    }]
-  }
+  if (!probe.requiresOAuth) return [bearerMethod]
   return [{
-    id: "bearer",
-    label: "Bearer token",
-    kind: "header",
-    template: "bearer",
-    placements: bearerPlacements
-  }]
+    id: "oauth2",
+    label: "OAuth",
+    kind: "oauth",
+    template: "oauth2",
+    oauth: {
+      discoveryUrl: endpoint,
+      supportsDynamicRegistration: probe.supportsDynamicRegistration,
+      ...whenPresent("scopes", probe.scopes.length === 0 ? undefined : probe.scopes)
+    }
+  }, bearerMethod]
 }
 
 const httpSchemeMethod = (

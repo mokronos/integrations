@@ -32,7 +32,6 @@ export const connection = sqliteTable("connection", {
   oauthClient: text("oauth_client"),
   oauthClientOwner: text("oauth_client_owner"),
   oauthScope: text("oauth_scope"),
-  expiresAt: integer("expires_at"),
   createdAt: integer("created_at").notNull()
 }, (table) => [
   primaryKey({ columns: [table.owner, table.integration, table.name] }),

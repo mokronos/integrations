@@ -50,5 +50,12 @@ export const integrationMigrations: ReadonlyArray<Migration> = [
       "ALTER TABLE `oauth_client` ADD `token_auth_method` text;",
       "ALTER TABLE `oauth_client` DROP COLUMN `token_auth_methods`;"
     ]
+  },
+  {
+    id: 5,
+    name: "0005_chubby_speed_demon",
+    statements: [
+      "ALTER TABLE `connection` DROP COLUMN `expires_at`;"
+    ]
   }
 ]
