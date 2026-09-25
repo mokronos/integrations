@@ -48,9 +48,21 @@ export const refusedOf = (code: RefusalReason["code"]): Refused =>
     ? Unauthorized.of(code)
     : Forbidden.of(code)
 
+export class RateLimited extends Schema.TaggedError<RateLimited>()(
+  "RateLimited",
+  { code: Schema.Literal("rate-limited"), message: Schema.String }
+) {}
+
+export const RateLimitedError = RateLimited.pipe(HttpApiSchema.status(429))
+
+const encodeRateLimited = Schema.encodeSync(RateLimited)
+
 export const rateLimitedResponse = (retryAfterSeconds: number) =>
   HttpServerResponse.jsonUnsafe(
-    { error: `Too many requests; retry in ${retryAfterSeconds} seconds`, code: "rate-limited" },
+    encodeRateLimited(new RateLimited({
+      code: "rate-limited",
+      message: `Too many requests; retry in ${retryAfterSeconds} seconds`
+    })),
     { status: 429, headers: { "retry-after": String(retryAfterSeconds) } }
   )
 

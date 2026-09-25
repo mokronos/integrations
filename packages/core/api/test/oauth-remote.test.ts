@@ -1,3 +1,4 @@
+import { makeGatewayEvents } from "@integragents/gateway-core"
 import { describe, expect, it } from "@effect/vitest"
 import { Context, Effect, Option } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
@@ -292,6 +293,7 @@ describe("the remote callback route", () => {
   ) {
     const store = yield* gatewayStore("gateway-oauth-")
     const { handle } = createGatewayHandler({
+    events: yield* makeGatewayEvents,
       httpClient: FetchHttpClient.layer,
       integrationServices: stubIntegrationsContext(),
       store,

@@ -1,12 +1,12 @@
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useCallback } from "react"
+import { useCallback, useEffect } from "react"
 import type { UseQueryResult } from "@tanstack/react-query"
 import type {
   AccessProfileId,
-  ApprovalId,
   ApprovalPolicyId,
   ApprovalStatus,
-  ClientId
+  ClientId,
+  GatewayResource
 } from "@integragents/contracts"
 
 import * as gateway from "@/lib/gateway"
@@ -21,7 +21,6 @@ export const keys = {
   clients: ["clients"] as const,
   approvalDestinations: ["approval-destinations"] as const,
   clientApprovalDestinations: (id: ClientId) => ["clients", id, "approval-destinations"] as const,
-  approvalDeliveries: (id: ApprovalId) => ["approvals", id, "deliveries"] as const,
   accessProfiles: ["access-profiles"] as const,
   accessProfile: (id: AccessProfileId | undefined) => ["access-profiles", id] as const,
   approvalPolicies: ["approval-policies"] as const,
@@ -63,6 +62,13 @@ export const useClients = () =>
     select: (response) => response.clients
   })
 
+export const useGatewayUrl = () =>
+  useQuery({
+    queryKey: keys.clients,
+    queryFn: gateway.listClients,
+    select: (response) => response.gatewayUrl
+  })
+
 export const useMcpUrl = () =>
   useQuery({
     queryKey: keys.clients,
@@ -79,15 +85,9 @@ export const useClientApprovalDestinations = (id: ClientId) =>
     queryFn: () => gateway.getClientApprovalDestinations(id)
   })
 
-export const useApprovalDeliveries = (id: ApprovalId) =>
-  useQuery({
-    queryKey: keys.approvalDeliveries(id),
-    queryFn: () => gateway.listApprovalDeliveries(id),
-    refetchInterval: 5_000
-  })
 
 export const useOverview = () =>
-  useQuery({ queryKey: keys.overview, queryFn: gateway.fetchOverview, refetchInterval: 5_000 })
+  useQuery({ queryKey: keys.overview, queryFn: gateway.fetchOverview })
 
 export const useAccessProfiles = () =>
   useQuery({ queryKey: keys.accessProfiles, queryFn: gateway.listAccessProfiles })
@@ -119,8 +119,7 @@ export const useClientTools = (id: ClientId | undefined) =>
 export const useApprovals = (status: ApprovalStatus | "all") =>
   useQuery({
     queryKey: keys.approvals(status),
-    queryFn: () => gateway.listApprovals(status === "all" ? undefined : status),
-    refetchInterval: status === "pending" || status === "executing" || status === "all" ? 5_000 : false
+    queryFn: () => gateway.listApprovals(status === "all" ? undefined : status)
   })
 
 export const useAudit = (input: AuditQuery) =>
@@ -132,9 +131,28 @@ export const useOAuthGrants = () =>
 export const useOAuthSession = (id: string | undefined) =>
   useQuery({
     queryKey: keys.oauthSession(id),
-    queryFn: id === undefined ? skipToken : () => gateway.pollOAuth(id),
-    refetchInterval: (query) => query.state.data?.state.status === "pending" ? 1_500 : false
+    queryFn: id === undefined ? skipToken : () => gateway.getOAuthSession(id)
   })
+
+const reloadedBy = {
+  approvals: [keys.overview, ["approvals"]],
+  audit: [keys.overview, ["audit"], ["onboarding-activity"]],
+  clients: [keys.overview, keys.clients],
+  policies: [keys.overview, keys.accessProfiles, keys.approvalPolicies, keys.clients],
+  "approval-destinations": [keys.approvalDestinations, keys.clients],
+  integrations: [keys.overview, keys.integrations, keys.connections, ["oauth-session"], keys.clients]
+} satisfies Record<GatewayResource, ReadonlyArray<ReadonlyArray<string>>>
+
+/** Reloads what the gateway reports changed; a fresh connection reloads everything it may have missed. */
+export const useGatewayEvents = () => {
+  const client = useQueryClient()
+  useEffect(() => gateway.followEvents((event) => {
+    if (event._tag === "Connected") void client.invalidateQueries()
+    if (event._tag === "Changed") {
+      for (const queryKey of reloadedBy[event.resource]) void client.invalidateQueries({ queryKey })
+    }
+  }), [client])
+}
 
 export const useInvalidate = () => {
   const client = useQueryClient()

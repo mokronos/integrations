@@ -11,13 +11,14 @@ import { maintenanceLoop } from "./maintenance.ts"
 import { createOAuthSessions, OAuthSessionError, sqlOAuthSessionStore } from "./oauth-sessions.ts"
 import type { OAuthSessions } from "./oauth-sessions.ts"
 import type { LocalAuthorizer, OAuthOperations } from "./oauth.ts"
+import { GatewayEvents, publishingIntegrations, publishingStore } from "./events.ts"
 import { GatewayStoreError, GatewayStoreService } from "./store.ts"
 
 export class OAuthFlowSessions extends Context.Service<OAuthFlowSessions, OAuthSessions>()(
   "@integragents/gateway-core/OAuthFlowSessions"
 ) {}
 
-export type GatewayCoreServices = GatewayStoreService | IntegrationServices | OAuthFlowSessions
+export type GatewayCoreServices = GatewayStoreService | IntegrationServices | OAuthFlowSessions | GatewayEvents
 
 export interface GatewayCoreOptions {
   readonly encryption: Encryption
@@ -35,17 +36,25 @@ export interface GatewayCoreOptions {
 
 const oauthSessionsLayer = (
   options: Pick<GatewayCoreOptions, "publicUrlOf" | "authorizeLocally">
-): Layer.Layer<OAuthFlowSessions, never, SqlClient.SqlClient | GatewayStoreService | OAuthOperations> =>
+): Layer.Layer<OAuthFlowSessions, never, SqlClient.SqlClient | GatewayStoreService | GatewayEvents | OAuthOperations> =>
   Layer.effect(
     OAuthFlowSessions,
     Effect.gen(function*() {
       const sql = yield* SqlClient.SqlClient
       const store = yield* GatewayStoreService
+      const events = yield* GatewayEvents
       const host = yield* Effect.context<OAuthOperations>()
+      const sessionStore = sqlOAuthSessionStore(sql)
       return yield* Effect.acquireRelease(
         Effect.sync(() =>
           createOAuthSessions(host, {
-            store: sqlOAuthSessionStore(sql),
+            store: {
+              ...sessionStore,
+              put: (session) => Effect.tap(
+                sessionStore.put(session),
+                () => events.publish({ tenantId: session.bindingTenant, resource: "integrations" })
+              )
+            },
             ...whenPresent("publicUrlOf", options.publicUrlOf),
             ...whenPresent("authorizeLocally", options.authorizeLocally),
             onConnected: (session) =>
@@ -64,6 +73,17 @@ const oauthSessionsLayer = (
       )
     })
   )
+
+/** Every write the store and the integration host commit is announced on the gateway's event bus. */
+const publishing = Layer.effectContext(Effect.gen(function*() {
+  const events = yield* GatewayEvents
+  const raw = yield* Effect.context<GatewayStoreService | IntegrationServices>()
+  return raw.pipe(
+    Context.add(GatewayStoreService, publishingStore(Context.get(raw, GatewayStoreService), events)),
+    Context.add(Integrations, publishingIntegrations(Context.get(raw, Integrations), events)),
+    Context.add(GatewayEvents, events)
+  )
+}))
 
 const reconcileOnStart: Layer.Layer<never, GatewayStoreError | StorageError, GatewayStoreService | Integrations> =
   Layer.effectDiscard(Effect.gen(function*() {
@@ -97,10 +117,11 @@ const maintenanceLayer = (
 export const gatewayCoreLayer = (
   options: GatewayCoreOptions
 ): Layer.Layer<GatewayCoreServices, GatewayStoreError | StorageError, SqlClient.SqlClient | HttpClient.HttpClient> => {
-  const base = Layer.mergeAll(
+  const base = publishing.pipe(Layer.provide(Layer.mergeAll(
     GatewayStoreService.layer({ encryption: options.encryption, ...whenPresent("migrate", options.migrate) }),
-    integrationLayer({ encryption: options.encryption, blobs: options.blobs })
-  )
+    integrationLayer({ encryption: options.encryption, blobs: options.blobs }),
+    GatewayEvents.layer
+  )))
   return Layer.mergeAll(
     oauthSessionsLayer(options),
     reconcileOnStart,

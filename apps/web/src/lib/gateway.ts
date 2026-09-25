@@ -1,4 +1,4 @@
-import { Effect, Predicate } from "effect"
+import { Duration, Effect, Fiber, Predicate, Schedule, Schema, Stream } from "effect"
 import { FetchHttpClient, HttpClientError } from "effect/unstable/http"
 import { HttpApiClient } from "effect/unstable/httpapi"
 import { GatewayApi, GatewayFailure } from "@integragents/gateway-api/definition"
@@ -10,7 +10,8 @@ import {
   whenPresent,
   type AccessProfileId,
   type ApiKeyId,
-  type ApprovalDelivery,
+  type ApprovalMethod,
+  type GatewayEvent,
   type ApprovalDestinationId,
   type ApprovalId,
   type ApprovalPolicyId,
@@ -93,6 +94,27 @@ const run = <A, E extends Error>(effect: Effect.Effect<A, E>): Promise<A> =>
     )
   )
 
+class EventStreamStalled extends Schema.TaggedError<EventStreamStalled>()("EventStreamStalled", {}) {}
+
+/** The gateway sends a heartbeat every five seconds; three missed ones mean the stream is gone. */
+const eventStreamStallAfter = Duration.seconds(15)
+
+/** Follows `/v1/events` until the returned function is called, reconnecting whenever the stream drops. */
+export const followEvents = (onEvent: (event: GatewayEvent) => void): (() => void) => {
+  const fiber = Effect.runFork(
+    endpoints.administrative.events().pipe(
+      Effect.flatMap((events) =>
+        Stream.runForEach(Stream.timeout(events, eventStreamStallAfter), (event) => Effect.sync(() => onEvent(event)))),
+      Effect.andThen(Effect.fail(new EventStreamStalled())),
+      Effect.provideService(FetchHttpClient.RequestInit, { credentials: "same-origin" }),
+      Effect.retry(Schedule.spaced(Duration.seconds(3)))
+    )
+  )
+  return () => {
+    Effect.runFork(Fiber.interrupt(fiber))
+  }
+}
+
 export const listIntegrations = async () => {
   const response = await run(endpoints.provisioning.listIntegrations())
   return {
@@ -141,7 +163,7 @@ export const startOAuth = async (input: {
   readonly clientSecret?: string
 }) => await run(endpoints.provisioning.startOAuth({ payload: input }))
 
-export const pollOAuth = async (id: string) =>
+export const getOAuthSession = async (id: string) =>
   await run(endpoints.provisioning.oauthSession({ params: { id } }))
 
 export const provideOAuthClient = async (
@@ -157,7 +179,7 @@ export const removeConnection = async (input: { readonly integration: string; re
 
 export const listClients = async () => {
   const response = await run(endpoints.administrative.listClients())
-  return { clients: response.clients, mcpUrl: response.mcpUrl ?? undefined }
+  return { clients: response.clients, gatewayUrl: response.gatewayUrl ?? undefined, mcpUrl: response.mcpUrl ?? undefined }
 }
 
 export const fetchOverview = async () => await run(endpoints.administrative.overview())
@@ -170,7 +192,6 @@ export const createClient = async (input: {
   readonly accessProfileId?: AccessProfileId
   readonly approvalPolicyId?: ApprovalPolicyId
   readonly capabilities: ReadonlyArray<ClientCapability>
-  readonly approvalDelivery: ApprovalDelivery
 }) => await run(endpoints.administrative.createClient({ payload: input }))
 
 export const renameClient = async (id: ClientId, name: string) =>
@@ -178,7 +199,7 @@ export const renameClient = async (id: ClientId, name: string) =>
 
 export const updateClientSettings = async (id: ClientId, settings: {
   readonly capabilities: ReadonlyArray<ClientCapability>
-  readonly approvalDelivery: ApprovalDelivery
+  readonly approvalMethod: ApprovalMethod
   readonly mcpSurface: McpSurface
 }) => await run(endpoints.administrative.updateClientSettings({ params: { id }, payload: settings }))
 
@@ -273,8 +294,6 @@ export const assignApprovalPolicy = async (id: ClientId, approvalPolicyId: Appro
 export const listApprovals = async (status?: ApprovalStatus) =>
   (await run(endpoints.administrative.listApprovals({ query: whenPresent("status", status) }))).approvals
 
-export const listApprovalDeliveries = async (id: ApprovalId) =>
-  (await run(endpoints.administrative.listApprovalDeliveries({ params: { id } }))).deliveries
 
 export const approveApproval = async (id: ApprovalId) =>
   await run(endpoints.administrative.approve({ params: { id } }))

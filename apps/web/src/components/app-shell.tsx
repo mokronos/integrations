@@ -23,7 +23,7 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
 import { logOut } from "@/lib/gateway"
-import { useApprovals } from "@/lib/queries"
+import { useApprovals, useGatewayEvents } from "@/lib/queries"
 import { cn } from "@/lib/utils"
 import { useSession } from "@/components/auth-gate"
 
@@ -82,6 +82,7 @@ export function AppShell({
   readonly onDarkChange: (dark: boolean) => void
 }) {
   const session = useSession()
+  useGatewayEvents()
   const [expanded, setExpanded] = useState(() => window.innerWidth >= 1024)
 
   return (

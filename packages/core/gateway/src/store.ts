@@ -15,7 +15,7 @@ import {
   ApprovalDestinationId,
   ApprovalPolicyId,
   ClientId,
-  defaultApprovalDelivery,
+  defaultApprovalMethod,
   defaultLocalSubjectId,
   defaultTenantId,
   SessionTokenHash,
@@ -534,9 +534,9 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
           return { sql: `INSERT INTO gateway_approval_policy_tool (approval_policy_id, owner, subject, integration, connection_name, tool, decision) VALUES (?, ?, ?, ?, ?, ?, ?)`, args: [input.approvalPolicyId, ...route, entry.decision] }
         }),
         {
-          sql: `INSERT INTO gateway_client (id, tenant_id, access_profile_id, approval_policy_id, name, capabilities, approval_delivery, mcp_surface, created_at, revoked_at)
-                VALUES (?, ?, ?, ?, ?, '[]', ?, 'tools', ?, NULL)`,
-          args: [input.id, input.tenantId, input.accessProfileId, input.approvalPolicyId, input.name, JSON.stringify(defaultApprovalDelivery), at]
+          sql: `INSERT INTO gateway_client (id, tenant_id, access_profile_id, approval_policy_id, name, capabilities, created_at, revoked_at)
+                VALUES (?, ?, ?, ?, ?, '[]', ?, NULL)`,
+          args: [input.id, input.tenantId, input.accessProfileId, input.approvalPolicyId, input.name, at]
         }
       ])
       return yield* requireClient(input.id)
@@ -544,7 +544,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
 
     createClient: (input) => operation("createClient", Effect.gen(function*() {
       yield* run(
-        "INSERT INTO gateway_client (id, tenant_id, access_profile_id, approval_policy_id, name, capabilities, approval_delivery, mcp_surface, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+        "INSERT INTO gateway_client (id, tenant_id, access_profile_id, approval_policy_id, name, capabilities, approval_method, mcp_surface, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
         [
           input.id,
           input.tenantId,
@@ -552,7 +552,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
           input.approvalPolicyId,
           input.name,
           JSON.stringify(input.capabilities),
-          JSON.stringify(input.approvalDelivery ?? defaultApprovalDelivery),
+          input.approvalMethod ?? defaultApprovalMethod,
           input.mcpSurface ?? "tools",
           yield* now
         ]
@@ -617,11 +617,11 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
 
     updateClientSettings: (input) => operation("updateClientSettings", Effect.gen(function*() {
       yield* run(
-        `UPDATE gateway_client SET capabilities = ?, approval_delivery = ?, mcp_surface = ?
+        `UPDATE gateway_client SET capabilities = ?, approval_method = ?, mcp_surface = ?
           WHERE tenant_id = ? AND id = ? AND revoked_at IS NULL`,
         [
           JSON.stringify(input.capabilities),
-          JSON.stringify(input.approvalDelivery),
+          input.approvalMethod,
           input.mcpSurface,
           input.tenantId,
           input.id
@@ -699,14 +699,14 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
       )).map((row) => ApprovalDestinationId.make(String(row["destination_id"])))
     })),
 
-    listApprovalDeliveries: (tenantId, approvalId) => operation("listApprovalDeliveries", Effect.gen(function*() {
+    listApprovalDeliveries: (tenantId, status) => operation("listApprovalDeliveries", Effect.gen(function*() {
       return (yield* all(
         `SELECT delivery.*, destination.name AS destination_name
            FROM gateway_approval_delivery AS delivery
            JOIN gateway_approval_destination AS destination ON destination.id = delivery.destination_id
            JOIN gateway_pending_approval AS approval ON approval.id = delivery.approval_id
-          WHERE approval.tenant_id = ? AND approval.id = ? ORDER BY destination.name`,
-        [tenantId, approvalId]
+          WHERE approval.tenant_id = ? AND (? IS NULL OR approval.status = ?) ORDER BY destination.name`,
+        [tenantId, status ?? null, status ?? null]
       )).map(toApprovalDeliveryAttempt)
     })),
 
@@ -795,7 +795,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
                  gateway_client.approval_policy_id AS client_approval_policy_id,
                 gateway_client.name AS client_name,
                 gateway_client.capabilities AS client_capabilities,
-                gateway_client.approval_delivery AS client_approval_delivery,
+                gateway_client.approval_method AS client_approval_method,
                 gateway_client.mcp_surface AS client_mcp_surface,
                 gateway_client.created_at AS client_created_at, gateway_client.revoked_at AS client_revoked_at
            FROM gateway_api_key JOIN gateway_client ON gateway_client.id = gateway_api_key.client_id
@@ -813,7 +813,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
            approval_policy_id: row["client_approval_policy_id"] ?? "",
           name: row["client_name"] ?? "",
           capabilities: row["client_capabilities"] ?? "[]",
-          approval_delivery: row["client_approval_delivery"] ?? JSON.stringify(defaultApprovalDelivery),
+          approval_method: row["client_approval_method"] ?? defaultApprovalMethod,
           mcp_surface: row["client_mcp_surface"] ?? "tools",
           created_at: row["client_created_at"] ?? 0,
           revoked_at: row["client_revoked_at"] ?? null

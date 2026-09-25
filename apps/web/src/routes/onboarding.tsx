@@ -7,7 +7,7 @@ import { ConnectionName, IntegrationSlug, ToolName } from "@integragents/contrac
 import { makeGatewayClient } from "@integragents/client/client"
 
 import { useSession } from "@/components/auth-gate"
-import { AgentConnect } from "@/components/clients/agent-connect"
+import { ConnectTabs } from "@/components/clients/connect-tabs"
 import { ConnectDialog } from "@/components/integrations/connect-dialog"
 import { DiscoverDialog } from "@/components/integrations/discover-dialog"
 import { RegistrySearchDialog } from "@/components/integrations/registry-search-dialog"
@@ -19,10 +19,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { CopyField } from "@/components/ui/copy-field"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import * as gateway from "@/lib/gateway"
 import { apiKeyPlaceholder } from "@/lib/mcp"
-import { keys, useClients, useIntegrations, useInvalidate, useMcpUrl, useMutation, useQuery } from "@/lib/queries"
+import { keys, useClients, useIntegrations, useGatewayUrl, useInvalidate, useMcpUrl, useMutation, useQuery } from "@/lib/queries"
 import type { ClientId, Connection, IntegrationOverview } from "@integragents/contracts"
 
 const Step = Schema.Literals(["connect", "access", "agent", "verify"])
@@ -40,6 +39,7 @@ export function OnboardingRoute() {
   const session = useSession()
   const integrations = useIntegrations()
   const clients = useClients()
+  const gatewayUrl = useGatewayUrl()
   const mcpUrl = useMcpUrl()
   const invalidate = useInvalidate()
   const step = Option.getOrElse(Schema.decodeUnknownOption(Step)(params.get("step")), () => "connect")
@@ -81,8 +81,7 @@ export function OnboardingRoute() {
   const activity = useQuery({
     queryKey: ["onboarding-activity", client?.id],
     queryFn: () => gateway.listAudit({ clientId: client?.id ?? "", limit: 5, offset: 0 }),
-    enabled: step === "verify" && client !== undefined,
-    refetchInterval: 3_000
+    enabled: step === "verify" && client !== undefined
   })
 
   return <div className="mx-auto w-full max-w-3xl space-y-8 px-4 py-4 sm:px-6 sm:py-10">
@@ -137,10 +136,10 @@ export function OnboardingRoute() {
         <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="flex items-center gap-2 font-medium"><KeyRound className="size-4" />Client key</p><p className="text-muted-foreground mt-1 text-sm">Shown once. Copy your configuration before leaving this page.</p></div><Button onClick={() => issue.mutate(client.id)} disabled={issue.isPending || secret !== undefined}>{issue.isPending ? "Issuing key…" : secret === undefined ? "Issue a key" : "Key issued"}</Button></div>
         <QueryError error={issue.error} />
         {secret !== undefined ? <CopyField value={secret} label="Client key" /> : null}
-        <Tabs defaultValue="mcp"><TabsList><TabsTrigger value="mcp">MCP</TabsTrigger><TabsTrigger value="cli">CLI</TabsTrigger></TabsList>
-          <TabsContent value="mcp" className="space-y-4"><QueryError error={mcpUrl.error} />{mcpUrl.data ? <AgentConnect clientName={client.name} url={mcpUrl.data} apiKey={secret ?? apiKeyPlaceholder} /> : <p className="text-sm">The gateway needs a reachable public URL before it can provide an MCP configuration.</p>}</TabsContent>
-          <TabsContent value="cli" className="space-y-3"><p className="text-muted-foreground text-sm">Install the CLI from GitHub and set these variables in your agent’s environment.</p><CopyField value="curl -fsSL https://raw.githubusercontent.com/mokronos/integrations/main/install.sh | sh" label="Install command" /><CopyField value={`export INTEGRATIONS_URL=${JSON.stringify(window.location.origin)}\nexport INTEGRATIONS_API_KEY=${JSON.stringify(secret ?? apiKeyPlaceholder)}\ni --help`} label="CLI configuration" multiline /></TabsContent>
-        </Tabs>
+        <QueryError error={gatewayUrl.error ?? mcpUrl.error} />
+        {gatewayUrl.data !== undefined && mcpUrl.data !== undefined
+          ? <ConnectTabs clientName={client.name} gatewayUrl={gatewayUrl.data} mcpUrl={mcpUrl.data} apiKey={secret ?? apiKeyPlaceholder} />
+          : <p className="text-sm">The gateway needs a reachable public URL before it can provide a configuration.</p>}
         <div className="flex justify-between"><Button variant="ghost" onClick={() => go("connect")}><ArrowLeft className="size-4" />Back</Button><Button disabled={secret === undefined} onClick={() => go("verify")}>Test the connection<ArrowRight className="size-4" /></Button></div>
       </CardContent></Card> : <>
         <Card><CardContent className="space-y-5 py-6">

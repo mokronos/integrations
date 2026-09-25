@@ -1,3 +1,4 @@
+import { makeGatewayEvents } from "@integragents/gateway-core"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
@@ -49,6 +50,7 @@ describe("gateway traffic shaping", () => {
     const key = yield* keyFor(store, "local")
 
     const { handle } = createGatewayHandler({
+    events: yield* makeGatewayEvents,
       httpClient: FetchHttpClient.layer,
       integrationServices: stubIntegrationsContext(),
       store,

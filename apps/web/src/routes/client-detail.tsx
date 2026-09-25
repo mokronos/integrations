@@ -2,7 +2,7 @@ import { ArrowLeft } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
 import { ClientKeys } from "@/components/clients/client-keys"
-import { ClientMcp } from "@/components/clients/client-mcp"
+import { ClientConnect } from "@/components/clients/client-connect"
 import { ClientSettings } from "@/components/clients/client-settings"
 import { RevokeClientButton } from "@/components/clients/revoke-client-button"
 import { IntegrationHeading, useIntegrationCollapse } from "@/components/integrations/integration-heading"
@@ -63,7 +63,7 @@ function ClientDetail({ clientId }: { readonly clientId: ClientId }) {
         <>
           <div className="grid gap-4 lg:grid-cols-3">
             <div className="lg:col-span-2">
-              <ClientMcp clientId={clientId} clientName={client.name} disabled={client.revokedAt !== null} />
+              <ClientConnect clientId={clientId} clientName={client.name} disabled={client.revokedAt !== null} />
             </div>
             <Card>
               <CardHeader>

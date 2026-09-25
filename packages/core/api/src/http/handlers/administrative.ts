@@ -4,7 +4,7 @@ import {
   whenPresentMap
 } from "@integragents/contracts"
 import { BlobStore, Integrations } from "@integragents/host"
-import { Effect } from "effect"
+import { Duration, Effect, Stream } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
   Alias,
@@ -36,7 +36,7 @@ import {
 } from "@integragents/gateway-core"
 import { runMaintenance } from "@integragents/gateway-core"
 import { deliverDueApprovalNotifications } from "@integragents/gateway-core"
-import { GatewayStoreService } from "@integragents/gateway-core"
+import { GatewayEvents, GatewayStoreService } from "@integragents/gateway-core"
 import {
   ApiBadRequest,
   ApiNotFound,
@@ -66,13 +66,34 @@ const approvalWebhookUrl = (value: string): URL | undefined => {
   }
 }
 
+/** Under Bun's ten-second idle timeout, and often enough for a client to notice a dead stream. */
+const heartbeatInterval = Duration.seconds(5)
+
+/** One invocation writes an approval, an audit record, and a delivery within milliseconds; the dashboard reloads once. */
+const burstWindow = Duration.millis(100)
+
 export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrative", (handlers) =>
   Effect.gen(function*() {
     const store = yield* GatewayStoreService
     const integrations = yield* Integrations
     const blobs = yield* BlobStore
     const config = yield* GatewayConfig
+    const events = yield* GatewayEvents
     return handlers
+      .handle("events", () =>
+        Effect.map(requireTenant, (tenantId) =>
+          Stream.unwrap(Effect.map(events.subscribe(tenantId), (changes) =>
+            Stream.concat(
+              Stream.make({ _tag: "Connected" as const }),
+              Stream.merge(
+                changes.pipe(
+                  Stream.groupedWithin(64, burstWindow),
+                  Stream.flatMap((burst) => Stream.fromIterable(new Set(burst))),
+                  Stream.map((resource) => ({ _tag: "Changed" as const, resource }))
+                ),
+                Stream.map(Stream.tick(heartbeatInterval), () => ({ _tag: "Heartbeat" as const }))
+              )
+            )))))
       .handle("overview", () =>
         Effect.gen(function*() {
           const tenantId = yield* requireTenant
@@ -105,6 +126,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           const tenantId = yield* requireTenant
           return {
             clients: yield* capture(store.listClients(tenantId)),
+            ...whenPresentMap("gatewayUrl", config.dashboardUrl?.(), (url) => url),
             ...whenPresentMap("mcpUrl", config.mcpUrl?.(), (url) => url)
           }
         }))
@@ -169,7 +191,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
             approvalPolicyId: approvalPolicy.id,
             name: body.name,
             capabilities: body.capabilities ?? [],
-            ...whenPresentMap("approvalDelivery", body.approvalDelivery, (d) => d),
+            ...whenPresentMap("approvalMethod", body.approvalMethod, (method) => method),
             ...whenPresentMap("mcpSurface", body.mcpSurface, (surface) => surface)
           }))
           return client
@@ -204,7 +226,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
             tenantId,
             id: clientId,
             capabilities: request.payload.capabilities,
-            approvalDelivery: request.payload.approvalDelivery,
+            approvalMethod: request.payload.approvalMethod,
             mcpSurface: request.payload.mcpSurface
           }))
         }))
@@ -477,19 +499,17 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
         Effect.gen(function*() {
           const tenantId = yield* requireTenant
           const status = request.query["status"]
+          const [approvals, deliveries] = yield* capture(Effect.all([
+            store.listApprovals(tenantId, status),
+            store.listApprovalDeliveries(tenantId, status)
+          ]))
           return {
-            approvals: yield* capture(
-              status === undefined
-                ? store.listApprovals(tenantId)
-                : store.listApprovals(tenantId, status))
+            approvals: approvals.map((approval) => ({
+              ...approval,
+              deliveries: deliveries.filter((delivery) => delivery.approvalId === approval.id)
+            }))
           }
         }))
-      .handle("listApprovalDeliveries", (request) => Effect.gen(function*() {
-        const tenantId = yield* requireTenant
-        const approval = yield* capture(store.getApproval(tenantId, request.params["id"]))
-        if (approval === undefined) return yield* new ApiNotFound({ error: `Unknown approval ${request.params["id"]}` })
-        return { deliveries: yield* capture(store.listApprovalDeliveries(tenantId, approval.id)) }
-      }))
       .handle("approve", (request) => Effect.gen(function*() {
         return yield* capture(approveApproval(
           { store, integrations, retentionDays: config.retentionDays },

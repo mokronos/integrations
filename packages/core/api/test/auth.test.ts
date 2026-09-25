@@ -1,3 +1,4 @@
+import { makeGatewayEvents } from "@integragents/gateway-core"
 import { describe, expect, it } from "@effect/vitest"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
@@ -79,6 +80,7 @@ const setup = Effect.fnUntraced(function*(options: SetupOptions = {}) {
   yield* store.addApiKey({ id: apiKey.id, clientId: client.id, hash: apiKey.hash })
 
   const { handle } = createGatewayHandler({
+    events: yield* makeGatewayEvents,
     httpClient: options.google === undefined ? FetchHttpClient.layer : googleHttpClient,
     integrationServices: options.integrationServices ?? stubIntegrationsContext(),
     store,

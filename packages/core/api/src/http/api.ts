@@ -6,8 +6,7 @@ import {
   HttpApiSchema
 } from "effect/unstable/httpapi"
 import {
-  ApprovalDelivery,
-  ApprovalDeliveryAttempt,
+  ApprovalMethod,
   ApprovalDestination,
   ApprovalDestinationId,
   ApprovalId,
@@ -30,6 +29,8 @@ import {
   ApprovalPolicyId,
   ApprovalPolicyTool,
   PolicyDecision,
+  GatewayEvent,
+  ListedApproval,
   PendingApproval,
   SubjectId,
   TenantId,
@@ -87,13 +88,13 @@ const CreateClientBody = Schema.Struct({
   accessProfileId: Schema.optional(AccessProfileId),
   approvalPolicyId: Schema.optional(ApprovalPolicyId),
   capabilities: Schema.optional(Schema.Array(ClientCapability)),
-  approvalDelivery: Schema.optional(ApprovalDelivery),
+  approvalMethod: Schema.optional(ApprovalMethod),
   mcpSurface: Schema.optional(McpSurface)
 })
 
 const UpdateClientSettingsBody = Schema.Struct({
   capabilities: Schema.Array(ClientCapability),
-  approvalDelivery: ApprovalDelivery,
+  approvalMethod: ApprovalMethod,
   mcpSurface: McpSurface
 })
 
@@ -488,6 +489,7 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
   .add(HttpApiEndpoint.get("listClients", "/v1/clients", {
     success: Schema.Struct({
       clients: Schema.Array(Client),
+      gatewayUrl: Schema.optional(Schema.NullOr(Schema.String)),
       mcpUrl: Schema.optional(Schema.NullOr(Schema.String))
     })
   }).annotate(RequiredAccess, "administrative"))
@@ -658,14 +660,12 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
     params: { id: ClientId }, payload: AssignApprovalPolicyBody,
     success: Client, error: [ApiNotFoundError, ApiBadRequestError]
   }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.get("events", "/v1/events", {
+    success: HttpApiSchema.StreamSse({ data: GatewayEvent })
+  }).annotate(RequiredAccess, "administrative"))
   .add(HttpApiEndpoint.get("listApprovals", "/v1/approvals", {
     query: { status: Schema.optional(ApprovalStatus) },
-    success: Schema.Struct({ approvals: Schema.Array(PendingApproval) })
-  }).annotate(RequiredAccess, "administrative"))
-  .add(HttpApiEndpoint.get("listApprovalDeliveries", "/v1/approvals/:id/deliveries", {
-    params: { id: ApprovalId },
-    success: Schema.Struct({ deliveries: Schema.Array(ApprovalDeliveryAttempt) }),
-    error: ApiNotFoundError
+    success: Schema.Struct({ approvals: Schema.Array(ListedApproval) })
   }).annotate(RequiredAccess, "administrative"))
   .add(HttpApiEndpoint.post("approve", "/v1/approvals/:id/approve", {
     params: { id: ApprovalId },

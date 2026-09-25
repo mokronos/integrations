@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Clock, Effect, Fiber, Option, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { delegationTemplateOf, ToolAddress, whenPresent } from "@integragents/contracts"
+import { makeGatewayEvents, publishingStore } from "@integragents/gateway-core"
 import type { OAuthSessions } from "@integragents/gateway-core"
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client"
 import type { Connection, ConnectionOwner, Tool } from "@integragents/contracts"
@@ -172,7 +173,8 @@ const setup = Effect.fnUntraced(function*(options: {
   readonly oauthIntegrations?: ReadonlyArray<string>
 } = {}) {
   const sql = yield* openDatabase(yield* temporaryDirectory("gateway-http-"))
-  const store = yield* storeOn(sql)
+  const events = yield* makeGatewayEvents
+  const store = publishingStore(yield* storeOn(sql), events)
   const granted: ConnectionRef = options.template === true ? delegationTemplateOf(connection) : connection
 
   const accessProfile = yield* store.createAccessProfile({
@@ -214,6 +216,7 @@ const setup = Effect.fnUntraced(function*(options: {
     ...whenPresent("oauthIntegrations", options.oauthIntegrations)
   })
   const { handle } = createGatewayHandler({
+    events,
     httpClient: FetchHttpClient.layer,
     store,
     integrationServices: stub.integrationServices,
@@ -295,7 +298,9 @@ const mcpText = <A>(result: A): string =>
 
 const mcpClient = Effect.fnUntraced(function*(
   handle: (request: Request) => Promise<Response>,
-  secret: string
+  secret: string,
+  /** Speaks 2026-07-28 and answers every elicitation with this action; without it the client is a 2025-era one. */
+  elicitation?: { readonly action: "accept" | "decline" | "cancel"; readonly asked: Array<string> }
 ) {
   const transport = new StreamableHTTPClientTransport(new URL("http://gateway.test/mcp"), {
     authProvider: { token: async () => secret },
@@ -303,7 +308,18 @@ const mcpClient = Effect.fnUntraced(function*(
   })
   return yield* Effect.acquireRelease(
     Effect.promise(async () => {
-      const client = new Client({ name: "gateway-test", version: "1.0.0" })
+      const client = new Client(
+        { name: "gateway-test", version: "1.0.0" },
+        elicitation === undefined
+          ? {}
+          : { capabilities: { elicitation: { form: {} } }, versionNegotiation: { mode: "auto" } }
+      )
+      if (elicitation !== undefined) {
+        client.setRequestHandler("elicitation/create", async (request) => {
+          elicitation.asked.push(request.params.message)
+          return elicitation.action === "accept" ? { action: "accept", content: {} } : { action: elicitation.action }
+        })
+      }
       await client.connect(transport)
       return client
     }),
@@ -472,6 +488,49 @@ describe("gateway http surface", () => {
         }))
       expect(refused.isError).toBe(true)
       expect(mcpText(refused)).toContain("not implemented")
+      expect(calls).toEqual([])
+    }).pipe(Effect.provide(testServices)))
+
+  it.effect("asks for approval in an MCP client that supports elicitation", () =>
+    Effect.gen(function*() {
+      const { handle, key, calls, store } = yield* setup({ decision: "require_approval" })
+      const asked: Array<string> = []
+      const client = yield* mcpClient(handle, key.secret, { action: "accept", asked })
+
+      const result = yield* mcpJson(client, "user___sebastian___gmail___work__sendEmail", { to: "a@b.c" })
+
+      expect(result["status"]).toBe("succeeded")
+      expect(asked).toEqual([expect.stringContaining("user___sebastian___gmail___work.sendEmail")])
+      expect(calls).toEqual([{ address: "tools.gmail.user:sebastian.work.sendEmail", input: { to: "a@b.c" } }])
+      expect(yield* store.listApprovals(defaultTenantId)).toMatchObject([
+        { status: "approved", decidedBy: "support-agent (in-client approval)" }
+      ])
+    }).pipe(Effect.provide(testServices)))
+
+  it.effect("denies the call when the human declines the in-client approval", () =>
+    Effect.gen(function*() {
+      const { handle, key, calls } = yield* setup({ decision: "require_approval" })
+      const client = yield* mcpClient(handle, key.secret, { action: "decline", asked: [] })
+
+      const result = yield* Effect.promise(() =>
+        client.callTool({ name: "user___sebastian___gmail___work__sendEmail", arguments: { to: "a@b.c" } }))
+
+      expect(result.isError).toBe(true)
+      expect(mcpText(result)).toContain("denied")
+      expect(calls).toEqual([])
+    }).pipe(Effect.provide(testServices)))
+
+  it.effect("returns the approval link when the MCP client cannot elicit or the human dismisses the prompt", () =>
+    Effect.gen(function*() {
+      const { handle, key, calls } = yield* setup({ decision: "require_approval", dashboardUrl: "https://gateway.example" })
+      const plain = yield* mcpClient(handle, key.secret)
+      const dismissing = yield* mcpClient(handle, key.secret, { action: "cancel", asked: [] })
+
+      for (const client of [plain, dismissing]) {
+        const result = yield* mcpJson(client, "user___sebastian___gmail___work__sendEmail", { to: "a@b.c" })
+        expect(result["status"]).toBe("pending")
+        expect(result["approvalUrl"]).toBe(`https://gateway.example/approvals?approval=${String(result["approvalId"])}`)
+      }
       expect(calls).toEqual([])
     }).pipe(Effect.provide(testServices)))
 
@@ -828,6 +887,34 @@ describe("gateway http surface", () => {
       const response = yield* call("GET", `/v1/clients/${clientId}/tools`)
       expect(response.status).toBe(200)
       expect(JSON.stringify(response.body)).toContain("require_approval")
+    }).pipe(Effect.provide(testServices)))
+
+  it.effect("streams what changed to a dashboard following /v1/events", () =>
+    Effect.gen(function*() {
+      const { call, handle, key } = yield* setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })
+      const response = yield* Effect.promise(() =>
+        handle(new Request("http://gateway.test/v1/events", { headers: { authorization: `Bearer ${key.secret}` } })))
+      expect(response.headers.get("content-type")).toContain("text/event-stream")
+      const reader = response.body?.getReader()
+      if (reader === undefined) throw new Error("/v1/events answered without a body")
+      const decoder = new TextDecoder()
+      let received = ""
+      const readUntil = (fragment: string) =>
+        Effect.promise(async () => {
+          while (!received.includes(fragment)) {
+            const chunk = await reader.read()
+            if (chunk.done) throw new Error(`/v1/events ended before ${fragment}: ${received}`)
+            received += decoder.decode(chunk.value)
+          }
+        }).pipe(Effect.timeout("5 seconds"))
+
+      yield* readUntil(`"_tag":"Connected"`)
+      yield* call("POST", "/v1/execute", {
+        body: { alias: "user___sebastian___gmail___work", tool: "sendEmail", arguments: { to: "a@b.c" } }
+      })
+      yield* readUntil(`"resource":"approvals"`)
+      yield* readUntil(`"resource":"audit"`)
+      yield* Effect.promise(() => reader.cancel())
     }).pipe(Effect.provide(testServices)))
 
   it.effect("returns an authenticated dashboard link with a pending invocation", () =>

@@ -94,7 +94,7 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function*(
 ): Effect.fn.Return<InvocationOutcome, GatewayStoreError, Crypto.Crypto | HttpClient.HttpClient> {
   const { store, retentionDays } = dependencies
   const pending = (approvalId: ApprovalId, expiresAt: Date): InvocationOutcome => {
-    const approvalUrl = authorization.client.approvalDelivery.returnLink
+    const approvalUrl = authorization.client.approvalMethod !== "none"
       ? dependencies.approvalUrlOf?.(approvalId)
       : undefined
     return {

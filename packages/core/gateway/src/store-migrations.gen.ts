@@ -107,5 +107,13 @@ export const gatewayMigrations: ReadonlyArray<Migration> = [
       "ALTER TABLE `gateway_audit` ADD `oauth_application_id` text;",
       "ALTER TABLE `gateway_audit` ADD `authorized_by_subject_id` text;"
     ]
+  },
+  {
+    id: 7,
+    name: "0007_adorable_whistler",
+    statements: [
+      "ALTER TABLE `gateway_client` ADD `approval_method` text DEFAULT 'elicitation' NOT NULL;",
+      "ALTER TABLE `gateway_client` DROP COLUMN `approval_delivery`;"
+    ]
   }
 ]

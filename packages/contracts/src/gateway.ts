@@ -69,8 +69,8 @@ export const aliasForConnection = (connection: ConnectionRef): Alias => Alias.ma
 
 export const ClientCapability = Schema.Literals(["provision_connections", "administer_gateway"])
 export type ClientCapability = typeof ClientCapability.Type
-export const ApprovalDelivery = Schema.Struct({ returnLink: Schema.Boolean })
-export type ApprovalDelivery = typeof ApprovalDelivery.Type
+export const ApprovalMethod = Schema.Literals(["elicitation", "link", "none"])
+export type ApprovalMethod = typeof ApprovalMethod.Type
 export const McpSurface = Schema.Literals(["tools", "discovery"])
 export type McpSurface = typeof McpSurface.Type
 export const PolicyDecision = Schema.Literals(["allow", "require_approval"])
@@ -78,7 +78,7 @@ export type PolicyDecision = typeof PolicyDecision.Type
 
 export const Client = Schema.Struct({
   id: ClientId, tenantId: TenantId, accessProfileId: AccessProfileId, approvalPolicyId: ApprovalPolicyId,
-  name: Schema.String, capabilities: Schema.Array(ClientCapability), approvalDelivery: ApprovalDelivery, mcpSurface: McpSurface,
+  name: Schema.String, capabilities: Schema.Array(ClientCapability), approvalMethod: ApprovalMethod, mcpSurface: McpSurface,
   createdAt: Schema.Date, revokedAt: Schema.NullOr(Schema.Date)
 })
 export type Client = typeof Client.Type
@@ -105,6 +105,18 @@ export type ApprovalDeliveryAttempt = typeof ApprovalDeliveryAttempt.Type
 
 export const PendingApproval = Schema.Struct({ id: ApprovalId, clientId: ClientId, approvalPolicyId: ApprovalPolicyId, accessProfileId: AccessProfileId, alias: Schema.String, tool: ToolName, arguments: Schema.Json, status: ApprovalStatus, createdAt: Schema.Date, expiresAt: Schema.Date, decidedAt: Schema.NullOr(Schema.Date), decidedBy: Schema.NullOr(Schema.String), result: Schema.NullOr(Schema.Json), error: Schema.NullOr(Schema.String), collectedAt: Schema.NullOr(Schema.Date) })
 export type PendingApproval = typeof PendingApproval.Type
+export const ListedApproval = Schema.Struct({ ...PendingApproval.fields, deliveries: Schema.Array(ApprovalDeliveryAttempt) })
+export type ListedApproval = typeof ListedApproval.Type
+
+/** What changed, so a dashboard knows which of its views to reload. */
+export const GatewayResource = Schema.Literals(["approvals", "audit", "clients", "policies", "approval-destinations", "integrations"])
+export type GatewayResource = typeof GatewayResource.Type
+export const GatewayEvent = Schema.Union([
+  Schema.TaggedStruct("Connected", {}),
+  Schema.TaggedStruct("Heartbeat", {}),
+  Schema.TaggedStruct("Changed", { resource: GatewayResource })
+])
+export type GatewayEvent = typeof GatewayEvent.Type
 export const InvocationSucceeded = Schema.Struct({ status: Schema.Literal("succeeded"), result: Schema.Json })
 export type InvocationSucceeded = typeof InvocationSucceeded.Type
 export const InvocationPending = Schema.Struct({ status: Schema.Literal("pending"), approvalId: ApprovalId, expiresAt: Schema.Date, approvalUrl: Schema.optional(Schema.String) })

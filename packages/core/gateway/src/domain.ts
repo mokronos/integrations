@@ -5,12 +5,12 @@ export {
   ApiKeyId, ApiKeyView, AccessProfileId, ApprovalPolicyId, ApprovalId, ApprovalDestinationId,
   ApprovalDeliveryId, AuditId, ConnectionRef, connectionSubject, connectionRefKey,
   OAuthApplicationId, OAuthGrantId, OAuthApplicationKind, OAuthGrantView,
-  sameConnectionRef, aliasForConnection, ClientCapability, ApprovalDelivery, McpSurface, ApprovalDestination,
+  sameConnectionRef, aliasForConnection, ClientCapability, ApprovalMethod, McpSurface, ApprovalDestination,
   ApprovalDeliveryStatus, ApprovalDeliveryAttempt, Client, PolicyDecision, AccessProfile,
   AccessProfileTool, ApprovalPolicy, ApprovalPolicyTool, PendingApproval, AuditOutcome,
   AuditRecord, ConfigureClient, ToolSnapshot, DriftKind, DriftEntry
 } from "@integragents/contracts"
-import { TenantId, SubjectId, ClientId, Client, ClientCapability, ApprovalDelivery, Alias, ConnectionRef, AccessProfile, AccessProfileTool, ApprovalPolicy, ApprovalPolicyTool, PolicyDecision, ToolName, ApiKeyId } from "@integragents/contracts"
+import { TenantId, SubjectId, ClientId, Client, ClientCapability, ApprovalMethod, Alias, ConnectionRef, AccessProfile, AccessProfileTool, ApprovalPolicy, ApprovalPolicyTool, PolicyDecision, ToolName, ApiKeyId } from "@integragents/contracts"
 export const ApiKeyHash = Schema.String.pipe(Schema.brand("ApiKeyHash"))
 export type ApiKeyHash = typeof ApiKeyHash.Type
 export const ApiKey = Schema.Struct({ id: ApiKeyId, clientId: ClientId, hash: ApiKeyHash, createdAt: Schema.Date, lastUsedAt: Schema.NullOr(Schema.Date), revokedAt: Schema.NullOr(Schema.Date) })
@@ -35,7 +35,7 @@ export const ExternalIdentity = Schema.Struct({ provider: IdentityProvider, prov
 export type ExternalIdentity = typeof ExternalIdentity.Type
 export const LoginHandoff = Schema.Struct({ requestHash: LoginHandoffHash, subjectId: Schema.NullOr(SubjectId), tenantId: Schema.NullOr(TenantId), email: Schema.NullOr(Schema.String), createdAt: Schema.Date, expiresAt: Schema.Date, collectedAt: Schema.NullOr(Schema.Date) })
 export type LoginHandoff = typeof LoginHandoff.Type
-export const defaultApprovalDelivery: ApprovalDelivery = { returnLink: true }
+export const defaultApprovalMethod: ApprovalMethod = "elicitation"
 export const clientHasCapability = (client: Client, capability: ClientCapability): boolean => client.capabilities.includes(capability)
 export const Authorized = Schema.Struct({ status: Schema.Literal("authorized"), client: Client, accessProfile: AccessProfile, accessProfileTool: AccessProfileTool, approvalPolicy: ApprovalPolicy, approvalPolicyTool: ApprovalPolicyTool, alias: Alias, connection: ConnectionRef, subject: Schema.NullOr(SubjectId), decision: PolicyDecision })
 export type Authorized = typeof Authorized.Type

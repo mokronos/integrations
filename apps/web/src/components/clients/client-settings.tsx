@@ -22,11 +22,17 @@ import {
   useClientApprovalDestinations
 } from "@/lib/queries"
 import { Schema } from "effect"
-import { McpSurface, type ApprovalDestinationId, type Client, type ClientCapability } from "@integragents/contracts"
+import { ApprovalMethod, McpSurface, type ApprovalDestinationId, type Client, type ClientCapability } from "@integragents/contracts"
 
 const mcpSurfaceOptions: ReadonlyArray<{ readonly value: McpSurface; readonly label: string; readonly description: string }> = [
   { value: "tools", label: "Tools", description: "Every tool this client may call appears as its own MCP tool. Best for agents that just need to do work." },
   { value: "discovery", label: "Discovery", description: "The CLI surface as MCP tools: search, connect, tools, schema, execute, approval. Best for agents that set up integrations themselves." }
+]
+
+const approvalMethodOptions: ReadonlyArray<{ readonly value: ApprovalMethod; readonly label: string; readonly description: string }> = [
+  { value: "elicitation", label: "Ask in the client", description: "MCP clients that support elicitation prompt for approval in the harness; anyone holding this client's credential can answer that prompt. Other callers get an approval link." },
+  { value: "link", label: "Approval link", description: "Pending calls return a link to approve them in the dashboard." },
+  { value: "none", label: "Dashboard only", description: "Pending calls carry no link; approve them from Approvals or a notification destination." }
 ]
 
 function DestinationAssignments({ client }: { readonly client: Client }) {
@@ -63,7 +69,7 @@ export function ClientSettings({ client }: { readonly client: Client }) {
   const [mayAdminister, setMayAdminister] = useState(
     client.capabilities.includes("administer_gateway")
   )
-  const [returnLink, setReturnLink] = useState(client.approvalDelivery.returnLink)
+  const [approvalMethod, setApprovalMethod] = useState<ApprovalMethod>(client.approvalMethod)
   const [mcpSurface, setMcpSurface] = useState<McpSurface>(client.mcpSurface)
 
   const save = useMutation({
@@ -73,7 +79,7 @@ export function ClientSettings({ client }: { readonly client: Client }) {
       if (mayAdminister) capabilities.push("administer_gateway")
       return gateway.updateClientSettings(client.id, {
         capabilities,
-        approvalDelivery: { returnLink },
+        approvalMethod,
         mcpSurface
       })
     },
@@ -137,17 +143,18 @@ export function ClientSettings({ client }: { readonly client: Client }) {
           </div>
         </div>
         <div className="space-y-3 rounded-md border p-3">
-          <div className="flex items-start gap-3">
-            <Switch
-              id="settings-return-link"
-              checked={returnLink}
-              onCheckedChange={setReturnLink}
+          <div className="space-y-1.5">
+            <Label>Approval method</Label>
+            <Select
+              className="w-full sm:w-72"
+              value={approvalMethod}
+              onValueChange={(next) => { if (next !== null) setApprovalMethod(Schema.decodeUnknownSync(ApprovalMethod)(next)) }}
+              items={approvalMethodOptions}
               disabled={disabled}
             />
-            <div className="space-y-1">
-              <Label htmlFor="settings-return-link">Return approval link</Label>
-              <p className="text-muted-foreground text-xs">Include a signed-in dashboard destination in pending outcomes.</p>
-            </div>
+            <p className="text-muted-foreground text-xs">
+              {approvalMethodOptions.find((option) => option.value === approvalMethod)?.description}
+            </p>
           </div>
           <DestinationAssignments client={client} />
         </div>

@@ -1,3 +1,4 @@
+import { makeGatewayEvents } from "@integragents/gateway-core"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Schema, Tracer } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
@@ -71,6 +72,7 @@ const setup = Effect.fnUntraced(function*(options: {
     : {}
 
   const { handle } = createGatewayHandler({
+    events: yield* makeGatewayEvents,
     httpClient: FetchHttpClient.layer,
     telemetry: Layer.succeed(Tracer.Tracer, recordingTracer(Tracer.nativeTracer, "gateway", () => {})),
     integrationServices: stubIntegrationsContext({}, unreachable),

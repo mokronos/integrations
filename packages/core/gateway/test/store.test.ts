@@ -222,18 +222,18 @@ describe("gateway store", () => {
         name: "policy-check",
         capabilities: []
       })
-      expect(client.approvalDelivery).toEqual({ returnLink: true })
+      expect(client.approvalMethod).toBe("elicitation")
 
       const updated = yield* gateway.updateClientSettings({
         tenantId: defaultTenantId,
         id: client.id,
         capabilities: ["provision_connections"],
-        approvalDelivery: { returnLink: false },
+        approvalMethod: "none",
         mcpSurface: "discovery"
       })
 
       expect(updated.capabilities).toEqual(["provision_connections"])
-      expect(updated.approvalDelivery).toEqual({ returnLink: false })
+      expect(updated.approvalMethod).toBe("none")
       expect(updated.mcpSurface).toBe("discovery")
     }).pipe(Effect.provide(testServices)))
 
@@ -264,7 +264,7 @@ describe("gateway store", () => {
         arguments: {},
         expiresAt: yield* notYet
       })
-      expect(yield* gateway.listApprovalDeliveries(defaultTenantId, approval.id)).toMatchObject([{
+      expect(yield* gateway.listApprovalDeliveries(defaultTenantId, "pending")).toMatchObject([{
         approvalId: approval.id,
         destinationId: destination.id,
         destinationName: "phone",
@@ -287,7 +287,7 @@ describe("gateway store", () => {
 
       expect(new Headers(delivered?.headers).get("x-integrations-signature")).toMatch(/^v1=/)
       expect(String(delivered?.body)).not.toContain("arguments")
-      expect(yield* gateway.listApprovalDeliveries(defaultTenantId, approval.id)).toMatchObject([{
+      expect(yield* gateway.listApprovalDeliveries(defaultTenantId)).toMatchObject([{
         status: "delivered",
         attempts: 1
       }])

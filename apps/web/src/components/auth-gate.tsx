@@ -31,6 +31,17 @@ export function AuthGate({ children }: { readonly children: ReactNode }) {
     )
   }
 
+  if (me.data === undefined && me.isError) {
+    return (
+      <div className="flex min-h-svh flex-col items-center justify-center gap-3">
+        <p className="text-destructive text-sm">{me.error.message}</p>
+        <Button variant="outline" size="sm" onClick={() => void me.refetch()} disabled={me.isFetching}>
+          Retry
+        </Button>
+      </div>
+    )
+  }
+
   if (me.data?.authenticated !== true) {
     return <AuthCard onAuthenticated={() => me.refetch().then(() => undefined)} />
   }

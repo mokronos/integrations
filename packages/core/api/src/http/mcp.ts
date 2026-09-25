@@ -1,8 +1,12 @@
 import {
+  CLIENT_CAPABILITIES_META_KEY,
   createMcpHandler,
   fromJsonSchema,
+  inputRequired,
+  inputResponse,
   McpServer
 } from "@modelcontextprotocol/server"
+import type { ServerContext } from "@modelcontextprotocol/server"
 import {
   Alias,
   asJson,
@@ -18,11 +22,11 @@ import type { IntegrationServices } from "@integragents/host"
 import { authenticateClient, GatewayStoreService, listEffectiveTools } from "@integragents/gateway-core"
 import type { GatewayStore } from "@integragents/gateway-core"
 import type { OAuthActor } from "@integragents/gateway-core"
-import { Context, Effect, Layer, ManagedRuntime, Option, Predicate } from "effect"
+import { Context, Effect, Layer, ManagedRuntime, Option, Predicate, Schema } from "effect"
 import { Headers, HttpTraceContext } from "effect/unstable/http"
 import type { HttpClient } from "effect/unstable/http"
 import { agentTools, invokeTool } from "./mcp-tools.ts"
-import type { AgentTool, McpCaller, ToolOutput } from "./mcp-tools.ts"
+import type { AgentTool, ApprovalPrompt, McpCaller, ToolOutput } from "./mcp-tools.ts"
 import { capture, ErrorCapture } from "./observability.ts"
 import type { ErrorSink } from "./observability.ts"
 import type { GatewayOperationServices } from "./operations.ts"
@@ -85,6 +89,41 @@ const contentOf = (text: string, isError: boolean) => ({
   isError
 })
 
+const approvalInput = "approval"
+
+/**
+ * Only 2026-07-28 requests carry their client's capabilities, so only they can
+ * be answered with an elicitation; older clients fall back to the approval link.
+ */
+const EnvelopeElicitation = Schema.Struct({
+  [CLIENT_CAPABILITIES_META_KEY]: Schema.Struct({
+    elicitation: Schema.Struct({ form: Schema.optional(Schema.Json), url: Schema.optional(Schema.Json) })
+  })
+})
+const decodeEnvelopeElicitation = Schema.decodeUnknownOption(EnvelopeElicitation)
+
+const approvalPromptOf = (context: ServerContext): ApprovalPrompt => {
+  const envelope = decodeEnvelopeElicitation(context.mcpReq.envelope)
+  const elicitation = Option.getOrUndefined(envelope)?.[CLIENT_CAPABILITIES_META_KEY].elicitation
+  if (elicitation === undefined || (elicitation.form === undefined && elicitation.url !== undefined)) {
+    return { kind: "unsupported" }
+  }
+  const answer = inputResponse(context.mcpReq.inputResponses, approvalInput)
+  return answer.kind === "elicit" ? { kind: "answered", action: answer.action } : { kind: "unanswered" }
+}
+
+const replyOf = (output: ToolOutput) =>
+  output.kind === "result"
+    ? contentOf(JSON.stringify(output.value), output.failed)
+    : inputRequired({
+      inputRequests: {
+        [approvalInput]: inputRequired.elicit({
+          message: output.message,
+          requestedSchema: { type: "object", properties: {} }
+        })
+      }
+    })
+
 type McpRuntime = ManagedRuntime.ManagedRuntime<GatewayOperationServices, never>
 
 /** Continues the caller's trace when its request carried one. */
@@ -102,13 +141,13 @@ const resultOf = (
   effect: Effect.Effect<ToolOutput, Error, GatewayOperationServices>
 ) =>
   runtime.runPromise(effect.pipe(
-    Effect.tap((output) => Effect.annotateCurrentSpan("mcp.tool.failed", output.failed)),
+    Effect.tap((output) => Effect.annotateCurrentSpan("mcp.tool.outcome", output.kind === "result" ? output.failed ? "failed" : "result" : output.kind)),
     Effect.tapError((failure) =>
       Effect.logInfo("MCP tool call refused", failure).pipe(
         Effect.annotateLogs({ "error.tag": Predicate.hasProperty(failure, "_tag") ? String(failure._tag) : failure.name })
       )),
     Effect.match({
-      onSuccess: (output: ToolOutput) => contentOf(JSON.stringify(output.value), output.failed),
+      onSuccess: replyOf,
       onFailure: (failure: Error) => contentOf(describeFailure(failure), true)
     }),
     Effect.withSpan("Mcp.callTool", {
@@ -136,10 +175,17 @@ export interface McpGatewayOptions {
   }
 }
 
+type McpPrincipal = Omit<McpCaller, "approvalPrompt">
+
+const callerFor = (principal: McpPrincipal, context: ServerContext): McpCaller => ({
+  ...principal,
+  approvalPrompt: approvalPromptOf(context)
+})
+
 const registerAgentTool = (
   server: McpServer,
   runtime: McpRuntime,
-  caller: McpCaller,
+  principal: McpPrincipal,
   tool: AgentTool
 ): void => {
   server.registerTool(
@@ -149,8 +195,10 @@ const registerAgentTool = (
       description: tool.description,
       inputSchema: fromJsonSchema<Record<string, Json>>(tool.inputSchema)
     },
-    async (arguments_, context) =>
-      resultOf(runtime, { tool: tool.name, caller, request: context.http?.req }, tool.run(caller, asJson(arguments_)))
+    async (arguments_, context) => {
+      const caller = callerFor(principal, context)
+      return resultOf(runtime, { tool: tool.name, caller, request: context.http?.req }, tool.run(caller, asJson(arguments_)))
+    }
   )
 }
 
@@ -168,12 +216,12 @@ const serverFor = async (
   oauthActor?: OAuthActor
 ): Promise<McpServer> => {
   const server = new McpServer({ name: "integrations-gateway", version: gatewayVersion })
-  const caller: McpCaller = { client, ...whenPresent("oauthActor", oauthActor) }
+  const principal: McpPrincipal = { client, ...whenPresent("oauthActor", oauthActor) }
 
   if (client.mcpSurface === "discovery") {
     for (const tool of agentTools) {
       if (tool.capability === undefined || client.capabilities.includes(tool.capability)) {
-        registerAgentTool(server, runtime, caller, tool)
+        registerAgentTool(server, runtime, principal, tool)
       }
     }
     return server
@@ -194,12 +242,14 @@ const serverFor = async (
         ...whenPresent("description", describeEffectiveTool(tool)),
         inputSchema: fromJsonSchema<Record<string, Json>>(inputSchema)
       },
-      async (arguments_, context) =>
-        resultOf(runtime, { tool: toolName(tool.alias, name), caller, request: context.http?.req }, invokeTool(caller, {
+      async (arguments_, context) => {
+        const caller = callerFor(principal, context)
+        return resultOf(runtime, { tool: toolName(tool.alias, name), caller, request: context.http?.req }, invokeTool(caller, {
           alias: tool.alias,
           tool: name,
           arguments: asJson(arguments_)
         }))
+      }
     )
   }
   return server

@@ -12,9 +12,9 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { until, when } from "@/lib/format"
 import * as gateway from "@/lib/gateway"
-import { useApprovalDeliveries, useApprovals, useIntegrations, useInvalidate, useMutation } from "@/lib/queries"
+import { useApprovals, useIntegrations, useInvalidate, useMutation } from "@/lib/queries"
 import { Schema } from "effect"
-import { ApprovalStatus, type IntegrationOverview, type PendingApproval } from "@integragents/contracts"
+import { ApprovalStatus, type IntegrationOverview, type ListedApproval } from "@integragents/contracts"
 
 const decodeApprovalFilter = Schema.decodeUnknownSync(Schema.Union([ApprovalStatus, Schema.Literal("all")]))
 
@@ -33,13 +33,12 @@ function ApprovalCard({
   selected,
   integrations
 }: {
-  readonly approval: PendingApproval
+  readonly approval: ListedApproval
   readonly selected: boolean
   readonly integrations: ReadonlyArray<IntegrationOverview>
 }) {
   const invalidate = useInvalidate()
   const [expired, setExpired] = useState(false)
-  const deliveries = useApprovalDeliveries(approval.id)
 
   useEffect(() => {
     if (approval.status !== "pending") return
@@ -92,8 +91,8 @@ function ApprovalCard({
           Check the connected service before requesting it again; the gateway will not rerun this approval.
         </p> : null}
         <JsonView value={approval.arguments} label="arguments" defaultOpen={approval.status === "pending"} />
-        {(deliveries.data ?? []).length > 0 ? <div className="flex flex-wrap gap-2">
-          {(deliveries.data ?? []).map((delivery) => <Badge key={delivery.id} variant={delivery.status === "failed" ? "destructive" : "outline"}>
+        {approval.deliveries.length > 0 ? <div className="flex flex-wrap gap-2">
+          {approval.deliveries.map((delivery) => <Badge key={delivery.id} variant={delivery.status === "failed" ? "destructive" : "outline"}>
             {delivery.destinationName}: {delivery.status}{delivery.attempts > 0 ? ` (${delivery.attempts})` : ""}
           </Badge>)}
         </div> : null}

@@ -22,7 +22,7 @@ import {
   provisionIntegration,
   searchIntegrations
 } from "@integragents/host"
-import { GatewayStoreService, invokeAsClient, listEffectiveTools } from "@integragents/gateway-core"
+import { approveApproval, denyApproval, GatewayStoreService, invokeAsClient, listEffectiveTools } from "@integragents/gateway-core"
 import type { OAuthActor } from "@integragents/gateway-core"
 import { capture } from "./observability.ts"
 import {
@@ -44,17 +44,23 @@ export class ToolRefusal extends Data.TaggedError("ToolRefusal")<{
 
 const refuse = (message: string): ToolRefusal => new ToolRefusal({ message })
 
-export interface ToolOutput {
-  readonly value: JsonEncodable
-  readonly failed: boolean
-}
+export type ToolOutput =
+  | { readonly kind: "result"; readonly value: JsonEncodable; readonly failed: boolean }
+  | { readonly kind: "ask-approval"; readonly message: string }
 
-const ok = (value: JsonEncodable): ToolOutput => ({ value, failed: false })
+const ok = (value: JsonEncodable): ToolOutput => ({ kind: "result", value, failed: false })
 
-/** The authenticated client an MCP session speaks for. */
+/** Whether the human can answer an approval inside the MCP client, and what they answered. */
+export type ApprovalPrompt =
+  | { readonly kind: "unsupported" }
+  | { readonly kind: "unanswered" }
+  | { readonly kind: "answered"; readonly action: "accept" | "decline" | "cancel" }
+
+/** The authenticated client an MCP call speaks for. */
 export interface McpCaller {
   readonly client: Client
   readonly oauthActor?: OAuthActor
+  readonly approvalPrompt: ApprovalPrompt
 }
 
 export type ToolRun = Effect.Effect<ToolOutput, Error, GatewayOperationServices>
@@ -124,6 +130,28 @@ const filesUnsupported =
   `Sending files over MCP is not implemented yet; upload the bytes to POST /v1/blobs with this key ` +
   `and pass the ${blobHandleKey} handle it returns.`
 
+const approvalMessage = (input: { readonly alias: Alias; readonly tool: ToolName; readonly arguments: Json }): string =>
+  `Approve ${input.alias}.${input.tool}?\n\n${inline(JSON.stringify(input.arguments), 2_000)}`
+
+/** Records the human's in-client answer; a call decided elsewhere in the meantime keeps that decision. */
+const decideInClient = (caller: McpCaller, approvalId: ApprovalId, action: "accept" | "decline") =>
+  Effect.gen(function*() {
+    const dependencies = yield* invokeDependencies
+    const config = yield* GatewayConfig
+    const decision = {
+      tenantId: caller.client.tenantId,
+      id: approvalId,
+      decidedBy: `${caller.client.name} (in-client approval)`
+    }
+    const decided = action === "accept"
+      ? approveApproval({ ...dependencies, retentionDays: config.retentionDays }, decision)
+      : denyApproval(dependencies.store, decision)
+    yield* capture(decided).pipe(
+      Effect.asVoid,
+      Effect.catchTags({ ApprovalNotFound: () => Effect.void, ApprovalConflict: () => Effect.void })
+    )
+  })
+
 /**
  * The one path every invocation takes, whether the agent called the tool by its
  * own name or reached it through `execute`.
@@ -139,15 +167,23 @@ export const invokeTool = (
   Effect.gen(function*() {
     if (mentionsKey(input.arguments, localFileKey)) return yield* refuse(filesUnsupported)
     const dependencies = yield* invokeDependencies
-    const outcome = yield* capture(invokeAsClient(dependencies, {
+    const invoke = capture(invokeAsClient(dependencies, {
       client: caller.client,
       alias: input.alias,
       tool: input.tool,
       arguments: input.arguments,
       ...whenPresent("oauthActor", caller.oauthActor)
     }))
+    const first = yield* invoke
+    const prompt = caller.approvalPrompt
+    const inClient = first.status === "pending" && caller.client.approvalMethod === "elicitation"
+    if (inClient && prompt.kind === "unanswered") return { kind: "ask-approval", message: approvalMessage(input) }
+    const outcome = inClient && prompt.kind === "answered" && prompt.action !== "cancel"
+      ? yield* Effect.andThen(decideInClient(caller, first.approvalId, prompt.action), invoke)
+      : first
     const encoded = encodeOutcome(outcome)
     return {
+      kind: "result",
       value: outcome.status === "succeeded" && mentionsKey(outcome.result, blobHandleKey)
         ? { ...objectEntries(asJson(encoded)), note: blobsUnsupported }
         : encoded,

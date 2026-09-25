@@ -2,7 +2,7 @@ import { Effect, Schema } from "effect"
 import type { NonNegativeInt, PositiveInt } from "@integragents/contracts"
 import type {
   AccessProfile, AccessProfileId, AccessProfileTool, Alias, ApiKey, ApiKeyHash,
-  ApiKeyId, ApprovalDelivery, ApprovalDeliveryAttempt, ApprovalDeliveryId, McpSurface,
+  ApiKeyId, ApprovalMethod, ApprovalDeliveryAttempt, ApprovalDeliveryId, McpSurface,
   ApprovalDestination, ApprovalDestinationId, ApprovalId, ApprovalPolicy, ApprovalPolicyId,
   ApprovalPolicyTool, ApprovalStatus, AuditId, AuditOutcome, AuditRecord,
   AuthSession, Client, ConfigureClient, ClientCapability, ClientId, ConnectionName, ConnectionRef,
@@ -46,7 +46,7 @@ export interface CreateClientInput {
   readonly approvalPolicyId: ApprovalPolicyId
   readonly name: string
   readonly capabilities: ReadonlyArray<ClientCapability>
-  readonly approvalDelivery?: ApprovalDelivery
+  readonly approvalMethod?: ApprovalMethod
   readonly mcpSurface?: McpSurface
 }
 
@@ -217,7 +217,7 @@ export interface GatewayStore {
     readonly tenantId: TenantId
     readonly id: ClientId
     readonly capabilities: ReadonlyArray<ClientCapability>
-    readonly approvalDelivery: ApprovalDelivery
+    readonly approvalMethod: ApprovalMethod
     readonly mcpSurface: McpSurface
   }): Effect.Effect<Client, GatewayStoreError>
   renameClient(tenantId: TenantId, id: ClientId, name: string): Effect.Effect<Client, GatewayStoreError>
@@ -234,7 +234,7 @@ export interface GatewayStore {
   deleteApprovalDestination(tenantId: TenantId, id: ApprovalDestinationId): Effect.Effect<void, GatewayStoreError>
   listClientApprovalDestinationIds(clientId: ClientId): Effect.Effect<ReadonlyArray<ApprovalDestinationId>, GatewayStoreError>
   replaceClientApprovalDestinations(tenantId: TenantId, clientId: ClientId, ids: ReadonlyArray<ApprovalDestinationId>): Effect.Effect<ReadonlyArray<ApprovalDestinationId>, GatewayStoreError>
-  listApprovalDeliveries(tenantId: TenantId, approvalId: ApprovalId): Effect.Effect<ReadonlyArray<ApprovalDeliveryAttempt>, GatewayStoreError>
+  listApprovalDeliveries(tenantId: TenantId, status?: ApprovalStatus): Effect.Effect<ReadonlyArray<ApprovalDeliveryAttempt>, GatewayStoreError>
   claimDueApprovalDeliveries(now: Date, limit: number): Effect.Effect<ReadonlyArray<ApprovalDeliveryJob>, GatewayStoreError>
   settleApprovalDelivery(input: {
     readonly id: ApprovalDeliveryId

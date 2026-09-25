@@ -135,7 +135,7 @@ export const gatewayClient = sqliteTable("gateway_client", {
   approvalPolicyId: text("approval_policy_id").notNull().references(() => gatewayApprovalPolicy.id),
   name: text("name").notNull(),
   capabilities: text("capabilities").notNull(),
-  approvalDelivery: text("approval_delivery").notNull(),
+  approvalMethod: text("approval_method").notNull().default("elicitation"),
   mcpSurface: text("mcp_surface").notNull().default("tools"),
   createdAt: createdAt(),
   revokedAt: integer("revoked_at")

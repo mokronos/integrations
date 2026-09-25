@@ -35,7 +35,8 @@ import type { ErrorSink } from "./observability.ts"
 import type { GatewaySettings, SignInPolicy } from "./services.ts"
 import { defaultMaxUploadBytes, NonNegativeIntFromString, whenPresent } from "@integragents/contracts"
 import type { IntegrationServices } from "@integragents/host"
-import { GatewayStoreService, OAuthFlowSessions } from "@integragents/gateway-core"
+import { GatewayEvents, GatewayStoreService, OAuthFlowSessions } from "@integragents/gateway-core"
+import type { EventBus } from "@integragents/gateway-core"
 import type { GatewayCoreServices } from "@integragents/gateway-core"
 import { webCryptoLayer } from "@integragents/contracts"
 import type { GatewayStore } from "@integragents/gateway-core"
@@ -53,10 +54,12 @@ export const gatewayServicesContext = (input: {
   readonly store: GatewayStore
   readonly integrationServices: Context.Context<IntegrationServices>
   readonly oauth: OAuthSessions
+  readonly events: EventBus
 }): Context.Context<GatewayCoreServices> =>
   input.integrationServices.pipe(
     Context.add(GatewayStoreService, input.store),
-    Context.add(OAuthFlowSessions, input.oauth)
+    Context.add(OAuthFlowSessions, input.oauth),
+    Context.add(GatewayEvents, input.events)
   )
 
 export interface GatewayHandlerOptions extends GatewaySettings {
@@ -64,6 +67,8 @@ export interface GatewayHandlerOptions extends GatewaySettings {
   readonly integrationServices: Context.Context<IntegrationServices>
   readonly httpClient: Layer.Layer<HttpClient.HttpClient>
   readonly oauth: OAuthSessions
+  /** Where the store's writes are announced; `/v1/events` streams them. */
+  readonly events: EventBus
   /** Who is calling. Defaults to the gateway's own keys, sessions, and local credential. */
   readonly authority?: Layer.Layer<Authority, never, GatewayStoreService>
   readonly sessions?: SignInPolicy
@@ -226,7 +231,7 @@ export const createGatewayHandler = (options: GatewayHandlerOptions): GatewayHan
   const web = HttpEffect.toWebHandlerLayerWith(
     app.pipe(Layer.provideMerge(Layer.merge(
       telemetry,
-      HttpMiddleware.layerTracerDisabledForUrls(["/v1/health", "/v1/metadata"])
+      HttpMiddleware.layerTracerDisabledForUrls(["/v1/health", "/v1/metadata", "/v1/events"])
     ))), {
     toHandler: (context) =>
       Effect.succeed(

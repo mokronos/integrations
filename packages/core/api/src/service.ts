@@ -8,6 +8,7 @@ import {
   generateApiKey,
   libsqlLayer,
   newClientId,
+  GatewayEvents,
   OAuthFlowSessions,
   reconcileConfigurations,
   resolveEncryption,
@@ -184,6 +185,7 @@ const buildCoreWith = async (
       store,
       integrationServices: services,
       oauth: Context.get(services, OAuthFlowSessions),
+      events: Context.get(services, GatewayEvents),
       httpClient: options.httpClient,
       retentionDays: options.retentionDays ?? defaultArgumentRetentionDays,
       oauthCallbackUrl: withOrigin("/v1/oauth/callback"),
@@ -373,7 +375,7 @@ export const ensureLocalCredential = Effect.fn("Gateway.ensureLocalCredential")(
           tenantId: defaultTenantId,
           id: existing.id,
           capabilities,
-          approvalDelivery: existing.approvalDelivery,
+          approvalMethod: existing.approvalMethod,
           mcpSurface: existing.mcpSurface
         })
       for (const key of yield* store.listApiKeys(client.id)) {
