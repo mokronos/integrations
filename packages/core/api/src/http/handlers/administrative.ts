@@ -21,6 +21,7 @@ import {
   approveApproval,
   catalogConfigurationTools,
   completeApprovalPolicyTools,
+  decideApprovals,
   denyApproval,
   listEffectiveTools,
   reconcileConfigurations
@@ -192,7 +193,8 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
             name: body.name,
             capabilities: body.capabilities ?? [],
             ...whenPresentMap("approvalMethod", body.approvalMethod, (method) => method),
-            ...whenPresentMap("mcpSurface", body.mcpSurface, (surface) => surface)
+            ...whenPresentMap("mcpSurface", body.mcpSurface, (surface) => surface),
+            ...whenPresentMap("approvalGroupWindowMinutes", body.approvalGroupWindowMinutes, (minutes) => minutes)
           }))
           return client
         }))
@@ -227,7 +229,8 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
             id: clientId,
             capabilities: request.payload.capabilities,
             approvalMethod: request.payload.approvalMethod,
-            mcpSurface: request.payload.mcpSurface
+            mcpSurface: request.payload.mcpSurface,
+            approvalGroupWindowMinutes: request.payload.approvalGroupWindowMinutes
           }))
         }))
       .handle("listApprovalDestinations", () => Effect.gen(function*() {
@@ -518,6 +521,19 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           Effect.catchTag("ApprovalNotFound", ({ id }) => new ApiNotFound({ error: `Unknown approval ${id}` })),
           Effect.catchTag("ApprovalConflict", ({ message }) => new ApiBadRequest({ error: message }))
         )
+      }))
+      .handle("decideApprovals", (request) => Effect.gen(function*() {
+        return {
+          results: yield* capture(decideApprovals(
+            { store, integrations, retentionDays: config.retentionDays },
+            {
+              tenantId: yield* requireTenant,
+              ids: request.payload.ids,
+              verdict: request.payload.verdict,
+              decidedBy: yield* decidedBy
+            }
+          ))
+        }
       }))
       .handle("deny", (request) => Effect.gen(function*() {
         return yield* capture(denyApproval(

@@ -10,6 +10,7 @@ import {
   CardHeader,
   CardTitle
 } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
@@ -21,8 +22,11 @@ import {
   useApprovalDestinations,
   useClientApprovalDestinations
 } from "@/lib/queries"
-import { Schema } from "effect"
-import { ApprovalMethod, McpSurface, type ApprovalDestinationId, type Client, type ClientCapability } from "@integragents/contracts"
+import { Option, Schema } from "effect"
+import { ApprovalGroupWindowMinutes, ApprovalMethod, McpSurface, type ApprovalDestinationId, type Client, type ClientCapability } from "@integragents/contracts"
+
+const decodeGroupWindow = (text: string): ApprovalGroupWindowMinutes | undefined =>
+  text.trim() === "" ? undefined : Schema.decodeUnknownOption(ApprovalGroupWindowMinutes)(Number(text)).pipe(Option.getOrUndefined)
 
 const mcpSurfaceOptions: ReadonlyArray<{ readonly value: McpSurface; readonly label: string; readonly description: string }> = [
   { value: "tools", label: "Tools", description: "Every tool this client may call appears as its own MCP tool. Best for agents that just need to do work." },
@@ -71,6 +75,8 @@ export function ClientSettings({ client }: { readonly client: Client }) {
   )
   const [approvalMethod, setApprovalMethod] = useState<ApprovalMethod>(client.approvalMethod)
   const [mcpSurface, setMcpSurface] = useState<McpSurface>(client.mcpSurface)
+  const [groupWindow, setGroupWindow] = useState(String(client.approvalGroupWindowMinutes))
+  const groupWindowMinutes = decodeGroupWindow(groupWindow)
 
   const save = useMutation({
     mutationFn: () => {
@@ -80,7 +86,8 @@ export function ClientSettings({ client }: { readonly client: Client }) {
       return gateway.updateClientSettings(client.id, {
         capabilities,
         approvalMethod,
-        mcpSurface
+        mcpSurface,
+        approvalGroupWindowMinutes: groupWindowMinutes ?? client.approvalGroupWindowMinutes
       })
     },
     onSuccess: () => {
@@ -156,11 +163,29 @@ export function ClientSettings({ client }: { readonly client: Client }) {
               {approvalMethodOptions.find((option) => option.value === approvalMethod)?.description}
             </p>
           </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="settings-group-window">Group calls within (minutes)</Label>
+            <Input
+              id="settings-group-window"
+              className="w-full sm:w-32"
+              type="number"
+              inputMode="numeric"
+              min={0}
+              max={1440}
+              value={groupWindow}
+              onChange={(event) => setGroupWindow(event.target.value)}
+              aria-invalid={groupWindowMinutes === undefined}
+              disabled={disabled}
+            />
+            <p className="text-muted-foreground text-xs">
+              Pending calls to the same tool that start within this many minutes of the first one are shown and decided together, and notify once. 0 keeps every call separate.
+            </p>
+          </div>
           <DestinationAssignments client={client} />
         </div>
       </CardContent>
       <CardFooter>
-        <Button onClick={() => save.mutate()} disabled={disabled || save.isPending}>
+        <Button onClick={() => save.mutate()} disabled={disabled || save.isPending || groupWindowMinutes === undefined}>
           {save.isPending ? "Saving…" : "Save settings"}
         </Button>
       </CardFooter>

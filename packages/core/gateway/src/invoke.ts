@@ -155,6 +155,7 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function*(
     alias: authorization.alias,
     tool: authorization.accessProfileTool.tool,
     arguments: argumentsValue,
+    groupWindowMinutes: authorization.client.approvalGroupWindowMinutes,
     expiresAt: DateTime.toDateUtc(
       DateTime.addDuration(yield* DateTime.now, Duration.hours(dependencies.expiryHours))
     )

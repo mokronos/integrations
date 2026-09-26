@@ -76,9 +76,15 @@ export type McpSurface = typeof McpSurface.Type
 export const PolicyDecision = Schema.Literals(["allow", "require_approval"])
 export type PolicyDecision = typeof PolicyDecision.Type
 
+/** Minutes after a group's first call during which calls to the same tool join it; 0 turns grouping off. */
+export const ApprovalGroupWindowMinutes = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 1440 }))
+export type ApprovalGroupWindowMinutes = typeof ApprovalGroupWindowMinutes.Type
+export const defaultApprovalGroupWindowMinutes = 30
+
 export const Client = Schema.Struct({
   id: ClientId, tenantId: TenantId, accessProfileId: AccessProfileId, approvalPolicyId: ApprovalPolicyId,
   name: Schema.String, capabilities: Schema.Array(ClientCapability), approvalMethod: ApprovalMethod, mcpSurface: McpSurface,
+  approvalGroupWindowMinutes: ApprovalGroupWindowMinutes,
   createdAt: Schema.Date, revokedAt: Schema.NullOr(Schema.Date)
 })
 export type Client = typeof Client.Type
@@ -103,10 +109,17 @@ export type ApprovalDeliveryStatus = typeof ApprovalDeliveryStatus.Type
 export const ApprovalDeliveryAttempt = Schema.Struct({ id: ApprovalDeliveryId, approvalId: ApprovalId, destinationId: ApprovalDestinationId, destinationName: Schema.String, status: ApprovalDeliveryStatus, attempts: Schema.Number, nextAttemptAt: Schema.NullOr(Schema.Date), deliveredAt: Schema.NullOr(Schema.Date), lastError: Schema.NullOr(Schema.String) })
 export type ApprovalDeliveryAttempt = typeof ApprovalDeliveryAttempt.Type
 
-export const PendingApproval = Schema.Struct({ id: ApprovalId, clientId: ClientId, approvalPolicyId: ApprovalPolicyId, accessProfileId: AccessProfileId, alias: Schema.String, tool: ToolName, arguments: Schema.Json, status: ApprovalStatus, createdAt: Schema.Date, expiresAt: Schema.Date, decidedAt: Schema.NullOr(Schema.Date), decidedBy: Schema.NullOr(Schema.String), result: Schema.NullOr(Schema.Json), error: Schema.NullOr(Schema.String), collectedAt: Schema.NullOr(Schema.Date) })
+export const PendingApproval = Schema.Struct({ id: ApprovalId, groupId: ApprovalId, clientId: ClientId, approvalPolicyId: ApprovalPolicyId, accessProfileId: AccessProfileId, alias: Schema.String, tool: ToolName, arguments: Schema.Json, status: ApprovalStatus, createdAt: Schema.Date, expiresAt: Schema.Date, decidedAt: Schema.NullOr(Schema.Date), decidedBy: Schema.NullOr(Schema.String), result: Schema.NullOr(Schema.Json), error: Schema.NullOr(Schema.String), collectedAt: Schema.NullOr(Schema.Date) })
 export type PendingApproval = typeof PendingApproval.Type
 export const ListedApproval = Schema.Struct({ ...PendingApproval.fields, deliveries: Schema.Array(ApprovalDeliveryAttempt) })
 export type ListedApproval = typeof ListedApproval.Type
+export const ApprovalVerdict = Schema.Literals(["approve", "deny"])
+export type ApprovalVerdict = typeof ApprovalVerdict.Type
+export const DecidedApproval = Schema.Union([
+  Schema.Struct({ id: ApprovalId, status: Schema.Literal("decided"), approval: PendingApproval }),
+  Schema.Struct({ id: ApprovalId, status: Schema.Literal("refused"), error: Schema.String })
+])
+export type DecidedApproval = typeof DecidedApproval.Type
 
 /** What changed, so a dashboard knows which of its views to reload. */
 export const GatewayResource = Schema.Literals(["approvals", "audit", "clients", "policies", "approval-destinations", "integrations"])

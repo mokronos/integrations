@@ -3,6 +3,8 @@ import type { Integrations } from "@integragents/host"
 import {
   aliasForConnection,
   ApprovalId,
+  type ApprovalVerdict,
+  type DecidedApproval,
   connectionSubject,
   sameConnectionRef,
   TenantId
@@ -103,4 +105,31 @@ export const approveApproval = Effect.fn("Approvals.approve")(function*(
     if (settled === undefined) return yield* new ApprovalNotFound({ id })
     return { approval: settled, outcome }
   }).pipe(Effect.uninterruptible)
+})
+
+/** One decision applied to many calls; a call that cannot be decided is reported, not fatal. */
+export const decideApprovals = Effect.fn("Approvals.decideMany")(function*(
+  dependencies: Parameters<typeof approveApproval>[0],
+  input: {
+    readonly tenantId: TenantId
+    readonly ids: ReadonlyArray<ApprovalId>
+    readonly verdict: ApprovalVerdict
+    readonly decidedBy: string | null
+  }
+) {
+  return yield* Effect.forEach(new Set(input.ids), (id) => {
+    const decision = { tenantId: input.tenantId, id, decidedBy: input.decidedBy }
+    const decided = input.verdict === "approve"
+      ? Effect.map(approveApproval(dependencies, decision), ({ approval }) => approval)
+      : Effect.map(denyApproval(dependencies.store, decision), ({ approval }) => approval)
+    return decided.pipe(
+      Effect.map((approval): DecidedApproval => ({ id, status: "decided", approval })),
+      Effect.catchTags({
+        ApprovalNotFound: (): Effect.Effect<DecidedApproval> =>
+          Effect.succeed({ id, status: "refused", error: `Unknown approval ${id}` }),
+        ApprovalConflict: ({ message }): Effect.Effect<DecidedApproval> =>
+          Effect.succeed({ id, status: "refused", error: message })
+      })
+    )
+  }, { concurrency: 4 })
 })

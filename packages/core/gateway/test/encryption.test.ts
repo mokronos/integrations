@@ -203,6 +203,7 @@ describe("the encrypted store", () => {
         alias: Alias.make("org___gmail___work"),
         tool: ToolName.make("sendEmail"),
         arguments: argumentsValue,
+        groupWindowMinutes: 0,
         expiresAt: new Date((yield* Clock.currentTimeMillis) + 60_000)
       })
 
@@ -237,6 +238,7 @@ describe("the encrypted store", () => {
         alias: Alias.make("org___gmail___work"),
         tool: ToolName.make("sendEmail"),
         arguments: {},
+        groupWindowMinutes: 0,
         expiresAt: new Date((yield* Clock.currentTimeMillis) + 60_000)
       })
       yield* store.claimApproval({ tenantId: defaultTenantId, id, decidedBy: "sebastian" })

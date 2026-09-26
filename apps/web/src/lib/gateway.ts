@@ -16,6 +16,7 @@ import {
   type ApprovalId,
   type ApprovalPolicyId,
   type ApprovalStatus,
+  type ApprovalVerdict,
   type AuditOutcome,
   type ClientCapability,
   type ConfigureClient,
@@ -201,6 +202,7 @@ export const updateClientSettings = async (id: ClientId, settings: {
   readonly capabilities: ReadonlyArray<ClientCapability>
   readonly approvalMethod: ApprovalMethod
   readonly mcpSurface: McpSurface
+  readonly approvalGroupWindowMinutes: number
 }) => await run(endpoints.administrative.updateClientSettings({ params: { id }, payload: settings }))
 
 export const listApprovalDestinations = async () =>
@@ -300,6 +302,9 @@ export const approveApproval = async (id: ApprovalId) =>
 
 export const denyApproval = async (id: ApprovalId) =>
   await run(endpoints.administrative.deny({ params: { id } }))
+
+export const decideApprovals = async (verdict: ApprovalVerdict, ids: readonly [ApprovalId, ...Array<ApprovalId>]) =>
+  (await run(endpoints.administrative.decideApprovals({ payload: { verdict, ids } }))).results
 
 export type AuditQuery = {
   readonly limit: number

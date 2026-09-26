@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import { TestClock } from "effect/testing"
 import { Clock, Effect, Layer, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import path from "node:path"
@@ -229,7 +230,8 @@ describe("gateway store", () => {
         id: client.id,
         capabilities: ["provision_connections"],
         approvalMethod: "none",
-        mcpSurface: "discovery"
+        mcpSurface: "discovery",
+        approvalGroupWindowMinutes: 30
       })
 
       expect(updated.capabilities).toEqual(["provision_connections"])
@@ -262,6 +264,7 @@ describe("gateway store", () => {
         alias: Alias.make("mail"),
         tool: ToolName.make("sendEmail"),
         arguments: {},
+        groupWindowMinutes: 0,
         expiresAt: yield* notYet
       })
       expect(yield* gateway.listApprovalDeliveries(defaultTenantId, "pending")).toMatchObject([{
@@ -291,6 +294,56 @@ describe("gateway store", () => {
         status: "delivered",
         attempts: 1
       }])
+    }).pipe(Effect.provide(testServices)))
+
+  it.effect("groups calls to one tool within the client's window and notifies once per group", () =>
+    Effect.gen(function*() {
+      const gateway = yield* store
+      const { accessProfile, approvalPolicy, client } = yield* seedBinding(gateway)
+      const destination = yield* gateway.createApprovalDestination({
+        id: yield* newApprovalDestinationId,
+        tenantId: defaultTenantId,
+        name: "phone",
+        url: "https://notify.example/approvals",
+        signingSecret: "igs_secret"
+      })
+      yield* gateway.replaceClientApprovalDestinations(defaultTenantId, client.id, [destination.id])
+      const freeze = Effect.fnUntraced(function*(tool: string, to: string, groupWindowMinutes: number) {
+        return yield* gateway.createApproval({
+          id: yield* newApprovalId,
+          tenantId: defaultTenantId,
+          clientId: client.id,
+          approvalPolicyId: approvalPolicy.id,
+          accessProfileId: accessProfile.id,
+          alias: Alias.make("mail"),
+          tool: ToolName.make(tool),
+          arguments: { to, subject: "Launch" },
+          groupWindowMinutes,
+          expiresAt: new Date((yield* Clock.currentTimeMillis) + 86_400_000)
+        })
+      })
+
+      const first = yield* freeze("sendEmail", "a@example.com", 30)
+      const second = yield* freeze("sendEmail", "b@example.com", 30)
+      const otherTool = yield* freeze("archive", "a@example.com", 30)
+      expect(first.groupId).toBe(first.id)
+      expect(second.groupId).toBe(first.id)
+      expect(otherTool.groupId).toBe(otherTool.id)
+
+      for (const { id } of [first, second]) {
+        yield* gateway.settleApproval({ tenantId: defaultTenantId, id, status: "denied", decidedBy: null, result: null, error: null })
+      }
+      const afterDecided = yield* freeze("sendEmail", "c@example.com", 30)
+      expect(afterDecided.groupId).toBe(afterDecided.id)
+
+      yield* TestClock.adjust("31 minutes")
+      const afterWindow = yield* freeze("sendEmail", "d@example.com", 30)
+      expect(afterWindow.groupId).toBe(afterWindow.id)
+      const ungrouped = yield* freeze("sendEmail", "e@example.com", 0)
+      expect(ungrouped.groupId).toBe(ungrouped.id)
+
+      const notified = (yield* gateway.listApprovalDeliveries(defaultTenantId)).map((delivery) => delivery.approvalId)
+      expect(new Set(notified)).toEqual(new Set([first.id, otherTool.id, afterDecided.id, afterWindow.id, ungrouped.id]))
     }).pipe(Effect.provide(testServices)))
 
   it.effect("completes and consumes login handoffs and OAuth state once", () =>
@@ -349,6 +402,7 @@ describe("gateway store", () => {
         alias: Alias.make("org___gmail___work"),
         tool: ToolName.make("sendEmail"),
         arguments: { to: ["customer@example.com"], subject: "Follow up" },
+        groupWindowMinutes: 0,
         expiresAt: yield* notYet
       })
       expect(approval.status).toBe("pending")
@@ -395,6 +449,7 @@ describe("gateway store", () => {
         alias: Alias.make("org___gmail___work"),
         tool: ToolName.make("sendEmail"),
         arguments: {},
+        groupWindowMinutes: 0,
         expiresAt: yield* notYet
       })
 
@@ -520,6 +575,7 @@ describe("gateway store", () => {
         alias: Alias.make("org___gmail___work"),
         tool: ToolName.make("sendEmail"),
         arguments: {},
+        groupWindowMinutes: 0,
         expiresAt: yield* notYet
       })
       expect(yield* gateway.getApproval(other.id, approval.id)).toBeUndefined()

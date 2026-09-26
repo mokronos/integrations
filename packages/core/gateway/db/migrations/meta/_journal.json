@@ -57,6 +57,13 @@
       "when": 1790288479920,
       "tag": "0007_adorable_whistler",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1790433474606,
+      "tag": "0008_nasty_killraven",
+      "breakpoints": true
     }
   ]
 }

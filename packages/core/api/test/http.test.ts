@@ -1094,6 +1094,31 @@ describe("gateway approval settlement", () => {
       expect(calls[0]?.input).toEqual({ to: "a@b.c" })
     }).pipe(Effect.provide(testServices)))
 
+  it.effect("groups calls to one tool and decides them together, reporting each call", () =>
+    Effect.gen(function*() {
+      const { call, calls } = yield* setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })
+      const freeze = (to: string) => call("POST", "/v1/execute", {
+        body: { alias: "user___sebastian___gmail___work", tool: "sendEmail", arguments: { to, subject: "Launch" } }
+      })
+      const first = String((yield* freeze("a@b.c")).body["approvalId"])
+      const second = String((yield* freeze("d@e.f")).body["approvalId"])
+      const listed = yield* call("GET", "/v1/approvals?status=pending", { local: true })
+      expect(listed.body["approvals"]).toMatchObject([{ id: second, groupId: first }, { id: first, groupId: first }])
+
+      yield* call("POST", `/v1/approvals/${first}/deny`, { body: {}, local: true })
+      const decided = yield* call("POST", "/v1/approvals/decide", {
+        body: { verdict: "approve", ids: [first, second] },
+        local: true
+      })
+
+      expect(decided.status).toBe(200)
+      expect(decided.body["results"]).toMatchObject([
+        { id: first, status: "refused" },
+        { id: second, status: "decided", approval: { status: "approved" } }
+      ])
+      expect(calls.map((entry) => entry.input)).toEqual([{ to: "d@e.f", subject: "Launch" }])
+    }).pipe(Effect.provide(testServices)))
+
   it.effect("refuses to approve twice", () =>
     Effect.gen(function*() {
       const { call } = yield* setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })

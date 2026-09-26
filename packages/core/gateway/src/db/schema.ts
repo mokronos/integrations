@@ -137,6 +137,7 @@ export const gatewayClient = sqliteTable("gateway_client", {
   capabilities: text("capabilities").notNull(),
   approvalMethod: text("approval_method").notNull().default("elicitation"),
   mcpSurface: text("mcp_surface").notNull().default("tools"),
+  approvalGroupWindowMinutes: integer("approval_group_window_minutes").notNull().default(30),
   createdAt: createdAt(),
   revokedAt: integer("revoked_at")
 }, (table) => [
@@ -266,6 +267,7 @@ export const gatewayPendingApproval = sqliteTable("gateway_pending_approval", {
   tool: text("tool").notNull(),
   arguments: text("arguments").notNull(),
   argumentsLookup: text("arguments_lookup"),
+  groupId: text("group_id"),
   status: text("status").notNull(),
   createdAt: createdAt(),
   expiresAt: integer("expires_at").notNull(),
@@ -286,7 +288,9 @@ export const gatewayPendingApproval = sqliteTable("gateway_pending_approval", {
       table.argumentsLookup,
       table.arguments
     )
-    .where(sql`collected_at IS NULL`)
+    .where(sql`collected_at IS NULL`),
+  index("gateway_pending_approval_group").on(table.groupId, table.status),
+  index("gateway_pending_approval_open").on(table.clientId, table.tool, table.status)
 ])
 
 export const gatewayApprovalDestination = sqliteTable("gateway_approval_destination", {

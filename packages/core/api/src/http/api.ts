@@ -6,7 +6,10 @@ import {
   HttpApiSchema
 } from "effect/unstable/httpapi"
 import {
+  ApprovalGroupWindowMinutes,
   ApprovalMethod,
+  ApprovalVerdict,
+  DecidedApproval,
   ApprovalDestination,
   ApprovalDestinationId,
   ApprovalId,
@@ -89,13 +92,15 @@ const CreateClientBody = Schema.Struct({
   approvalPolicyId: Schema.optional(ApprovalPolicyId),
   capabilities: Schema.optional(Schema.Array(ClientCapability)),
   approvalMethod: Schema.optional(ApprovalMethod),
-  mcpSurface: Schema.optional(McpSurface)
+  mcpSurface: Schema.optional(McpSurface),
+  approvalGroupWindowMinutes: Schema.optional(ApprovalGroupWindowMinutes)
 })
 
 const UpdateClientSettingsBody = Schema.Struct({
   capabilities: Schema.Array(ClientCapability),
   approvalMethod: ApprovalMethod,
-  mcpSurface: McpSurface
+  mcpSurface: McpSurface,
+  approvalGroupWindowMinutes: ApprovalGroupWindowMinutes
 })
 
 const CreateApprovalDestinationBody = Schema.Struct({
@@ -674,6 +679,13 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
       outcome: SettledOutcome
     }),
     error: [ApiNotFoundError, ApiBadRequestError]
+  }).annotate(RequiredAccess, "human"))
+  .add(HttpApiEndpoint.post("decideApprovals", "/v1/approvals/decide", {
+    payload: Schema.Struct({
+      verdict: ApprovalVerdict,
+      ids: Schema.NonEmptyArray(ApprovalId).check(Schema.isMaxLength(500))
+    }),
+    success: Schema.Struct({ results: Schema.Array(DecidedApproval) })
   }).annotate(RequiredAccess, "human"))
   .add(HttpApiEndpoint.post("deny", "/v1/approvals/:id/deny", {
     params: { id: ApprovalId },

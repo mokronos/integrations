@@ -376,7 +376,8 @@ export const ensureLocalCredential = Effect.fn("Gateway.ensureLocalCredential")(
           id: existing.id,
           capabilities,
           approvalMethod: existing.approvalMethod,
-          mcpSurface: existing.mcpSurface
+          mcpSurface: existing.mcpSurface,
+          approvalGroupWindowMinutes: existing.approvalGroupWindowMinutes
         })
       for (const key of yield* store.listApiKeys(client.id)) {
         if (key.revokedAt === null) yield* store.revokeApiKey(key.id)

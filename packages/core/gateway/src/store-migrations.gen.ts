@@ -115,5 +115,15 @@ export const gatewayMigrations: ReadonlyArray<Migration> = [
       "ALTER TABLE `gateway_client` ADD `approval_method` text DEFAULT 'elicitation' NOT NULL;",
       "ALTER TABLE `gateway_client` DROP COLUMN `approval_delivery`;"
     ]
+  },
+  {
+    id: 8,
+    name: "0008_nasty_killraven",
+    statements: [
+      "ALTER TABLE `gateway_client` ADD `approval_group_window_minutes` integer DEFAULT 30 NOT NULL;",
+      "ALTER TABLE `gateway_pending_approval` ADD `group_id` text;",
+      "CREATE INDEX `gateway_pending_approval_group` ON `gateway_pending_approval` (`group_id`,`status`);",
+      "CREATE INDEX `gateway_pending_approval_open` ON `gateway_pending_approval` (`client_id`,`tool`,`status`);"
+    ]
   }
 ]

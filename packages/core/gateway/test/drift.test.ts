@@ -176,6 +176,7 @@ describe("gateway maintenance", () => {
             alias: Alias.make("tickets"),
             tool: ToolName.make(tool),
             arguments: {},
+            groupWindowMinutes: 0,
             expiresAt
           }))
       const stale = yield* freeze("create", new Date((yield* Clock.currentTimeMillis) - 1_000))
@@ -214,6 +215,7 @@ describe("gateway maintenance", () => {
         alias: Alias.make("tickets"),
         tool: ToolName.make("create"),
         arguments: {},
+        groupWindowMinutes: 0,
         expiresAt: new Date((yield* Clock.currentTimeMillis) + 60_000)
       })
 

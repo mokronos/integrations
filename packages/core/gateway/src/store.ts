@@ -13,8 +13,10 @@ import {
   canonicalArguments,
   connectionSubject,
   ApprovalDestinationId,
+  ApprovalId,
   ApprovalPolicyId,
   ClientId,
+  defaultApprovalGroupWindowMinutes,
   defaultApprovalMethod,
   defaultLocalSubjectId,
   defaultTenantId,
@@ -544,7 +546,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
 
     createClient: (input) => operation("createClient", Effect.gen(function*() {
       yield* run(
-        "INSERT INTO gateway_client (id, tenant_id, access_profile_id, approval_policy_id, name, capabilities, approval_method, mcp_surface, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+        "INSERT INTO gateway_client (id, tenant_id, access_profile_id, approval_policy_id, name, capabilities, approval_method, mcp_surface, approval_group_window_minutes, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
         [
           input.id,
           input.tenantId,
@@ -554,6 +556,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
           JSON.stringify(input.capabilities),
           input.approvalMethod ?? defaultApprovalMethod,
           input.mcpSurface ?? "tools",
+          input.approvalGroupWindowMinutes ?? defaultApprovalGroupWindowMinutes,
           yield* now
         ]
       )
@@ -617,12 +620,13 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
 
     updateClientSettings: (input) => operation("updateClientSettings", Effect.gen(function*() {
       yield* run(
-        `UPDATE gateway_client SET capabilities = ?, approval_method = ?, mcp_surface = ?
+        `UPDATE gateway_client SET capabilities = ?, approval_method = ?, mcp_surface = ?, approval_group_window_minutes = ?
           WHERE tenant_id = ? AND id = ? AND revoked_at IS NULL`,
         [
           JSON.stringify(input.capabilities),
           input.approvalMethod,
           input.mcpSurface,
+          input.approvalGroupWindowMinutes,
           input.tenantId,
           input.id
         ]
@@ -718,7 +722,9 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
                  SELECT delivery.id FROM gateway_approval_delivery AS delivery
                  JOIN gateway_pending_approval AS approval ON approval.id = delivery.approval_id
                  WHERE delivery.status IN ('pending', 'retrying') AND delivery.next_attempt_at <= ?
-                   AND approval.status = 'pending' AND approval.expires_at > ?
+                   AND EXISTS (SELECT 1 FROM gateway_pending_approval AS member
+                                WHERE (member.group_id = approval.group_id OR member.id = approval.id)
+                                  AND member.status = 'pending' AND member.expires_at > ?)
                  ORDER BY delivery.next_attempt_at LIMIT ?
                ) AND next_attempt_at <= ?
                RETURNING id`,
@@ -729,7 +735,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
       const placeholders = ids.map(() => "?").join(", ")
       const rows = yield* all(
         `SELECT delivery.*, destination.name AS destination_name, destination.url,
-                destination.signing_secret, approval.tenant_id, approval.client_id,
+                destination.signing_secret, approval.tenant_id, approval.group_id, approval.client_id,
                 client.name AS client_name, approval.alias, approval.tool, approval.expires_at
            FROM gateway_approval_delivery AS delivery
            JOIN gateway_approval_destination AS destination ON destination.id = delivery.destination_id
@@ -741,6 +747,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
       return rows.map((row) => ({
         ...toApprovalDeliveryAttempt(row),
         tenantId: TenantId.make(String(row["tenant_id"])),
+        groupId: ApprovalId.make(String(row["group_id"])),
         clientId: ClientId.make(String(row["client_id"])),
         clientName: String(row["client_name"]),
         alias: Alias.make(String(row["alias"])),
@@ -797,6 +804,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
                 gateway_client.capabilities AS client_capabilities,
                 gateway_client.approval_method AS client_approval_method,
                 gateway_client.mcp_surface AS client_mcp_surface,
+                gateway_client.approval_group_window_minutes AS client_approval_group_window_minutes,
                 gateway_client.created_at AS client_created_at, gateway_client.revoked_at AS client_revoked_at
            FROM gateway_api_key JOIN gateway_client ON gateway_client.id = gateway_api_key.client_id
           WHERE gateway_api_key.hash = ?`,
@@ -815,6 +823,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
           capabilities: row["client_capabilities"] ?? "[]",
           approval_method: row["client_approval_method"] ?? defaultApprovalMethod,
           mcp_surface: row["client_mcp_surface"] ?? "tools",
+          approval_group_window_minutes: row["client_approval_group_window_minutes"] ?? defaultApprovalGroupWindowMinutes,
           created_at: row["client_created_at"] ?? 0,
           revoked_at: row["client_revoked_at"] ?? null
         })
@@ -1316,8 +1325,15 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
       const createdAt = yield* now
       yield* batch([
         { sql: `INSERT INTO gateway_pending_approval
-           (id, tenant_id, client_id, approval_policy_id, access_profile_id, alias, tool, arguments, arguments_lookup, status, created_at, expires_at, decided_at, decided_by, result, error, collected_at)
-         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, NULL, NULL, NULL, NULL, NULL
+           (id, tenant_id, client_id, approval_policy_id, access_profile_id, alias, tool, arguments, arguments_lookup, group_id, status, created_at, expires_at, decided_at, decided_by, result, error, collected_at)
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((
+             SELECT member.group_id FROM gateway_pending_approval AS member
+               JOIN gateway_pending_approval AS lead ON lead.id = member.group_id
+              WHERE member.tenant_id = ? AND member.client_id = ? AND member.alias = ?
+                AND member.approval_policy_id = ? AND member.access_profile_id = ? AND member.tool = ?
+                AND member.status = 'pending' AND member.expires_at > ? AND lead.created_at > ?
+              ORDER BY lead.created_at DESC LIMIT 1
+           ), ?), 'pending', ?, ?, NULL, NULL, NULL, NULL, NULL
           WHERE NOT EXISTS (SELECT 1 FROM gateway_pending_approval WHERE ${match.sql})`, args: [
           input.id,
           input.tenantId,
@@ -1328,6 +1344,15 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
           input.tool,
           sealText(canonical),
           encryption.lookup(canonical),
+          input.tenantId,
+          input.clientId,
+          input.alias,
+          input.approvalPolicyId,
+          input.accessProfileId,
+          input.tool,
+          createdAt,
+          createdAt - input.groupWindowMinutes * 60_000,
+          input.id,
           createdAt,
           millis(input.expiresAt),
           ...match.args
@@ -1338,7 +1363,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
              FROM gateway_client_approval_destination AS assignment
              JOIN gateway_approval_destination AS destination ON destination.id = assignment.destination_id
             WHERE assignment.client_id = ? AND destination.deleted_at IS NULL
-              AND EXISTS (SELECT 1 FROM gateway_pending_approval WHERE id = ?)`, args: [input.id, createdAt, input.clientId, input.id] }
+              AND EXISTS (SELECT 1 FROM gateway_pending_approval WHERE id = ? AND group_id = id)`, args: [input.id, createdAt, input.clientId, input.id] }
       ])
       const approval = yield* findUncollectedApproval(input)
       if (approval === undefined) return yield* Effect.die(new Error(`Failed to store approval ${input.id}`))

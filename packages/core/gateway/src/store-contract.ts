@@ -2,7 +2,7 @@ import { Effect, Schema } from "effect"
 import type { NonNegativeInt, PositiveInt } from "@integragents/contracts"
 import type {
   AccessProfile, AccessProfileId, AccessProfileTool, Alias, ApiKey, ApiKeyHash,
-  ApiKeyId, ApprovalMethod, ApprovalDeliveryAttempt, ApprovalDeliveryId, McpSurface,
+  ApiKeyId, ApprovalGroupWindowMinutes, ApprovalMethod, ApprovalDeliveryAttempt, ApprovalDeliveryId, McpSurface,
   ApprovalDestination, ApprovalDestinationId, ApprovalId, ApprovalPolicy, ApprovalPolicyId,
   ApprovalPolicyTool, ApprovalStatus, AuditId, AuditOutcome, AuditRecord,
   AuthSession, Client, ConfigureClient, ClientCapability, ClientId, ConnectionName, ConnectionRef,
@@ -48,6 +48,7 @@ export interface CreateClientInput {
   readonly capabilities: ReadonlyArray<ClientCapability>
   readonly approvalMethod?: ApprovalMethod
   readonly mcpSurface?: McpSurface
+  readonly approvalGroupWindowMinutes?: ApprovalGroupWindowMinutes
 }
 
 export interface CreateAccessProfileInput {
@@ -78,10 +79,13 @@ export interface CreateApprovalInput {
   readonly tool: ToolName
   readonly arguments: typeof Schema.Json.Type
   readonly expiresAt: Date
+  /** Joins the newest open group for this tool whose first call is younger than this. */
+  readonly groupWindowMinutes: ApprovalGroupWindowMinutes
 }
 
 export interface ApprovalDeliveryJob extends ApprovalDeliveryAttempt {
   readonly tenantId: TenantId
+  readonly groupId: ApprovalId
   readonly clientId: ClientId
   readonly clientName: string
   readonly alias: Alias
@@ -219,6 +223,7 @@ export interface GatewayStore {
     readonly capabilities: ReadonlyArray<ClientCapability>
     readonly approvalMethod: ApprovalMethod
     readonly mcpSurface: McpSurface
+    readonly approvalGroupWindowMinutes: ApprovalGroupWindowMinutes
   }): Effect.Effect<Client, GatewayStoreError>
   renameClient(tenantId: TenantId, id: ClientId, name: string): Effect.Effect<Client, GatewayStoreError>
   revokeClient(tenantId: TenantId, id: ClientId): Effect.Effect<void, GatewayStoreError>

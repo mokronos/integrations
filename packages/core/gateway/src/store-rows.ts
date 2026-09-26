@@ -2,7 +2,7 @@ import { ApprovalStatus } from "./domain.ts"
 import type { Row } from "@libsql/client"
 import { Schema } from "effect"
 import {
-  AccessProfileId, ApiKeyHash, ApiKeyId, ApprovalDeliveryId, ApprovalMethod, McpSurface,
+  AccessProfileId, ApiKeyHash, ApiKeyId, ApprovalDeliveryId, ApprovalGroupWindowMinutes, ApprovalMethod, McpSurface,
   ApprovalDestinationId, ApprovalId,
   ApprovalPolicyId, AuditId, ClientId, ConnectionName, IntegrationSlug,
   LoginHandoffHash, SessionTokenHash, SubjectId, TenantId, ToolName,
@@ -37,6 +37,7 @@ const ClientRow = Schema.Struct({
   capabilities: Schema.String,
   mcp_surface: McpSurface,
   approval_method: ApprovalMethod,
+  approval_group_window_minutes: ApprovalGroupWindowMinutes,
   created_at: Schema.Number,
   revoked_at: NullableNumber
 })
@@ -201,6 +202,7 @@ const ApprovalPolicyToolRow = Schema.Struct({
 
 const ApprovalRow = Schema.Struct({
   id: Schema.String,
+  group_id: NullableString,
   client_id: Schema.String,
   approval_policy_id: Schema.String,
   access_profile_id: Schema.String,
@@ -266,7 +268,7 @@ const SnapshotRow = Schema.Struct({
 })
 
 const clientColumns = [
-  "id", "tenant_id", "access_profile_id", "approval_policy_id", "name", "capabilities", "approval_method", "mcp_surface", "created_at", "revoked_at"
+  "id", "tenant_id", "access_profile_id", "approval_policy_id", "name", "capabilities", "approval_method", "mcp_surface", "approval_group_window_minutes", "created_at", "revoked_at"
 ]
 const tenantColumns = ["id", "name", "created_at"]
 const subjectColumns = ["id", "tenant_id", "created_at"]
@@ -292,7 +294,7 @@ const approvalPolicyToolColumns = [
   "approval_policy_id", "owner", "subject", "integration", "connection_name", "tool", "decision"
 ]
 const approvalColumns = [
-  "id", "client_id", "approval_policy_id", "access_profile_id", "alias", "tool", "arguments", "status",
+  "id", "group_id", "client_id", "approval_policy_id", "access_profile_id", "alias", "tool", "arguments", "status",
   "created_at", "expires_at", "decided_at", "decided_by", "result", "error", "collected_at"
 ]
 const auditColumns = [
@@ -375,6 +377,7 @@ export const toClient = (row: Row): Client => {
     capabilities: decodeCapabilities(decoded.capabilities),
     approvalMethod: decoded.approval_method,
     mcpSurface: decoded.mcp_surface,
+    approvalGroupWindowMinutes: decoded.approval_group_window_minutes,
     createdAt: date(decoded.created_at),
     revokedAt: nullableDate(decoded.revoked_at)
   }
@@ -659,6 +662,7 @@ export const toApproval = (row: Row, open: (text: string) => string = identity):
   const decoded = decodeApprovalRow(pick(row, approvalColumns))
   return {
     id: ApprovalId.make(decoded.id),
+    groupId: ApprovalId.make(decoded.group_id ?? decoded.id),
     clientId: ClientId.make(decoded.client_id),
     approvalPolicyId: ApprovalPolicyId.make(decoded.approval_policy_id),
     accessProfileId: AccessProfileId.make(decoded.access_profile_id),

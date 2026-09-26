@@ -6,7 +6,7 @@ import type { GatewayStore } from "./store-contract.ts"
 
 export const ApprovalNotification = Schema.Struct({
   version: Schema.Literal(1), event: Schema.Literal("approval.pending"),
-  approvalId: Schema.String, clientId: Schema.String, clientName: Schema.String,
+  approvalId: Schema.String, groupId: Schema.String, clientId: Schema.String, clientName: Schema.String,
   alias: Schema.String, tool: Schema.String, expiresAt: Schema.String,
   approvalUrl: Schema.optional(Schema.String)
 })
@@ -60,7 +60,7 @@ export const deliverDueApprovalNotifications = Effect.fn("Approval.deliverDueNot
       const approvalUrl = input.dashboardUrl === undefined ? undefined
         : `${input.dashboardUrl.replace(/\/+$/, "")}/approvals?approval=${encodeURIComponent(job.approvalId)}`
       const notification: ApprovalNotification = {
-        version: 1, event: "approval.pending", approvalId: job.approvalId,
+        version: 1, event: "approval.pending", approvalId: job.approvalId, groupId: job.groupId,
         clientId: job.clientId, clientName: job.clientName, alias: job.alias,
         tool: job.tool, expiresAt: job.expiresAt.toISOString(),
         ...whenPresent("approvalUrl", approvalUrl)
