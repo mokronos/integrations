@@ -125,5 +125,13 @@ export const gatewayMigrations: ReadonlyArray<Migration> = [
       "CREATE INDEX `gateway_pending_approval_group` ON `gateway_pending_approval` (`group_id`,`status`);",
       "CREATE INDEX `gateway_pending_approval_open` ON `gateway_pending_approval` (`client_id`,`tool`,`status`);"
     ]
+  },
+  {
+    id: 9,
+    name: "0009_clear_the_stranger",
+    statements: [
+      "CREATE TABLE `gateway_approval_rule` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`approval_policy_id` text NOT NULL,\n\t`owner` text NOT NULL,\n\t`subject` text,\n\t`integration` text NOT NULL,\n\t`connection_name` text NOT NULL,\n\t`tool` text NOT NULL,\n\t`pattern` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`created_by` text,\n\tFOREIGN KEY (`approval_policy_id`) REFERENCES `gateway_approval_policy`(`id`) ON UPDATE no action ON DELETE cascade\n);",
+      "CREATE INDEX `gateway_approval_rule_route` ON `gateway_approval_rule` (`approval_policy_id`,`integration`,`connection_name`,`tool`);"
+    ]
   }
 ]

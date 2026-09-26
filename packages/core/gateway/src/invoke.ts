@@ -1,4 +1,4 @@
-import { connectionOwner, connectionRefOf, isDelegationTemplate, whenPresent } from "@integragents/contracts"
+import { connectionOwner, connectionRefOf, isDelegationTemplate, matchesPattern, whenPresent } from "@integragents/contracts"
 import type { InvocationOutcome } from "@integragents/contracts"
 import { Crypto, DateTime, Duration, Effect, Option, Schema } from "effect"
 import type { HttpClient } from "effect/unstable/http"
@@ -227,6 +227,20 @@ const settle = Effect.fn("Invocation.settle")(function*(
   if (missing !== undefined) return missing
 
   if (authorization.decision === "require_approval") {
+    const rule = (yield* store.listApprovalRules(authorization.approvalPolicy.id)).find((candidate) =>
+      candidate.tool === authorization.approvalPolicyTool.tool
+      && sameConnectionRef(candidate.connection, authorization.approvalPolicyTool.connection)
+      && matchesPattern(candidate, input.arguments))
+    if (rule !== undefined) {
+      yield* Effect.annotateCurrentSpan("approval.rule", rule.id)
+      return yield* executeAuthorized(
+        { store, integrations, retentionDays },
+        authorization,
+        input.arguments,
+        input.oauthActor,
+        `approved by saved rule ${rule.id}`
+      )
+    }
     return yield* freezeOrCollect(
       {
         store,
@@ -366,7 +380,8 @@ export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(funct
   },
   authorization: Extract<Authorization, { status: "authorized" }>,
   argumentsValue: Json,
-  oauthActor?: OAuthActor
+  oauthActor?: OAuthActor,
+  approvedBy?: string
 ): Effect.fn.Return<
   Extract<InvocationOutcome, { status: "succeeded" | "failed" }>,
   GatewayStoreError,
@@ -376,7 +391,7 @@ export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(funct
   const invocation = yield* Effect.result(dependencies.integrations.execute(address, argumentsValue))
   if (invocation._tag === "Success") {
     yield* dependencies.store.recordAudit(
-      yield* auditFor(authorization, "succeeded", null, argumentsValue, dependencies.retentionDays, oauthActor)
+      yield* auditFor(authorization, "succeeded", approvedBy ?? null, argumentsValue, dependencies.retentionDays, oauthActor)
     )
     return { status: "succeeded", result: invocation.success }
   }

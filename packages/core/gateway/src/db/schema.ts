@@ -128,6 +128,25 @@ export const gatewayApprovalPolicyTool = sqliteTable("gateway_approval_policy_to
   )
 ])
 
+/** A saved "always approve": calls to one policy tool whose arguments fit the sealed pattern skip approval. */
+export const gatewayApprovalRule = sqliteTable("gateway_approval_rule", {
+  id: text("id").primaryKey(),
+  approvalPolicyId: text("approval_policy_id").notNull().references(
+    () => gatewayApprovalPolicy.id,
+    { onDelete: "cascade" }
+  ),
+  owner: text("owner").notNull(),
+  subject: text("subject"),
+  integration: text("integration").notNull(),
+  connectionName: text("connection_name").notNull(),
+  tool: text("tool").notNull(),
+  pattern: text("pattern").notNull(),
+  createdAt: createdAt(),
+  createdBy: text("created_by")
+}, (table) => [
+  index("gateway_approval_rule_route").on(table.approvalPolicyId, table.integration, table.connectionName, table.tool)
+])
+
 export const gatewayClient = sqliteTable("gateway_client", {
   id: text("id").primaryKey(),
   tenantId: text("tenant_id").notNull().references(() => gatewayTenant.id, { onDelete: "cascade" }),

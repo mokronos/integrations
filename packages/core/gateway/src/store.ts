@@ -10,7 +10,7 @@ import { webCrypto } from "@integragents/contracts"
 import {
   AccessProfileId,
   Alias,
-  canonicalArguments,
+  canonicalJson,
   connectionSubject,
   ApprovalDestinationId,
   ApprovalId,
@@ -28,6 +28,8 @@ import {
   SubjectId
 } from "./domain.ts"
 import type {
+  ApprovalRule,
+  ApprovalRuleId,
   Client,
   PendingApproval
 } from "./domain.ts"
@@ -35,7 +37,7 @@ import { applyIntegrationMigrations } from "@integragents/host"
 import { applyGatewayMigrations } from "./migrate.ts"
 
 import {
-  millis, toAccessProfile, toAccessProfileTool, toApiKey, toApproval,
+  millis, toAccessProfile, toApprovalRule, toAccessProfileTool, toApiKey, toApproval,
   toApprovalPolicy, toApprovalPolicyTool, toAuditRecord, toAuthSession, toClient,
   toApprovalDeliveryAttempt, toApprovalDestination, toExternalIdentity, toIdentityOAuthState, toLoginHandoff, toLoginRecord,
   toSnapshot, toSubject, toTenant, toOAuthApplication, toOAuthAuthorizationRequest,
@@ -191,6 +193,13 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
 
   const sealText = (text: string): string => encryption.seal(text)
   const openApproval = (row: Row): PendingApproval => toApproval(row, encryption.open)
+  const openApprovalRule = (row: Row): ApprovalRule => toApprovalRule(row, encryption.open)
+  const requireApprovalRule = (id: ApprovalRuleId): Effect.Effect<ApprovalRule, SqlError.SqlError> =>
+    Effect.gen(function*() {
+      const row = yield* one("SELECT * FROM gateway_approval_rule WHERE id = ?", [id])
+      if (row === undefined) return yield* Effect.die(new Error(`Unknown approval rule ${id}`))
+      return openApprovalRule(row)
+    })
 
   const requireSession = (tokenHash: SessionTokenHash) =>
     Effect.gen(function*() {
@@ -205,7 +214,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
     })
 
   const approvalMatch = (input: Parameters<GatewayStore["findUncollectedApproval"]>[0]) => {
-    const canonical = canonicalArguments(input.arguments)
+    const canonical = canonicalJson(input.arguments)
     return {
       sql: `tenant_id = ? AND client_id = ? AND alias = ?
         AND approval_policy_id = ? AND access_profile_id = ? AND tool = ?
@@ -1319,9 +1328,43 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
       return yield* requireClient(clientId)
     })),
 
+    createApprovalRule: (input) => operation("createApprovalRule", Effect.gen(function*() {
+      yield* run(
+        `INSERT INTO gateway_approval_rule
+           (id, approval_policy_id, owner, subject, integration, connection_name, tool, pattern, created_at, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          input.id, input.approvalPolicyId, input.connection.owner, connectionSubject(input.connection) ?? null,
+          input.connection.integration, input.connection.name, input.tool,
+          sealText(JSON.stringify(input.pattern)), yield* now, input.createdBy
+        ]
+      )
+      return yield* requireApprovalRule(input.id)
+    })),
+
+    listApprovalRules: (approvalPolicyId) => operation("listApprovalRules", Effect.gen(function*() {
+      return (yield* all(
+        "SELECT * FROM gateway_approval_rule WHERE approval_policy_id = ? ORDER BY integration, connection_name, tool, created_at",
+        [approvalPolicyId]
+      )).map(openApprovalRule)
+    })),
+
+    findApprovalRule: (id) => operation("findApprovalRule", Effect.gen(function*() {
+      const row = yield* one("SELECT * FROM gateway_approval_rule WHERE id = ?", [id])
+      return row === undefined ? undefined : openApprovalRule(row)
+    })),
+
+    updateApprovalRule: (id, pattern) => operation("updateApprovalRule", Effect.gen(function*() {
+      yield* run("UPDATE gateway_approval_rule SET pattern = ? WHERE id = ?", [sealText(JSON.stringify(pattern)), id])
+      return yield* requireApprovalRule(id)
+    })),
+
+    deleteApprovalRule: (id) =>
+      operation("deleteApprovalRule", Effect.asVoid(run("DELETE FROM gateway_approval_rule WHERE id = ?", [id]))),
+
     createApproval: (input) => operation("createApproval", Effect.gen(function*() {
       const match = approvalMatch(input)
-      const canonical = canonicalArguments(input.arguments)
+      const canonical = canonicalJson(input.arguments)
       const createdAt = yield* now
       yield* batch([
         { sql: `INSERT INTO gateway_pending_approval

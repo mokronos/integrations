@@ -4,7 +4,7 @@ import type {
   AccessProfile, AccessProfileId, AccessProfileTool, Alias, ApiKey, ApiKeyHash,
   ApiKeyId, ApprovalGroupWindowMinutes, ApprovalMethod, ApprovalDeliveryAttempt, ApprovalDeliveryId, McpSurface,
   ApprovalDestination, ApprovalDestinationId, ApprovalId, ApprovalPolicy, ApprovalPolicyId,
-  ApprovalPolicyTool, ApprovalStatus, AuditId, AuditOutcome, AuditRecord,
+  ApprovalPolicyTool, ApprovalRule, ApprovalRuleId, ApprovalStatus, ArgumentPattern, AuditId, AuditOutcome, AuditRecord,
   AuthSession, Client, ConfigureClient, ClientCapability, ClientId, ConnectionName, ConnectionRef,
   ExternalIdentity, IdentityProvider, IntegrationSlug, Login, LoginHandoff,
   LoginHandoffHash, PendingApproval, PolicyDecision, SessionTokenHash, Subject,
@@ -321,6 +321,19 @@ export interface GatewayStore {
   listApprovalPolicyTools(id: ApprovalPolicyId): Effect.Effect<ReadonlyArray<ApprovalPolicyTool>, GatewayStoreError>
   replaceApprovalPolicyTools(id: ApprovalPolicyId, tools: ReadonlyArray<ApprovalPolicyToolInput>): Effect.Effect<ReadonlyArray<ApprovalPolicyTool>, GatewayStoreError>
   assignApprovalPolicy(tenantId: TenantId, clientId: ClientId, id: ApprovalPolicyId): Effect.Effect<Client, GatewayStoreError>
+
+  createApprovalRule(input: {
+    readonly id: ApprovalRuleId
+    readonly approvalPolicyId: ApprovalPolicyId
+    readonly connection: ConnectionRef
+    readonly tool: ToolName
+    readonly pattern: ArgumentPattern
+    readonly createdBy: string | null
+  }): Effect.Effect<ApprovalRule, GatewayStoreError>
+  listApprovalRules(approvalPolicyId: ApprovalPolicyId): Effect.Effect<ReadonlyArray<ApprovalRule>, GatewayStoreError>
+  findApprovalRule(id: ApprovalRuleId): Effect.Effect<ApprovalRule | undefined, GatewayStoreError>
+  updateApprovalRule(id: ApprovalRuleId, pattern: ArgumentPattern): Effect.Effect<ApprovalRule, GatewayStoreError>
+  deleteApprovalRule(id: ApprovalRuleId): Effect.Effect<void, GatewayStoreError>
 
   createApproval(input: CreateApprovalInput): Effect.Effect<PendingApproval, GatewayStoreError>
   getApproval(tenantId: TenantId, id: ApprovalId): Effect.Effect<PendingApproval | undefined, GatewayStoreError>

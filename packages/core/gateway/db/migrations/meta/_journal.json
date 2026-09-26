@@ -64,6 +64,13 @@
       "when": 1790433474606,
       "tag": "0008_nasty_killraven",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1790442651922,
+      "tag": "0009_clear_the_stranger",
+      "breakpoints": true
     }
   ]
 }

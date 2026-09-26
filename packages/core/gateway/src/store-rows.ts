@@ -3,13 +3,13 @@ import type { Row } from "@libsql/client"
 import { Schema } from "effect"
 import {
   AccessProfileId, ApiKeyHash, ApiKeyId, ApprovalDeliveryId, ApprovalGroupWindowMinutes, ApprovalMethod, McpSurface,
-  ApprovalDestinationId, ApprovalId,
+  ApprovalDestinationId, ApprovalId, ApprovalRuleId, ArgumentPattern,
   ApprovalPolicyId, AuditId, ClientId, ConnectionName, IntegrationSlug,
   LoginHandoffHash, SessionTokenHash, SubjectId, TenantId, ToolName,
   OAuthApplicationId, OAuthGrantId, OAuthApplicationKind
 } from "./domain.ts"
 import type {
-  AccessProfile, AccessProfileTool, ApiKey, ApprovalDeliveryAttempt, ApprovalDestination, ApprovalPolicy, ApprovalPolicyTool,
+  AccessProfile, AccessProfileTool, ApiKey, ApprovalDeliveryAttempt, ApprovalDestination, ApprovalPolicy, ApprovalPolicyTool, ApprovalRule,
   AuditRecord, AuthSession, Client, ConnectionRef, ExternalIdentity, LoginHandoff,
   PendingApproval, Subject, Tenant, ToolSnapshot
 } from "./domain.ts"
@@ -200,6 +200,19 @@ const ApprovalPolicyToolRow = Schema.Struct({
   decision: Schema.Literals(["allow", "require_approval"])
 })
 
+const ApprovalRuleRow = Schema.Struct({
+  id: Schema.String,
+  approval_policy_id: Schema.String,
+  owner: Schema.Literals(["org", "user"]),
+  subject: NullableString,
+  integration: Schema.String,
+  connection_name: Schema.String,
+  tool: Schema.String,
+  pattern: Schema.String,
+  created_at: Schema.Number,
+  created_by: NullableString
+})
+
 const ApprovalRow = Schema.Struct({
   id: Schema.String,
   group_id: NullableString,
@@ -347,9 +360,11 @@ const decodeConfigurationRow = rowDecoder("gateway_configuration", Configuration
 const decodeAccessProfileToolRow = rowDecoder("gateway_access_profile_tool", AccessProfileToolRow)
 const decodeApprovalPolicyToolRow = rowDecoder("gateway_approval_policy_tool", ApprovalPolicyToolRow)
 const decodeApprovalRow = rowDecoder("gateway_approval", ApprovalRow)
+const decodeApprovalRuleRow = rowDecoder("gateway_approval_rule", ApprovalRuleRow)
 const decodeAuditRow = rowDecoder("gateway_audit", AuditRow)
 const decodeSnapshotRow = rowDecoder("gateway_tool_snapshot", SnapshotRow)
 const decodeJsonText = jsonDecoder("json column", Schema.fromJsonString(Schema.Json))
+const decodePattern = jsonDecoder("gateway_approval_rule.pattern", Schema.fromJsonString(ArgumentPattern))
 const decodeCapabilities = jsonDecoder(
   "gateway_client.capabilities",
   Schema.fromJsonString(Schema.Array(Schema.Literals([
@@ -655,6 +670,23 @@ export const toApprovalPolicyTool = (row: Row): ApprovalPolicyTool => {
     connection: toConnectionRef(decoded),
     tool: ToolName.make(decoded.tool),
     decision: decoded.decision
+  }
+}
+
+export const toApprovalRule = (row: Row, open: (text: string) => string): ApprovalRule => {
+  const decoded = decodeApprovalRuleRow(pick(row, [
+    "id", "approval_policy_id", "owner", "subject", "integration", "connection_name", "tool", "pattern", "created_at", "created_by"
+  ]))
+  const pattern = decodePattern(open(decoded.pattern))
+  return {
+    id: ApprovalRuleId.make(decoded.id),
+    approvalPolicyId: ApprovalPolicyId.make(decoded.approval_policy_id),
+    connection: toConnectionRef(decoded),
+    tool: ToolName.make(decoded.tool),
+    pinned: pattern.pinned,
+    free: pattern.free,
+    createdAt: date(decoded.created_at),
+    createdBy: decoded.created_by
   }
 }
 

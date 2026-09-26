@@ -47,16 +47,3 @@ export const AuthorizationDenied = Schema.Union([AuthorizationUnknownKey, Author
 export type AuthorizationDenied = typeof AuthorizationDenied.Type
 export const Authorization = Schema.Union([Authorized, AuthorizationDenied])
 export type Authorization = typeof Authorization.Type
-const isJsonObject = Schema.is(Schema.Record(Schema.String, Schema.Json))
-const canonicalise = (value: Schema.Json): Schema.Json => {
-  if (Array.isArray(value)) return value.map(canonicalise)
-  if (isJsonObject(value)) {
-    return Object.fromEntries(
-      Object.entries(value)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, nested]) => [key, canonicalise(nested)])
-    )
-  }
-  return value
-}
-export const canonicalArguments = (value: Schema.Json): string => JSON.stringify(canonicalise(value))

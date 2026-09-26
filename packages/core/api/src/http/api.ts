@@ -8,7 +8,10 @@ import {
 import {
   ApprovalGroupWindowMinutes,
   ApprovalMethod,
+  ApprovalRule,
+  ApprovalRuleId,
   ApprovalVerdict,
+  ArgumentPattern,
   DecidedApproval,
   ApprovalDestination,
   ApprovalDestinationId,
@@ -633,8 +636,17 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
   }).annotate(RequiredAccess, "administrative"))
   .add(HttpApiEndpoint.get("getApprovalPolicy", "/v1/approval-policies/:id", {
     params: { id: ApprovalPolicyId }, success: Schema.Struct({
-      approvalPolicy: ApprovalPolicy, tools: Schema.Array(ApprovalPolicyTool), assignedClients: Schema.Array(Client)
+      approvalPolicy: ApprovalPolicy, tools: Schema.Array(ApprovalPolicyTool), assignedClients: Schema.Array(Client),
+      rules: Schema.Array(ApprovalRule)
     }), error: ApiNotFoundError
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.post("updateApprovalRule", "/v1/approval-rules/:id", {
+    params: { id: ApprovalRuleId }, payload: ArgumentPattern, success: ApprovalRule,
+    error: [ApiNotFoundError, ApiBadRequestError]
+  }).annotate(RequiredAccess, "administrative"))
+  .add(HttpApiEndpoint.delete("deleteApprovalRule", "/v1/approval-rules/:id", {
+    params: { id: ApprovalRuleId }, success: Schema.Struct({ deleted: Schema.Literal(true) }),
+    error: ApiNotFoundError
   }).annotate(RequiredAccess, "administrative"))
   .add(HttpApiEndpoint.post("createApprovalPolicy", "/v1/approval-policies", {
     payload: ConfigurationBody, success: HttpApiSchema.status(201)(ApprovalPolicy), error: ApiBadRequestError
@@ -683,9 +695,12 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
   .add(HttpApiEndpoint.post("decideApprovals", "/v1/approvals/decide", {
     payload: Schema.Struct({
       verdict: ApprovalVerdict,
-      ids: Schema.NonEmptyArray(ApprovalId).check(Schema.isMaxLength(500))
+      ids: Schema.NonEmptyArray(ApprovalId).check(Schema.isMaxLength(500)),
+      /** Also approve every later call to this tool that fits the pattern these calls share. */
+      remember: Schema.optional(Schema.Boolean)
     }),
-    success: Schema.Struct({ results: Schema.Array(DecidedApproval) })
+    success: Schema.Struct({ results: Schema.Array(DecidedApproval), rule: Schema.optional(ApprovalRule) }),
+    error: ApiBadRequestError
   }).annotate(RequiredAccess, "human"))
   .add(HttpApiEndpoint.post("deny", "/v1/approvals/:id/deny", {
     params: { id: ApprovalId },

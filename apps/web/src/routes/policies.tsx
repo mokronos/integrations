@@ -5,6 +5,7 @@ import { Option, Schema } from "effect"
 import { AccessProfileId, ApprovalPolicyId } from "@integragents/contracts"
 import { accessProfileKind, approvalPolicyKind, type ConfigurationKind, type ConfigurationResource } from "@/components/policies/configuration-kinds"
 import { ConfigurationDialog } from "@/components/policies/policy-dialogs"
+import { ApprovalRules } from "@/components/policies/approval-rules"
 import { AccessProfileEditor, ApprovalPolicyEditor } from "@/components/policies/policy-editor"
 import { LoadingRows, Page, QueryError, ReloadButton } from "@/components/page"
 import { Badge } from "@/components/ui/badge"
@@ -60,7 +61,10 @@ export function AccessProfileDetailRoute() {
 export function ApprovalPolicyDetailRoute() {
   const query = useApprovalPolicy(Option.getOrUndefined(decodeApprovalPolicyId(useParams()["approvalPolicyId"])))
   const resource = query.data?.approvalPolicy
-  return <ConfigurationDetail kind={approvalPolicyKind} query={query} resource={resource}>{resource === undefined ? null : <ApprovalPolicyEditor key={resource.updatedAt.toISOString()} id={resource.id} storedTools={query.data?.tools ?? []} assignedClientCount={query.data?.assignedClients.length ?? 0} />}</ConfigurationDetail>
+  return <ConfigurationDetail kind={approvalPolicyKind} query={query} resource={resource}>{resource === undefined ? null : <div className="space-y-4">
+    <ApprovalPolicyEditor key={resource.updatedAt.toISOString()} id={resource.id} storedTools={query.data?.tools ?? []} assignedClientCount={query.data?.assignedClients.length ?? 0} />
+    <ApprovalRules policyId={resource.id} rules={query.data?.rules ?? []} />
+  </div>}</ConfigurationDetail>
 }
 
 function ConfigurationDetail<Id extends string>({ kind, query, resource, children }: {

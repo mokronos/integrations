@@ -1119,6 +1119,37 @@ describe("gateway approval settlement", () => {
       expect(calls.map((entry) => entry.input)).toEqual([{ to: "d@e.f", subject: "Launch" }])
     }).pipe(Effect.provide(testServices)))
 
+  it.effect("always approve saves the shared pattern and runs later calls that fit it", () =>
+    Effect.gen(function*() {
+      const { call, calls, client } = yield* setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })
+      const send = (argumentsValue: typeof Schema.Json.Type) => call("POST", "/v1/execute", {
+        body: { alias: "user___sebastian___gmail___work", tool: "sendEmail", arguments: argumentsValue }
+      })
+      const first = String((yield* send({ to: "a@b.c", subject: "Launch" })).body["approvalId"])
+      const second = String((yield* send({ to: "d@e.f", subject: "Launch" })).body["approvalId"])
+
+      const decided = yield* call("POST", "/v1/approvals/decide", {
+        body: { verdict: "approve", ids: [first, second], remember: true },
+        local: true
+      })
+      expect(decided.body["rule"]).toMatchObject({ pinned: [{ path: ["subject"], value: "Launch" }], free: [["to"]] })
+
+      expect((yield* send({ to: "g@h.i", subject: "Launch" })).body["status"]).toBe("succeeded")
+      expect((yield* send({ to: "g@h.i", subject: "Other" })).body["status"]).toBe("pending")
+      expect((yield* send({ to: "g@h.i", subject: "Launch", bcc: "x@y.z" })).body["status"]).toBe("pending")
+      expect(calls).toHaveLength(3)
+
+      const policy = yield* call("GET", `/v1/approval-policies/${client.approvalPolicyId}`, { local: true })
+      const ruleId = Schema.decodeUnknownSync(Schema.Struct({ id: Schema.String }))(decided.body["rule"]).id
+      expect(policy.body["rules"]).toMatchObject([{ id: ruleId }])
+      const loosened = yield* call("POST", `/v1/approval-rules/${ruleId}`, { body: { pinned: [], free: [["to"], ["subject"]] }, local: true })
+      expect(loosened.status).toBe(200)
+      expect((yield* send({ to: "g@h.i", subject: "Anything" })).body["status"]).toBe("succeeded")
+
+      expect((yield* call("DELETE", `/v1/approval-rules/${ruleId}`, { local: true })).status).toBe(200)
+      expect((yield* send({ to: "j@k.l", subject: "Launch" })).body["status"]).toBe("pending")
+    }).pipe(Effect.provide(testServices)))
+
   it.effect("refuses to approve twice", () =>
     Effect.gen(function*() {
       const { call } = yield* setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })

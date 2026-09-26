@@ -1,6 +1,7 @@
 import { Schema } from "effect"
 import { Alias, ApprovalStatus, ConnectionName, ConnectionOwner, IntegrationSlug, ToolName } from "./vocabulary.ts"
 import { OAuthSessionView } from "./oauth.ts"
+import { ArgumentPattern } from "./argument-paths.ts"
 
 export const TenantId = Schema.String.pipe(Schema.brand("TenantId"))
 export type TenantId = typeof TenantId.Type
@@ -17,6 +18,8 @@ export const ApprovalPolicyId = Schema.String.pipe(Schema.brand("ApprovalPolicyI
 export type ApprovalPolicyId = typeof ApprovalPolicyId.Type
 export const ApprovalId = Schema.String.pipe(Schema.brand("ApprovalId"))
 export type ApprovalId = typeof ApprovalId.Type
+export const ApprovalRuleId = Schema.String.pipe(Schema.brand("ApprovalRuleId"))
+export type ApprovalRuleId = typeof ApprovalRuleId.Type
 export const ApprovalDestinationId = Schema.String.pipe(Schema.brand("ApprovalDestinationId"))
 export type ApprovalDestinationId = typeof ApprovalDestinationId.Type
 export const ApprovalDeliveryId = Schema.String.pipe(Schema.brand("ApprovalDeliveryId"))
@@ -113,6 +116,11 @@ export const PendingApproval = Schema.Struct({ id: ApprovalId, groupId: Approval
 export type PendingApproval = typeof PendingApproval.Type
 export const ListedApproval = Schema.Struct({ ...PendingApproval.fields, deliveries: Schema.Array(ApprovalDeliveryAttempt) })
 export type ListedApproval = typeof ListedApproval.Type
+export const ApprovalRule = Schema.Struct({
+  id: ApprovalRuleId, approvalPolicyId: ApprovalPolicyId, connection: ConnectionRef, tool: ToolName,
+  ...ArgumentPattern.fields, createdAt: Schema.Date, createdBy: Schema.NullOr(Schema.String)
+})
+export type ApprovalRule = typeof ApprovalRule.Type
 export const ApprovalVerdict = Schema.Literals(["approve", "deny"])
 export type ApprovalVerdict = typeof ApprovalVerdict.Type
 export const DecidedApproval = Schema.Union([

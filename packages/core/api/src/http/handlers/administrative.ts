@@ -1,7 +1,9 @@
 import {
   NonNegativeInt,
+  patternProblem,
   PositiveInt,
-  whenPresentMap
+  whenPresentMap,
+  type ApprovalRuleId
 } from "@integragents/contracts"
 import { BlobStore, Integrations } from "@integragents/host"
 import { Duration, Effect, Stream } from "effect"
@@ -32,6 +34,7 @@ import {
   newAccessProfileId,
   newApprovalDestinationId,
   newApprovalPolicyId,
+  newApprovalRuleId,
   newClientId,
   newSubjectId
 } from "@integragents/gateway-core"
@@ -80,6 +83,13 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
     const blobs = yield* BlobStore
     const config = yield* GatewayConfig
     const events = yield* GatewayEvents
+    const ownedApprovalRule = (id: ApprovalRuleId) => Effect.gen(function*() {
+      const tenantId = yield* requireTenant
+      const rule = yield* capture(store.findApprovalRule(id))
+      const policy = rule === undefined ? undefined : yield* capture(store.findApprovalPolicy(tenantId, rule.approvalPolicyId))
+      if (rule === undefined || policy === undefined) return yield* new ApiNotFound({ error: `Unknown approval rule ${id}` })
+      return rule
+    })
     return handlers
       .handle("events", () =>
         Effect.map(requireTenant, (tenantId) =>
@@ -429,7 +439,19 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
         const approvalPolicy = yield* capture(store.findApprovalPolicy(tenantId, request.params["id"]))
         if (approvalPolicy === undefined) return yield* new ApiNotFound({ error: "Unknown approval policy" })
         const [tools, clients] = yield* Effect.all([capture(store.listApprovalPolicyTools(approvalPolicy.id)), capture(store.listClients(tenantId))])
-        return { approvalPolicy, tools, assignedClients: clients.filter((client) => client.approvalPolicyId === approvalPolicy.id) }
+        const rules = yield* capture(store.listApprovalRules(approvalPolicy.id))
+        return { approvalPolicy, tools, rules, assignedClients: clients.filter((client) => client.approvalPolicyId === approvalPolicy.id) }
+      }))
+      .handle("updateApprovalRule", (request) => Effect.gen(function*() {
+        const rule = yield* ownedApprovalRule(request.params["id"])
+        const problem = patternProblem(request.payload)
+        if (problem !== undefined) return yield* new ApiBadRequest({ error: problem })
+        return yield* capture(store.updateApprovalRule(rule.id, request.payload))
+      }))
+      .handle("deleteApprovalRule", (request) => Effect.gen(function*() {
+        const rule = yield* ownedApprovalRule(request.params["id"])
+        yield* capture(store.deleteApprovalRule(rule.id))
+        return { deleted: true as const }
       }))
       .handle("createApprovalPolicy", (request) => Effect.gen(function*() {
         const tenantId = yield* requireTenant
@@ -485,6 +507,16 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
         const approvalPolicy = yield* capture(store.createApprovalPolicy({
           id: (yield* newApprovalPolicyId), tenantId, name: request.payload.name, tools
         }))
+        for (const rule of yield* capture(store.listApprovalRules(source.id))) {
+          yield* capture(store.createApprovalRule({
+            id: yield* newApprovalRuleId,
+            approvalPolicyId: approvalPolicy.id,
+            connection: rule.connection,
+            tool: rule.tool,
+            pattern: { pinned: rule.pinned, free: rule.free },
+            createdBy: rule.createdBy
+          }))
+        }
         return {
           approvalPolicy,
           tools: yield* capture(store.listApprovalPolicyTools(approvalPolicy.id))
@@ -523,17 +555,16 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
         )
       }))
       .handle("decideApprovals", (request) => Effect.gen(function*() {
-        return {
-          results: yield* capture(decideApprovals(
-            { store, integrations, retentionDays: config.retentionDays },
-            {
-              tenantId: yield* requireTenant,
-              ids: request.payload.ids,
-              verdict: request.payload.verdict,
-              decidedBy: yield* decidedBy
-            }
-          ))
-        }
+        return yield* capture(decideApprovals(
+          { store, integrations, retentionDays: config.retentionDays },
+          {
+            tenantId: yield* requireTenant,
+            ids: request.payload.ids,
+            verdict: request.payload.verdict,
+            decidedBy: yield* decidedBy,
+            remember: request.payload.remember ?? false
+          }
+        )).pipe(Effect.catchTag("ApprovalConflict", ({ message }) => new ApiBadRequest({ error: message })))
       }))
       .handle("deny", (request) => Effect.gen(function*() {
         return yield* capture(denyApproval(

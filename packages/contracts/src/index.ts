@@ -1,4 +1,5 @@
 export * from "./address.ts"
+export * from "./argument-paths.ts"
 export * from "./connection.ts"
 export * from "./discovery.ts"
 export * from "./gateway.ts"

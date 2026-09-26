@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Check, ChevronRight, ShieldCheck, X } from "lucide-react"
+import { Check, CheckCheck, ChevronRight, ShieldCheck, X } from "lucide-react"
 import { useSearchParams } from "react-router"
 import { toast } from "sonner"
 
@@ -11,13 +11,13 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { argumentAt, groupApprovals, splitArguments, type ArgumentPath } from "@/lib/approval-groups"
+import { argumentAt, groupApprovals, splitArguments } from "@/lib/approval-groups"
 import { pluralise, until, when } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import * as gateway from "@/lib/gateway"
 import { useApprovals, useIntegrations, useInvalidate, useMutation } from "@/lib/queries"
 import { Schema } from "effect"
-import { ApprovalStatus, isJsonString, type ApprovalId, type ApprovalVerdict, type IntegrationOverview, type Json, type ListedApproval } from "@integragents/contracts"
+import { ApprovalStatus, isJsonString, type ApprovalId, type ArgumentPath, type ApprovalVerdict, type IntegrationOverview, type Json, type ListedApproval } from "@integragents/contracts"
 
 const decodeApprovalFilter = Schema.decodeUnknownSync(Schema.Union([ApprovalStatus, Schema.Literal("all")]))
 
@@ -31,6 +31,72 @@ const statusVariant = {
   Record<ApprovalStatus, "default" | "secondary" | "destructive" | "outline">
 >
 
+type Decision = {
+  readonly verdict: ApprovalVerdict
+  readonly ids: readonly [ApprovalId, ...Array<ApprovalId>]
+  readonly remember?: boolean
+}
+
+function useDecision(onDecided?: () => void) {
+  const invalidate = useInvalidate()
+  return useMutation({
+    mutationFn: ({ verdict, ids, remember }: Decision) => gateway.decideApprovals(verdict, ids, remember),
+    onSuccess: ({ results, rule }, { verdict }) => {
+      invalidate(["approvals"], ["audit"], ["approval-policies"])
+      onDecided?.()
+      const refused = results.filter((result) => result.status === "refused")
+      const failed = results.filter((result) => result.status === "decided" && result.approval.error !== null)
+      const done = results.length - refused.length - failed.length
+      const summary = [
+        `${verdict === "approve" ? "Approved and performed" : "Denied"} ${pluralise(done, "call")}`,
+        rule === undefined ? undefined : "matching calls will be approved from now on"
+      ].filter((part) => part !== undefined).join(" · ")
+      if (refused.length + failed.length === 0) toast.success(summary)
+      else toast.error(summary, {
+        description: [
+          ...failed.map((result) => result.status === "decided" ? result.approval.error : null),
+          ...refused.map((result) => result.status === "refused" ? result.error : null)
+        ].filter((line) => line !== null).join("\n")
+      })
+    },
+    onError: (error: Error) => toast.error("Could not decide", { description: error.message })
+  })
+}
+
+function DecisionButtons({ ids, disabled, decide, count }: {
+  readonly ids: ReadonlyArray<ApprovalId>
+  readonly disabled: boolean
+  readonly decide: ReturnType<typeof useDecision>
+  readonly count?: number
+}) {
+  const [head, ...rest] = ids
+  const run = (verdict: ApprovalVerdict, remember: boolean) => {
+    if (head !== undefined) decide.mutate({ verdict, ids: [head, ...rest], remember })
+  }
+  const blocked = disabled || decide.isPending || head === undefined
+  const suffix = count === undefined ? "" : ` ${count}`
+  return <>
+    <Button size="sm" onClick={() => run("approve", false)} disabled={blocked}>
+      <Check className="size-3" />
+      Approve{suffix} and run
+    </Button>
+    <Button
+      size="sm"
+      variant="secondary"
+      onClick={() => run("approve", true)}
+      disabled={blocked}
+      title="Approve these and every later call to this tool whose arguments fit the same pattern"
+    >
+      <CheckCheck className="size-3" />
+      Always approve
+    </Button>
+    <Button size="sm" variant="outline" onClick={() => run("deny", false)} disabled={decide.isPending || head === undefined}>
+      <X className="size-3" />
+      Deny{suffix}
+    </Button>
+  </>
+}
+
 function ApprovalCard({
   approval,
   selected,
@@ -40,7 +106,6 @@ function ApprovalCard({
   readonly selected: boolean
   readonly integrations: ReadonlyArray<IntegrationOverview>
 }) {
-  const invalidate = useInvalidate()
   const [expired, setExpired] = useState(false)
 
   useEffect(() => {
@@ -50,18 +115,7 @@ function ApprovalCard({
     return () => window.clearTimeout(timer)
   }, [approval.expiresAt, approval.status])
 
-  const decide = useMutation({
-    mutationFn: (verdict: "approve" | "deny") =>
-      verdict === "approve"
-        ? gateway.approveApproval(approval.id)
-        : gateway.denyApproval(approval.id),
-    onSuccess: (response, verdict) => {
-      invalidate(["approvals"], ["audit"])
-      if (response.approval?.error) toast.error("Approved, but the call failed", { description: response.approval.error })
-      else toast.success(verdict === "approve" ? "Approved and performed" : "Denied")
-    },
-    onError: (error: Error) => toast.error("Could not decide", { description: error.message })
-  })
+  const decide = useDecision()
 
   return (
     <Card
@@ -103,23 +157,7 @@ function ApprovalCard({
         {approval.status === "pending"
           ? (
             <div className="flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                onClick={() => decide.mutate("approve")}
-                disabled={decide.isPending || expired}
-              >
-                <Check className="size-3" />
-                Approve and run
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => decide.mutate("deny")}
-                disabled={decide.isPending}
-              >
-                <X className="size-3" />
-                Deny
-              </Button>
+              <DecisionButtons ids={[approval.id]} disabled={expired} decide={decide} />
               {expired
                 ? (
                   <span className="text-muted-foreground self-center text-xs">
@@ -165,13 +203,11 @@ function ApprovalGroupCard({
   readonly selected: string | null
   readonly integrations: ReadonlyArray<IntegrationOverview>
 }) {
-  const invalidate = useInvalidate()
   const [open, setOpen] = useState(true)
   const [excluded, setExcluded] = useState<ReadonlySet<ApprovalId>>(new Set())
   const { shared, varying } = splitArguments(approvals.map((approval) => approval.arguments))
   const decidable = approvals.filter((approval) => approval.status === "pending" && approval.expiresAt.getTime() > Date.now())
   const chosen = decidable.filter((approval) => !excluded.has(approval.id)).map((approval) => approval.id)
-  const [head, ...rest] = chosen
   const counts = ApprovalStatus.literals
     .map((status) => [status, approvals.filter((approval) => approval.status === status).length] as const)
     .filter(([, count]) => count > 0)
@@ -181,26 +217,7 @@ function ApprovalGroupCard({
   )
   const showOutcome = approvals.some((approval) => approval.result !== null || approval.error !== null)
 
-  const decide = useMutation({
-    mutationFn: ({ verdict, ids }: { readonly verdict: ApprovalVerdict; readonly ids: readonly [ApprovalId, ...Array<ApprovalId>] }) =>
-      gateway.decideApprovals(verdict, ids),
-    onSuccess: (results, { verdict }) => {
-      invalidate(["approvals"], ["audit"])
-      setExcluded(new Set())
-      const refused = results.filter((result) => result.status === "refused").length
-      const failed = results.filter((result) => result.status === "decided" && result.approval.error !== null).length
-      const done = results.length - refused - failed
-      const summary = `${verdict === "approve" ? "Approved and performed" : "Denied"} ${pluralise(done, "call")}`
-      if (refused + failed === 0) toast.success(summary)
-      else toast.error(summary, {
-        description: [
-          failed > 0 ? `${pluralise(failed, "call")} failed when run` : undefined,
-          refused > 0 ? `${pluralise(refused, "call")} could not be decided` : undefined
-        ].filter((line) => line !== undefined).join(" · ")
-      })
-    },
-    onError: (error: Error) => toast.error("Could not decide", { description: error.message })
-  })
+  const decide = useDecision(() => setExcluded(new Set()))
 
   const toggle = (id: ApprovalId) => setExcluded((current) => {
     const next = new Set(current)
@@ -307,23 +324,7 @@ function ApprovalGroupCard({
 
         {decidable.length > 0 ? (
           <div className="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              onClick={() => { if (head !== undefined) decide.mutate({ verdict: "approve", ids: [head, ...rest] }) }}
-              disabled={decide.isPending || head === undefined}
-            >
-              <Check className="size-3" />
-              Approve {chosen.length} and run
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => { if (head !== undefined) decide.mutate({ verdict: "deny", ids: [head, ...rest] }) }}
-              disabled={decide.isPending || head === undefined}
-            >
-              <X className="size-3" />
-              Deny {chosen.length}
-            </Button>
+            <DecisionButtons ids={chosen} disabled={false} decide={decide} count={chosen.length} />
           </div>
         ) : null}
       </CardContent>

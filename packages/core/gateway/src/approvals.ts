@@ -1,5 +1,6 @@
 import { Clock, Effect, Schema } from "effect"
 import type { Integrations } from "@integragents/host"
+import { argumentPattern, whenPresent } from "@integragents/contracts"
 import {
   aliasForConnection,
   ApprovalId,
@@ -9,8 +10,10 @@ import {
   sameConnectionRef,
   TenantId
 } from "./domain.ts"
+import type { Authorized, PendingApproval } from "./domain.ts"
 import { executeAuthorized } from "./invoke.ts"
-import type { GatewayStore } from "./store.ts"
+import { newApprovalRuleId } from "./keys.ts"
+import type { GatewayStore, GatewayStoreError } from "./store.ts"
 
 export class ApprovalNotFound extends Schema.TaggedError<ApprovalNotFound>()("ApprovalNotFound", {
   id: ApprovalId
@@ -24,6 +27,44 @@ const ApprovalDecision = Schema.Struct({
   tenantId: TenantId,
   id: ApprovalId,
   decidedBy: Schema.NullOr(Schema.String)
+})
+
+/** The authority a frozen call was made under, if its client still holds exactly that. */
+const frozenAuthorization = Effect.fn("Approvals.frozenAuthorization")(function*(
+  store: GatewayStore,
+  tenantId: TenantId,
+  approval: PendingApproval
+): Effect.fn.Return<Authorized | undefined, GatewayStoreError> {
+  const [client, accessProfile, approvalPolicy] = yield* Effect.all([
+    store.findClientById(tenantId, approval.clientId),
+    store.findAccessProfile(tenantId, approval.accessProfileId),
+    store.findApprovalPolicy(tenantId, approval.approvalPolicyId)
+  ])
+  const accessTools = accessProfile === undefined ? [] : yield* store.listAccessProfileTools(accessProfile.id)
+  const approvalTools = approvalPolicy === undefined ? [] : yield* store.listApprovalPolicyTools(approvalPolicy.id)
+  const accessProfileTool = accessTools.find((candidate) =>
+    candidate.tool === approval.tool && aliasForConnection(candidate.connection) === approval.alias)
+  const approvalPolicyTool = accessProfileTool === undefined ? undefined : approvalTools.find((candidate) =>
+    candidate.tool === approval.tool && sameConnectionRef(candidate.connection, accessProfileTool.connection))
+  if (client === undefined || client.revokedAt !== null
+    || client.accessProfileId !== approval.accessProfileId
+    || client.approvalPolicyId !== approval.approvalPolicyId
+    || accessProfile === undefined || approvalPolicy === undefined
+    || accessProfileTool === undefined || approvalPolicyTool === undefined) {
+    return undefined
+  }
+  return {
+    status: "authorized",
+    client,
+    accessProfile,
+    accessProfileTool,
+    approvalPolicy,
+    approvalPolicyTool,
+    alias: aliasForConnection(accessProfileTool.connection),
+    connection: accessProfileTool.connection,
+    subject: connectionSubject(accessProfileTool.connection) ?? null,
+    decision: approvalPolicyTool.decision
+  }
 })
 
 const pendingApproval = Effect.fn("Approvals.pending")(function*(store: GatewayStore, input: typeof ApprovalDecision.Type) {
@@ -61,22 +102,8 @@ export const approveApproval = Effect.fn("Approvals.approve")(function*(
   const { store } = dependencies
   const { tenantId, id, decidedBy } = input
   const approval = yield* pendingApproval(store, input)
-  const [client, accessProfile, approvalPolicy] = yield* Effect.all([
-    store.findClientById(tenantId, approval.clientId),
-    store.findAccessProfile(tenantId, approval.accessProfileId),
-    store.findApprovalPolicy(tenantId, approval.approvalPolicyId)
-  ])
-  const accessTools = accessProfile === undefined ? [] : yield* store.listAccessProfileTools(accessProfile.id)
-  const approvalTools = approvalPolicy === undefined ? [] : yield* store.listApprovalPolicyTools(approvalPolicy.id)
-  const accessProfileTool = accessTools.find((candidate) =>
-    candidate.tool === approval.tool && aliasForConnection(candidate.connection) === approval.alias)
-  const approvalPolicyTool = accessProfileTool === undefined ? undefined : approvalTools.find((candidate) =>
-    candidate.tool === approval.tool && sameConnectionRef(candidate.connection, accessProfileTool.connection))
-  if (client === undefined || client.revokedAt !== null
-    || client.accessProfileId !== approval.accessProfileId
-    || client.approvalPolicyId !== approval.approvalPolicyId
-    || accessProfile === undefined || approvalPolicy === undefined
-    || accessProfileTool === undefined || approvalPolicyTool === undefined) {
+  const authorization = yield* frozenAuthorization(store, tenantId, approval)
+  if (authorization === undefined) {
     yield* store.settleApproval({ tenantId, id, status: "denied", decidedBy, result: null, error: "the client assignments or tool intersection changed while this call was frozen" })
     return yield* new ApprovalConflict({ message: `Approval ${id} is no longer authorized` })
   }
@@ -84,18 +111,7 @@ export const approveApproval = Effect.fn("Approvals.approve")(function*(
   return yield* Effect.gen(function*() {
     const claimed = yield* store.claimApproval({ tenantId, id, decidedBy })
     if (!claimed) return yield* new ApprovalConflict({ message: `Approval ${id} was decided or expired` })
-    const outcome = yield* executeAuthorized(dependencies, {
-      status: "authorized",
-      client,
-      accessProfile,
-      accessProfileTool,
-      approvalPolicy,
-      approvalPolicyTool,
-      alias: aliasForConnection(accessProfileTool.connection),
-      connection: accessProfileTool.connection,
-      subject: connectionSubject(accessProfileTool.connection) ?? null,
-      decision: approvalPolicyTool.decision
-    }, approval.arguments)
+    const outcome = yield* executeAuthorized(dependencies, authorization, approval.arguments)
     yield* store.settleApproval({
       tenantId, id, status: "approved", decidedBy,
       result: outcome.status === "succeeded" ? outcome.result : null,
@@ -107,6 +123,36 @@ export const approveApproval = Effect.fn("Approvals.approve")(function*(
   }).pipe(Effect.uninterruptible)
 })
 
+/**
+ * Saves "always approve" for the calls being approved: what they all agree on
+ * is pinned, what differs between them is left open.
+ */
+const rememberApproval = Effect.fn("Approvals.remember")(function*(
+  store: GatewayStore,
+  input: { readonly tenantId: TenantId; readonly ids: ReadonlyArray<ApprovalId>; readonly decidedBy: string | null }
+) {
+  const approvals: Array<PendingApproval> = []
+  for (const id of input.ids) {
+    const approval = yield* store.getApproval(input.tenantId, id)
+    if (approval?.status === "pending") approvals.push(approval)
+  }
+  const [first] = approvals
+  if (first === undefined) return yield* new ApprovalConflict({ message: "None of these calls is still waiting for a decision" })
+  if (approvals.some((approval) => approval.approvalPolicyId !== first.approvalPolicyId || approval.alias !== first.alias || approval.tool !== first.tool)) {
+    return yield* new ApprovalConflict({ message: "A saved approval covers one tool under one policy; these calls span several" })
+  }
+  const authorization = yield* frozenAuthorization(store, input.tenantId, first)
+  if (authorization === undefined) return yield* new ApprovalConflict({ message: `Approval ${first.id} is no longer authorized` })
+  return yield* store.createApprovalRule({
+    id: yield* newApprovalRuleId,
+    approvalPolicyId: authorization.approvalPolicy.id,
+    connection: authorization.approvalPolicyTool.connection,
+    tool: authorization.approvalPolicyTool.tool,
+    pattern: argumentPattern(approvals.map((approval) => approval.arguments)),
+    createdBy: input.decidedBy
+  })
+})
+
 /** One decision applied to many calls; a call that cannot be decided is reported, not fatal. */
 export const decideApprovals = Effect.fn("Approvals.decideMany")(function*(
   dependencies: Parameters<typeof approveApproval>[0],
@@ -115,9 +161,13 @@ export const decideApprovals = Effect.fn("Approvals.decideMany")(function*(
     readonly ids: ReadonlyArray<ApprovalId>
     readonly verdict: ApprovalVerdict
     readonly decidedBy: string | null
+    readonly remember: boolean
   }
 ) {
-  return yield* Effect.forEach(new Set(input.ids), (id) => {
+  const rule = input.remember && input.verdict === "approve"
+    ? yield* rememberApproval(dependencies.store, input)
+    : undefined
+  const results = yield* Effect.forEach(new Set(input.ids), (id) => {
     const decision = { tenantId: input.tenantId, id, decidedBy: input.decidedBy }
     const decided = input.verdict === "approve"
       ? Effect.map(approveApproval(dependencies, decision), ({ approval }) => approval)
@@ -132,4 +182,5 @@ export const decideApprovals = Effect.fn("Approvals.decideMany")(function*(
       })
     )
   }, { concurrency: 4 })
+  return { results, ...whenPresent("rule", rule) }
 })

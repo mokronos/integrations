@@ -10,6 +10,7 @@ import {
   ClientId,
   AccessProfileId,
   ApprovalPolicyId,
+  ApprovalRuleId,
   LoginHandoffHash,
   OAuthApplicationId,
   OAuthGrantId,
@@ -101,6 +102,7 @@ export const newAccessProfileId: Effect.Effect<AccessProfileId, never, Crypto.Cr
 )
 export const newApprovalPolicyId: Effect.Effect<ApprovalPolicyId, never, Crypto.Crypto> = Effect
   .map(uuid, ApprovalPolicyId.make)
+export const newApprovalRuleId: Effect.Effect<ApprovalRuleId, never, Crypto.Crypto> = Effect.map(uuid, ApprovalRuleId.make)
 export const newApprovalId: Effect.Effect<ApprovalId, never, Crypto.Crypto> = Effect.map(
   uuid,
   ApprovalId.make

@@ -16,7 +16,9 @@ import {
   type ApprovalId,
   type ApprovalPolicyId,
   type ApprovalStatus,
+  type ApprovalRuleId,
   type ApprovalVerdict,
+  type ArgumentPattern,
   type AuditOutcome,
   type ClientCapability,
   type ConfigureClient,
@@ -297,14 +299,18 @@ export const listApprovals = async (status?: ApprovalStatus) =>
   (await run(endpoints.administrative.listApprovals({ query: whenPresent("status", status) }))).approvals
 
 
-export const approveApproval = async (id: ApprovalId) =>
-  await run(endpoints.administrative.approve({ params: { id } }))
 
-export const denyApproval = async (id: ApprovalId) =>
-  await run(endpoints.administrative.deny({ params: { id } }))
+export const decideApprovals = async (
+  verdict: ApprovalVerdict,
+  ids: readonly [ApprovalId, ...Array<ApprovalId>],
+  remember = false
+) => await run(endpoints.administrative.decideApprovals({ payload: { verdict, ids, remember } }))
 
-export const decideApprovals = async (verdict: ApprovalVerdict, ids: readonly [ApprovalId, ...Array<ApprovalId>]) =>
-  (await run(endpoints.administrative.decideApprovals({ payload: { verdict, ids } }))).results
+export const updateApprovalRule = async (id: ApprovalRuleId, pattern: ArgumentPattern) =>
+  await run(endpoints.administrative.updateApprovalRule({ params: { id }, payload: pattern }))
+
+export const deleteApprovalRule = async (id: ApprovalRuleId) =>
+  await run(endpoints.administrative.deleteApprovalRule({ params: { id } }))
 
 export type AuditQuery = {
   readonly limit: number

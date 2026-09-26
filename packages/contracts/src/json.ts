@@ -8,6 +8,20 @@ const decodeJson = Schema.decodeUnknownOption(Schema.Json)
 export const isJsonObject = (value: Json): value is JsonObject =>
   Predicate.isReadonlyObject(value) && !Array.isArray(value)
 
+const canonicalise = (value: Json): Json =>
+  Array.isArray(value)
+    ? value.map(canonicalise)
+    : isJsonObject(value)
+    ? Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, nested]) => [key, canonicalise(nested)])
+    )
+    : value
+
+/** Equal JSON values serialise identically, whatever order their keys arrived in. */
+export const canonicalJson = (value: Json): string => JSON.stringify(canonicalise(value))
+
 export const isJsonString = (value: Json): value is string => Predicate.isString(value)
 
 export const isJsonBoolean = (value: Json): value is boolean => Predicate.isBoolean(value)

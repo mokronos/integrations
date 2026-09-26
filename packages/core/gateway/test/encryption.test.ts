@@ -20,7 +20,7 @@ import {
   ToolName
 } from "../src/index.ts"
 import type { GatewayStore } from "../src/index.ts"
-import { canonicalArguments } from "../src/domain.ts"
+import { canonicalJson } from "../src/domain.ts"
 import { openStore, temporaryDirectory, testServices } from "./fixtures.ts"
 
 class KeyRefused extends Schema.TaggedError<KeyRefused>()("KeyRefused", {
@@ -302,7 +302,7 @@ describe("the encrypted store", () => {
             accessProfile.id,
             Alias.make("org___gmail___work"),
             ToolName.make("sendEmail"),
-            canonicalArguments({ to: "old@example.com" }),
+            canonicalJson({ to: "old@example.com" }),
             expiresAt
           ]
         )
