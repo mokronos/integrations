@@ -13,7 +13,7 @@ import { Gateway } from "./gateway.ts"
 const dashboard = Effect.suspend(() =>
   Command.Build("Dashboard", {
     cwd: fileURLToPath(new URL("../../web", import.meta.url)),
-    command: "bun run build",
+    command: "bun run --cwd ../.. build && bun run build",
     outdir: "dist",
     memo: { include: ["**/*", "../../packages/*/src/**", "../../packages/core/*/src/**"], lockfile: true }
   })
