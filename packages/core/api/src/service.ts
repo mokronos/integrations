@@ -58,6 +58,8 @@ export interface GatewayServiceOptions {
   readonly sqlClient?: Layer.Layer<SqlClient.SqlClient>
   /** The master key. Defaults to the environment's, then the key file under `home`. */
   readonly encryption?: Encryption
+  /** Whether a missing `INTEGRATIONS_MASTER_KEY` may fall back to the key file. Defaults to true. */
+  readonly masterKeyFile?: boolean
   /** Where uploaded and oversized response bodies live. Defaults to files under `home`. */
   readonly blobs?: Layer.Layer<BlobStore, never, SqlClient.SqlClient>
   readonly home?: string
@@ -127,7 +129,7 @@ const buildCoreWith = async (
   const home = options.home ?? integrationsHome()
   const encryption = options.encryption ?? await resolveEncryption({
     ...whenPresent("envValue", Option.getOrUndefined(environment.masterKey)),
-    keyFile: `${home}/gateway.key`
+    ...whenPresent("keyFile", options.masterKeyFile === false ? undefined : `${home}/gateway.key`)
   })
   const resolvePublicUrl = (): string | undefined =>
     options.publicUrl ?? Option.getOrUndefined(environment.publicUrl) ?? options.localCallbackOrigin
@@ -229,6 +231,7 @@ export const createGatewayService = async (
 
 export interface ServeOptions {
   readonly httpClient: Layer.Layer<HttpClient.HttpClient>
+  readonly encryption?: Encryption
   readonly port?: number
   readonly hostname?: string
   readonly home?: string
@@ -254,6 +257,7 @@ export const serveGateway = async (options: ServeOptions): Promise<RunningGatewa
     ...options,
     traceFile: traceFilePath(options.home ?? integrationsHome(), "gateway"),
     secureCookies: !boundToLoopback,
+    masterKeyFile: boundToLoopback,
     ...whenPresent(
       "localCallbackOrigin",
       boundToLoopback && requestedPort !== 0

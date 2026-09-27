@@ -39,8 +39,8 @@ directly with `i`.
   per-user service on Linux or macOS, so it survives reboots and `i` finds it
   with no configuration. Use `ii serve -d` instead to run it only for the
   current session.
-- **Self-hosted.** Run the same binary on a machine you control to share one
-  gateway across machines or a team. See [Self-hosting](#self-hosting).
+- **Self-hosted.** Run the Docker image or the same binary on a server to share
+  one gateway across machines or a team. See [Self-hosting](#self-hosting).
 - **Embedded.** Run the gateway core in-process on your application's own
   database. See [Embedding](#embedding).
 
@@ -86,22 +86,48 @@ directory.
 
 ## Self-hosting
 
-On the server, install as above and serve on a non-loopback address behind a
-TLS-terminating reverse proxy. `INTEGRATIONS_PUBLIC_URL` is the URL OAuth
-providers redirect back to:
+A gateway bound beyond loopback takes its master key, which seals every stored
+credential, only from `INTEGRATIONS_MASTER_KEY`. Keep it outside the data
+directory and its backups. Put the gateway behind a TLS-terminating reverse
+proxy; `INTEGRATIONS_PUBLIC_URL` is the URL users and OAuth providers reach it
+at.
+
+### Docker
 
 ```bash
+cd docker
+cp .env.example .env    # set INTEGRATIONS_MASTER_KEY and INTEGRATIONS_PUBLIC_URL
+docker compose up -d    # --build to build this checkout instead of pulling
+```
+
+The image is `ghcr.io/mokronos/integrations` (`latest`, `nightly`, or a
+version). State lives in the `/data` volume. Probe `GET /v1/health`.
+
+### Binary
+
+Install as above, then:
+
+```bash
+export INTEGRATIONS_MASTER_KEY="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')"
 INTEGRATIONS_PUBLIC_URL=https://integrations.example.com ii serve --host 0.0.0.0
 ```
 
-The gateway writes its agent key to `~/.integrations/gateway.json` and its
-administrator key to `~/.integrations/operator-gateway.json` on the server.
-Point each client machine at it:
+### First sign-in
+
+The first account to sign up claims the gateway, in the dashboard at the public
+URL or from a client machine:
 
 ```bash
 export INTEGRATIONS_URL=https://integrations.example.com
-export INTEGRATIONS_API_KEY=...        # for i
-export INTEGRATIONS_ADMIN_API_KEY=...  # for ii
+ii signup you@example.com --tenant "Your Company"
+```
+
+Issue each agent a key with `ii client <name>` and `ii key <client-id>`, then on
+its machine:
+
+```bash
+export INTEGRATIONS_URL=https://integrations.example.com
+export INTEGRATIONS_API_KEY=...
 ```
 
 Anything other than loopback exposes the gateway, and with it every credential

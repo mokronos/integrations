@@ -1,0 +1,11 @@
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+**/.alchemy
+**/.wrangler
+**/tsconfig.tsbuildinfo
+.git
+.reference
+apps/local/web
+apps/platform-demo/data

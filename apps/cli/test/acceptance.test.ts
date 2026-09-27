@@ -1,9 +1,15 @@
+import { randomBytes } from "node:crypto"
 import path from "node:path"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Schema } from "effect"
 import { FetchHttpClient, HttpBody, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { serveGateway } from "@integragents/local"
-import { aliasForConnection, ConnectionName, IntegrationSlug } from "@integragents/gateway-core"
+import {
+  aliasForConnection,
+  ConnectionName,
+  createEncryption,
+  IntegrationSlug
+} from "@integragents/gateway-core"
 import { temporaryDirectory, testServices } from "./fixtures.ts"
 
 const services = Layer.merge(testServices, FetchHttpClient.layer)
@@ -212,6 +218,7 @@ const startRemoteGateway = Effect.fnUntraced(function*() {
       serveGateway({
         httpClient: FetchHttpClient.layer,
         home: serverHome,
+        encryption: createEncryption(randomBytes(32)),
         hostname: "0.0.0.0",
         port: 0,
         publicUrl: "https://gateway.example"

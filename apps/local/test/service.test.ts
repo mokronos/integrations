@@ -106,6 +106,19 @@ describe("gateway service", () => {
       }
     }).pipe(Effect.provide(services)))
 
+  it.live("beyond loopback, takes its master key only from the environment", () =>
+    Effect.gen(function*() {
+      const home = yield* temporaryDirectory("gateway-exposed-")
+      const fs = yield* FileSystem.FileSystem
+
+      const refused = yield* Effect.flip(Effect.tryPromise(() =>
+        serveGateway({ home, hostname: "0.0.0.0", port: 0, httpClient: FetchHttpClient.layer })
+      ))
+
+      expect(String(refused.cause)).toContain("INTEGRATIONS_MASTER_KEY is required")
+      expect(yield* Effect.orDie(fs.exists(`${home}/gateway.key`))).toBe(false)
+    }).pipe(Effect.provide(services)))
+
   it.live("the control plane's own page is authenticated, a page on another site is not", () =>
     Effect.gen(function*() {
       const running = yield* gateway

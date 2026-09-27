@@ -28,7 +28,9 @@ export const resolveEncryption = async (source: EncryptionSource): Promise<Encry
   }
 
   if (source.keyFile === undefined) {
-    throw new Error("A master key is required: set INTEGRATIONS_MASTER_KEY or name a key file")
+    throw new Error(
+      "INTEGRATIONS_MASTER_KEY is required. Generate one with: openssl rand -base64 32 | tr '+/' '-_' | tr -d '='"
+    )
   }
 
   if (existsSync(source.keyFile)) {

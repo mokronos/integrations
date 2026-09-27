@@ -1,0 +1,19 @@
+services:
+  integrations:
+    image: ghcr.io/mokronos/integrations:latest
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${INTEGRATIONS_PORT:-4788}:4788"
+    environment:
+      INTEGRATIONS_MASTER_KEY: ${INTEGRATIONS_MASTER_KEY:?set INTEGRATIONS_MASTER_KEY in docker/.env}
+      INTEGRATIONS_PUBLIC_URL: ${INTEGRATIONS_PUBLIC_URL:-http://localhost:4788}
+      INTEGRATIONS_GOOGLE_CLIENT_ID: ${INTEGRATIONS_GOOGLE_CLIENT_ID:-}
+      INTEGRATIONS_GOOGLE_CLIENT_SECRET: ${INTEGRATIONS_GOOGLE_CLIENT_SECRET:-}
+    volumes:
+      - integrations-data:/data
+
+volumes:
+  integrations-data:
