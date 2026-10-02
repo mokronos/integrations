@@ -43,8 +43,8 @@ export const publishablePackageDirectories = [
 ] as const
 
 /**
- * `nightly` is the prerelease train cut from `main` on a schedule, `stable` is
- * cut from a `vX.Y.Z` tag push.
+ * `nightly` is the cutting-edge prerelease train, cut on demand from `main`;
+ * `stable` is cut from a `vX.Y.Z` tag push.
  */
 export const ReleaseChannel = Schema.Literals(["stable", "nightly"])
 export type ReleaseChannel = typeof ReleaseChannel.Type
