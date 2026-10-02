@@ -249,7 +249,9 @@ const loginOperator = Effect.fnUntraced(function*(
   expect(`signup exit ${signedUp.exitCode}: ${signedUp.stderr}`).toBe("signup exit 0: ")
 })
 
-describe("integrations CLI acceptance", () => {
+// Every step spawns a fresh CLI process, and the longest test runs two dozen of them:
+// about 20s locally and right at the global 30s on CI runners.
+describe("integrations CLI acceptance", { timeout: 120_000 }, () => {
   it.live("local ii uses the operator key while i uses the agent key", () =>
     Effect.gen(function*() {
       const gateway = yield* startGateway()
