@@ -1,6 +1,6 @@
 import { Context, Effect, Option, Schema } from "effect"
-import { HttpServerResponse } from "effect/unstable/http"
-import { HttpApiSchema } from "effect/unstable/httpapi"
+import { HttpServerResponse } from "effect/http"
+import { HttpApiSchema } from "effect/http-api"
 import { RefusalReason, refusalReason } from "@integragents/contracts"
 import type { Client, ClientCapability, SubjectId, TenantId } from "@integragents/contracts"
 // By subpath: the API definition is imported by browser clients, and the

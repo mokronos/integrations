@@ -1,4 +1,5 @@
-import { Crypto, Effect, Encoding } from "effect"
+import { Crypto, Effect } from "effect"
+import { Base64Url, Hex } from "effect/encoding"
 import { utf8Bytes } from "@integragents/contracts"
 import {
   ApiKeyHash,
@@ -40,15 +41,15 @@ const uuid: Effect.Effect<string, never, Crypto.Crypto> = Effect.flatMap(
 export const sha256Hex = (text: string): Effect.Effect<string, never, Crypto.Crypto> =>
   Effect.flatMap(Crypto.Crypto, (crypto) =>
     Effect.orDie(crypto.digest("SHA-256", utf8Bytes(text)))
-  ).pipe(Effect.map(Encoding.encodeHex))
+  ).pipe(Effect.map(Hex.encode))
 
 export const sha256Base64Url = (text: string): Effect.Effect<string, never, Crypto.Crypto> =>
   Effect.flatMap(Crypto.Crypto, (crypto) =>
     Effect.orDie(crypto.digest("SHA-256", utf8Bytes(text)))
-  ).pipe(Effect.map(Encoding.encodeBase64Url))
+  ).pipe(Effect.map(Base64Url.encode))
 
 const prefixedSecret = (prefix: string): Effect.Effect<string, never, Crypto.Crypto> =>
-  Effect.map(randomBytes(secretBytes), (bytes) => `${prefix}${Encoding.encodeBase64Url(bytes)}`)
+  Effect.map(randomBytes(secretBytes), (bytes) => `${prefix}${Base64Url.encode(bytes)}`)
 
 export interface IssuedApiKey {
   readonly id: ApiKeyId

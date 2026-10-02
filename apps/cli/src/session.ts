@@ -1,8 +1,8 @@
 import { chmod, mkdir, rm } from "node:fs/promises"
 import path from "node:path"
 import { Config, DateTime, Duration, Effect, Option, Predicate, Schedule, Schema } from "effect"
-import { HttpBody, HttpClient, HttpClientRequest } from "effect/unstable/http"
-import type { HttpClientResponse, HttpMethod } from "effect/unstable/http"
+import { HttpBody, HttpClient, HttpClientRequest } from "effect/http"
+import type { HttpClientResponse, HttpMethod } from "effect/http"
 import {
   integrationsHome,
   makeGatewayClient,
@@ -13,7 +13,7 @@ import {
 import type { GatewayClient } from "@integragents/client"
 import { cliError, IntegrationsCliError } from "./connection.ts"
 import { openBrowser } from "./connection.ts"
-import type { ChildProcessSpawner } from "effect/unstable/process"
+import type { ChildProcessSpawner } from "effect/process"
 import { optionalText, whenPresentMap } from "@integragents/contracts"
 
 const OperatorSession = Schema.Struct({

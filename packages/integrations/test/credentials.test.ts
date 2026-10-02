@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { randomBytes } from "node:crypto"
 import { Effect, Layer, Option, Schema } from "effect"
-import { SqlClient } from "effect/unstable/sql"
+import { SqlClient } from "effect/sql"
 import {
   connectionCredentialKey,
   CredentialStore,

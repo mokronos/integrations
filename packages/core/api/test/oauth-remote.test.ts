@@ -1,7 +1,7 @@
 import { makeGatewayEvents } from "@integragents/gateway-core"
 import { describe, expect, it } from "@effect/vitest"
 import { Context, Effect, Option } from "effect"
-import { FetchHttpClient } from "effect/unstable/http"
+import { FetchHttpClient } from "effect/http"
 import { ConnectionName, IntegrationSlug, whenPresent } from "@integragents/contracts"
 import { catalogStoreFake, stubIntegrations, stubIntegrationsContext } from "./stubs.ts"
 import { gatewayStore, testServices } from "./fixtures.ts"

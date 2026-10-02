@@ -4,7 +4,7 @@ import {
   HttpApiEndpoint,
   HttpApiGroup,
   OpenApi
-} from "effect/unstable/httpapi"
+} from "effect/http-api"
 
 const EchoBody = Schema.Struct({ message: Schema.String })
 const EchoResult = Schema.Struct({

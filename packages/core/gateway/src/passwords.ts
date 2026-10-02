@@ -1,5 +1,6 @@
 import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto"
-import { Crypto, Effect, Encoding, Schema } from "effect"
+import { Crypto, Effect, Schema } from "effect"
+import { Base64 } from "effect/encoding"
 import { decodeBase64Field } from "@integragents/contracts"
 import { sessionSecret, sha256Hex } from "./keys.ts"
 import { SessionTokenHash } from "./domain.ts"
@@ -23,7 +24,7 @@ const scrypt = (password: string, salt: Uint8Array, keylen: number): Effect.Effe
     })
   })
 
-export const PasswordHash = Schema.String.check(Schema.isStartsWith("scrypt$"))
+export const PasswordHash = Schema.String.check(Schema.isStartingWith("scrypt$"))
 export type PasswordHash = typeof PasswordHash.Type
 
 const keyLength = 64
@@ -37,7 +38,7 @@ export const hashPassword = Effect.fn("Password.hash")(function*(
   })
   const derived = yield* scrypt(password, salt, keyLength)
   return PasswordHash.make(
-    `scrypt$${Encoding.encodeBase64(salt)}$${Encoding.encodeBase64(derived)}`
+    `scrypt$${Base64.encode(salt)}$${Base64.encode(derived)}`
   )
 })
 

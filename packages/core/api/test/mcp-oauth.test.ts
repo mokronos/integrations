@@ -1,7 +1,7 @@
 import { makeGatewayEvents } from "@integragents/gateway-core"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Schema } from "effect"
-import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http"
 import {
   createGatewayHandler,
   defaultTenantId,

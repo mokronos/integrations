@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:crypto"
-import { Encoding } from "effect"
+import { Base64 } from "effect/encoding"
 import { concatBytes, decodeBase64Field, utf8Text } from "@integragents/contracts"
 
 const envelopePrefix = "enc.v1$"
@@ -14,7 +14,7 @@ const sealWith = (masterKey: Uint8Array) => (text: string): string => {
   const iv = randomBytes(12)
   const cipher = createCipheriv("aes-256-gcm", masterKey, iv)
   const ciphertext = concatBytes([cipher.update(text, "utf8"), cipher.final()])
-  return `${envelopePrefix}${Encoding.encodeBase64(iv)}$${Encoding.encodeBase64(cipher.getAuthTag())}$${Encoding.encodeBase64(ciphertext)}`
+  return `${envelopePrefix}${Base64.encode(iv)}$${Base64.encode(cipher.getAuthTag())}$${Base64.encode(ciphertext)}`
 }
 
 const openWith = (masterKey: Uint8Array) => (text: string): string => {

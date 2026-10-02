@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Layer, Schema } from "effect"
-import { FetchHttpClient, HttpClient } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient } from "effect/http"
 import { GatewayMetadata } from "@integragents/contracts"
 import { gatewayVersion } from "@integragents/gateway-api"
 import {

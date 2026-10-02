@@ -1,6 +1,6 @@
 import { Cause, Context, Effect, Layer, Option, Schema } from "effect"
-import { SqlClient } from "effect/unstable/sql"
-import type { SqlError } from "effect/unstable/sql"
+import { SqlClient } from "effect/sql"
+import type { SqlError } from "effect/sql"
 import { StorageError } from "../errors.ts"
 import type { Encryption } from "./encryption.ts"
 

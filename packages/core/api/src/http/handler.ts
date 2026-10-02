@@ -9,9 +9,9 @@ import {
   HttpRouter,
   HttpServerRequest,
   HttpServerResponse
-} from "effect/unstable/http"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
-import { HttpApiSchemaError } from "effect/unstable/httpapi/HttpApiError"
+} from "effect/http"
+import { HttpApiBuilder } from "effect/http-api"
+import { HttpApiSchemaError } from "effect/http-api/HttpApiError"
 import { GatewayApi } from "./api.ts"
 import {
   Authority,

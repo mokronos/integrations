@@ -1,6 +1,6 @@
 import type { Effect } from "effect"
-import type { SqlError } from "effect/unstable/sql"
-import type { SqlClient } from "effect/unstable/sql"
+import type { SqlError } from "effect/sql"
+import type { SqlClient } from "effect/sql"
 import { applyMigrations } from "@integragents/host"
 import type { Migration, MigrationSet } from "@integragents/host"
 import { gatewayMigrations } from "./store-migrations.gen.ts"

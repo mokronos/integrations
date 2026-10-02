@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto"
 import * as Cloudflare from "alchemy/Cloudflare"
 import { RuntimeContext } from "alchemy"
-import { Effect, Encoding, Layer, Stream } from "effect"
+import { Effect, Layer, Stream } from "effect"
+import { Hex } from "effect/encoding"
 import { BlobId } from "@integragents/contracts"
 import { BlobStore, StorageError } from "@integragents/host"
 
@@ -41,7 +42,7 @@ const r2BlobStore = (bucket: Cloudflare.R2.ReadWriteBucketClient): BlobStore["Se
   return {
     write: (descriptor, content) =>
       Effect.gen(function*() {
-        const id = BlobId.make(Encoding.encodeHex(crypto.getRandomValues(new Uint8Array(16))))
+        const id = BlobId.make(Hex.encode(crypto.getRandomValues(new Uint8Array(16))))
         const metadata = {
           httpMetadata: { contentType: descriptor.contentType },
           customMetadata: descriptor.filename === undefined ? {} : { filename: descriptor.filename }

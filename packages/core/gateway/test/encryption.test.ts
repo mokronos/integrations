@@ -3,7 +3,8 @@ import { readFileSync, statSync } from "node:fs"
 import path from "node:path"
 import { randomBytes } from "node:crypto"
 import { createClient as openRawDatabase } from "@libsql/client"
-import { Clock, Effect, Encoding, Schema } from "effect"
+import { Clock, Effect, Schema } from "effect"
+import { Base64, Base64Url } from "effect/encoding"
 import { decodeBase64Field, decodeBase64UrlField } from "@integragents/contracts"
 import {
   Alias,
@@ -63,7 +64,7 @@ describe("payload sealing", () => {
     const bytes = decodeBase64Field("ciphertext", data)
     const lastIndex = bytes.length - 1
     bytes[lastIndex] = (bytes[lastIndex] ?? 0) ^ 0xff
-    const tampered = `enc.v1$${ivText}$${tagText}$${Encoding.encodeBase64(bytes)}`
+    const tampered = `enc.v1$${ivText}$${tagText}$${Base64.encode(bytes)}`
 
     expect(() => encryption.open(tampered)).toThrow()
   })
@@ -83,7 +84,7 @@ describe("payload sealing", () => {
 describe("master key resolution", () => {
   it.effect("uses an environment key of exactly 32 bytes", () =>
     Effect.gen(function*() {
-      const key = Encoding.encodeBase64Url(randomBytes(32))
+      const key = Base64Url.encode(randomBytes(32))
       const encryption = yield* resolve({ envValue: key })
       expect(encryption.open(encryption.seal("round trip"))).toBe("round trip")
     }))
@@ -123,7 +124,7 @@ describe("master key resolution", () => {
       const directory = yield* temporaryDirectory("gateway-crypto-")
       const keyFile = path.join(directory, "gateway.key")
       yield* resolve({ keyFile })
-      const environmentKey = Encoding.encodeBase64Url(randomBytes(32))
+      const environmentKey = Base64Url.encode(randomBytes(32))
 
       const encryption = yield* resolve({ envValue: environmentKey, keyFile })
       const sealed = encryption.seal("decides")

@@ -3,7 +3,7 @@ import type { AuthMethod, Connection } from "@integragents/contracts"
 import { ConnectionName, IntegrationSlug } from "@integragents/contracts"
 import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Option, Result } from "effect"
 import { TestClock } from "effect/testing"
-import { FetchHttpClient, HttpClient } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient } from "effect/http"
 import {
   AuthTemplateSlug,
   CatalogStore,

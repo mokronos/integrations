@@ -1,6 +1,6 @@
 import { Context, Crypto, Duration, Effect, Layer, Option } from "effect"
-import { RateLimiter } from "effect/unstable/persistence"
-import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
+import { RateLimiter } from "effect/persistence"
+import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { Authority } from "./middleware.ts"
 import { authenticateClient, authorizeClientCapability, GatewayStoreService } from "@integragents/gateway-core"
 import { SessionTokenHash } from "@integragents/gateway-core"

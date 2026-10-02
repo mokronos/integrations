@@ -1,6 +1,6 @@
 import { Clock, Effect, Schema } from "effect"
-import type { SqlError } from "effect/unstable/sql"
-import type { SqlClient } from "effect/unstable/sql"
+import type { SqlError } from "effect/sql"
+import type { SqlClient } from "effect/sql"
 
 export interface Migration {
   /** Journal index. Stamped in the ledger, so it never shifts. */

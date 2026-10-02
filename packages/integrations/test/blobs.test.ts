@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Option, Schema, Stream } from "effect"
-import { FetchHttpClient } from "effect/unstable/http"
+import { FetchHttpClient } from "effect/http"
 import { BlobHandle, blobHandleKey } from "@integragents/contracts"
 import { OpenApiInvoker } from "../src/openapi/invoke.ts"
 import { temporarySqlLayer } from "../src/runtime.ts"

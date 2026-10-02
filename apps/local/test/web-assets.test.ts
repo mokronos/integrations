@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import path from "node:path"
 import { Effect, FileSystem, Result } from "effect"
-import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
+import { HttpServerRequest, HttpServerResponse } from "effect/http"
 import { createWebAssets } from "../index.ts"
 import type { WebAssets } from "../index.ts"
 import { temporaryDirectory, testServices } from "./fixtures.ts"

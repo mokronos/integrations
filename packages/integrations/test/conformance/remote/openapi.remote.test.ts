@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
-import { FetchHttpClient, HttpClient } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient } from "effect/http"
 import { compileSpec } from "../../../src/openapi/compile.ts"
 
 const enabled = process.env["RUN_REMOTE_INTEGRATION_TESTS"] === "1"

@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto"
 import path from "node:path"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Schema } from "effect"
-import { FetchHttpClient, HttpBody, HttpClient, HttpClientRequest } from "effect/unstable/http"
+import { FetchHttpClient, HttpBody, HttpClient, HttpClientRequest } from "effect/http"
 import { serveGateway } from "@integragents/local"
 import {
   aliasForConnection,

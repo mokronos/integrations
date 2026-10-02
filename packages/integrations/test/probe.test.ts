@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Option, Schema, Scope } from "effect"
-import { FetchHttpClient } from "effect/unstable/http"
+import { FetchHttpClient } from "effect/http"
 import { McpClient } from "../src/mcp/client.ts"
 
 const JsonRpcRequest = Schema.Struct({

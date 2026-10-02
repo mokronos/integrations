@@ -1,11 +1,11 @@
-import { FetchHttpClient } from "effect/unstable/http"
+import { FetchHttpClient } from "effect/http"
 import {
   OtlpExporter,
   OtlpLogger,
   OtlpMetrics,
   OtlpSerialization,
   OtlpTracer
-} from "effect/unstable/observability"
+} from "effect/observability"
 import { Config, Context, Effect, FileSystem, Layer, Logger, Option, References, Tracer } from "effect"
 import type { Scope } from "effect"
 import { recordingTracer, TraceFile } from "./trace-file.ts"

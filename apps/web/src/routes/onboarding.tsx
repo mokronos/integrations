@@ -2,7 +2,7 @@ import { useState } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router"
 import { ArrowLeft, ArrowRight, Check, CheckCircle2, KeyRound, Plug, ShieldCheck } from "lucide-react"
 import { Effect, Option, Schema } from "effect"
-import { FetchHttpClient } from "effect/unstable/http"
+import { FetchHttpClient } from "effect/http"
 import { ConnectionName, IntegrationSlug, ToolName } from "@integragents/contracts"
 import { makeGatewayClient } from "@integragents/client/client"
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { BunHttpClient } from "@effect/platform-bun"
 import { Effect, Layer } from "effect"
-import { Command } from "effect/unstable/cli"
+import { Command } from "effect/cli"
 import { cliLayer, commandSpan } from "./telemetry.ts"
 import { clientSubcommands } from "./commands.ts"
 import packageMetadata from "../package.json" with { type: "json" }

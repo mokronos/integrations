@@ -1,7 +1,7 @@
 import { makeGatewayEvents } from "@integragents/gateway-core"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Schema, Tracer } from "effect"
-import { FetchHttpClient } from "effect/unstable/http"
+import { FetchHttpClient } from "effect/http"
 import { whenPresent, whenPresentMap } from "@integragents/contracts"
 import { McpError, SpecError } from "@integragents/host"
 import { recordingTracer } from "@integragents/observability"

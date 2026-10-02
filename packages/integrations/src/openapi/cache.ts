@@ -1,5 +1,5 @@
 import { Cache, Context, Effect, Layer, Option } from "effect"
-import { HttpClient, HttpClientResponse } from "effect/unstable/http"
+import { HttpClient, HttpClientResponse } from "effect/http"
 import { CatalogStore } from "../catalog/store.ts"
 import type { IntegrationRecord } from "../catalog/store.ts"
 import { describeCause, SpecError } from "../errors.ts"

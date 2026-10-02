@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import path from "node:path"
 import { Effect, Layer, Schedule } from "effect"
-import { FetchHttpClient, HttpClient } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient } from "effect/http"
 import { temporaryDirectory, testServices } from "./fixtures.ts"
 
 const repoRoot = path.resolve(import.meta.dirname, "../../..")

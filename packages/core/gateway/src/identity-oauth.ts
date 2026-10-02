@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import { HttpBody, HttpClient, HttpClientResponse } from "effect/unstable/http"
+import { HttpBody, HttpClient, HttpClientResponse } from "effect/http"
 
 const GoogleTokenResponse = Schema.Struct({
   access_token: Schema.String
