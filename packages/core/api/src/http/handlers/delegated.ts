@@ -4,7 +4,7 @@ import {
 } from "@integragents/contracts"
 import { BlobStore, Integrations } from "@integragents/host"
 import { Effect, Stream } from "effect"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { HttpApiBuilder } from "effect/http-api"
 import {
   ApprovalId,
   BlobId,

@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 import { BunHttpClient } from "@effect/platform-bun"
 import { Data, Effect, Layer } from "effect"
-import { Command, Flag } from "effect/unstable/cli"
-import { HttpClient } from "effect/unstable/http"
+import { Command, Flag } from "effect/cli"
+import { HttpClient } from "effect/http"
 import { defaultGatewayPort } from "@integragents/client"
 import { cliLayer, commandSpan } from "./telemetry.ts"
 import { controlPlaneSubcommands, operatorClientSubcommands } from "./commands.ts"

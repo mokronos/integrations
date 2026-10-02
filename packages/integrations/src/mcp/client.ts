@@ -6,8 +6,8 @@ import {
   extractWWWAuthenticateParams
 } from "@modelcontextprotocol/client"
 import { Context, Effect, Layer, Option, Schema } from "effect"
-import { HttpBody, HttpClient, HttpClientResponse } from "effect/unstable/http"
-import type { Headers } from "effect/unstable/http"
+import { HttpBody, HttpClient, HttpClientResponse } from "effect/http"
+import type { Headers } from "effect/http"
 import { describeCause, McpError } from "../errors.ts"
 import { serviceName, slugify } from "@integragents/contracts"
 import { whenPresent } from "@integragents/contracts"

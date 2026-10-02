@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Option } from "effect"
-import { FetchHttpClient } from "effect/unstable/http"
+import { FetchHttpClient } from "effect/http"
 import { ConnectionName, IntegrationSlug } from "@integragents/contracts"
 import { captureOpenApiTools } from "../../../src/catalog/capture.ts"
 import { compileSpec } from "../../../src/openapi/compile.ts"

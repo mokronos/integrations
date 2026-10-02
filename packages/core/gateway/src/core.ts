@@ -1,6 +1,6 @@
 import { Context, Effect, Layer } from "effect"
-import type { HttpClient } from "effect/unstable/http"
-import { SqlClient } from "effect/unstable/sql"
+import type { HttpClient } from "effect/http"
+import { SqlClient } from "effect/sql"
 import { whenPresent } from "@integragents/contracts"
 import { BlobStore, integrationLayer, Integrations } from "@integragents/host"
 import type { IntegrationServices, StorageError } from "@integragents/host"

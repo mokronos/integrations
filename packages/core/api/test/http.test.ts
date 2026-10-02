@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Clock, Effect, Fiber, Option, Schema } from "effect"
-import { FetchHttpClient } from "effect/unstable/http"
+import { FetchHttpClient } from "effect/http"
 import { delegationTemplateOf, ToolAddress, whenPresent } from "@integragents/contracts"
 import { makeGatewayEvents, publishingStore } from "@integragents/gateway-core"
 import type { OAuthSessions } from "@integragents/gateway-core"

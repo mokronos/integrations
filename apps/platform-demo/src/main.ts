@@ -6,8 +6,8 @@ import { migrate } from "drizzle-orm/libsql/migrator"
 import { BunHttpClient } from "@effect/platform-bun"
 import { LibsqlClient } from "@effect/sql-libsql"
 import { Context, Effect, Layer, ManagedRuntime, Predicate, Schema } from "effect"
-import { Reactivity } from "effect/unstable/reactivity"
-import { SqlClient } from "effect/unstable/sql"
+import { Reactivity } from "effect/reactivity"
+import { SqlClient } from "effect/sql"
 import { webCryptoLayer, whenPresent } from "@integragents/contracts"
 import {
   Alias,

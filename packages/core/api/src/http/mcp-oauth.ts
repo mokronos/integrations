@@ -12,7 +12,7 @@ import {
 } from "@integragents/gateway-core"
 import type { GatewayStore, OAuthActor } from "@integragents/gateway-core"
 import { Crypto, DateTime, Duration, Effect, Exit, Layer, ManagedRuntime, Schema } from "effect"
-import { HttpClient, HttpClientResponse } from "effect/unstable/http"
+import { HttpClient, HttpClientResponse } from "effect/http"
 import type { GatewaySettings } from "./services.ts"
 
 const ClientMetadata = Schema.Struct({

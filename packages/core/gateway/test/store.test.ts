@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { TestClock } from "effect/testing"
 import { Clock, Effect, Layer, Schema } from "effect"
-import { FetchHttpClient } from "effect/unstable/http"
+import { FetchHttpClient } from "effect/http"
 import path from "node:path"
 import { AuditRecord, PendingApproval, PositiveInt } from "@integragents/contracts"
 import {

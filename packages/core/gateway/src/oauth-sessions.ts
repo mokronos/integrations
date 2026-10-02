@@ -1,7 +1,7 @@
 import { AuthMethod, OAuthSessionState, SubjectId, TenantId, userOwner, whenPresent } from "@integragents/contracts"
 
 import { Clock, Context, Deferred, Effect, Exit, Schema, Scope } from "effect"
-import type { SqlClient } from "effect/unstable/sql"
+import type { SqlClient } from "effect/sql"
 import { webCrypto } from "@integragents/contracts"
 import { completeOAuthFlow } from "@integragents/host"
 import { OAuthFlowError, startRemoteAuthorization } from "./oauth.ts"

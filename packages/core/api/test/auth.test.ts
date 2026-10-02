@@ -1,7 +1,7 @@
 import { makeGatewayEvents } from "@integragents/gateway-core"
 import { describe, expect, it } from "@effect/vitest"
 import { Context, Effect, Layer, Option, Schema } from "effect"
-import { FetchHttpClient } from "effect/unstable/http"
+import { FetchHttpClient } from "effect/http"
 import { whenPresent } from "@integragents/contracts"
 import {
   ConnectionName,

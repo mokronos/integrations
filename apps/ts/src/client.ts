@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect"
-import { HttpClient, HttpClientRequest } from "effect/unstable/http"
-import { HttpApiClient } from "effect/unstable/httpapi"
+import { HttpClient, HttpClientRequest } from "effect/http"
+import { HttpApiClient } from "effect/http-api"
 // The definition alone: importing the package index would pull the server
 // — handlers, store, MCP — into every consumer of this client.
 import { GatewayApi } from "@integragents/gateway-api/definition"

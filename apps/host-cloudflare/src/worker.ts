@@ -6,8 +6,9 @@ import { Random } from "alchemy"
 import { Stage } from "alchemy/Stage"
 import { whenPresent } from "@integragents/contracts"
 import { gatewayRoutes } from "@integragents/gateway-api"
-import { Array as Arr, Config, Effect, Encoding, Option, Redacted, Result } from "effect"
-import { HttpServerRequest } from "effect/unstable/http"
+import { Array as Arr, Config, Effect, Option, Redacted, Result } from "effect"
+import { Base64Url, Hex } from "effect/encoding"
+import { HttpServerRequest } from "effect/http"
 import { Gateway } from "./gateway.ts"
 
 const dashboard = Effect.suspend(() =>
@@ -23,7 +24,7 @@ const dashboard = Effect.suspend(() =>
 const masterKey = Random("MasterKey", { bytes: 32 }).pipe(
   Effect.map((random) =>
     random.text.pipe(Output.map((hex) =>
-      Redacted.make(Encoding.encodeBase64Url(Result.getOrThrow(Encoding.decodeHex(Redacted.value(hex)))))
+      Redacted.make(Base64Url.encode(Result.getOrThrow(Hex.decode(Redacted.value(hex)))))
     ))
   )
 )

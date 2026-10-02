@@ -1,7 +1,7 @@
 import { connectionOwner, connectionRefOf, isDelegationTemplate, matchesPattern, whenPresent } from "@integragents/contracts"
 import type { InvocationOutcome } from "@integragents/contracts"
 import { Crypto, DateTime, Duration, Effect, Option, Schema } from "effect"
-import type { HttpClient } from "effect/unstable/http"
+import type { HttpClient } from "effect/http"
 import type { Integrations } from "@integragents/host"
 import { ToolAddress } from "@integragents/contracts"
 import type { OAuthSessions } from "./oauth-sessions.ts"

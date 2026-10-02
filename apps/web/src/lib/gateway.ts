@@ -1,6 +1,6 @@
 import { Duration, Effect, Fiber, Predicate, Schedule, Schema, Stream } from "effect"
-import { FetchHttpClient, HttpClientError } from "effect/unstable/http"
-import { HttpApiClient } from "effect/unstable/httpapi"
+import { FetchHttpClient, HttpClientError } from "effect/http"
+import { HttpApiClient } from "effect/http-api"
 import { GatewayApi, GatewayFailure } from "@integragents/gateway-api/definition"
 import {
   Alias,

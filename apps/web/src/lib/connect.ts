@@ -11,7 +11,7 @@ export const tsClientInstallCommand = "bun add @integragents/client"
 
 export const tsClientExample = (gatewayUrl: string, apiKey: string): string =>
   `import { Effect } from "effect"
-import { FetchHttpClient } from "effect/unstable/http"
+import { FetchHttpClient } from "effect/http"
 import { makeGatewayClient } from "@integragents/client/client"
 
 const program = Effect.gen(function*() {

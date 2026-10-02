@@ -1,5 +1,5 @@
 import { Context, Effect } from "effect"
-import { HttpTraceContext } from "effect/unstable/http"
+import { HttpTraceContext } from "effect/http"
 
 /**
  * A `fetch` for libraries that insist on one: each request gets a client span

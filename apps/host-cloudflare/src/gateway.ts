@@ -9,7 +9,7 @@ import {
   runMaintenance
 } from "@integragents/gateway-core"
 import { Effect, Layer, Schema } from "effect"
-import { FetchHttpClient, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
+import { FetchHttpClient, HttpServerRequest, HttpServerResponse } from "effect/http"
 
 /** Blobs share the object's SQLite storage; `r2Blobs` from ./r2-blobs.ts replaces this once R2 is enabled. */
 const blobs = Effect.succeed(BlobStore.sqlLayer)

@@ -1,5 +1,5 @@
 import { Effect, Predicate, Schema } from "effect"
-import { FetchHttpClient, HttpBody, HttpClient, HttpClientRequest } from "effect/unstable/http"
+import { FetchHttpClient, HttpBody, HttpClient, HttpClientRequest } from "effect/http"
 import {
   gatewayProtocolVersion,
   makeGatewayClient,

@@ -1,5 +1,5 @@
 import { Option, Schema } from "effect"
-import type { HttpMethod } from "effect/unstable/http"
+import type { HttpMethod } from "effect/http"
 import { blobHandleKey, BlobRef, isJsonObject, isJsonString, type BlobId, type Json } from "@integragents/contracts"
 import type { CallParameter, HttpCall, HttpMethod as CallMethod } from "../tool.ts"
 

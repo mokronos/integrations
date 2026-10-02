@@ -1,6 +1,6 @@
 import { Effect, Option, Redacted, Schema } from "effect"
-import type { HttpClient } from "effect/unstable/http"
-import { Argument, Command, Flag, Prompt } from "effect/unstable/cli"
+import type { HttpClient } from "effect/http"
+import { Argument, Command, Flag, Prompt } from "effect/cli"
 import { whenPresent } from "@integragents/contracts"
 import { cliError, describeError, IntegrationsCliError } from "./connection.ts"
 import { jsonOutput, writeStdoutLine } from "./output.ts"

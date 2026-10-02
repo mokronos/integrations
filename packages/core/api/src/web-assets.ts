@@ -10,7 +10,7 @@ import {
   HttpServerRequest,
   HttpServerResponse,
   HttpStaticServer
-} from "effect/unstable/http"
+} from "effect/http"
 
 const webAssetsDirectory = (): string =>
   path.resolve(import.meta.dirname ?? process.cwd(), "../../../../apps/web/dist")

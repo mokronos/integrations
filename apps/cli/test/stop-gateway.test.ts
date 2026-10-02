@@ -4,7 +4,7 @@ import { gatewayConfigPath } from "@integragents/client"
 import { whenPresent } from "@integragents/contracts"
 import { Effect, FileSystem, Layer } from "effect"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { FetchHttpClient, HttpClient } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient } from "effect/http"
 import { stopGateway } from "../src/service.ts"
 import { temporaryDirectory, testServices } from "./fixtures.ts"
 

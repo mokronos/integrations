@@ -1,6 +1,6 @@
 import { buildRequest } from "./request.ts"
 import { Context, Effect, Layer, Option, Stream } from "effect"
-import { HttpClient, HttpClientRequest } from "effect/unstable/http"
+import { HttpClient, HttpClientRequest } from "effect/http"
 import { describeCause, InvocationError, SpecError, StorageError } from "../errors.ts"
 import type { HttpCall } from "../tool.ts"
 import { missingArguments, splitArguments } from "./arguments.ts"

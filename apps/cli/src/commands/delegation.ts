@@ -1,6 +1,6 @@
-import type { HttpClient } from "effect/unstable/http"
+import type { HttpClient } from "effect/http"
 import { Effect, Option, Schema } from "effect"
-import { Argument, Command, Flag } from "effect/unstable/cli"
+import { Argument, Command, Flag } from "effect/cli"
 import type { IntegrationsCliError } from "../connection.ts"
 import { cliError, describeError } from "../connection.ts"
 import type { Page, Window } from "../output.ts"

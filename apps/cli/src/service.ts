@@ -3,8 +3,8 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { homedir, userInfo } from "node:os"
 import path from "node:path"
 import { Data, Duration, Effect, Result, Schedule } from "effect"
-import { HttpClient } from "effect/unstable/http"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { HttpClient } from "effect/http"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { defaultGatewayPort, integrationsHome, readGatewayConfig } from "@integragents/client"
 
 export class ServiceError extends Data.TaggedError("ServiceError")<{

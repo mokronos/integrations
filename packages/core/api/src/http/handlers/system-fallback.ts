@@ -3,8 +3,8 @@ import {
   gatewayProtocolVersion
 } from "@integragents/contracts"
 import { Effect, Result } from "effect"
-import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/http"
+import { HttpApiBuilder } from "effect/http-api"
 import { gatewayVersion } from "../../version.ts"
 import type { WebAssets } from "../../web-assets.ts"
 import {

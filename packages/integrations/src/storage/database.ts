@@ -1,6 +1,6 @@
 import { Context, Effect, Layer, Predicate, Schema } from "effect"
-import { SqlClient } from "effect/unstable/sql"
-import type { SqlError } from "effect/unstable/sql"
+import { SqlClient } from "effect/sql"
+import type { SqlError } from "effect/sql"
 import { StorageError } from "../errors.ts"
 
 export const SqlValue = Schema.Union([Schema.String, Schema.Number, Schema.Null])
