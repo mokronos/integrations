@@ -205,6 +205,8 @@ export class Integrations extends Context.Service<
       readonly integration: IntegrationSlug
       readonly name: ConnectionName
     }) => Effect.Effect<ReadonlyArray<Tool>, IntegrationFailure>
+    /** Rebuilds every OpenAPI connection's stored tools from its specification with the current compiler. */
+    readonly recompileOpenApiTools: () => Effect.Effect<void, StorageError>
 
     readonly toolSummaries: (
       filter?: ToolFilter
@@ -394,6 +396,31 @@ export class Integrations extends Context.Service<
           return captured
         }
       )
+
+      const recompileOpenApiTools = Effect.fn("Integrations.recompileOpenApiTools")(function* () {
+        const integrations = (yield* store.listIntegrations()).filter((integration) => integration.kind === "openapi")
+        yield* Effect.forEach(integrations, (integration) =>
+          Effect.gen(function* () {
+            const spec = yield* specs.load(integration)
+            const connections = yield* store.listConnections({ integration: integration.slug })
+            const capturedAt = yield* Clock.currentTimeMillis
+            yield* Effect.forEach(connections, (connection) =>
+              Effect.flatMap(
+                captureOpenApiTools(
+                  { owner: connection.owner, integration: integration.slug, connection: connection.name },
+                  spec,
+                  capturedAt
+                ),
+                (captured) => store.replaceTools(
+                  { owner: connection.owner, integration: integration.slug, name: connection.name },
+                  captured
+                )
+              ), { discard: true })
+          }).pipe(
+            Effect.catchTag("SpecError", (failure) =>
+              Effect.logWarning(`Kept the stored tools for ${integration.slug}: ${failure.message}`))
+          ), { discard: true })
+      })
 
       const listTools = Effect.fn("Integrations.listTools")(
         function* (filter: ToolFilter = {}) {
@@ -671,6 +698,7 @@ export class Integrations extends Context.Service<
         ),
         removeConnection,
         refreshConnection,
+        recompileOpenApiTools,
         toolSummaries,
         listTools,
         describeTool,

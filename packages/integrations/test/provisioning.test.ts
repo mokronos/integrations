@@ -68,6 +68,7 @@ const integrationsWith = (options: {
     listConnections: () => Effect.succeed([]),
     removeConnection: dies("removeConnection"),
     refreshConnection: dies("refreshConnection"),
+    recompileOpenApiTools: dies("recompileOpenApiTools"),
     toolSummaries: () => Effect.succeed([]),
     listTools: () => Effect.succeed([]),
     describeTool: dies("describeTool"),

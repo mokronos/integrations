@@ -151,12 +151,14 @@ export interface BuildRequestOptions {
 
 export const buildRequest = (options: BuildRequestOptions): BuiltRequest => {
   const call = options.call
-  const declared = new Map(call.parameters.map((parameter) => [parameter.name, parameter]))
+  const declared = new Map(call.parameters.map((parameter) => [parameter.argument, parameter]))
   const base = options.server.replace(/\/+$/, "")
 
   const path = call.path.replace(/\{([^{}]+)\}/g, (whole, name: string) => {
-    const parameter = declared.get(name)
-    const value = options.parameters[name]
+    const parameter = call.parameters.find((candidate) =>
+      candidate.location === "path" && candidate.name === name
+    )
+    const value = parameter === undefined ? undefined : options.parameters[parameter.argument]
     if (parameter === undefined || value === undefined) return whole
     return pathSegment(parameter, value)
   })
@@ -164,8 +166,8 @@ export const buildRequest = (options: BuildRequestOptions): BuiltRequest => {
   const query = new URLSearchParams()
   const headers: Record<string, string> = {}
 
-  for (const [name, value] of Object.entries(options.parameters)) {
-    const parameter = declared.get(name)
+  for (const [argument, value] of Object.entries(options.parameters)) {
+    const parameter = declared.get(argument)
     if (parameter === undefined || value === undefined) continue
     switch (parameter.location) {
       case "path":
@@ -176,12 +178,12 @@ export const buildRequest = (options: BuildRequestOptions): BuiltRequest => {
         }
         break
       case "header":
-        headers[name] = Array.isArray(value)
+        headers[parameter.name] = Array.isArray(value)
           ? value.map(scalar).join(",")
           : scalar(value)
         break
       case "cookie":
-        headers["cookie"] = [headers["cookie"], `${name}=${scalar(value)}`]
+        headers["cookie"] = [headers["cookie"], `${parameter.name}=${scalar(value)}`]
           .filter((entry) => entry !== undefined && entry.length > 0)
           .join("; ")
         break

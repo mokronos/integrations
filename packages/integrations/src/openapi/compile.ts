@@ -3,9 +3,12 @@ import type { Operation } from "oas/operation"
 import OASNormalize from "oas-normalize"
 import { Effect, Option, Schema } from "effect"
 import { describeCause, SpecError } from "../errors.ts"
-import { HttpMethod, ParameterLocation, whenPresent } from "@integragents/contracts"
+import { HttpMethod } from "@integragents/contracts"
 import type { HttpMethod as HttpMethodType, ParameterLocation as ParameterLocationType } from "@integragents/contracts"
 import { OpenApiPreview } from "@integragents/contracts"
+import type { CallParameter } from "../tool.ts"
+import { adaptInputs, type AdaptationContext } from "./adaptations/index.ts"
+import { assembleInputs, inputSchemaOf, WireLocation, type OperationInput, type WireParameter } from "./operation-inputs.ts"
 import {
   asJson,
   isJsonBoolean,
@@ -13,17 +16,8 @@ import {
   isJsonString,
   objectEntries,
   property,
-  stringEntries,
   type Json
 } from "@integragents/contracts"
-
-export interface CompiledParameter {
-  readonly name: string
-  readonly location: ParameterLocationType
-  readonly style: string
-  readonly explode: boolean
-  readonly required: boolean
-}
 
 export interface CompiledOperation {
   readonly name: string
@@ -39,7 +33,7 @@ export interface CompiledOperation {
   readonly schemaDefinitions: Record<string, Json>
   readonly locations: Record<string, ParameterLocationType>
   readonly bodyProperty: Option.Option<string>
-  readonly parameters: ReadonlyArray<CompiledParameter>
+  readonly parameters: ReadonlyArray<CallParameter>
   readonly contentType: Option.Option<string>
   /**
    * Set when the document gives this operation a base of its own, which
@@ -100,9 +94,6 @@ const normalizeSchema = (value: Json): Json => {
 
 const propertiesOf = (schema: Json): Record<string, Json> =>
   objectEntries(property(schema, "properties"))
-
-const requiredOf = (schema: Json): ReadonlyArray<string> =>
-  stringEntries(property(schema, "required"))
 
 const definitionsOf = (schema: Json): Record<string, Json> =>
   objectEntries(property(property(schema, "components"), "schemas"))
@@ -174,15 +165,11 @@ const selfContained = (schema: Json, definitions: Record<string, Json>): Json =>
     : { ...schema, $defs: reachable }
 }
 
-const flattenParameters = (
-  operation: Operation
-) => {
+const operationInputs = (operation: Operation) => {
   const groups = operation.getParametersAsJSONSchema() ?? []
-  const properties: Record<string, Json> = {}
-  const required: Array<string> = []
-  const locations: Record<string, ParameterLocationType> = {}
+  const wire = compileParameters(operation)
+  const inputs: Array<OperationInput> = []
   const schemaDefinitions: Record<string, Json> = {}
-  let bodyProperty = Option.none<string>()
 
   for (const group of groups) {
     const rawSchema = asJson(group.schema)
@@ -192,37 +179,25 @@ const flattenParameters = (
     const schema = rewriteDefinitionRefs(normalizeSchema(withoutDefinitions(rawSchema)))
 
     if (group.type === "body" || group.type === "formData") {
-      const name = "body" in properties ? "requestBody" : "body"
-      properties[name] = schema
-      locations[name] = "body"
-      if (operation.hasRequiredRequestBody()) required.push(name)
-      bodyProperty = Option.some(name)
+      inputs.push({
+        kind: "body",
+        argument: "body",
+        schema,
+        required: operation.hasRequiredRequestBody()
+      })
       continue
     }
 
-    const location = Option.getOrElse(
-      Schema.decodeUnknownOption(ParameterLocation)(group.type),
-      (): ParameterLocationType => "query"
-    )
     for (const [name, value] of Object.entries(propertiesOf(schema))) {
-      properties[name] = value
-      locations[name] = location
+      const parameter = wire.find((candidate) =>
+        candidate.name === name && candidate.location === group.type
+      )
+      if (parameter === undefined) continue
+      inputs.push({ kind: "parameter", argument: name, parameter, schema: value })
     }
-    required.push(...requiredOf(schema))
   }
 
-  const flatSchema: Json = {
-    type: "object",
-    properties,
-    ...whenPresent("required", required.length === 0 ? undefined : [...new Set(required)]),
-    additionalProperties: false
-  }
-  return {
-    inputSchema: selfContained(flatSchema, schemaDefinitions),
-    locations,
-    schemaDefinitions,
-    bodyProperty
-  }
+  return { inputs, schemaDefinitions }
 }
 
 const successSchema = (operation: Operation): Option.Option<Json> => {
@@ -265,10 +240,10 @@ const defaultStyle = (location: ParameterLocationType): string =>
 
 const defaultExplode = (style: string): boolean => style === "form"
 
-const compileParameters = (operation: Operation): ReadonlyArray<CompiledParameter> =>
+const compileParameters = (operation: Operation): ReadonlyArray<WireParameter> =>
   operation.getParameters().flatMap((parameter) => {
     const location = Option.getOrUndefined(
-      Schema.decodeUnknownOption(ParameterLocation)(parameter.in)
+      Schema.decodeUnknownOption(WireLocation)(parameter.in)
     )
     if (location === undefined) return []
     const style = parameter.style ?? defaultStyle(location)
@@ -285,9 +260,14 @@ const compileOperation = (
   method: HttpMethodType,
   path: string,
   operation: Operation,
-  server: Option.Option<string>
+  server: Option.Option<string>,
+  context: AdaptationContext
 ): CompiledOperation => {
-  const flattened = flattenParameters(operation)
+  const { inputs, schemaDefinitions } = operationInputs(operation)
+  const assembled = assembleInputs(adaptInputs(inputs, {
+    ...context,
+    servers: [...Option.toArray(server), ...context.servers]
+  }))
   const operationId = operation.hasOperationId()
     ? operation.getOperationId()
     : derivedName(method, path)
@@ -300,12 +280,12 @@ const compileOperation = (
     tags: operation.getTags().map((tag) => tag.name),
     deprecated: operation.isDeprecated(),
     readOnly: safeMethods.has(method),
-    inputSchema: flattened.inputSchema,
+    inputSchema: selfContained(inputSchemaOf(assembled), schemaDefinitions),
     outputSchema: successSchema(operation),
-    schemaDefinitions: flattened.schemaDefinitions,
-    locations: flattened.locations,
-    bodyProperty: flattened.bodyProperty,
-    parameters: compileParameters(operation),
+    schemaDefinitions,
+    locations: assembled.locations,
+    bodyProperty: assembled.bodyProperty,
+    parameters: assembled.parameters,
     contentType: operation.hasRequestBody()
       ? Option.fromNullishOr(operation.getContentType())
       : Option.none(),
@@ -419,6 +399,11 @@ export const compileSpec = (
         const oas = Oas.init(isJsonObject(documentJson) ? { ...documentJson } : {})
         const definition = oas.getDefinition()
         const operations: Array<CompiledOperation> = []
+        const securitySchemes = compileSecuritySchemes(documentJson)
+        const context: AdaptationContext = {
+          servers: (definition.servers ?? []).map((server) => server.url),
+          securitySchemes
+        }
 
         const pathsJson = property(documentJson, "paths")
         for (const [path, methods] of Object.entries(oas.getPaths())) {
@@ -432,7 +417,8 @@ export const compileSpec = (
               method,
               path,
               operation,
-              Option.orElse(declaredServer(asJson(operation.schema)), () => pathServer)
+              Option.orElse(declaredServer(asJson(operation.schema)), () => pathServer),
+              context
             ))
           }
         }
@@ -450,7 +436,7 @@ export const compileSpec = (
               )
             )
           })),
-          securitySchemes: compileSecuritySchemes(documentJson),
+          securitySchemes,
           operations: operations.toSorted((left, right) => left.name.localeCompare(right.name)),
           document: documentJson
         }

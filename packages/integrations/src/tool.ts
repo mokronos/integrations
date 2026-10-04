@@ -13,6 +13,7 @@ export const McpCall = Schema.Struct({ kind: Schema.Literal("mcp"), tool: Schema
 export type McpCall = typeof McpCall.Type
 
 export const CallParameter = Schema.Struct({
+  argument: Schema.String,
   name: Schema.String,
   location: ParameterLocation,
   style: Schema.String,

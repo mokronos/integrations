@@ -664,3 +664,45 @@ describe("tools", () => {
       expect(Option.isNone(seen[0] ?? Option.none())).toBe(true)
     }))
 })
+
+describe("recompiling OpenAPI tools", () => {
+  const source = "https://items.example.com/openapi.json"
+  const items = IntegrationSlug.make("items")
+
+  it.effect("rebuilds stored tools that an older compile left behind", () =>
+    withIntegrations(Effect.gen(function* () {
+      const store = yield* CatalogStore
+      const host = yield* Integrations
+      yield* store.putSpecDocument(source, JSON.stringify({
+        openapi: "3.0.3",
+        info: { title: "Items", version: "1" },
+        servers: [{ url: "https://items.example.com" }],
+        paths: {
+          "/items": {
+            get: {
+              operationId: "listItems",
+              parameters: [{ name: "filter[status]", in: "query", schema: { type: "string" } }],
+              responses: { "200": { description: "ok" } }
+            }
+          }
+        }
+      }))
+      yield* host.addOpenApi({ spec: source, slug: items })
+      yield* host.createConnection({
+        owner: "org",
+        integration: items,
+        name: primary,
+        template: AuthTemplateSlug.make("none")
+      })
+      const current = yield* store.listTools({ integration: items })
+      yield* store.replaceTools(
+        { owner: "org", integration: items, name: primary },
+        current.map((tool) => ({ ...tool, inputSchema: { type: "object", properties: { "filter[status]": {} } } }))
+      )
+
+      yield* host.recompileOpenApiTools()
+
+      const rebuilt = yield* store.listTools({ integration: items })
+      expect(rebuilt.map((tool) => tool.inputSchema)).toEqual(current.map((tool) => tool.inputSchema))
+    })))
+})

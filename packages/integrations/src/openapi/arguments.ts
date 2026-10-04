@@ -56,5 +56,5 @@ export const missingArguments = (
   parameters: Readonly<Record<string, Json>>
 ): ReadonlyArray<string> =>
   call.parameters
-    .filter((parameter) => parameter.required && parameters[parameter.name] === undefined)
-    .map((parameter) => parameter.name)
+    .filter((parameter) => parameter.required && parameters[parameter.argument] === undefined)
+    .map((parameter) => parameter.argument)

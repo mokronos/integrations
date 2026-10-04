@@ -89,6 +89,7 @@ const reconcileOnStart: Layer.Layer<never, GatewayStoreError | StorageError, Gat
   Layer.effectDiscard(Effect.gen(function*() {
     const store = yield* GatewayStoreService
     const integrations = yield* Integrations
+    yield* integrations.recompileOpenApiTools()
     const tenants = yield* store.listTenants()
     yield* Effect.forEach(
       tenants,

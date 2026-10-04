@@ -15,6 +15,7 @@ export const stubIntegrations = (
   listConnections: () => Effect.succeed([]),
   removeConnection: dies("removeConnection"),
   refreshConnection: dies("refreshConnection"),
+  recompileOpenApiTools: () => Effect.void,
   toolSummaries: () => Effect.succeed([]),
   listTools: () => Effect.succeed([]),
   describeTool: (target) => Effect.fail(new ToolNotFoundError({ tool: String(target) })),
