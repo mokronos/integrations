@@ -1112,6 +1112,10 @@ describe("gateway approval settlement", () => {
       expect(decided.body["rule"]).toMatchObject({ pinned: [{ path: ["subject"], value: "Launch" }], free: [["to"]] })
 
       expect((yield* send({ to: "g@h.i", subject: "Launch" })).body["status"]).toBe("succeeded")
+      const runs = Schema.decodeUnknownSync(Schema.Struct({
+        records: Schema.Array(Schema.Struct({ outcome: Schema.String, approval: Schema.NullOr(Schema.String) }))
+      }))((yield* call("GET", `/v1/audit?profileId=${profile.id}&outcome=succeeded`, { local: true })).body)
+      expect(runs.records.map((record) => record.approval)).toEqual(["saved_approval", "approved_always", "approved_always"])
       expect((yield* send({ to: "g@h.i", subject: "Other" })).body["status"]).toBe("pending")
       expect((yield* send({ to: "g@h.i", subject: "Launch", bcc: "x@y.z" })).body["status"]).toBe("pending")
       expect(calls).toHaveLength(3)

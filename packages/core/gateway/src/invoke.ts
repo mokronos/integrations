@@ -18,6 +18,7 @@ import {
 import type {
   Alias,
   ApprovalId,
+  AuditApproval,
   Authorized,
   CallOrigin,
   ConnectionName,
@@ -63,7 +64,8 @@ const auditFor = (
   message: string | null,
   argumentsValue: Json,
   retentionDays: number,
-  origin: CallOrigin
+  origin: CallOrigin,
+  approval?: AuditApproval
 ): Effect.Effect<RecordAuditInput, never, Crypto.Crypto> =>
   Effect.all([newAuditId, DateTime.now]).pipe(Effect.map(([id, at]): RecordAuditInput => ({
   tenantId: authorization.profile.tenantId,
@@ -75,6 +77,7 @@ const auditFor = (
   tool: authorization.profileTool.tool,
   connection: authorization.connection,
   decision: authorization.decision,
+  ...whenPresent("approval", approval),
   outcome,
   message,
   arguments: {
@@ -127,7 +130,7 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function*(
       yield* store.recordAudit(yield* auditFor(
         authorization,
         existing.error === null ? "succeeded" : "failed",
-        `approval ${existing.id} collected`,
+        `result of approval ${existing.id} collected`,
         argumentsValue,
         retentionDays,
         origin
@@ -239,7 +242,7 @@ const settle = Effect.fn("Invocation.settle")(function*(
         authorization,
         input.arguments,
         input.origin,
-        `approved by saved rule ${rule.id}`
+        { approval: "saved_approval", message: `saved approval ${rule.id}` }
       )
     }
     return yield* freezeOrCollect(
@@ -389,7 +392,7 @@ export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(funct
   authorization: Extract<Authorization, { status: "authorized" }>,
   argumentsValue: Json,
   origin: CallOrigin,
-  approvedBy?: string
+  approved?: { readonly approval: AuditApproval; readonly message: string | null }
 ): Effect.fn.Return<
   Extract<InvocationOutcome, { status: "succeeded" | "failed" }>,
   GatewayStoreError,
@@ -399,13 +402,13 @@ export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(funct
   const invocation = yield* Effect.result(dependencies.integrations.execute(address, argumentsValue))
   if (invocation._tag === "Success") {
     yield* dependencies.store.recordAudit(
-      yield* auditFor(authorization, "succeeded", approvedBy ?? null, argumentsValue, dependencies.retentionDays, origin)
+      yield* auditFor(authorization, "succeeded", approved?.message ?? null, argumentsValue, dependencies.retentionDays, origin, approved?.approval)
     )
     return { status: "succeeded", result: invocation.success }
   }
   const message = invocation.failure.message
   yield* dependencies.store.recordAudit(
-    yield* auditFor(authorization, "failed", message, argumentsValue, dependencies.retentionDays, origin)
+    yield* auditFor(authorization, "failed", message, argumentsValue, dependencies.retentionDays, origin, approved?.approval)
   )
   return { status: "failed", message }
 })

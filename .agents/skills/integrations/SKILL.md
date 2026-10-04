@@ -61,8 +61,17 @@ or `i execute` is not an alias and will not resolve to the connection.
 Every `execute` call answers in one shape: `{"status":"succeeded","result":…}`,
 `{"status":"pending","approvalId":…}`, `{"status":"denied","reason":…}`, or
 `{"status":"failed","message":…}`. `pending` means a human has to decide.
-If you need to wait for approval, poll `i approval <id>` every 60 seconds and sleep in between.
-Afterwards or alternatively just run the same `i execute` call again — a retry meets the same frozen call rather than asking again, and collects the decision once it lands.
+
+The gateway runs an approved call itself, the moment it is approved. Do not
+run it again to make it happen. To get its result, poll `i approval <id>`
+every 60 seconds and sleep in between, until the status is no longer
+`pending` or `executing`. `approved` carries the call's `result` (or `error`);
+`denied` and `expired` mean it never ran.
+
+A long script whose later steps need results from approved calls does not
+have to be rewritten around polling. Once its calls are approved, run it
+again unchanged: an identical call returns the stored result of its approved
+call instead of running it twice.
 
 If a command says the gateway is unavailable, retry that exact command once.
 If it still fails, report that the gateway is down; do not reinterpret it as a

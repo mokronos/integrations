@@ -4,7 +4,7 @@ import { Schema } from "effect"
 import {
   ApiKeyHash, ApiKeyId, ApprovalDeliveryId, ApprovalGroupWindowMinutes, ApprovalMethod, McpSurface,
   ApprovalDestinationId, ApprovalId, ApprovalRuleId, ArgumentPattern,
-  AuditId, ConnectionName, IntegrationSlug, ProfileCapability, ProfileId, ToolDecision,
+  AuditApproval, AuditId, ConnectionName, IntegrationSlug, ProfileCapability, ProfileId, ToolDecision,
   LoginHandoffHash, SessionTokenHash, SubjectId, TenantId, ToolName,
   OAuthApplicationId, OAuthGrantId, OAuthApplicationKind
 } from "./domain.ts"
@@ -255,6 +255,7 @@ const AuditRow = Schema.Struct({
   integration: NullableString,
   connection_name: NullableString,
   decision: Schema.NullOr(ToolDecision),
+  approval: Schema.NullOr(AuditApproval),
   outcome: Schema.Literals(["succeeded", "failed", "denied", "pending"]),
   message: NullableString,
   created_at: Schema.Number
@@ -296,7 +297,7 @@ const approvalColumns = [
 ]
 const auditColumns = [
   "id", "profile_id", ...callerColumns, "authorized_by_subject_id", "alias", "tool", "owner", "subject", "integration",
-  "connection_name", "decision", "outcome", "message", "created_at"
+  "connection_name", "decision", "approval", "outcome", "message", "created_at"
 ]
 const snapshotColumns = [
   "integration", "connection_name", "tool", "input_schema", "output_schema", "synced_at"
@@ -686,6 +687,7 @@ export const toAuditRecord = (row: Row): AuditRecord => {
       }),
     subject: decoded.subject === null ? null : SubjectId.make(decoded.subject),
     decision: decoded.decision,
+    approval: decoded.approval,
     outcome: decoded.outcome,
     message: decoded.message,
     createdAt: date(decoded.created_at)

@@ -182,7 +182,7 @@ const FEATURES: ReadonlyArray<Feature> = [
     icon: Users
   },
   {
-    title: "Off, Ask, or Auto for every tool",
+    title: "Off, Ask, or Allow for every tool",
     body: "Read-only tools run immediately; mutating or unclassified tools ask first. Change them in bulk, per integration or tool.",
     icon: ShieldCheck
   },
@@ -386,7 +386,7 @@ function Hero() {
           {[
             { icon: Globe, k: "Any API", v: "OpenAPI specs + MCP servers" },
             { icon: Lock, k: "Zero key sprawl", v: "Gateway holds all credentials" },
-            { icon: ShieldCheck, k: "Governed tools", v: "Off, Ask, or Auto per tool" }
+            { icon: ShieldCheck, k: "Governed tools", v: "Off, Ask, or Allow per tool" }
           ].map((stat) => (
             <div
               key={stat.k}
@@ -659,7 +659,7 @@ function Security() {
                 Least privilege, enforced at execution
               </h2>
               <p className="mt-4 leading-relaxed text-neutral-400">
-                A profile turns each tool off, or on with Ask or Auto. Changing one agent's profile
+                A profile turns each tool off, or on with Ask or Allow. Changing one agent's profile
                 never changes another's, and every call names the app that made it.
               </p>
             </div>

@@ -12,7 +12,7 @@ import {
   ToolName
 } from "@integragents/contracts"
 
-import { ConnectionIdentity } from "@/components/integrations/connection-identity"
+import { ConnectionIdentity, ToolIdentity } from "@/components/integrations/connection-identity"
 import { IntegrationIcon, integrationHost } from "@/components/integrations/integration-icon"
 import { LoadingRows, QueryError } from "@/components/page"
 import { SavedApproval } from "@/components/profiles/saved-approvals"
@@ -31,7 +31,7 @@ type Setting = "off" | ToolDecision
 const settingOptions = [
   { value: "off", label: "Off", title: "The tool is hidden and cannot be called" },
   { value: "require_approval", label: "Ask", title: "Every call waits for a human" },
-  { value: "allow", label: "Auto", title: "Calls run immediately" }
+  { value: "allow", label: "Allow", title: "Calls run without asking" }
 ] as const
 
 type Row = {
@@ -135,7 +135,7 @@ function ToolEditor({ profile, integrations, enabled, rules }: {
   const stored = useMemo(() => new Map(enabled.map((tool) => [routeKey(tool.connection, tool.tool), tool.decision])), [enabled])
   const [settings, setSettings] = useState<ReadonlyMap<string, Setting>>(stored)
   const [query, setQuery] = useState("")
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
   const rows = useMemo(() => rowsOf(integrations, enabled), [integrations, enabled])
   const settingOf = (row: Row): Setting => settings.get(row.key) ?? "off"
   const changed = rows.filter((row) => settingOf(row) !== (stored.get(row.key) ?? "off")).length
@@ -173,6 +173,21 @@ function ToolEditor({ profile, integrations, enabled, rules }: {
   }
 
   return <div className="space-y-3">
+    {rules.length === 0 ? null : <details className="group rounded-xl border">
+      <summary className="flex cursor-pointer list-none items-center gap-3 p-3 [&::-webkit-details-marker]:hidden">
+        <ChevronRight aria-hidden className="text-muted-foreground size-4 shrink-0 transition-transform group-open:rotate-90" />
+        <span className="min-w-0">
+          <span className="block font-medium">{pluralise(rules.length, "saved approval")}</span>
+          <span className="text-muted-foreground block text-xs">Created with "Always approve". A call to an Ask tool that fits one runs without asking.</span>
+        </span>
+      </summary>
+      <div className="space-y-3 border-t p-3">
+        {rules.map((rule) => <div key={rule.id} className="space-y-1">
+          <ToolIdentity connection={rule.connection} alias={null} tool={rule.tool} integrations={integrations} className="min-h-0" />
+          <SavedApproval rule={rule} profileId={profile.id} />
+        </div>)}
+      </div>
+    </details>}
     <div className="relative">
       <Search aria-hidden className="text-muted-foreground absolute left-2.5 top-1/2 size-4 -translate-y-1/2" />
       <Input className="pl-8" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a tool…" aria-label="Find a tool" />
@@ -180,13 +195,13 @@ function ToolEditor({ profile, integrations, enabled, rules }: {
     {groups.length === 0 ? <p className="text-muted-foreground py-6 text-center text-sm">Nothing matches “{query.trim()}”.</p> : null}
     {groups.map((group) => {
       const groupRows = group.connections.flatMap((connection) => connection.rows)
-      const open = needle.length > 0 || !collapsed.has(group.slug)
+      const open = needle.length > 0 || expanded.has(group.slug)
       return <section key={group.slug} className="overflow-hidden rounded-xl border">
         <div className={cn("bg-muted/30 flex flex-wrap items-center gap-3 p-3", open && "border-b")}>
           <button
             type="button"
             aria-expanded={open}
-            onClick={() => setCollapsed((current) => {
+            onClick={() => setExpanded((current) => {
               const next = new Set(current)
               if (next.has(group.slug)) next.delete(group.slug); else next.add(group.slug)
               return next

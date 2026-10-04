@@ -9,7 +9,7 @@ import {
   connectionSubject,
   TenantId
 } from "./domain.ts"
-import type { Authorized, PendingApproval } from "./domain.ts"
+import type { AuditApproval, Authorized, PendingApproval } from "./domain.ts"
 import { executeAuthorized } from "./invoke.ts"
 import { newApprovalRuleId } from "./keys.ts"
 import type { GatewayStore, GatewayStoreError } from "./store.ts"
@@ -80,12 +80,13 @@ export const approveApproval = Effect.fn("Approvals.approve")(function*(
     readonly integrations: Integrations["Service"]
     readonly retentionDays: number
   },
-  input: typeof ApprovalDecision.Type
+  input: typeof ApprovalDecision.Type,
+  approval: Extract<AuditApproval, "approved" | "approved_always"> = "approved"
 ) {
   const { store } = dependencies
   const { tenantId, id, decidedBy } = input
-  const approval = yield* pendingApproval(store, input)
-  const authorization = yield* frozenAuthorization(store, tenantId, approval)
+  const frozen = yield* pendingApproval(store, input)
+  const authorization = yield* frozenAuthorization(store, tenantId, frozen)
   if (authorization === undefined) {
     yield* store.settleApproval({ tenantId, id, status: "denied", decidedBy, result: null, error: "the profile was revoked or stopped enabling this tool while the call was frozen" })
     return yield* new ApprovalConflict({ message: `Approval ${id} is no longer authorized` })
@@ -94,7 +95,13 @@ export const approveApproval = Effect.fn("Approvals.approve")(function*(
   return yield* Effect.gen(function*() {
     const claimed = yield* store.claimApproval({ tenantId, id, decidedBy })
     if (!claimed) return yield* new ApprovalConflict({ message: `Approval ${id} was decided or expired` })
-    const outcome = yield* executeAuthorized(dependencies, authorization, approval.arguments, { caller: approval.caller, authorizedBy: null })
+    const outcome = yield* executeAuthorized(
+      dependencies,
+      authorization,
+      frozen.arguments,
+      { caller: frozen.caller, authorizedBy: null },
+      { approval, message: decidedBy === null ? null : `approved by ${decidedBy}` }
+    )
     yield* store.settleApproval({
       tenantId, id, status: "approved", decidedBy,
       result: outcome.status === "succeeded" ? outcome.result : null,
@@ -153,7 +160,7 @@ export const decideApprovals = Effect.fn("Approvals.decideMany")(function*(
   const results = yield* Effect.forEach(new Set(input.ids), (id) => {
     const decision = { tenantId: input.tenantId, id, decidedBy: input.decidedBy }
     const decided = input.verdict === "approve"
-      ? Effect.map(approveApproval(dependencies, decision), ({ approval }) => approval)
+      ? Effect.map(approveApproval(dependencies, decision, rule === undefined ? "approved" : "approved_always"), ({ approval }) => approval)
       : Effect.map(denyApproval(dependencies.store, decision), ({ approval }) => approval)
     return decided.pipe(
       Effect.map((approval): DecidedApproval => ({ id, status: "decided", approval })),

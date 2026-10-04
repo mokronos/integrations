@@ -298,6 +298,7 @@ export const gatewayAudit = sqliteTable("gateway_audit", {
   integration: text("integration"),
   connectionName: text("connection_name"),
   decision: text("decision"),
+  approval: text("approval"),
   outcome: text("outcome").notNull(),
   message: text("message"),
   createdAt: createdAt()

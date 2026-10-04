@@ -167,7 +167,7 @@ export const profileToolsCommand = Command.make(
         narrowing: "window with --limit/--offset",
         verbose,
         empty: "No tools enabled.",
-        next: `ii profile-tool ${profileId} <integration> <tool> off|ask|auto`,
+        next: `ii profile-tool ${profileId} <integration> <tool> off|ask|allow`,
         row: (tool) => tool
       })
     }))
@@ -197,8 +197,8 @@ export const profileToolCommand = Command.make(
     profileId: Argument.String("profile-id"),
     integration: Argument.String("integration"),
     tool: Argument.String("tool"),
-    setting: Argument.Literals("setting", ["off", "ask", "auto"]).pipe(
-      Argument.withDescription("off: not callable; ask: each call waits for approval; auto: runs immediately")
+    setting: Argument.Literals("setting", ["off", "ask", "allow"]).pipe(
+      Argument.withDescription("off: not callable; ask: each call waits for approval; allow: runs without asking")
     ),
     connection: Flag.String("connection").pipe(
       Flag.optional,
@@ -231,12 +231,12 @@ export const profileToolCommand = Command.make(
             ...targets.map((target) => ({
               connection: { owner: target.owner, integration, name: target.name },
               tool,
-              decision: setting === "auto" ? "allow" : "require_approval"
+              decision: setting === "allow" ? "allow" : "require_approval"
             }))
           ]
       })
     })).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false))))
-).pipe(Command.withDescription("Turn one tool off, or on with ask or auto, in a profile"))
+).pipe(Command.withDescription("Turn one tool off, or on with ask or allow, in a profile"))
 
 export const keyCommand = Command.make(
   "key",

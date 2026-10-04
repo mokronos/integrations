@@ -124,7 +124,7 @@ ii signup you@example.com --tenant "Your Company"
 ```
 
 Create a profile with `ii profile <name>`, enable tools with
-`ii profile-tool <profile-id> <integration> <tool> ask|auto`, and issue each app
+`ii profile-tool <profile-id> <integration> <tool> ask|allow`, and issue each app
 its own key with `ii key <profile-id> "<app name>"`. Then on the app's machine:
 
 ```bash
