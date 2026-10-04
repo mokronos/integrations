@@ -33,7 +33,7 @@ const decode = <S extends Schema.Top & { readonly DecodingServices: never }>(sch
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex")
 
 test(
-  "an operator signs up, provisions a client, and its key moves a blob larger than one upload part",
+  "an operator signs up, creates a profile, and an app's key moves a blob larger than one upload part",
   Effect.gen(function*() {
     const { url } = yield* stack
     const call = (path: string, init?: RequestInit) => Effect.promise(() => fetch(`${url}${path}`, init))
@@ -47,12 +47,16 @@ test(
     yield* decode(Signup, signup)
     const session = { cookie: signup.headers.getSetCookie().map((cookie) => cookie.split(";")[0]).join("; "), origin: url }
 
-    const client = yield* decode(Created, yield* call("/v1/clients", {
+    const profile = yield* decode(Created, yield* call("/v1/profiles", {
       method: "POST",
       headers: { ...session, "content-type": "application/json" },
       body: JSON.stringify({ name: "worker-test" })
     }))
-    const key = yield* decode(Key, yield* call(`/v1/clients/${client.id}/keys`, { method: "POST", headers: session }))
+    const key = yield* decode(Key, yield* call(`/v1/profiles/${profile.id}/keys`, {
+      method: "POST",
+      headers: { ...session, "content-type": "application/json" },
+      body: JSON.stringify({ name: "worker-test app" })
+    }))
     const bearer = { authorization: `Bearer ${key.secret}` }
 
     const body = new Uint8Array(9 * 1024 * 1024).map((_, index) => index % 251)

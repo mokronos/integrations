@@ -11,18 +11,20 @@ import { SqlClient } from "effect/sql"
 import { webCryptoLayer, whenPresent } from "@integragents/contracts"
 import {
   Alias,
-  ClientId,
+  catalogProfileTools,
   defaultTenantId,
   gatewayCoreLayer,
   GatewayStoreService,
-  invokeAsClient,
+  includeConnectionTools,
+  invokeAsProfile,
   listEffectiveTools,
-  newClientId,
+  newProfileId,
   OAuthFlowSessions,
-  reconcileConfigurations,
+  ProfileId,
   resolveEncryption,
   SubjectId,
-  ToolName
+  ToolName,
+  unattributedOrigin
 } from "@integragents/gateway-core"
 import type { GatewayCoreServices } from "@integragents/gateway-core"
 import { ConnectionName, IntegrationSlug } from "@integragents/contracts"
@@ -54,7 +56,7 @@ const runtime = ManagedRuntime.make(
   )
 )
 
-const AgentRow = Schema.Struct({ id: Schema.String, name: Schema.String, gateway_client_id: ClientId })
+const AgentRow = Schema.Struct({ id: Schema.String, name: Schema.String, gateway_profile_id: ProfileId })
 const decodeAgents = Schema.decodeUnknownEffect(Schema.Array(AgentRow))
 const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))
 
@@ -62,33 +64,29 @@ const tenantId = defaultTenantId
 
 const listAgents = Effect.gen(function*() {
   const sql = yield* SqlClient.SqlClient
-  return yield* decodeAgents(yield* sql.unsafe("SELECT id, name, gateway_client_id FROM agent ORDER BY name"))
+  return yield* decodeAgents(yield* sql.unsafe("SELECT id, name, gateway_profile_id FROM agent ORDER BY name"))
 })
 
-/** One gateway client per agent: the platform keeps the id, the gateway keeps the policy. */
+/** One gateway profile per agent: the platform keeps the id, the gateway keeps its tools. */
 const createAgent = Effect.fn("Platform.createAgent")(function*(name: string) {
   const sql = yield* SqlClient.SqlClient
   const store = yield* GatewayStoreService
-  const accessProfile = yield* store.findDefaultAccessProfile(tenantId)
-  const approvalPolicy = yield* store.findDefaultApprovalPolicy(tenantId)
-  if (accessProfile === undefined || approvalPolicy === undefined) {
-    return yield* Effect.die(new Error("The tenant has no default access profile or approval policy"))
-  }
-  const client = yield* store.createClient({
-    id: yield* newClientId,
+  const integrations = yield* Integrations
+  const profile = yield* store.createProfile({
+    id: yield* newProfileId,
     tenantId,
-    accessProfileId: accessProfile.id,
-    approvalPolicyId: approvalPolicy.id,
     name,
-    capabilities: []
+    capabilities: [],
+    includeNewTools: true,
+    tools: yield* catalogProfileTools(integrations)
   })
   yield* sql.unsafe(
-    "INSERT INTO agent (id, name, tenant_id, gateway_client_id) VALUES (?, ?, ?, ?)",
-    [crypto.randomUUID(), name, tenantId, client.id]
+    "INSERT INTO agent (id, name, tenant_id, gateway_profile_id) VALUES (?, ?, ?, ?)",
+    [crypto.randomUUID(), name, tenantId, profile.id]
   )
 })
 
-/** An OpenAPI service connected under one of its auth templates and granted to the default policy. */
+/** An OpenAPI service connected under one of its auth templates; every agent gets its tools. */
 const addIntegration = Effect.fn("Platform.addIntegration")(function*(input: {
   readonly spec: string
   readonly slug: string
@@ -99,19 +97,19 @@ const addIntegration = Effect.fn("Platform.addIntegration")(function*(input: {
   const integrations = yield* Integrations
   const integration = IntegrationSlug.make(input.slug)
   yield* integrations.addOpenApi({ spec: input.spec, slug: integration })
-  yield* integrations.createConnection({
+  const connection = yield* integrations.createConnection({
     owner: "org",
     integration,
     name: ConnectionName.make("default"),
     template: AuthTemplateSlug.make(input.template === "" ? "none" : input.template),
     ...whenPresent("value", input.token === "" ? undefined : input.token)
   })
-  yield* reconcileConfigurations({ store, integrations, tenantId })
+  yield* includeConnectionTools({ store, integrations, tenantId, integration, connection: connection.name })
 })
 
 /**
- * Marks a tool as acting for the calling user: the grant names a user-owned
- * connection with no subject, and each invocation supplies the subject.
+ * Marks a tool as acting for the calling user: every agent's profile names a
+ * user-owned connection with no subject, and each invocation supplies the subject.
  */
 const delegateTool = Effect.fn("Platform.delegateTool")(function*(input: {
   readonly integration: string
@@ -119,15 +117,14 @@ const delegateTool = Effect.fn("Platform.delegateTool")(function*(input: {
   readonly tool: string
 }) {
   const store = yield* GatewayStoreService
-  const integrations = yield* Integrations
-  const accessProfile = yield* store.findDefaultAccessProfile(tenantId)
-  if (accessProfile === undefined) return yield* Effect.die(new Error("The tenant has no default access profile"))
-  const existing = yield* store.listAccessProfileTools(accessProfile.id)
-  yield* store.replaceAccessProfileTools(accessProfile.id, [...existing, {
-    connection: { owner: "user", integration: IntegrationSlug.make(input.integration), name: ConnectionName.make(input.connection) },
-    tool: ToolName.make(input.tool)
-  }])
-  yield* reconcileConfigurations({ store, integrations, tenantId })
+  for (const agent of yield* listAgents) {
+    const existing = yield* store.listProfileTools(agent.gateway_profile_id)
+    yield* store.replaceProfileTools(agent.gateway_profile_id, [...existing, {
+      connection: { owner: "user", integration: IntegrationSlug.make(input.integration), name: ConnectionName.make(input.connection) },
+      tool: ToolName.make(input.tool),
+      decision: "require_approval"
+    }])
+  }
 })
 
 /** The platform mirrors its users as gateway subjects; here a subject is whatever the form says. */
@@ -141,8 +138,8 @@ const ensureSubject = Effect.fn("Platform.ensureSubject")(function*(subject: Sub
 const agentView = Effect.fn("Platform.agentView")(function*(row: typeof AgentRow.Type, withSchemas: boolean) {
   const store = yield* GatewayStoreService
   const integrations = yield* Integrations
-  const tools = yield* listEffectiveTools(store, row.gateway_client_id, { schemas: withSchemas, integrations })
-  return { id: row.id, name: row.name, clientId: row.gateway_client_id, tools } satisfies AgentView
+  const tools = yield* listEffectiveTools(store, row.gateway_profile_id, { schemas: withSchemas, integrations })
+  return { id: row.id, name: row.name, profileId: row.gateway_profile_id, tools } satisfies AgentView
 })
 
 const execute = Effect.fn("Platform.execute")(function*(input: {
@@ -161,10 +158,11 @@ const execute = Effect.fn("Platform.execute")(function*(input: {
   const agents = yield* listAgents
   const row = agents.find((candidate) => candidate.id === agentId)
   if (row === undefined) return yield* Effect.die(new Error(`Unknown agent ${agentId}`))
-  const client = yield* store.findClientById(tenantId, row.gateway_client_id)
-  if (client === undefined) return yield* Effect.die(new Error(`Agent ${row.name} has no gateway client`))
-  return yield* invokeAsClient({ store, integrations, oauth }, {
-    client,
+  const profile = yield* store.findProfileById(tenantId, row.gateway_profile_id)
+  if (profile === undefined) return yield* Effect.die(new Error(`Agent ${row.name} has no gateway profile`))
+  return yield* invokeAsProfile({ store, integrations, oauth }, {
+    profile,
+    origin: { ...unattributedOrigin, caller: { ...unattributedOrigin.caller, agent: row.name } },
     alias: Alias.make(alias),
     tool: ToolName.make(tool),
     arguments: yield* decodeJson(argumentsText.trim() === "" ? "{}" : argumentsText),

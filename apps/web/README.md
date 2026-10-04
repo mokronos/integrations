@@ -1,8 +1,9 @@
 # The gateway's control plane
 
-The human control plane for the integration gateway: readiness overview,
-catalog and connections, reusable tool policies, clients and keys, approvals, account
-settings, drift checks, and the permanent activity trail. Headless validation,
+The human control plane for the integration gateway: a home page of what needs
+attention, integrations and connections, profiles (their tools, keys, connected
+apps, and saved approvals), approvals, settings, drift checks, and the permanent
+activity trail. Headless validation,
 direct invocation, and maintenance stay in the API and `ii` CLI instead of
 competing with those workflows in the dashboard.
 

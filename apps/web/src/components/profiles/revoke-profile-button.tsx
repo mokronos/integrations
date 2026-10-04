@@ -1,34 +1,33 @@
 import { toast } from "sonner"
-import type { ClientId } from "@integragents/contracts"
+import type { Profile } from "@integragents/contracts"
 
 import { ConfirmButton } from "@/components/ui/confirm-button"
 import * as gateway from "@/lib/gateway"
 import { keys, useInvalidate, useMutation } from "@/lib/queries"
 
-export function RevokeClientButton({ clientId, clientName, onRevoked }: {
-  readonly clientId: ClientId
-  readonly clientName: string
+export function RevokeProfileButton({ profile, onRevoked }: {
+  readonly profile: Profile
   readonly onRevoked?: () => void
 }) {
   const invalidate = useInvalidate()
   const revoke = useMutation({
-    mutationFn: () => gateway.revokeClient(clientId),
+    mutationFn: () => gateway.revokeProfile(profile.id),
     onSuccess: (result) => {
-      invalidate(keys.clients, keys.approvals("pending"), keys.overview)
-      toast.success(`${clientName} revoked`, {
+      invalidate(keys.profiles, ["approvals"], keys.overview)
+      toast.success(`${profile.name} revoked`, {
         description: result.cancelledApprovals === 0
           ? undefined
           : `${result.cancelledApprovals} pending approval${result.cancelledApprovals === 1 ? "" : "s"} cancelled.`
       })
       onRevoked?.()
     },
-    onError: (error: Error) => toast.error("Could not revoke client", { description: error.message })
+    onError: (error: Error) => toast.error("Could not revoke the profile", { description: error.message })
   })
   return (
     <ConfirmButton
       label="Revoke"
-      title={`Revoke ${clientName}?`}
-      description="Every API key stops working and pending approvals are cancelled. Tool access ends immediately. This cannot be undone."
+      title={`Revoke ${profile.name}?`}
+      description="Every app on this profile loses access at once, and its pending approvals are cancelled. This cannot be undone."
       confirmLabel="Revoke"
       pendingLabel="Revoking…"
       pending={revoke.isPending}

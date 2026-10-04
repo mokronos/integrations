@@ -2,18 +2,15 @@ import { Suspense, useState } from "react"
 import { NavLink, Outlet, useNavigate } from "react-router"
 import {
   Activity,
-  BellRing,
   Bot,
+  House,
   Inbox,
-  LayoutDashboard,
   LogOut,
   Moon,
-  FileKey2,
   PanelLeftClose,
   PanelLeftOpen,
   Plug,
-  UserRound,
-  ShieldCheck,
+  Settings,
   Sun
 } from "lucide-react"
 import { toast } from "sonner"
@@ -28,15 +25,12 @@ import { cn } from "@/lib/utils"
 import { useSession } from "@/components/auth-gate"
 
 const navigation = [
-  { to: "/", label: "Overview", icon: LayoutDashboard },
-  { to: "/integrations", label: "Integrations", icon: Plug },
-  { to: "/clients", label: "Clients", icon: Bot },
-  { to: "/access-profiles", label: "Access profiles", icon: FileKey2 },
-  { to: "/approval-policies", label: "Approval policies", icon: ShieldCheck },
+  { to: "/", label: "Home", icon: House },
   { to: "/approvals", label: "Approvals", icon: Inbox },
-  { to: "/approval-destinations", label: "Approval destinations", icon: BellRing },
+  { to: "/integrations", label: "Integrations", icon: Plug },
+  { to: "/profiles", label: "Profiles", icon: Bot },
   { to: "/activity", label: "Activity", icon: Activity },
-  { to: "/account", label: "Account", icon: UserRound }
+  { to: "/settings", label: "Settings", icon: Settings }
 ] as const
 
 function PendingBadge({ compact }: { readonly compact: boolean }) {
@@ -96,8 +90,7 @@ export function AppShell({
         <div className={cn("flex h-14 items-center", expanded ? "justify-between px-2" : "justify-center")}>
           {expanded ? (
             <div className="min-w-0">
-              <p className="truncate text-xs uppercase tracking-widest opacity-60">gateway</p>
-              <p className="truncate font-semibold">Control plane</p>
+              <p className="truncate font-semibold">Integrations</p>
             </div>
           ) : null}
           <Button
@@ -155,10 +148,6 @@ export function AppShell({
                 {session?.authenticated === true && session.kind === "session"
                   ? <SignOutButton />
                   : null}
-                <p className="text-sidebar-foreground/50 text-xs leading-relaxed">
-                  Served by the gateway. Actions run with your signed-in session,
-                  or the local client's key on loopback.
-                </p>
               </>
             )
             : (

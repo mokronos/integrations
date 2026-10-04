@@ -96,14 +96,19 @@ const stop = async (environment: Environment): Promise<void> => {
   }
 }
 
+const decodeProfiles = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Struct({
+  profiles: Schema.Array(Schema.Struct({ profile: Schema.Struct({ id: Schema.String, name: Schema.String }) }))
+})))
+
 const read = async (home: string): Promise<Environment> =>
   decodeEnvironment(await readFile(path.join(home, "test-env.json"), "utf8"))
 
 const seed = async (home: string, fixtureUrl: string): Promise<void> => {
   await cli("agent", ["discover", `${fixtureUrl}/mcp`], home)
-  // A tool in an access profile without an approval decision fails every tool listing, so grant both.
-  await cli("main", ["access-profile-tool", "default-access-profile:default", "fixture", "echo"], home)
-  await cli("main", ["approval-policy-tool", "default-approval-policy:default", "fixture", "echo", "allow"], home)
+  const { profiles } = decodeProfiles(await cli("main", ["profiles"], home))
+  const agent = profiles.find((entry) => entry.profile.name === "local-agent")
+  if (agent === undefined) throw new Error("The gateway did not create the local-agent profile")
+  await cli("main", ["profile-tool", agent.profile.id, "fixture", "echo", "auto"], home)
 }
 
 const up = async (): Promise<void> => {

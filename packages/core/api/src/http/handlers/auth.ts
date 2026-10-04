@@ -347,21 +347,21 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
               identityProviders: identities.map((identity) => identity.provider)
             }
           }
-          if (caller.kind === "client") {
+          if (caller.kind === "key") {
             return {
               authenticated: true as const,
-              kind: "client" as const,
-              clientId: caller.client.id,
-              tenantId: caller.client.tenantId,
-              capabilities: caller.client.capabilities
+              kind: "profile" as const,
+              profileId: caller.profile.id,
+              tenantId: caller.profile.tenantId,
+              capabilities: caller.profile.capabilities
             }
           }
           if (caller.kind === "local") {
             return {
               authenticated: true as const,
               kind: "local" as const,
-              clientId: caller.client.id,
-              tenantId: caller.client.tenantId
+              profileId: caller.profile.id,
+              tenantId: caller.profile.tenantId
             }
           }
           return { authenticated: false as const }

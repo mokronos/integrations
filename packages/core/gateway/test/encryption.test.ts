@@ -14,9 +14,7 @@ import {
   IntegrationSlug,
   newApprovalId,
   newAuditId,
-  newClientId,
-  newAccessProfileId,
-  newApprovalPolicyId,
+  newProfileId,
   resolveEncryption,
   ToolName
 } from "../src/index.ts"
@@ -160,47 +158,35 @@ describe("the encrypted store", () => {
     return { store, raw, column }
   })
 
-  const seedClient = Effect.fnUntraced(function*(store: GatewayStore) {
-    const accessProfile = yield* store.createAccessProfile({
-      id: yield* newAccessProfileId,
-      tenantId: defaultTenantId,
-      name: `profile-${crypto.randomUUID()}`
-    })
-    yield* store.replaceAccessProfileTools(accessProfile.id, [
-      { connection, tool: ToolName.make("sendEmail") }
-    ])
-    const approvalPolicy = yield* store.createApprovalPolicy({
-      id: yield* newApprovalPolicyId,
-      tenantId: defaultTenantId,
-      name: `policy-${crypto.randomUUID()}`,
-      tools: []
-    })
-    yield* store.replaceApprovalPolicyTools(approvalPolicy.id, [{
-      connection, tool: ToolName.make("sendEmail"), decision: "require_approval"
-    }])
-    const client = yield* store.createClient({
-      id: yield* newClientId,
-      tenantId: defaultTenantId,
-      accessProfileId: accessProfile.id,
-      approvalPolicyId: approvalPolicy.id,
-      name: "agent",
-      capabilities: ["provision_connections"]
-    })
-    return { client, accessProfile, approvalPolicy }
-  })
+  const seedProfile = (store: GatewayStore) =>
+    Effect.flatMap(newProfileId, (id) =>
+      store.createProfile({
+        id,
+        tenantId: defaultTenantId,
+        name: "agent",
+        capabilities: ["provision_connections"],
+        tools: [{ connection, tool: ToolName.make("sendEmail"), decision: "require_approval" }]
+      }))
+
+  const noCaller = {
+    apiKeyId: null,
+    oauthGrantId: null,
+    oauthApplicationId: null,
+    credentialName: null,
+    agent: null
+  }
 
   it.effect("stores frozen-call arguments sealed, yet retries still meet them", () =>
     Effect.gen(function*() {
       const { column, store } = yield* encryptedStore()
-      const { accessProfile, approvalPolicy, client } = yield* seedClient(store)
+      const profile = yield* seedProfile(store)
       const argumentsValue = { to: "customer@example.com", subject: "Private" }
 
       const approval = yield* store.createApproval({
         id: yield* newApprovalId,
         tenantId: defaultTenantId,
-        clientId: client.id,
-        approvalPolicyId: approvalPolicy.id,
-        accessProfileId: accessProfile.id,
+        profileId: profile.id,
+        caller: noCaller,
         alias: Alias.make("org___gmail___work"),
         tool: ToolName.make("sendEmail"),
         arguments: argumentsValue,
@@ -214,10 +200,8 @@ describe("the encrypted store", () => {
 
       const metAgain = yield* store.findUncollectedApproval({
         tenantId: defaultTenantId,
-        clientId: client.id,
+        profileId: profile.id,
         alias: Alias.make("org___gmail___work"),
-        approvalPolicyId: approvalPolicy.id,
-        accessProfileId: accessProfile.id,
         tool: ToolName.make("sendEmail"),
         arguments: argumentsValue
       })
@@ -228,14 +212,13 @@ describe("the encrypted store", () => {
   it.effect("seals a settled result while reading it back intact", () =>
     Effect.gen(function*() {
       const { column, store } = yield* encryptedStore()
-      const { accessProfile, approvalPolicy, client } = yield* seedClient(store)
+      const profile = yield* seedProfile(store)
       const id = yield* newApprovalId
       yield* store.createApproval({
         id,
         tenantId: defaultTenantId,
-        clientId: client.id,
-        approvalPolicyId: approvalPolicy.id,
-        accessProfileId: accessProfile.id,
+        profileId: profile.id,
+        caller: noCaller,
         alias: Alias.make("org___gmail___work"),
         tool: ToolName.make("sendEmail"),
         arguments: {},
@@ -267,7 +250,9 @@ describe("the encrypted store", () => {
       yield* store.recordAudit({
         tenantId: defaultTenantId,
         id,
-        clientId: null,
+        profileId: null,
+        caller: noCaller,
+        authorizedBySubjectId: null,
         alias: null,
         tool: null,
         connection: null,
@@ -288,19 +273,17 @@ describe("the encrypted store", () => {
   it.effect("still matches pre-encryption rows written in plaintext", () =>
     Effect.gen(function*() {
       const { raw, store } = yield* encryptedStore()
-      const { accessProfile, approvalPolicy, client } = yield* seedClient(store)
+      const profile = yield* seedProfile(store)
       const expiresAt = (yield* Clock.currentTimeMillis) + 60_000
 
       yield* Effect.promise(() =>
         raw.execute(
           `INSERT INTO gateway_pending_approval
-             (id, tenant_id, client_id, approval_policy_id, access_profile_id, alias, tool, arguments, status, created_at, expires_at, collected_at)
-           VALUES ('legacy-approval', ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, NULL)`,
+             (id, tenant_id, profile_id, alias, tool, arguments, status, created_at, expires_at, collected_at)
+           VALUES ('legacy-approval', ?, ?, ?, ?, ?, 'pending', 0, ?, NULL)`,
           [
             defaultTenantId,
-            client.id,
-            approvalPolicy.id,
-            accessProfile.id,
+            profile.id,
             Alias.make("org___gmail___work"),
             ToolName.make("sendEmail"),
             canonicalJson({ to: "old@example.com" }),
@@ -311,10 +294,8 @@ describe("the encrypted store", () => {
 
       const metAgain = yield* store.findUncollectedApproval({
         tenantId: defaultTenantId,
-        clientId: client.id,
+        profileId: profile.id,
         alias: Alias.make("org___gmail___work"),
-        approvalPolicyId: approvalPolicy.id,
-        accessProfileId: accessProfile.id,
         tool: ToolName.make("sendEmail"),
         arguments: { to: "old@example.com" }
       })

@@ -1,8 +1,8 @@
 # @integragents/local
 
-The integration gateway. Holds connections and credentials, intersects reusable
-policies with client-specific connection grants, and performs invocations — so callers
-hold only an API key and never a credential.
+The integration gateway. Holds connections and credentials, decides each call by
+the caller's profile, and performs invocations — so callers hold only an API key
+and never a credential.
 
 ## Storage
 
@@ -22,5 +22,5 @@ Pass `{ web: false }` to `serveGateway` for a headless gateway with nothing but
 the API on the port.
 
 Requests from that page carry no API key. `src/http/loopback.ts` decides when a
-request may borrow the local client's credential instead, and documents both
+request may borrow the local operator profile's key instead, and documents both
 what that defends against and what it does not.

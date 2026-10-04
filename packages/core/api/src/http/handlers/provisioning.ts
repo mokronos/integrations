@@ -2,7 +2,6 @@ import { whenPresent, whenPresentMap } from "@integragents/contracts"
 import {
   Integrations,
   listIntegrationOverviews,
-  provisionIntegration,
   searchIntegrations
 } from "@integragents/host"
 import type { IntegrationServices } from "@integragents/host"
@@ -19,6 +18,7 @@ import { capture } from "../observability.ts"
 import { asApiFailure } from "./host-failure.ts"
 import {
   connectWithCredentials,
+  discoverIntegration,
   OperationRefused,
   removeConnectionByName,
   requireSlug as decodeSlug,
@@ -74,11 +74,14 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
           }
         }))
       .handle("discover", (request) =>
-        asApiFailure(provisionIntegration(request.payload.url, {
-          ...whenPresent("connection", request.payload.connection),
-          ...whenPresent("slug", request.payload.slug),
-          ...whenPresent("name", request.payload.name)
-        }).pipe(Effect.provide(integrationServices))))
+        Effect.gen(function*() {
+          const tenantId = yield* requireTenant
+          return yield* asApiFailure(discoverIntegration(tenantId, request.payload.url, {
+            ...whenPresent("connection", request.payload.connection),
+            ...whenPresent("slug", request.payload.slug),
+            ...whenPresent("name", request.payload.name)
+          }).pipe(Effect.provide(integrationServices)))
+        }))
       .handle("renameIntegration", (request) =>
         Effect.gen(function*() {
           const slug = yield* requireSlug(request.params["slug"])
@@ -119,8 +122,8 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
       .handle("validate", (request) =>
         Effect.gen(function*() {
           const caller = yield* Identity
-          const clientId = caller.kind === "client" || caller.kind === "local" ? caller.client.id : undefined
-          return yield* validateReference(clientId, request.payload.node, request.payload.live ?? true)
+          const profileId = caller.kind === "key" || caller.kind === "local" ? caller.profile.id : undefined
+          return yield* validateReference(profileId, request.payload.node, request.payload.live ?? true)
         }))
       .handle("listConnections", () =>
         Effect.map(capture(integrations.listConnections()), (connections) => ({ connections })))

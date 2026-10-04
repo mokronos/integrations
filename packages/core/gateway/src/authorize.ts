@@ -1,20 +1,20 @@
 import {
   aliasForConnection,
-  AuthorizationClientRevoked,
+  ApiKey,
   AuthorizationKeyRevoked,
+  AuthorizationProfileRevoked,
   AuthorizationUnknownKey,
-  clientHasCapability,
-  Client,
   connectionSubject,
   isDelegationTemplate,
-  sameConnectionRef
+  Profile,
+  profileHasCapability
 } from "./domain.ts"
 import type {
   Alias,
   Authorization,
   Authorized,
-  ClientCapability,
   ConnectionRef,
+  ProfileCapability,
   SubjectId,
   ToolName
 } from "./domain.ts"
@@ -23,24 +23,25 @@ import { Crypto, Effect, Schema } from "effect"
 import type { GatewayStore } from "./store.ts"
 import type { GatewayStoreError } from "./store.ts"
 
-export const AuthenticatedClient = Schema.Struct({
+export const AuthenticatedProfile = Schema.Struct({
   status: Schema.Literal("authenticated"),
-  client: Client
+  profile: Profile,
+  key: ApiKey
 })
-export type AuthenticatedClient = typeof AuthenticatedClient.Type
+export type AuthenticatedProfile = typeof AuthenticatedProfile.Type
 
-export const ClientAuthentication = Schema.Union([
-  AuthenticatedClient,
+export const KeyAuthentication = Schema.Union([
+  AuthenticatedProfile,
   AuthorizationUnknownKey,
   AuthorizationKeyRevoked,
-  AuthorizationClientRevoked
+  AuthorizationProfileRevoked
 ])
-export type ClientAuthentication = typeof ClientAuthentication.Type
+export type KeyAuthentication = typeof KeyAuthentication.Type
 
-export const authenticateClient = Effect.fn("Authorization.authenticateClient")(function*(
+export const authenticateKey = Effect.fn("Authorization.authenticateKey")(function*(
   store: GatewayStore,
   secret: string
-): Effect.fn.Return<ClientAuthentication, GatewayStoreError, Crypto.Crypto> {
+): Effect.fn.Return<KeyAuthentication, GatewayStoreError, Crypto.Crypto> {
   const resolved = yield* store.findApiKeyByHash((yield* hashApiKey(secret)))
   if (resolved === undefined) {
     return { status: "unknown-key", message: "This API key is not known to the server" }
@@ -49,13 +50,13 @@ export const authenticateClient = Effect.fn("Authorization.authenticateClient")(
     return { status: "key-revoked", message: "This API key was revoked" }
   }
 
-  const client = resolved.client
-  if (client.revokedAt !== null) {
-    return { status: "client-revoked", message: "The client this key belongs to was revoked" }
+  const profile = resolved.profile
+  if (profile.revokedAt !== null) {
+    return { status: "profile-revoked", message: "The profile this credential belongs to was revoked" }
   }
 
   yield* store.touchApiKey(resolved.key.id)
-  return { status: "authenticated", client } satisfies AuthenticatedClient
+  return { status: "authenticated", profile, key: resolved.key } satisfies AuthenticatedProfile
 })
 
 export const authorizeInvocation = Effect.fn("Authorization.authorizeInvocation")(function*(
@@ -67,63 +68,43 @@ export const authorizeInvocation = Effect.fn("Authorization.authorizeInvocation"
     readonly subject?: SubjectId
   }
 ): Effect.fn.Return<Authorization, GatewayStoreError, Crypto.Crypto> {
-  const authentication = yield* authenticateClient(store, input.secret)
+  const authentication = yield* authenticateKey(store, input.secret)
   if (authentication.status !== "authenticated") return authentication
-  return yield* authorizeClientInvocation(store, authentication.client, input)
+  return yield* authorizeProfileInvocation(store, authentication.profile, input)
 })
 
 /**
- * The policy decision for a client the caller has already identified, as an
+ * The decision for a profile the caller has already identified, as an
  * embedding host does when the agent loop and the gateway share a process.
  *
- * A delegated tool is granted on a template, a user-owned connection with no
+ * A delegated tool is enabled on a template, a user-owned connection with no
  * subject. It resolves to the connection of the subject the call names, so the
- * same grant serves every user and no user reaches another's credential.
+ * same tool serves every user and no user reaches another's credential.
  */
-export const authorizeClientInvocation = Effect.fn("Authorization.authorizeClientInvocation")(function*(
+export const authorizeProfileInvocation = Effect.fn("Authorization.authorizeProfileInvocation")(function*(
   store: GatewayStore,
-  client: Client,
+  profile: Profile,
   input: {
     readonly alias: Alias
     readonly tool: ToolName
     readonly subject?: SubjectId
   }
 ): Effect.fn.Return<Authorization, GatewayStoreError> {
-  if (client.revokedAt !== null) {
-    return { status: "client-revoked", message: "The client this key belongs to was revoked" }
+  if (profile.revokedAt !== null) {
+    return { status: "profile-revoked", message: "The profile this credential belongs to was revoked" }
   }
-  const [accessProfile, approvalPolicy] = yield* Effect.all([
-    store.findAccessProfile(client.tenantId, client.accessProfileId),
-    store.findApprovalPolicy(client.tenantId, client.approvalPolicyId)
-  ])
-  const profileTools = accessProfile === undefined
-    ? []
-    : yield* store.listAccessProfileTools(accessProfile.id)
-  const accessProfileTool = profileTools.find((candidate) =>
+  const profileTool = (yield* store.listProfileTools(profile.id)).find((candidate) =>
     candidate.tool === input.tool && aliasForConnection(candidate.connection) === input.alias)
-  const approvalPolicyTools = approvalPolicy === undefined
-    ? []
-    : yield* store.listApprovalPolicyTools(approvalPolicy.id)
-  const approvalPolicyTool = accessProfileTool === undefined
-    ? undefined
-    : approvalPolicyTools.find((candidate) =>
-      candidate.tool === input.tool
-      && sameConnectionRef(candidate.connection, accessProfileTool.connection))
-  if (accessProfile === undefined || accessProfileTool === undefined) {
+  if (profileTool === undefined) {
     return {
       status: "not-authorized",
       alias: input.alias,
       tool: input.tool,
-      message: `${input.alias}.${input.tool} is not authorized for this client`
+      message: `${input.alias}.${input.tool} is not enabled for this profile`
     }
   }
-  if (approvalPolicy === undefined || approvalPolicyTool === undefined) {
-    return yield* Effect.die(new Error(
-      `Approval policy ${client.approvalPolicyId} has no decision for ${input.alias}.${input.tool}`
-    ))
-  }
 
-  let connection: ConnectionRef = accessProfileTool.connection
+  let connection: ConnectionRef = profileTool.connection
   if (isDelegationTemplate(connection)) {
     if (input.subject === undefined) {
       return {
@@ -138,21 +119,19 @@ export const authorizeClientInvocation = Effect.fn("Authorization.authorizeClien
 
   return {
     status: "authorized",
-    client,
-    accessProfile,
-    accessProfileTool,
-    approvalPolicy,
-    approvalPolicyTool,
+    profile,
+    profileTool,
     alias: input.alias,
     connection,
     subject: connectionSubject(connection) ?? null,
-    decision: approvalPolicyTool.decision
+    decision: profileTool.decision
   } satisfies Authorized
 })
 
 export const CapabilityAuthorized = Schema.Struct({
   status: Schema.Literal("authorized"),
-  client: Client
+  profile: Profile,
+  key: ApiKey
 })
 export type CapabilityAuthorized = typeof CapabilityAuthorized.Type
 
@@ -166,25 +145,25 @@ export const CapabilityAuthorization = Schema.Union([
   CapabilityAuthorized,
   AuthorizationUnknownKey,
   AuthorizationKeyRevoked,
-  AuthorizationClientRevoked,
+  AuthorizationProfileRevoked,
   CapabilityNotPermitted
 ])
 export type CapabilityAuthorization = typeof CapabilityAuthorization.Type
 
-export const authorizeClientCapability = Effect.fn("Authorization.authorizeClientCapability")(
+export const authorizeProfileCapability = Effect.fn("Authorization.authorizeProfileCapability")(
   function*(
     store: GatewayStore,
     secret: string,
-    capability: ClientCapability
+    capability: ProfileCapability
   ): Effect.fn.Return<CapabilityAuthorization, GatewayStoreError, Crypto.Crypto> {
-    const authentication = yield* authenticateClient(store, secret)
+    const authentication = yield* authenticateKey(store, secret)
     if (authentication.status !== "authenticated") return authentication
-    if (!clientHasCapability(authentication.client, capability)) {
+    if (!profileHasCapability(authentication.profile, capability)) {
       return {
         status: "not-permitted",
         message: "This credential does not hold the required permission"
       }
     }
-    return { status: "authorized", client: authentication.client } satisfies CapabilityAuthorized
+    return { status: "authorized", profile: authentication.profile, key: authentication.key } satisfies CapabilityAuthorized
   }
 )

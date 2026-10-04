@@ -4,5 +4,5 @@ export const agent = sqliteTable("agent", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   tenantId: text("tenant_id").notNull(),
-  gatewayClientId: text("gateway_client_id").notNull()
+  gatewayProfileId: text("gateway_profile_id").notNull()
 })

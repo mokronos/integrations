@@ -2,7 +2,7 @@ import { Context, Crypto, Duration, Effect, Layer, Option } from "effect"
 import { RateLimiter } from "effect/persistence"
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { Authority } from "./middleware.ts"
-import { authenticateClient, authorizeClientCapability, GatewayStoreService } from "@integragents/gateway-core"
+import { authenticateKey, authorizeProfileCapability, GatewayStoreService } from "@integragents/gateway-core"
 import { SessionTokenHash } from "@integragents/gateway-core"
 import { hashSessionToken } from "@integragents/gateway-core"
 import { webCryptoLayer } from "@integragents/contracts"
@@ -17,20 +17,20 @@ import {
   refusedOf,
   requiredCapability
 } from "./identity.ts"
-import type { Access, Caller } from "./identity.ts"
+import type { Access, Principal } from "./identity.ts"
 
 export {
   currentSession,
   decidedBy,
   Forbidden,
   Identity,
-  requireClient,
+  requireKeyHolder,
   requireSecret,
   requireTenant,
   Unauthorized
 } from "./identity.ts"
 import { capture } from "./observability.ts"
-export type { Caller, Refused } from "./identity.ts"
+export type { Principal, Refused } from "./identity.ts"
 
 const sessionCookieName = "integrations_session"
 
@@ -131,19 +131,19 @@ interface ResolvedAuthority {
   readonly store: GatewayStore
 }
 
-const resolveCaller = Effect.fn("Authority.resolveCaller")(function*(
+const resolvePrincipal = Effect.fn("Authority.resolvePrincipal")(function*(
   options: ResolvedAuthority,
   headers: Readonly<Record<string, string>>,
   context: RequestContext
 ) {
   const secret = presentedSecret(headers)
   if (Option.isSome(secret)) {
-    const authentication = yield* capture(authenticateClient(options.store, secret.value)
+    const authentication = yield* capture(authenticateKey(options.store, secret.value)
     )
     if (authentication.status !== "authenticated") {
       return yield* refusedOf(authentication.status)
     }
-    return { kind: "client", client: authentication.client, secret: secret.value } satisfies Caller
+    return { kind: "key", profile: authentication.profile, key: authentication.key, secret: secret.value } satisfies Principal
   }
 
   const token = readSessionCookieValue(headers["cookie"])
@@ -151,31 +151,31 @@ const resolveCaller = Effect.fn("Authority.resolveCaller")(function*(
     const session = yield* capture(
       options.store.findLiveSession(SessionTokenHash.make((yield* hashSessionToken(token.value))))
     )
-    if (session === undefined) return { kind: "anonymous" } satisfies Caller
+    if (session === undefined) return { kind: "anonymous" } satisfies Principal
     return {
       kind: "session",
       tenantId: session.tenantId,
       subjectId: session.subjectId,
       email: session.email,
       tokenHash: session.tokenHash
-    } satisfies Caller
+    } satisfies Principal
   }
 
   const localSecret = context.localSecret
   if (localSecret !== undefined) {
-    const authentication = yield* capture(authenticateClient(options.store, localSecret)
+    const authentication = yield* capture(authenticateKey(options.store, localSecret)
     )
     if (authentication.status === "authenticated") {
-      return { kind: "local", client: authentication.client } satisfies Caller
+      return { kind: "local", profile: authentication.profile, key: authentication.key } satisfies Principal
     }
   }
 
-  return { kind: "anonymous" } satisfies Caller
+  return { kind: "anonymous" } satisfies Principal
 })
 
 const admit = Effect.fn("Authority.admit")(function*(
   options: ResolvedAuthority,
-  caller: Caller,
+  caller: Principal,
   access: Access,
   method: string,
   headers: Readonly<Record<string, string>>
@@ -201,32 +201,32 @@ const admit = Effect.fn("Authority.admit")(function*(
 
   const capability = requiredCapability(access)
   if (capability === undefined) return
-  const authorization = yield* capture(authorizeClientCapability(options.store, caller.secret, capability)
+  const authorization = yield* capture(authorizeProfileCapability(options.store, caller.secret, capability)
   )
   if (authorization.status !== "authorized") {
     return yield* refusedOf(authorization.status)
   }
 })
 
-const callerAttributes = (caller: Caller) => {
+const callerAttributes = (caller: Principal) => {
   switch (caller.kind) {
     case "session":
       return { "caller.kind": caller.kind, "tenant.id": caller.tenantId }
-    case "client":
+    case "key":
     case "local":
-      return { "caller.kind": caller.kind, "client.id": caller.client.id, "tenant.id": caller.client.tenantId }
+      return { "caller.kind": caller.kind, "profile.id": caller.profile.id, "api_key.id": caller.key.id, "tenant.id": caller.profile.tenantId }
     case "anonymous":
       return { "caller.kind": caller.kind }
   }
 }
 
-const principalKey = (caller: Caller): Option.Option<string> => {
+const principalKey = (caller: Principal): Option.Option<string> => {
   switch (caller.kind) {
     case "session":
       return Option.some(`subject:${caller.subjectId}`)
-    case "client":
+    case "key":
     case "local":
-      return Option.some(`${caller.kind}:${caller.client.id}`)
+      return Option.some(`${caller.kind}:${caller.key.id}`)
     case "anonymous":
       return Option.none()
   }
@@ -281,8 +281,8 @@ export const authorityLayer = (
           }
 
           const caller = unmetered
-            ? ({ kind: "anonymous" } satisfies Caller)
-            : yield* resolveCaller(resolved, headers, context)
+            ? ({ kind: "anonymous" } satisfies Principal)
+            : yield* resolvePrincipal(resolved, headers, context)
           yield* Effect.annotateCurrentSpan(callerAttributes(caller))
 
           if (!unmetered && limits !== undefined) {

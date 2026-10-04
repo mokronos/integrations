@@ -8,9 +8,7 @@ import {
   ApprovalDeliveryId,
   ApprovalDestinationId,
   AuditId,
-  ClientId,
-  AccessProfileId,
-  ApprovalPolicyId,
+  ProfileId,
   ApprovalRuleId,
   LoginHandoffHash,
   OAuthApplicationId,
@@ -93,16 +91,10 @@ export const generateApprovalSigningSecret: Effect.Effect<string, never, Crypto.
 /** Session tokens carry the same prefix and entropy as approval secrets. */
 export const sessionSecret: Effect.Effect<string, never, Crypto.Crypto> = prefixedSecret("igs_")
 
-export const newClientId: Effect.Effect<ClientId, never, Crypto.Crypto> = Effect.map(
+export const newProfileId: Effect.Effect<ProfileId, never, Crypto.Crypto> = Effect.map(
   uuid,
-  ClientId.make
+  ProfileId.make
 )
-export const newAccessProfileId: Effect.Effect<AccessProfileId, never, Crypto.Crypto> = Effect.map(
-  uuid,
-  AccessProfileId.make
-)
-export const newApprovalPolicyId: Effect.Effect<ApprovalPolicyId, never, Crypto.Crypto> = Effect
-  .map(uuid, ApprovalPolicyId.make)
 export const newApprovalRuleId: Effect.Effect<ApprovalRuleId, never, Crypto.Crypto> = Effect.map(uuid, ApprovalRuleId.make)
 export const newApprovalId: Effect.Effect<ApprovalId, never, Crypto.Crypto> = Effect.map(
   uuid,

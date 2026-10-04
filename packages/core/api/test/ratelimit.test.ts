@@ -7,7 +7,7 @@ import {
   createGatewayHandler,
   defaultTenantId,
   generateApiKey,
-  newClientId
+  newProfileId
 } from "./gateway.ts"
 import type { GatewayStore } from "./gateway.ts"
 import { stubIntegrationsContext } from "./stubs.ts"
@@ -23,21 +23,15 @@ const bodyOf = (response: Response) =>
 
 describe("gateway traffic shaping", () => {
   const keyFor = Effect.fnUntraced(function*(store: GatewayStore, name: string) {
-    const accessProfile = yield* store.findDefaultAccessProfile(defaultTenantId)
-    const approvalPolicy = yield* store.findDefaultApprovalPolicy(defaultTenantId)
-    if (accessProfile === undefined || approvalPolicy === undefined) {
-      throw new Error("missing defaults")
-    }
-    const client = yield* store.createClient({
-      id: yield* newClientId,
+    const profile = yield* store.createProfile({
+      id: yield* newProfileId,
       tenantId: defaultTenantId,
-      accessProfileId: accessProfile.id,
-      approvalPolicyId: approvalPolicy.id,
       name,
-      capabilities: ["provision_connections", "administer_gateway"]
+      capabilities: ["provision_connections", "administer_gateway"],
+      tools: []
     })
     const key = yield* generateApiKey
-    yield* store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
+    yield* store.addApiKey({ id: key.id, profileId: profile.id, name, hash: key.hash })
     return key
   })
 
@@ -119,7 +113,7 @@ describe("gateway traffic shaping", () => {
       const { key, send } = yield* setup({ maxBodyBytes: 16 })
       const body = JSON.stringify({ name: "x".repeat(64) })
 
-      const response = yield* send(new Request("http://gateway.test/v1/clients", {
+      const response = yield* send(new Request("http://gateway.test/v1/profiles", {
         method: "POST",
         headers: {
           "content-type": "application/json",

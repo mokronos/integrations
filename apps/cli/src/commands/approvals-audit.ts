@@ -173,7 +173,7 @@ export const auditCommand = Command.make(
       Flag.withDescription("How many records to read (default: 50)")
     ),
     offset: offsetFlag(),
-    client: Flag.String("client").pipe(Flag.optional, Flag.withDescription("Only this client id")),
+    profile: Flag.String("profile").pipe(Flag.optional, Flag.withDescription("Only this profile id")),
     alias: Flag.String("alias").pipe(Flag.optional, Flag.withDescription("Only this alias")),
     tool: Flag.String("tool").pipe(Flag.optional, Flag.withDescription("Only this tool")),
     outcome: Flag.Literals("outcome", ["succeeded", "failed", "denied", "pending"]).pipe(
@@ -192,7 +192,7 @@ export const auditCommand = Command.make(
         limit: String(options.limit),
         offset: String(Option.getOrElse(options.offset, () => 0))
       })
-      if (Option.isSome(options.client)) parameters.set("clientId", options.client.value)
+      if (Option.isSome(options.profile)) parameters.set("profileId", options.profile.value)
       if (Option.isSome(options.alias)) parameters.set("alias", options.alias.value)
       if (Option.isSome(options.tool)) parameters.set("tool", options.tool.value)
       if (Option.isSome(options.outcome)) parameters.set("outcome", options.outcome.value)

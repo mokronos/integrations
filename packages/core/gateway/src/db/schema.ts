@@ -37,70 +37,24 @@ export const gatewaySession = sqliteTable("gateway_session", {
   expiresAt: integer("expires_at").notNull()
 })
 
-export const gatewayAccessProfile = sqliteTable("gateway_access_profile", {
+export const gatewayProfile = sqliteTable("gateway_profile", {
   id: text("id").primaryKey(),
   tenantId: text("tenant_id").notNull().references(() => gatewayTenant.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
-  isDefault: integer("is_default").notNull().default(0),
+  capabilities: text("capabilities").notNull(),
+  approvalMethod: text("approval_method").notNull().default("elicitation"),
+  mcpSurface: text("mcp_surface").notNull().default("tools"),
+  approvalGroupWindowMinutes: integer("approval_group_window_minutes").notNull().default(30),
+  includeNewTools: integer("include_new_tools").notNull().default(0),
   createdAt: createdAt(),
-  updatedAt: integer("updated_at").notNull()
+  revokedAt: integer("revoked_at")
 }, (table) => [
-  uniqueIndex("gateway_access_profile_name_tenant").on(table.tenantId, table.name),
-  uniqueIndex("gateway_access_profile_default_tenant")
-    .on(table.tenantId)
-    .where(sql`is_default = 1`)
+  uniqueIndex("gateway_profile_name_tenant").on(table.tenantId, table.name)
 ])
 
-export const gatewayAccessProfileTool = sqliteTable("gateway_access_profile_tool", {
-  accessProfileId: text("access_profile_id").notNull().references(
-    () => gatewayAccessProfile.id,
-    { onDelete: "cascade" }
-  ),
-  owner: text("owner").notNull(),
-  subject: text("subject"),
-  integration: text("integration").notNull(),
-  connectionName: text("connection_name").notNull(),
-  tool: text("tool").notNull()
-}, (table) => [
-  primaryKey({
-    columns: [
-      table.accessProfileId,
-      table.owner,
-      table.subject,
-      table.integration,
-      table.connectionName,
-      table.tool
-    ]
-  }),
-  uniqueIndex("gateway_access_profile_tool_route").on(
-    table.accessProfileId,
-    table.owner,
-    unscopedSubject,
-    table.integration,
-    table.connectionName,
-    table.tool
-  )
-])
-
-export const gatewayApprovalPolicy = sqliteTable("gateway_approval_policy", {
-  id: text("id").primaryKey(),
-  tenantId: text("tenant_id").notNull().references(() => gatewayTenant.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  isDefault: integer("is_default").notNull().default(0),
-  createdAt: createdAt(),
-  updatedAt: integer("updated_at").notNull()
-}, (table) => [
-  uniqueIndex("gateway_approval_policy_name_tenant").on(table.tenantId, table.name),
-  uniqueIndex("gateway_approval_policy_default_tenant")
-    .on(table.tenantId)
-    .where(sql`is_default = 1`)
-])
-
-export const gatewayApprovalPolicyTool = sqliteTable("gateway_approval_policy_tool", {
-  approvalPolicyId: text("approval_policy_id").notNull().references(
-    () => gatewayApprovalPolicy.id,
-    { onDelete: "cascade" }
-  ),
+/** One enabled tool on one connection, and whether its calls wait for a human. */
+export const gatewayProfileTool = sqliteTable("gateway_profile_tool", {
+  profileId: text("profile_id").notNull().references(() => gatewayProfile.id, { onDelete: "cascade" }),
   owner: text("owner").notNull(),
   subject: text("subject"),
   integration: text("integration").notNull(),
@@ -110,7 +64,7 @@ export const gatewayApprovalPolicyTool = sqliteTable("gateway_approval_policy_to
 }, (table) => [
   primaryKey({
     columns: [
-      table.approvalPolicyId,
+      table.profileId,
       table.owner,
       table.subject,
       table.integration,
@@ -118,8 +72,8 @@ export const gatewayApprovalPolicyTool = sqliteTable("gateway_approval_policy_to
       table.tool
     ]
   }),
-  uniqueIndex("gateway_approval_policy_tool_route").on(
-    table.approvalPolicyId,
+  uniqueIndex("gateway_profile_tool_route").on(
+    table.profileId,
     table.owner,
     unscopedSubject,
     table.integration,
@@ -128,13 +82,10 @@ export const gatewayApprovalPolicyTool = sqliteTable("gateway_approval_policy_to
   )
 ])
 
-/** A saved "always approve": calls to one policy tool whose arguments fit the sealed pattern skip approval. */
+/** A saved "always approve": calls to one profile tool whose arguments fit the sealed pattern skip approval. */
 export const gatewayApprovalRule = sqliteTable("gateway_approval_rule", {
   id: text("id").primaryKey(),
-  approvalPolicyId: text("approval_policy_id").notNull().references(
-    () => gatewayApprovalPolicy.id,
-    { onDelete: "cascade" }
-  ),
+  profileId: text("profile_id").notNull().references(() => gatewayProfile.id, { onDelete: "cascade" }),
   owner: text("owner").notNull(),
   subject: text("subject"),
   integration: text("integration").notNull(),
@@ -144,28 +95,13 @@ export const gatewayApprovalRule = sqliteTable("gateway_approval_rule", {
   createdAt: createdAt(),
   createdBy: text("created_by")
 }, (table) => [
-  index("gateway_approval_rule_route").on(table.approvalPolicyId, table.integration, table.connectionName, table.tool)
-])
-
-export const gatewayClient = sqliteTable("gateway_client", {
-  id: text("id").primaryKey(),
-  tenantId: text("tenant_id").notNull().references(() => gatewayTenant.id, { onDelete: "cascade" }),
-  accessProfileId: text("access_profile_id").notNull().references(() => gatewayAccessProfile.id),
-  approvalPolicyId: text("approval_policy_id").notNull().references(() => gatewayApprovalPolicy.id),
-  name: text("name").notNull(),
-  capabilities: text("capabilities").notNull(),
-  approvalMethod: text("approval_method").notNull().default("elicitation"),
-  mcpSurface: text("mcp_surface").notNull().default("tools"),
-  approvalGroupWindowMinutes: integer("approval_group_window_minutes").notNull().default(30),
-  createdAt: createdAt(),
-  revokedAt: integer("revoked_at")
-}, (table) => [
-  uniqueIndex("gateway_client_name_tenant").on(table.tenantId, table.name)
+  index("gateway_approval_rule_route").on(table.profileId, table.integration, table.connectionName, table.tool)
 ])
 
 export const gatewayApiKey = sqliteTable("gateway_api_key", {
   id: text("id").primaryKey(),
-  clientId: text("client_id").notNull().references(() => gatewayClient.id, { onDelete: "cascade" }),
+  profileId: text("profile_id").notNull().references(() => gatewayProfile.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
   hash: text("hash").notNull().unique(),
   createdAt: createdAt(),
   lastUsedAt: integer("last_used_at"),
@@ -202,7 +138,7 @@ export const gatewayOauthGrant = sqliteTable("gateway_oauth_grant", {
   applicationId: text("application_id").notNull().references(() => gatewayOauthApplication.id, { onDelete: "cascade" }),
   subjectId: text("subject_id").notNull().references(() => gatewaySubject.id, { onDelete: "cascade" }),
   tenantId: text("tenant_id").notNull().references(() => gatewayTenant.id, { onDelete: "cascade" }),
-  clientId: text("client_id").notNull().references(() => gatewayClient.id, { onDelete: "cascade" }),
+  profileId: text("profile_id").notNull().references(() => gatewayProfile.id, { onDelete: "cascade" }),
   resource: text("resource").notNull(),
   scope: text("scope").notNull(),
   createdAt: createdAt(),
@@ -210,7 +146,7 @@ export const gatewayOauthGrant = sqliteTable("gateway_oauth_grant", {
   revokedAt: integer("revoked_at")
 }, (table) => [
   uniqueIndex("gateway_oauth_grant_binding").on(
-    table.applicationId, table.subjectId, table.clientId, table.resource, table.scope
+    table.applicationId, table.subjectId, table.profileId, table.resource, table.scope
   )
 ])
 
@@ -279,9 +215,12 @@ export const gatewayIdentityOauthState = sqliteTable("gateway_identity_oauth_sta
 export const gatewayPendingApproval = sqliteTable("gateway_pending_approval", {
   id: text("id").primaryKey(),
   tenantId: text("tenant_id").notNull().references(() => gatewayTenant.id, { onDelete: "cascade" }),
-  clientId: text("client_id").notNull().references(() => gatewayClient.id, { onDelete: "cascade" }),
-  approvalPolicyId: text("approval_policy_id").notNull().references(() => gatewayApprovalPolicy.id),
-  accessProfileId: text("access_profile_id").notNull().references(() => gatewayAccessProfile.id),
+  profileId: text("profile_id").notNull().references(() => gatewayProfile.id, { onDelete: "cascade" }),
+  apiKeyId: text("api_key_id"),
+  oauthGrantId: text("oauth_grant_id"),
+  oauthApplicationId: text("oauth_application_id"),
+  credentialName: text("credential_name"),
+  agent: text("agent"),
   alias: text("alias").notNull(),
   tool: text("tool").notNull(),
   arguments: text("arguments").notNull(),
@@ -299,17 +238,15 @@ export const gatewayPendingApproval = sqliteTable("gateway_pending_approval", {
   index("gateway_pending_approval_retry")
     .on(
       table.tenantId,
-      table.clientId,
+      table.profileId,
       table.alias,
-      table.approvalPolicyId,
-      table.accessProfileId,
       table.tool,
       table.argumentsLookup,
       table.arguments
     )
     .where(sql`collected_at IS NULL`),
   index("gateway_pending_approval_group").on(table.groupId, table.status),
-  index("gateway_pending_approval_open").on(table.clientId, table.tool, table.status)
+  index("gateway_pending_approval_open").on(table.profileId, table.tool, table.status)
 ])
 
 export const gatewayApprovalDestination = sqliteTable("gateway_approval_destination", {
@@ -325,10 +262,10 @@ export const gatewayApprovalDestination = sqliteTable("gateway_approval_destinat
   uniqueIndex("gateway_approval_destination_name_tenant").on(table.tenantId, table.name)
 ])
 
-export const gatewayClientApprovalDestination = sqliteTable("gateway_client_approval_destination", {
-  clientId: text("client_id").notNull().references(() => gatewayClient.id, { onDelete: "cascade" }),
+export const gatewayProfileApprovalDestination = sqliteTable("gateway_profile_approval_destination", {
+  profileId: text("profile_id").notNull().references(() => gatewayProfile.id, { onDelete: "cascade" }),
   destinationId: text("destination_id").notNull().references(() => gatewayApprovalDestination.id, { onDelete: "cascade" })
-}, (table) => [primaryKey({ columns: [table.clientId, table.destinationId] })])
+}, (table) => [primaryKey({ columns: [table.profileId, table.destinationId] })])
 
 export const gatewayApprovalDelivery = sqliteTable("gateway_approval_delivery", {
   id: text("id").primaryKey(),
@@ -347,9 +284,12 @@ export const gatewayApprovalDelivery = sqliteTable("gateway_approval_delivery", 
 export const gatewayAudit = sqliteTable("gateway_audit", {
   id: text("id").primaryKey(),
   tenantId: text("tenant_id").notNull().references(() => gatewayTenant.id, { onDelete: "cascade" }),
-  clientId: text("client_id"),
+  profileId: text("profile_id"),
+  apiKeyId: text("api_key_id"),
   oauthGrantId: text("oauth_grant_id"),
   oauthApplicationId: text("oauth_application_id"),
+  credentialName: text("credential_name"),
+  agent: text("agent"),
   authorizedBySubjectId: text("authorized_by_subject_id"),
   alias: text("alias"),
   tool: text("tool"),

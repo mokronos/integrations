@@ -3,14 +3,13 @@ import { Link, useNavigate, useSearchParams } from "react-router"
 import { ArrowLeft, ArrowRight, Check, CheckCircle2, KeyRound, Plug, ShieldCheck } from "lucide-react"
 import { Effect, Option, Schema } from "effect"
 import { FetchHttpClient } from "effect/http"
-import { ConnectionName, IntegrationSlug, ToolName } from "@integragents/contracts"
+import { ConnectionName, IntegrationSlug, ProfileId, ToolName, whenPresent } from "@integragents/contracts"
 import { makeGatewayClient } from "@integragents/client/client"
 
 import { useSession } from "@/components/auth-gate"
-import { ConnectTabs } from "@/components/clients/connect-tabs"
+import { ConnectTabs } from "@/components/profiles/connect-tabs"
+import { AddIntegrationDialog } from "@/components/integrations/add-integration-dialog"
 import { ConnectDialog } from "@/components/integrations/connect-dialog"
-import { DiscoverDialog } from "@/components/integrations/discover-dialog"
-import { RegistrySearchDialog } from "@/components/integrations/registry-search-dialog"
 import { LoadingRows, QueryError } from "@/components/page"
 import { Badge } from "@/components/ui/badge"
 import { AuditOutcomeBadge } from "@/components/audit-outcome"
@@ -21,14 +20,14 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import * as gateway from "@/lib/gateway"
 import { apiKeyPlaceholder } from "@/lib/mcp"
-import { keys, useClients, useIntegrations, useGatewayUrl, useInvalidate, useMcpUrl, useMutation, useQuery } from "@/lib/queries"
-import type { ClientId, Connection, IntegrationOverview } from "@integragents/contracts"
+import { keys, useIntegrations, useGatewayUrl, useInvalidate, useMcpUrl, useMutation, useProfiles, useQuery } from "@/lib/queries"
+import type { Connection, IntegrationOverview } from "@integragents/contracts"
 
 const Step = Schema.Literals(["connect", "access", "agent", "verify"])
 type Step = typeof Step.Type
 const steps: ReadonlyArray<{ readonly id: Step; readonly title: string }> = [
   { id: "connect", title: "Connect a service" },
-  { id: "access", title: "Choose access" },
+  { id: "access", title: "Choose tools" },
   { id: "agent", title: "Connect your agent" },
   { id: "verify", title: "Try it out" }
 ]
@@ -38,7 +37,7 @@ export function OnboardingRoute() {
   const navigate = useNavigate()
   const session = useSession()
   const integrations = useIntegrations()
-  const clients = useClients()
+  const profiles = useProfiles()
   const gatewayUrl = useGatewayUrl()
   const mcpUrl = useMcpUrl()
   const invalidate = useInvalidate()
@@ -46,8 +45,11 @@ export function OnboardingRoute() {
   const stepIndex = steps.findIndex((entry) => entry.id === step)
   const selected = integrations.data?.find((integration) => integration.slug === params.get("integration"))
   const connection = selected?.connections.find((entry) => entry.address === params.get("connection"))
-  const client = clients.data?.find((entry) => entry.id === params.get("client") && entry.revokedAt === null && !entry.capabilities.includes("administer_gateway"))
-  const [existingClient, setExistingClient] = useState("")
+  const usable = (profiles.data ?? []).map((entry) => entry.profile)
+    .filter((entry) => entry.revokedAt === null && !entry.capabilities.includes("administer_gateway"))
+  const profile = usable.find((entry) => entry.id === params.get("profile"))
+  const [existingProfile, setExistingProfile] = useState("")
+  const [appName, setAppName] = useState("My agent")
 
   const go = (next: Step, values: Readonly<Record<string, string>> = {}) => {
     setParams((current) => {
@@ -62,10 +64,10 @@ export function OnboardingRoute() {
     void navigate("/")
   }
   const issue = useMutation({
-    mutationFn: (clientId: ClientId) => gateway.issueKey(clientId),
-    onSuccess: () => invalidate(keys.clients, keys.overview)
+    mutationFn: (profileId: ProfileId) => gateway.issueKey(profileId, appName.trim()),
+    onSuccess: () => invalidate(keys.profiles, keys.overview)
   })
-  const secret = issue.variables === client?.id ? issue.data?.secret : undefined
+  const secret = issue.variables === profile?.id ? issue.data?.secret : undefined
   const verify = useMutation({
     mutationFn: async () => {
       if (secret === undefined) throw new Error("Issue a key in the previous step to verify access.")
@@ -79,9 +81,9 @@ export function OnboardingRoute() {
     }
   })
   const activity = useQuery({
-    queryKey: ["onboarding-activity", client?.id],
-    queryFn: () => gateway.listAudit({ clientId: client?.id ?? "", limit: 5, offset: 0 }),
-    enabled: step === "verify" && client !== undefined
+    queryKey: ["onboarding-activity", profile?.id],
+    queryFn: () => gateway.listAudit({ ...whenPresent("profileId", profile?.id), limit: 5, offset: 0 }),
+    enabled: step === "verify" && profile !== undefined
   })
 
   return <div className="mx-auto w-full max-w-3xl space-y-8 px-4 py-4 sm:px-6 sm:py-10">
@@ -105,11 +107,10 @@ export function OnboardingRoute() {
         <p className="text-muted-foreground max-w-xl text-base leading-relaxed">Start with one service. You’ll choose what your agent can do and which calls need your approval. The gateway holds the service’s credentials.</p>
       </div>
       <Card>
-        <CardHeader><CardTitle>Connect your first service</CardTitle><CardDescription>Find a service, or add an MCP endpoint or OpenAPI document you already use.</CardDescription></CardHeader>
+        <CardHeader><CardTitle>Connect your first service</CardTitle><CardDescription>Find a service, or paste the URL of an MCP server or OpenAPI document you already use.</CardDescription></CardHeader>
         <CardContent className="space-y-5">
           <div className="flex flex-wrap gap-2">
-            <RegistrySearchDialog onInstalled={(slug) => go("connect", { integration: slug })} />
-            <DiscoverDialog onInstalled={(slug) => go("connect", { integration: slug })} />
+            <AddIntegrationDialog onInstalled={(slug) => go("connect", { integration: slug })} />
           </div>
           <QueryError error={integrations.error} />
           {integrations.isPending ? <LoadingRows rows={2} /> : integrations.data?.map((integration) => <div key={integration.slug} className={`space-y-3 rounded-xl border p-4 ${selected?.slug === integration.slug ? "border-primary/50 bg-primary/5" : ""}`}>
@@ -121,31 +122,33 @@ export function OnboardingRoute() {
           </div>)}
         </CardContent>
       </Card>
-      {(clients.data ?? []).some((entry) => entry.revokedAt === null && !entry.capabilities.includes("administer_gateway")) ? <div className="space-y-2 rounded-xl border border-dashed p-4">
-        <Label htmlFor="existing-client">Already have a client? Continue with it.</Label>
-        <div className="flex flex-wrap gap-2"><select id="existing-client" value={existingClient} onChange={(event) => setExistingClient(event.target.value)} className="bg-background min-w-0 flex-1 rounded-md border px-3 py-2 text-sm"><option value="">Choose a client</option>{clients.data?.filter((entry) => entry.revokedAt === null && !entry.capabilities.includes("administer_gateway")).map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select><Button variant="outline" disabled={!existingClient} onClick={() => { issue.reset(); verify.reset(); go("agent", { client: existingClient }) }}>Use client</Button></div>
+      {usable.length > 0 ? <div className="space-y-2 rounded-xl border border-dashed p-4">
+        <Label htmlFor="existing-profile">Already have a profile? Continue with it.</Label>
+        <div className="flex flex-wrap gap-2"><select id="existing-profile" value={existingProfile} onChange={(event) => setExistingProfile(event.target.value)} className="bg-background min-w-0 flex-1 rounded-md border px-3 py-2 text-sm"><option value="">Choose a profile</option>{usable.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select><Button variant="outline" disabled={!existingProfile} onClick={() => { issue.reset(); verify.reset(); go("agent", { profile: existingProfile }) }}>Use profile</Button></div>
       </div> : null}
-      <QueryError error={clients.error} />
+      <QueryError error={profiles.error} />
     </> : null}
 
-    {step === "access" ? selected !== undefined && connection !== undefined ? <AccessStep key={connection.address} integration={selected} connection={connection} onBack={() => go("connect")} onCreated={(id) => go("agent", { client: id })} /> : <Card><CardContent className="space-y-4 py-6"><p>Choose a connected account to set up access.</p><Button onClick={() => go("connect")}>Choose a service</Button></CardContent></Card> : null}
+    {step === "access" ? selected !== undefined && connection !== undefined ? <AccessStep key={connection.address} integration={selected} connection={connection} onBack={() => go("connect")} onCreated={(id) => go("agent", { profile: id })} /> : <Card><CardContent className="space-y-4 py-6"><p>Choose a connected account to set up access.</p><Button onClick={() => go("connect")}>Choose a service</Button></CardContent></Card> : null}
 
-    {step === "agent" || step === "verify" ? (clients.isPending || (clients.isFetching && client === undefined)) ? <LoadingRows /> : client === undefined ? <Card><CardContent className="space-y-4 py-6"><p>This client is no longer available. Choose a client to continue.</p><Button onClick={() => go("connect")}>Choose a client</Button></CardContent></Card> : <>
-      <div className="space-y-2"><h1 className="text-3xl font-semibold tracking-tight">{step === "agent" ? "Give your agent its own key." : "Make your first connection."}</h1><p className="text-muted-foreground">{step === "agent" ? `Connect ${client.name} to this gateway. Its key only permits the access you chose.` : "Verify the key, then ask your agent to use a connected tool."}</p></div>
+    {step === "agent" || step === "verify" ? (profiles.isPending || (profiles.isFetching && profile === undefined)) ? <LoadingRows /> : profile === undefined ? <Card><CardContent className="space-y-4 py-6"><p>This profile is no longer available. Choose one to continue.</p><Button onClick={() => go("connect")}>Choose a profile</Button></CardContent></Card> : <>
+      <div className="space-y-2"><h1 className="text-3xl font-semibold tracking-tight">{step === "agent" ? "Give your agent its own key." : "Make your first connection."}</h1><p className="text-muted-foreground">{step === "agent" ? `Give the app you use a key for ${profile.name}. It can only use the tools you chose.` : "Verify the key, then ask your agent to use a connected tool."}</p></div>
       {step === "agent" ? <Card><CardContent className="space-y-5 py-6">
-        <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="flex items-center gap-2 font-medium"><KeyRound className="size-4" />Client key</p><p className="text-muted-foreground mt-1 text-sm">Shown once. Copy your configuration before leaving this page.</p></div><Button onClick={() => issue.mutate(client.id)} disabled={issue.isPending || secret !== undefined}>{issue.isPending ? "Issuing key…" : secret === undefined ? "Issue a key" : "Key issued"}</Button></div>
+        <div className="space-y-3"><div><p className="flex items-center gap-2 font-medium"><KeyRound className="size-4" />API key</p><p className="text-muted-foreground mt-1 text-sm">Shown once. Copy your configuration before leaving this page.</p></div>
+          <div className="flex flex-wrap items-end gap-2"><div className="min-w-0 flex-1 space-y-1.5"><Label htmlFor="onboarding-app-name">Which app is this key for?</Label><Input id="onboarding-app-name" value={appName} onChange={(event) => setAppName(event.target.value)} placeholder="e.g. Claude Code" disabled={secret !== undefined} /></div><Button onClick={() => issue.mutate(profile.id)} disabled={issue.isPending || secret !== undefined || appName.trim().length === 0}>{issue.isPending ? "Issuing key…" : secret === undefined ? "Issue a key" : "Key issued"}</Button></div>
+        </div>
         <QueryError error={issue.error} />
         {secret !== undefined ? <CopyField value={secret} label="Client key" /> : null}
         <QueryError error={gatewayUrl.error ?? mcpUrl.error} />
         {gatewayUrl.data !== undefined && mcpUrl.data !== undefined
-          ? <ConnectTabs clientName={client.name} gatewayUrl={gatewayUrl.data} mcpUrl={mcpUrl.data} apiKey={secret ?? apiKeyPlaceholder} />
+          ? <ConnectTabs profileName={profile.name} gatewayUrl={gatewayUrl.data} mcpUrl={mcpUrl.data} apiKey={secret ?? apiKeyPlaceholder} />
           : <p className="text-sm">The gateway needs a reachable public URL before it can provide a configuration.</p>}
         <div className="flex justify-between"><Button variant="ghost" onClick={() => go("connect")}><ArrowLeft className="size-4" />Back</Button><Button disabled={secret === undefined} onClick={() => go("verify")}>Test the connection<ArrowRight className="size-4" /></Button></div>
       </CardContent></Card> : <>
         <Card><CardContent className="space-y-5 py-6">
-          <div className="space-y-2"><p className="font-medium">1. Verify your agent’s access</p><p className="text-muted-foreground text-sm">Check that its key can list the tools you enabled.</p><Button variant="outline" disabled={verify.isPending || secret === undefined} onClick={() => verify.mutate()}>{verify.isPending ? "Checking…" : "Verify access"}</Button>{secret === undefined ? <Button variant="link" onClick={() => go("agent")}>Return to issue a key</Button> : null}<QueryError error={verify.error} />{verify.isSuccess ? <p role="status" className="flex items-center gap-2 text-sm"><CheckCircle2 className="size-4 text-primary" />Connected. {verify.data.tools.length} tools available to this client.</p> : null}</div>
+          <div className="space-y-2"><p className="font-medium">1. Verify your agent’s access</p><p className="text-muted-foreground text-sm">Check that its key can list the tools you enabled.</p><Button variant="outline" disabled={verify.isPending || secret === undefined} onClick={() => verify.mutate()}>{verify.isPending ? "Checking…" : "Verify access"}</Button>{secret === undefined ? <Button variant="link" onClick={() => go("agent")}>Return to issue a key</Button> : null}<QueryError error={verify.error} />{verify.isSuccess ? <p role="status" className="flex items-center gap-2 text-sm"><CheckCircle2 className="size-4 text-primary" />Connected. {verify.data.tools.length} tools available through this key.</p> : null}</div>
           <div className="space-y-3 border-t pt-5"><p className="font-medium">2. Ask your agent to try a tool</p><CopyField value="List the tools available through my integrations gateway. Pick a read-only tool, explain what it will read, and call it. If approval is required, show me the approval link and wait for my decision." label="First task" multiline /><p className="text-muted-foreground text-sm">For an action that changes something, ask your agent to prepare the call. Review its exact arguments in <Link to="/approvals" target="_blank" className="text-foreground underline">Approvals</Link> before allowing it to run.</p></div>
-          <div className="space-y-2 border-t pt-5"><p className="font-medium">Activity from {client.name}</p><QueryError error={activity.error} />{activity.data?.records.length ? activity.data.records.map((record) => <div key={record.id} className="flex items-center justify-between gap-3 text-sm"><code className="min-w-0 truncate">{record.tool ?? "Access check"}</code><AuditOutcomeBadge outcome={record.outcome} /></div>) : <p className="text-muted-foreground text-sm">Waiting for your first call. This updates automatically.</p>}</div>
+          <div className="space-y-2 border-t pt-5"><p className="font-medium">Activity from {profile.name}</p><QueryError error={activity.error} />{activity.data?.records.length ? activity.data.records.map((record) => <div key={record.id} className="flex items-center justify-between gap-3 text-sm"><code className="min-w-0 truncate">{record.tool ?? "Access check"}</code><AuditOutcomeBadge outcome={record.outcome} /></div>) : <p className="text-muted-foreground text-sm">Waiting for your first call. This updates automatically.</p>}</div>
         </CardContent></Card>
         <div className="flex justify-between"><Button variant="ghost" onClick={() => go("agent")}><ArrowLeft className="size-4" />Configuration</Button><Button onClick={finish}>Open dashboard<ArrowRight className="size-4" /></Button></div>
       </>}
@@ -157,7 +160,7 @@ function AccessStep({ integration, connection, onBack, onCreated }: {
   readonly integration: IntegrationOverview
   readonly connection: Connection
   readonly onBack: () => void
-  readonly onCreated: (clientId: string) => void
+  readonly onCreated: (profileId: string) => void
 }) {
   const invalidate = useInvalidate()
   const [name, setName] = useState("")
@@ -167,7 +170,7 @@ function AccessStep({ integration, connection, onBack, onCreated }: {
   const tools = integration.tools.filter((tool) => tool.owner === connection.owner && tool.connection === connection.name)
   const selected = tools.filter((tool) => enabled.has(tool.name))
   const create = useMutation({
-    mutationFn: () => gateway.createConfiguredClient({
+    mutationFn: () => gateway.createProfile({
       name: name.trim(),
       tools: selected.map((tool) => ({
         connection: { owner: "org", integration: IntegrationSlug.make(integration.slug), name: ConnectionName.make(connection.name) },
@@ -175,21 +178,21 @@ function AccessStep({ integration, connection, onBack, onCreated }: {
         decision: reviewAll ? "require_approval" : tool.defaultDecision
       }))
     }),
-    onSuccess: (client) => {
-      invalidate(keys.clients, keys.accessProfiles, keys.approvalPolicies, keys.overview)
-      onCreated(client.id)
+    onSuccess: (profile) => {
+      invalidate(keys.profiles, keys.overview)
+      onCreated(profile.id)
     }
   })
   return <>
     <div className="space-y-2"><h1 className="text-3xl font-semibold tracking-tight">Give it just the access it needs.</h1><p className="text-muted-foreground">Choose tools on {integration.name} · {connection.identityLabel ?? connection.name}. You can change these choices later.</p></div>
     <Card><CardContent className="space-y-5 py-6">
-      <div className="space-y-2"><Label htmlFor="onboarding-client-name">Name your client</Label><Input id="onboarding-client-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Research assistant" disabled={create.isPending} /></div>
+      <div className="space-y-2"><Label htmlFor="onboarding-profile-name">Name this profile</Label><Input id="onboarding-profile-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Research assistant" disabled={create.isPending} /><p className="text-muted-foreground text-xs">Every app you trust the same way can share it, each with its own key.</p></div>
       <div className="space-y-3"><div className="flex flex-wrap items-center justify-between gap-2"><Label htmlFor="onboarding-tool-filter">Tools it may use</Label><span className="text-muted-foreground text-xs">{selected.length} selected</span></div><Input id="onboarding-tool-filter" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Find a tool…" /><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" disabled={create.isPending} onClick={() => setEnabled(new Set(tools.filter((tool) => tool.defaultDecision === "allow").map((tool) => tool.name)))}>Select read-only tools</Button><Button variant="ghost" size="sm" disabled={create.isPending} onClick={() => setEnabled(new Set())}>Clear selection</Button></div>
         <div className="max-h-72 divide-y overflow-y-auto rounded-lg border">{tools.filter((tool) => `${tool.name} ${tool.description}`.toLowerCase().includes(filter.toLowerCase())).map((tool) => <label key={tool.name} className="hover:bg-accent/40 flex cursor-pointer items-start gap-3 p-3"><input type="checkbox" checked={enabled.has(tool.name)} disabled={create.isPending} onChange={(event) => setEnabled((current) => { const next = new Set(current); if (event.target.checked) next.add(tool.name); else next.delete(tool.name); return next })} className="accent-primary mt-1 size-4 shrink-0" /><span className="min-w-0 flex-1"><span className="break-all font-mono text-xs">{tool.name}</span><span className="text-muted-foreground mt-1 block line-clamp-2 text-xs">{tool.description}</span></span><Badge variant="secondary">{reviewAll || tool.defaultDecision === "require_approval" ? "Approval" : "Read-only"}</Badge></label>)}{tools.length === 0 ? <p className="text-muted-foreground p-4 text-sm">No tools are available. Reconnect the service to continue.</p> : null}</div>
       </div>
-      <div className="bg-muted/40 space-y-3 rounded-xl p-4"><p className="flex items-center gap-2 text-sm font-medium"><ShieldCheck className="size-4" />You stay in control</p><p className="text-muted-foreground text-sm">Read-only tools can run directly. Other tools require your approval for each call. This client cannot manage the gateway or approve its own requests.</p><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={reviewAll} disabled={create.isPending} onChange={(event) => setReviewAll(event.target.checked)} className="accent-primary size-4" />Ask me before every call, including reads</label></div>
+      <div className="bg-muted/40 space-y-3 rounded-xl p-4"><p className="flex items-center gap-2 text-sm font-medium"><ShieldCheck className="size-4" />You stay in control</p><p className="text-muted-foreground text-sm">Read-only tools can run directly. Other tools require your approval for each call. Its apps cannot manage the gateway or approve their own requests.</p><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={reviewAll} disabled={create.isPending} onChange={(event) => setReviewAll(event.target.checked)} className="accent-primary size-4" />Ask me before every call, including reads</label></div>
       <QueryError error={create.error} />
-      <div className="flex justify-between gap-3"><Button variant="ghost" onClick={onBack} disabled={create.isPending}><ArrowLeft className="size-4" />Back</Button><Button disabled={!name.trim() || selected.length === 0 || create.isPending} onClick={() => create.mutate()}>{create.isPending ? "Creating client…" : "Create client"}<ArrowRight className="size-4" /></Button></div>
+      <div className="flex justify-between gap-3"><Button variant="ghost" onClick={onBack} disabled={create.isPending}><ArrowLeft className="size-4" />Back</Button><Button disabled={!name.trim() || selected.length === 0 || create.isPending} onClick={() => create.mutate()}>{create.isPending ? "Creating profile…" : "Create profile"}<ArrowRight className="size-4" /></Button></div>
     </CardContent></Card>
   </>
 }

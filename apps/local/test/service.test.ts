@@ -7,9 +7,9 @@ import {
   defaultTenantId,
   gatewayConfigPath,
   generateApiKey,
-  localAgentClientName,
-  localClientName,
-  newClientId,
+  localAgentProfileName,
+  localProfileName,
+  newProfileId,
   operatorGatewayConfigPath,
   readGatewayConfig,
   readOperatorGatewayConfig,
@@ -42,7 +42,7 @@ describe("gateway service", () => {
       expect(response.headers["cache-control"]).toBe("no-store")
     }).pipe(Effect.provide(services)))
 
-  it.live("bootstraps separate local agent and operator clients", () =>
+  it.live("bootstraps separate local agent and operator profiles", () =>
     Effect.gen(function*() {
       const running = yield* gateway
 
@@ -53,19 +53,18 @@ describe("gateway service", () => {
       expect(operatorConfig?.apiKey).toMatch(/^igk_/)
       expect(operatorConfig?.apiKey).not.toBe(config?.apiKey)
 
-      const operator = yield* running.service.store.findClientByName(
-        defaultTenantId,
-        localClientName
-      )
-      const agent = yield* running.service.store.findClientByName(defaultTenantId, localAgentClientName)
+      const operator = yield* running.service.store.findProfileByName(defaultTenantId, localProfileName)
+      const agent = yield* running.service.store.findProfileByName(defaultTenantId, localAgentProfileName)
       expect(operator?.capabilities).toEqual(["provision_connections", "administer_gateway"])
       expect(agent?.capabilities).toEqual(["provision_connections"])
+      expect(operator?.includeNewTools).toBe(true)
+      expect(agent?.includeNewTools).toBe(true)
 
-      const denied = yield* HttpClient.get(`${running.url}/v1/clients`, {
+      const denied = yield* HttpClient.get(`${running.url}/v1/profiles`, {
         headers: { authorization: `Bearer ${config?.apiKey ?? ""}` }
       })
       expect(denied.status).toBe(403)
-      const allowed = yield* HttpClient.get(`${running.url}/v1/clients`, {
+      const allowed = yield* HttpClient.get(`${running.url}/v1/profiles`, {
         headers: { authorization: `Bearer ${operatorConfig?.apiKey ?? ""}` }
       })
       expect(allowed.status).toBe(200)
@@ -99,7 +98,7 @@ describe("gateway service", () => {
         (running) => Effect.promise(() => running.stop())
       )
       for (const key of [oldAgent?.apiKey, oldOperator?.apiKey]) {
-        const response = yield* HttpClient.get(`${second.url}/v1/clients`, {
+        const response = yield* HttpClient.get(`${second.url}/v1/profiles`, {
           headers: { authorization: `Bearer ${key ?? ""}` }
         })
         expect(response.status).toBe(401)
@@ -123,12 +122,12 @@ describe("gateway service", () => {
     Effect.gen(function*() {
       const running = yield* gateway
 
-      const ownPage = yield* HttpClient.get(`${running.url}/v1/clients`, {
+      const ownPage = yield* HttpClient.get(`${running.url}/v1/profiles`, {
         headers: { "sec-fetch-site": "same-origin" }
       })
       expect(ownPage.status).toBe(200)
 
-      const elsewhere = yield* HttpClient.get(`${running.url}/v1/clients`, {
+      const elsewhere = yield* HttpClient.get(`${running.url}/v1/profiles`, {
         headers: { "sec-fetch-site": "cross-site", origin: "https://evil.example.com" }
       })
       expect(elsewhere.status).toBe(401)
@@ -138,20 +137,17 @@ describe("gateway service", () => {
     Effect.gen(function*() {
       const running = yield* gateway
       const store = running.service.store
-      const local = yield* store.findClientByName(defaultTenantId, localClientName)
-      if (local === undefined) throw new Error("Local client was not bootstrapped")
-      const sandbox = yield* store.createClient({
-        id: yield* newClientId,
+      const sandbox = yield* store.createProfile({
+        id: yield* newProfileId,
         tenantId: defaultTenantId,
-        accessProfileId: local.accessProfileId,
-        approvalPolicyId: local.approvalPolicyId,
         name: "sandbox",
-        capabilities: ["provision_connections"]
+        capabilities: ["provision_connections"],
+        tools: []
       })
       const key = yield* generateApiKey
-      yield* store.addApiKey({ id: key.id, clientId: sandbox.id, hash: key.hash })
+      yield* store.addApiKey({ id: key.id, profileId: sandbox.id, name: "sandbox", hash: key.hash })
 
-      const response = yield* HttpClient.get(`${running.url}/v1/clients`, {
+      const response = yield* HttpClient.get(`${running.url}/v1/profiles`, {
         headers: { "sec-fetch-site": "same-origin", authorization: `Bearer ${key.secret}` }
       })
 

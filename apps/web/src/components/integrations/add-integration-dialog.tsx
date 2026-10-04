@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 import { IntegrationSearchKind, type IntegrationSearchMatch, whenPresent } from "@integragents/contracts"
-import { Download, Search, X } from "lucide-react"
+import { Download, Link2, Plus, Search, X } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router"
 import { toast } from "sonner"
@@ -39,6 +39,17 @@ const installableSurfaces = (result: IntegrationSearchMatch, kind: KindFilter) =
     && (surface.type === "mcp" || surface.type === "openapi")
     && (kind === ALL_KINDS || surface.type === kind)
   )
+
+/** Text that is a URL installs directly instead of searching. */
+const endpointUrl = (text: string): string | undefined => {
+  const trimmed = text.trim()
+  if (!/^https?:\/\//i.test(trimmed)) return undefined
+  try {
+    return new URL(trimmed).toString()
+  } catch {
+    return undefined
+  }
+}
 
 const matches = (result: IntegrationSearchMatch, query: string): boolean =>
   `${result.name} ${result.domain} ${result.description}`.toLowerCase().includes(query)
@@ -109,7 +120,10 @@ function RegistrySkeleton() {
   ))
 }
 
-export function RegistrySearchDialog({ onInstalled }: { readonly onInstalled?: (slug: string) => void }) {
+export function AddIntegrationDialog({ onInstalled, variant = "default" }: {
+  readonly onInstalled?: (slug: string) => void
+  readonly variant?: "default" | "outline"
+}) {
   const invalidate = useInvalidate()
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
@@ -117,7 +131,8 @@ export function RegistrySearchDialog({ onInstalled }: { readonly onInstalled?: (
   const [searchTerm, setSearchTerm] = useState("")
   const [kind, setKind] = useState<KindFilter>(ALL_KINDS)
   const [installing, setInstalling] = useState<string | undefined>()
-  const trimmedQuery = query.trim().toLowerCase()
+  const directUrl = endpointUrl(query)
+  const trimmedQuery = directUrl === undefined ? query.trim().toLowerCase() : ""
 
   useEffect(() => {
     const timer = setTimeout(() => setSearchTerm(trimmedQuery), 300)
@@ -177,14 +192,14 @@ export function RegistrySearchDialog({ onInstalled }: { readonly onInstalled?: (
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button />}>
-        <Search className="size-4" /> Find integration
+      <DialogTrigger render={<Button variant={variant} />}>
+        <Plus className="size-4" /> Add integration
       </DialogTrigger>
       <DialogContent className="flex h-[min(48rem,calc(100dvh-2rem))] min-h-0 flex-col sm:max-w-4xl">
         <DialogHeader className="shrink-0 pr-8">
-          <DialogTitle>Find an integration</DialogTitle>
+          <DialogTitle>Add an integration</DialogTitle>
           <DialogDescription>
-            Browse available integrations or search by service, domain, or capability.
+            Search for a service, or paste the URL of an MCP server or OpenAPI document.
           </DialogDescription>
         </DialogHeader>
         <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
@@ -195,7 +210,7 @@ export function RegistrySearchDialog({ onInstalled }: { readonly onInstalled?: (
               className="pl-8 pr-9"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search integrations…"
+              placeholder="Search services, or paste an MCP / OpenAPI URL…"
             />
             {query.length > 0 ? (
               <button type="button" onClick={() => setQuery("")} aria-label="Clear search" className="text-muted-foreground hover:text-foreground absolute right-2 top-1/2 -translate-y-1/2 p-1">
@@ -212,6 +227,18 @@ export function RegistrySearchDialog({ onInstalled }: { readonly onInstalled?: (
         </div>
         {error === null ? null : <OperationError title="Registry search failed" step="Loading integrations.sh" error={error} />}
         {install.error === null ? null : <OperationError title="Installation failed" step="Inspecting and installing the selected endpoint" error={install.error} />}
+        {directUrl === undefined ? null : (
+          <div className="flex shrink-0 flex-wrap items-center gap-3 rounded-xl border p-4">
+            <Link2 className="text-muted-foreground size-5 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="font-medium">Add from URL</p>
+              <p className="text-muted-foreground truncate text-xs" title={directUrl}>{directUrl}</p>
+            </div>
+            <Button onClick={() => install.mutate(directUrl)} disabled={installing !== undefined}>
+              {installing === directUrl ? "Inspecting…" : "Add"}
+            </Button>
+          </div>
+        )}
         <p className="text-muted-foreground shrink-0 text-xs" aria-live="polite">
           {loading ? "Loading integrations…" : `Showing ${results.length} ${results.length === 1 ? "integration" : "integrations"}${trimmedQuery.length === 0 ? " · Search to find more" : ""}`}
         </p>

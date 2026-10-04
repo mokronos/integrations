@@ -4,8 +4,13 @@ import { toast } from "sonner"
 
 import { Page } from "@/components/page"
 import { useSession } from "@/components/auth-gate"
-import { changeEmail, changePassword, deleteAccount, revokeOAuthGrant } from "@/lib/gateway"
-import { keys, useInvalidate, useMutation, useOAuthGrants } from "@/lib/queries"
+import { Bell, Plus } from "lucide-react"
+import type { ApprovalDestinationId } from "@integragents/contracts"
+import { changeEmail, changePassword, createApprovalDestination, deleteAccount, deleteApprovalDestination } from "@/lib/gateway"
+import { keys, useApprovalDestinations, useInvalidate, useMutation } from "@/lib/queries"
+import { ConfirmButton } from "@/components/ui/confirm-button"
+import { CopyField } from "@/components/ui/copy-field"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
   AlertDialog,
@@ -21,6 +26,7 @@ import {
 import { Button } from "@/components/ui/button"
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardFooter,
@@ -32,40 +38,48 @@ import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { pluralise } from "@/lib/format"
 
-export function AccountRoute() {
+export function SettingsRoute() {
   const session = useSession()
   if (session?.authenticated !== true) return null
   if (session.kind !== "session") {
     return (
-      <Page title="Account" description="This local control plane is authenticated by its loopback credential.">
-        <div className="grid max-w-2xl gap-6"><Card>
-          <CardHeader>
-            <CardTitle>Local operator</CardTitle>
-            <CardDescription>
-              Human account settings appear on hosted gateways after signing in.
-              This browser is borrowing the local administrative client while it
-              remains on loopback.
-            </CardDescription>
-          </CardHeader>
-        </Card><OAuthApplicationsCard /></div>
+      <Page title="Settings">
+        <div className="grid max-w-2xl gap-6">
+          <NotificationDestinations />
+          <Card>
+            <CardHeader>
+              <CardTitle>Account</CardTitle>
+              <CardDescription>
+                This browser uses the local gateway's operator key, so there is no account to manage.
+                Account settings appear on a hosted gateway once you sign in.
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        </div>
       </Page>
     )
   }
   return (
-    <Page title="Account" description={`Signed in as ${session.email}.`}>
+    <Page title="Settings">
       <div className="grid max-w-2xl gap-6">
+        <NotificationDestinations />
+        <Card>
+          <CardHeader>
+            <CardTitle>Account</CardTitle>
+            <CardDescription>Signed in as {session.email}.</CardDescription>
+          </CardHeader>
+        </Card>
+
         <Card>
           <CardHeader>
             <CardTitle>Workspace</CardTitle>
             <CardDescription>
               Tenant{" "}
               <code className="text-xs">{session.tenantId}</code>
-              . Connections, clients, and approvals are private to it.
+              . Connections, profiles, and approvals are private to it.
             </CardDescription>
           </CardHeader>
         </Card>
-
-        <OAuthApplicationsCard />
 
         <Card>
           <CardHeader>
@@ -86,45 +100,90 @@ export function AccountRoute() {
   )
 }
 
-function OAuthApplicationsCard() {
-  const grants = useOAuthGrants()
+function CreateDestination() {
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState("")
+  const [url, setUrl] = useState("")
   const invalidate = useInvalidate()
-  const revoke = useMutation({
-    mutationFn: revokeOAuthGrant,
-    onSuccess: () => invalidate(keys.oauthGrants)
+  const create = useMutation({
+    mutationFn: () => createApprovalDestination({ name: name.trim(), url: url.trim() }),
+    onSuccess: () => invalidate(keys.approvalDestinations),
+    onError: (error: Error) => toast.error("Could not add the destination", { description: error.message })
   })
-  const active = grants.data?.filter((grant) => grant.revokedAt === null) ?? []
+  const changeOpen = (next: boolean) => {
+    setOpen(next)
+    if (!next) {
+      create.reset()
+      setName("")
+      setUrl("")
+    }
+  }
+  const secret = create.data?.signingSecret
+  return <Dialog open={open} onOpenChange={changeOpen}>
+    <DialogTrigger render={<Button size="sm" variant="outline" />}><Plus className="size-4" />Add webhook</DialogTrigger>
+    <DialogContent>
+      <DialogHeader>
+        <DialogTitle>{secret === undefined ? "Add a webhook" : "Copy the signing secret now"}</DialogTitle>
+        <DialogDescription>
+          {secret === undefined
+            ? "The gateway posts here whenever a call asks for approval. A notification carries no arguments and cannot approve anything."
+            : "Use it to verify each notification's signature. It cannot be shown again."}
+        </DialogDescription>
+      </DialogHeader>
+      {secret === undefined
+        ? <div className="space-y-4">
+          <div className="space-y-1.5"><Label htmlFor="destination-name">Name</Label><Input id="destination-name" value={name} onChange={(event) => setName(event.target.value)} /></div>
+          <div className="space-y-1.5"><Label htmlFor="destination-url">Public HTTPS URL</Label><Input id="destination-url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com/approval-events" /></div>
+        </div>
+        : <CopyField value={secret} label="Signing secret" />}
+      <DialogFooter>
+        {secret === undefined
+          ? <Button disabled={!name.trim() || !url.trim() || create.isPending} onClick={() => create.mutate()}>{create.isPending ? "Adding…" : "Add"}</Button>
+          : <Button onClick={() => changeOpen(false)}>Done</Button>}
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+}
 
+function DeleteDestination({ id, name }: { readonly id: ApprovalDestinationId; readonly name: string }) {
+  const invalidate = useInvalidate()
+  const remove = useMutation({
+    mutationFn: () => deleteApprovalDestination(id),
+    onSuccess: () => { invalidate(keys.approvalDestinations, keys.profiles); toast.success(`${name} removed`) },
+    onError: (error: Error) => toast.error("Could not remove the destination", { description: error.message })
+  })
+  return <ConfirmButton
+    label="Remove"
+    title={`Remove ${name}?`}
+    description="Profiles stop notifying it. Approvals already sent are unaffected."
+    confirmLabel="Remove"
+    pendingLabel="Removing…"
+    pending={remove.isPending}
+    onConfirm={() => remove.mutateAsync().then(() => undefined)}
+  />
+}
+
+function NotificationDestinations() {
+  const destinations = useApprovalDestinations()
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Connected MCP applications</CardTitle>
-        <CardDescription>
-          Browser-authorized applications. Revoking one immediately invalidates its access and refresh tokens.
-        </CardDescription>
+        <CardTitle>Approval notifications</CardTitle>
+        <CardDescription>Webhooks a profile can notify when a call asks for approval. Choose them per profile under its settings.</CardDescription>
+        <CardAction><CreateDestination /></CardAction>
       </CardHeader>
-      <CardContent className="space-y-3">
-        {grants.isPending ? <div className="space-y-3" aria-hidden><Skeleton className="h-20 w-full" /><Skeleton className="h-20 w-full" /></div> : null}
-        {grants.error ? <Alert variant="destructive"><AlertTitle>Could not load applications</AlertTitle><AlertDescription>{grants.error.message}</AlertDescription></Alert> : null}
-        {!grants.isPending && active.length === 0 ? <p className="text-muted-foreground text-sm">No MCP applications are connected.</p> : null}
-        {active.map((grant) => (
-          <div key={grant.id} className="flex items-start justify-between gap-4 rounded-lg border p-3">
-            <div className="min-w-0 text-sm">
-              <p className="font-medium">{grant.applicationName}</p>
-              <p className="text-muted-foreground">Acts as {grant.clientName} · authorized by {grant.subjectEmail}</p>
-              <p className="text-muted-foreground mt-1 text-xs">
-                {grant.applicationKind === "cimd" ? "Client metadata document" : "Dynamic registration"}
-                {grant.lastUsedAt === null ? " · Not used yet" : ` · Last used ${grant.lastUsedAt.toLocaleString()}`}
-              </p>
+      <CardContent className="space-y-2">
+        {destinations.isPending ? <Skeleton className="h-14 w-full" /> : null}
+        {destinations.error ? <Alert variant="destructive"><AlertTitle>Could not load destinations</AlertTitle><AlertDescription>{destinations.error.message}</AlertDescription></Alert> : null}
+        {!destinations.isPending && (destinations.data ?? []).length === 0 ? <p className="text-muted-foreground text-sm">No webhooks yet.</p> : null}
+        {(destinations.data ?? []).map((destination) => (
+          <div key={destination.id} className="flex items-center gap-3 rounded-lg border p-3">
+            <Bell className="text-muted-foreground size-4 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium">{destination.name}</p>
+              <p className="text-muted-foreground truncate text-xs">{destination.url}</p>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={revoke.isPending && revoke.variables === grant.id}
-              onClick={() => revoke.mutate(grant.id)}
-            >
-              Revoke
-            </Button>
+            <DeleteDestination id={destination.id} name={destination.name} />
           </div>
         ))}
       </CardContent>
@@ -267,8 +326,8 @@ function DeleteAccountCard({ hasPassword }: { readonly hasPassword: boolean }) {
       <CardHeader>
         <CardTitle>Delete account</CardTitle>
         <CardDescription>
-          Removes your sign-in, sessions, clients, API keys, policies, and approval
-          history. Vendor connections stored in the integrations's credential store
+          Removes your sign-in, sessions, profiles, API keys, and approval
+          history. Vendor connections stored in the integration host's credential store
           are not reclaimed. This cannot be undone.
         </CardDescription>
       </CardHeader>

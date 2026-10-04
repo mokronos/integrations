@@ -299,7 +299,7 @@ export const schemaCommand = (runGateway: GatewayTask) => Command.make(
     runGateway((client) => client.delegated.listTools({ query: { schemas: true } })).pipe(Effect.flatMap((effective) => {
       const found = effective.tools.find((candidate) => candidate.alias === alias && candidate.tool === tool)
       if (found === undefined) {
-        return Effect.fail(cliError(`${tool} is not available to this client through ${alias}`))
+        return Effect.fail(cliError(`${tool} is not available to this key through ${alias}`))
       }
       const detail = record(found)
       const core = Object.fromEntries(

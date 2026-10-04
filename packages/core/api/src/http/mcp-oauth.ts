@@ -1,5 +1,5 @@
 import { whenPresent, webCryptoLayer } from "@integragents/contracts"
-import type { Client } from "@integragents/contracts"
+import type { Profile } from "@integragents/contracts"
 import {
   newOAuthAccessToken,
   newOAuthApplicationId,
@@ -139,7 +139,7 @@ export const mcpOAuthIssuer = (settings: GatewaySettings): string | undefined =>
   oauthResourceUrl(settings)?.origin
 
 export interface McpOAuthAuthentication {
-  readonly client: Client
+  readonly profile: Profile
   readonly actor: OAuthActor
   readonly expiresAt: Date
   readonly scope: "mcp"

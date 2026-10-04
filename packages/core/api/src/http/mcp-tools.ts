@@ -15,19 +15,19 @@ import {
   ToolName,
   whenPresent
 } from "@integragents/contracts"
-import type { Client, ClientCapability, Json, JsonEncodable } from "@integragents/contracts"
+import type { Json, JsonEncodable, Profile, ProfileCapability } from "@integragents/contracts"
 import {
   Integrations,
   listIntegrationOverviews,
-  provisionIntegration,
   searchIntegrations
 } from "@integragents/host"
-import { approveApproval, denyApproval, GatewayStoreService, invokeAsClient, listEffectiveTools } from "@integragents/gateway-core"
-import type { OAuthActor } from "@integragents/gateway-core"
+import { approveApproval, denyApproval, GatewayStoreService, invokeAsProfile, listEffectiveTools } from "@integragents/gateway-core"
+import type { CallOrigin } from "@integragents/gateway-core"
 import { capture } from "./observability.ts"
 import {
   connectWithCredentials,
-  findClientApproval,
+  discoverIntegration,
+  findProfileApproval,
   invokeDependencies,
   removeConnectionByName,
   startOAuthConnection,
@@ -56,10 +56,10 @@ export type ApprovalPrompt =
   | { readonly kind: "unanswered" }
   | { readonly kind: "answered"; readonly action: "accept" | "decline" | "cancel" }
 
-/** The authenticated client an MCP call speaks for. */
+/** The profile an MCP call speaks for, and the credential and app it came through. */
 export interface McpCaller {
-  readonly client: Client
-  readonly oauthActor?: OAuthActor
+  readonly profile: Profile
+  readonly origin: CallOrigin
   readonly approvalPrompt: ApprovalPrompt
 }
 
@@ -69,8 +69,8 @@ export interface AgentTool {
   readonly name: string
   readonly title: string
   readonly description: string
-  /** Omitted when any client key may call it. */
-  readonly capability?: ClientCapability
+  /** Omitted when any profile may call it. */
+  readonly capability?: ProfileCapability
   readonly inputSchema: Record<string, Json>
   readonly run: (caller: McpCaller, input: Json) => ToolRun
 }
@@ -84,7 +84,7 @@ const agentTool = <S extends Schema.Top & { readonly DecodingServices: never }>(
   readonly name: string
   readonly title: string
   readonly description: string
-  readonly capability?: ClientCapability
+  readonly capability?: ProfileCapability
   readonly input: S
   readonly run: (caller: McpCaller, input: S["Type"]) => ToolRun
 }): AgentTool => {
@@ -139,9 +139,9 @@ const decideInClient = (caller: McpCaller, approvalId: ApprovalId, action: "acce
     const dependencies = yield* invokeDependencies
     const config = yield* GatewayConfig
     const decision = {
-      tenantId: caller.client.tenantId,
+      tenantId: caller.profile.tenantId,
       id: approvalId,
-      decidedBy: `${caller.client.name} (in-client approval)`
+      decidedBy: `${caller.origin.caller.credentialName ?? caller.profile.name} (in-client approval)`
     }
     const decided = action === "accept"
       ? approveApproval({ ...dependencies, retentionDays: config.retentionDays }, decision)
@@ -167,16 +167,16 @@ export const invokeTool = (
   Effect.gen(function*() {
     if (mentionsKey(input.arguments, localFileKey)) return yield* refuse(filesUnsupported)
     const dependencies = yield* invokeDependencies
-    const invoke = capture(invokeAsClient(dependencies, {
-      client: caller.client,
+    const invoke = capture(invokeAsProfile(dependencies, {
+      profile: caller.profile,
+      origin: caller.origin,
       alias: input.alias,
       tool: input.tool,
-      arguments: input.arguments,
-      ...whenPresent("oauthActor", caller.oauthActor)
+      arguments: input.arguments
     }))
     const first = yield* invoke
     const prompt = caller.approvalPrompt
-    const inClient = first.status === "pending" && caller.client.approvalMethod === "elicitation"
+    const inClient = first.status === "pending" && caller.profile.approvalMethod === "elicitation"
     if (inClient && prompt.kind === "unanswered") return { kind: "ask-approval", message: approvalMessage(input) }
     const outcome = inClient && prompt.kind === "answered" && prompt.action !== "cancel"
       ? yield* Effect.andThen(decideInClient(caller, first.approvalId, prompt.action), invoke)
@@ -205,9 +205,9 @@ const discoverTool = agentTool({
     name: Schema.optional(Schema.String),
     verbose: verboseField
   }),
-  run: (_, input) =>
+  run: (caller, input) =>
     Effect.map(
-      provisionIntegration(input.url, {
+      discoverIntegration(caller.profile.tenantId, input.url, {
         ...whenPresent("connection", input.connection),
         ...whenPresent("slug", input.slug),
         ...whenPresent("name", input.name)
@@ -283,7 +283,7 @@ const effectiveTools = (
   Effect.gen(function*() {
     const store = yield* GatewayStoreService
     const integrations = yield* Integrations
-    return yield* capture(listEffectiveTools(store, caller.client.id, {
+    return yield* capture(listEffectiveTools(store, caller.profile.id, {
       schemas: true,
       integrations,
       ...whenPresent("integration", filter.integration),
@@ -395,7 +395,7 @@ const connectTool = agentTool({
           }. Name the one you mean with template.`)
       }
 
-      const tenantId = caller.client.tenantId
+      const tenantId = caller.profile.tenantId
       if (oauthMethod !== undefined) {
         const session = yield* startOAuthConnection(tenantId, {
           integration: input.integration,
@@ -465,7 +465,7 @@ const disconnectTool = agentTool({
   }),
   run: (caller, input) =>
     Effect.map(
-      removeConnectionByName(caller.client.tenantId, input.integration, input.connection ?? "default"),
+      removeConnectionByName(caller.profile.tenantId, input.integration, input.connection ?? "default"),
       ok
     )
 })
@@ -508,7 +508,7 @@ const validateTool = agentTool({
     const node: Json = input.address === undefined
       ? input.node ?? null
       : { source: { kind: "tool", address: input.address } }
-    return Effect.map(validateReference(caller.client.id, node, input.structural !== true), ok)
+    return Effect.map(validateReference(caller.profile.id, node, input.structural !== true), ok)
   }
 })
 
@@ -520,7 +520,7 @@ const approvalTool = agentTool({
     "came back pending is collected here once somebody approves it.",
   input: Schema.Struct({ approvalId: ApprovalId }),
   run: (caller, input) =>
-    Effect.flatMap(findClientApproval(caller.client, input.approvalId), (approval) =>
+    Effect.flatMap(findProfileApproval(caller.profile, input.approvalId), (approval) =>
       approval === undefined
         ? Effect.fail(refuse(`Unknown approval ${input.approvalId}`))
         : Effect.succeed(ok(approval)))

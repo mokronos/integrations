@@ -58,7 +58,15 @@ const WindowedToolsOutput = Schema.Struct({
 const KeysOutput = Schema.Struct({
   keys: Schema.Array(Schema.Struct({
     id: Schema.String,
+    name: Schema.String,
     revokedAt: Schema.NullOr(Schema.String)
+  }))
+})
+const AuditOutput = Schema.Struct({
+  records: Schema.Array(Schema.Struct({
+    tool: Schema.NullOr(Schema.String),
+    outcome: Schema.String,
+    caller: Schema.Struct({ credentialName: Schema.NullOr(Schema.String) })
   }))
 })
 const AuthenticationOutput = Schema.Struct({
@@ -254,7 +262,7 @@ describe("integrations CLI acceptance", () => {
     Effect.gen(function*() {
       const gateway = yield* startGateway()
       const environment = { ...gateway.environment, INTEGRATIONS_ADMIN_API_KEY: undefined }
-      const listed = yield* run(operatorCli, ["clients"], environment)
+      const listed = yield* run(operatorCli, ["profiles"], environment)
       expect(listed.exitCode, listed.stderr).toBe(0)
       const connected = yield* run(agentCli, ["connections"], environment)
       expect(connected.exitCode, connected.stderr).toBe(0)
@@ -299,11 +307,11 @@ describe("integrations CLI acceptance", () => {
         "https://gateway.example/v1/oauth/callback"
       )
 
-      const client = parseOutput(
+      const profile = parseOutput(
         IdOutput,
-        (yield* operator(["client", "remote-agent", "--provision"])).stdout
+        (yield* operator(["profile", "remote-agent", "--provision"])).stdout
       )
-      const key = parseOutput(SecretOutput, (yield* operator(["key", client.id])).stdout)
+      const key = parseOutput(SecretOutput, (yield* operator(["key", profile.id, "Remote agent"])).stdout)
       const agentEnvironment = {
         ...gateway.environment,
         INTEGRATIONS_API_KEY: key.secret
@@ -312,12 +320,12 @@ describe("integrations CLI acceptance", () => {
       expect(connections.exitCode, connections.stderr).toBe(0)
       expect(parseOutput(ConnectionsOutput, connections.stdout).connections).toEqual([])
 
-      const administrative = yield* run(agentCli, ["clients"], agentEnvironment)
+      const administrative = yield* run(agentCli, ["profiles"], agentEnvironment)
       expect(administrative.exitCode).not.toBe(0)
       expect(administrative.stderr).toContain("Unknown subcommand")
 
       expect((yield* operator(["logout"])).exitCode).toBe(0)
-      const afterLogout = yield* operator(["clients"])
+      const afterLogout = yield* operator(["profiles"])
       expect(afterLogout.exitCode).not.toBe(0)
       expect(afterLogout.stderr).toContain("No operator credential found")
     }).pipe(Effect.provide(services)), 40_000)
@@ -416,34 +424,13 @@ describe("integrations CLI acceptance", () => {
         yield* loginOperator(gateway)
         const operator = (args: ReadonlyArray<string>) =>
           run(operatorCli, args, { ...gateway.environment, INTEGRATIONS_API_KEY: undefined })
-        const client = parseOutput(IdOutput, (yield* operator(["client", "acceptance-agent"])).stdout)
-        const accessProfile = parseOutput(
-          IdOutput,
-          (yield* operator(["access-profile", "acceptance-access"])).stdout
-        )
+        const profile = parseOutput(IdOutput, (yield* operator(["profile", "acceptance-agent"])).stdout)
         const included = yield* operator([
-          "access-profile-tool", accessProfile.id, slug, "tickets.create",
+          "profile-tool", profile.id, slug, "tickets.create", "ask",
           "--connection", connectionName
         ])
         expect(included.exitCode, included.stderr).toBe(0)
-        const assignedAccess = yield* operator([
-          "assign-access-profile", client.id, accessProfile.id
-        ])
-        expect(assignedAccess.exitCode, assignedAccess.stderr).toBe(0)
-        const approvalPolicy = parseOutput(
-          IdOutput,
-          (yield* operator(["approval-policy", "acceptance-approval"])).stdout
-        )
-        const decided = yield* operator([
-          "approval-policy-tool", approvalPolicy.id, slug, "tickets.create", "require-approval",
-          "--connection", connectionName
-        ])
-        expect(decided.exitCode, decided.stderr).toBe(0)
-        const assignedApproval = yield* operator([
-          "assign-approval-policy", client.id, approvalPolicy.id
-        ])
-        expect(assignedApproval.exitCode, assignedApproval.stderr).toBe(0)
-        const key = parseOutput(SecretOutput, (yield* operator(["key", client.id])).stdout)
+        const key = parseOutput(SecretOutput, (yield* operator(["key", profile.id, "acceptance"])).stdout)
 
         const executed = yield* run(agentCli, [
           "execute",
@@ -456,7 +443,7 @@ describe("integrations CLI acceptance", () => {
         expect(vendor.invocations()).toBe(0)
     }).pipe(Effect.provide(services)), 60_000)
 
-  it.live("a delegated key reaches only what its assigned access profile includes", () =>
+  it.live("a delegated key reaches only what its profile enables, and its calls carry the key's name", () =>
     Effect.gen(function*() {
       const vendor = yield* startVendor
       const gateway = yield* startGateway()
@@ -474,48 +461,25 @@ describe("integrations CLI acceptance", () => {
       const operatorCatalog = yield* operator(["integrations"])
       expect(operatorCatalog.exitCode, operatorCatalog.stderr).toBe(0)
 
-      const client = parseOutput(IdOutput, (yield* operator(["client", "sandbox"])).stdout)
-      const accessProfile = parseOutput(
-        IdOutput,
-        (yield* operator(["access-profile", "sandbox-access"])).stdout
-      )
-      const included = yield* operator([
-        "access-profile-tool",
-        accessProfile.id,
-        slug,
-        "tickets.create",
-        "--connection",
-        connectionName
-      ])
-      expect(included.exitCode, included.stderr).toBe(0)
-      const assignedAccess = yield* operator(["assign-access-profile", client.id, accessProfile.id])
-      expect(assignedAccess.exitCode, assignedAccess.stderr).toBe(0)
-      const approvalPolicy = parseOutput(
-        IdOutput,
-        (yield* operator(["approval-policy", "sandbox-approval"])).stdout
-      )
+      const profile = parseOutput(IdOutput, (yield* operator(["profile", "sandbox"])).stdout)
       const allowed = yield* operator([
-        "approval-policy-tool", approvalPolicy.id, slug, "tickets.create", "allow",
+        "profile-tool", profile.id, slug, "tickets.create", "auto",
         "--connection", connectionName
       ])
       expect(allowed.exitCode, allowed.stderr).toBe(0)
-      const assignedApproval = yield* operator([
-        "assign-approval-policy", client.id, approvalPolicy.id
-      ])
-      expect(assignedApproval.exitCode, assignedApproval.stderr).toBe(0)
-      const key = parseOutput(SecretOutput, (yield* operator(["key", client.id])).stdout)
+      const key = parseOutput(SecretOutput, (yield* operator(["key", profile.id, "Sandbox agent"])).stdout)
       const sandbox = {
         ...gateway.environment,
         INTEGRATIONS_API_KEY: key.secret
       }
 
-      const escalation = yield* clientCli(["client", "escalated"], sandbox)
+      const escalation = yield* clientCli(["profile", "escalated"], sandbox)
       expect(escalation.exitCode).toBe(1)
       expect(escalation.stderr).toContain("Unknown subcommand")
 
       const discoverAttempt = yield* clientCli(["discover", vendor.specUrl], sandbox)
       expect(discoverAttempt.exitCode).toBe(1)
-      expect(discoverAttempt.stderr).toContain("required capability")
+      expect(discoverAttempt.stderr).toContain("a profile with that capability")
 
       const visible = parseOutput(
         ToolsOutput,
@@ -533,7 +497,7 @@ describe("integrations CLI acceptance", () => {
         "schema", orgAlias(slug, connectionName), "tickets.delete"
       ], sandbox)
       expect(hiddenSchema.exitCode).toBe(1)
-      expect(hiddenSchema.stderr).toContain("not available to this client")
+      expect(hiddenSchema.stderr).toContain("not available to this key")
 
       const executed = yield* clientCli([
         "execute",
@@ -552,6 +516,13 @@ describe("integrations CLI acceptance", () => {
         "{}"
       ], sandbox)
       expect(refused.exitCode).toBe(1)
+
+      const audit = parseOutput(AuditOutput, (yield* operator(["audit", "--profile", profile.id])).stdout)
+      expect(audit.records.map(({ tool, outcome, caller }) => ({ tool, outcome, credentialName: caller.credentialName })))
+        .toEqual([
+          { tool: "tickets.delete", outcome: "denied", credentialName: "Sandbox agent" },
+          { tool: "tickets.create", outcome: "succeeded", credentialName: "Sandbox agent" }
+        ])
     }).pipe(Effect.provide(services)), 60_000)
 
   it.live("listings return every row, and window only when asked", () =>
@@ -581,7 +552,7 @@ describe("integrations CLI acceptance", () => {
       expect(catalog.count).toBeGreaterThan(0)
     }).pipe(Effect.provide(services)), 40_000)
 
-  it.live("an access profile can remove authority, and a key can be listed and revoked", () =>
+  it.live("turning a tool off removes authority, a copied profile keeps its own, and a key can be listed and revoked", () =>
     Effect.gen(function*() {
       const vendor = yield* startVendor
       const gateway = yield* startGateway()
@@ -595,51 +566,42 @@ describe("integrations CLI acceptance", () => {
       const slug = discovered.integration.slug
       yield* clientCli(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
       const connections = parseOutput(ConnectionsOutput, (yield* clientCli(["connections"])).stdout)
-      const alias = orgAlias(slug, connections.connections[0]?.name ?? "")
-      const client = parseOutput(IdOutput, (yield* operator(["client", "sandbox"])).stdout)
-      const accessProfile = parseOutput(
-        IdOutput,
-        (yield* operator(["access-profile", "sandbox-access"])).stdout
-      )
-      yield* operator([
-        "access-profile-tool", accessProfile.id, slug, "tickets.create",
-        "--connection", connections.connections[0]?.name ?? ""
-      ])
-      yield* operator(["assign-access-profile", client.id, accessProfile.id])
-      const key = parseOutput(KeyOutput, (yield* operator(["key", client.id])).stdout)
-      const sandbox = { ...gateway.environment, INTEGRATIONS_API_KEY: key.secret }
+      const connectionName = connections.connections[0]?.name ?? ""
+      const alias = orgAlias(slug, connectionName)
+      const profile = parseOutput(IdOutput, (yield* operator(["profile", "sandbox"])).stdout)
+      yield* operator(["profile-tool", profile.id, slug, "tickets.create", "ask", "--connection", connectionName])
+      const copy = parseOutput(IdOutput, (yield* operator(["profile", "sandbox-copy", "--copy-from", profile.id])).stdout)
+      const key = parseOutput(KeyOutput, (yield* operator(["key", profile.id, "Sandbox agent"])).stdout)
+      const copyKey = parseOutput(KeyOutput, (yield* operator(["key", copy.id, "Copy agent"])).stdout)
 
-      const keys = parseOutput(KeysOutput, (yield* operator(["keys", client.id])).stdout)
-      expect(keys.keys.map((entry) => entry.id)).toEqual([key.id])
+      const keys = parseOutput(KeysOutput, (yield* operator(["keys", profile.id])).stdout)
+      expect(keys.keys.map(({ id, name }) => ({ id, name }))).toEqual([{ id: key.id, name: "Sandbox agent" }])
 
-      const execute = (title: string) =>
+      const execute = (secret: string, title: string) =>
         clientCli(
           ["execute", alias, "tickets.create", JSON.stringify({ body: { title } })],
-          sandbox
+          { ...gateway.environment, INTEGRATIONS_API_KEY: secret }
         )
 
-      // The profile reaches this tool, so the call gets past authorization and
-      // is frozen by the conservative default policy rather than refused.
-      const allowed = yield* execute("Allowed")
-      expect(`allowed exit ${allowed.exitCode}: ${allowed.stderr}`).toBe("allowed exit 0: ")
-      expect(JSON.parse(allowed.stdout)).toMatchObject({ status: "pending" })
+      const asked = yield* execute(key.secret, "Asked")
+      expect(`asked exit ${asked.exitCode}: ${asked.stderr}`).toBe("asked exit 0: ")
+      expect(JSON.parse(asked.stdout)).toMatchObject({ status: "pending" })
 
-      const emptyProfile = parseOutput(
-        IdOutput,
-        (yield* operator(["access-profile", "deny-all"])).stdout
-      )
-      const reassigned = yield* operator(["assign-access-profile", client.id, emptyProfile.id])
-      expect(reassigned.exitCode, reassigned.stderr).toBe(0)
+      const turnedOff = yield* operator(["profile-tool", profile.id, slug, "tickets.create", "off", "--connection", connectionName])
+      expect(turnedOff.exitCode, turnedOff.stderr).toBe(0)
 
-      const afterRevoke = yield* execute("Revoked")
-      expect(afterRevoke.exitCode).toBe(1)
-      expect(JSON.parse(afterRevoke.stdout)).toMatchObject({ status: "denied" })
+      const afterOff = yield* execute(key.secret, "Off")
+      expect(afterOff.exitCode).toBe(1)
+      expect(JSON.parse(afterOff.stdout)).toMatchObject({ status: "denied" })
+      const fromCopy = yield* execute(copyKey.secret, "Copy")
+      expect(fromCopy.exitCode, fromCopy.stderr).toBe(0)
+      expect(JSON.parse(fromCopy.stdout)).toMatchObject({ status: "pending" })
 
       const revokedKey = yield* operator(["revoke", "key", key.id])
       expect(revokedKey.exitCode, revokedKey.stderr).toBe(0)
 
-      const withRevokedKey = yield* execute("Revoked key")
+      const withRevokedKey = yield* execute(key.secret, "Revoked key")
       expect(withRevokedKey.exitCode).toBe(1)
       expect(vendor.invocations()).toBe(0)
-    }).pipe(Effect.provide(services)), 40_000)
+    }).pipe(Effect.provide(services)), 60_000)
 })

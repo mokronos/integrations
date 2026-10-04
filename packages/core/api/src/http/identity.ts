@@ -2,7 +2,8 @@ import { Context, Effect, Option, Schema } from "effect"
 import { HttpServerResponse } from "effect/http"
 import { HttpApiSchema } from "effect/http-api"
 import { RefusalReason, refusalReason } from "@integragents/contracts"
-import type { Client, ClientCapability, SubjectId, TenantId } from "@integragents/contracts"
+import type { Profile, ProfileCapability, SubjectId, TenantId } from "@integragents/contracts"
+import type { ApiKey } from "@integragents/gateway-core/domain"
 // By subpath: the API definition is imported by browser clients, and the
 // gateway-core index reaches the store.
 import { SessionTokenHash } from "@integragents/gateway-core/domain"
@@ -23,7 +24,7 @@ export const UnauthorizedError = Unauthorized.pipe(HttpApiSchema.status(401))
 
 export class Forbidden extends Schema.TaggedError<Forbidden>()(
   "Forbidden",
-  { code: Schema.Literals(["client-revoked", "not-permitted", "cross-site"]), message: Schema.String }
+  { code: Schema.Literals(["profile-revoked", "not-permitted", "cross-site"]), message: Schema.String }
 ) {
   static readonly of = (code: ForbiddenReason["code"]): Forbidden => {
     return new Forbidden({ code, message: refusalReason(code).message })
@@ -83,10 +84,11 @@ export const Unmetered = Context.Reference<boolean>(
   { defaultValue: (): boolean => false }
 )
 
-export type Caller =
+/** Who a request authenticated as: one of a profile's keys, a dashboard session, or the local host's borrowed key. */
+export type Principal =
   | { readonly kind: "anonymous" }
-  | { readonly kind: "client"; readonly client: Client; readonly secret: string }
-  | { readonly kind: "local"; readonly client: Client }
+  | { readonly kind: "key"; readonly profile: Profile; readonly key: ApiKey; readonly secret: string }
+  | { readonly kind: "local"; readonly profile: Profile; readonly key: ApiKey }
   | {
     readonly kind: "session"
     readonly tenantId: TenantId
@@ -95,22 +97,22 @@ export type Caller =
     readonly tokenHash: SessionTokenHash
   }
 
-export class Identity extends Context.Service<Identity, Caller>()(
+export class Identity extends Context.Service<Identity, Principal>()(
   "@integragents/gateway-api/Identity"
 ) {}
 
-export const requireClient: Effect.Effect<Client, Forbidden, Identity> = Effect.flatMap(
+export const requireKeyHolder: Effect.Effect<{ readonly profile: Profile; readonly key: ApiKey }, Forbidden, Identity> = Effect.flatMap(
   Identity,
   (caller) =>
-    caller.kind === "client" || caller.kind === "local"
-      ? Effect.succeed(caller.client)
+    caller.kind === "key" || caller.kind === "local"
+      ? Effect.succeed(caller)
       : Effect.fail(Forbidden.of("not-permitted"))
 )
 
 export const requireSecret: Effect.Effect<string, Unauthorized | Forbidden, Identity> = Effect.gen(
   function* () {
     const caller = yield* Identity
-    if (caller.kind === "client") return caller.secret
+    if (caller.kind === "key") return caller.secret
     if (caller.kind === "local") return yield* Forbidden.of("not-permitted")
     return yield* Unauthorized.of("unknown-key")
   }
@@ -120,9 +122,9 @@ export const requireTenant: Effect.Effect<TenantId, Forbidden, Identity> = Effec
   Identity,
   (caller) => {
     switch (caller.kind) {
-      case "client":
+      case "key":
       case "local":
-        return Effect.succeed(caller.client.tenantId)
+        return Effect.succeed(caller.profile.tenantId)
       case "session":
         return Effect.succeed(caller.tenantId)
       case "anonymous":
@@ -150,11 +152,11 @@ export const decidedBy: Effect.Effect<
     caller.kind === "session"
       ? caller.email
       : caller.kind === "local"
-      ? `local:${caller.client.name}`
+      ? `local:${caller.profile.name}`
       : null
 )
 
-export const requiredCapability = (access: Access): ClientCapability | undefined => {
+export const requiredCapability = (access: Access): ProfileCapability | undefined => {
   switch (access) {
     case "provisioning":
       return "provision_connections"

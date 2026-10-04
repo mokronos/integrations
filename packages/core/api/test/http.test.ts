@@ -11,20 +11,17 @@ import { stubIntegrationsContext } from "./stubs.ts"
 import { openDatabase, storeOn, temporaryDirectory, testServices } from "./fixtures.ts"
 import {
   aliasForConnection,
-  ApprovalPolicyId,
-  ClientId,
   ConnectionName,
   createGatewayHandler,
   defaultTenantId,
   generateApiKey,
   IntegrationSlug,
-  newClientId,
-  newAccessProfileId,
-  newApprovalPolicyId,
+  newProfileId,
+  ProfileId,
   SubjectId,
   ToolName
 } from "./gateway.ts"
-import type { ConnectionRef } from "./gateway.ts"
+import type { ConnectionRef, GatewayStore, ProfileToolInput } from "./gateway.ts"
 
 const JsonBody = Schema.Record(Schema.String, Schema.Json)
 const JsonRows = Schema.Array(JsonBody)
@@ -177,37 +174,16 @@ const setup = Effect.fnUntraced(function*(options: {
   const store = publishingStore(yield* storeOn(sql), events)
   const granted: ConnectionRef = options.template === true ? delegationTemplateOf(connection) : connection
 
-  const accessProfile = yield* store.createAccessProfile({
-    id: yield* newAccessProfileId,
+  const profile = yield* store.createProfile({
+    id: yield* newProfileId,
     tenantId: defaultTenantId,
-    name: `access-${crypto.randomUUID()}`
-  })
-  yield* store.replaceAccessProfileTools(accessProfile.id, [{
-    connection: granted,
-    tool: ToolName.make("sendEmail")
-  }])
-  const approvalPolicy = yield* store.createApprovalPolicy({
-    id: yield* newApprovalPolicyId,
-    tenantId: defaultTenantId,
-    name: `approval-${crypto.randomUUID()}`,
-    tools: []
-  })
-  yield* store.replaceApprovalPolicyTools(approvalPolicy.id, [{
-    connection: granted,
-    tool: ToolName.make("sendEmail"),
-    decision: options.decision ?? "allow"
-  }])
-  const client = yield* store.createClient({
-    id: yield* newClientId,
-    tenantId: defaultTenantId,
-    accessProfileId: accessProfile.id,
-    approvalPolicyId: approvalPolicy.id,
     name: "support-agent",
     capabilities: options.capabilities ?? ["provision_connections"],
+    tools: [{ connection: granted, tool: ToolName.make("sendEmail"), decision: options.decision ?? "allow" }],
     ...whenPresent("mcpSurface", options.mcpSurface)
   })
   const key = yield* generateApiKey
-  yield* store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
+  yield* store.addApiKey({ id: key.id, profileId: profile.id, name: "Claude Desktop", hash: key.hash })
   const stub = stubIntegrations({
     ...whenPresent("beforeExecute", options.beforeExecute),
     ...whenPresent("fail", options.fail),
@@ -272,10 +248,8 @@ const setup = Effect.fnUntraced(function*(options: {
   return {
     store,
     sql,
-    client,
+    profile,
     key,
-    accessProfile,
-    approvalPolicy,
     handle,
     call,
     calls: stub.calls,
@@ -283,6 +257,30 @@ const setup = Effect.fnUntraced(function*(options: {
     forgotten: stub.forgotten,
     renamed: stub.renamed
   }
+})
+
+/** Another profile in the same tenant, holding one key named after it. */
+const profileWithKey = Effect.fnUntraced(function*(
+  store: GatewayStore,
+  name: string,
+  tools: ReadonlyArray<ProfileToolInput>
+) {
+  const profile = yield* store.createProfile({
+    id: yield* newProfileId,
+    tenantId: defaultTenantId,
+    name,
+    capabilities: ["provision_connections"],
+    tools
+  })
+  const key = yield* generateApiKey
+  yield* store.addApiKey({ id: key.id, profileId: profile.id, name, hash: key.hash })
+  return { profile, key }
+})
+
+const sendEmailOn = (on: ConnectionRef, decision: "allow" | "require_approval"): ProfileToolInput => ({
+  connection: on,
+  tool: ToolName.make("sendEmail"),
+  decision
 })
 
 const McpToolResult = Schema.Struct({
@@ -338,56 +336,26 @@ const mcpJson = Effect.fnUntraced(function*(
 })
 
 describe("gateway http surface", () => {
-  it.effect("onboarding scopes access to selected tools and fills every approval decision", () =>
+  it.effect("creates a profile from selected tools, refusing tools the catalog does not offer", () =>
     Effect.gen(function*() {
-      const { call, store, accessProfile } = yield* setup({
+      const { call, store, profile } = yield* setup({
         tools: [
           { address: "tools.gmail.org.work.sendEmail", name: "sendEmail", owner: "org" },
           { address: "tools.gmail.org.work.getEmail", name: "getEmail", owner: "org", defaultDecision: "allow" }
         ]
       })
       const selected = { connection: { owner: "org", integration: "gmail", name: "work" }, tool: "sendEmail", decision: "require_approval" }
-      const response = yield* call("POST", "/v1/clients/configured", { local: true, body: { name: "New assistant", tools: [selected] } })
+      const response = yield* call("POST", "/v1/profiles", { local: true, body: { name: "New assistant", tools: [selected] } })
       expect(response.status).toBe(201)
       expect(response.body["capabilities"]).toEqual([])
-      expect(response.body["accessProfileId"]).not.toBe(accessProfile.id)
       const id = String(response.body["id"])
-      const tools = yield* call("GET", `/v1/clients/${id}/tools`, { local: true })
+      expect(id).not.toBe(profile.id)
+      const tools = yield* call("GET", `/v1/profiles/${id}/tools`, { local: true })
       expect(tools.body["tools"]).toMatchObject([{ alias: "org___gmail___work", tool: "sendEmail", decision: "require_approval" }])
-      const approvalPolicyId = String(response.body["approvalPolicyId"])
-      expect((yield* store.listApprovalPolicyTools(ApprovalPolicyId.make(approvalPolicyId))).map((entry) => ({
-        tool: entry.tool,
-        decision: entry.decision
-      }))).toEqual([
-        { tool: "getEmail", decision: "allow" },
-        { tool: "sendEmail", decision: "require_approval" }
-      ])
-      expect(yield* store.listAccessProfileTools(accessProfile.id)).toHaveLength(1)
-      expect((yield* call("POST", "/v1/clients/configured", { local: true, body: { name: "New assistant", tools: [selected] } })).status).toBe(400)
-      expect((yield* call("POST", "/v1/clients/configured", { local: true, body: { name: "Unavailable", tools: [{ ...selected, tool: "missing" }] } })).status).toBe(400)
-      expect(yield* store.findClientByName(defaultTenantId, "Unavailable")).toBeUndefined()
-    }).pipe(Effect.provide(testServices)))
-
-  it.effect("creates approval policies with a decision for every catalogued tool", () =>
-    Effect.gen(function*() {
-      const { call, store } = yield* setup({
-        tools: [
-          { address: "tools.gmail.org.work.getEmail", name: "getEmail", owner: "org", defaultDecision: "allow" },
-          { address: "tools.gmail.org.work.sendEmail", name: "sendEmail", owner: "org" }
-        ]
-      })
-      const response = yield* call("POST", "/v1/approval-policies", {
-        local: true,
-        body: { name: "Filled defaults" }
-      })
-      expect(response.status).toBe(201)
-      const tools = yield* store.listApprovalPolicyTools(
-        ApprovalPolicyId.make(String(response.body["id"]))
-      )
-      expect(tools.map(({ tool, decision }) => ({ tool, decision }))).toEqual([
-        { tool: "getEmail", decision: "allow" },
-        { tool: "sendEmail", decision: "require_approval" }
-      ])
+      expect(yield* store.listProfileTools(profile.id)).toHaveLength(1)
+      expect((yield* call("POST", "/v1/profiles", { local: true, body: { name: "New assistant", tools: [selected] } })).status).toBe(400)
+      expect((yield* call("POST", "/v1/profiles", { local: true, body: { name: "Unavailable", tools: [{ ...selected, tool: "missing" }] } })).status).toBe(400)
+      expect(yield* store.findProfileByName(defaultTenantId, "Unavailable")).toBeUndefined()
     }).pipe(Effect.provide(testServices)))
 
   it.effect("serves each API key's effective tools over MCP", () =>
@@ -412,6 +380,20 @@ describe("gateway http surface", () => {
       expect(calls).toEqual([{
         address: "tools.gmail.user:sebastian.work.sendEmail",
         input: { to: "a@b.c" }
+      }])
+    }).pipe(Effect.provide(testServices)))
+
+  it.effect("attributes an MCP call to the key it arrived with and the app that says it made it", () =>
+    Effect.gen(function*() {
+      const { handle, key, store, profile } = yield* setup()
+      const client = yield* mcpClient(handle, key.secret, { action: "accept", asked: [] })
+
+      yield* mcpJson(client, "user___sebastian___gmail___work__sendEmail", { to: "a@b.c" })
+
+      expect(yield* store.listAudit(defaultTenantId, {})).toMatchObject([{
+        profileId: profile.id,
+        outcome: "succeeded",
+        caller: { apiKeyId: key.id, oauthGrantId: null, credentialName: "Claude Desktop", agent: "gateway-test 1.0.0" }
       }])
     }).pipe(Effect.provide(testServices)))
 
@@ -503,7 +485,7 @@ describe("gateway http surface", () => {
       expect(asked).toEqual([expect.stringContaining("user___sebastian___gmail___work.sendEmail")])
       expect(calls).toEqual([{ address: "tools.gmail.user:sebastian.work.sendEmail", input: { to: "a@b.c" } }])
       expect(yield* store.listApprovals(defaultTenantId)).toMatchObject([
-        { status: "approved", decidedBy: "support-agent (in-client approval)" }
+        { status: "approved", decidedBy: "Claude Desktop (in-client approval)" }
       ])
     }).pipe(Effect.provide(testServices)))
 
@@ -560,13 +542,15 @@ describe("gateway http surface", () => {
       expect((yield* call("GET", "/v1/tools", { secret: null })).status).toBe(401)
     }).pipe(Effect.provide(testServices)))
 
-  it.effect("rejects an unknown key with 401 and a revoked client with 403", () =>
+  it.effect("rejects an unknown key with 401 and a key of a revoked profile with 403", () =>
     Effect.gen(function*() {
-      const { call, client, store } = yield* setup()
+      const { call, profile, store } = yield* setup()
       expect((yield* call("GET", "/v1/tools", { secret: "igk_nope" })).status).toBe(401)
 
-      yield* store.revokeClient(defaultTenantId, client.id)
-      expect((yield* call("GET", "/v1/tools")).status).toBe(403)
+      yield* store.revokeProfile(defaultTenantId, profile.id)
+      const refused = yield* call("GET", "/v1/tools")
+      expect(refused.status).toBe(403)
+      expect(refused.body["code"]).toBe("profile-revoked")
     }).pipe(Effect.provide(testServices)))
 
   it.effect("lists only the caller's effective tools", () =>
@@ -646,7 +630,7 @@ describe("gateway http surface", () => {
 
   it.effect("filters the caller's tools by integration and connection", () =>
     Effect.gen(function*() {
-      const { call, store, accessProfile, approvalPolicy } = yield* setup()
+      const { call, store, profile } = yield* setup()
       const personal = {
         ...connection,
         name: ConnectionName.make("personal")
@@ -661,11 +645,7 @@ describe("gateway http surface", () => {
         { connection: personal, tool: ToolName.make("readEmail"), decision: "allow" as const },
         { connection: slack, tool: ToolName.make("postMessage"), decision: "require_approval" as const }
       ]
-      yield* store.replaceAccessProfileTools(
-        accessProfile.id,
-        routes.map(({ connection, tool }) => ({ connection, tool }))
-      )
-      yield* store.replaceApprovalPolicyTools(approvalPolicy.id, routes)
+      yield* store.replaceProfileTools(profile.id, routes)
 
       const gmail = yield* call("GET", "/v1/tools?integration=gmail")
       expect(Schema.decodeUnknownSync(JsonRows)(gmail.body["tools"])
@@ -678,7 +658,7 @@ describe("gateway http surface", () => {
       }])
     }).pipe(Effect.provide(testServices)))
 
-  it.effect("executes an effective tool against the address built from the access profile", () =>
+  it.effect("executes an effective tool against the address built from the profile", () =>
     Effect.gen(function*() {
       const { call, calls } = yield* setup()
 
@@ -755,7 +735,7 @@ describe("gateway http surface", () => {
 
   it.effect("provisioning does not imply gateway administration", () =>
     Effect.gen(function*() {
-      const { call } = yield* setup({ capabilities: ["provision_connections"] })
+      const { call, profile } = yield* setup({ capabilities: ["provision_connections"] })
 
       for (const [method, route] of [
         ["GET", "/v1/integrations"],
@@ -767,12 +747,12 @@ describe("gateway http surface", () => {
       }
 
       for (const [method, route] of [
-        ["GET", "/v1/clients"],
-        ["POST", "/v1/clients"],
-        ["GET", "/v1/access-profiles"],
-        ["POST", "/v1/access-profiles"],
-        ["GET", "/v1/approval-policies"],
-        ["POST", "/v1/approval-policies"],
+        ["GET", "/v1/overview"],
+        ["GET", "/v1/profiles"],
+        ["POST", "/v1/profiles"],
+        ["GET", `/v1/profiles/${profile.id}/tools`],
+        ["POST", `/v1/profiles/${profile.id}/tools`],
+        ["POST", `/v1/profiles/${profile.id}/keys`],
         ["GET", "/v1/approvals"],
         ["GET", "/v1/audit"]
       ] as const) {
@@ -785,11 +765,11 @@ describe("gateway http surface", () => {
     Effect.gen(function*() {
       const { call } = yield* setup({ capabilities: ["provision_connections", "administer_gateway"] })
       expect((yield* call("GET", "/v1/integrations")).status).toBe(200)
-      expect((yield* call("GET", "/v1/clients")).status).toBe(200)
+      expect((yield* call("GET", "/v1/profiles")).status).toBe(200)
       expect((yield* call("GET", "/v1/audit")).status).toBe(200)
     }).pipe(Effect.provide(testServices)))
 
-  it.effect("summarizes dashboard readiness without per-client requests", () =>
+  it.effect("summarizes dashboard readiness without per-profile requests", () =>
     Effect.gen(function*() {
       const { call } = yield* setup({
         capabilities: ["provision_connections", "administer_gateway"]
@@ -798,63 +778,53 @@ describe("gateway http surface", () => {
       expect(response.status).toBe(200)
       expect(response.body).toEqual({
         connections: 0,
-        clients: 1,
-        accessProfiles: 2,
-        accessProfileTools: 1,
-        approvalPolicies: 2,
-        approvalPolicyTools: 1,
+        profiles: 1,
+        profileTools: 1,
         keys: 1,
         pendingApprovals: 0,
         recentActivity: []
       })
     }).pipe(Effect.provide(testServices)))
 
-  it.effect("does not let one client read another's frozen call", () =>
+  it.effect("does not let one profile read another's frozen call", () =>
     Effect.gen(function*() {
-      const { call, store, client, accessProfile, approvalPolicy } = yield* setup({ decision: "require_approval" })
+      const { call, store } = yield* setup({ decision: "require_approval" })
       const frozen = yield* call("POST", "/v1/execute", {
         body: { alias: "user___sebastian___gmail___work", tool: "sendEmail", arguments: { to: "a@b.c" } }
       })
       const approvalId = String(frozen.body["approvalId"])
 
-      const other = yield* store.createClient({
-        id: (yield* newClientId),
-        tenantId: defaultTenantId,
-        accessProfileId: accessProfile.id,
-        approvalPolicyId: approvalPolicy.id,
-        name: "someone-else",
-        capabilities: ["provision_connections"]
-      })
-      const otherKey = (yield* generateApiKey)
-      yield* store.addApiKey({ id: otherKey.id, clientId: other.id, hash: otherKey.hash })
+      const other = yield* profileWithKey(store, "someone-else", [sendEmailOn(connection, "require_approval")])
 
       expect((yield* call("GET", `/v1/approvals/${approvalId}`)).status).toBe(200)
-      const peek = yield* call("GET", `/v1/approvals/${approvalId}`, { secret: otherKey.secret })
+      const peek = yield* call("GET", `/v1/approvals/${approvalId}`, { secret: other.key.secret })
       expect(peek.status).toBe(404)
-      expect(client.id).not.toBe(other.id)
     }).pipe(Effect.provide(testServices)))
 
-  it.effect("issues a key exactly once and never returns it again", () =>
+  it.effect("issues a named key exactly once and never returns it again", () =>
     Effect.gen(function*() {
       const { call, store } = yield* setup({ capabilities: ["provision_connections", "administer_gateway"] })
-      const clientResponse = yield* call("POST", "/v1/clients", { body: { name: "sandbox" } })
-      expect(clientResponse.status).toBe(201)
-      const clientId = ClientId.make(String(clientResponse.body["id"]))
+      const profileResponse = yield* call("POST", "/v1/profiles", { body: { name: "sandbox" } })
+      expect(profileResponse.status).toBe(201)
+      const profileId = ProfileId.make(String(profileResponse.body["id"]))
 
-      const keyResponse = yield* call("POST", `/v1/clients/${clientId}/keys`, { body: {} })
+      expect((yield* call("POST", `/v1/profiles/${profileId}/keys`, { body: { name: "  " } })).status).toBe(400)
+      const keyResponse = yield* call("POST", `/v1/profiles/${profileId}/keys`, { body: { name: " Cursor " } })
       expect(keyResponse.status).toBe(201)
+      expect(keyResponse.body).toMatchObject({ profileId, name: "Cursor" })
       const secret = String(keyResponse.body["secret"])
       expect(secret).toMatch(/^igk_/)
 
-      const stored = yield* store.listApiKeys(clientId)
+      const stored = yield* store.listApiKeys(profileId)
+      expect(stored.map((key) => key.name)).toEqual(["Cursor"])
       expect(JSON.stringify(stored)).not.toContain(secret)
     }).pipe(Effect.provide(testServices)))
 
-  it.effect("manages reusable approval destinations and client assignments", () =>
+  it.effect("manages reusable approval destinations and profile assignments", () =>
     Effect.gen(function*() {
       const { call } = yield* setup({ capabilities: ["provision_connections", "administer_gateway"] })
-      const createdClient = yield* call("POST", "/v1/clients", { body: { name: "notified" } })
-      const clientId = String(createdClient.body["id"])
+      const createdProfile = yield* call("POST", "/v1/profiles", { body: { name: "notified" } })
+      const profileId = String(createdProfile.body["id"])
       const created = yield* call("POST", "/v1/approval-destinations", {
         body: { name: "phone", url: "https://notify.example/approvals" }
       })
@@ -862,7 +832,7 @@ describe("gateway http surface", () => {
       expect(String(created.body["signingSecret"])).toMatch(/^igs_/)
       const destination = Schema.decodeUnknownSync(Schema.Struct({ id: Schema.String }))(created.body["destination"])
       const destinationId = destination.id
-      const assigned = yield* call("POST", `/v1/clients/${clientId}/approval-destinations`, {
+      const assigned = yield* call("POST", `/v1/profiles/${profileId}/approval-destinations`, {
         body: { destinationIds: [destinationId] }
       })
       expect(assigned.body["destinationIds"]).toEqual([destinationId])
@@ -870,23 +840,36 @@ describe("gateway http surface", () => {
       expect(listed.body["destinations"]).toHaveLength(1)
     }).pipe(Effect.provide(testServices)))
 
-  it.effect("uses a tool's conservative decision when seeding the default policy", () =>
+  it.effect("copies a profile into one that changes independently of its source", () =>
     Effect.gen(function*() {
-      const { call } = yield* setup({
+      const { call, store, profile } = yield* setup({
+        decision: "require_approval",
         capabilities: ["provision_connections", "administer_gateway"],
-        connections: [{ integration: "gmail", name: "work" }],
-        tools: [{
-          address: "tools.gmail.org.work.sendEmail",
-          name: "sendEmail",
-          owner: "org",
-          defaultDecision: "require_approval"
-        }]
+        mcpSurface: "discovery"
       })
-      const created = yield* call("POST", "/v1/clients", { body: { name: "sandbox" } })
-      const clientId = String(created.body["id"])
-      const response = yield* call("GET", `/v1/clients/${clientId}/tools`)
-      expect(response.status).toBe(200)
-      expect(JSON.stringify(response.body)).toContain("require_approval")
+      const destination = Schema.decodeUnknownSync(Schema.Struct({ id: Schema.String }))((yield* call("POST", "/v1/approval-destinations", {
+        body: { name: "phone", url: "https://notify.example/approvals" }
+      })).body["destination"])
+      yield* call("POST", `/v1/profiles/${profile.id}/approval-destinations`, { body: { destinationIds: [destination.id] } })
+
+      const copied = yield* call("POST", "/v1/profiles", { body: { name: "copy", copyFrom: profile.id } })
+      expect(copied.status).toBe(201)
+      expect(copied.body).toMatchObject({ capabilities: profile.capabilities, mcpSurface: "discovery" })
+      const copyId = ProfileId.make(String(copied.body["id"]))
+      expect((yield* call("GET", `/v1/profiles/${copyId}/approval-destinations`)).body["destinationIds"]).toEqual([destination.id])
+      expect((yield* store.listProfileTools(copyId)).map(({ tool, decision }) => ({ tool, decision }))).toEqual([
+        { tool: "sendEmail", decision: "require_approval" }
+      ])
+
+      const replaced = yield* call("POST", `/v1/profiles/${copyId}/tools`, {
+        body: { tools: [{ connection: { owner: "user", subject: "sebastian", integration: "gmail", name: "work" }, tool: "sendEmail", decision: "allow" }] }
+      })
+      expect(replaced.status).toBe(200)
+      yield* call("POST", `/v1/profiles/${copyId}/approval-destinations`, { body: { destinationIds: [] } })
+
+      expect((yield* store.listProfileTools(profile.id)).map(({ decision }) => decision)).toEqual(["require_approval"])
+      expect((yield* call("GET", `/v1/profiles/${profile.id}/approval-destinations`)).body["destinationIds"]).toEqual([destination.id])
+      expect((yield* call("POST", "/v1/profiles", { body: { name: "orphan", copyFrom: "missing" } })).status).toBe(404)
     }).pipe(Effect.provide(testServices)))
 
   it.effect("streams what changed to a dashboard following /v1/events", () =>
@@ -931,12 +914,12 @@ describe("gateway http surface", () => {
       )
     }).pipe(Effect.provide(testServices)))
 
-  it.effect("revoking a client through the API cancels its frozen calls", () =>
+  it.effect("revoking a profile through the API cancels its frozen calls", () =>
     Effect.gen(function*() {
-      const { call, client } = yield* setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })
+      const { call, profile } = yield* setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })
       yield* call("POST", "/v1/execute", { body: { alias: "user___sebastian___gmail___work", tool: "sendEmail", arguments: { to: "a@b.c" } } })
 
-      const response = yield* call("POST", `/v1/clients/${client.id}/revoke`, { body: {} })
+      const response = yield* call("POST", `/v1/profiles/${profile.id}/revoke`, { body: {} })
 
       expect(response.status).toBe(200)
       expect(response.body["cancelledApprovals"]).toBe(1)
@@ -957,15 +940,10 @@ describe("gateway approval settlement", () => {
       expect(yield* store.listApprovals(defaultTenantId)).toHaveLength(1)
     }).pipe(Effect.provide(testServices)))
 
-  it.effect("shared profiles cannot share or collect another client's approval", () =>
+  it.effect("profiles holding the same tool cannot share or collect each other's approval", () =>
     Effect.gen(function*() {
-      const { call, store, accessProfile, approvalPolicy } = yield* setup({ decision: "require_approval" })
-      const other = yield* store.createClient({
-        id: (yield* newClientId), tenantId: defaultTenantId, accessProfileId: accessProfile.id,
-        approvalPolicyId: approvalPolicy.id, name: "other-agent", capabilities: []
-      })
-      const key = (yield* generateApiKey)
-      yield* store.addApiKey({ id: key.id, clientId: other.id, hash: key.hash })
+      const { call, store } = yield* setup({ decision: "require_approval" })
+      const { key } = yield* profileWithKey(store, "other-agent", [sendEmailOn(connection, "require_approval")])
       const body = { alias: aliasForConnection(connection), tool: "sendEmail", arguments: { to: "a@b.c" } }
       const first = yield* call("POST", "/v1/execute", { body })
       const second = yield* call("POST", "/v1/execute", { body, secret: key.secret })
@@ -979,11 +957,9 @@ describe("gateway approval settlement", () => {
 
   it.effect("the same tool and arguments on different accounts keep distinct approvals and targets", () =>
     Effect.gen(function*() {
-      const { call, store, accessProfile, approvalPolicy, calls } = yield* setup({ decision: "require_approval" })
+      const { call, store, profile, calls } = yield* setup({ decision: "require_approval" })
       const personal = { ...connection, name: ConnectionName.make("personal") }
-      const tools = [connection, personal].map((connection) => ({ connection, tool: ToolName.make("sendEmail") }))
-      yield* store.replaceAccessProfileTools(accessProfile.id, tools)
-      yield* (store.replaceApprovalPolicyTools(approvalPolicy.id, tools.map((tool) => ({ ...tool, decision: "require_approval" }))))
+      yield* store.replaceProfileTools(profile.id, [connection, personal].map((on) => sendEmailOn(on, "require_approval")))
       const first = yield* call("POST", "/v1/execute", { body: { alias: aliasForConnection(connection), tool: "sendEmail", arguments: { to: "a@b.c" } } })
       const second = yield* call("POST", "/v1/execute", { body: { alias: aliasForConnection(personal), tool: "sendEmail", arguments: { to: "a@b.c" } } })
       expect(second.body["approvalId"]).not.toBe(first.body["approvalId"])
@@ -1119,9 +1095,10 @@ describe("gateway approval settlement", () => {
       expect(calls.map((entry) => entry.input)).toEqual([{ to: "d@e.f", subject: "Launch" }])
     }).pipe(Effect.provide(testServices)))
 
-  it.effect("always approve saves the shared pattern and runs later calls that fit it", () =>
+  it.effect("always approve saves the shared pattern and runs later calls of the same profile that fit it", () =>
     Effect.gen(function*() {
-      const { call, calls, client } = yield* setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })
+      const { call, calls, profile, store } = yield* setup({ decision: "require_approval", capabilities: ["provision_connections", "administer_gateway"] })
+      const other = yield* profileWithKey(store, "other-agent", [sendEmailOn(connection, "require_approval")])
       const send = (argumentsValue: typeof Schema.Json.Type) => call("POST", "/v1/execute", {
         body: { alias: "user___sebastian___gmail___work", tool: "sendEmail", arguments: argumentsValue }
       })
@@ -1138,10 +1115,17 @@ describe("gateway approval settlement", () => {
       expect((yield* send({ to: "g@h.i", subject: "Other" })).body["status"]).toBe("pending")
       expect((yield* send({ to: "g@h.i", subject: "Launch", bcc: "x@y.z" })).body["status"]).toBe("pending")
       expect(calls).toHaveLength(3)
+      const fromOther = yield* call("POST", "/v1/execute", {
+        body: { alias: "user___sebastian___gmail___work", tool: "sendEmail", arguments: { to: "g@h.i", subject: "Launch" } },
+        secret: other.key.secret
+      })
+      expect(fromOther.body["status"]).toBe("pending")
+      expect(calls).toHaveLength(3)
 
-      const policy = yield* call("GET", `/v1/approval-policies/${client.approvalPolicyId}`, { local: true })
+      const rules = yield* call("GET", `/v1/profiles/${profile.id}/approval-rules`, { local: true })
       const ruleId = Schema.decodeUnknownSync(Schema.Struct({ id: Schema.String }))(decided.body["rule"]).id
-      expect(policy.body["rules"]).toMatchObject([{ id: ruleId }])
+      expect(rules.body["rules"]).toMatchObject([{ id: ruleId }])
+      expect((yield* call("GET", `/v1/profiles/${other.profile.id}/approval-rules`, { local: true })).body["rules"]).toEqual([])
       const loosened = yield* call("POST", `/v1/approval-rules/${ruleId}`, { body: { pinned: [], free: [["to"], ["subject"]] }, local: true })
       expect(loosened.status).toBe(200)
       expect((yield* send({ to: "g@h.i", subject: "Anything" })).body["status"]).toBe("succeeded")
@@ -1170,46 +1154,22 @@ describe("gateway approval settlement", () => {
       )).status).toBe(400)
     }).pipe(Effect.provide(testServices)))
 
-  it.effect("re-checks authority at approval time, however it was taken away", () =>
+  it.effect("refuses an approval once the tool was turned off for the profile", () =>
     Effect.gen(function*() {
-      const reassigned = yield* setup({
+      const { call, calls, store, profile } = yield* setup({
         decision: "require_approval",
         capabilities: ["provision_connections", "administer_gateway"]
       })
-      const frozen = yield* reassigned.call("POST", "/v1/execute", {
+      const stale = yield* call("POST", "/v1/execute", {
         body: { alias: "user___sebastian___gmail___work", tool: "sendEmail", arguments: { to: "a@b.c" } }
       })
-      const emptyProfile = yield* reassigned.store.createAccessProfile({
-        id: (yield* newAccessProfileId),
-        tenantId: defaultTenantId,
-        name: "No mail access"
-      })
-      yield* reassigned.store.assignAccessProfile(
-        defaultTenantId,
-        reassigned.client.id,
-        emptyProfile.id
-      )
-      expect((yield* reassigned.call(
-        "POST",
-        `/v1/approvals/${String(frozen.body["approvalId"])}/approve`,
-        { body: {}, local: true }
-      )).status).toBe(400)
-      expect(reassigned.calls).toHaveLength(0)
-
-      const emptied = yield* setup({
-        decision: "require_approval",
-        capabilities: ["provision_connections", "administer_gateway"]
-      })
-      const stale = yield* emptied.call("POST", "/v1/execute", {
-        body: { alias: "user___sebastian___gmail___work", tool: "sendEmail", arguments: { to: "a@b.c" } }
-      })
-      yield* emptied.store.replaceAccessProfileTools(emptied.accessProfile.id, [])
-      expect((yield* emptied.call(
+      yield* store.replaceProfileTools(profile.id, [])
+      expect((yield* call(
         "POST",
         `/v1/approvals/${String(stale.body["approvalId"])}/approve`,
         { body: {}, local: true }
       )).status).toBe(400)
-      expect(emptied.calls).toHaveLength(0)
+      expect(calls).toHaveLength(0)
     }).pipe(Effect.provide(testServices)))
 
   it.effect("denying settles without performing the call", () =>
@@ -1346,23 +1306,21 @@ describe("provisioning surface", () => {
       expect(removed).toEqual([{ integration: "gmail", name: "docs_demo" }])
     }).pipe(Effect.provide(testServices)))
 
-  it.effect("removing an integration takes its connections and their policy rules", () =>
+  it.effect("removing an integration takes its connections and the profile tools on them", () =>
     Effect.gen(function*() {
-      const { call, store, accessProfile, approvalPolicy, forgotten } = yield* setup({
+      const { call, store, profile, forgotten } = yield* setup({
         capabilities: ["provision_connections", "administer_gateway"],
         connections: [{ integration: "gmail", name: "work" }]
       })
 
-      expect(yield* store.listAccessProfileTools(accessProfile.id)).toHaveLength(1)
-      expect(yield* store.listApprovalPolicyTools(approvalPolicy.id)).toHaveLength(1)
+      expect(yield* store.listProfileTools(profile.id)).toHaveLength(1)
 
       const response = yield* call("DELETE", "/v1/integrations/gmail")
 
       expect(response.status).toBe(200)
       expect(forgotten).toEqual(["gmail"])
       expect(response.body["connections"]).toEqual(["work"])
-      expect(yield* store.listAccessProfileTools(accessProfile.id)).toEqual([])
-      expect(yield* store.listApprovalPolicyTools(approvalPolicy.id)).toEqual([])
+      expect(yield* store.listProfileTools(profile.id)).toEqual([])
     }).pipe(Effect.provide(testServices)))
 
   it.effect("renames an integration without moving its slug", () =>
@@ -1410,51 +1368,56 @@ describe("provisioning surface", () => {
       expect(String(response.body["error"])).toContain("work")
     }).pipe(Effect.provide(testServices)))
 
-  it.effect("lists a client's keys without their hashes, and revokes one", () =>
+  it.effect("lists a profile's keys by name without their hashes, and revokes one", () =>
     Effect.gen(function*() {
-      const { call, client, key, store } = yield* setup({ capabilities: ["provision_connections", "administer_gateway"] })
+      const { call, profile, key, store } = yield* setup({ capabilities: ["provision_connections", "administer_gateway"] })
 
-      const listed = yield* call("GET", `/v1/clients/${client.id}/keys`)
+      const listed = yield* call("GET", `/v1/profiles/${profile.id}/keys`)
       const keys = Schema.decodeUnknownSync(Schema.Array(JsonBody))(listed.body["keys"])
-      expect(keys).toHaveLength(1)
-      expect(keys[0]?.["id"]).toBe(key.id)
+      expect(keys).toMatchObject([{ id: key.id, profileId: profile.id, name: "Claude Desktop" }])
       expect(JSON.stringify(keys)).not.toContain(key.hash)
 
       const revoked = yield* call("POST", `/v1/keys/${key.id}/revoke`)
       expect(revoked.status).toBe(200)
-      const after = yield* store.listApiKeys(client.id)
+      const after = yield* store.listApiKeys(profile.id)
       expect(after[0]?.revokedAt).not.toBeNull()
     }).pipe(Effect.provide(testServices)))
 
-  it.effect("names the MCP endpoint alongside the clients, and omits it without a public origin", () =>
+  it.effect("names the MCP endpoint alongside the profiles, and omits it without a public origin", () =>
     Effect.gen(function*() {
       const named = yield* setup({
         capabilities: ["provision_connections", "administer_gateway"],
         mcpUrl: "https://gateway.example/mcp"
       })
-      expect((yield* named.call("GET", "/v1/clients")).body["mcpUrl"])
+      expect((yield* named.call("GET", "/v1/profiles")).body["mcpUrl"])
         .toBe("https://gateway.example/mcp")
 
       const anonymous = yield* setup({
         capabilities: ["provision_connections", "administer_gateway"]
       })
-      expect((yield* anonymous.call("GET", "/v1/clients")).body["mcpUrl"]).toBeUndefined()
+      expect((yield* anonymous.call("GET", "/v1/profiles")).body["mcpUrl"]).toBeUndefined()
     }).pipe(Effect.provide(testServices)))
 
   it.effect("filters and windows the audit trail, and says how much there is", () =>
     Effect.gen(function*() {
-      const { call } = yield* setup({ capabilities: ["provision_connections", "administer_gateway"] })
+      const { call, store, profile } = yield* setup({ capabilities: ["provision_connections", "administer_gateway"] })
+      const other = yield* profileWithKey(store, "other-agent", [sendEmailOn(connection, "allow")])
       yield* call("POST", "/v1/execute", { body: { alias: "user___sebastian___gmail___work", tool: "sendEmail", arguments: { to: "a@b.c" } } })
       yield* call("POST", "/v1/execute", { body: { alias: "user___sebastian___gmail___work", tool: "nope" } })
+      yield* call("POST", "/v1/execute", {
+        body: { alias: "user___sebastian___gmail___work", tool: "sendEmail", arguments: { to: "a@b.c" } },
+        secret: other.key.secret
+      })
 
-      const all = yield* call("GET", "/v1/audit")
+      expect((yield* call("GET", "/v1/audit")).body["total"]).toBe(3)
+      const all = yield* call("GET", `/v1/audit?profileId=${profile.id}`)
       expect(all.body["total"]).toBe(2)
 
-      const denied = yield* call("GET", "/v1/audit?outcome=denied")
+      const denied = yield* call("GET", `/v1/audit?profileId=${profile.id}&outcome=denied`)
       expect(denied.body["total"]).toBe(1)
       expect(Schema.decodeUnknownSync(Schema.Array(Schema.Json))(denied.body["records"])).toHaveLength(1)
 
-      const windowed = yield* call("GET", "/v1/audit?limit=1&offset=1")
+      const windowed = yield* call("GET", `/v1/audit?profileId=${profile.id}&limit=1&offset=1`)
       expect(windowed.body["total"]).toBe(2)
       expect(windowed.body["offset"]).toBe(1)
       expect(Schema.decodeUnknownSync(Schema.Array(Schema.Json))(windowed.body["records"])).toHaveLength(1)

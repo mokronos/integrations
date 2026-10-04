@@ -10,11 +10,9 @@ import {
   diffSnapshots,
   generateLoginHandoff,
   IntegrationSlug,
-  newAccessProfileId,
   newApprovalId,
-  newApprovalPolicyId,
   newAuditId,
-  newClientId,
+  newProfileId,
   refreshIntegrationSnapshot,
   runMaintenance,
   ToolName
@@ -89,7 +87,7 @@ describe("catalog drift", () => {
     ])
   })
 
-  it.effect("surfaces new tools, which explicit policies otherwise make invisible", () =>
+  it.effect("surfaces new tools, which profiles otherwise leave invisible", () =>
     Effect.gen(function*() {
       const gateway = yield* store
       const first = yield* refreshIntegrationSnapshot(
@@ -142,6 +140,14 @@ describe("catalog drift", () => {
 })
 
 describe("gateway maintenance", () => {
+  const noCaller = {
+    apiKeyId: null,
+    oauthGrantId: null,
+    oauthApplicationId: null,
+    credentialName: null,
+    agent: null
+  }
+
   const connection: ConnectionRef = {
     owner: "org",
     integration: IntegrationSlug.make("tickets"),
@@ -151,28 +157,20 @@ describe("gateway maintenance", () => {
   it.effect("turns an undecided approval into an expired one", () =>
     Effect.gen(function*() {
       const gateway = yield* store
-      const accessProfile = yield* gateway.createAccessProfile({
-        id: yield* newAccessProfileId, tenantId: defaultTenantId, name: "sales access"
-      })
-      const approvalPolicy = yield* gateway.createApprovalPolicy({
-        id: yield* newApprovalPolicyId, tenantId: defaultTenantId, name: "sales approvals", tools: []
-      })
-      const client = yield* gateway.createClient({
-        id: yield* newClientId,
+      const profile = yield* gateway.createProfile({
+        id: yield* newProfileId,
         tenantId: defaultTenantId,
-        accessProfileId: accessProfile.id,
-        approvalPolicyId: approvalPolicy.id,
         name: "sales",
-        capabilities: ["provision_connections"]
+        capabilities: ["provision_connections"],
+        tools: []
       })
       const freeze = (tool: string, expiresAt: Date) =>
         Effect.flatMap(newApprovalId, (id) =>
           gateway.createApproval({
             id,
             tenantId: defaultTenantId,
-            clientId: client.id,
-            accessProfileId: accessProfile.id,
-            approvalPolicyId: approvalPolicy.id,
+            profileId: profile.id,
+            caller: noCaller,
             alias: Alias.make("tickets"),
             tool: ToolName.make(tool),
             arguments: {},
@@ -192,26 +190,18 @@ describe("gateway maintenance", () => {
   it.effect("expires an approval once its window passes, not before", () =>
     Effect.gen(function*() {
       const gateway = yield* store
-      const accessProfile = yield* gateway.createAccessProfile({
-        id: yield* newAccessProfileId, tenantId: defaultTenantId, name: "sales access"
-      })
-      const approvalPolicy = yield* gateway.createApprovalPolicy({
-        id: yield* newApprovalPolicyId, tenantId: defaultTenantId, name: "sales approvals", tools: []
-      })
-      const client = yield* gateway.createClient({
-        id: yield* newClientId,
+      const profile = yield* gateway.createProfile({
+        id: yield* newProfileId,
         tenantId: defaultTenantId,
-        accessProfileId: accessProfile.id,
-        approvalPolicyId: approvalPolicy.id,
         name: "sales",
-        capabilities: ["provision_connections"]
+        capabilities: ["provision_connections"],
+        tools: []
       })
       const frozen = yield* gateway.createApproval({
         id: yield* newApprovalId,
         tenantId: defaultTenantId,
-        clientId: client.id,
-        accessProfileId: accessProfile.id,
-        approvalPolicyId: approvalPolicy.id,
+        profileId: profile.id,
+        caller: noCaller,
         alias: Alias.make("tickets"),
         tool: ToolName.make("create"),
         arguments: {},
@@ -234,7 +224,9 @@ describe("gateway maintenance", () => {
       yield* gateway.recordAudit({
         tenantId: defaultTenantId,
         id: yield* newAuditId,
-        clientId: null,
+        profileId: null,
+        caller: noCaller,
+        authorizedBySubjectId: null,
         alias: Alias.make("tickets"),
         tool: ToolName.make("create"),
         connection,

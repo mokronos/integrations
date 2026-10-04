@@ -10,32 +10,26 @@ import { Duration, Effect, Stream } from "effect"
 import { HttpApiBuilder } from "effect/http-api"
 import {
   Alias,
-  ClientId,
   connectionRefKey,
-  type ConnectionRef,
-  AccessProfileId,
-  ApprovalPolicyId,
-  ToolName
+  ProfileId,
+  ToolName,
+  type ProfileToolInput,
+  type TenantId
 } from "@integragents/contracts"
 import type { DriftReport } from "@integragents/gateway-core"
 import { refreshIntegrationSnapshot } from "@integragents/gateway-core"
 import {
   approveApproval,
-  catalogConfigurationTools,
-  completeApprovalPolicyTools,
+  catalogProfileTools,
   decideApprovals,
   denyApproval,
-  listEffectiveTools,
-  reconcileConfigurations
+  listEffectiveTools
 } from "@integragents/gateway-core"
 import {
   generateApiKey,
   generateApprovalSigningSecret,
-  newAccessProfileId,
   newApprovalDestinationId,
-  newApprovalPolicyId,
-  newApprovalRuleId,
-  newClientId,
+  newProfileId,
   newSubjectId
 } from "@integragents/gateway-core"
 import { runMaintenance } from "@integragents/gateway-core"
@@ -86,9 +80,42 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
     const ownedApprovalRule = (id: ApprovalRuleId) => Effect.gen(function*() {
       const tenantId = yield* requireTenant
       const rule = yield* capture(store.findApprovalRule(id))
-      const policy = rule === undefined ? undefined : yield* capture(store.findApprovalPolicy(tenantId, rule.approvalPolicyId))
-      if (rule === undefined || policy === undefined) return yield* new ApiNotFound({ error: `Unknown approval rule ${id}` })
+      const profile = rule === undefined ? undefined : yield* capture(store.findProfileById(tenantId, rule.profileId))
+      if (rule === undefined || profile === undefined) return yield* new ApiNotFound({ error: `Unknown approval rule ${id}` })
       return rule
+    })
+    const requireProfile = (tenantId: TenantId, id: ProfileId) => Effect.gen(function*() {
+      const profile = yield* capture(store.findProfileById(tenantId, id))
+      if (profile === undefined) return yield* new ApiNotFound({ error: `Unknown profile ${id}` })
+      return profile
+    })
+    const liveProfile = (tenantId: TenantId, id: ProfileId) => Effect.gen(function*() {
+      const profile = yield* requireProfile(tenantId, id)
+      if (profile.revokedAt !== null) return yield* new ApiBadRequest({ error: `Profile ${profile.name} is revoked` })
+      return profile
+    })
+    const freeName = (tenantId: TenantId, name: string, self?: ProfileId) => Effect.gen(function*() {
+      const trimmed = name.trim()
+      if (trimmed.length === 0) return yield* new ApiBadRequest({ error: "A profile needs a name" })
+      const taken = yield* capture(store.findProfileByName(tenantId, trimmed))
+      if (taken !== undefined && taken.id !== self) {
+        return yield* new ApiBadRequest({ error: `A profile named ${trimmed} already exists` })
+      }
+      return trimmed
+    })
+    /** One row per route, each naming an org tool the gateway still reaches or a delegation template. */
+    const checkedTools = (tools: ReadonlyArray<ProfileToolInput>) => Effect.gen(function*() {
+      const catalog = new Set((yield* capture(catalogProfileTools(integrations)))
+        .map((entry) => `${connectionRefKey(entry.connection)}\u0000${entry.tool}`))
+      const routes = new Map<string, ProfileToolInput>()
+      for (const entry of tools) {
+        const key = `${connectionRefKey(entry.connection)}\u0000${entry.tool}`
+        if (entry.connection.owner === "org" && !catalog.has(key)) {
+          return yield* new ApiBadRequest({ error: `${entry.connection.integration}/${entry.connection.name} has no tool ${entry.tool}. Refresh the connections and try again.` })
+        }
+        routes.set(key, { connection: entry.connection, tool: ToolName.make(entry.tool), decision: entry.decision })
+      }
+      return [...routes.values()]
     })
     return handlers
       .handle("events", () =>
@@ -132,117 +159,108 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           }
           return yield* capture(store.createSubject({ id, tenantId }))
         }))
-      .handle("listClients", () =>
+      .handle("listProfiles", () =>
         Effect.gen(function*() {
           const tenantId = yield* requireTenant
+          const [profiles, grants] = yield* Effect.all([
+            capture(store.listProfiles(tenantId)),
+            capture(store.listOAuthGrants(tenantId))
+          ])
           return {
-            clients: yield* capture(store.listClients(tenantId)),
+            profiles: yield* Effect.forEach(profiles, (profile) => Effect.gen(function*() {
+              const [tools, keys] = yield* Effect.all([
+                capture(store.listProfileTools(profile.id)),
+                capture(store.listApiKeys(profile.id))
+              ])
+              return {
+                profile,
+                tools: tools.length,
+                approvalTools: tools.filter((tool) => tool.decision === "require_approval").length,
+                keys: keys.filter((key) => key.revokedAt === null).length,
+                applications: grants.filter((grant) => grant.profileId === profile.id && grant.revokedAt === null).length
+              }
+            })),
             ...whenPresentMap("gatewayUrl", config.dashboardUrl?.(), (url) => url),
             ...whenPresentMap("mcpUrl", config.mcpUrl?.(), (url) => url)
           }
         }))
-      .handle("createConfiguredClient", (request) => Effect.gen(function*() {
+      .handle("createProfile", (request) => Effect.gen(function*() {
         const tenantId = yield* requireTenant
-        const { tools } = request.payload
-        const name = request.payload.name.trim()
-        if (name.length === 0) return yield* new ApiBadRequest({ error: "Choose a client name" })
-        const [client, profiles, policies, catalog] = yield* Effect.all([
-          capture(store.findClientByName(tenantId, name)),
-          capture(store.listAccessProfiles(tenantId)),
-          capture(store.listApprovalPolicies(tenantId)),
-          capture(integrations.toolSummaries())
-        ])
-        if (client !== undefined || profiles.some((profile) => profile.name === name) || policies.some((policy) => policy.name === name)) {
-          return yield* new ApiBadRequest({ error: `The name ${name} is already in use. Choose another name or use the existing client.` })
-        }
-        for (const entry of tools) {
-          if (entry.connection.owner !== "org" || !catalog.some((tool) => tool.owner === "org"
-            && tool.integration === entry.connection.integration && tool.connection === entry.connection.name && tool.name === entry.tool)) {
-            return yield* new ApiBadRequest({ error: `The selected tool ${entry.tool} is no longer available. Refresh the connections and try again.` })
-          }
-        }
-        const approvalPolicyTools = completeApprovalPolicyTools(
-          yield* capture(catalogConfigurationTools(integrations)),
-          tools.map(({ connection, tool, decision }) => ({
-            connection,
-            tool: ToolName.make(tool),
-            decision
-          }))
-        )
-        return yield* capture(store.createConfiguredClient({
-          ...request.payload, name, tenantId,
-          id: (yield* newClientId), accessProfileId: (yield* newAccessProfileId),
-          approvalPolicyId: (yield* newApprovalPolicyId), approvalPolicyTools
+        const body = request.payload
+        const name = yield* freeName(tenantId, body.name)
+        const source = body.copyFrom === undefined ? undefined : yield* requireProfile(tenantId, body.copyFrom)
+        const tools = body.tools !== undefined
+          ? yield* checkedTools(body.tools)
+          : source === undefined ? [] : yield* capture(store.listProfileTools(source.id))
+        return yield* capture(store.createProfile({
+          id: yield* newProfileId,
+          tenantId,
+          name,
+          tools,
+          capabilities: body.capabilities ?? source?.capabilities ?? [],
+          ...whenPresentMap("approvalMethod", body.approvalMethod ?? source?.approvalMethod, (method) => method),
+          ...whenPresentMap("mcpSurface", body.mcpSurface ?? source?.mcpSurface, (surface) => surface),
+          ...whenPresentMap(
+            "approvalGroupWindowMinutes",
+            body.approvalGroupWindowMinutes ?? source?.approvalGroupWindowMinutes,
+            (minutes) => minutes
+          ),
+          ...whenPresentMap("includeNewTools", body.includeNewTools ?? source?.includeNewTools, (include) => include),
+          ...whenPresentMap(
+            "destinationIds",
+            source === undefined ? undefined : yield* capture(store.listProfileApprovalDestinationIds(source.id)),
+            (ids) => ids
+          )
         }))
       }))
-      .handle("createClient", (request) =>
+      .handle("renameProfile", (request) =>
         Effect.gen(function*() {
           const tenantId = yield* requireTenant
-          const body = request.payload
-          if ((yield* capture(store.findClientByName(tenantId, body.name))) !== undefined) {
-            return yield* new ApiBadRequest({ error: `A client named ${body.name} already exists` })
-          }
-          const defaults = yield* capture(reconcileConfigurations({ store, integrations, tenantId }))
-          const accessProfile = body.accessProfileId === undefined
-            ? defaults.accessProfile
-            : yield* capture(store.findAccessProfile(tenantId, body.accessProfileId))
-          const approvalPolicy = body.approvalPolicyId === undefined
-            ? defaults.approvalPolicy
-            : yield* capture(store.findApprovalPolicy(tenantId, body.approvalPolicyId))
-          if (accessProfile === undefined) {
-            return yield* new ApiBadRequest({ error: `Unknown access profile ${body.accessProfileId ?? "default"}` })
-          }
-          if (approvalPolicy === undefined) {
-            return yield* new ApiBadRequest({ error: `Unknown approval policy ${body.approvalPolicyId ?? "default"}` })
-          }
-          const client = yield* capture(store.createClient({
-            id: (yield* newClientId),
-            tenantId,
-            accessProfileId: accessProfile.id,
-            approvalPolicyId: approvalPolicy.id,
-            name: body.name,
-            capabilities: body.capabilities ?? [],
-            ...whenPresentMap("approvalMethod", body.approvalMethod, (method) => method),
-            ...whenPresentMap("mcpSurface", body.mcpSurface, (surface) => surface),
-            ...whenPresentMap("approvalGroupWindowMinutes", body.approvalGroupWindowMinutes, (minutes) => minutes)
-          }))
-          return client
+          const profile = yield* liveProfile(tenantId, request.params["id"])
+          const name = yield* freeName(tenantId, request.payload.name, profile.id)
+          return yield* capture(store.renameProfile(tenantId, profile.id, name))
         }))
-      .handle("renameClient", (request) =>
+      .handle("updateProfileSettings", (request) =>
         Effect.gen(function*() {
           const tenantId = yield* requireTenant
-          const clientId = request.params["id"]
-          const name = request.payload.name.trim()
-          if (name.length === 0) return yield* new ApiBadRequest({ error: "A client needs a name" })
-          const existing = yield* capture(store.findClientById(tenantId, clientId))
-          if (existing === undefined) return yield* new ApiNotFound({ error: `Unknown client ${clientId}` })
-          if (existing.revokedAt !== null) return yield* new ApiBadRequest({ error: `Client ${clientId} is revoked` })
-          const taken = yield* capture(store.findClientByName(tenantId, name))
-          if (taken !== undefined && taken.id !== clientId) {
-            return yield* new ApiBadRequest({ error: `A client named ${name} already exists` })
-          }
-          return yield* capture(store.renameClient(tenantId, clientId, name))
+          const profile = yield* liveProfile(tenantId, request.params["id"])
+          return yield* capture(store.updateProfileSettings(tenantId, profile.id, request.payload))
         }))
-      .handle("updateClientSettings", (request) =>
+      .handle("profileTools", (request) =>
         Effect.gen(function*() {
           const tenantId = yield* requireTenant
-          const clientId = request.params["id"]
-          const existing = yield* capture(store.findClientById(tenantId, clientId))
-          if (existing === undefined) {
-            return yield* new ApiNotFound({ error: `Unknown client ${clientId}` })
+          const profile = yield* requireProfile(tenantId, request.params["id"])
+          return {
+            tools: yield* capture(listEffectiveTools(store, profile.id, {
+              schemas: request.query["schemas"],
+              integrations
+            }))
           }
-          if (existing.revokedAt !== null) {
-            return yield* new ApiBadRequest({ error: `Client ${clientId} is revoked` })
-          }
-          return yield* capture(store.updateClientSettings({
-            tenantId,
-            id: clientId,
-            capabilities: request.payload.capabilities,
-            approvalMethod: request.payload.approvalMethod,
-            mcpSurface: request.payload.mcpSurface,
-            approvalGroupWindowMinutes: request.payload.approvalGroupWindowMinutes
-          }))
         }))
+      .handle("replaceProfileTools", (request) =>
+        Effect.gen(function*() {
+          const tenantId = yield* requireTenant
+          const profile = yield* liveProfile(tenantId, request.params["id"])
+          const tools = yield* checkedTools(request.payload.tools)
+          return { tools: yield* capture(store.replaceProfileTools(profile.id, tools)) }
+        }))
+      .handle("listApprovalRules", (request) =>
+        Effect.gen(function*() {
+          const tenantId = yield* requireTenant
+          const profile = yield* requireProfile(tenantId, request.params["id"])
+          return { rules: yield* capture(store.listApprovalRules(profile.id)) }
+        }))
+      .handle("updateApprovalRule", (request) => Effect.gen(function*() {
+        const rule = yield* ownedApprovalRule(request.params["id"])
+        const problem = patternProblem(request.payload)
+        if (problem !== undefined) return yield* new ApiBadRequest({ error: problem })
+        return yield* capture(store.updateApprovalRule(rule.id, request.payload))
+      }))
+      .handle("deleteApprovalRule", (request) => Effect.gen(function*() {
+        const rule = yield* ownedApprovalRule(request.params["id"])
+        yield* capture(store.deleteApprovalRule(rule.id))
+        return { deleted: true as const }
+      }))
       .handle("listApprovalDestinations", () => Effect.gen(function*() {
         const tenantId = yield* requireTenant
         return { destinations: yield* capture(store.listApprovalDestinations(tenantId)) }
@@ -263,46 +281,41 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
         yield* capture(store.deleteApprovalDestination(tenantId, request.params["id"]))
         return { deleted: true as const }
       }))
-      .handle("getClientApprovalDestinations", (request) => Effect.gen(function*() {
+      .handle("getProfileApprovalDestinations", (request) => Effect.gen(function*() {
         const tenantId = yield* requireTenant
-        const client = yield* capture(store.findClientById(tenantId, request.params["id"]))
-        if (client === undefined) return yield* new ApiNotFound({ error: `Unknown client ${request.params["id"]}` })
-        return { destinationIds: yield* capture(store.listClientApprovalDestinationIds(client.id)) }
+        const profile = yield* requireProfile(tenantId, request.params["id"])
+        return { destinationIds: yield* capture(store.listProfileApprovalDestinationIds(profile.id)) }
       }))
-      .handle("replaceClientApprovalDestinations", (request) => Effect.gen(function*() {
+      .handle("replaceProfileApprovalDestinations", (request) => Effect.gen(function*() {
         const tenantId = yield* requireTenant
-        const client = yield* capture(store.findClientById(tenantId, request.params["id"]))
-        if (client === undefined) return yield* new ApiNotFound({ error: `Unknown client ${request.params["id"]}` })
+        const profile = yield* liveProfile(tenantId, request.params["id"])
         const available = yield* capture(store.listApprovalDestinations(tenantId))
         const selected = new Set(request.payload.destinationIds)
         if (available.filter((destination) => selected.has(destination.id)).length !== selected.size) {
           return yield* new ApiBadRequest({ error: "One or more approval destinations do not belong to this tenant" })
         }
-        return { destinationIds: yield* capture(store.replaceClientApprovalDestinations(tenantId, client.id, [...selected])) }
+        return { destinationIds: yield* capture(store.replaceProfileApprovalDestinations(tenantId, profile.id, [...selected])) }
       }))
       .handle("issueKey", (request) =>
         Effect.gen(function*() {
           const tenantId = yield* requireTenant
-          const clientId = request.params["id"]
-          if ((yield* capture(store.findClientById(tenantId, clientId))) === undefined) {
-            return yield* new ApiNotFound({ error: `Unknown client ${clientId}` })
-          }
+          const profile = yield* liveProfile(tenantId, request.params["id"])
+          const name = request.payload.name.trim()
+          if (name.length === 0) return yield* new ApiBadRequest({ error: "Name the key after the app that will use it" })
           const key = (yield* generateApiKey)
-          yield* capture(store.addApiKey({ id: key.id, clientId, hash: key.hash }))
-          return { id: key.id, clientId, secret: key.secret }
+          yield* capture(store.addApiKey({ id: key.id, profileId: profile.id, name, hash: key.hash }))
+          return { id: key.id, profileId: profile.id, name, secret: key.secret }
         }))
       .handle("listKeys", (request) =>
         Effect.gen(function*() {
           const tenantId = yield* requireTenant
-          const clientId = request.params["id"]
-          if ((yield* capture(store.findClientById(tenantId, clientId))) === undefined) {
-            return yield* new ApiNotFound({ error: `Unknown client ${clientId}` })
-          }
-          const keys = yield* capture(store.listApiKeys(clientId))
+          const profile = yield* requireProfile(tenantId, request.params["id"])
+          const keys = yield* capture(store.listApiKeys(profile.id))
           return {
             keys: keys.map((key) => ({
               id: key.id,
-              clientId: key.clientId,
+              profileId: key.profileId,
+              name: key.name,
               createdAt: key.createdAt,
               lastUsedAt: key.lastUsedAt,
               revokedAt: key.revokedAt
@@ -315,221 +328,14 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           yield* capture(store.revokeApiKey(keyId))
           return { revoked: true as const, key: keyId }
         }))
-      .handle("clientTools", (request) =>
+      .handle("revokeProfile", (request) =>
         Effect.gen(function*() {
           const tenantId = yield* requireTenant
-          const clientId = request.params["id"]
-          if ((yield* capture(store.findClientById(tenantId, clientId))) === undefined) {
-            return yield* new ApiNotFound({ error: `Unknown client ${clientId}` })
-          }
-          return {
-            tools: yield* capture(listEffectiveTools(store, clientId, {
-              schemas: request.query["schemas"],
-              integrations
-            }))
-          }
-        }))
-      .handle("revokeClient", (request) =>
-        Effect.gen(function*() {
-          const tenantId = yield* requireTenant
-          const clientId = request.params["id"]
-          if ((yield* capture(store.findClientById(tenantId, clientId))) === undefined) {
-            return yield* new ApiNotFound({ error: `Unknown client ${clientId}` })
-          }
-          yield* capture(store.revokeClient(tenantId, clientId))
-          const cancelled = yield* capture(store.cancelApprovalsForClient(clientId))
+          const profile = yield* requireProfile(tenantId, request.params["id"])
+          yield* capture(store.revokeProfile(tenantId, profile.id))
+          const cancelled = yield* capture(store.cancelApprovalsForProfile(profile.id))
           return { revoked: true as const, cancelledApprovals: cancelled }
         }))
-      .handle("listAccessProfiles", () =>
-        Effect.gen(function*() {
-          const tenantId = yield* requireTenant
-          const [accessProfiles, clients] = yield* Effect.all([
-            capture(store.listAccessProfiles(tenantId)),
-            capture(store.listClients(tenantId))
-          ])
-          return { accessProfiles: yield* Effect.forEach(accessProfiles, (accessProfile) => Effect.gen(function*() {
-            const tools = yield* capture(store.listAccessProfileTools(accessProfile.id))
-            return { accessProfile, connectionCount: new Set(tools.map((tool) => connectionRefKey(tool.connection))).size,
-              integrationCount: new Set(tools.map((tool) => tool.connection.integration)).size, toolCount: tools.length,
-              assignedClientCount: clients.filter((client) => client.accessProfileId === accessProfile.id).length }
-          })) }
-        }))
-      .handle("getAccessProfile", (request) =>
-        Effect.gen(function*() {
-          const tenantId = yield* requireTenant
-          const accessProfile = yield* capture(store.findAccessProfile(tenantId, request.params["id"]))
-          if (accessProfile === undefined) return yield* new ApiNotFound({ error: "Unknown access profile" })
-          const [tools, clients] = yield* Effect.all([
-            capture(store.listAccessProfileTools(accessProfile.id)),
-            capture(store.listClients(tenantId))
-          ])
-          return { accessProfile, tools, assignedClients: clients.filter((client) => client.accessProfileId === accessProfile.id) }
-        }))
-      .handle("createAccessProfile", (request) =>
-        Effect.gen(function*() {
-          const tenantId = yield* requireTenant
-          return yield* capture(store.createAccessProfile({ id: (yield* newAccessProfileId), tenantId, name: request.payload.name }))
-        }))
-      .handle("updateAccessProfile", (request) => Effect.gen(function*() {
-        const tenantId = yield* requireTenant
-        if ((yield* capture(store.findAccessProfile(tenantId, request.params["id"]))) === undefined) return yield* new ApiNotFound({ error: "Unknown access profile" })
-        return yield* capture(store.updateAccessProfile(tenantId, request.params["id"], request.payload.name))
-      }))
-      .handle("deleteAccessProfile", (request) => Effect.gen(function*() {
-        const tenantId = yield* requireTenant
-        const profile = yield* capture(store.findAccessProfile(tenantId, request.params["id"]))
-        if (profile === undefined) return yield* new ApiNotFound({ error: "Unknown access profile" })
-        if (profile.isDefault) return yield* new ApiBadRequest({ error: "The default access profile cannot be deleted" })
-        const assigned = (yield* capture(store.listClients(tenantId))).filter((client) => client.accessProfileId === profile.id)
-        if (assigned.length > 0) {
-          return yield* new ApiBadRequest({ error: `${assigned.length} client${assigned.length === 1 ? " is" : "s are"} still assigned to ${profile.name}. Reassign them first.` })
-        }
-        yield* capture(store.deleteAccessProfile(tenantId, profile.id))
-        return { deleted: true as const }
-      }))
-      .handle("replaceAccessProfileTools", (request) =>
-        Effect.gen(function*() {
-          const tenantId = yield* requireTenant
-          const accessProfile = yield* capture(store.findAccessProfile(tenantId, request.params["id"]))
-          if (accessProfile === undefined) return yield* new ApiNotFound({ error: "Unknown access profile" })
-          const deduplicated = new Map<string, { readonly connection: ConnectionRef; readonly tool: ToolName }>()
-          for (const input of request.payload.tools) {
-            const key = `${connectionRefKey(input.connection)}\u0000${input.tool}`
-            deduplicated.set(key, { connection: input.connection, tool: ToolName.make(input.tool) })
-          }
-          const tools = yield* capture(store.replaceAccessProfileTools(accessProfile.id, [...deduplicated.values()]))
-          return { accessProfile: yield* capture(store.findAccessProfile(tenantId, accessProfile.id)).pipe(Effect.flatMap((v) => v === undefined ? new ApiNotFound({ error: "Unknown access profile" }) : Effect.succeed(v))), tools }
-        }))
-      .handle("cloneAccessProfile", (request) =>
-        Effect.gen(function*() {
-          const tenantId = yield* requireTenant
-          const source = yield* capture(store.findAccessProfile(tenantId, request.params["id"]))
-          if (source === undefined) return yield* new ApiNotFound({ error: "Unknown access profile" })
-          const accessProfile = yield* capture(store.createAccessProfile({ id: (yield* newAccessProfileId), tenantId, name: request.payload.name }))
-          const sourceTools = yield* capture(store.listAccessProfileTools(source.id))
-          const tools = yield* capture(store.replaceAccessProfileTools(accessProfile.id, sourceTools.map(({ connection, tool }) => ({ connection, tool }))))
-          return { accessProfile, tools }
-        }))
-      .handle("assignAccessProfile", (request) =>
-        Effect.gen(function*() {
-          const tenantId = yield* requireTenant
-          const clientId = request.params["id"]
-          if ((yield* capture(store.findClientById(tenantId, clientId))) === undefined) {
-            return yield* new ApiNotFound({ error: `Unknown client ${clientId}` })
-          }
-          const id = AccessProfileId.make(request.payload.accessProfileId)
-          if ((yield* capture(store.findAccessProfile(tenantId, id))) === undefined) {
-            return yield* new ApiBadRequest({ error: `Access profile ${id} belongs to another tenant or does not exist` })
-          }
-          return yield* capture(store.assignAccessProfile(tenantId, clientId, id))
-        }))
-      .handle("listApprovalPolicies", () =>
-        Effect.gen(function*() {
-          const tenantId = yield* requireTenant
-          const [approvalPolicies, clients] = yield* Effect.all([capture(store.listApprovalPolicies(tenantId)), capture(store.listClients(tenantId))])
-          return { approvalPolicies: yield* Effect.forEach(approvalPolicies, (approvalPolicy) => Effect.gen(function*() {
-            const tools = yield* capture(store.listApprovalPolicyTools(approvalPolicy.id))
-            return { approvalPolicy, connectionCount: new Set(tools.map((tool) => connectionRefKey(tool.connection))).size,
-              integrationCount: new Set(tools.map((tool) => tool.connection.integration)).size, toolCount: tools.length,
-              assignedClientCount: clients.filter((client) => client.approvalPolicyId === approvalPolicy.id).length }
-          })) }
-        }))
-      .handle("getApprovalPolicy", (request) => Effect.gen(function*() {
-        const tenantId = yield* requireTenant
-        const approvalPolicy = yield* capture(store.findApprovalPolicy(tenantId, request.params["id"]))
-        if (approvalPolicy === undefined) return yield* new ApiNotFound({ error: "Unknown approval policy" })
-        const [tools, clients] = yield* Effect.all([capture(store.listApprovalPolicyTools(approvalPolicy.id)), capture(store.listClients(tenantId))])
-        const rules = yield* capture(store.listApprovalRules(approvalPolicy.id))
-        return { approvalPolicy, tools, rules, assignedClients: clients.filter((client) => client.approvalPolicyId === approvalPolicy.id) }
-      }))
-      .handle("updateApprovalRule", (request) => Effect.gen(function*() {
-        const rule = yield* ownedApprovalRule(request.params["id"])
-        const problem = patternProblem(request.payload)
-        if (problem !== undefined) return yield* new ApiBadRequest({ error: problem })
-        return yield* capture(store.updateApprovalRule(rule.id, request.payload))
-      }))
-      .handle("deleteApprovalRule", (request) => Effect.gen(function*() {
-        const rule = yield* ownedApprovalRule(request.params["id"])
-        yield* capture(store.deleteApprovalRule(rule.id))
-        return { deleted: true as const }
-      }))
-      .handle("createApprovalPolicy", (request) => Effect.gen(function*() {
-        const tenantId = yield* requireTenant
-        return yield* capture(store.createApprovalPolicy({
-          id: (yield* newApprovalPolicyId), tenantId, name: request.payload.name,
-          tools: yield* capture(catalogConfigurationTools(integrations))
-        }))
-      }))
-      .handle("updateApprovalPolicy", (request) => Effect.gen(function*() {
-        const tenantId = yield* requireTenant
-        if ((yield* capture(store.findApprovalPolicy(tenantId, request.params["id"]))) === undefined) return yield* new ApiNotFound({ error: "Unknown approval policy" })
-        return yield* capture(store.updateApprovalPolicy(tenantId, request.params["id"], request.payload.name))
-      }))
-      .handle("deleteApprovalPolicy", (request) => Effect.gen(function*() {
-        const tenantId = yield* requireTenant
-        const policy = yield* capture(store.findApprovalPolicy(tenantId, request.params["id"]))
-        if (policy === undefined) return yield* new ApiNotFound({ error: "Unknown approval policy" })
-        if (policy.isDefault) return yield* new ApiBadRequest({ error: "The default approval policy cannot be deleted" })
-        const assigned = (yield* capture(store.listClients(tenantId))).filter((client) => client.approvalPolicyId === policy.id)
-        if (assigned.length > 0) {
-          return yield* new ApiBadRequest({ error: `${assigned.length} client${assigned.length === 1 ? " is" : "s are"} still assigned to ${policy.name}. Reassign them first.` })
-        }
-        yield* capture(store.deleteApprovalPolicy(tenantId, policy.id)); return { deleted: true as const }
-      }))
-      .handle("replaceApprovalPolicyTools", (request) => Effect.gen(function*() {
-        const tenantId = yield* requireTenant
-        const approvalPolicy = yield* capture(store.findApprovalPolicy(tenantId, request.params["id"]))
-        if (approvalPolicy === undefined) return yield* new ApiNotFound({ error: "Unknown approval policy" })
-        const deduplicated = new Map<string, { readonly connection: ConnectionRef; readonly tool: ToolName; readonly decision: "allow" | "require_approval" }>()
-        for (const input of request.payload.tools) {
-          const key = `${connectionRefKey(input.connection)}\u0000${input.tool}`
-          const existing = deduplicated.get(key)
-          deduplicated.set(key, { connection: input.connection, tool: ToolName.make(input.tool), decision: existing?.decision === "require_approval" || input.decision === "require_approval" ? "require_approval" : "allow" })
-        }
-        const tools = yield* capture(store.replaceApprovalPolicyTools(
-          approvalPolicy.id,
-          completeApprovalPolicyTools(
-            yield* capture(catalogConfigurationTools(integrations)),
-            [...deduplicated.values()]
-          )
-        ))
-        return { approvalPolicy: yield* capture(store.findApprovalPolicy(tenantId, approvalPolicy.id)).pipe(Effect.flatMap((v) => v === undefined ? new ApiNotFound({ error: "Unknown approval policy" }) : Effect.succeed(v))), tools }
-      }))
-      .handle("cloneApprovalPolicy", (request) => Effect.gen(function*() {
-        const tenantId = yield* requireTenant
-        const source = yield* capture(store.findApprovalPolicy(tenantId, request.params["id"]))
-        if (source === undefined) return yield* new ApiNotFound({ error: "Unknown approval policy" })
-        const sourceTools = yield* capture(store.listApprovalPolicyTools(source.id))
-        const tools = completeApprovalPolicyTools(
-          yield* capture(catalogConfigurationTools(integrations)),
-          sourceTools
-        )
-        const approvalPolicy = yield* capture(store.createApprovalPolicy({
-          id: (yield* newApprovalPolicyId), tenantId, name: request.payload.name, tools
-        }))
-        for (const rule of yield* capture(store.listApprovalRules(source.id))) {
-          yield* capture(store.createApprovalRule({
-            id: yield* newApprovalRuleId,
-            approvalPolicyId: approvalPolicy.id,
-            connection: rule.connection,
-            tool: rule.tool,
-            pattern: { pinned: rule.pinned, free: rule.free },
-            createdBy: rule.createdBy
-          }))
-        }
-        return {
-          approvalPolicy,
-          tools: yield* capture(store.listApprovalPolicyTools(approvalPolicy.id))
-        }
-      }))
-      .handle("assignApprovalPolicy", (request) => Effect.gen(function*() {
-        const tenantId = yield* requireTenant
-        const clientId = request.params["id"]
-        if ((yield* capture(store.findClientById(tenantId, clientId))) === undefined) return yield* new ApiNotFound({ error: `Unknown client ${clientId}` })
-        const id = ApprovalPolicyId.make(request.payload.approvalPolicyId)
-        if ((yield* capture(store.findApprovalPolicy(tenantId, id))) === undefined) return yield* new ApiBadRequest({ error: `Approval policy ${id} belongs to another tenant or does not exist` })
-        return yield* capture(store.assignApprovalPolicy(tenantId, clientId, id))
-      }))
       .handle("listApprovals", (request) =>
         Effect.gen(function*() {
           const tenantId = yield* requireTenant
@@ -609,7 +415,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           const tenantId = yield* requireTenant
           const query = request.query
           const filter = {
-            ...whenPresentMap("clientId", query["clientId"], ClientId.make),
+            ...whenPresentMap("profileId", query["profileId"], ProfileId.make),
             ...whenPresentMap("alias", query["alias"], Alias.make),
             ...whenPresentMap(
               "tool",

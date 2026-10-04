@@ -8,14 +8,12 @@ import { SqlClient, SqlError } from "effect/sql"
 import type { Encryption } from "@integragents/host"
 import { webCrypto } from "@integragents/contracts"
 import {
-  AccessProfileId,
   Alias,
   canonicalJson,
   connectionSubject,
   ApprovalDestinationId,
   ApprovalId,
-  ApprovalPolicyId,
-  ClientId,
+  ProfileId,
   defaultApprovalGroupWindowMinutes,
   defaultApprovalMethod,
   defaultLocalSubjectId,
@@ -30,26 +28,26 @@ import {
 import type {
   ApprovalRule,
   ApprovalRuleId,
-  Client,
-  PendingApproval
+  Caller,
+  ConnectionRef,
+  PendingApproval,
+  Profile,
+  ProfileToolInput
 } from "./domain.ts"
 import { applyIntegrationMigrations } from "@integragents/host"
 import { applyGatewayMigrations } from "./migrate.ts"
 
 import {
-  millis, toAccessProfile, toApprovalRule, toAccessProfileTool, toApiKey, toApproval,
-  toApprovalPolicy, toApprovalPolicyTool, toAuditRecord, toAuthSession, toClient,
+  millis, toApprovalRule, toApiKey, toApproval, toAuditRecord, toAuthSession, toProfile, toProfileTool,
   toApprovalDeliveryAttempt, toApprovalDestination, toExternalIdentity, toIdentityOAuthState, toLoginHandoff, toLoginRecord,
   toSnapshot, toSubject, toTenant, toOAuthApplication, toOAuthAuthorizationRequest,
   toOAuthGrant, toOAuthAuthorizationCode, toOAuthToken
 } from "./store-rows.ts"
 export {
   GatewayStoreError,
-  type AccessProfileToolInput, type ApprovalPolicyToolInput, type AuditQuery,
-  type CreateAccessProfileInput, type CreateApprovalInput,
-  type CreateApprovalPolicyInput, type CreateClientInput, type CreateSubjectInput,
+  type AuditQuery, type CreateApprovalInput, type CreateProfileInput, type CreateSubjectInput,
   type CreateTenantInput, type GatewayOverviewCounts, type GatewayStore,
-  type IdentityOAuthStateRecord, type LoginRecord, type RecordAuditInput
+  type IdentityOAuthStateRecord, type LoginRecord, type ProfileSettings, type RecordAuditInput
 } from "./store-contract.ts"
 import {
   GatewayStoreError,
@@ -85,19 +83,22 @@ const bootstrapDefaultTenant = Effect.fn("GatewayStore.bootstrap")(function*(
     "INSERT INTO gateway_tenant (id, name, created_at) VALUES (?, ?, ?) ON CONFLICT (id) DO NOTHING",
     [defaultTenantId, "Default", timestamp]
   )
-  yield* sql.unsafe(
-    `INSERT INTO gateway_access_profile (id, tenant_id, name, is_default, created_at, updated_at)
-     VALUES (?, ?, 'Default', 1, ?, ?)
-     ON CONFLICT (id) DO NOTHING`,
-    [`default-access-profile:${defaultTenantId}`, defaultTenantId, timestamp, timestamp]
-  )
-  yield* sql.unsafe(
-    `INSERT INTO gateway_approval_policy (id, tenant_id, name, is_default, created_at, updated_at)
-     VALUES (?, ?, 'Default', 1, ?, ?)
-     ON CONFLICT (id) DO NOTHING`,
-    [`default-approval-policy:${defaultTenantId}`, defaultTenantId, timestamp, timestamp]
-  )
 })
+
+const routeArgs = (connection: ConnectionRef): ReadonlyArray<InValue> => [
+  connection.owner,
+  connectionSubject(connection) ?? null,
+  connection.integration,
+  connection.name
+]
+
+const callerArgs = (caller: Caller): ReadonlyArray<InValue> => [
+  caller.apiKeyId,
+  caller.oauthGrantId,
+  caller.oauthApplicationId,
+  caller.credentialName,
+  caller.agent
+]
 
 interface SqlFilter {
   readonly where: string
@@ -109,9 +110,9 @@ const auditFilter = (
 ): SqlFilter => {
   const clauses: Array<string> = []
   const args: Array<InValue> = []
-  if (options.clientId !== undefined) {
-    clauses.push("client_id = ?")
-    args.push(options.clientId)
+  if (options.profileId !== undefined) {
+    clauses.push("profile_id = ?")
+    args.push(options.profileId)
   }
   if (options.alias !== undefined) {
     clauses.push("alias = ?")
@@ -184,12 +185,26 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
       })
     )
 
-  const requireClient = (id: ClientId): Effect.Effect<Client, SqlError.SqlError> =>
+  const requireProfile = (id: ProfileId): Effect.Effect<Profile, SqlError.SqlError> =>
     Effect.gen(function*() {
-      const row = yield* one("SELECT * FROM gateway_client WHERE id = ?", [id])
-      if (row === undefined) return yield* Effect.die(new Error(`Unknown client ${id}`))
-      return toClient(row)
+      const row = yield* one("SELECT * FROM gateway_profile WHERE id = ?", [id])
+      if (row === undefined) return yield* Effect.die(new Error(`Unknown profile ${id}`))
+      return toProfile(row)
     })
+
+  const profileToolStatements = (id: ProfileId, tools: ReadonlyArray<ProfileToolInput>) =>
+    tools.map((tool) => ({
+      sql: `INSERT INTO gateway_profile_tool
+              (profile_id, owner, subject, integration, connection_name, tool, decision)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      args: [id, ...routeArgs(tool.connection), tool.tool, tool.decision]
+    }))
+
+  const listProfileTools = (id: ProfileId) =>
+    Effect.map(
+      all("SELECT * FROM gateway_profile_tool WHERE profile_id = ? ORDER BY integration, connection_name, tool", [id]),
+      (rows) => rows.map(toProfileTool)
+    )
 
   const sealText = (text: string): string => encryption.seal(text)
   const openApproval = (row: Row): PendingApproval => toApproval(row, encryption.open)
@@ -216,12 +231,10 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
   const approvalMatch = (input: Parameters<GatewayStore["findUncollectedApproval"]>[0]) => {
     const canonical = canonicalJson(input.arguments)
     return {
-      sql: `tenant_id = ? AND client_id = ? AND alias = ?
-        AND approval_policy_id = ? AND access_profile_id = ? AND tool = ?
+      sql: `tenant_id = ? AND profile_id = ? AND alias = ? AND tool = ?
         AND ((arguments_lookup IS NOT NULL AND arguments_lookup = ?)
           OR (arguments_lookup IS NULL AND arguments = ?)) AND collected_at IS NULL`,
-      args: [input.tenantId, input.clientId, input.alias, input.approvalPolicyId, input.accessProfileId,
-        input.tool, encryption.lookup(canonical), canonical]
+      args: [input.tenantId, input.profileId, input.alias, input.tool, encryption.lookup(canonical), canonical]
     }
   }
 
@@ -239,23 +252,10 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
     createTenant: (input) => operation("createTenant", Effect.gen(function*() {
       const id = input?.id ?? TenantId.make(yield* Effect.orDie(webCrypto.randomUUIDv4))
       const name = input?.name ?? "Untitled"
-      yield* sql.withTransaction(Effect.gen(function*() {
-        yield* run(
-          "INSERT INTO gateway_tenant (id, name, created_at) VALUES (?, ?, ?)",
-          [id, name, yield* now]
-        )
-        const timestamp = yield* now
-        yield* run(
-         `INSERT INTO gateway_access_profile (id, tenant_id, name, is_default, created_at, updated_at)
-           VALUES (?, ?, 'Default', 1, ?, ?)`,
-          [AccessProfileId.make(`default-access-profile:${id}`), id, timestamp, timestamp]
-        )
-        yield* run(
-          `INSERT INTO gateway_approval_policy (id, tenant_id, name, is_default, created_at, updated_at)
-           VALUES (?, ?, 'Default', 1, ?, ?)`,
-          [ApprovalPolicyId.make(`default-approval-policy:${id}`), id, timestamp, timestamp]
-        )
-      }))
+      yield* run(
+        "INSERT INTO gateway_tenant (id, name, created_at) VALUES (?, ?, ?)",
+        [id, name, yield* now]
+      )
       const row = yield* one("SELECT * FROM gateway_tenant WHERE id = ?", [id])
       if (row === undefined) return yield* Effect.die(new Error(`Failed to store tenant ${id}`))
       return toTenant(row)
@@ -523,144 +523,128 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
       return requests + codes + tokens
     })),
 
-    createConfiguredClient: (input) => operation("createConfiguredClient", Effect.gen(function*() {
-      const at = yield* now
+    createProfile: (input) => operation("createProfile", Effect.gen(function*() {
       yield* batch([
         {
-          sql: `INSERT INTO gateway_access_profile (id, tenant_id, name, is_default, created_at, updated_at)
-                VALUES (?, ?, ?, 0, ?, ?)`,
-          args: [input.accessProfileId, input.tenantId, input.name, at, at]
+          sql: `INSERT INTO gateway_profile
+                  (id, tenant_id, name, capabilities, approval_method, mcp_surface, approval_group_window_minutes,
+                   include_new_tools, created_at, revoked_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+          args: [
+            input.id,
+            input.tenantId,
+            input.name,
+            JSON.stringify(input.capabilities),
+            input.approvalMethod ?? defaultApprovalMethod,
+            input.mcpSurface ?? "tools",
+            input.approvalGroupWindowMinutes ?? defaultApprovalGroupWindowMinutes,
+            input.includeNewTools === true ? 1 : 0,
+            yield* now
+          ]
         },
-        {
-          sql: `INSERT INTO gateway_approval_policy (id, tenant_id, name, is_default, created_at, updated_at)
-                VALUES (?, ?, ?, 0, ?, ?)`,
-          args: [input.approvalPolicyId, input.tenantId, input.name, at, at]
-        },
-        ...input.tools.map((entry) => {
-          const route = [entry.connection.owner, connectionSubject(entry.connection) ?? null, entry.connection.integration, entry.connection.name, entry.tool]
-          return { sql: `INSERT INTO gateway_access_profile_tool (access_profile_id, owner, subject, integration, connection_name, tool) VALUES (?, ?, ?, ?, ?, ?)`, args: [input.accessProfileId, ...route] }
-        }),
-        ...input.approvalPolicyTools.map((entry) => {
-          const route = [entry.connection.owner, connectionSubject(entry.connection) ?? null, entry.connection.integration, entry.connection.name, entry.tool]
-          return { sql: `INSERT INTO gateway_approval_policy_tool (approval_policy_id, owner, subject, integration, connection_name, tool, decision) VALUES (?, ?, ?, ?, ?, ?, ?)`, args: [input.approvalPolicyId, ...route, entry.decision] }
-        }),
-        {
-          sql: `INSERT INTO gateway_client (id, tenant_id, access_profile_id, approval_policy_id, name, capabilities, created_at, revoked_at)
-                VALUES (?, ?, ?, ?, ?, '[]', ?, NULL)`,
-          args: [input.id, input.tenantId, input.accessProfileId, input.approvalPolicyId, input.name, at]
-        }
+        ...profileToolStatements(input.id, input.tools),
+        ...(input.destinationIds ?? []).map((destinationId) => ({
+          sql: `INSERT INTO gateway_profile_approval_destination (profile_id, destination_id)
+                SELECT ?, id FROM gateway_approval_destination WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL`,
+          args: [input.id, input.tenantId, destinationId]
+        }))
       ])
-      return yield* requireClient(input.id)
+      return yield* requireProfile(input.id)
     })),
 
-    createClient: (input) => operation("createClient", Effect.gen(function*() {
-      yield* run(
-        "INSERT INTO gateway_client (id, tenant_id, access_profile_id, approval_policy_id, name, capabilities, approval_method, mcp_surface, approval_group_window_minutes, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
-        [
-          input.id,
-          input.tenantId,
-          input.accessProfileId,
-          input.approvalPolicyId,
-          input.name,
-          JSON.stringify(input.capabilities),
-          input.approvalMethod ?? defaultApprovalMethod,
-          input.mcpSurface ?? "tools",
-          input.approvalGroupWindowMinutes ?? defaultApprovalGroupWindowMinutes,
-          yield* now
-        ]
-      )
-      return yield* requireClient(input.id)
-    })),
-
-    listClients: (tenantId) => operation("listClients", Effect.gen(function*() {
+    listProfiles: (tenantId) => operation("listProfiles", Effect.gen(function*() {
       return (yield* all(
-        "SELECT * FROM gateway_client WHERE tenant_id = ? ORDER BY created_at",
+        "SELECT * FROM gateway_profile WHERE tenant_id = ? ORDER BY created_at",
         [tenantId]
-      )).map(toClient)
+      )).map(toProfile)
     })),
 
     overviewCounts: (tenantId) => operation("overviewCounts", Effect.gen(function*() {
       const row = yield* one(
         `SELECT
-          (SELECT COUNT(*) FROM gateway_client
-            WHERE tenant_id = ? AND revoked_at IS NULL) AS clients,
-          (SELECT COUNT(*) FROM gateway_access_profile WHERE tenant_id = ?) AS access_profiles,
-          (SELECT COUNT(*) FROM gateway_access_profile_tool AS tool
-            JOIN gateway_access_profile AS profile ON profile.id = tool.access_profile_id
-            WHERE profile.tenant_id = ?) AS access_profile_tools,
-          (SELECT COUNT(*) FROM gateway_approval_policy WHERE tenant_id = ?) AS approval_policies,
-          (SELECT COUNT(*) FROM gateway_approval_policy_tool AS tool
-            JOIN gateway_approval_policy AS policy ON policy.id = tool.approval_policy_id
-            WHERE policy.tenant_id = ?) AS approval_policy_tools,
+          (SELECT COUNT(*) FROM gateway_profile
+            WHERE tenant_id = ? AND revoked_at IS NULL) AS profiles,
+          (SELECT COUNT(*) FROM gateway_profile_tool AS tool
+            JOIN gateway_profile AS profile ON profile.id = tool.profile_id
+            WHERE profile.tenant_id = ? AND profile.revoked_at IS NULL) AS profile_tools,
           (SELECT COUNT(*) FROM gateway_api_key AS api_key
-            JOIN gateway_client AS client ON client.id = api_key.client_id
-            WHERE client.tenant_id = ? AND client.revoked_at IS NULL
+            JOIN gateway_profile AS profile ON profile.id = api_key.profile_id
+            WHERE profile.tenant_id = ? AND profile.revoked_at IS NULL
               AND api_key.revoked_at IS NULL) AS keys,
           (SELECT COUNT(*) FROM gateway_pending_approval
             WHERE tenant_id = ? AND status = 'pending' AND expires_at > ?) AS pending_approvals`,
-        [tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, tenantId, yield* now]
+        [tenantId, tenantId, tenantId, tenantId, yield* now]
       )
       return {
-        clients: Number(row?.["clients"] ?? 0),
-        accessProfiles: Number(row?.["access_profiles"] ?? 0),
-        accessProfileTools: Number(row?.["access_profile_tools"] ?? 0),
-        approvalPolicies: Number(row?.["approval_policies"] ?? 0),
-        approvalPolicyTools: Number(row?.["approval_policy_tools"] ?? 0),
+        profiles: Number(row?.["profiles"] ?? 0),
+        profileTools: Number(row?.["profile_tools"] ?? 0),
         keys: Number(row?.["keys"] ?? 0),
         pendingApprovals: Number(row?.["pending_approvals"] ?? 0)
       }
     })),
 
-    findClientById: (tenantId, id) => operation("findClientById", Effect.gen(function*() {
+    findProfileById: (tenantId, id) => operation("findProfileById", Effect.gen(function*() {
       const row = yield* one(
-        "SELECT * FROM gateway_client WHERE tenant_id = ? AND id = ?",
+        "SELECT * FROM gateway_profile WHERE tenant_id = ? AND id = ?",
         [tenantId, id]
       )
-      return row === undefined ? undefined : toClient(row)
+      return row === undefined ? undefined : toProfile(row)
     })),
 
-    findClientByName: (tenantId, name) => operation("findClientByName", Effect.gen(function*() {
+    findProfileByName: (tenantId, name) => operation("findProfileByName", Effect.gen(function*() {
       const row = yield* one(
-        "SELECT * FROM gateway_client WHERE tenant_id = ? AND name = ?",
+        "SELECT * FROM gateway_profile WHERE tenant_id = ? AND name = ?",
         [tenantId, name]
       )
-      return row === undefined ? undefined : toClient(row)
+      return row === undefined ? undefined : toProfile(row)
     })),
 
-    updateClientSettings: (input) => operation("updateClientSettings", Effect.gen(function*() {
+    updateProfileSettings: (tenantId, id, settings) => operation("updateProfileSettings", Effect.gen(function*() {
       yield* run(
-        `UPDATE gateway_client SET capabilities = ?, approval_method = ?, mcp_surface = ?, approval_group_window_minutes = ?
+        `UPDATE gateway_profile
+            SET capabilities = ?, approval_method = ?, mcp_surface = ?, approval_group_window_minutes = ?, include_new_tools = ?
           WHERE tenant_id = ? AND id = ? AND revoked_at IS NULL`,
         [
-          JSON.stringify(input.capabilities),
-          input.approvalMethod,
-          input.mcpSurface,
-          input.approvalGroupWindowMinutes,
-          input.tenantId,
-          input.id
+          JSON.stringify(settings.capabilities),
+          settings.approvalMethod,
+          settings.mcpSurface,
+          settings.approvalGroupWindowMinutes,
+          settings.includeNewTools ? 1 : 0,
+          tenantId,
+          id
         ]
       )
-      return yield* requireClient(input.id)
+      return yield* requireProfile(id)
     })),
 
-    renameClient: (tenantId, id, name) => operation("renameClient", Effect.gen(function*() {
+    renameProfile: (tenantId, id, name) => operation("renameProfile", Effect.gen(function*() {
       yield* run(
-        "UPDATE gateway_client SET name = ? WHERE tenant_id = ? AND id = ? AND revoked_at IS NULL",
+        "UPDATE gateway_profile SET name = ? WHERE tenant_id = ? AND id = ? AND revoked_at IS NULL",
         [name, tenantId, id]
       )
-      return yield* requireClient(id)
+      return yield* requireProfile(id)
     })),
 
-    revokeClient: (tenantId, id) =>
+    revokeProfile: (tenantId, id) =>
       operation(
-        "revokeClient",
+        "revokeProfile",
         Effect.gen(function*() {
           yield* run(
-            "UPDATE gateway_client SET revoked_at = ? WHERE tenant_id = ? AND id = ? AND revoked_at IS NULL",
+            "UPDATE gateway_profile SET revoked_at = ? WHERE tenant_id = ? AND id = ? AND revoked_at IS NULL",
             [yield* now, tenantId, id]
           )
         })
       ),
+
+    listProfileTools: (id) => operation("listProfileTools", listProfileTools(id)),
+
+    replaceProfileTools: (id, tools) => operation("replaceProfileTools", Effect.gen(function*() {
+      yield* batch([
+        { sql: "DELETE FROM gateway_profile_tool WHERE profile_id = ?", args: [id] },
+        ...profileToolStatements(id, tools)
+      ])
+      return yield* listProfileTools(id)
+    })),
 
     createApprovalDestination: (input) => operation("createApprovalDestination", Effect.gen(function*() {
       yield* run(
@@ -690,25 +674,25 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
         })
       ),
 
-    listClientApprovalDestinationIds: (clientId) => operation("listClientApprovalDestinationIds", Effect.gen(function*() {
-      return (yield* all("SELECT destination_id FROM gateway_client_approval_destination WHERE client_id = ? ORDER BY destination_id", [clientId]))
+    listProfileApprovalDestinationIds: (profileId) => operation("listProfileApprovalDestinationIds", Effect.gen(function*() {
+      return (yield* all("SELECT destination_id FROM gateway_profile_approval_destination WHERE profile_id = ? ORDER BY destination_id", [profileId]))
         .map((row) => ApprovalDestinationId.make(String(row["destination_id"])))
     })),
 
-    replaceClientApprovalDestinations: (tenantId, clientId, ids) => operation("replaceClientApprovalDestinations", Effect.gen(function*() {
+    replaceProfileApprovalDestinations: (tenantId, profileId, ids) => operation("replaceProfileApprovalDestinations", Effect.gen(function*() {
       const statements = [
-        { sql: "DELETE FROM gateway_client_approval_destination WHERE client_id = ?", args: [clientId] },
+        { sql: "DELETE FROM gateway_profile_approval_destination WHERE profile_id = ?", args: [profileId] },
         ...ids.map((id) => ({
-          sql: `INSERT INTO gateway_client_approval_destination (client_id, destination_id)
+          sql: `INSERT INTO gateway_profile_approval_destination (profile_id, destination_id)
                 SELECT ?, id FROM gateway_approval_destination WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL`,
-          args: [clientId, tenantId, id]
+          args: [profileId, tenantId, id]
         }))
       ]
       yield* batch(statements)
       return (yield* all(
-        `SELECT destination_id FROM gateway_client_approval_destination
-          WHERE client_id = ? ORDER BY destination_id`,
-        [clientId]
+        `SELECT destination_id FROM gateway_profile_approval_destination
+          WHERE profile_id = ? ORDER BY destination_id`,
+        [profileId]
       )).map((row) => ApprovalDestinationId.make(String(row["destination_id"])))
     })),
 
@@ -744,12 +728,12 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
       const placeholders = ids.map(() => "?").join(", ")
       const rows = yield* all(
         `SELECT delivery.*, destination.name AS destination_name, destination.url,
-                destination.signing_secret, approval.tenant_id, approval.group_id, approval.client_id,
-                client.name AS client_name, approval.alias, approval.tool, approval.expires_at
+                destination.signing_secret, approval.tenant_id, approval.group_id, approval.profile_id,
+                profile.name AS profile_name, approval.alias, approval.tool, approval.expires_at
            FROM gateway_approval_delivery AS delivery
            JOIN gateway_approval_destination AS destination ON destination.id = delivery.destination_id
            JOIN gateway_pending_approval AS approval ON approval.id = delivery.approval_id
-           JOIN gateway_client AS client ON client.id = approval.client_id
+           JOIN gateway_profile AS profile ON profile.id = approval.profile_id
           WHERE delivery.id IN (${placeholders})`,
         ids
       )
@@ -757,8 +741,8 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
         ...toApprovalDeliveryAttempt(row),
         tenantId: TenantId.make(String(row["tenant_id"])),
         groupId: ApprovalId.make(String(row["group_id"])),
-        clientId: ClientId.make(String(row["client_id"])),
-        clientName: String(row["client_name"]),
+        profileId: ProfileId.make(String(row["profile_id"])),
+        profileName: String(row["profile_name"]),
         alias: Alias.make(String(row["alias"])),
         tool: ToolName.make(String(row["tool"])),
         expiresAt: new Date(Number(row["expires_at"])),
@@ -791,52 +775,24 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
 
     addApiKey: (input) => operation("addApiKey", Effect.gen(function*() {
       yield* run(
-        "INSERT INTO gateway_api_key (id, client_id, hash, created_at, last_used_at, revoked_at) VALUES (?, ?, ?, ?, NULL, NULL)",
-        [input.id, input.clientId, input.hash, yield* now]
+        "INSERT INTO gateway_api_key (id, profile_id, name, hash, created_at, last_used_at, revoked_at) VALUES (?, ?, ?, ?, ?, NULL, NULL)",
+        [input.id, input.profileId, input.name, input.hash, yield* now]
       )
       const row = yield* one("SELECT * FROM gateway_api_key WHERE id = ?", [input.id])
       if (row === undefined) return yield* Effect.die(new Error(`Failed to store API key ${input.id}`))
       return toApiKey(row)
     })),
 
-    listApiKeys: (clientId) => operation("listApiKeys", Effect.gen(function*() {
-      return (yield* all("SELECT * FROM gateway_api_key WHERE client_id = ? ORDER BY created_at", [clientId]))
+    listApiKeys: (profileId) => operation("listApiKeys", Effect.gen(function*() {
+      return (yield* all("SELECT * FROM gateway_api_key WHERE profile_id = ? ORDER BY created_at", [profileId]))
         .map(toApiKey)
     })),
 
     findApiKeyByHash: (hash) => operation("findApiKeyByHash", Effect.gen(function*() {
-      const row = yield* one(
-        `SELECT gateway_api_key.*, gateway_client.tenant_id AS client_tenant_id,
-                 gateway_client.access_profile_id AS client_access_profile_id,
-                 gateway_client.approval_policy_id AS client_approval_policy_id,
-                gateway_client.name AS client_name,
-                gateway_client.capabilities AS client_capabilities,
-                gateway_client.approval_method AS client_approval_method,
-                gateway_client.mcp_surface AS client_mcp_surface,
-                gateway_client.approval_group_window_minutes AS client_approval_group_window_minutes,
-                gateway_client.created_at AS client_created_at, gateway_client.revoked_at AS client_revoked_at
-           FROM gateway_api_key JOIN gateway_client ON gateway_client.id = gateway_api_key.client_id
-          WHERE gateway_api_key.hash = ?`,
-        [hash]
-      )
-      if (row === undefined) return undefined
-      return {
-        key: toApiKey(row),
-        client: toClient({
-          ...row,
-          id: row["client_id"] ?? "",
-          tenant_id: row["client_tenant_id"] ?? "",
-           access_profile_id: row["client_access_profile_id"] ?? "",
-           approval_policy_id: row["client_approval_policy_id"] ?? "",
-          name: row["client_name"] ?? "",
-          capabilities: row["client_capabilities"] ?? "[]",
-          approval_method: row["client_approval_method"] ?? defaultApprovalMethod,
-          mcp_surface: row["client_mcp_surface"] ?? "tools",
-          approval_group_window_minutes: row["client_approval_group_window_minutes"] ?? defaultApprovalGroupWindowMinutes,
-          created_at: row["client_created_at"] ?? 0,
-          revoked_at: row["client_revoked_at"] ?? null
-        })
-      }
+      const key = yield* one("SELECT * FROM gateway_api_key WHERE hash = ?", [hash])
+      if (key === undefined) return undefined
+      const apiKey = toApiKey(key)
+      return { key: apiKey, profile: yield* requireProfile(apiKey.profileId) }
     })),
 
     touchApiKey: (id) =>
@@ -943,17 +899,17 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
       }
       yield* run(
         `INSERT INTO gateway_oauth_grant
-           (id, application_id, subject_id, tenant_id, client_id, resource, scope, created_at, last_used_at, revoked_at)
+           (id, application_id, subject_id, tenant_id, profile_id, resource, scope, created_at, last_used_at, revoked_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
-         ON CONFLICT (application_id, subject_id, client_id, resource, scope)
+         ON CONFLICT (application_id, subject_id, profile_id, resource, scope)
          DO UPDATE SET revoked_at = NULL`,
-        [input.id, input.applicationId, input.subjectId, input.tenantId, input.clientId,
+        [input.id, input.applicationId, input.subjectId, input.tenantId, input.profileId,
           input.resource, input.scope, yield* now]
       )
       const row = yield* one(
         `SELECT * FROM gateway_oauth_grant
-          WHERE application_id = ? AND subject_id = ? AND client_id = ? AND resource = ? AND scope = ?`,
-        [input.applicationId, input.subjectId, input.clientId, input.resource, input.scope]
+          WHERE application_id = ? AND subject_id = ? AND profile_id = ? AND resource = ? AND scope = ?`,
+        [input.applicationId, input.subjectId, input.profileId, input.resource, input.scope]
       )
       if (row === undefined) return yield* Effect.die(new Error("Failed to store OAuth grant"))
       return toOAuthGrant(row)
@@ -962,10 +918,10 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
     listOAuthGrants: (tenantId) => operation("listOAuthGrants", Effect.gen(function*() {
       const rows = yield* all(
         `SELECT g.*, a.kind AS application_kind, a.name AS application_name,
-                c.name AS client_name, COALESCE(l.email, 'Local operator') AS subject_email
+                p.name AS profile_name, COALESCE(l.email, 'Local operator') AS subject_email
            FROM gateway_oauth_grant g
            JOIN gateway_oauth_application a ON a.id = g.application_id
-           JOIN gateway_client c ON c.id = g.client_id
+           JOIN gateway_profile p ON p.id = g.profile_id
            LEFT JOIN gateway_login l ON l.subject_id = g.subject_id
           WHERE g.tenant_id = ? ORDER BY g.created_at DESC`,
         [tenantId]
@@ -975,8 +931,8 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
         applicationId: OAuthApplicationId.make(String(row["application_id"] ?? "")),
         applicationKind: row["application_kind"] === "dcr" ? "dcr" as const : "cimd" as const,
         applicationName: String(row["application_name"] ?? ""),
-        clientId: ClientId.make(String(row["client_id"] ?? "")),
-        clientName: String(row["client_name"] ?? ""),
+        profileId: ProfileId.make(String(row["profile_id"] ?? "")),
+        profileName: String(row["profile_name"] ?? ""),
         subjectId: SubjectId.make(String(row["subject_id"] ?? "")),
         subjectEmail: String(row["subject_email"] ?? ""),
         scope: "mcp" as const,
@@ -1088,25 +1044,26 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
     resolveOAuthAccessToken: (input) => operation("resolveOAuthAccessToken", Effect.gen(function*() {
       const timestamp = yield* now
       const row = yield* one(
-        `SELECT t.*, g.subject_id, g.client_id
+        `SELECT t.*, g.subject_id, g.profile_id, a.name AS application_name
            FROM gateway_oauth_token t
            JOIN gateway_oauth_grant g ON g.id = t.grant_id
            JOIN gateway_oauth_application a ON a.id = t.application_id
-           JOIN gateway_client c ON c.id = g.client_id
+           JOIN gateway_profile p ON p.id = g.profile_id
           WHERE t.hash = ? AND t.kind = 'access' AND t.resource = ? AND t.expires_at > ?
             AND t.revoked_at IS NULL AND g.revoked_at IS NULL AND a.revoked_at IS NULL
-            AND c.revoked_at IS NULL`,
+            AND p.revoked_at IS NULL`,
         [input.hash, input.resource, timestamp]
       )
       if (row === undefined) return undefined
       const token = toOAuthToken(row)
-      const client = yield* requireClient(ClientId.make(String(row["client_id"] ?? "")))
+      const profile = yield* requireProfile(ProfileId.make(String(row["profile_id"] ?? "")))
       yield* run("UPDATE gateway_oauth_grant SET last_used_at = ? WHERE id = ?", [timestamp, token.grantId])
       return {
-        client,
+        profile,
         actor: {
           grantId: token.grantId,
           applicationId: token.applicationId,
+          applicationName: String(row["application_name"] ?? ""),
           subjectId: SubjectId.make(String(row["subject_id"] ?? ""))
         },
         expiresAt: token.expiresAt,
@@ -1114,238 +1071,23 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
       }
     })),
 
-    createAccessProfile: (input) => operation("createAccessProfile", Effect.gen(function*() {
-      const timestamp = yield* now
-      yield* run(
-        `INSERT INTO gateway_access_profile (id, tenant_id, name, is_default, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [
-          input.id, input.tenantId, input.name, input.isDefault === true ? 1 : 0, timestamp, timestamp
-        ]
-      )
-      const row = yield* one("SELECT * FROM gateway_access_profile WHERE id = ?", [input.id])
-      if (row === undefined) return yield* Effect.die(new Error(`Failed to store access profile ${input.id}`))
-      return toAccessProfile(row)
-    })),
-
-    updateAccessProfile: (tenantId, id, name) => operation("updateAccessProfile", Effect.gen(function*() {
-      yield* run(
-        "UPDATE gateway_access_profile SET name = ?, updated_at = ? WHERE tenant_id = ? AND id = ?",
-        [name, yield* now, tenantId, id]
-      )
-      const row = yield* one("SELECT * FROM gateway_access_profile WHERE tenant_id = ? AND id = ?", [tenantId, id])
-      if (row === undefined) return yield* Effect.die(new Error(`Unknown access profile ${id}`))
-      return toAccessProfile(row)
-    })),
-
-    deleteAccessProfile: (tenantId, id) => operation("deleteAccessProfile", Effect.gen(function*() {
-      const removed = yield* changed(
-        `DELETE FROM gateway_access_profile
-          WHERE tenant_id = ? AND id = ? AND is_default = 0
-            AND NOT EXISTS (SELECT 1 FROM gateway_client WHERE access_profile_id = ?)
-          RETURNING id`,
-        [tenantId, id, id]
-      )
-      if (removed === 0) {
-        return yield* Effect.die(new Error(`Access profile ${id} is default, assigned, or does not exist`))
-      }
-    })),
-
-    listAccessProfiles: (tenantId) => operation("listAccessProfiles", Effect.gen(function*() {
-      return (yield* all("SELECT * FROM gateway_access_profile WHERE tenant_id = ? ORDER BY is_default DESC, name", [tenantId])).map(toAccessProfile)
-    })),
-
-    findAccessProfile: (tenantId, id) => operation("findAccessProfile", Effect.gen(function*() {
-      const row = yield* one("SELECT * FROM gateway_access_profile WHERE tenant_id = ? AND id = ?", [tenantId, id])
-      return row === undefined ? undefined : toAccessProfile(row)
-    })),
-
-    findDefaultAccessProfile: (tenantId) => operation("findDefaultAccessProfile", Effect.gen(function*() {
-      const row = yield* one("SELECT * FROM gateway_access_profile WHERE tenant_id = ? AND is_default = 1", [tenantId])
-      return row === undefined ? undefined : toAccessProfile(row)
-    })),
-
-    findAccessProfileForClient: (clientId) => operation("findAccessProfileForClient", Effect.gen(function*() {
-      const row = yield* one(
-        `SELECT profile.* FROM gateway_access_profile AS profile
-           JOIN gateway_client AS client ON client.access_profile_id = profile.id
-           WHERE client.id = ?`,
-        [clientId]
-      )
-      return row === undefined ? undefined : toAccessProfile(row)
-    })),
-
-    listAccessProfileTools: (id) => operation("listAccessProfileTools", Effect.gen(function*() {
-      return (yield* all("SELECT * FROM gateway_access_profile_tool WHERE access_profile_id = ? ORDER BY integration, connection_name, tool", [id])).map(toAccessProfileTool)
-    })),
-
-    replaceAccessProfileTools: (id, tools) => operation("replaceAccessProfileTools", Effect.gen(function*() {
-      yield* sql.withTransaction(Effect.gen(function*() {
-        yield* run("DELETE FROM gateway_access_profile_tool WHERE access_profile_id = ?", [id])
-        for (const tool of tools) {
-          yield* run(
-            `INSERT INTO gateway_access_profile_tool
-               (access_profile_id, owner, subject, integration, connection_name, tool)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            [
-              id,
-              tool.connection.owner,
-              tool.connection.owner === "user" ? tool.connection.subject ?? null : null,
-              tool.connection.integration,
-              tool.connection.name,
-              tool.tool
-            ]
-          )
-        }
-        yield* run(
-          `UPDATE gateway_access_profile
-              SET updated_at = CASE WHEN updated_at >= ? THEN updated_at + 1 ELSE ? END
-            WHERE id = ?`,
-          [yield* now, yield* now, id]
-        )
-      }))
-      return (yield* all("SELECT * FROM gateway_access_profile_tool WHERE access_profile_id = ? ORDER BY integration, connection_name, tool", [id])).map(toAccessProfileTool)
-    })),
-
-    assignAccessProfile: (tenantId, clientId, id) => operation("assignAccessProfile", Effect.gen(function*() {
-      const assigned = yield* changed(
-        `UPDATE gateway_client SET access_profile_id = ?
-          WHERE tenant_id = ? AND id = ? AND EXISTS (
-            SELECT 1 FROM gateway_access_profile WHERE id = ? AND tenant_id = ?
-          )
-          RETURNING id`,
-        [id, tenantId, clientId, id, tenantId]
-      )
-      if (assigned === 0) {
-        return yield* Effect.die(
-          new Error(`Access profile ${id} cannot be assigned to client ${clientId}`)
-        )
-      }
-      return yield* requireClient(clientId)
-    })),
-
-    createApprovalPolicy: (input) => operation("createApprovalPolicy", Effect.gen(function*() {
-      const timestamp = yield* now
-      yield* batch([
-        {
-          sql: `INSERT INTO gateway_approval_policy (id, tenant_id, name, is_default, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)`,
-          args: [input.id, input.tenantId, input.name, input.isDefault === true ? 1 : 0, timestamp, timestamp]
-        },
-        ...input.tools.map((tool) => ({
-          sql: `INSERT INTO gateway_approval_policy_tool
-                (approval_policy_id, owner, subject, integration, connection_name, tool, decision)
-                VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          args: [
-            input.id,
-            tool.connection.owner,
-            connectionSubject(tool.connection) ?? null,
-            tool.connection.integration,
-            tool.connection.name,
-            tool.tool,
-            tool.decision
-          ]
-        }))
-      ])
-      const row = yield* one("SELECT * FROM gateway_approval_policy WHERE id = ?", [input.id])
-      if (row === undefined) return yield* Effect.die(new Error(`Failed to store approval policy ${input.id}`))
-      return toApprovalPolicy(row)
-    })),
-
-    updateApprovalPolicy: (tenantId, id, name) => operation("updateApprovalPolicy", Effect.gen(function*() {
-      yield* run("UPDATE gateway_approval_policy SET name = ?, updated_at = ? WHERE tenant_id = ? AND id = ?", [name, yield* now, tenantId, id])
-      const row = yield* one("SELECT * FROM gateway_approval_policy WHERE tenant_id = ? AND id = ?", [tenantId, id])
-      if (row === undefined) return yield* Effect.die(new Error(`Unknown approval policy ${id}`))
-      return toApprovalPolicy(row)
-    })),
-
-    deleteApprovalPolicy: (tenantId, id) => operation("deleteApprovalPolicy", Effect.gen(function*() {
-      const removed = yield* changed(
-        `DELETE FROM gateway_approval_policy WHERE tenant_id = ? AND id = ? AND is_default = 0
-          AND NOT EXISTS (SELECT 1 FROM gateway_client WHERE approval_policy_id = ?)
-          RETURNING id`,
-        [tenantId, id, id]
-      )
-      if (removed === 0) {
-        return yield* Effect.die(
-          new Error(`Approval policy ${id} is default, assigned, or does not exist`)
-        )
-      }
-    })),
-
-    listApprovalPolicies: (tenantId) => operation("listApprovalPolicies", Effect.gen(function*() {
-      return (yield* all("SELECT * FROM gateway_approval_policy WHERE tenant_id = ? ORDER BY is_default DESC, name", [tenantId])).map(toApprovalPolicy)
-    })),
-
-    findApprovalPolicy: (tenantId, id) => operation("findApprovalPolicy", Effect.gen(function*() {
-      const row = yield* one("SELECT * FROM gateway_approval_policy WHERE tenant_id = ? AND id = ?", [tenantId, id])
-      return row === undefined ? undefined : toApprovalPolicy(row)
-    })),
-
-    findDefaultApprovalPolicy: (tenantId) => operation("findDefaultApprovalPolicy", Effect.gen(function*() {
-      const row = yield* one("SELECT * FROM gateway_approval_policy WHERE tenant_id = ? AND is_default = 1", [tenantId])
-      return row === undefined ? undefined : toApprovalPolicy(row)
-    })),
-
-    findApprovalPolicyForClient: (clientId) => operation("findApprovalPolicyForClient", Effect.gen(function*() {
-      const row = yield* one(`SELECT policy.* FROM gateway_approval_policy AS policy
-        JOIN gateway_client AS client ON client.approval_policy_id = policy.id WHERE client.id = ?`, [clientId])
-      return row === undefined ? undefined : toApprovalPolicy(row)
-    })),
-
-    listApprovalPolicyTools: (id) => operation("listApprovalPolicyTools", Effect.gen(function*() {
-      return (yield* all("SELECT * FROM gateway_approval_policy_tool WHERE approval_policy_id = ? ORDER BY integration, connection_name, tool", [id])).map(toApprovalPolicyTool)
-    })),
-
-    replaceApprovalPolicyTools: (id, tools) => operation("replaceApprovalPolicyTools", Effect.gen(function*() {
-      yield* sql.withTransaction(Effect.gen(function*() {
-        yield* run("DELETE FROM gateway_approval_policy_tool WHERE approval_policy_id = ?", [id])
-        for (const tool of tools) {
-          yield* run(`INSERT INTO gateway_approval_policy_tool
-            (approval_policy_id, owner, subject, integration, connection_name, tool, decision)
-            VALUES (?, ?, ?, ?, ?, ?, ?)`, [
-            id, tool.connection.owner, tool.connection.owner === "user" ? tool.connection.subject ?? null : null,
-            tool.connection.integration, tool.connection.name, tool.tool, tool.decision
-          ])
-        }
-        yield* run(`UPDATE gateway_approval_policy SET updated_at = CASE WHEN updated_at >= ? THEN updated_at + 1 ELSE ? END WHERE id = ?`, [yield* now, yield* now, id])
-      }))
-      return (yield* all("SELECT * FROM gateway_approval_policy_tool WHERE approval_policy_id = ? ORDER BY integration, connection_name, tool", [id])).map(toApprovalPolicyTool)
-    })),
-
-    assignApprovalPolicy: (tenantId, clientId, id) => operation("assignApprovalPolicy", Effect.gen(function*() {
-      const assigned = yield* changed(
-        `UPDATE gateway_client SET approval_policy_id = ? WHERE tenant_id = ? AND id = ? AND EXISTS (
-          SELECT 1 FROM gateway_approval_policy WHERE id = ? AND tenant_id = ?)
-          RETURNING id`,
-        [id, tenantId, clientId, id, tenantId]
-      )
-      if (assigned === 0) {
-        return yield* Effect.die(
-          new Error(`Approval policy ${id} cannot be assigned to client ${clientId}`)
-        )
-      }
-      return yield* requireClient(clientId)
-    })),
-
     createApprovalRule: (input) => operation("createApprovalRule", Effect.gen(function*() {
       yield* run(
         `INSERT INTO gateway_approval_rule
-           (id, approval_policy_id, owner, subject, integration, connection_name, tool, pattern, created_at, created_by)
+           (id, profile_id, owner, subject, integration, connection_name, tool, pattern, created_at, created_by)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          input.id, input.approvalPolicyId, input.connection.owner, connectionSubject(input.connection) ?? null,
-          input.connection.integration, input.connection.name, input.tool,
+          input.id, input.profileId, ...routeArgs(input.connection), input.tool,
           sealText(JSON.stringify(input.pattern)), yield* now, input.createdBy
         ]
       )
       return yield* requireApprovalRule(input.id)
     })),
 
-    listApprovalRules: (approvalPolicyId) => operation("listApprovalRules", Effect.gen(function*() {
+    listApprovalRules: (profileId) => operation("listApprovalRules", Effect.gen(function*() {
       return (yield* all(
-        "SELECT * FROM gateway_approval_rule WHERE approval_policy_id = ? ORDER BY integration, connection_name, tool, created_at",
-        [approvalPolicyId]
+        "SELECT * FROM gateway_approval_rule WHERE profile_id = ? ORDER BY integration, connection_name, tool, created_at",
+        [profileId]
       )).map(openApprovalRule)
     })),
 
@@ -1368,30 +1110,27 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
       const createdAt = yield* now
       yield* batch([
         { sql: `INSERT INTO gateway_pending_approval
-           (id, tenant_id, client_id, approval_policy_id, access_profile_id, alias, tool, arguments, arguments_lookup, group_id, status, created_at, expires_at, decided_at, decided_by, result, error, collected_at)
-         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((
+           (id, tenant_id, profile_id, api_key_id, oauth_grant_id, oauth_application_id, credential_name, agent,
+            alias, tool, arguments, arguments_lookup, group_id, status, created_at, expires_at, decided_at, decided_by, result, error, collected_at)
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((
              SELECT member.group_id FROM gateway_pending_approval AS member
                JOIN gateway_pending_approval AS lead ON lead.id = member.group_id
-              WHERE member.tenant_id = ? AND member.client_id = ? AND member.alias = ?
-                AND member.approval_policy_id = ? AND member.access_profile_id = ? AND member.tool = ?
+              WHERE member.tenant_id = ? AND member.profile_id = ? AND member.alias = ? AND member.tool = ?
                 AND member.status = 'pending' AND member.expires_at > ? AND lead.created_at > ?
               ORDER BY lead.created_at DESC LIMIT 1
            ), ?), 'pending', ?, ?, NULL, NULL, NULL, NULL, NULL
           WHERE NOT EXISTS (SELECT 1 FROM gateway_pending_approval WHERE ${match.sql})`, args: [
           input.id,
           input.tenantId,
-          input.clientId,
-          input.approvalPolicyId,
-          input.accessProfileId,
+          input.profileId,
+          ...callerArgs(input.caller),
           input.alias,
           input.tool,
           sealText(canonical),
           encryption.lookup(canonical),
           input.tenantId,
-          input.clientId,
+          input.profileId,
           input.alias,
-          input.approvalPolicyId,
-          input.accessProfileId,
           input.tool,
           createdAt,
           createdAt - input.groupWindowMinutes * 60_000,
@@ -1403,10 +1142,10 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
         { sql: `INSERT INTO gateway_approval_delivery
              (id, approval_id, destination_id, status, attempts, next_attempt_at, delivered_at, last_error)
            SELECT lower(hex(randomblob(16))), ?, assignment.destination_id, 'pending', 0, ?, NULL, NULL
-             FROM gateway_client_approval_destination AS assignment
+             FROM gateway_profile_approval_destination AS assignment
              JOIN gateway_approval_destination AS destination ON destination.id = assignment.destination_id
-            WHERE assignment.client_id = ? AND destination.deleted_at IS NULL
-              AND EXISTS (SELECT 1 FROM gateway_pending_approval WHERE id = ? AND group_id = id)`, args: [input.id, createdAt, input.clientId, input.id] }
+            WHERE assignment.profile_id = ? AND destination.deleted_at IS NULL
+              AND EXISTS (SELECT 1 FROM gateway_pending_approval WHERE id = ? AND group_id = id)`, args: [input.id, createdAt, input.profileId, input.id] }
       ])
       const approval = yield* findUncollectedApproval(input)
       if (approval === undefined) return yield* Effect.die(new Error(`Failed to store approval ${input.id}`))
@@ -1477,16 +1216,16 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
       )) === 1
     })),
 
-    cancelApprovalsForClient: (clientId) =>
+    cancelApprovalsForProfile: (profileId) =>
       operation(
-        "cancelApprovalsForClient",
+        "cancelApprovalsForProfile",
         Effect.gen(function*() {
           return yield* changed(
             `UPDATE gateway_pending_approval
-              SET status = 'denied', decided_at = ?, decided_by = 'client-revoked'
-            WHERE client_id = ? AND status = 'pending'
+              SET status = 'denied', decided_at = ?, decided_by = 'profile-revoked'
+            WHERE profile_id = ? AND status = 'pending'
             RETURNING id`,
-            [yield* now, clientId]
+            [yield* now, profileId]
           )
         })
       ),
@@ -1495,16 +1234,15 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
       const connection = input.connection
       yield* run(
         `INSERT INTO gateway_audit
-           (id, tenant_id, client_id, oauth_grant_id, oauth_application_id, authorized_by_subject_id,
-            alias, tool, owner, subject, integration, connection_name, decision, outcome, message, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, tenant_id, profile_id, api_key_id, oauth_grant_id, oauth_application_id, credential_name, agent,
+            authorized_by_subject_id, alias, tool, owner, subject, integration, connection_name, decision, outcome, message, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           input.id,
           input.tenantId,
-          input.clientId,
-          input.oauthActor?.grantId ?? null,
-          input.oauthActor?.applicationId ?? null,
-          input.oauthActor?.subjectId ?? null,
+          input.profileId,
+          ...callerArgs(input.caller),
+          input.authorizedBySubjectId,
           input.alias,
           input.tool,
           connection === null ? null : connection.owner,

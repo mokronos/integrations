@@ -18,7 +18,9 @@ export const OAuthSessionRequest = Schema.Struct({
   timeoutMs: Schema.optional(Schema.Number),
   bindingTenant: Schema.optional(TenantId),
   /** The person this flow connects for. Set at start, so a leaked URL can only ever finish their connection. */
-  subject: Schema.optional(SubjectId)
+  subject: Schema.optional(SubjectId),
+  /** The connection did not exist when the flow started; re-authorizing one leaves profiles as they are. */
+  newConnection: Schema.optional(Schema.Boolean)
 })
 export type OAuthSessionRequest = typeof OAuthSessionRequest.Type
 

@@ -1,9 +1,9 @@
 import { Schema } from "effect"
 import {
-  ClientId,
   OAuthApplicationId,
   OAuthApplicationKind,
   OAuthGrantId,
+  ProfileId,
   SubjectId,
   TenantId
 } from "@integragents/contracts"
@@ -43,7 +43,7 @@ export const OAuthGrant = Schema.Struct({
   applicationId: OAuthApplicationId,
   subjectId: SubjectId,
   tenantId: TenantId,
-  clientId: ClientId,
+  profileId: ProfileId,
   resource: Schema.String,
   scope: Schema.Literal("mcp"),
   createdAt: Schema.Date,
@@ -87,6 +87,7 @@ export type OAuthToken = typeof OAuthToken.Type
 export const OAuthActor = Schema.Struct({
   grantId: OAuthGrantId,
   applicationId: OAuthApplicationId,
+  applicationName: Schema.String,
   subjectId: SubjectId
 })
 export type OAuthActor = typeof OAuthActor.Type
