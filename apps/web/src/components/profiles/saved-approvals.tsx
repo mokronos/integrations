@@ -1,8 +1,8 @@
-import { Option } from "effect"
+import { Option, Predicate } from "effect"
 import { Pencil, X } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
-import { parseJsonString, type ApprovalRule, type ArgumentPath, type Json, type ProfileId } from "@integragents/contracts"
+import { isJsonBoolean, isJsonString, parseJsonString, type ApprovalRule, type ArgumentPath, type Json, type ProfileId } from "@integragents/contracts"
 
 import { JsonView } from "@/components/json-view"
 import { Badge } from "@/components/ui/badge"
@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { ConfirmButton } from "@/components/ui/confirm-button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Segmented } from "@/components/ui/segmented"
 import { Switch } from "@/components/ui/switch"
 import { pinnedObject } from "@/lib/approval-groups"
 import { when } from "@/lib/format"
@@ -18,18 +19,79 @@ import { keys, useInvalidate, useMutation } from "@/lib/queries"
 
 const pathLabel = (path: ArgumentPath): string => path.length === 0 ? "arguments" : path.join(".")
 
-type Field = { readonly path: ArgumentPath; readonly open: boolean; readonly text: string }
+/** A pinned value is edited as what it is: text without quotes, a number, true or false, or JSON for nested values. */
+type Value =
+  | { readonly kind: "text"; readonly text: string }
+  | { readonly kind: "number"; readonly text: string }
+  | { readonly kind: "boolean"; readonly value: boolean }
+  | { readonly kind: "json"; readonly text: string }
+
+type Field = { readonly path: ArgumentPath; readonly open: boolean; readonly value: Value }
+
+const editable = (json: Json): Value =>
+  isJsonString(json)
+    ? { kind: "text", text: json }
+    : Predicate.isNumber(json)
+    ? { kind: "number", text: String(json) }
+    : isJsonBoolean(json)
+    ? { kind: "boolean", value: json }
+    : { kind: "json", text: JSON.stringify(json) }
+
+const parsed = (value: Value): Option.Option<Json> => {
+  switch (value.kind) {
+    case "text":
+      return Option.some(value.text)
+    case "number": {
+      const number = Number(value.text)
+      return value.text.trim() === "" || !Number.isFinite(number) ? Option.none() : Option.some(number)
+    }
+    case "boolean":
+      return Option.some(value.value)
+    case "json":
+      return parseJsonString(value.text)
+  }
+}
 
 const fieldsOf = (rule: ApprovalRule): ReadonlyArray<Field> => [
-  ...rule.pinned.map((entry) => ({ path: entry.path, open: false, text: JSON.stringify(entry.value) })),
-  ...rule.free.map((path) => ({ path, open: true, text: "" }))
+  ...rule.pinned.map((entry) => ({ path: entry.path, open: false, value: editable(entry.value) })),
+  ...rule.free.map((path): Field => ({ path, open: true, value: { kind: "text", text: "" } }))
 ]
+
+function ValueInput({ value, label, invalid, onChange }: {
+  readonly value: Value
+  readonly label: string
+  readonly invalid: boolean
+  readonly onChange: (value: Value) => void
+}) {
+  switch (value.kind) {
+    case "boolean":
+      return <Segmented
+        label={label}
+        value={value.value ? "true" : "false"}
+        options={[{ value: "true", label: "true" }, { value: "false", label: "false" }]}
+        onChange={(next) => onChange({ kind: "boolean", value: next === "true" })}
+        className="mr-auto"
+      />
+    case "number":
+      return <Input className="flex-1" type="number" value={value.text} aria-label={label} aria-invalid={invalid}
+        onChange={(event) => onChange({ kind: "number", text: event.target.value })} />
+    case "json":
+      return <span className="flex flex-1 items-center gap-2">
+        <Badge variant="outline" className="shrink-0 text-[10px]">JSON</Badge>
+        <Input className="flex-1 font-mono text-xs" value={value.text} aria-label={label} aria-invalid={invalid}
+          onChange={(event) => onChange({ kind: "json", text: event.target.value })} />
+      </span>
+    case "text":
+      return <Input className="flex-1" value={value.text} aria-label={label}
+        onChange={(event) => onChange({ kind: "text", text: event.target.value })} />
+  }
+}
 
 function EditRule({ rule, profileId }: { readonly rule: ApprovalRule; readonly profileId: ProfileId }) {
   const invalidate = useInvalidate()
   const [open, setOpen] = useState(false)
   const [fields, setFields] = useState(() => fieldsOf(rule))
-  const values = fields.map((field) => field.open ? Option.some<Json>(null) : parseJsonString(field.text))
+  const values = fields.map((field) => field.open ? Option.some<Json>(null) : parsed(field.value))
   const invalid = values.some(Option.isNone)
   const save = useMutation({
     mutationFn: () => gateway.updateApprovalRule(rule.id, {
@@ -65,12 +127,11 @@ function EditRule({ rule, profileId }: { readonly rule: ApprovalRule; readonly p
             <Switch checked={field.open} onCheckedChange={(checked) => update(index, { open: checked })} />
             any value
           </label>
-          {field.open ? <span className="flex-1" /> : <Input
-            className="flex-1 font-mono text-xs"
-            value={field.text}
-            aria-label={`Value of ${pathLabel(field.path)} as JSON`}
-            aria-invalid={Option.isNone(values[index] ?? Option.none())}
-            onChange={(event) => update(index, { text: event.target.value })}
+          {field.open ? <span className="flex-1" /> : <ValueInput
+            value={field.value}
+            label={`Value of ${pathLabel(field.path)}`}
+            invalid={Option.isNone(values[index] ?? Option.none())}
+            onChange={(value) => update(index, { value })}
           />}
           <Button size="icon-sm" variant="ghost" aria-label={`Remove ${pathLabel(field.path)}`} onClick={() => setFields((current) => current.filter((_, at) => at !== index))}>
             <X className="size-3" />
