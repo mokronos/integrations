@@ -5,20 +5,12 @@ import { approvalCommand, approvalsCommand, approveCommand, auditCommand, denyCo
 import { discoverCommand, integrationsCommand, renameCommand, schemaCommand, searchCommand, toolsCommand } from "./commands/catalog.ts"
 import { connectCommand, connectionsCommand, disconnectCommand } from "./commands/connections.ts"
 import {
-  accessProfileCommand,
-  accessProfilesCommand,
-  accessProfileToolCommand,
-  approvalPoliciesCommand,
-  approvalPolicyCommand,
-  approvalPolicyToolCommand,
-  assignAccessProfileCommand,
-  assignApprovalPolicyCommand,
-  clientCommand,
-  clientsCommand,
-  cloneAccessProfileCommand,
-  cloneApprovalPolicyCommand,
   keyCommand,
   keysCommand,
+  profileCommand,
+  profilesCommand,
+  profileToolCommand,
+  profileToolsCommand,
   revokeCommand
 } from "./commands/delegation.ts"
 import { clientExecuteCommand, operatorExecuteCommand, validateCommand } from "./commands/invocation.ts"
@@ -76,20 +68,12 @@ export const operatorClientSubcommands = [
 ] as const
 
 export const controlPlaneSubcommands = [
-  clientsCommand,
-  clientCommand,
+  profilesCommand,
+  profileCommand,
+  profileToolsCommand,
+  profileToolCommand,
   keyCommand,
   keysCommand,
-  accessProfilesCommand,
-  accessProfileCommand,
-  cloneAccessProfileCommand,
-  accessProfileToolCommand,
-  assignAccessProfileCommand,
-  approvalPoliciesCommand,
-  approvalPolicyCommand,
-  cloneApprovalPolicyCommand,
-  approvalPolicyToolCommand,
-  assignApprovalPolicyCommand,
   revokeCommand,
   approvalsCommand,
   approveCommand,

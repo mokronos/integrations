@@ -50,7 +50,7 @@ describe("control plane assets", () => {
     Effect.gen(function*() {
       const assets = yield* served
 
-      const response = yield* ask(assets, "/clients/cl_7")
+      const response = yield* ask(assets, "/profiles/pr_7")
 
       expect(response?.status).toBe(200)
       expect(yield* bodyOf(response)).toContain("<title>control</title>")

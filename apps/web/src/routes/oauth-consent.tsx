@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { ShieldCheck } from "lucide-react"
-import type { ClientId, OAuthConsentDecision } from "@integragents/contracts"
+import type { OAuthConsentDecision, ProfileId } from "@integragents/contracts"
 
 import { getOAuthConsent, decideOAuthConsent } from "@/lib/gateway"
 import { useMutation } from "@/lib/queries"
@@ -20,8 +20,8 @@ export function OAuthConsentRoute() {
     refetchOnWindowFocus: false
   })
   const view = consent.data
-  const [chosenClientId, setClientId] = useState<ClientId | undefined>()
-  const clientId = chosenClientId ?? view?.clients[0]?.id
+  const [chosenProfileId, setProfileId] = useState<ProfileId | undefined>()
+  const profileId = chosenProfileId ?? view?.profiles[0]?.id
   const decide = useMutation({
     mutationFn: (decision: OAuthConsentDecision) => decideOAuthConsent(requestId, decision),
     onSuccess: (redirect) => window.location.assign(redirect)
@@ -29,7 +29,7 @@ export function OAuthConsentRoute() {
   const error = consent.error ?? decide.error
   const busy = decide.isPending || decide.isSuccess
 
-  const selectedClient = view?.clients.find((client) => client.id === clientId)
+  const selectedProfile = view?.profiles.find((profile) => profile.id === profileId)
 
   return (
     <div className="flex min-h-svh items-center justify-center p-4">
@@ -50,31 +50,32 @@ export function OAuthConsentRoute() {
                 <p className="text-muted-foreground mt-2 text-xs">Registration: {view.application.kind === "cimd" ? "Client ID Metadata Document" : "Dynamic Client Registration compatibility"}</p>
               </div>
               <div className="grid gap-2">
-                <Label>Gateway Client</Label>
+                <Label>Profile</Label>
                 <Select
-                  aria-label="Gateway Client"
+                  aria-label="Profile"
                   className="w-full"
-                  value={clientId ?? ""}
-                  onValueChange={(value) => setClientId(view.clients.find((client) => client.id === value)?.id)}
-                  items={view.clients.map((client) => ({ value: client.id, label: client.name }))}
+                  value={profileId ?? ""}
+                  onValueChange={(value) => setProfileId(view.profiles.find((profile) => profile.id === value)?.id)}
+                  items={view.profiles.map((profile) => ({ value: profile.id, label: profile.name }))}
                 />
-                {selectedClient === undefined ? null : (
+                {selectedProfile === undefined ? null : (
                   <div className="text-muted-foreground rounded-md bg-muted p-3 text-xs">
-                    <p>Surface: {selectedClient.mcpSurface === "tools" ? "Tools" : "Gateway commands"}</p>
+                    <p>Surface: {selectedProfile.mcpSurface === "tools" ? "Tools" : "Gateway commands"}</p>
                     <p>Scope: {view.request.scope}</p>
-                    <p>Capabilities: {selectedClient.capabilities.join(", ") || "tool access only"}</p>
+                    <p>Gateway access: {selectedProfile.capabilities.join(", ") || "tool access only"}</p>
                   </div>
                 )}
+                {view.profiles.length === 0 ? <p className="text-muted-foreground text-xs">Create a profile in the dashboard first.</p> : null}
               </div>
               <p className="text-sm">
-                The application receives the selected Gateway Client’s current access profile and approval policy. Changes and revocation take effect immediately.
+                {view.application.name} can use the tools the profile turns on, and its calls are recorded under its name. You can revoke it from the profile at any time.
               </p>
             </>
           )}
         </CardContent>
         <CardFooter className="justify-end gap-2">
           <Button variant="outline" disabled={busy || view === undefined} onClick={() => decide.mutate({ decision: "deny" })}>Deny</Button>
-          <Button disabled={busy || clientId === undefined} onClick={() => { if (clientId !== undefined) decide.mutate({ decision: "approve", clientId }) }}>{busy ? "Authorizing…" : "Authorize"}</Button>
+          <Button disabled={busy || profileId === undefined} onClick={() => { if (profileId !== undefined) decide.mutate({ decision: "approve", profileId }) }}>{busy ? "Authorizing…" : "Authorize"}</Button>
         </CardFooter>
       </Card>
     </div>

@@ -8,14 +8,10 @@ export type TenantId = typeof TenantId.Type
 /** A person the gateway acts for. Ids double as a segment of connection owners and tool addresses, hence the alphabet. */
 export const SubjectId = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]+$/)).pipe(Schema.brand("SubjectId"))
 export type SubjectId = typeof SubjectId.Type
-export const ClientId = Schema.String.pipe(Schema.brand("ClientId"))
-export type ClientId = typeof ClientId.Type
+export const ProfileId = Schema.String.pipe(Schema.brand("ProfileId"))
+export type ProfileId = typeof ProfileId.Type
 export const ApiKeyId = Schema.String.pipe(Schema.brand("ApiKeyId"))
 export type ApiKeyId = typeof ApiKeyId.Type
-export const AccessProfileId = Schema.String.pipe(Schema.brand("AccessProfileId"))
-export type AccessProfileId = typeof AccessProfileId.Type
-export const ApprovalPolicyId = Schema.String.pipe(Schema.brand("ApprovalPolicyId"))
-export type ApprovalPolicyId = typeof ApprovalPolicyId.Type
 export const ApprovalId = Schema.String.pipe(Schema.brand("ApprovalId"))
 export type ApprovalId = typeof ApprovalId.Type
 export const ApprovalRuleId = Schema.String.pipe(Schema.brand("ApprovalRuleId"))
@@ -70,40 +66,53 @@ const aliasSlugPart = (value: string): string => value.replaceAll("-", "__")
 const aliasSubjectPart = (value: string): string => Array.from(utf8.encode(value), (byte) => byte >= 0x61 && byte <= 0x7a || byte >= 0x30 && byte <= 0x39 ? String.fromCharCode(byte) : `__${byte.toString(16).padStart(2, "0")}`).join("")
 export const aliasForConnection = (connection: ConnectionRef): Alias => Alias.make([connection.owner, ...connection.owner === "user" && connection.subject !== undefined ? [aliasSubjectPart(connection.subject)] : [], aliasSlugPart(connection.integration), aliasSlugPart(connection.name)].join(aliasJoiner))
 
-export const ClientCapability = Schema.Literals(["provision_connections", "administer_gateway"])
-export type ClientCapability = typeof ClientCapability.Type
+export const ProfileCapability = Schema.Literals(["provision_connections", "administer_gateway"])
+export type ProfileCapability = typeof ProfileCapability.Type
 export const ApprovalMethod = Schema.Literals(["elicitation", "link", "none"])
 export type ApprovalMethod = typeof ApprovalMethod.Type
 export const McpSurface = Schema.Literals(["tools", "discovery"])
 export type McpSurface = typeof McpSurface.Type
-export const PolicyDecision = Schema.Literals(["allow", "require_approval"])
-export type PolicyDecision = typeof PolicyDecision.Type
+/** How a profile treats one enabled tool. A tool that is off has no decision at all. */
+export const ToolDecision = Schema.Literals(["allow", "require_approval"])
+export type ToolDecision = typeof ToolDecision.Type
 
 /** Minutes after a group's first call during which calls to the same tool join it; 0 turns grouping off. */
 export const ApprovalGroupWindowMinutes = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 1440 }))
 export type ApprovalGroupWindowMinutes = typeof ApprovalGroupWindowMinutes.Type
 export const defaultApprovalGroupWindowMinutes = 30
 
-export const Client = Schema.Struct({
-  id: ClientId, tenantId: TenantId, accessProfileId: AccessProfileId, approvalPolicyId: ApprovalPolicyId,
-  name: Schema.String, capabilities: Schema.Array(ClientCapability), approvalMethod: ApprovalMethod, mcpSurface: McpSurface,
+/**
+ * What a set of AI apps may do through the gateway: its tools, how each is
+ * decided, and how approvals reach a human. Every app connects with its own
+ * key or OAuth grant, so calls stay attributable and revocable one by one.
+ */
+export const Profile = Schema.Struct({
+  id: ProfileId, tenantId: TenantId,
+  name: Schema.String, capabilities: Schema.Array(ProfileCapability), approvalMethod: ApprovalMethod, mcpSurface: McpSurface,
   approvalGroupWindowMinutes: ApprovalGroupWindowMinutes,
+  /** Tools of newly connected services are enabled with their default decision. */
+  includeNewTools: Schema.Boolean,
   createdAt: Schema.Date, revokedAt: Schema.NullOr(Schema.Date)
 })
-export type Client = typeof Client.Type
+export type Profile = typeof Profile.Type
 
-export const ApiKeyView = Schema.Struct({ id: ApiKeyId, clientId: ClientId, createdAt: Schema.Date, lastUsedAt: Schema.NullOr(Schema.Date), revokedAt: Schema.NullOr(Schema.Date) })
+export const ApiKeyView = Schema.Struct({ id: ApiKeyId, profileId: ProfileId, name: Schema.String, createdAt: Schema.Date, lastUsedAt: Schema.NullOr(Schema.Date), revokedAt: Schema.NullOr(Schema.Date) })
 export type ApiKeyView = typeof ApiKeyView.Type
 
-const ReusableConfiguration = { tenantId: TenantId, name: Schema.String, isDefault: Schema.Boolean, createdAt: Schema.Date, updatedAt: Schema.Date }
-export const AccessProfile = Schema.Struct({ id: AccessProfileId, ...ReusableConfiguration })
-export type AccessProfile = typeof AccessProfile.Type
-export const AccessProfileTool = Schema.Struct({ accessProfileId: AccessProfileId, connection: ConnectionRef, tool: ToolName })
-export type AccessProfileTool = typeof AccessProfileTool.Type
-export const ApprovalPolicy = Schema.Struct({ id: ApprovalPolicyId, ...ReusableConfiguration })
-export type ApprovalPolicy = typeof ApprovalPolicy.Type
-export const ApprovalPolicyTool = Schema.Struct({ approvalPolicyId: ApprovalPolicyId, connection: ConnectionRef, tool: ToolName, decision: PolicyDecision })
-export type ApprovalPolicyTool = typeof ApprovalPolicyTool.Type
+export const ProfileTool = Schema.Struct({ profileId: ProfileId, connection: ConnectionRef, tool: ToolName, decision: ToolDecision })
+export type ProfileTool = typeof ProfileTool.Type
+
+/** The credential a call arrived with, and what the calling app said about itself. */
+export const Caller = Schema.Struct({
+  apiKeyId: Schema.NullOr(ApiKeyId),
+  oauthGrantId: Schema.NullOr(OAuthGrantId),
+  oauthApplicationId: Schema.NullOr(OAuthApplicationId),
+  /** The key's or OAuth application's name when the call was made. */
+  credentialName: Schema.NullOr(Schema.String),
+  /** Self-reported, such as an MCP client's name and version. */
+  agent: Schema.NullOr(Schema.String)
+})
+export type Caller = typeof Caller.Type
 
 export const ApprovalDestination = Schema.Struct({ id: ApprovalDestinationId, tenantId: TenantId, name: Schema.String, type: Schema.Literal("webhook"), url: Schema.String.check(Schema.isPattern(/^https:\/\/[^\s]+$/)), createdAt: Schema.Date })
 export type ApprovalDestination = typeof ApprovalDestination.Type
@@ -112,12 +121,12 @@ export type ApprovalDeliveryStatus = typeof ApprovalDeliveryStatus.Type
 export const ApprovalDeliveryAttempt = Schema.Struct({ id: ApprovalDeliveryId, approvalId: ApprovalId, destinationId: ApprovalDestinationId, destinationName: Schema.String, status: ApprovalDeliveryStatus, attempts: Schema.Number, nextAttemptAt: Schema.NullOr(Schema.Date), deliveredAt: Schema.NullOr(Schema.Date), lastError: Schema.NullOr(Schema.String) })
 export type ApprovalDeliveryAttempt = typeof ApprovalDeliveryAttempt.Type
 
-export const PendingApproval = Schema.Struct({ id: ApprovalId, groupId: ApprovalId, clientId: ClientId, approvalPolicyId: ApprovalPolicyId, accessProfileId: AccessProfileId, alias: Schema.String, tool: ToolName, arguments: Schema.Json, status: ApprovalStatus, createdAt: Schema.Date, expiresAt: Schema.Date, decidedAt: Schema.NullOr(Schema.Date), decidedBy: Schema.NullOr(Schema.String), result: Schema.NullOr(Schema.Json), error: Schema.NullOr(Schema.String), collectedAt: Schema.NullOr(Schema.Date) })
+export const PendingApproval = Schema.Struct({ id: ApprovalId, groupId: ApprovalId, profileId: ProfileId, caller: Caller, alias: Schema.String, tool: ToolName, arguments: Schema.Json, status: ApprovalStatus, createdAt: Schema.Date, expiresAt: Schema.Date, decidedAt: Schema.NullOr(Schema.Date), decidedBy: Schema.NullOr(Schema.String), result: Schema.NullOr(Schema.Json), error: Schema.NullOr(Schema.String), collectedAt: Schema.NullOr(Schema.Date) })
 export type PendingApproval = typeof PendingApproval.Type
 export const ListedApproval = Schema.Struct({ ...PendingApproval.fields, deliveries: Schema.Array(ApprovalDeliveryAttempt) })
 export type ListedApproval = typeof ListedApproval.Type
 export const ApprovalRule = Schema.Struct({
-  id: ApprovalRuleId, approvalPolicyId: ApprovalPolicyId, connection: ConnectionRef, tool: ToolName,
+  id: ApprovalRuleId, profileId: ProfileId, connection: ConnectionRef, tool: ToolName,
   ...ArgumentPattern.fields, createdAt: Schema.Date, createdBy: Schema.NullOr(Schema.String)
 })
 export type ApprovalRule = typeof ApprovalRule.Type
@@ -130,7 +139,7 @@ export const DecidedApproval = Schema.Union([
 export type DecidedApproval = typeof DecidedApproval.Type
 
 /** What changed, so a dashboard knows which of its views to reload. */
-export const GatewayResource = Schema.Literals(["approvals", "audit", "clients", "policies", "approval-destinations", "integrations"])
+export const GatewayResource = Schema.Literals(["approvals", "audit", "profiles", "approval-destinations", "integrations"])
 export type GatewayResource = typeof GatewayResource.Type
 export const GatewayEvent = Schema.Union([
   Schema.TaggedStruct("Connected", {}),
@@ -162,7 +171,7 @@ export const InvocationOutcome = Schema.Union([InvocationSucceeded, InvocationPe
 export type InvocationOutcome = typeof InvocationOutcome.Type
 export const AuditOutcome = Schema.Literals(["succeeded", "failed", "denied", "pending"])
 export type AuditOutcome = typeof AuditOutcome.Type
-export const AuditRecord = Schema.Struct({ id: AuditId, clientId: Schema.NullOr(ClientId), oauthGrantId: Schema.NullOr(OAuthGrantId), oauthApplicationId: Schema.NullOr(OAuthApplicationId), authorizedBySubjectId: Schema.NullOr(SubjectId), alias: Schema.NullOr(Schema.String), tool: Schema.NullOr(ToolName), connection: Schema.NullOr(ConnectionRef), subject: Schema.NullOr(SubjectId), decision: Schema.NullOr(PolicyDecision), outcome: AuditOutcome, message: Schema.NullOr(Schema.String), createdAt: Schema.Date })
+export const AuditRecord = Schema.Struct({ id: AuditId, profileId: Schema.NullOr(ProfileId), caller: Caller, authorizedBySubjectId: Schema.NullOr(SubjectId), alias: Schema.NullOr(Schema.String), tool: Schema.NullOr(ToolName), connection: Schema.NullOr(ConnectionRef), subject: Schema.NullOr(SubjectId), decision: Schema.NullOr(ToolDecision), outcome: AuditOutcome, message: Schema.NullOr(Schema.String), createdAt: Schema.Date })
 export type AuditRecord = typeof AuditRecord.Type
 
 export const OAuthApplicationKind = Schema.Literals(["cimd", "dcr"])
@@ -172,8 +181,8 @@ export const OAuthGrantView = Schema.Struct({
   applicationId: OAuthApplicationId,
   applicationKind: OAuthApplicationKind,
   applicationName: Schema.String,
-  clientId: ClientId,
-  clientName: Schema.String,
+  profileId: ProfileId,
+  profileName: Schema.String,
   subjectId: SubjectId,
   subjectEmail: Schema.String,
   scope: Schema.Literal("mcp"),
@@ -190,16 +199,16 @@ export const OAuthConsentView = Schema.Struct({
     name: Schema.String,
     clientIdentifier: Schema.String
   }),
-  clients: Schema.Array(Client)
+  profiles: Schema.Array(Profile)
 })
 export type OAuthConsentView = typeof OAuthConsentView.Type
 export const OAuthConsentDecision = Schema.Union([
   Schema.Struct({ decision: Schema.Literal("deny") }),
-  Schema.Struct({ decision: Schema.Literal("approve"), clientId: ClientId })
+  Schema.Struct({ decision: Schema.Literal("approve"), profileId: ProfileId })
 ])
 export type OAuthConsentDecision = typeof OAuthConsentDecision.Type
-export const ConfigureClient = Schema.Struct({ name: Schema.String.check(Schema.isMinLength(1)), tools: Schema.Array(Schema.Struct({ connection: ConnectionRef, tool: ToolName, decision: PolicyDecision })).check(Schema.isMinLength(1)) })
-export type ConfigureClient = typeof ConfigureClient.Type
+export const ProfileToolInput = Schema.Struct({ connection: ConnectionRef, tool: ToolName, decision: ToolDecision })
+export type ProfileToolInput = typeof ProfileToolInput.Type
 export const ToolSnapshot = Schema.Struct({ integration: IntegrationSlug, connection: ConnectionName, tool: ToolName, inputSchema: Schema.NullOr(Schema.Json), outputSchema: Schema.NullOr(Schema.Json), syncedAt: Schema.Date })
 export type ToolSnapshot = typeof ToolSnapshot.Type
 export const DriftKind = Schema.Literals(["added", "removed", "changed"])
@@ -209,21 +218,21 @@ export type DriftEntry = typeof DriftEntry.Type
 
 const unknownKeyMessage = "This API key is not known to the server"
 const keyRevokedMessage = "This API key was revoked"
-const clientRevokedMessage = "The client this key belongs to was revoked"
+const profileRevokedMessage = "The profile this credential belongs to was revoked"
 const notPermittedMessage = "This credential does not hold the required permission"
 const crossSiteMessage = "Cross-site requests are not permitted"
 export const UnknownKey = Schema.Struct({ code: Schema.Literal("unknown-key"), message: Schema.Literal(unknownKeyMessage) })
 export const KeyRevoked = Schema.Struct({ code: Schema.Literal("key-revoked"), message: Schema.Literal(keyRevokedMessage) })
-export const ClientRevoked = Schema.Struct({ code: Schema.Literal("client-revoked"), message: Schema.Literal(clientRevokedMessage) })
+export const ProfileRevoked = Schema.Struct({ code: Schema.Literal("profile-revoked"), message: Schema.Literal(profileRevokedMessage) })
 export const NotPermitted = Schema.Struct({ code: Schema.Literal("not-permitted"), message: Schema.Literal(notPermittedMessage) })
 export const CrossSite = Schema.Struct({ code: Schema.Literal("cross-site"), message: Schema.Literal(crossSiteMessage) })
-export const RefusalReason = Schema.Union([UnknownKey, KeyRevoked, ClientRevoked, NotPermitted, CrossSite])
+export const RefusalReason = Schema.Union([UnknownKey, KeyRevoked, ProfileRevoked, NotPermitted, CrossSite])
 export type RefusalReason = typeof RefusalReason.Type
 export const refusalReason = (code: RefusalReason["code"]): RefusalReason => {
   switch (code) {
     case "unknown-key": return { code, message: unknownKeyMessage }
     case "key-revoked": return { code, message: keyRevokedMessage }
-    case "client-revoked": return { code, message: clientRevokedMessage }
+    case "profile-revoked": return { code, message: profileRevokedMessage }
     case "not-permitted": return { code, message: notPermittedMessage }
     case "cross-site": return { code, message: crossSiteMessage }
   }

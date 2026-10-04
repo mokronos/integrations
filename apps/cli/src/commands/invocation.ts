@@ -145,7 +145,7 @@ export const operatorExecuteCommand = Command.make(
       })).pipe(Effect.flatMap((outcome) => reportOutcome(outcome, verbose)))
 ).pipe(
   Command.withDescription(
-    "Invoke an effective policy tool through its alias"
+    "Invoke one of the profile's tools through its alias"
   )
 )
 

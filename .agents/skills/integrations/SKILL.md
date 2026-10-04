@@ -47,9 +47,9 @@ for `tools`, `connect`, and `discover`.
 OAuth requires a human browser step. Run `i connect` with a command timeout of
 at least 5 minutes; do not let the agent's shell timeout terminate it first.
 
-`i connect` binds every currently available tool from that connection to the
-connecting client and adds it to the tenant's default policy. Safe tools run
-directly; mutating or unclassified tools ask a human.
+`i connect` enables that connection's tools on every profile set to take new
+tools, which includes the local agent's. Safe tools run directly; mutating or
+unclassified tools ask a human.
 
 `i execute` takes an **alias**, not an integration slug. An alias names one
 connection uniquely — `org_statelessserver_default` — because a slug does not:

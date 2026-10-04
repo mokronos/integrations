@@ -18,11 +18,11 @@ import {
   GatewayApi
 } from "../api.ts"
 import {
-  requireClient,
+  requireKeyHolder,
   requireSecret
 } from "../authority.ts"
 import { capture } from "../observability.ts"
-import { findClientApproval, invokeDependencies } from "../operations.ts"
+import { findProfileApproval, invokeDependencies } from "../operations.ts"
 
 export const DelegatedLayer = HttpApiBuilder.group(GatewayApi, "delegated", (handlers) =>
   Effect.gen(function*() {
@@ -32,9 +32,9 @@ export const DelegatedLayer = HttpApiBuilder.group(GatewayApi, "delegated", (han
     return handlers
       .handle("listTools", (request) =>
         Effect.gen(function*() {
-          const client = yield* requireClient
+          const { profile } = yield* requireKeyHolder
           return {
-            tools: yield* capture(listEffectiveTools(store, client.id, {
+            tools: yield* capture(listEffectiveTools(store, profile.id, {
               schemas: request.query["schemas"],
               integrations,
               ...whenPresentMap("integration", request.query["integration"], (integration) => integration),
@@ -83,8 +83,8 @@ export const DelegatedLayer = HttpApiBuilder.group(GatewayApi, "delegated", (han
       .handle("approval", (request) =>
         Effect.gen(function*() {
           const id = ApprovalId.make(request.params["id"])
-          const client = yield* requireClient
-          const approval = yield* findClientApproval(client, id)
+          const { profile } = yield* requireKeyHolder
+          const approval = yield* findProfileApproval(profile, id)
           if (approval === undefined) return yield* new ApiNotFound({ error: `Unknown approval ${id}` })
           return approval
         }))

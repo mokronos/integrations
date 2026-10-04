@@ -3,16 +3,14 @@ import { Effect } from "effect"
 import {
   Alias,
   aliasForConnection,
-  authorizeClientCapability,
-  authorizeClientInvocation,
   authorizeInvocation,
+  authorizeProfileCapability,
+  authorizeProfileInvocation,
   ConnectionName,
   defaultTenantId,
   generateApiKey,
   IntegrationSlug,
-  newClientId,
-  newAccessProfileId,
-  newApprovalPolicyId,
+  newProfileId,
   SubjectId,
   ToolName
 } from "../src/index.ts"
@@ -42,39 +40,22 @@ const seed = Effect.fnUntraced(function*(store: GatewayStore, options: {
   readonly capabilities?: ReadonlyArray<"provision_connections" | "administer_gateway">
   readonly connection?: ConnectionRef
   readonly decision?: "allow" | "require_approval"
+  readonly name?: string
 } = {}) {
-  const accessProfile = yield* store.createAccessProfile({
-    id: yield* newAccessProfileId,
+  const profile = yield* store.createProfile({
+    id: yield* newProfileId,
     tenantId: defaultTenantId,
-    name: `access-${crypto.randomUUID()}`
-  })
-  const approvalPolicy = yield* store.createApprovalPolicy({
-    id: yield* newApprovalPolicyId,
-    tenantId: defaultTenantId,
-    name: `approval-${crypto.randomUUID()}`,
-    tools: []
-  })
-  const client = yield* store.createClient({
-    id: yield* newClientId,
-    tenantId: defaultTenantId,
-    accessProfileId: accessProfile.id,
-    approvalPolicyId: approvalPolicy.id,
-    name: "support-agent",
-    capabilities: options.capabilities ?? ["provision_connections"]
+    name: options.name ?? "support-agent",
+    capabilities: options.capabilities ?? ["provision_connections"],
+    tools: [{
+      connection: options.connection ?? orgConnection,
+      tool: ToolName.make("getDocument"),
+      decision: options.decision ?? "allow"
+    }]
   })
   const key = yield* generateApiKey
-  yield* store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
-  const policyConnection = options.connection ?? orgConnection
-  yield* store.replaceAccessProfileTools(accessProfile.id, [{
-    connection: policyConnection,
-    tool: ToolName.make("getDocument")
-  }])
-  yield* store.replaceApprovalPolicyTools(approvalPolicy.id, [{
-    connection: policyConnection,
-    tool: ToolName.make("getDocument"),
-    decision: options.decision ?? "allow"
-  }])
-  return { client, key, accessProfile, approvalPolicy }
+  yield* store.addApiKey({ id: key.id, profileId: profile.id, name: "Claude Code", hash: key.hash })
+  return { profile, key }
 })
 
 const invoke = (
@@ -90,16 +71,16 @@ const invoke = (
   })
 
 describe("gateway authorization", () => {
-  it.effect("authorizes an effective tool and names the connection it resolves to", () =>
+  it.effect("authorizes an enabled tool and names the connection it resolves to", () =>
     Effect.gen(function*() {
       const store = yield* gatewayStore()
-      const { accessProfile, key } = yield* seed(store)
+      const { profile, key } = yield* seed(store)
 
       const result = yield* invoke(store, key.secret)
 
       expect(result.status).toBe("authorized")
       if (result.status !== "authorized") return
-      expect(result.accessProfile.id).toBe(accessProfile.id)
+      expect(result.profile.id).toBe(profile.id)
       expect(result.connection).toEqual(orgConnection)
       expect(result.subject).toBeNull()
     }).pipe(Effect.provide(testServices)))
@@ -116,7 +97,7 @@ describe("gateway authorization", () => {
       expect(result.subject).toBe(SubjectId.make("sebastian"))
     }).pipe(Effect.provide(testServices)))
 
-  it.effect("carries the policy's approval decision through", () =>
+  it.effect("carries the profile's approval decision through", () =>
     Effect.gen(function*() {
       const store = yield* gatewayStore()
       const { key } = yield* seed(store, { decision: "require_approval" })
@@ -136,25 +117,25 @@ describe("gateway authorization", () => {
       expect((yield* invoke(store, "igk_not-a-real-key")).status).toBe("unknown-key")
     }).pipe(Effect.provide(testServices)))
 
-  it.effect("denies every key of a revoked client", () =>
+  it.effect("denies every key of a revoked profile", () =>
     Effect.gen(function*() {
       const store = yield* gatewayStore()
-      const { client, key } = yield* seed(store)
+      const { profile, key } = yield* seed(store)
       const second = yield* generateApiKey
-      yield* store.addApiKey({ id: second.id, clientId: client.id, hash: second.hash })
+      yield* store.addApiKey({ id: second.id, profileId: profile.id, name: "Cursor", hash: second.hash })
 
-      yield* store.revokeClient(defaultTenantId, client.id)
+      yield* store.revokeProfile(defaultTenantId, profile.id)
 
-      expect((yield* invoke(store, key.secret)).status).toBe("client-revoked")
-      expect((yield* invoke(store, second.secret)).status).toBe("client-revoked")
+      expect((yield* invoke(store, key.secret)).status).toBe("profile-revoked")
+      expect((yield* invoke(store, second.secret)).status).toBe("profile-revoked")
     }).pipe(Effect.provide(testServices)))
 
   it.effect("a second live key keeps working while the first is rotated out", () =>
     Effect.gen(function*() {
       const store = yield* gatewayStore()
-      const { client, key } = yield* seed(store)
+      const { profile, key } = yield* seed(store)
       const replacement = yield* generateApiKey
-      yield* store.addApiKey({ id: replacement.id, clientId: client.id, hash: replacement.hash })
+      yield* store.addApiKey({ id: replacement.id, profileId: profile.id, name: "Claude Code", hash: replacement.hash })
 
       yield* store.revokeApiKey(key.id)
 
@@ -162,7 +143,7 @@ describe("gateway authorization", () => {
       expect((yield* invoke(store, replacement.secret)).status).toBe("authorized")
     }).pipe(Effect.provide(testServices)))
 
-  it.effect("denies a tool outside the intersection, and says no more than it does for an unknown alias", () =>
+  it.effect("denies a tool the profile does not enable, and says no more than it does for an unknown alias", () =>
     Effect.gen(function*() {
       const store = yield* gatewayStore()
       const { key } = yield* seed(store)
@@ -174,21 +155,17 @@ describe("gateway authorization", () => {
       expect(unknownAlias.status).toBe(unauthorizedTool.status)
     }).pipe(Effect.provide(testServices)))
 
-  it.effect("removing a profile route denies it while leaving another route usable", () =>
+  it.effect("turning a tool off denies it while leaving another tool usable", () =>
     Effect.gen(function*() {
       const store = yield* gatewayStore()
-      const { accessProfile, approvalPolicy, key } = yield* seed(store)
-      yield* store.replaceAccessProfileTools(accessProfile.id, [
-        { connection: orgConnection, tool: ToolName.make("getDocument") },
-        { connection: userConnection, tool: ToolName.make("search") }
-      ])
-      yield* store.replaceApprovalPolicyTools(approvalPolicy.id, [
+      const { profile, key } = yield* seed(store)
+      yield* store.replaceProfileTools(profile.id, [
         { connection: orgConnection, tool: ToolName.make("getDocument"), decision: "allow" },
         { connection: userConnection, tool: ToolName.make("search"), decision: "allow" }
       ])
 
-      yield* store.replaceAccessProfileTools(accessProfile.id, [
-        { connection: userConnection, tool: ToolName.make("search") }
+      yield* store.replaceProfileTools(profile.id, [
+        { connection: userConnection, tool: ToolName.make("search"), decision: "allow" }
       ])
 
       expect((yield* invoke(store, key.secret)).status).toBe("not-authorized")
@@ -196,32 +173,11 @@ describe("gateway authorization", () => {
         .toBe("authorized")
     }).pipe(Effect.provide(testServices)))
 
-  it.effect("two clients hold different policies over the same connection", () =>
+  it.effect("two profiles decide the same tool independently", () =>
     Effect.gen(function*() {
       const store = yield* gatewayStore()
-      const { key: readerKey } = yield* seed(store)
-      const writerAccess = yield* store.createAccessProfile({
-        id: yield* newAccessProfileId, tenantId: defaultTenantId, name: "writer access"
-      })
-      const writerApproval = yield* store.createApprovalPolicy({
-        id: yield* newApprovalPolicyId, tenantId: defaultTenantId, name: "writer approval", tools: []
-      })
-      const writer = yield* store.createClient({
-        id: yield* newClientId,
-        tenantId: defaultTenantId,
-        accessProfileId: writerAccess.id,
-        approvalPolicyId: writerApproval.id,
-        name: "sales-campaign",
-        capabilities: ["provision_connections"]
-      })
-      const writerKey = yield* generateApiKey
-      yield* store.addApiKey({ id: writerKey.id, clientId: writer.id, hash: writerKey.hash })
-      yield* store.replaceAccessProfileTools(writerAccess.id, [{
-        connection: orgConnection, tool: ToolName.make("getDocument")
-      }])
-      yield* store.replaceApprovalPolicyTools(writerApproval.id, [{
-        connection: orgConnection, tool: ToolName.make("getDocument"), decision: "require_approval"
-      }])
+      const { key: readerKey } = yield* seed(store, { name: "reader" })
+      const { key: writerKey } = yield* seed(store, { name: "sales-campaign", decision: "require_approval" })
 
       const reader = yield* invoke(store, readerKey.secret)
       const campaign = yield* invoke(store, writerKey.secret)
@@ -236,7 +192,7 @@ describe("gateway authorization", () => {
   it.effect("the tenant's connection and one person's own never share an alias", () =>
     Effect.gen(function*() {
       const store = yield* gatewayStore()
-      const { client, key } = yield* seed(store)
+      const { profile, key } = yield* seed(store)
       const shared = {
         owner: "org",
         integration: IntegrationSlug.make("gmail"),
@@ -244,16 +200,7 @@ describe("gateway authorization", () => {
       } as const
       expect(aliasForConnection(shared)).not.toBe(aliasForConnection(userConnection))
 
-      const accessProfile = yield* store.findAccessProfile(defaultTenantId, client.accessProfileId)
-      const approvalPolicy = yield* store.findApprovalPolicy(defaultTenantId, client.approvalPolicyId)
-      if (accessProfile === undefined || approvalPolicy === undefined) {
-        throw new Error("missing configuration")
-      }
-      yield* store.replaceAccessProfileTools(accessProfile.id, [
-        { connection: shared, tool: ToolName.make("sendEmail") },
-        { connection: userConnection, tool: ToolName.make("sendEmail") }
-      ])
-      yield* store.replaceApprovalPolicyTools(approvalPolicy.id, [
+      yield* store.replaceProfileTools(profile.id, [
         { connection: shared, tool: ToolName.make("sendEmail"), decision: "allow" },
         { connection: userConnection, tool: ToolName.make("sendEmail"), decision: "require_approval" }
       ])
@@ -275,22 +222,22 @@ describe("gateway authorization", () => {
   it.effect("records when a key was last used", () =>
     Effect.gen(function*() {
       const store = yield* gatewayStore()
-      const { client, key } = yield* seed(store)
-      expect((yield* store.listApiKeys(client.id))[0]?.lastUsedAt).toBeNull()
+      const { profile, key } = yield* seed(store)
+      expect((yield* store.listApiKeys(profile.id))[0]?.lastUsedAt).toBeNull()
 
       yield* invoke(store, key.secret)
 
-      expect((yield* store.listApiKeys(client.id))[0]?.lastUsedAt).not.toBeNull()
+      expect((yield* store.listApiKeys(profile.id))[0]?.lastUsedAt).not.toBeNull()
     }).pipe(Effect.provide(testServices)))
 })
 
 describe("delegated tools", () => {
-  it.effect("a template grant resolves to the calling subject's own connection", () =>
+  it.effect("a template tool resolves to the calling subject's own connection", () =>
     Effect.gen(function*() {
       const store = yield* gatewayStore()
-      const { client } = yield* seed(store, { connection: delegationTemplate })
+      const { profile } = yield* seed(store, { connection: delegationTemplate })
 
-      const result = yield* authorizeClientInvocation(store, client, {
+      const result = yield* authorizeProfileInvocation(store, profile, {
         alias: aliasForConnection(delegationTemplate),
         tool: ToolName.make("getDocument"),
         subject: SubjectId.make("sebastian")
@@ -301,15 +248,15 @@ describe("delegated tools", () => {
       if (result.status !== "authorized") return
       expect(result.connection).toEqual(userConnection)
       expect(result.subject).toBe(SubjectId.make("sebastian"))
-      expect(result.accessProfileTool.connection).toEqual(delegationTemplate)
+      expect(result.profileTool.connection).toEqual(delegationTemplate)
     }).pipe(Effect.provide(testServices)))
 
-  it.effect("refuses a template grant when the call names nobody", () =>
+  it.effect("refuses a template tool when the call names nobody", () =>
     Effect.gen(function*() {
       const store = yield* gatewayStore()
-      const { client } = yield* seed(store, { connection: delegationTemplate })
+      const { profile } = yield* seed(store, { connection: delegationTemplate })
 
-      const result = yield* authorizeClientInvocation(store, client, {
+      const result = yield* authorizeProfileInvocation(store, profile, {
         alias: aliasForConnection(delegationTemplate),
         tool: ToolName.make("getDocument")
       })
@@ -319,12 +266,12 @@ describe("delegated tools", () => {
       expect(result.message).toContain("subject")
     }).pipe(Effect.provide(testServices)))
 
-  it.effect("a subject does not turn a concrete grant into someone else's connection", () =>
+  it.effect("a subject does not turn a concrete tool into someone else's connection", () =>
     Effect.gen(function*() {
       const store = yield* gatewayStore()
-      const { client } = yield* seed(store, { connection: userConnection })
+      const { profile } = yield* seed(store, { connection: userConnection })
 
-      const result = yield* authorizeClientInvocation(store, client, {
+      const result = yield* authorizeProfileInvocation(store, profile, {
         alias: aliasForConnection(userConnection),
         tool: ToolName.make("getDocument"),
         subject: SubjectId.make("someone-else")
@@ -337,38 +284,38 @@ describe("delegated tools", () => {
 })
 
 describe("gateway capability authorization", () => {
-  it.effect("permits a key whose client holds the requested capability", () =>
+  it.effect("permits a key whose profile holds the requested capability", () =>
     Effect.gen(function*() {
       const store = yield* gatewayStore()
       const { key } = yield* seed(store, {
         capabilities: ["provision_connections", "administer_gateway"]
       })
 
-      expect((yield* authorizeClientCapability(store, key.secret, "administer_gateway")).status)
+      expect((yield* authorizeProfileCapability(store, key.secret, "administer_gateway")).status)
         .toBe("authorized")
     }).pipe(Effect.provide(testServices)))
 
-  it.effect("refuses a key whose client may not, before any human is asked", () =>
+  it.effect("refuses a key whose profile may not, before any human is asked", () =>
     Effect.gen(function*() {
       const store = yield* gatewayStore()
       const { key } = yield* seed(store, { capabilities: ["provision_connections"] })
 
-      expect((yield* authorizeClientCapability(store, key.secret, "administer_gateway")).status)
+      expect((yield* authorizeProfileCapability(store, key.secret, "administer_gateway")).status)
         .toBe("not-permitted")
     }).pipe(Effect.provide(testServices)))
 
   it.effect("refuses unknown and revoked credentials", () =>
     Effect.gen(function*() {
       const store = yield* gatewayStore()
-      const { client, key } = yield* seed(store, {
+      const { profile, key } = yield* seed(store, {
         capabilities: ["provision_connections", "administer_gateway"]
       })
 
-      expect((yield* authorizeClientCapability(store, "igk_nope", "administer_gateway")).status)
+      expect((yield* authorizeProfileCapability(store, "igk_nope", "administer_gateway")).status)
         .toBe("unknown-key")
 
-      yield* store.revokeClient(defaultTenantId, client.id)
-      expect((yield* authorizeClientCapability(store, key.secret, "administer_gateway")).status)
-        .toBe("client-revoked")
+      yield* store.revokeProfile(defaultTenantId, profile.id)
+      expect((yield* authorizeProfileCapability(store, key.secret, "administer_gateway")).status)
+        .toBe("profile-revoked")
     }).pipe(Effect.provide(testServices)))
 })

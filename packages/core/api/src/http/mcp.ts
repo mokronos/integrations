@@ -1,5 +1,6 @@
 import {
   CLIENT_CAPABILITIES_META_KEY,
+  CLIENT_INFO_META_KEY,
   createMcpHandler,
   fromJsonSchema,
   inputRequired,
@@ -16,12 +17,11 @@ import {
   webCryptoLayer,
   whenPresent
 } from "@integragents/contracts"
-import type { Client, Json, PolicyDecision } from "@integragents/contracts"
+import type { Json, Profile, ToolDecision } from "@integragents/contracts"
 import { Integrations } from "@integragents/host"
 import type { IntegrationServices } from "@integragents/host"
-import { authenticateClient, GatewayStoreService, listEffectiveTools } from "@integragents/gateway-core"
-import type { GatewayStore } from "@integragents/gateway-core"
-import type { OAuthActor } from "@integragents/gateway-core"
+import { authenticateKey, GatewayStoreService, keyOrigin, listEffectiveTools, oauthOrigin } from "@integragents/gateway-core"
+import type { ApiKey, GatewayStore, OAuthActor } from "@integragents/gateway-core"
 import { Context, Effect, Layer, ManagedRuntime, Option, Predicate, Schema } from "effect"
 import { Headers, HttpTraceContext } from "effect/http"
 import type { HttpClient } from "effect/http"
@@ -37,8 +37,8 @@ import { gatewayVersion } from "../version.ts"
 
 /**
  * MCP is a second surface over the same gateway, not a second gateway: its
- * tools call the operations the HTTP routes call, with the client the key
- * authenticated as, so policy, approval, and audit are shared by construction.
+ * tools call the operations the HTTP routes call, with the profile the
+ * credential belongs to, so decisions, approval, and audit are shared by construction.
  */
 
 const defaultInputSchema = {
@@ -54,11 +54,11 @@ const presentedSecret = (request: Request): string | undefined => {
   return bearer ?? request.headers.get("x-api-key") ?? undefined
 }
 
-const authenticationFailure = (status: "unknown-key" | "key-revoked" | "client-revoked") =>
+const authenticationFailure = (status: "unknown-key" | "key-revoked" | "profile-revoked") =>
   Response.json(
-    { error: status === "client-revoked" ? "Client revoked" : "Invalid API key" },
+    { error: status === "profile-revoked" ? "Profile revoked" : "Invalid API key" },
     {
-      status: status === "client-revoked" ? 403 : 401,
+      status: status === "profile-revoked" ? 403 : 401,
       headers: { "www-authenticate": "Bearer" }
     }
   )
@@ -70,7 +70,7 @@ const awaitsApproval = "Calls to this tool are held until a human approves them.
 /** The approval decision belongs in the description: the model reads that. */
 const describeEffectiveTool = (tool: {
   readonly description?: string | undefined
-  readonly decision: PolicyDecision
+  readonly decision: ToolDecision
 }): string | undefined =>
   tool.decision !== "require_approval"
     ? tool.description
@@ -101,6 +101,18 @@ const EnvelopeElicitation = Schema.Struct({
   })
 })
 const decodeEnvelopeElicitation = Schema.decodeUnknownOption(EnvelopeElicitation)
+
+/** What the MCP client says it is, such as `claude-code 2.1.0`, recorded with each call it makes. */
+const EnvelopeClientInfo = Schema.Struct({
+  [CLIENT_INFO_META_KEY]: Schema.Struct({ name: Schema.String, version: Schema.optional(Schema.String) })
+})
+const decodeEnvelopeClientInfo = Schema.decodeUnknownOption(EnvelopeClientInfo)
+
+const agentOf = (context: ServerContext): string | undefined =>
+  Option.getOrUndefined(Option.map(decodeEnvelopeClientInfo(context.mcpReq.envelope), (envelope) => {
+    const info = envelope[CLIENT_INFO_META_KEY]
+    return info.version === undefined ? info.name : `${info.name} ${info.version}`
+  }))
 
 const approvalPromptOf = (context: ServerContext): ApprovalPrompt => {
   const envelope = decodeEnvelopeElicitation(context.mcpReq.envelope)
@@ -152,7 +164,7 @@ const resultOf = (
     }),
     Effect.withSpan("Mcp.callTool", {
       kind: "server",
-      attributes: { "mcp.tool": call.tool, "client.id": call.caller.client.id },
+      attributes: { "mcp.tool": call.tool, "profile.id": call.caller.profile.id },
       ...spanOptionsFor(call.request)
     })
   ))
@@ -166,7 +178,7 @@ export interface McpGatewayOptions {
   readonly errorCapture?: ErrorSink
   readonly oauth?: {
     readonly authenticate: (token: string) => Promise<{
-      readonly client: Client
+      readonly profile: Profile
       readonly actor: OAuthActor
       readonly expiresAt: Date
       readonly scope: "mcp"
@@ -175,12 +187,24 @@ export interface McpGatewayOptions {
   }
 }
 
-type McpPrincipal = Omit<McpCaller, "approvalPrompt">
+/** The credential behind an MCP request: one of the profile's keys, or an OAuth app acting for a person. */
+type McpPrincipal = {
+  readonly profile: Profile
+  readonly credential:
+    | { readonly kind: "key"; readonly key: ApiKey }
+    | { readonly kind: "oauth"; readonly actor: OAuthActor }
+}
 
-const callerFor = (principal: McpPrincipal, context: ServerContext): McpCaller => ({
-  ...principal,
-  approvalPrompt: approvalPromptOf(context)
-})
+const callerFor = (principal: McpPrincipal, context: ServerContext): McpCaller => {
+  const agent = agentOf(context)
+  return {
+    profile: principal.profile,
+    origin: principal.credential.kind === "key"
+      ? keyOrigin(principal.credential.key, agent)
+      : oauthOrigin(principal.credential.actor, agent),
+    approvalPrompt: approvalPromptOf(context)
+  }
+}
 
 const registerAgentTool = (
   server: McpServer,
@@ -202,33 +226,32 @@ const registerAgentTool = (
   )
 }
 
-const effectiveToolsOf = (client: Client) =>
+const effectiveToolsOf = (profile: Profile) =>
   Effect.gen(function*() {
     const store = yield* GatewayStoreService
     const integrations = yield* Integrations
-    return yield* capture(listEffectiveTools(store, client.id, { schemas: true, integrations }))
+    return yield* capture(listEffectiveTools(store, profile.id, { schemas: true, integrations }))
   })
 
 const serverFor = async (
   runtime: McpRuntime,
   request: Request | undefined,
-  client: Client,
-  oauthActor?: OAuthActor
+  principal: McpPrincipal
 ): Promise<McpServer> => {
   const server = new McpServer({ name: "integrations-gateway", version: gatewayVersion })
-  const principal: McpPrincipal = { client, ...whenPresent("oauthActor", oauthActor) }
+  const profile = principal.profile
 
-  if (client.mcpSurface === "discovery") {
+  if (profile.mcpSurface === "discovery") {
     for (const tool of agentTools) {
-      if (tool.capability === undefined || client.capabilities.includes(tool.capability)) {
+      if (tool.capability === undefined || profile.capabilities.includes(tool.capability)) {
         registerAgentTool(server, runtime, principal, tool)
       }
     }
     return server
   }
 
-  const effective = await runtime.runPromise(effectiveToolsOf(client).pipe(
-    Effect.withSpan("Mcp.listTools", { attributes: { "client.id": client.id }, ...spanOptionsFor(request) })
+  const effective = await runtime.runPromise(effectiveToolsOf(profile).pipe(
+    Effect.withSpan("Mcp.listTools", { attributes: { "profile.id": profile.id }, ...spanOptionsFor(request) })
   ))
   for (const tool of effective) {
     const name = ToolName.make(tool.tool)
@@ -272,24 +295,29 @@ export const createMcpGatewayHandler = (options: McpGatewayOptions): McpGatewayH
     options.telemetry
   ))
   const authenticate = (secret: string, request: Request | undefined) =>
-    runtime.runPromise(capture(authenticateClient(options.store, secret)).pipe(
+    runtime.runPromise(capture(authenticateKey(options.store, secret)).pipe(
       Effect.withSpan("Mcp.authenticate", spanOptionsFor(request))
     ))
   const resolve = async (secret: string, request: Request | undefined) => {
     if (secret.startsWith("igoa_") && options.oauth !== undefined) {
       const oauth = await options.oauth.authenticate(secret)
-      return oauth === undefined ? undefined : { client: oauth.client, actor: oauth.actor, scope: oauth.scope }
+      return oauth === undefined
+        ? undefined
+        : { principal: { profile: oauth.profile, credential: { kind: "oauth", actor: oauth.actor } } satisfies McpPrincipal, scope: oauth.scope }
     }
     const apiKey = await authenticate(secret, request)
     return apiKey.status === "authenticated"
-      ? { client: apiKey.client, scope: apiKey.client.capabilities.join(" ") }
+      ? {
+        principal: { profile: apiKey.profile, credential: { kind: "key", key: apiKey.key } } satisfies McpPrincipal,
+        scope: apiKey.profile.capabilities.join(" ")
+      }
       : apiKey
   }
   const handler = createMcpHandler(async ({ authInfo, requestInfo }) => {
     if (authInfo === undefined) throw new Error("Authenticated MCP request has no identity")
     const authentication = await resolve(authInfo.token, requestInfo)
     if (authentication === undefined || "status" in authentication) throw new Error("MCP credential is no longer valid")
-    return serverFor(runtime, requestInfo, authentication.client, authentication.actor)
+    return serverFor(runtime, requestInfo, authentication.principal)
   })
 
   return {
@@ -314,7 +342,7 @@ export const createMcpGatewayHandler = (options: McpGatewayOptions): McpGatewayH
       return handler.fetch(request, {
         authInfo: {
           token: secret,
-          clientId: authentication.client.id,
+          clientId: authentication.principal.profile.id,
           scopes: authentication.scope.split(" ").filter((scope) => scope.length > 0)
         }
       })

@@ -10,7 +10,7 @@ import {
   defaultTenantId,
   generateApiKey,
   GatewayStoreError,
-  newClientId
+  newProfileId
 } from "./gateway.ts"
 import type { GatewayStore } from "./gateway.ts"
 import { stubIntegrationsContext } from "./stubs.ts"
@@ -27,33 +27,26 @@ const bodyOf = (response: Response) =>
 const driverFailure = "SQLITE_BUSY: database is locked at /srv/secrets/gateway.sqlite"
 
 const setup = Effect.fnUntraced(function*(options: {
-  readonly listClientsFails?: boolean
+  readonly listProfilesFails?: boolean
   readonly unreachableUrl?: boolean
   readonly errorCapture?: (operation: string | undefined) => void
 } = {}) {
   const store = yield* gatewayStore("gateway-failures-")
-  const accessProfile = yield* store.findDefaultAccessProfile(defaultTenantId)
-  const approvalPolicy = yield* store.findDefaultApprovalPolicy(defaultTenantId)
-  if (accessProfile === undefined || approvalPolicy === undefined) {
-    throw new Error("missing defaults")
-  }
-
-  const client = yield* store.createClient({
-    id: yield* newClientId,
+  const profile = yield* store.createProfile({
+    id: yield* newProfileId,
     tenantId: defaultTenantId,
-    accessProfileId: accessProfile.id,
-    approvalPolicyId: approvalPolicy.id,
     name: "operator",
-    capabilities: ["administer_gateway", "provision_connections"]
+    capabilities: ["administer_gateway", "provision_connections"],
+    tools: []
   })
   const key = yield* generateApiKey
-  yield* store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
+  yield* store.addApiKey({ id: key.id, profileId: profile.id, name: "operator", hash: key.hash })
 
-  const presented: GatewayStore = options.listClientsFails === true
+  const presented: GatewayStore = options.listProfilesFails === true
     ? {
       ...store,
-      listClients: () => Effect.fail(new GatewayStoreError({
-        operation: "listClients",
+      listProfiles: () => Effect.fail(new GatewayStoreError({
+        operation: "listProfiles",
         kind: "driver",
         cause: new Error(driverFailure)
       }))
@@ -107,9 +100,9 @@ const setup = Effect.fnUntraced(function*(options: {
 describe("failures nobody declared", () => {
   it.effect("answers in the gateway's own dialect, saying nothing about the database that broke", () =>
     Effect.gen(function*() {
-      const { call } = yield* setup({ listClientsFails: true })
+      const { call } = yield* setup({ listProfilesFails: true })
 
-      const response = yield* call("GET", "/v1/clients")
+      const response = yield* call("GET", "/v1/profiles")
 
       expect(response.status).toBe(500)
       const body = yield* Effect.promise(() => response.text())
@@ -125,16 +118,16 @@ describe("failures nobody declared", () => {
     Effect.gen(function*() {
       const recorded: Array<string | undefined> = []
       const { call } = yield* setup({
-        listClientsFails: true,
+        listProfilesFails: true,
         errorCapture: (operation) => {
           recorded.push(operation)
         }
       })
 
-      const first = yield* bodyOf(yield* call("GET", "/v1/clients"))
-      const second = yield* bodyOf(yield* call("GET", "/v1/clients"))
+      const first = yield* bodyOf(yield* call("GET", "/v1/profiles"))
+      const second = yield* bodyOf(yield* call("GET", "/v1/profiles"))
 
-      expect(recorded).toEqual(["listClients", "listClients"])
+      expect(recorded).toEqual(["listProfiles", "listProfiles"])
       expect(first["traceId"]).toMatch(/^[0-9a-f]{32}$/)
       expect(second["traceId"]).not.toBe(first["traceId"])
     }).pipe(Effect.provide(testServices)))

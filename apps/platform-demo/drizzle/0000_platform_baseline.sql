@@ -2,41 +2,18 @@ CREATE TABLE `agent` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,
 	`tenant_id` text NOT NULL,
-	`gateway_client_id` text NOT NULL
+	`gateway_profile_id` text NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE `gateway_access_profile` (
-	`id` text PRIMARY KEY NOT NULL,
-	`tenant_id` text NOT NULL,
-	`name` text NOT NULL,
-	`is_default` integer DEFAULT 0 NOT NULL,
-	`created_at` integer NOT NULL,
-	`updated_at` integer NOT NULL,
-	FOREIGN KEY (`tenant_id`) REFERENCES `gateway_tenant`(`id`) ON UPDATE no action ON DELETE cascade
-);
---> statement-breakpoint
-CREATE UNIQUE INDEX `gateway_access_profile_name_tenant` ON `gateway_access_profile` (`tenant_id`,`name`);--> statement-breakpoint
-CREATE UNIQUE INDEX `gateway_access_profile_default_tenant` ON `gateway_access_profile` (`tenant_id`) WHERE is_default = 1;--> statement-breakpoint
-CREATE TABLE `gateway_access_profile_tool` (
-	`access_profile_id` text NOT NULL,
-	`owner` text NOT NULL,
-	`subject` text,
-	`integration` text NOT NULL,
-	`connection_name` text NOT NULL,
-	`tool` text NOT NULL,
-	PRIMARY KEY(`access_profile_id`, `owner`, `subject`, `integration`, `connection_name`, `tool`),
-	FOREIGN KEY (`access_profile_id`) REFERENCES `gateway_access_profile`(`id`) ON UPDATE no action ON DELETE cascade
-);
---> statement-breakpoint
-CREATE UNIQUE INDEX `gateway_access_profile_tool_route` ON `gateway_access_profile_tool` (`access_profile_id`,`owner`,CASE WHEN subject IS NULL THEN '' ELSE subject END,`integration`,`connection_name`,`tool`);--> statement-breakpoint
 CREATE TABLE `gateway_api_key` (
 	`id` text PRIMARY KEY NOT NULL,
-	`client_id` text NOT NULL,
+	`profile_id` text NOT NULL,
+	`name` text NOT NULL,
 	`hash` text NOT NULL,
 	`created_at` integer NOT NULL,
 	`last_used_at` integer,
 	`revoked_at` integer,
-	FOREIGN KEY (`client_id`) REFERENCES `gateway_client`(`id`) ON UPDATE no action ON DELETE cascade
+	FOREIGN KEY (`profile_id`) REFERENCES `gateway_profile`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `gateway_api_key_hash_unique` ON `gateway_api_key` (`hash`);--> statement-breakpoint
@@ -68,35 +45,31 @@ CREATE TABLE `gateway_approval_destination` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `gateway_approval_destination_name_tenant` ON `gateway_approval_destination` (`tenant_id`,`name`);--> statement-breakpoint
-CREATE TABLE `gateway_approval_policy` (
+CREATE TABLE `gateway_approval_rule` (
 	`id` text PRIMARY KEY NOT NULL,
-	`tenant_id` text NOT NULL,
-	`name` text NOT NULL,
-	`is_default` integer DEFAULT 0 NOT NULL,
-	`created_at` integer NOT NULL,
-	`updated_at` integer NOT NULL,
-	FOREIGN KEY (`tenant_id`) REFERENCES `gateway_tenant`(`id`) ON UPDATE no action ON DELETE cascade
-);
---> statement-breakpoint
-CREATE UNIQUE INDEX `gateway_approval_policy_name_tenant` ON `gateway_approval_policy` (`tenant_id`,`name`);--> statement-breakpoint
-CREATE UNIQUE INDEX `gateway_approval_policy_default_tenant` ON `gateway_approval_policy` (`tenant_id`) WHERE is_default = 1;--> statement-breakpoint
-CREATE TABLE `gateway_approval_policy_tool` (
-	`approval_policy_id` text NOT NULL,
+	`profile_id` text NOT NULL,
 	`owner` text NOT NULL,
 	`subject` text,
 	`integration` text NOT NULL,
 	`connection_name` text NOT NULL,
 	`tool` text NOT NULL,
-	`decision` text NOT NULL,
-	PRIMARY KEY(`approval_policy_id`, `owner`, `subject`, `integration`, `connection_name`, `tool`),
-	FOREIGN KEY (`approval_policy_id`) REFERENCES `gateway_approval_policy`(`id`) ON UPDATE no action ON DELETE cascade
+	`pattern` text NOT NULL,
+	`created_at` integer NOT NULL,
+	`created_by` text,
+	FOREIGN KEY (`profile_id`) REFERENCES `gateway_profile`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `gateway_approval_policy_tool_route` ON `gateway_approval_policy_tool` (`approval_policy_id`,`owner`,CASE WHEN subject IS NULL THEN '' ELSE subject END,`integration`,`connection_name`,`tool`);--> statement-breakpoint
+CREATE INDEX `gateway_approval_rule_route` ON `gateway_approval_rule` (`profile_id`,`integration`,`connection_name`,`tool`);--> statement-breakpoint
 CREATE TABLE `gateway_audit` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
-	`client_id` text,
+	`profile_id` text,
+	`api_key_id` text,
+	`oauth_grant_id` text,
+	`oauth_application_id` text,
+	`credential_name` text,
+	`agent` text,
+	`authorized_by_subject_id` text,
 	`alias` text,
 	`tool` text,
 	`owner` text,
@@ -115,30 +88,6 @@ CREATE TABLE `gateway_audit_arguments` (
 	`arguments` text NOT NULL,
 	`expires_at` integer NOT NULL,
 	FOREIGN KEY (`audit_id`) REFERENCES `gateway_audit`(`id`) ON UPDATE no action ON DELETE cascade
-);
---> statement-breakpoint
-CREATE TABLE `gateway_client` (
-	`id` text PRIMARY KEY NOT NULL,
-	`tenant_id` text NOT NULL,
-	`access_profile_id` text NOT NULL,
-	`approval_policy_id` text NOT NULL,
-	`name` text NOT NULL,
-	`capabilities` text NOT NULL,
-	`approval_delivery` text NOT NULL,
-	`created_at` integer NOT NULL,
-	`revoked_at` integer,
-	FOREIGN KEY (`tenant_id`) REFERENCES `gateway_tenant`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`access_profile_id`) REFERENCES `gateway_access_profile`(`id`) ON UPDATE no action ON DELETE no action,
-	FOREIGN KEY (`approval_policy_id`) REFERENCES `gateway_approval_policy`(`id`) ON UPDATE no action ON DELETE no action
-);
---> statement-breakpoint
-CREATE UNIQUE INDEX `gateway_client_name_tenant` ON `gateway_client` (`tenant_id`,`name`);--> statement-breakpoint
-CREATE TABLE `gateway_client_approval_destination` (
-	`client_id` text NOT NULL,
-	`destination_id` text NOT NULL,
-	PRIMARY KEY(`client_id`, `destination_id`),
-	FOREIGN KEY (`client_id`) REFERENCES `gateway_client`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`destination_id`) REFERENCES `gateway_approval_destination`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE TABLE `gateway_external_identity` (
@@ -184,6 +133,66 @@ CREATE TABLE `gateway_login_handoff` (
 	FOREIGN KEY (`tenant_id`) REFERENCES `gateway_tenant`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
+CREATE TABLE `gateway_oauth_application` (
+	`id` text PRIMARY KEY NOT NULL,
+	`kind` text NOT NULL,
+	`client_identifier` text NOT NULL,
+	`name` text NOT NULL,
+	`redirect_uris_json` text NOT NULL,
+	`metadata_json` text NOT NULL,
+	`created_at` integer NOT NULL,
+	`updated_at` integer NOT NULL,
+	`revoked_at` integer
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `gateway_oauth_application_client_identifier_unique` ON `gateway_oauth_application` (`client_identifier`);--> statement-breakpoint
+CREATE TABLE `gateway_oauth_authorization_code` (
+	`hash` text PRIMARY KEY NOT NULL,
+	`grant_id` text NOT NULL,
+	`application_id` text NOT NULL,
+	`redirect_uri` text NOT NULL,
+	`code_challenge` text NOT NULL,
+	`resource` text NOT NULL,
+	`scope` text NOT NULL,
+	`created_at` integer NOT NULL,
+	`expires_at` integer NOT NULL,
+	`consumed_at` integer,
+	FOREIGN KEY (`grant_id`) REFERENCES `gateway_oauth_grant`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`application_id`) REFERENCES `gateway_oauth_application`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE TABLE `gateway_oauth_authorization_request` (
+	`id` text PRIMARY KEY NOT NULL,
+	`application_id` text NOT NULL,
+	`redirect_uri` text NOT NULL,
+	`state` text,
+	`code_challenge` text NOT NULL,
+	`resource` text NOT NULL,
+	`scope` text NOT NULL,
+	`created_at` integer NOT NULL,
+	`expires_at` integer NOT NULL,
+	`consumed_at` integer,
+	FOREIGN KEY (`application_id`) REFERENCES `gateway_oauth_application`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE TABLE `gateway_oauth_grant` (
+	`id` text PRIMARY KEY NOT NULL,
+	`application_id` text NOT NULL,
+	`subject_id` text NOT NULL,
+	`tenant_id` text NOT NULL,
+	`profile_id` text NOT NULL,
+	`resource` text NOT NULL,
+	`scope` text NOT NULL,
+	`created_at` integer NOT NULL,
+	`last_used_at` integer,
+	`revoked_at` integer,
+	FOREIGN KEY (`application_id`) REFERENCES `gateway_oauth_application`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`subject_id`) REFERENCES `gateway_subject`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`tenant_id`) REFERENCES `gateway_tenant`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`profile_id`) REFERENCES `gateway_profile`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `gateway_oauth_grant_binding` ON `gateway_oauth_grant` (`application_id`,`subject_id`,`profile_id`,`resource`,`scope`);--> statement-breakpoint
 CREATE TABLE `gateway_oauth_session` (
 	`id` text PRIMARY KEY NOT NULL,
 	`integration` text NOT NULL,
@@ -199,16 +208,39 @@ CREATE TABLE `gateway_oauth_state` (
 	`created_at` integer NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE `gateway_oauth_token` (
+	`hash` text PRIMARY KEY NOT NULL,
+	`kind` text NOT NULL,
+	`family_id` text NOT NULL,
+	`grant_id` text NOT NULL,
+	`application_id` text NOT NULL,
+	`resource` text NOT NULL,
+	`scope` text NOT NULL,
+	`created_at` integer NOT NULL,
+	`expires_at` integer NOT NULL,
+	`used_at` integer,
+	`revoked_at` integer,
+	`replaced_by_hash` text,
+	FOREIGN KEY (`grant_id`) REFERENCES `gateway_oauth_grant`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`application_id`) REFERENCES `gateway_oauth_application`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE INDEX `gateway_oauth_token_family` ON `gateway_oauth_token` (`family_id`);--> statement-breakpoint
+CREATE INDEX `gateway_oauth_token_grant` ON `gateway_oauth_token` (`grant_id`);--> statement-breakpoint
 CREATE TABLE `gateway_pending_approval` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tenant_id` text NOT NULL,
-	`client_id` text NOT NULL,
-	`approval_policy_id` text NOT NULL,
-	`access_profile_id` text NOT NULL,
+	`profile_id` text NOT NULL,
+	`api_key_id` text,
+	`oauth_grant_id` text,
+	`oauth_application_id` text,
+	`credential_name` text,
+	`agent` text,
 	`alias` text NOT NULL,
 	`tool` text NOT NULL,
 	`arguments` text NOT NULL,
 	`arguments_lookup` text,
+	`group_id` text,
 	`status` text NOT NULL,
 	`created_at` integer NOT NULL,
 	`expires_at` integer NOT NULL,
@@ -218,12 +250,48 @@ CREATE TABLE `gateway_pending_approval` (
 	`error` text,
 	`collected_at` integer,
 	FOREIGN KEY (`tenant_id`) REFERENCES `gateway_tenant`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`client_id`) REFERENCES `gateway_client`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`approval_policy_id`) REFERENCES `gateway_approval_policy`(`id`) ON UPDATE no action ON DELETE no action,
-	FOREIGN KEY (`access_profile_id`) REFERENCES `gateway_access_profile`(`id`) ON UPDATE no action ON DELETE no action
+	FOREIGN KEY (`profile_id`) REFERENCES `gateway_profile`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE INDEX `gateway_pending_approval_retry` ON `gateway_pending_approval` (`tenant_id`,`client_id`,`alias`,`approval_policy_id`,`access_profile_id`,`tool`,`arguments_lookup`,`arguments`) WHERE collected_at IS NULL;--> statement-breakpoint
+CREATE INDEX `gateway_pending_approval_retry` ON `gateway_pending_approval` (`tenant_id`,`profile_id`,`alias`,`tool`,`arguments_lookup`,`arguments`) WHERE collected_at IS NULL;--> statement-breakpoint
+CREATE INDEX `gateway_pending_approval_group` ON `gateway_pending_approval` (`group_id`,`status`);--> statement-breakpoint
+CREATE INDEX `gateway_pending_approval_open` ON `gateway_pending_approval` (`profile_id`,`tool`,`status`);--> statement-breakpoint
+CREATE TABLE `gateway_profile` (
+	`id` text PRIMARY KEY NOT NULL,
+	`tenant_id` text NOT NULL,
+	`name` text NOT NULL,
+	`capabilities` text NOT NULL,
+	`approval_method` text DEFAULT 'elicitation' NOT NULL,
+	`mcp_surface` text DEFAULT 'tools' NOT NULL,
+	`approval_group_window_minutes` integer DEFAULT 30 NOT NULL,
+	`include_new_tools` integer DEFAULT 0 NOT NULL,
+	`created_at` integer NOT NULL,
+	`revoked_at` integer,
+	FOREIGN KEY (`tenant_id`) REFERENCES `gateway_tenant`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `gateway_profile_name_tenant` ON `gateway_profile` (`tenant_id`,`name`);--> statement-breakpoint
+CREATE TABLE `gateway_profile_approval_destination` (
+	`profile_id` text NOT NULL,
+	`destination_id` text NOT NULL,
+	PRIMARY KEY(`profile_id`, `destination_id`),
+	FOREIGN KEY (`profile_id`) REFERENCES `gateway_profile`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`destination_id`) REFERENCES `gateway_approval_destination`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE TABLE `gateway_profile_tool` (
+	`profile_id` text NOT NULL,
+	`owner` text NOT NULL,
+	`subject` text,
+	`integration` text NOT NULL,
+	`connection_name` text NOT NULL,
+	`tool` text NOT NULL,
+	`decision` text NOT NULL,
+	PRIMARY KEY(`profile_id`, `owner`, `subject`, `integration`, `connection_name`, `tool`),
+	FOREIGN KEY (`profile_id`) REFERENCES `gateway_profile`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `gateway_profile_tool_route` ON `gateway_profile_tool` (`profile_id`,`owner`,CASE WHEN subject IS NULL THEN '' ELSE subject END,`integration`,`connection_name`,`tool`);--> statement-breakpoint
 CREATE TABLE `gateway_session` (
 	`token_hash` text PRIMARY KEY NOT NULL,
 	`subject_id` text NOT NULL,
@@ -271,7 +339,6 @@ CREATE TABLE `connection` (
 	`oauth_client` text,
 	`oauth_client_owner` text,
 	`oauth_scope` text,
-	`expires_at` integer,
 	`created_at` integer NOT NULL,
 	PRIMARY KEY(`owner`, `integration`, `name`),
 	FOREIGN KEY (`integration`) REFERENCES `integration`(`slug`) ON UPDATE no action ON DELETE cascade
@@ -289,6 +356,7 @@ CREATE TABLE `integration` (
 	`description` text DEFAULT '' NOT NULL,
 	`kind` text NOT NULL,
 	`endpoint` text,
+	`mcp_era` text,
 	`spec_source` text,
 	`spec_format` text,
 	`base_url` text,
@@ -308,7 +376,7 @@ CREATE TABLE `oauth_client` (
 	`issuer` text,
 	`resource` text,
 	`scopes` text DEFAULT '[]' NOT NULL,
-	`token_auth_methods` text DEFAULT '[]' NOT NULL,
+	`token_auth_method` text,
 	`created_at` integer NOT NULL,
 	PRIMARY KEY(`owner`, `slug`)
 );
@@ -332,6 +400,22 @@ CREATE TABLE `spec_document` (
 	`source` text PRIMARY KEY NOT NULL,
 	`content` text NOT NULL,
 	`fetched_at` integer NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE `blob` (
+	`id` text PRIMARY KEY NOT NULL,
+	`content_type` text NOT NULL,
+	`filename` text,
+	`bytes` integer NOT NULL,
+	`created_at` integer NOT NULL
+);
+--> statement-breakpoint
+CREATE INDEX `blob_created_at` ON `blob` (`created_at`);--> statement-breakpoint
+CREATE TABLE `blob_chunk` (
+	`blob` text NOT NULL,
+	`seq` integer NOT NULL,
+	`data` blob NOT NULL,
+	PRIMARY KEY(`blob`, `seq`)
 );
 --> statement-breakpoint
 CREATE TABLE `tool` (

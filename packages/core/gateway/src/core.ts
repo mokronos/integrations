@@ -5,7 +5,8 @@ import { whenPresent } from "@integragents/contracts"
 import { BlobStore, integrationLayer, Integrations } from "@integragents/host"
 import type { IntegrationServices, StorageError } from "@integragents/host"
 import { deliverDueApprovalNotifications } from "./approval-delivery.ts"
-import { reconcileConfigurations } from "./configurations.ts"
+import { includeConnectionTools, pruneProfileTools } from "./profiles.ts"
+import { ConnectionName, IntegrationSlug } from "./domain.ts"
 import type { Encryption } from "./crypto.ts"
 import { maintenanceLoop } from "./maintenance.ts"
 import { createOAuthSessions, OAuthSessionError, sqlOAuthSessionStore } from "./oauth-sessions.ts"
@@ -58,12 +59,14 @@ const oauthSessionsLayer = (
             ...whenPresent("publicUrlOf", options.publicUrlOf),
             ...whenPresent("authorizeLocally", options.authorizeLocally),
             onConnected: (session) =>
-              session.bindingTenant === undefined || session.state.status !== "connected"
+              session.bindingTenant === undefined || session.state.status !== "connected" || session.request.newConnection !== true
                 ? Effect.void
-                : reconcileConfigurations({
+                : includeConnectionTools({
                   store,
                   integrations: Context.get(host, Integrations),
-                  tenantId: session.bindingTenant
+                  tenantId: session.bindingTenant,
+                  integration: IntegrationSlug.make(session.integration),
+                  connection: ConnectionName.make(session.connection)
                 }).pipe(
                   Effect.asVoid,
                   Effect.mapError((cause) => new OAuthSessionError({ operation: "bindConnectedTools", cause }))
@@ -93,7 +96,7 @@ const reconcileOnStart: Layer.Layer<never, GatewayStoreError | StorageError, Gat
     const tenants = yield* store.listTenants()
     yield* Effect.forEach(
       tenants,
-      (tenant) => reconcileConfigurations({ store, integrations, tenantId: tenant.id }),
+      (tenant) => pruneProfileTools({ store, integrations, tenantId: tenant.id }),
       { discard: true }
     )
   }))

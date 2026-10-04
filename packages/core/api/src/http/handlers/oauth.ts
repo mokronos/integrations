@@ -21,8 +21,8 @@ const human = Effect.flatMap(Identity, (caller) => {
     case "session":
       return Effect.succeed({ tenantId: caller.tenantId, subjectId: caller.subjectId })
     case "local":
-      return Effect.succeed({ tenantId: caller.client.tenantId, subjectId: defaultLocalSubjectId })
-    case "client":
+      return Effect.succeed({ tenantId: caller.profile.tenantId, subjectId: defaultLocalSubjectId })
+    case "key":
     case "anonymous":
       return Effect.fail(Forbidden.of("not-permitted"))
   }
@@ -45,7 +45,7 @@ export const OAuthLayer = HttpApiBuilder.group(GatewayApi, "oauth", (handlers) =
           if (pending === undefined) return yield* requestSpent
           const application = yield* capture(store.findOAuthApplicationById(pending.applicationId))
           if (application === undefined) return yield* new ApiGone({ error: "OAuth application is no longer available" })
-          const clients = yield* capture(store.listClients(tenantId))
+          const profiles = yield* capture(store.listProfiles(tenantId))
           return {
             request: { id: pending.id, scope: pending.scope, resource: pending.resource },
             application: {
@@ -54,7 +54,7 @@ export const OAuthLayer = HttpApiBuilder.group(GatewayApi, "oauth", (handlers) =
               name: application.name,
               clientIdentifier: application.clientIdentifier
             },
-            clients: clients.filter((client) => client.revokedAt === null)
+            profiles: profiles.filter((profile) => profile.revokedAt === null)
           }
         }))
       .handle("decideConsent", (request) =>
@@ -73,9 +73,9 @@ export const OAuthLayer = HttpApiBuilder.group(GatewayApi, "oauth", (handlers) =
             redirect.searchParams.set("error", "access_denied")
             return { redirect: redirect.toString() }
           }
-          const client = yield* capture(store.findClientById(tenantId, decision.clientId))
-          if (client === undefined || client.revokedAt !== null) {
-            return yield* new ApiBadRequest({ error: "Gateway Client is not available" })
+          const profile = yield* capture(store.findProfileById(tenantId, decision.profileId))
+          if (profile === undefined || profile.revokedAt !== null) {
+            return yield* new ApiBadRequest({ error: "That profile is not available" })
           }
           if ((yield* capture(store.consumeOAuthAuthorizationRequest(id))) === undefined) return yield* requestSpent
           const grant = yield* capture(store.findOrCreateOAuthGrant({
@@ -83,7 +83,7 @@ export const OAuthLayer = HttpApiBuilder.group(GatewayApi, "oauth", (handlers) =
             applicationId: pending.applicationId,
             subjectId,
             tenantId,
-            clientId: client.id,
+            profileId: profile.id,
             resource: pending.resource,
             scope: pending.scope
           }))

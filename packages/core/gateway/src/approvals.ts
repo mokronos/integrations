@@ -7,7 +7,6 @@ import {
   type ApprovalVerdict,
   type DecidedApproval,
   connectionSubject,
-  sameConnectionRef,
   TenantId
 } from "./domain.ts"
 import type { Authorized, PendingApproval } from "./domain.ts"
@@ -29,41 +28,25 @@ const ApprovalDecision = Schema.Struct({
   decidedBy: Schema.NullOr(Schema.String)
 })
 
-/** The authority a frozen call was made under, if its client still holds exactly that. */
+/** The authority a frozen call was made under, if its profile still enables that tool. */
 const frozenAuthorization = Effect.fn("Approvals.frozenAuthorization")(function*(
   store: GatewayStore,
   tenantId: TenantId,
   approval: PendingApproval
 ): Effect.fn.Return<Authorized | undefined, GatewayStoreError> {
-  const [client, accessProfile, approvalPolicy] = yield* Effect.all([
-    store.findClientById(tenantId, approval.clientId),
-    store.findAccessProfile(tenantId, approval.accessProfileId),
-    store.findApprovalPolicy(tenantId, approval.approvalPolicyId)
-  ])
-  const accessTools = accessProfile === undefined ? [] : yield* store.listAccessProfileTools(accessProfile.id)
-  const approvalTools = approvalPolicy === undefined ? [] : yield* store.listApprovalPolicyTools(approvalPolicy.id)
-  const accessProfileTool = accessTools.find((candidate) =>
+  const profile = yield* store.findProfileById(tenantId, approval.profileId)
+  if (profile === undefined || profile.revokedAt !== null) return undefined
+  const profileTool = (yield* store.listProfileTools(profile.id)).find((candidate) =>
     candidate.tool === approval.tool && aliasForConnection(candidate.connection) === approval.alias)
-  const approvalPolicyTool = accessProfileTool === undefined ? undefined : approvalTools.find((candidate) =>
-    candidate.tool === approval.tool && sameConnectionRef(candidate.connection, accessProfileTool.connection))
-  if (client === undefined || client.revokedAt !== null
-    || client.accessProfileId !== approval.accessProfileId
-    || client.approvalPolicyId !== approval.approvalPolicyId
-    || accessProfile === undefined || approvalPolicy === undefined
-    || accessProfileTool === undefined || approvalPolicyTool === undefined) {
-    return undefined
-  }
+  if (profileTool === undefined) return undefined
   return {
     status: "authorized",
-    client,
-    accessProfile,
-    accessProfileTool,
-    approvalPolicy,
-    approvalPolicyTool,
-    alias: aliasForConnection(accessProfileTool.connection),
-    connection: accessProfileTool.connection,
-    subject: connectionSubject(accessProfileTool.connection) ?? null,
-    decision: approvalPolicyTool.decision
+    profile,
+    profileTool,
+    alias: aliasForConnection(profileTool.connection),
+    connection: profileTool.connection,
+    subject: connectionSubject(profileTool.connection) ?? null,
+    decision: profileTool.decision
   }
 })
 
@@ -104,14 +87,14 @@ export const approveApproval = Effect.fn("Approvals.approve")(function*(
   const approval = yield* pendingApproval(store, input)
   const authorization = yield* frozenAuthorization(store, tenantId, approval)
   if (authorization === undefined) {
-    yield* store.settleApproval({ tenantId, id, status: "denied", decidedBy, result: null, error: "the client assignments or tool intersection changed while this call was frozen" })
+    yield* store.settleApproval({ tenantId, id, status: "denied", decidedBy, result: null, error: "the profile was revoked or stopped enabling this tool while the call was frozen" })
     return yield* new ApprovalConflict({ message: `Approval ${id} is no longer authorized` })
   }
 
   return yield* Effect.gen(function*() {
     const claimed = yield* store.claimApproval({ tenantId, id, decidedBy })
     if (!claimed) return yield* new ApprovalConflict({ message: `Approval ${id} was decided or expired` })
-    const outcome = yield* executeAuthorized(dependencies, authorization, approval.arguments)
+    const outcome = yield* executeAuthorized(dependencies, authorization, approval.arguments, { caller: approval.caller, authorizedBy: null })
     yield* store.settleApproval({
       tenantId, id, status: "approved", decidedBy,
       result: outcome.status === "succeeded" ? outcome.result : null,
@@ -138,16 +121,16 @@ const rememberApproval = Effect.fn("Approvals.remember")(function*(
   }
   const [first] = approvals
   if (first === undefined) return yield* new ApprovalConflict({ message: "None of these calls is still waiting for a decision" })
-  if (approvals.some((approval) => approval.approvalPolicyId !== first.approvalPolicyId || approval.alias !== first.alias || approval.tool !== first.tool)) {
-    return yield* new ApprovalConflict({ message: "A saved approval covers one tool under one policy; these calls span several" })
+  if (approvals.some((approval) => approval.profileId !== first.profileId || approval.alias !== first.alias || approval.tool !== first.tool)) {
+    return yield* new ApprovalConflict({ message: "A saved approval covers one tool of one profile; these calls span several" })
   }
   const authorization = yield* frozenAuthorization(store, input.tenantId, first)
   if (authorization === undefined) return yield* new ApprovalConflict({ message: `Approval ${first.id} is no longer authorized` })
   return yield* store.createApprovalRule({
     id: yield* newApprovalRuleId,
-    approvalPolicyId: authorization.approvalPolicy.id,
-    connection: authorization.approvalPolicyTool.connection,
-    tool: authorization.approvalPolicyTool.tool,
+    profileId: authorization.profile.id,
+    connection: authorization.profileTool.connection,
+    tool: authorization.profileTool.tool,
     pattern: argumentPattern(approvals.map((approval) => approval.arguments)),
     createdBy: input.decidedBy
   })

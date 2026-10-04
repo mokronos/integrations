@@ -1,6 +1,6 @@
 import { Braces, Plug, Terminal } from "lucide-react"
 
-import { AgentConnect } from "@/components/clients/agent-connect"
+import { AgentConnect } from "@/components/profiles/agent-connect"
 import { CopyField } from "@/components/ui/copy-field"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
@@ -11,8 +11,8 @@ import {
   tsClientInstallCommand
 } from "@/lib/connect"
 
-export function ConnectTabs({ clientName, gatewayUrl, mcpUrl, apiKey }: {
-  readonly clientName: string
+export function ConnectTabs({ profileName, gatewayUrl, mcpUrl, apiKey }: {
+  readonly profileName: string
   readonly gatewayUrl: string
   readonly mcpUrl: string
   readonly apiKey: string
@@ -39,7 +39,7 @@ export function ConnectTabs({ clientName, gatewayUrl, mcpUrl, apiKey }: {
         </Step>
       </TabsContent>
       <TabsContent value="mcp">
-        <AgentConnect clientName={clientName} url={mcpUrl} apiKey={apiKey} />
+        <AgentConnect profileName={profileName} url={mcpUrl} apiKey={apiKey} />
       </TabsContent>
       <TabsContent value="ts" className="space-y-3">
         <Step label="1. Install the client">

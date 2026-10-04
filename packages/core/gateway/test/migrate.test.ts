@@ -57,9 +57,8 @@ describe("applyGatewayMigrations", () => {
       const tables = yield* tableNames(sql)
       for (const table of [
         "gateway_tenant",
-        "gateway_client",
-        "gateway_access_profile_tool",
-        "gateway_approval_policy_tool",
+        "gateway_profile",
+        "gateway_profile_tool",
         "gateway_pending_approval",
         "gateway_tool_snapshot"
       ]) {
@@ -111,18 +110,17 @@ describe("the declared schema", () => {
       ["tenant", "Tenant", 0]
     )
 
-  const insertProfile = (sql: SqlClient.SqlClient, id: string, isDefault: number) =>
+  const insertProfile = (sql: SqlClient.SqlClient) =>
     sql.unsafe(
-      `INSERT INTO gateway_access_profile (id, tenant_id, name, is_default, created_at, updated_at)
-       VALUES (?, 'tenant', ?, ?, 0, 0)`,
-      [id, id, isDefault]
+      `INSERT INTO gateway_profile (id, tenant_id, name, capabilities, created_at)
+       VALUES ('profile', 'tenant', 'profile', '[]', 0)`
     )
 
   const insertTool = (sql: SqlClient.SqlClient, subject: string | null) =>
     sql.unsafe(
-      `INSERT INTO gateway_access_profile_tool
-         (access_profile_id, owner, subject, integration, connection_name, tool)
-       VALUES ('profile', 'user', ?, 'gmail', 'work', 'send')`,
+      `INSERT INTO gateway_profile_tool
+         (profile_id, owner, subject, integration, connection_name, tool, decision)
+       VALUES ('profile', 'user', ?, 'gmail', 'work', 'send', 'allow')`,
       [subject]
     )
 
@@ -142,35 +140,25 @@ describe("the declared schema", () => {
   it.effect("holds one route per tool even when the route has no subject", () =>
     Effect.gen(function*() {
       const sql = yield* seeded()
-      yield* insertProfile(sql, "profile", 0)
+      yield* insertProfile(sql)
       yield* insertTool(sql, null)
 
       const again = yield* Effect.result(insertTool(sql, null))
 
       expect(again._tag).toBe("Failure")
-      expect(yield* total(sql, "gateway_access_profile_tool")).toBe(1)
+      expect(yield* total(sql, "gateway_profile_tool")).toBe(1)
     }).pipe(Effect.provide(testServices)))
 
   it.effect("keeps subject-scoped routes distinct from the unscoped one", () =>
     Effect.gen(function*() {
       const sql = yield* seeded()
-      yield* insertProfile(sql, "profile", 0)
+      yield* insertProfile(sql)
 
       yield* insertTool(sql, null)
       yield* insertTool(sql, "sebastian")
       yield* insertTool(sql, "mokronos")
 
-      expect(yield* total(sql, "gateway_access_profile_tool")).toBe(3)
-    }).pipe(Effect.provide(testServices)))
-
-  it.effect("holds one default access profile per tenant, and any number of non-defaults", () =>
-    Effect.gen(function*() {
-      const sql = yield* seeded()
-      yield* insertProfile(sql, "first", 1)
-      yield* insertProfile(sql, "second", 0)
-      yield* insertProfile(sql, "third", 0)
-
-      expect((yield* Effect.result(insertProfile(sql, "fourth", 1)))._tag).toBe("Failure")
+      expect(yield* total(sql, "gateway_profile_tool")).toBe(3)
     }).pipe(Effect.provide(testServices)))
 })
 

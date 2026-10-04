@@ -5,19 +5,14 @@ import { AppShell } from "@/components/app-shell"
 import { AuthGate } from "@/components/auth-gate"
 import { Toaster } from "@/components/ui/sonner"
 
-const AccountRoute = lazy(() => import("@/routes/account").then((route) => ({ default: route.AccountRoute })))
+const ActivityRoute = lazy(() => import("@/routes/activity").then((route) => ({ default: route.ActivityRoute })))
 const ApprovalsRoute = lazy(() => import("@/routes/approvals").then((route) => ({ default: route.ApprovalsRoute })))
-const ApprovalDestinationsRoute = lazy(() => import("@/routes/approval-destinations").then((route) => ({ default: route.ApprovalDestinationsRoute })))
-const ClientDetailRoute = lazy(() => import("@/routes/client-detail").then((route) => ({ default: route.ClientDetailRoute })))
-const ClientsRoute = lazy(() => import("@/routes/clients").then((route) => ({ default: route.ClientsRoute })))
-const ExecutionsRoute = lazy(() => import("@/routes/executions").then((route) => ({ default: route.ExecutionsRoute })))
+const HomeRoute = lazy(() => import("@/routes/home").then((route) => ({ default: route.HomeRoute })))
 const IntegrationsRoute = lazy(() => import("@/routes/integrations").then((route) => ({ default: route.IntegrationsRoute })))
 const OnboardingRoute = lazy(() => import("@/routes/onboarding").then((route) => ({ default: route.OnboardingRoute })))
-const OverviewRoute = lazy(() => import("@/routes/overview").then((route) => ({ default: route.OverviewRoute })))
-const AccessProfilesRoute = lazy(() => import("@/routes/policies").then((route) => ({ default: route.AccessProfilesRoute })))
-const AccessProfileDetailRoute = lazy(() => import("@/routes/policies").then((route) => ({ default: route.AccessProfileDetailRoute })))
-const ApprovalPoliciesRoute = lazy(() => import("@/routes/policies").then((route) => ({ default: route.ApprovalPoliciesRoute })))
-const ApprovalPolicyDetailRoute = lazy(() => import("@/routes/policies").then((route) => ({ default: route.ApprovalPolicyDetailRoute })))
+const ProfilesRoute = lazy(() => import("@/routes/profiles").then((route) => ({ default: route.ProfilesRoute })))
+const ProfileDetailRoute = lazy(() => import("@/routes/profiles").then((route) => ({ default: route.ProfileDetailRoute })))
+const SettingsRoute = lazy(() => import("@/routes/settings").then((route) => ({ default: route.SettingsRoute })))
 const OAuthConsentRoute = lazy(() => import("@/routes/oauth-consent").then((route) => ({ default: route.OAuthConsentRoute })))
 
 export default function App() {
@@ -35,23 +30,15 @@ export default function App() {
         <Routes>
           <Route path="/oauth/consent" element={<OAuthConsentRoute />} />
           <Route element={<AppShell dark={dark} onDarkChange={setDark} />}>
-            <Route index element={<OverviewRoute />} />
+            <Route index element={<HomeRoute />} />
             <Route path="/onboarding" element={<OnboardingRoute />} />
+            <Route path="/approvals" element={<ApprovalsRoute />} />
             <Route path="/integrations" element={<IntegrationsRoute />} />
             <Route path="/integrations/:slug" element={<IntegrationsRoute />} />
-            <Route path="/clients" element={<ClientsRoute />} />
-            <Route path="/clients/:clientId" element={<ClientDetailRoute />} />
-            <Route path="/access-profiles" element={<AccessProfilesRoute />} />
-            <Route path="/access-profiles/:accessProfileId" element={<AccessProfileDetailRoute />} />
-            <Route path="/approval-policies" element={<ApprovalPoliciesRoute />} />
-            <Route path="/approval-policies/:approvalPolicyId" element={<ApprovalPolicyDetailRoute />} />
-            <Route path="/approvals" element={<ApprovalsRoute />} />
-            <Route path="/approval-destinations" element={<ApprovalDestinationsRoute />} />
-            <Route path="/activity" element={<ExecutionsRoute />} />
-            <Route path="/executions" element={<Navigate to="/activity" replace />} />
-            <Route path="/workbench" element={<Navigate to="/" replace />} />
-            <Route path="/system" element={<Navigate to="/" replace />} />
-            <Route path="/account" element={<AccountRoute />} />
+            <Route path="/profiles" element={<ProfilesRoute />} />
+            <Route path="/profiles/:profileId" element={<ProfileDetailRoute />} />
+            <Route path="/activity" element={<ActivityRoute />} />
+            <Route path="/settings" element={<SettingsRoute />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

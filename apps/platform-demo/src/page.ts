@@ -4,7 +4,7 @@ import type { EffectiveTool } from "@integragents/gateway-core"
 export interface AgentView {
   readonly id: string
   readonly name: string
-  readonly clientId: string
+  readonly profileId: string
   readonly tools: ReadonlyArray<EffectiveTool>
 }
 
@@ -37,7 +37,7 @@ const authorizationLink = (outcome: InvocationOutcome): string =>
 
 const agentSection = (agent: AgentView, selected: boolean): string => `
   <section>
-    <h3>${escape(agent.name)} <small>gateway client <code>${escape(agent.clientId)}</code></small>
+    <h3>${escape(agent.name)} <small>gateway profile <code>${escape(agent.profileId)}</code></small>
       ${selected ? "" : `<a href="/?agent=${encodeURIComponent(agent.id)}">show schemas</a>`}</h3>
     <table>
       <thead><tr><th>alias</th><th>tool</th><th>policy</th><th></th></tr></thead>
@@ -70,7 +70,7 @@ export const page = (model: PageModel): string => `<!doctype html>
 <body>
   <h1>platform demo</h1>
   <p>One process, one database. Agents are rows in the platform's <code>agent</code> table; each holds a
-  gateway client. Tools and execution come from the gateway core called directly, not over HTTP.</p>
+  gateway profile. Tools and execution come from the gateway core called directly, not over HTTP.</p>
 
   <section>
     <h2>Integrations <small>${model.integrations.map((slug) => `<code>${escape(slug)}</code>`).join(" ")}</small></h2>

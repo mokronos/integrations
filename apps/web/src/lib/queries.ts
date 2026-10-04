@@ -2,11 +2,9 @@ import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/reac
 import { useCallback, useEffect } from "react"
 import type { UseQueryResult } from "@tanstack/react-query"
 import type {
-  AccessProfileId,
-  ApprovalPolicyId,
   ApprovalStatus,
-  ClientId,
-  GatewayResource
+  GatewayResource,
+  ProfileId
 } from "@integragents/contracts"
 
 import * as gateway from "@/lib/gateway"
@@ -18,15 +16,12 @@ export const keys = {
   integrations: ["integrations"] as const,
   connections: ["connections"] as const,
   overview: ["overview"] as const,
-  clients: ["clients"] as const,
+  profiles: ["profiles"] as const,
   approvalDestinations: ["approval-destinations"] as const,
-  clientApprovalDestinations: (id: ClientId) => ["clients", id, "approval-destinations"] as const,
-  accessProfiles: ["access-profiles"] as const,
-  accessProfile: (id: AccessProfileId | undefined) => ["access-profiles", id] as const,
-  approvalPolicies: ["approval-policies"] as const,
-  approvalPolicy: (id: ApprovalPolicyId | undefined) => ["approval-policies", id] as const,
-  clientTools: (id: ClientId | undefined) => ["clients", id, "tools"] as const,
-  apiKeys: (id: ClientId) => ["clients", id, "keys"] as const,
+  profileApprovalDestinations: (id: ProfileId) => ["profiles", id, "approval-destinations"] as const,
+  profileTools: (id: ProfileId) => ["profiles", id, "tools"] as const,
+  approvalRules: (id: ProfileId) => ["profiles", id, "approval-rules"] as const,
+  apiKeys: (id: ProfileId) => ["profiles", id, "keys"] as const,
   approvals: (status: ApprovalStatus | "all") => ["approvals", status] as const,
   audit: (input: AuditQuery) => ["audit", input] as const,
   oauthSession: (id: string | undefined) => ["oauth-session", id] as const,
@@ -55,66 +50,48 @@ export const useOAuthCallbackUrl = () =>
 export const useConnections = () =>
   useQuery({ queryKey: keys.connections, queryFn: gateway.listConnections })
 
-export const useClients = () =>
+export const useProfiles = () =>
   useQuery({
-    queryKey: keys.clients,
-    queryFn: gateway.listClients,
-    select: (response) => response.clients
+    queryKey: keys.profiles,
+    queryFn: gateway.listProfiles,
+    select: (response) => response.profiles
   })
 
 export const useGatewayUrl = () =>
   useQuery({
-    queryKey: keys.clients,
-    queryFn: gateway.listClients,
+    queryKey: keys.profiles,
+    queryFn: gateway.listProfiles,
     select: (response) => response.gatewayUrl
   })
 
 export const useMcpUrl = () =>
   useQuery({
-    queryKey: keys.clients,
-    queryFn: gateway.listClients,
+    queryKey: keys.profiles,
+    queryFn: gateway.listProfiles,
     select: (response) => response.mcpUrl
   })
 
 export const useApprovalDestinations = () =>
   useQuery({ queryKey: keys.approvalDestinations, queryFn: gateway.listApprovalDestinations })
 
-export const useClientApprovalDestinations = (id: ClientId) =>
+export const useProfileApprovalDestinations = (id: ProfileId) =>
   useQuery({
-    queryKey: keys.clientApprovalDestinations(id),
-    queryFn: () => gateway.getClientApprovalDestinations(id)
+    queryKey: keys.profileApprovalDestinations(id),
+    queryFn: () => gateway.getProfileApprovalDestinations(id)
   })
 
 
 export const useOverview = () =>
   useQuery({ queryKey: keys.overview, queryFn: gateway.fetchOverview })
 
-export const useAccessProfiles = () =>
-  useQuery({ queryKey: keys.accessProfiles, queryFn: gateway.listAccessProfiles })
-
-export const useAccessProfile = (id: AccessProfileId | undefined) =>
-  useQuery({
-    queryKey: keys.accessProfile(id),
-    queryFn: id === undefined ? skipToken : () => gateway.getAccessProfile(id)
-  })
-
-export const useApprovalPolicies = () =>
-  useQuery({ queryKey: keys.approvalPolicies, queryFn: gateway.listApprovalPolicies })
-
-export const useApprovalPolicy = (id: ApprovalPolicyId | undefined) =>
-  useQuery({
-    queryKey: keys.approvalPolicy(id),
-    queryFn: id === undefined ? skipToken : () => gateway.getApprovalPolicy(id)
-  })
-
-export const useApiKeys = (id: ClientId) =>
+export const useApiKeys = (id: ProfileId) =>
   useQuery({ queryKey: keys.apiKeys(id), queryFn: () => gateway.listKeys(id) })
 
-export const useClientTools = (id: ClientId | undefined) =>
-  useQuery({
-    queryKey: keys.clientTools(id),
-    queryFn: id === undefined ? skipToken : () => gateway.listClientTools(id)
-  })
+export const useProfileTools = (id: ProfileId) =>
+  useQuery({ queryKey: keys.profileTools(id), queryFn: () => gateway.listProfileTools(id) })
+
+export const useApprovalRules = (id: ProfileId) =>
+  useQuery({ queryKey: keys.approvalRules(id), queryFn: () => gateway.listApprovalRules(id) })
 
 export const useApprovals = (status: ApprovalStatus | "all") =>
   useQuery({
@@ -137,10 +114,9 @@ export const useOAuthSession = (id: string | undefined) =>
 const reloadedBy = {
   approvals: [keys.overview, ["approvals"]],
   audit: [keys.overview, ["audit"], ["onboarding-activity"]],
-  clients: [keys.overview, keys.clients],
-  policies: [keys.overview, keys.accessProfiles, keys.approvalPolicies, keys.clients],
-  "approval-destinations": [keys.approvalDestinations, keys.clients],
-  integrations: [keys.overview, keys.integrations, keys.connections, ["oauth-session"], keys.clients]
+  profiles: [keys.overview, keys.profiles, keys.oauthGrants],
+  "approval-destinations": [keys.approvalDestinations, keys.profiles],
+  integrations: [keys.overview, keys.integrations, keys.connections, ["oauth-session"], keys.profiles]
 } satisfies Record<GatewayResource, ReadonlyArray<ReadonlyArray<string>>>
 
 /** Reloads what the gateway reports changed; a fresh connection reloads everything it may have missed. */

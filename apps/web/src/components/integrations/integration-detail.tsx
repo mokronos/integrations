@@ -1,4 +1,4 @@
-import { ChevronRight, ExternalLink, Search, Unplug } from "lucide-react"
+import { ChevronRight, ExternalLink, RefreshCcw, Search } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useNavigate } from "react-router"
 import { toast } from "sonner"
@@ -15,7 +15,6 @@ import { ConfirmButton } from "@/components/ui/confirm-button"
 import { EditableTitle } from "@/components/ui/editable-title"
 import { Input } from "@/components/ui/input"
 import { Item, ItemActions, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item"
-import { Separator } from "@/components/ui/separator"
 import { pluralise, when } from "@/lib/format"
 import * as gateway from "@/lib/gateway"
 import { keys, useInvalidate, useMutation } from "@/lib/queries"
@@ -156,7 +155,7 @@ function IntegrationName({ integration }: { readonly integration: IntegrationOve
 function ConnectionRow({ integration, connection, onDisconnect, disconnecting }: {
   readonly integration: IntegrationOverview
   readonly connection: Connection
-  readonly onDisconnect: () => void
+  readonly onDisconnect: () => Promise<void>
   readonly disconnecting: boolean
 }) {
   return (
@@ -186,10 +185,15 @@ function ConnectionRow({ integration, connection, onDisconnect, disconnecting }:
           )}
         </ItemContent>
         <ItemActions>
-          <Button variant="ghost" size="sm" onClick={onDisconnect} disabled={disconnecting}>
-            <Unplug className="size-3" />
-            Disconnect
-          </Button>
+          <ConfirmButton
+            label="Disconnect"
+            title={`Disconnect ${connection.identityLabel ?? connection.name}?`}
+            description="The stored credential is deleted and every profile loses this connection's tools. Connecting again later starts fresh."
+            confirmLabel="Disconnect"
+            pendingLabel="Disconnecting…"
+            pending={disconnecting}
+            onConfirm={onDisconnect}
+          />
         </ItemActions>
       </Item>
     </li>
@@ -204,9 +208,19 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
     mutationFn: (connection: Connection) =>
       gateway.removeConnection({ integration: integration.slug, name: connection.name }),
     onSuccess: () => {
-      invalidate(keys.integrations, keys.connections)
+      invalidate(keys.integrations, keys.connections, keys.profiles)
       toast.success("Connection removed")
     }
+  })
+  const drift = useMutation({
+    mutationFn: () => gateway.refreshDrift(integration.slug),
+    onSuccess: (reports) => {
+      const changes = reports.reduce((total, report) => total + report.entries.length, 0)
+      toast.success(changes === 0 ? "No tool changes since the last check" : `${changes} tool change(s) found`, {
+        description: changes === 0 ? undefined : "Run `ii drift` for the full report."
+      })
+    },
+    onError: (error: Error) => toast.error("Could not check for changes", { description: error.message })
   })
 
   const tools = useMemo(() => {
@@ -226,67 +240,29 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
             <IntegrationName integration={integration} />
             <ConnectionBadge integration={integration} />
             <div className="ml-auto flex shrink-0 items-center gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                title="Re-read the tools and compare them with the last check"
+                onClick={() => drift.mutate()}
+                disabled={drift.isPending}
+              >
+                <RefreshCcw className={cn("size-3", drift.isPending && "animate-spin")} />
+                Check for changes
+              </Button>
               <ConnectDialog key={integration.slug} integration={integration} />
               <RemoveIntegration integration={integration} />
             </div>
           </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <dl className="grid gap-3 text-sm sm:grid-cols-3">
-            <div className="min-w-0">
-              <dt className="text-muted-foreground text-xs uppercase">Slug</dt>
-              <dd><code className="break-all font-mono">{integration.slug}</code></dd>
-            </div>
-            <div className="min-w-0">
-              <dt className="text-muted-foreground text-xs uppercase">Kind</dt>
-              <dd>{integration.kind}</dd>
-            </div>
-            <div className="min-w-0">
-              <dt className="text-muted-foreground text-xs uppercase">Authentication</dt>
-              <dd>{integration.requiresAuthentication ? "Required" : "Not required"}</dd>
-            </div>
-          </dl>
-
-          {integration.displayUrl === undefined ? null : (
-            <a
-              className="text-primary inline-flex max-w-full items-center gap-1 break-all text-sm hover:underline"
-              href={integration.displayUrl}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {integration.displayUrl}
-              <ExternalLink className="size-3 shrink-0" />
-            </a>
-          )}
-
           {integration.description.length === 0
             ? null
             : <p className="text-muted-foreground text-sm">{integration.description}</p>}
-
-          <Separator />
-
+        </CardHeader>
+        <CardContent className="space-y-4">
           <div className="space-y-2">
-            <div>
-              <p className="text-xs uppercase tracking-wide">Authentication options</p>
-              <p className="text-muted-foreground mt-1 text-xs">
-                Discovered from the {integration.kind === "mcp" ? "MCP endpoint" : "OpenAPI document"}. Each connection uses one option.
-              </p>
-            </div>
-            {integration.authMethods.length === 0
-              ? <p className="text-destructive text-sm">No supported authentication option was discovered.</p>
-              : (
-                <div className="grid gap-2 xl:grid-cols-2">
-                  {integration.authMethods.map((method) => <AuthMethodDetails key={method.id} method={method} />)}
-                </div>
-              )}
-          </div>
-
-          <Separator />
-
-          <div className="space-y-2">
-            <p className="text-xs uppercase tracking-wide">Connections</p>
+            <p className="text-xs font-medium uppercase tracking-wide">Connections</p>
             {integration.connections.length === 0
-              ? <p className="text-muted-foreground text-sm">Not connected.</p>
+              ? <p className="text-muted-foreground text-sm">Not connected yet. Connect an account to use its tools.</p>
               : (
                 <ul className="space-y-2">
                   {integration.connections.map((connection) => (
@@ -294,7 +270,7 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
                       key={connection.address}
                       integration={integration}
                       connection={connection}
-                      onDisconnect={() => disconnect.mutate(connection)}
+                      onDisconnect={() => disconnect.mutateAsync(connection).then(() => undefined)}
                       disconnecting={disconnect.isPending}
                     />
                   ))}
@@ -304,6 +280,47 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
               <OperationError title="Disconnect failed" step="Removing the stored connection" error={disconnect.error} />
             )}
           </div>
+
+          <details className="group">
+            <summary className="text-muted-foreground hover:text-foreground flex w-fit cursor-pointer list-none items-center gap-1 text-xs [&::-webkit-details-marker]:hidden">
+              <ChevronRight className="size-3 transition-transform group-open:rotate-90" />
+              Details and sign-in options
+            </summary>
+            <div className="mt-3 space-y-4">
+              <dl className="grid gap-3 text-sm sm:grid-cols-3">
+                <div className="min-w-0">
+                  <dt className="text-muted-foreground text-xs uppercase">Slug</dt>
+                  <dd><code className="break-all font-mono">{integration.slug}</code></dd>
+                </div>
+                <div className="min-w-0">
+                  <dt className="text-muted-foreground text-xs uppercase">Kind</dt>
+                  <dd>{integration.kind}</dd>
+                </div>
+                <div className="min-w-0">
+                  <dt className="text-muted-foreground text-xs uppercase">Authentication</dt>
+                  <dd>{integration.requiresAuthentication ? "Required" : "Not required"}</dd>
+                </div>
+              </dl>
+              {integration.displayUrl === undefined ? null : (
+                <a
+                  className="text-primary inline-flex max-w-full items-center gap-1 break-all text-sm hover:underline"
+                  href={integration.displayUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {integration.displayUrl}
+                  <ExternalLink className="size-3 shrink-0" />
+                </a>
+              )}
+              {integration.authMethods.length === 0
+                ? <p className="text-destructive text-sm">No supported authentication option was discovered.</p>
+                : (
+                  <div className="grid gap-2 xl:grid-cols-2">
+                    {integration.authMethods.map((method) => <AuthMethodDetails key={method.id} method={method} />)}
+                  </div>
+                )}
+            </div>
+          </details>
         </CardContent>
       </Card>
 

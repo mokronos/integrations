@@ -56,17 +56,12 @@ describe("i and ii CLI help", () => {
       expect(hasCommand(result.stdout, command)).toBe(true)
     }
     for (const command of [
-      "clients",
-      "client",
+      "profiles",
+      "profile",
+      "profile-tools",
+      "profile-tool",
       "key",
       "keys",
-      "grant",
-      "grants",
-      "policies",
-      "policy",
-      "clone-policy",
-      "policy-tool",
-      "assign-policy",
       "revoke",
       "codegen",
       "approvals",
@@ -99,10 +94,7 @@ describe("i and ii CLI help", () => {
       expect(operator.stdout.includes(`  ${command}`)).toBe(true)
     }
     for (const command of [
-      "clients", "client", "key", "keys", "access-profiles", "access-profile",
-      "clone-access-profile", "access-profile-tool", "assign-access-profile",
-      "approval-policies", "approval-policy", "clone-approval-policy",
-      "approval-policy-tool", "assign-approval-policy", "revoke", "approvals",
+      "profiles", "profile", "profile-tools", "profile-tool", "key", "keys", "revoke", "approvals",
       "approve", "deny", "audit", "drift", "maintenance", "login", "signup",
       "logout", "whoami", "account", "serve", "dashboard", "install", "uninstall"
     ]) {
@@ -113,8 +105,8 @@ describe("i and ii CLI help", () => {
   test("every listing command windows with --limit and --offset", () => {
     for (
       const command of [
-        "integrations", "tools", "connections", "clients", "access-profiles",
-        "approval-policies", "audit", "approvals"
+        "integrations", "tools", "connections", "profiles", "profile-tools",
+        "keys", "audit", "approvals"
       ]
     ) {
       const help = runOperator([command, "--help"])

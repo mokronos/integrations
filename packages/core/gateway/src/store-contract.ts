@@ -1,15 +1,15 @@
 import { Effect, Schema } from "effect"
 import type { NonNegativeInt, PositiveInt } from "@integragents/contracts"
 import type {
-  AccessProfile, AccessProfileId, AccessProfileTool, Alias, ApiKey, ApiKeyHash,
+  Alias, ApiKey, ApiKeyHash,
   ApiKeyId, ApprovalGroupWindowMinutes, ApprovalMethod, ApprovalDeliveryAttempt, ApprovalDeliveryId, McpSurface,
-  ApprovalDestination, ApprovalDestinationId, ApprovalId, ApprovalPolicy, ApprovalPolicyId,
-  ApprovalPolicyTool, ApprovalRule, ApprovalRuleId, ApprovalStatus, ArgumentPattern, AuditId, AuditOutcome, AuditRecord,
-  AuthSession, Client, ConfigureClient, ClientCapability, ClientId, ConnectionName, ConnectionRef,
+  ApprovalDestination, ApprovalDestinationId, ApprovalId,
+  ApprovalRule, ApprovalRuleId, ApprovalStatus, ArgumentPattern, AuditId, AuditOutcome, AuditRecord,
+  AuthSession, Caller, ConnectionName, ConnectionRef,
   ExternalIdentity, IdentityProvider, IntegrationSlug, Login, LoginHandoff,
-  LoginHandoffHash, PendingApproval, PolicyDecision, SessionTokenHash, Subject,
-  SubjectId, Tenant, TenantId, ToolName, ToolSnapshot, OAuthApplicationId, OAuthGrantId,
-  OAuthGrantView
+  LoginHandoffHash, PendingApproval, Profile, ProfileCapability, ProfileId, ProfileTool, ProfileToolInput,
+  SessionTokenHash, Subject, SubjectId, Tenant, TenantId, ToolDecision, ToolName, ToolSnapshot,
+  OAuthApplicationId, OAuthGrantId, OAuthGrantView
 } from "./domain.ts"
 import type { PasswordHash } from "./passwords.ts"
 import type {
@@ -39,42 +39,32 @@ export interface IdentityOAuthStateRecord {
   readonly expiresAt: Date
 }
 
-export interface CreateClientInput {
+export interface CreateProfileInput {
   readonly tenantId: TenantId
-  readonly id: ClientId
-  readonly accessProfileId: AccessProfileId
-  readonly approvalPolicyId: ApprovalPolicyId
+  readonly id: ProfileId
   readonly name: string
-  readonly capabilities: ReadonlyArray<ClientCapability>
+  readonly capabilities: ReadonlyArray<ProfileCapability>
   readonly approvalMethod?: ApprovalMethod
   readonly mcpSurface?: McpSurface
   readonly approvalGroupWindowMinutes?: ApprovalGroupWindowMinutes
+  readonly includeNewTools?: boolean
+  readonly tools: ReadonlyArray<ProfileToolInput>
+  readonly destinationIds?: ReadonlyArray<ApprovalDestinationId>
 }
 
-export interface CreateAccessProfileInput {
-  readonly tenantId: TenantId
-  readonly id: AccessProfileId
-  readonly name: string
-  readonly isDefault?: boolean
+export interface ProfileSettings {
+  readonly capabilities: ReadonlyArray<ProfileCapability>
+  readonly approvalMethod: ApprovalMethod
+  readonly mcpSurface: McpSurface
+  readonly approvalGroupWindowMinutes: ApprovalGroupWindowMinutes
+  readonly includeNewTools: boolean
 }
-
-export interface CreateApprovalPolicyInput {
-  readonly tenantId: TenantId
-  readonly id: ApprovalPolicyId
-  readonly name: string
-  readonly isDefault?: boolean
-  readonly tools: ReadonlyArray<ApprovalPolicyToolInput>
-}
-
-export type AccessProfileToolInput = Omit<AccessProfileTool, "accessProfileId">
-export type ApprovalPolicyToolInput = Omit<ApprovalPolicyTool, "approvalPolicyId">
 
 export interface CreateApprovalInput {
   readonly tenantId: TenantId
   readonly id: ApprovalId
-  readonly clientId: ClientId
-  readonly approvalPolicyId: ApprovalPolicyId
-  readonly accessProfileId: AccessProfileId
+  readonly profileId: ProfileId
+  readonly caller: Caller
   readonly alias: Alias
   readonly tool: ToolName
   readonly arguments: typeof Schema.Json.Type
@@ -86,8 +76,8 @@ export interface CreateApprovalInput {
 export interface ApprovalDeliveryJob extends ApprovalDeliveryAttempt {
   readonly tenantId: TenantId
   readonly groupId: ApprovalId
-  readonly clientId: ClientId
-  readonly clientName: string
+  readonly profileId: ProfileId
+  readonly profileName: string
   readonly alias: Alias
   readonly tool: ToolName
   readonly expiresAt: Date
@@ -98,7 +88,7 @@ export interface ApprovalDeliveryJob extends ApprovalDeliveryAttempt {
 export interface AuditQuery {
   readonly limit?: PositiveInt
   readonly offset?: NonNegativeInt
-  readonly clientId?: ClientId
+  readonly profileId?: ProfileId
   readonly alias?: Alias
   readonly tool?: ToolName
   readonly outcome?: AuditOutcome
@@ -108,12 +98,13 @@ export interface AuditQuery {
 export interface RecordAuditInput {
   readonly tenantId: TenantId
   readonly id: AuditId
-  readonly clientId: ClientId | null
-  readonly oauthActor?: OAuthActor
+  readonly profileId: ProfileId | null
+  readonly caller: Caller
+  readonly authorizedBySubjectId: SubjectId | null
   readonly alias: Alias | null
   readonly tool: ToolName | null
   readonly connection: ConnectionRef | null
-  readonly decision: PolicyDecision | null
+  readonly decision: ToolDecision | null
   readonly outcome: AuditOutcome
   readonly message: string | null
   readonly arguments?: {
@@ -123,11 +114,8 @@ export interface RecordAuditInput {
 }
 
 export interface GatewayOverviewCounts {
-  readonly clients: number
-  readonly accessProfiles: number
-  readonly accessProfileTools: number
-  readonly approvalPolicies: number
-  readonly approvalPolicyTools: number
+  readonly profiles: number
+  readonly profileTools: number
   readonly keys: number
   readonly pendingApprovals: number
 }
@@ -205,28 +193,16 @@ export interface GatewayStore {
   deleteExpiredIdentityFlows(now: Date): Effect.Effect<number, GatewayStoreError>
   deleteExpiredOAuthState(now: Date): Effect.Effect<number, GatewayStoreError>
 
-  createConfiguredClient(input: ConfigureClient & {
-    readonly tenantId: TenantId
-    readonly id: ClientId
-    readonly accessProfileId: AccessProfileId
-    readonly approvalPolicyId: ApprovalPolicyId
-    readonly approvalPolicyTools: ReadonlyArray<ApprovalPolicyToolInput>
-  }): Effect.Effect<Client, GatewayStoreError>
-  createClient(input: CreateClientInput): Effect.Effect<Client, GatewayStoreError>
-  listClients(tenantId: TenantId): Effect.Effect<ReadonlyArray<Client>, GatewayStoreError>
+  createProfile(input: CreateProfileInput): Effect.Effect<Profile, GatewayStoreError>
+  listProfiles(tenantId: TenantId): Effect.Effect<ReadonlyArray<Profile>, GatewayStoreError>
   overviewCounts(tenantId: TenantId): Effect.Effect<GatewayOverviewCounts, GatewayStoreError>
-  findClientById(tenantId: TenantId, id: ClientId): Effect.Effect<Client | undefined, GatewayStoreError>
-  findClientByName(tenantId: TenantId, name: string): Effect.Effect<Client | undefined, GatewayStoreError>
-  updateClientSettings(input: {
-    readonly tenantId: TenantId
-    readonly id: ClientId
-    readonly capabilities: ReadonlyArray<ClientCapability>
-    readonly approvalMethod: ApprovalMethod
-    readonly mcpSurface: McpSurface
-    readonly approvalGroupWindowMinutes: ApprovalGroupWindowMinutes
-  }): Effect.Effect<Client, GatewayStoreError>
-  renameClient(tenantId: TenantId, id: ClientId, name: string): Effect.Effect<Client, GatewayStoreError>
-  revokeClient(tenantId: TenantId, id: ClientId): Effect.Effect<void, GatewayStoreError>
+  findProfileById(tenantId: TenantId, id: ProfileId): Effect.Effect<Profile | undefined, GatewayStoreError>
+  findProfileByName(tenantId: TenantId, name: string): Effect.Effect<Profile | undefined, GatewayStoreError>
+  updateProfileSettings(tenantId: TenantId, id: ProfileId, settings: ProfileSettings): Effect.Effect<Profile, GatewayStoreError>
+  renameProfile(tenantId: TenantId, id: ProfileId, name: string): Effect.Effect<Profile, GatewayStoreError>
+  revokeProfile(tenantId: TenantId, id: ProfileId): Effect.Effect<void, GatewayStoreError>
+  listProfileTools(id: ProfileId): Effect.Effect<ReadonlyArray<ProfileTool>, GatewayStoreError>
+  replaceProfileTools(id: ProfileId, tools: ReadonlyArray<ProfileToolInput>): Effect.Effect<ReadonlyArray<ProfileTool>, GatewayStoreError>
 
   createApprovalDestination(input: {
     readonly id: ApprovalDestinationId
@@ -237,8 +213,8 @@ export interface GatewayStore {
   }): Effect.Effect<ApprovalDestination, GatewayStoreError>
   listApprovalDestinations(tenantId: TenantId): Effect.Effect<ReadonlyArray<ApprovalDestination>, GatewayStoreError>
   deleteApprovalDestination(tenantId: TenantId, id: ApprovalDestinationId): Effect.Effect<void, GatewayStoreError>
-  listClientApprovalDestinationIds(clientId: ClientId): Effect.Effect<ReadonlyArray<ApprovalDestinationId>, GatewayStoreError>
-  replaceClientApprovalDestinations(tenantId: TenantId, clientId: ClientId, ids: ReadonlyArray<ApprovalDestinationId>): Effect.Effect<ReadonlyArray<ApprovalDestinationId>, GatewayStoreError>
+  listProfileApprovalDestinationIds(profileId: ProfileId): Effect.Effect<ReadonlyArray<ApprovalDestinationId>, GatewayStoreError>
+  replaceProfileApprovalDestinations(tenantId: TenantId, profileId: ProfileId, ids: ReadonlyArray<ApprovalDestinationId>): Effect.Effect<ReadonlyArray<ApprovalDestinationId>, GatewayStoreError>
   listApprovalDeliveries(tenantId: TenantId, status?: ApprovalStatus): Effect.Effect<ReadonlyArray<ApprovalDeliveryAttempt>, GatewayStoreError>
   claimDueApprovalDeliveries(now: Date, limit: number): Effect.Effect<ReadonlyArray<ApprovalDeliveryJob>, GatewayStoreError>
   settleApprovalDelivery(input: {
@@ -248,9 +224,9 @@ export interface GatewayStore {
     readonly error: string | null
   }): Effect.Effect<void, GatewayStoreError>
 
-  addApiKey(input: { readonly id: ApiKeyId; readonly clientId: ClientId; readonly hash: ApiKeyHash }): Effect.Effect<ApiKey, GatewayStoreError>
-  listApiKeys(clientId: ClientId): Effect.Effect<ReadonlyArray<ApiKey>, GatewayStoreError>
-  findApiKeyByHash(hash: ApiKeyHash): Effect.Effect<{ readonly key: ApiKey; readonly client: Client } | undefined, GatewayStoreError>
+  addApiKey(input: { readonly id: ApiKeyId; readonly profileId: ProfileId; readonly name: string; readonly hash: ApiKeyHash }): Effect.Effect<ApiKey, GatewayStoreError>
+  listApiKeys(profileId: ProfileId): Effect.Effect<ReadonlyArray<ApiKey>, GatewayStoreError>
+  findApiKeyByHash(hash: ApiKeyHash): Effect.Effect<{ readonly key: ApiKey; readonly profile: Profile } | undefined, GatewayStoreError>
   touchApiKey(id: ApiKeyId): Effect.Effect<void, GatewayStoreError>
   revokeApiKey(id: ApiKeyId): Effect.Effect<void, GatewayStoreError>
 
@@ -272,7 +248,7 @@ export interface GatewayStore {
     readonly applicationId: OAuthApplicationId
     readonly subjectId: SubjectId
     readonly tenantId: TenantId
-    readonly clientId: ClientId
+    readonly profileId: ProfileId
     readonly resource: string
     readonly scope: "mcp"
   }): Effect.Effect<OAuthGrant, GatewayStoreError>
@@ -294,43 +270,21 @@ export interface GatewayStore {
     readonly hash: OAuthSecretHash
     readonly resource: string
   }): Effect.Effect<{
-    readonly client: Client
+    readonly profile: Profile
     readonly actor: OAuthActor
     readonly expiresAt: Date
     readonly scope: "mcp"
   } | undefined, GatewayStoreError>
 
-  createAccessProfile(input: CreateAccessProfileInput): Effect.Effect<AccessProfile, GatewayStoreError>
-  updateAccessProfile(tenantId: TenantId, id: AccessProfileId, name: string): Effect.Effect<AccessProfile, GatewayStoreError>
-  deleteAccessProfile(tenantId: TenantId, id: AccessProfileId): Effect.Effect<void, GatewayStoreError>
-  listAccessProfiles(tenantId: TenantId): Effect.Effect<ReadonlyArray<AccessProfile>, GatewayStoreError>
-  findAccessProfile(tenantId: TenantId, id: AccessProfileId): Effect.Effect<AccessProfile | undefined, GatewayStoreError>
-  findDefaultAccessProfile(tenantId: TenantId): Effect.Effect<AccessProfile | undefined, GatewayStoreError>
-  findAccessProfileForClient(clientId: ClientId): Effect.Effect<AccessProfile | undefined, GatewayStoreError>
-  listAccessProfileTools(id: AccessProfileId): Effect.Effect<ReadonlyArray<AccessProfileTool>, GatewayStoreError>
-  replaceAccessProfileTools(id: AccessProfileId, tools: ReadonlyArray<AccessProfileToolInput>): Effect.Effect<ReadonlyArray<AccessProfileTool>, GatewayStoreError>
-  assignAccessProfile(tenantId: TenantId, clientId: ClientId, id: AccessProfileId): Effect.Effect<Client, GatewayStoreError>
-
-  createApprovalPolicy(input: CreateApprovalPolicyInput): Effect.Effect<ApprovalPolicy, GatewayStoreError>
-  updateApprovalPolicy(tenantId: TenantId, id: ApprovalPolicyId, name: string): Effect.Effect<ApprovalPolicy, GatewayStoreError>
-  deleteApprovalPolicy(tenantId: TenantId, id: ApprovalPolicyId): Effect.Effect<void, GatewayStoreError>
-  listApprovalPolicies(tenantId: TenantId): Effect.Effect<ReadonlyArray<ApprovalPolicy>, GatewayStoreError>
-  findApprovalPolicy(tenantId: TenantId, id: ApprovalPolicyId): Effect.Effect<ApprovalPolicy | undefined, GatewayStoreError>
-  findDefaultApprovalPolicy(tenantId: TenantId): Effect.Effect<ApprovalPolicy | undefined, GatewayStoreError>
-  findApprovalPolicyForClient(clientId: ClientId): Effect.Effect<ApprovalPolicy | undefined, GatewayStoreError>
-  listApprovalPolicyTools(id: ApprovalPolicyId): Effect.Effect<ReadonlyArray<ApprovalPolicyTool>, GatewayStoreError>
-  replaceApprovalPolicyTools(id: ApprovalPolicyId, tools: ReadonlyArray<ApprovalPolicyToolInput>): Effect.Effect<ReadonlyArray<ApprovalPolicyTool>, GatewayStoreError>
-  assignApprovalPolicy(tenantId: TenantId, clientId: ClientId, id: ApprovalPolicyId): Effect.Effect<Client, GatewayStoreError>
-
   createApprovalRule(input: {
     readonly id: ApprovalRuleId
-    readonly approvalPolicyId: ApprovalPolicyId
+    readonly profileId: ProfileId
     readonly connection: ConnectionRef
     readonly tool: ToolName
     readonly pattern: ArgumentPattern
     readonly createdBy: string | null
   }): Effect.Effect<ApprovalRule, GatewayStoreError>
-  listApprovalRules(approvalPolicyId: ApprovalPolicyId): Effect.Effect<ReadonlyArray<ApprovalRule>, GatewayStoreError>
+  listApprovalRules(profileId: ProfileId): Effect.Effect<ReadonlyArray<ApprovalRule>, GatewayStoreError>
   findApprovalRule(id: ApprovalRuleId): Effect.Effect<ApprovalRule | undefined, GatewayStoreError>
   updateApprovalRule(id: ApprovalRuleId, pattern: ArgumentPattern): Effect.Effect<ApprovalRule, GatewayStoreError>
   deleteApprovalRule(id: ApprovalRuleId): Effect.Effect<void, GatewayStoreError>
@@ -339,7 +293,7 @@ export interface GatewayStore {
   getApproval(tenantId: TenantId, id: ApprovalId): Effect.Effect<PendingApproval | undefined, GatewayStoreError>
   listApprovals(tenantId: TenantId, status?: ApprovalStatus): Effect.Effect<ReadonlyArray<PendingApproval>, GatewayStoreError>
   findUncollectedApproval(input: Pick<CreateApprovalInput,
-    "tenantId" | "clientId" | "approvalPolicyId" | "accessProfileId" | "alias" | "tool" | "arguments"
+    "tenantId" | "profileId" | "alias" | "tool" | "arguments"
   >): Effect.Effect<PendingApproval | undefined, GatewayStoreError>
   collectApproval(tenantId: TenantId, id: ApprovalId): Effect.Effect<boolean, GatewayStoreError>
   claimApproval(input: {
@@ -355,7 +309,7 @@ export interface GatewayStore {
     readonly result: typeof Schema.Json.Type | null
     readonly error: string | null
   }): Effect.Effect<boolean, GatewayStoreError>
-  cancelApprovalsForClient(clientId: ClientId): Effect.Effect<number, GatewayStoreError>
+  cancelApprovalsForProfile(profileId: ProfileId): Effect.Effect<number, GatewayStoreError>
 
   recordAudit(input: RecordAuditInput): Effect.Effect<void, GatewayStoreError>
   listAudit(tenantId: TenantId, options: AuditQuery): Effect.Effect<ReadonlyArray<AuditRecord>, GatewayStoreError>

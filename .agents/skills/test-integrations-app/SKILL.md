@@ -15,7 +15,7 @@ bun run scripts/test-env.ts up
 
 It prints the sandbox as JSON: `home`, `gateway.url`, `dashboard.url`, `fixture.url`, and `traces` (the directory holding the trace files). Keep that JSON; every later step uses its values. Reuse a live sandbox across turns: `status --home <home>` tells you whether it is still up, and `up --home <home>` restarts it on the same ports with its data intact.
 
-A new sandbox comes seeded. The fixture MCP server (`scripts/fixture-mcp.ts`, one `echo` tool) is registered and connected as alias `org___fixture___default`, and `echo` is granted and allowed for the local clients. `--no-seed` gives an empty gateway.
+A new sandbox comes seeded. The fixture MCP server (`scripts/fixture-mcp.ts`, one `echo` tool) is registered and connected as alias `org___fixture___default`, and `echo` is enabled on the `local` and `local-agent` profiles, set to run without asking on `local-agent`. `--no-seed` gives an empty gateway.
 
 Done when `status` reports `gatewayUp`, `dashboardUp`, and `fixtureUp` true.
 
@@ -25,7 +25,7 @@ Run the CLIs from this checkout: `apps/cli/src/agent.ts` is `i` and `apps/cli/sr
 
 ```sh
 INTEGRATIONS_HOME=<home> bun run apps/cli/src/agent.ts execute org___fixture___default echo '{"text":"hi"}'
-INTEGRATIONS_HOME=<home> bun run apps/cli/src/main.ts clients            # --help lists every command
+INTEGRATIONS_HOME=<home> bun run apps/cli/src/main.ts profiles           # --help lists every command
 ```
 
 `<home>/gateway.json` holds the agent key for calling `<gateway.url>/mcp` directly.
@@ -88,4 +88,3 @@ bun run scripts/test-env.ts down --home <home> --remove
 
 - **Gateway code is loaded once.** A gateway keeps the modules it started with, so after editing gateway or package code, run `up --home <home>` to restart it. Dashboard code hot-reloads.
 - **Gateway-served dashboard.** `<gateway.url>/` serves `apps/web/dist`, which only `bun run build:control-plane` refreshes. Test the UI at `dashboard.url`.
-- **Grant tools in pairs.** A tool added to an access profile needs a decision in the approval policy too (`ii approval-policy-tool …`). Without one, every tool listing for that client fails with a 500. Leaving the decision out on purpose is also the quickest reproducible 500.

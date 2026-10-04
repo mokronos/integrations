@@ -6,9 +6,7 @@ import {
   createGatewayHandler,
   defaultTenantId,
   generateApiKey,
-  newAccessProfileId,
-  newApprovalPolicyId,
-  newClientId,
+  newProfileId,
   sha256Base64Url
 } from "./gateway.ts"
 import { gatewayStore, testServices } from "./fixtures.ts"
@@ -18,7 +16,7 @@ const JsonObject = Schema.Record(Schema.String, Schema.Json)
 const Registration = Schema.Struct({ client_id: Schema.String })
 const Consent = Schema.Struct({
   application: Schema.Struct({ name: Schema.String, kind: Schema.Literals(["cimd", "dcr"]) }),
-  clients: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String }))
+  profiles: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String }))
 })
 const Redirect = Schema.Struct({ redirect: Schema.String })
 const Grants = Schema.Struct({ grants: Schema.Array(Schema.Struct({ id: Schema.String, subjectEmail: Schema.String })) })
@@ -33,27 +31,15 @@ const Tokens = Schema.Struct({
 
 const setup = Effect.fnUntraced(function*(httpClient: Layer.Layer<HttpClient.HttpClient> = FetchHttpClient.layer) {
   const store = yield* gatewayStore("gateway-mcp-oauth-")
-  const accessProfile = yield* store.createAccessProfile({
-    id: yield* newAccessProfileId,
+  const profile = yield* store.createProfile({
+    id: yield* newProfileId,
     tenantId: defaultTenantId,
-    name: "oauth-access"
-  })
-  const approvalPolicy = yield* store.createApprovalPolicy({
-    id: yield* newApprovalPolicyId,
-    tenantId: defaultTenantId,
-    name: "oauth-policy",
+    name: "Local OAuth profile",
+    capabilities: [],
     tools: []
   })
-  const client = yield* store.createClient({
-    id: yield* newClientId,
-    tenantId: defaultTenantId,
-    accessProfileId: accessProfile.id,
-    approvalPolicyId: approvalPolicy.id,
-    name: "Local OAuth client",
-    capabilities: []
-  })
   const key = yield* generateApiKey
-  yield* store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
+  yield* store.addApiKey({ id: key.id, profileId: profile.id, name: "This machine", hash: key.hash })
   const gateway = createGatewayHandler({
     events: yield* makeGatewayEvents,
     store,
@@ -69,7 +55,7 @@ const setup = Effect.fnUntraced(function*(httpClient: Layer.Layer<HttpClient.Htt
       stop: () => Effect.void
     }
   })
-  return { ...gateway, store, client, key }
+  return { ...gateway, store, profile, key }
 })
 
 const request = (
@@ -176,7 +162,7 @@ describe("MCP OAuth authorization server", () => {
       expect(consent.status).toBe(200)
       const consentBody = Schema.decodeUnknownSync(Consent)(yield* Effect.promise(() => consent.json()))
       expect(consentBody.application).toEqual({ name: "Claude-compatible test client", kind: "dcr" })
-      expect(consentBody.clients.map((entry) => entry.id)).toContain(gateway.client.id)
+      expect(consentBody.profiles.map((entry) => entry.id)).toContain(gateway.profile.id)
 
       const approved = yield* request(
         gateway.handle,
@@ -184,7 +170,7 @@ describe("MCP OAuth authorization server", () => {
         {
           method: "POST",
           headers: { "content-type": "application/json", origin: "http://127.0.0.1:3210" },
-          body: JSON.stringify({ decision: "approve", clientId: gateway.client.id })
+          body: JSON.stringify({ decision: "approve", profileId: gateway.profile.id })
         },
         gateway.key.secret
       )
@@ -215,7 +201,7 @@ describe("MCP OAuth authorization server", () => {
         headers: { authorization: `Bearer ${tokens.access_token}` }
       })
       expect(mcpWithAccess.status).not.toBe(401)
-      const restWithAccess = yield* request(gateway.handle, "/v1/clients", {
+      const restWithAccess = yield* request(gateway.handle, "/v1/profiles", {
         headers: { authorization: `Bearer ${tokens.access_token}` }
       })
       expect(restWithAccess.status).toBe(401)

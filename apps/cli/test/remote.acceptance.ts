@@ -13,12 +13,12 @@ const RemoteUrl = Schema.String.pipe(Schema.refine((value): value is string => {
     return false
   }
 }))
-const ClientCreated = Schema.Struct({ id: Schema.String })
+const ProfileCreated = Schema.Struct({ id: Schema.String })
 const KeyCreated = Schema.Struct({ secret: Schema.String })
 const RemoteAcceptanceResult = Schema.Struct({
   gatewayVersion: Schema.String,
   protocolVersion: Schema.Number,
-  delegatedClient: Schema.Boolean,
+  delegatedKey: Schema.Boolean,
   administrationRejected: Schema.Boolean,
   oauthProvider: Schema.String,
   oauthCallbackUrl: Schema.String
@@ -94,21 +94,21 @@ const program = Effect.gen(function*() {
       )
     }
 
-    const client = Schema.decodeUnknownSync(ClientCreated)(
-      yield* request("/v1/clients", {
+    const profile = Schema.decodeUnknownSync(ProfileCreated)(
+      yield* request("/v1/profiles", {
         name: `acceptance-${crypto.randomUUID()}`,
         capabilities: ["provision_connections"]
       })
     )
     const key = Schema.decodeUnknownSync(KeyCreated)(
-      yield* request(`/v1/clients/${encodeURIComponent(client.id)}/keys`, {})
+      yield* request(`/v1/profiles/${encodeURIComponent(profile.id)}/keys`, { name: "Remote acceptance" })
     )
     const delegated = yield* makeGatewayClient({ url: gatewayUrl, apiKey: key.secret })
     if ((yield* delegated.provisioning.listConnections()).connections.length !== 0) {
       return yield* Effect.die(new Error("A fresh remote tenant unexpectedly has connections"))
     }
 
-    const administrative = yield* HttpClient.get(`${gatewayUrl}/v1/clients`, {
+    const administrative = yield* HttpClient.get(`${gatewayUrl}/v1/profiles`, {
       headers: { authorization: `Bearer ${key.secret}` }
     })
     if (administrative.status !== 403) {
@@ -136,7 +136,7 @@ const program = Effect.gen(function*() {
     return {
       gatewayVersion: metadata.gatewayVersion,
       protocolVersion: metadata.protocolVersion,
-      delegatedClient: true,
+      delegatedKey: true,
       administrationRejected: true,
       oauthProvider,
       oauthCallbackUrl: `${gatewayUrl}/v1/oauth/callback`

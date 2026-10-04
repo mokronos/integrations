@@ -9,9 +9,7 @@ import {
   defaultTenantId,
   generateApiKey,
   IntegrationSlug,
-  newClientId,
-  newAccessProfileId,
-  newApprovalPolicyId,
+  newProfileId,
   TenantId,
   ToolName
 } from "./gateway.ts"
@@ -53,31 +51,15 @@ interface SetupOptions {
 const setup = Effect.fnUntraced(function*(options: SetupOptions = {}) {
   const store = yield* gatewayStore("gateway-auth-")
 
-  const accessProfile = yield* store.createAccessProfile({
-    id: (yield* newAccessProfileId), tenantId: defaultTenantId, name: "local"
-  })
-  yield* store.replaceAccessProfileTools(accessProfile.id, [{
-    connection,
-    tool: ToolName.make("sendEmail")
-  }])
-  const approvalPolicy = yield* store.createApprovalPolicy({
-    id: (yield* newApprovalPolicyId), tenantId: defaultTenantId, name: "local", tools: []
-  })
-  yield* store.replaceApprovalPolicyTools(approvalPolicy.id, [{
-      connection,
-      tool: ToolName.make("sendEmail"),
-      decision: "allow"
-    }])
-  const client = yield* store.createClient({
-    id: (yield* newClientId),
+  const profile = yield* store.createProfile({
+    id: (yield* newProfileId),
     tenantId: defaultTenantId,
-    accessProfileId: accessProfile.id,
-    approvalPolicyId: approvalPolicy.id,
     name: "local",
-    capabilities: ["provision_connections", "administer_gateway"]
+    capabilities: ["provision_connections", "administer_gateway"],
+    tools: [{ connection, tool: ToolName.make("sendEmail"), decision: "allow" }]
   })
   const apiKey = (yield* generateApiKey)
-  yield* store.addApiKey({ id: apiKey.id, clientId: client.id, hash: apiKey.hash })
+  yield* store.addApiKey({ id: apiKey.id, profileId: profile.id, name: "local", hash: apiKey.hash })
 
   const { handle } = createGatewayHandler({
     events: yield* makeGatewayEvents,
@@ -124,7 +106,7 @@ const setup = Effect.fnUntraced(function*(options: SetupOptions = {}) {
     return match[1]
   }
 
-  return { store, client, apiKey, call, cookieValue, handle }
+  return { store, profile, apiKey, call, cookieValue, handle }
 })
 
 interface Gateway {
@@ -381,8 +363,8 @@ describe("what a session may do", () => {
     const setup_ = yield* setup({ signupOpen: true })
     const human = yield* signupHuman(setup_)
 
-    const clients = yield* setup_.call("GET", "/v1/clients", { cookie: human.cookie })
-    expect(clients.status).toBe(200)
+    const profiles = yield* setup_.call("GET", "/v1/profiles", { cookie: human.cookie })
+    expect(profiles.status).toBe(200)
 
     const audit = yield* setup_.call("GET", "/v1/audit", { cookie: human.cookie })
     expect(audit.status).toBe(200)
@@ -452,12 +434,12 @@ describe("what a session may do", () => {
     const human = yield* signupHuman(setup_)
     expect(String((human.tenantId))).not.toBe(defaultTenantId)
 
-    const clients = Schema.decodeUnknownSync(
+    const profiles = Schema.decodeUnknownSync(
       Schema.Array(Schema.Record(Schema.String, Schema.Json))
     )(
-      (yield* setup_.call("GET", "/v1/clients", { cookie: human.cookie })).body["clients"]
+      (yield* setup_.call("GET", "/v1/profiles", { cookie: human.cookie })).body["profiles"]
     )
-    expect(clients).toHaveLength(0)
+    expect(profiles).toHaveLength(0)
     }).pipe(Effect.provide(testServices)))
 })
 
@@ -467,7 +449,7 @@ describe("cross-site protection for cookie-carried authority", () => {
     const setup_ = yield* setup({ signupOpen: true })
     const human = yield* signupHuman(setup_)
 
-    const response = yield* setup_.call("POST", "/v1/clients", {
+    const response = yield* setup_.call("POST", "/v1/profiles", {
       body: { name: "from-another-site" },
       cookie: human.cookie
     })
@@ -481,7 +463,7 @@ describe("cross-site protection for cookie-carried authority", () => {
     const setup_ = yield* setup({ signupOpen: true })
     const human = yield* signupHuman(setup_)
 
-    const response = yield* setup_.call("POST", "/v1/clients", {
+    const response = yield* setup_.call("POST", "/v1/profiles", {
       body: { name: "from-another-site" },
       cookie: human.cookie,
       headers: { origin: "https://evil.example" }
@@ -495,14 +477,14 @@ describe("cross-site protection for cookie-carried authority", () => {
     const setup_ = yield* setup({ signupOpen: true })
     const human = yield* signupHuman(setup_)
 
-    const write = yield* setup_.call("POST", "/v1/clients", {
+    const write = yield* setup_.call("POST", "/v1/profiles", {
       body: { name: "sandbox" },
       cookie: human.cookie,
       headers: { origin: "http://gateway.test", "sec-fetch-site": "same-origin" }
     })
     expect(write.status).toBe(201)
 
-    const read = yield* setup_.call("GET", "/v1/clients", { cookie: human.cookie })
+    const read = yield* setup_.call("GET", "/v1/profiles", { cookie: human.cookie })
     expect(read.status).toBe(200)
     }).pipe(Effect.provide(testServices)))
 })
@@ -521,7 +503,7 @@ describe("logout", () => {
 
     const replayed = yield* setup_.call("GET", "/v1/auth/me", { cookie: human.cookie })
     expect(replayed.body).toEqual({ authenticated: false })
-    const surface = yield* setup_.call("GET", "/v1/clients", { cookie: human.cookie })
+    const surface = yield* setup_.call("GET", "/v1/profiles", { cookie: human.cookie })
     expect(surface.status).toBe(401)
     }).pipe(Effect.provide(testServices)))
 
@@ -542,8 +524,8 @@ describe("credential precedence", () => {
       cookie: (yield* signupHuman(setup_, "second@example.com")).cookie,
       headers: { authorization: `Bearer ${setup_.apiKey.secret}` }
     })
-    expect(me.body["kind"]).toBe("client")
-    expect(me.body["clientId"]).toBe(setup_.client.id)
+    expect(me.body["kind"]).toBe("profile")
+    expect(me.body["profileId"]).toBe(setup_.profile.id)
     }).pipe(Effect.provide(testServices)))
 
   it.effect("a refused key is reported even when a valid cookie sits next to it", () =>
@@ -551,7 +533,7 @@ describe("credential precedence", () => {
     const setup_ = yield* setup({ signupOpen: true })
     const human = yield* signupHuman(setup_)
 
-    const response = yield* setup_.call("GET", "/v1/clients", {
+    const response = yield* setup_.call("GET", "/v1/profiles", {
       cookie: human.cookie,
       headers: { authorization: "Bearer igk_not-a-real-key" }
     })
@@ -567,31 +549,15 @@ describe("attribution", () => {
     const setup_ = yield* setup({ signupOpen: true })
     const human = yield* signupHuman(setup_)
 
-    const accessProfile = yield* setup_.store.createAccessProfile({
-      id: (yield* newAccessProfileId), tenantId: human.tenantId, name: "support-agent"
-    })
-    yield* setup_.store.replaceAccessProfileTools(accessProfile.id, [{
-      connection,
-      tool: ToolName.make("sendEmail")
-    }])
-    const approvalPolicy = yield* setup_.store.createApprovalPolicy({
-      id: (yield* newApprovalPolicyId), tenantId: human.tenantId, name: "support-agent", tools: []
-    })
-    yield* setup_.store.replaceApprovalPolicyTools(approvalPolicy.id, [{
-        connection,
-        tool: ToolName.make("sendEmail"),
-        decision: "require_approval"
-      }])
-    const client = yield* setup_.store.createClient({
-      id: (yield* newClientId),
+    const profile = yield* setup_.store.createProfile({
+      id: (yield* newProfileId),
       tenantId: human.tenantId,
-      accessProfileId: accessProfile.id,
-      approvalPolicyId: approvalPolicy.id,
       name: "support-agent",
-      capabilities: ["provision_connections"]
+      capabilities: ["provision_connections"],
+      tools: [{ connection, tool: ToolName.make("sendEmail"), decision: "require_approval" }]
     })
     const key = (yield* generateApiKey)
-    yield* setup_.store.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
+    yield* setup_.store.addApiKey({ id: key.id, profileId: profile.id, name: "support-agent", hash: key.hash })
 
     const frozen = yield* setup_.call("POST", "/v1/execute", {
       body: { alias: "org___gmail___work", tool: "sendEmail", arguments: {} },

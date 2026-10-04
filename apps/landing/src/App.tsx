@@ -173,17 +173,17 @@ interface Feature {
 const FEATURES: ReadonlyArray<Feature> = [
   {
     title: "Credentials never leave the gateway",
-    body: "OAuth grants, API keys, and bearer tokens are held server-side. Clients get an API key and invoke logical { alias, tool } addresses.",
+    body: "OAuth grants, API keys, and bearer tokens are held server-side. Each app gets its own API key and invokes logical { alias, tool } addresses.",
     icon: Lock
   },
   {
-    title: "Access profiles, not pasted keys",
-    body: "Reusable sets of connections and tools granted per client. A rule for a connection a client was never granted reaches nothing.",
+    title: "Profiles, not pasted keys",
+    body: "A profile is the tools an agent may call. Claude Code, ChatGPT, and Gemini CLI can share one, each with its own revocable key.",
     icon: Users
   },
   {
-    title: "Approval policies with safe defaults",
-    body: "Read-only tools run immediately; mutating or unclassified tools require approval. Manage decisions in bulk, per integration or tool.",
+    title: "Off, Ask, or Auto for every tool",
+    body: "Read-only tools run immediately; mutating or unclassified tools ask first. Change them in bulk, per integration or tool.",
     icon: ShieldCheck
   },
   {
@@ -386,7 +386,7 @@ function Hero() {
           {[
             { icon: Globe, k: "Any API", v: "OpenAPI specs + MCP servers" },
             { icon: Lock, k: "Zero key sprawl", v: "Gateway holds all credentials" },
-            { icon: ShieldCheck, k: "Governed tools", v: "Access + approval policies" }
+            { icon: ShieldCheck, k: "Governed tools", v: "Off, Ask, or Auto per tool" }
           ].map((stat) => (
             <div
               key={stat.k}
@@ -659,20 +659,20 @@ function Security() {
                 Least privilege, enforced at execution
               </h2>
               <p className="mt-4 leading-relaxed text-neutral-400">
-                Access and approval are independent layers. Which connections a client reaches is
-                one decision; whether each tool runs immediately or waits for a human is another.
+                A profile turns each tool off, or on with Ask or Auto. Changing one agent's profile
+                never changes another's, and every call names the app that made it.
               </p>
             </div>
             <ul className="space-y-4">
               {[
                 {
                   icon: Layers,
-                  title: "Access profiles grant reach",
-                  body: "Exactly one reusable profile per client scopes its connections and tools."
+                  title: "Profiles grant reach",
+                  body: "Only the tools a profile turns on are visible or callable."
                 },
                 {
                   icon: Bell,
-                  title: "Approval policies gate impact",
+                  title: "Ask gates impact",
                   body: "Safe reads run; writes and unknowns pause with an execution id to resume."
                 },
                 {

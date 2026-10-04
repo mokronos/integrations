@@ -5,28 +5,30 @@ import type { HttpClient } from "effect/http"
 import type { Integrations } from "@integragents/host"
 import { ToolAddress } from "@integragents/contracts"
 import type { OAuthSessions } from "./oauth-sessions.ts"
-import type { OAuthActor } from "./mcp-oauth.ts"
 import { invalidArguments } from "./arguments.ts"
-import { authorizeClientInvocation, authorizeInvocation } from "./authorize.ts"
+import { authenticateKey, authorizeProfileInvocation } from "./authorize.ts"
 import { defaultApprovalExpiryHours, defaultArgumentRetentionDays } from "./config.ts"
 import {
   aliasForConnection,
   defaultTenantId,
-  sameConnectionRef
+  keyOrigin,
+  sameConnectionRef,
+  unattributedOrigin
 } from "./domain.ts"
 import type {
   Alias,
   ApprovalId,
   Authorized,
-  Client,
-  ClientId,
+  CallOrigin,
   ConnectionName,
   Authorization,
   ConnectionRef,
   IntegrationSlug,
-  PolicyDecision,
+  Profile,
+  ProfileId,
   SubjectId,
   TenantId,
+  ToolDecision,
   ToolName
 } from "./domain.ts"
 import { newApprovalId, newAuditId } from "./keys.ts"
@@ -61,19 +63,20 @@ const auditFor = (
   message: string | null,
   argumentsValue: Json,
   retentionDays: number,
-  oauthActor?: OAuthActor
+  origin: CallOrigin
 ): Effect.Effect<RecordAuditInput, never, Crypto.Crypto> =>
   Effect.all([newAuditId, DateTime.now]).pipe(Effect.map(([id, at]): RecordAuditInput => ({
-  tenantId: authorization.client.tenantId,
+  tenantId: authorization.profile.tenantId,
   id,
-  clientId: authorization.client.id,
+  profileId: authorization.profile.id,
+  caller: origin.caller,
+  authorizedBySubjectId: origin.authorizedBy,
   alias: authorization.alias,
-  tool: authorization.accessProfileTool.tool,
+  tool: authorization.profileTool.tool,
   connection: authorization.connection,
   decision: authorization.decision,
   outcome,
   message,
-  ...whenPresent("oauthActor", oauthActor),
   arguments: {
     value: argumentsValue,
     expiresAt: DateTime.toDateUtc(DateTime.addDuration(at, Duration.days(retentionDays)))
@@ -90,11 +93,11 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function*(
   },
   authorization: Extract<Authorization, { status: "authorized" }>,
   argumentsValue: Json,
-  oauthActor?: OAuthActor
+  origin: CallOrigin
 ): Effect.fn.Return<InvocationOutcome, GatewayStoreError, Crypto.Crypto | HttpClient.HttpClient> {
   const { store, retentionDays } = dependencies
   const pending = (approvalId: ApprovalId, expiresAt: Date): InvocationOutcome => {
-    const approvalUrl = authorization.client.approvalMethod !== "none"
+    const approvalUrl = authorization.profile.approvalMethod !== "none"
       ? dependencies.approvalUrlOf?.(approvalId)
       : undefined
     return {
@@ -105,12 +108,10 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function*(
     }
   }
   const existing = yield* store.findUncollectedApproval({
-    tenantId: authorization.client.tenantId,
-    clientId: authorization.client.id,
+    tenantId: authorization.profile.tenantId,
+    profileId: authorization.profile.id,
     alias: authorization.alias,
-    approvalPolicyId: authorization.approvalPolicy.id,
-    accessProfileId: authorization.accessProfile.id,
-    tool: authorization.accessProfileTool.tool,
+    tool: authorization.profileTool.tool,
     arguments: argumentsValue
   })
 
@@ -120,7 +121,7 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function*(
 
   if (
     existing !== undefined
-    && (yield* store.collectApproval(authorization.client.tenantId, existing.id))
+    && (yield* store.collectApproval(authorization.profile.tenantId, existing.id))
   ) {
     if (existing.status === "approved") {
       yield* store.recordAudit(yield* auditFor(
@@ -129,7 +130,7 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function*(
         `approval ${existing.id} collected`,
         argumentsValue,
         retentionDays,
-        oauthActor
+        origin
       ))
       return existing.error === null
         ? { status: "succeeded", result: existing.result }
@@ -140,7 +141,7 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function*(
       : `approval ${existing.id} was denied${existing.decidedBy === null ? "" : ` by ${existing.decidedBy}`
       }`
     yield* store.recordAudit(
-      yield* auditFor(authorization, "denied", reason, argumentsValue, retentionDays, oauthActor)
+      yield* auditFor(authorization, "denied", reason, argumentsValue, retentionDays, origin)
     )
     return { status: "denied", reason }
   }
@@ -148,21 +149,20 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function*(
   const id = (yield* newApprovalId)
   const approval = yield* store.createApproval({
     id,
-    tenantId: authorization.client.tenantId,
-    clientId: authorization.client.id,
-    approvalPolicyId: authorization.approvalPolicy.id,
-    accessProfileId: authorization.accessProfile.id,
+    tenantId: authorization.profile.tenantId,
+    profileId: authorization.profile.id,
+    caller: origin.caller,
     alias: authorization.alias,
-    tool: authorization.accessProfileTool.tool,
+    tool: authorization.profileTool.tool,
     arguments: argumentsValue,
-    groupWindowMinutes: authorization.client.approvalGroupWindowMinutes,
+    groupWindowMinutes: authorization.profile.approvalGroupWindowMinutes,
     expiresAt: DateTime.toDateUtc(
       DateTime.addDuration(yield* DateTime.now, Duration.hours(dependencies.expiryHours))
     )
   })
   if (approval.id !== id) return pending(approval.id, approval.expiresAt)
   yield* store.recordAudit(
-    yield* auditFor(authorization, "pending", `approval ${approval.id}`, argumentsValue, retentionDays, oauthActor)
+    yield* auditFor(authorization, "pending", `approval ${approval.id}`, argumentsValue, retentionDays, origin)
   )
   const outcome = pending(approval.id, approval.expiresAt)
   if (dependencies.onApprovalCreated !== undefined) {
@@ -187,8 +187,8 @@ const settle = Effect.fn("Invocation.settle")(function*(
     readonly alias: Alias
     readonly tool: ToolName
     readonly arguments: Json
-    readonly oauthActor?: OAuthActor
-    readonly callerClientId?: ClientId
+    readonly origin: CallOrigin
+    readonly profileId: ProfileId | null
   }
 ): Effect.fn.Return<InvocationOutcome, GatewayStoreError, Crypto.Crypto | HttpClient.HttpClient> {
   const { store, integrations } = dependencies
@@ -197,7 +197,7 @@ const settle = Effect.fn("Invocation.settle")(function*(
     yield* Effect.annotateCurrentSpan({
       "connection.integration": authorization.connection.integration,
       "connection.name": authorization.connection.name,
-      "policy.decision": authorization.decision
+      "tool.decision": authorization.decision
     })
   }
   const retentionDays = dependencies.argumentRetentionDays ?? defaultArgumentRetentionDays
@@ -208,8 +208,9 @@ const settle = Effect.fn("Invocation.settle")(function*(
     yield* store.recordAudit({
       tenantId,
       id: (yield* newAuditId),
-      clientId: input.callerClientId ?? null,
-      ...whenPresent("oauthActor", input.oauthActor),
+      profileId: input.profileId,
+      caller: input.origin.caller,
+      authorizedBySubjectId: input.origin.authorizedBy,
       alias: input.alias,
       tool: input.tool,
       connection: null,
@@ -227,9 +228,9 @@ const settle = Effect.fn("Invocation.settle")(function*(
   if (missing !== undefined) return missing
 
   if (authorization.decision === "require_approval") {
-    const rule = (yield* store.listApprovalRules(authorization.approvalPolicy.id)).find((candidate) =>
-      candidate.tool === authorization.approvalPolicyTool.tool
-      && sameConnectionRef(candidate.connection, authorization.approvalPolicyTool.connection)
+    const rule = (yield* store.listApprovalRules(authorization.profile.id)).find((candidate) =>
+      candidate.tool === authorization.profileTool.tool
+      && sameConnectionRef(candidate.connection, authorization.profileTool.connection)
       && matchesPattern(candidate, input.arguments))
     if (rule !== undefined) {
       yield* Effect.annotateCurrentSpan("approval.rule", rule.id)
@@ -237,7 +238,7 @@ const settle = Effect.fn("Invocation.settle")(function*(
         { store, integrations, retentionDays },
         authorization,
         input.arguments,
-        input.oauthActor,
+        input.origin,
         `approved by saved rule ${rule.id}`
       )
     }
@@ -251,7 +252,7 @@ const settle = Effect.fn("Invocation.settle")(function*(
       },
       authorization,
       input.arguments,
-      input.oauthActor
+      input.origin
     )
   }
 
@@ -259,7 +260,7 @@ const settle = Effect.fn("Invocation.settle")(function*(
     { store, integrations, retentionDays },
     authorization,
     input.arguments,
-    input.oauthActor
+    input.origin
   )
 }, Effect.tap((outcome) => Effect.annotateCurrentSpan("invocation.outcome", outcome.status)))
 
@@ -273,13 +274,13 @@ const checkArguments = Effect.fn("Invocation.checkArguments")(function*(
   authorization: Authorized,
   argumentsValue: Json
 ): Effect.fn.Return<InvocationOutcome | undefined> {
-  const address = boundToolAddress(authorization.connection, authorization.accessProfileTool.tool)
+  const address = boundToolAddress(authorization.connection, authorization.profileTool.tool)
   const described = yield* integrations.describeTool(address).pipe(
     Effect.map(Option.some),
     Effect.catch(() => Effect.succeed(Option.none()))
   )
   if (Option.isNone(described)) return undefined
-  return invalidArguments(described.value.inputSchema, argumentsValue, authorization.accessProfileTool.tool)
+  return invalidArguments(described.value.inputSchema, argumentsValue, authorization.profileTool.tool)
 })
 
 /**
@@ -292,7 +293,7 @@ const missingUserConnection = Effect.fn("Invocation.missingUserConnection")(func
   authorization: Authorized
 ): Effect.fn.Return<InvocationOutcome | undefined, GatewayStoreError> {
   const connection = authorization.connection
-  if (!isDelegationTemplate(authorization.accessProfileTool.connection)) return undefined
+  if (!isDelegationTemplate(authorization.profileTool.connection)) return undefined
   if (connection.owner !== "user" || connection.subject === undefined) return undefined
   const subject = connection.subject
   const held = yield* dependencies.integrations.listConnections({
@@ -304,7 +305,7 @@ const missingUserConnection = Effect.fn("Invocation.missingUserConnection")(func
 
   const deny = (reason: string): InvocationOutcome => ({ status: "denied", reason })
   if (dependencies.oauth === undefined) {
-    return deny(`${authorization.alias}.${authorization.accessProfileTool.tool} needs ${subject} to connect ${connection.integration} first`)
+    return deny(`${authorization.alias}.${authorization.profileTool.tool} needs ${subject} to connect ${connection.integration} first`)
   }
   const integration = yield* dependencies.integrations.findIntegration(connection.integration).pipe(
     Effect.catch(() => Effect.succeed(Option.none()))
@@ -319,7 +320,7 @@ const missingUserConnection = Effect.fn("Invocation.missingUserConnection")(func
     integration: connection.integration,
     connection: connection.name,
     authMethod: method,
-    bindingTenant: authorization.client.tenantId,
+    bindingTenant: authorization.profile.tenantId,
     subject
   }).pipe(Effect.catch((failure) => Effect.succeed(failure)))
   if ("_tag" in session) {
@@ -343,32 +344,39 @@ export const invokeThroughGateway = Effect.fn("Invocation.invokeThroughGateway")
     readonly tool: ToolName
     readonly arguments: Json
     readonly subject?: SubjectId
-    readonly oauthActor?: OAuthActor
   }
 ): Effect.fn.Return<InvocationOutcome, GatewayStoreError, Crypto.Crypto | HttpClient.HttpClient> {
-  const authorization = yield* authorizeInvocation(dependencies.store, input)
-  return yield* settle(dependencies, defaultTenantId, authorization, input)
+  const authentication = yield* authenticateKey(dependencies.store, input.secret)
+  if (authentication.status !== "authenticated") {
+    return yield* settle(dependencies, defaultTenantId, authentication, { ...input, origin: unattributedOrigin, profileId: null })
+  }
+  const authorization = yield* authorizeProfileInvocation(dependencies.store, authentication.profile, input)
+  return yield* settle(dependencies, authentication.profile.tenantId, authorization, {
+    ...input,
+    origin: keyOrigin(authentication.key),
+    profileId: authentication.profile.id
+  })
 })
 
 /**
- * An invocation on behalf of a client the host already identified: the same
- * policy, approval, and audit path, with no key to present or check.
+ * An invocation on behalf of a profile the host already identified: the same
+ * decision, approval, and audit path, with no key to present or check.
  */
-export const invokeAsClient = Effect.fn("Invocation.invokeAsClient")(function*(
+export const invokeAsProfile = Effect.fn("Invocation.invokeAsProfile")(function*(
   dependencies: InvokeDependencies,
   input: {
-    readonly client: Client
+    readonly profile: Profile
+    readonly origin: CallOrigin
     readonly alias: Alias
     readonly tool: ToolName
     readonly arguments: Json
     readonly subject?: SubjectId
-    readonly oauthActor?: OAuthActor
   }
 ): Effect.fn.Return<InvocationOutcome, GatewayStoreError, Crypto.Crypto | HttpClient.HttpClient> {
-  const authorization = yield* authorizeClientInvocation(dependencies.store, input.client, input)
-  return yield* settle(dependencies, input.client.tenantId, authorization, {
+  const authorization = yield* authorizeProfileInvocation(dependencies.store, input.profile, input)
+  return yield* settle(dependencies, input.profile.tenantId, authorization, {
     ...input,
-    callerClientId: input.client.id
+    profileId: input.profile.id
   })
 })
 
@@ -380,24 +388,24 @@ export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(funct
   },
   authorization: Extract<Authorization, { status: "authorized" }>,
   argumentsValue: Json,
-  oauthActor?: OAuthActor,
+  origin: CallOrigin,
   approvedBy?: string
 ): Effect.fn.Return<
   Extract<InvocationOutcome, { status: "succeeded" | "failed" }>,
   GatewayStoreError,
   Crypto.Crypto
 > {
-  const address = boundToolAddress(authorization.connection, authorization.accessProfileTool.tool)
+  const address = boundToolAddress(authorization.connection, authorization.profileTool.tool)
   const invocation = yield* Effect.result(dependencies.integrations.execute(address, argumentsValue))
   if (invocation._tag === "Success") {
     yield* dependencies.store.recordAudit(
-      yield* auditFor(authorization, "succeeded", approvedBy ?? null, argumentsValue, dependencies.retentionDays, oauthActor)
+      yield* auditFor(authorization, "succeeded", approvedBy ?? null, argumentsValue, dependencies.retentionDays, origin)
     )
     return { status: "succeeded", result: invocation.success }
   }
   const message = invocation.failure.message
   yield* dependencies.store.recordAudit(
-    yield* auditFor(authorization, "failed", message, argumentsValue, dependencies.retentionDays, oauthActor)
+    yield* auditFor(authorization, "failed", message, argumentsValue, dependencies.retentionDays, origin)
   )
   return { status: "failed", message }
 })
@@ -406,7 +414,7 @@ export type EffectiveTool = {
   readonly alias: Alias
   readonly tool: ToolName
   readonly connection: ConnectionRef
-  readonly decision: PolicyDecision
+  readonly decision: ToolDecision
   /** The tool runs on the calling user's own connection; invocations must name a subject. */
   readonly delegated: boolean
   readonly description?: string
@@ -416,7 +424,7 @@ export type EffectiveTool = {
 
 export const listEffectiveTools = Effect.fn("Invocation.listEffectiveTools")(function*(
   store: GatewayStore,
-  clientId: Parameters<GatewayStore["findAccessProfileForClient"]>[0],
+  profileId: ProfileId,
   options: {
     readonly schemas?: boolean
     readonly integrations?: Integrations["Service"]
@@ -424,37 +432,17 @@ export const listEffectiveTools = Effect.fn("Invocation.listEffectiveTools")(fun
     readonly connection?: ConnectionName
   } = {}
 ): Effect.fn.Return<ReadonlyArray<EffectiveTool>, GatewayStoreError> {
-  const [accessProfile, approvalPolicy] = yield* Effect.all([
-    store.findAccessProfileForClient(clientId),
-    store.findApprovalPolicyForClient(clientId)
-  ])
-  const profileTools = accessProfile === undefined
-    ? []
-    : yield* store.listAccessProfileTools(accessProfile.id)
-  const policyTools = approvalPolicy === undefined
-    ? []
-    : yield* store.listApprovalPolicyTools(approvalPolicy.id)
-  const filtered = profileTools.filter((profileTool) =>
-    (options.integration === undefined || profileTool.connection.integration === options.integration)
-    && (options.connection === undefined || profileTool.connection.name === options.connection))
-  const reachable = yield* Effect.forEach(filtered, (profileTool) => Effect.gen(function*() {
-    const policyTool = policyTools.find((candidate) =>
-      candidate.tool === profileTool.tool
-      && sameConnectionRef(candidate.connection, profileTool.connection))
-    if (policyTool === undefined) {
-      return yield* Effect.die(new Error(
-        `Approval policy ${approvalPolicy?.id ?? "missing"} has no decision for ${aliasForConnection(profileTool.connection)}.${profileTool.tool}`
-      ))
-    }
-    return { profileTool, policyTool }
-  }))
-  const base = reachable.map(({ profileTool, policyTool }) => ({
-    alias: aliasForConnection(profileTool.connection),
-    tool: profileTool.tool,
-    connection: profileTool.connection,
-    decision: policyTool.decision,
-    delegated: isDelegationTemplate(profileTool.connection)
-  }))
+  const base = (yield* store.listProfileTools(profileId))
+    .filter((profileTool) =>
+      (options.integration === undefined || profileTool.connection.integration === options.integration)
+      && (options.connection === undefined || profileTool.connection.name === options.connection))
+    .map((profileTool) => ({
+      alias: aliasForConnection(profileTool.connection),
+      tool: profileTool.tool,
+      connection: profileTool.connection,
+      decision: profileTool.decision,
+      delegated: isDelegationTemplate(profileTool.connection)
+    }))
   if (options.schemas !== true || options.integrations === undefined) return base
 
   const host = options.integrations

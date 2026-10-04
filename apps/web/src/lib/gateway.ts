@@ -4,30 +4,27 @@ import { HttpApiClient } from "effect/http-api"
 import { GatewayApi, GatewayFailure } from "@integragents/gateway-api/definition"
 import {
   Alias,
-  ClientId,
   NonNegativeInt,
   PositiveInt,
   whenPresent,
-  type AccessProfileId,
   type ApiKeyId,
+  type ApprovalGroupWindowMinutes,
   type ApprovalMethod,
   type GatewayEvent,
   type ApprovalDestinationId,
   type ApprovalId,
-  type ApprovalPolicyId,
   type ApprovalStatus,
   type ApprovalRuleId,
   type ApprovalVerdict,
   type ArgumentPattern,
   type AuditOutcome,
-  type ClientCapability,
-  type ConfigureClient,
-  type ConnectionRef,
   type IntegrationSearchKind,
   type McpSurface,
   type OAuthConsentDecision,
   type OAuthGrantId,
-  type PolicyDecision
+  type ProfileCapability,
+  type ProfileId,
+  type ProfileToolInput
 } from "@integragents/contracts"
 
 export class GatewayError extends Error {
@@ -180,32 +177,42 @@ export const removeIntegration = async (slug: string) =>
 export const removeConnection = async (input: { readonly integration: string; readonly name: string }) =>
   await run(endpoints.provisioning.removeConnection({ params: input }))
 
-export const listClients = async () => {
-  const response = await run(endpoints.administrative.listClients())
-  return { clients: response.clients, gatewayUrl: response.gatewayUrl ?? undefined, mcpUrl: response.mcpUrl ?? undefined }
+export const listProfiles = async () => {
+  const response = await run(endpoints.administrative.listProfiles())
+  return { profiles: response.profiles, gatewayUrl: response.gatewayUrl ?? undefined, mcpUrl: response.mcpUrl ?? undefined }
 }
 
 export const fetchOverview = async () => await run(endpoints.administrative.overview())
 
-export const createConfiguredClient = async (input: ConfigureClient) =>
-  await run(endpoints.administrative.createConfiguredClient({ payload: input }))
-
-export const createClient = async (input: {
+export const createProfile = async (input: {
   readonly name: string
-  readonly accessProfileId?: AccessProfileId
-  readonly approvalPolicyId?: ApprovalPolicyId
-  readonly capabilities: ReadonlyArray<ClientCapability>
-}) => await run(endpoints.administrative.createClient({ payload: input }))
+  readonly copyFrom?: ProfileId
+  readonly tools?: ReadonlyArray<ProfileToolInput>
+  readonly includeNewTools?: boolean
+}) => await run(endpoints.administrative.createProfile({ payload: input }))
 
-export const renameClient = async (id: ClientId, name: string) =>
-  await run(endpoints.administrative.renameClient({ params: { id }, payload: { name } }))
+export const renameProfile = async (id: ProfileId, name: string) =>
+  await run(endpoints.administrative.renameProfile({ params: { id }, payload: { name } }))
 
-export const updateClientSettings = async (id: ClientId, settings: {
-  readonly capabilities: ReadonlyArray<ClientCapability>
+export type ProfileSettings = {
+  readonly capabilities: ReadonlyArray<ProfileCapability>
   readonly approvalMethod: ApprovalMethod
   readonly mcpSurface: McpSurface
-  readonly approvalGroupWindowMinutes: number
-}) => await run(endpoints.administrative.updateClientSettings({ params: { id }, payload: settings }))
+  readonly approvalGroupWindowMinutes: ApprovalGroupWindowMinutes
+  readonly includeNewTools: boolean
+}
+
+export const updateProfileSettings = async (id: ProfileId, settings: ProfileSettings) =>
+  await run(endpoints.administrative.updateProfileSettings({ params: { id }, payload: settings }))
+
+export const listProfileTools = async (id: ProfileId) =>
+  (await run(endpoints.administrative.profileTools({ params: { id }, query: { schemas: false } }))).tools
+
+export const replaceProfileTools = async (id: ProfileId, tools: ReadonlyArray<ProfileToolInput>) =>
+  (await run(endpoints.administrative.replaceProfileTools({ params: { id }, payload: { tools } }))).tools
+
+export const listApprovalRules = async (id: ProfileId) =>
+  (await run(endpoints.administrative.listApprovalRules({ params: { id } }))).rules
 
 export const listApprovalDestinations = async () =>
   (await run(endpoints.administrative.listApprovalDestinations())).destinations
@@ -216,84 +223,29 @@ export const createApprovalDestination = async (input: { readonly name: string; 
 export const deleteApprovalDestination = async (id: ApprovalDestinationId) =>
   await run(endpoints.administrative.deleteApprovalDestination({ params: { id } }))
 
-export const getClientApprovalDestinations = async (id: ClientId) =>
-  (await run(endpoints.administrative.getClientApprovalDestinations({ params: { id } }))).destinationIds
+export const getProfileApprovalDestinations = async (id: ProfileId) =>
+  (await run(endpoints.administrative.getProfileApprovalDestinations({ params: { id } }))).destinationIds
 
-export const replaceClientApprovalDestinations = async (
-  id: ClientId,
+export const replaceProfileApprovalDestinations = async (
+  id: ProfileId,
   destinationIds: ReadonlyArray<ApprovalDestinationId>
 ) =>
-  (await run(endpoints.administrative.replaceClientApprovalDestinations({
+  (await run(endpoints.administrative.replaceProfileApprovalDestinations({
     params: { id },
     payload: { destinationIds }
   }))).destinationIds
 
-export const issueKey = async (id: ClientId) =>
-  await run(endpoints.administrative.issueKey({ params: { id } }))
+export const issueKey = async (id: ProfileId, name: string) =>
+  await run(endpoints.administrative.issueKey({ params: { id }, payload: { name } }))
 
-export const listKeys = async (id: ClientId) =>
+export const listKeys = async (id: ProfileId) =>
   (await run(endpoints.administrative.listKeys({ params: { id } }))).keys
 
 export const revokeKey = async (id: ApiKeyId) =>
   await run(endpoints.administrative.revokeKey({ params: { id } }))
 
-export const listClientTools = async (id: ClientId) =>
-  (await run(endpoints.administrative.clientTools({ params: { id }, query: { schemas: false } }))).tools
-
-export const revokeClient = async (id: ClientId) =>
-  await run(endpoints.administrative.revokeClient({ params: { id } }))
-
-export const listAccessProfiles = async () =>
-  (await run(endpoints.administrative.listAccessProfiles())).accessProfiles
-
-export const getAccessProfile = async (id: AccessProfileId) =>
-  await run(endpoints.administrative.getAccessProfile({ params: { id } }))
-
-export const createAccessProfile = async (name: string) =>
-  await run(endpoints.administrative.createAccessProfile({ payload: { name } }))
-
-export const renameAccessProfile = async (id: AccessProfileId, name: string) =>
-  await run(endpoints.administrative.updateAccessProfile({ params: { id }, payload: { name } }))
-
-export const deleteAccessProfile = async (id: AccessProfileId) =>
-  await run(endpoints.administrative.deleteAccessProfile({ params: { id } }))
-
-export const cloneAccessProfile = async (id: AccessProfileId, name: string) =>
-  await run(endpoints.administrative.cloneAccessProfile({ params: { id }, payload: { name } }))
-
-export const replaceAccessProfileTools = async (
-  id: AccessProfileId,
-  tools: ReadonlyArray<{ readonly connection: ConnectionRef; readonly tool: string }>
-) => await run(endpoints.administrative.replaceAccessProfileTools({ params: { id }, payload: { tools } }))
-
-export const assignAccessProfile = async (id: ClientId, accessProfileId: AccessProfileId) =>
-  await run(endpoints.administrative.assignAccessProfile({ params: { id }, payload: { accessProfileId } }))
-
-export const listApprovalPolicies = async () =>
-  (await run(endpoints.administrative.listApprovalPolicies())).approvalPolicies
-
-export const getApprovalPolicy = async (id: ApprovalPolicyId) =>
-  await run(endpoints.administrative.getApprovalPolicy({ params: { id } }))
-
-export const createApprovalPolicy = async (name: string) =>
-  await run(endpoints.administrative.createApprovalPolicy({ payload: { name } }))
-
-export const renameApprovalPolicy = async (id: ApprovalPolicyId, name: string) =>
-  await run(endpoints.administrative.updateApprovalPolicy({ params: { id }, payload: { name } }))
-
-export const deleteApprovalPolicy = async (id: ApprovalPolicyId) =>
-  await run(endpoints.administrative.deleteApprovalPolicy({ params: { id } }))
-
-export const cloneApprovalPolicy = async (id: ApprovalPolicyId, name: string) =>
-  await run(endpoints.administrative.cloneApprovalPolicy({ params: { id }, payload: { name } }))
-
-export const replaceApprovalPolicyTools = async (
-  id: ApprovalPolicyId,
-  tools: ReadonlyArray<{ readonly connection: ConnectionRef; readonly tool: string; readonly decision: PolicyDecision }>
-) => await run(endpoints.administrative.replaceApprovalPolicyTools({ params: { id }, payload: { tools } }))
-
-export const assignApprovalPolicy = async (id: ClientId, approvalPolicyId: ApprovalPolicyId) =>
-  await run(endpoints.administrative.assignApprovalPolicy({ params: { id }, payload: { approvalPolicyId } }))
+export const revokeProfile = async (id: ProfileId) =>
+  await run(endpoints.administrative.revokeProfile({ params: { id } }))
 
 export const listApprovals = async (status?: ApprovalStatus) =>
   (await run(endpoints.administrative.listApprovals({ query: whenPresent("status", status) }))).approvals
@@ -315,7 +267,7 @@ export const deleteApprovalRule = async (id: ApprovalRuleId) =>
 export type AuditQuery = {
   readonly limit: number
   readonly offset: number
-  readonly clientId?: string
+  readonly profileId?: ProfileId
   readonly alias?: string
   readonly tool?: string
   readonly outcome?: AuditOutcome
@@ -327,7 +279,7 @@ export const listAudit = async (input: AuditQuery) =>
     query: {
       limit: PositiveInt.make(input.limit),
       offset: NonNegativeInt.make(input.offset),
-      ...whenPresent("clientId", input.clientId === undefined ? undefined : ClientId.make(input.clientId)),
+      ...whenPresent("profileId", input.profileId),
       ...whenPresent("alias", input.alias === undefined ? undefined : Alias.make(input.alias)),
       ...whenPresent("tool", input.tool),
       ...whenPresent("outcome", input.outcome),

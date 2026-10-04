@@ -15,14 +15,12 @@ import {
   newApprovalId,
   newApprovalDestinationId,
   newAuditId,
-  newClientId,
-  newAccessProfileId,
-  newApprovalPolicyId,
+  newProfileId,
   newSubjectId,
   SubjectId,
   ToolName
 } from "../src/index.ts"
-import type { ConnectionRef, GatewayStore } from "../src/index.ts"
+import type { Caller, ConnectionRef, GatewayStore } from "../src/index.ts"
 import { generateLoginHandoff } from "../src/keys.ts"
 import { openStore, temporaryDirectory, testServices } from "./fixtures.ts"
 import { toApproval, toAuditRecord } from "../src/store-rows.ts"
@@ -40,46 +38,27 @@ const connection: ConnectionRef = {
   name: ConnectionName.make("work")
 }
 
-const tenantConfigIds = Effect.fnUntraced(function*(
+const seedProfile = Effect.fnUntraced(function*(
   store: GatewayStore,
-  tenantId = defaultTenantId
+  tenantId = defaultTenantId,
+  name = `profile-${crypto.randomUUID()}`
 ) {
-  const accessProfile = yield* store.findDefaultAccessProfile(tenantId)
-  const approvalPolicy = yield* store.findDefaultApprovalPolicy(tenantId)
-  if (accessProfile === undefined || approvalPolicy === undefined) {
-    throw new Error(`Missing default configuration for ${tenantId}`)
-  }
-  return { accessProfileId: accessProfile.id, approvalPolicyId: approvalPolicy.id }
+  return yield* store.createProfile({
+    id: yield* newProfileId,
+    tenantId,
+    name,
+    capabilities: ["provision_connections"],
+    tools: [{ connection, tool: ToolName.make("sendEmail"), decision: "require_approval" }]
+  })
 })
 
-const seedBinding = Effect.fnUntraced(function*(store: GatewayStore) {
-  const accessProfile = yield* store.createAccessProfile({
-    id: yield* newAccessProfileId,
-    tenantId: defaultTenantId,
-    name: `profile-${crypto.randomUUID()}`
-  })
-  yield* store.replaceAccessProfileTools(accessProfile.id, [
-    { connection, tool: ToolName.make("sendEmail") }
-  ])
-  const approvalPolicy = yield* store.createApprovalPolicy({
-    id: yield* newApprovalPolicyId,
-    tenantId: defaultTenantId,
-    name: `policy-${crypto.randomUUID()}`,
-    tools: []
-  })
-  yield* store.replaceApprovalPolicyTools(approvalPolicy.id, [{
-    connection, tool: ToolName.make("sendEmail"), decision: "require_approval"
-  }])
-  const client = yield* store.createClient({
-    id: yield* newClientId,
-    tenantId: defaultTenantId,
-    accessProfileId: accessProfile.id,
-    approvalPolicyId: approvalPolicy.id,
-    name: `client-${crypto.randomUUID()}`,
-    capabilities: ["provision_connections"]
-  })
-  return { client, accessProfile, approvalPolicy }
-})
+const noCaller: Caller = {
+  apiKeyId: null,
+  oauthGrantId: null,
+  oauthApplicationId: null,
+  credentialName: null,
+  agent: null
+}
 
 /** An expiry the test clock has not reached. */
 const notYet = Effect.map(Clock.currentTimeMillis, (now) => new Date(now + 60_000))
@@ -89,9 +68,13 @@ describe("gateway store", () => {
     const approval = toApproval({
       length: 0,
       id: "approval-1",
-      client_id: "client-1",
-      approval_policy_id: "policy-1",
-      access_profile_id: "profile-1",
+      group_id: null,
+      profile_id: "profile-1",
+      api_key_id: null,
+      oauth_grant_id: null,
+      oauth_application_id: null,
+      credential_name: null,
+      agent: null,
       alias: "org_google-5fdrive-5fapi_default",
       tool: "save_file",
       arguments: "{}",
@@ -113,9 +96,12 @@ describe("gateway store", () => {
     const record = toAuditRecord({
       length: 0,
       id: "audit-1",
-      client_id: null,
+      profile_id: null,
+      api_key_id: null,
       oauth_grant_id: null,
       oauth_application_id: null,
+      credential_name: null,
+      agent: null,
       authorized_by_subject_id: null,
       alias: "org_google-5fdrive-5fapi_default",
       tool: "list_files",
@@ -133,62 +119,45 @@ describe("gateway store", () => {
     expect(Schema.encodeSync(AuditRecord)(record).alias).toBe(record.alias)
   })
 
-  it.effect("client setup rolls back its configurations when the client cannot be inserted", () =>
+  it.effect("creating a profile under a taken id changes nothing about the existing one", () =>
     Effect.gen(function*() {
       const gateway = yield* store
-      const { client } = yield* seedBinding(gateway)
-      const accessProfileId = yield* newAccessProfileId
-      const approvalPolicyId = yield* newApprovalPolicyId
+      const profile = yield* seedProfile(gateway)
+      const before = yield* gateway.listProfileTools(profile.id)
 
-      const result = yield* Effect.result(gateway.createConfiguredClient({
-        id: client.id,
+      const result = yield* Effect.result(gateway.createProfile({
+        id: profile.id,
         tenantId: defaultTenantId,
         name: "Rollback setup",
-        accessProfileId,
-        approvalPolicyId,
-        approvalPolicyTools: [{ connection, tool: ToolName.make("sendEmail"), decision: "require_approval" }],
-        tools: [{ connection, tool: ToolName.make("sendEmail"), decision: "require_approval" }]
+        capabilities: [],
+        tools: [{ connection, tool: ToolName.make("archiveEmail"), decision: "allow" }]
       }))
 
       expect(result._tag).toBe("Failure")
-      expect(yield* gateway.findAccessProfile(defaultTenantId, accessProfileId)).toBeUndefined()
-      expect(yield* gateway.findApprovalPolicy(defaultTenantId, approvalPolicyId)).toBeUndefined()
-      expect(yield* gateway.findClientById(defaultTenantId, client.id)).toEqual(client)
+      expect(yield* gateway.findProfileById(defaultTenantId, profile.id)).toEqual(profile)
+      expect(yield* gateway.listProfileTools(profile.id)).toEqual(before)
+      expect(yield* gateway.findProfileByName(defaultTenantId, "Rollback setup")).toBeUndefined()
     }).pipe(Effect.provide(testServices)))
 
-  it.effect("creates the database directory it was pointed at", () =>
+  it.effect("creates the database directory it was pointed at, with no profile in it", () =>
     Effect.gen(function*() {
       const gateway = yield* store
-      expect(yield* gateway.listClients(defaultTenantId)).toEqual([])
+      expect(yield* gateway.listProfiles(defaultTenantId)).toEqual([])
     }).pipe(Effect.provide(testServices)))
 
-  it.effect("persists access profiles and their tools", () =>
+  it.effect("persists profiles and their tool decisions", () =>
     Effect.gen(function*() {
       const gateway = yield* store
-      const { accessProfile } = yield* seedBinding(gateway)
+      const profile = yield* seedProfile(gateway)
 
-      expect(yield* gateway.findAccessProfile(defaultTenantId, accessProfile.id)).toMatchObject({
-        id: accessProfile.id,
-        name: accessProfile.name
+      expect(yield* gateway.findProfileById(defaultTenantId, profile.id)).toMatchObject({
+        id: profile.id,
+        name: profile.name,
+        includeNewTools: false,
+        revokedAt: null
       })
-      expect(yield* gateway.listAccessProfileTools(accessProfile.id)).toEqual([{
-        accessProfileId: accessProfile.id,
-        connection,
-        tool: ToolName.make("sendEmail")
-      }])
-    }).pipe(Effect.provide(testServices)))
-
-  it.effect("persists approval policies and their decisions", () =>
-    Effect.gen(function*() {
-      const gateway = yield* store
-      const { approvalPolicy } = yield* seedBinding(gateway)
-
-      expect(yield* gateway.findApprovalPolicy(defaultTenantId, approvalPolicy.id)).toMatchObject({
-        id: approvalPolicy.id,
-        name: approvalPolicy.name
-      })
-      expect(yield* gateway.listApprovalPolicyTools(approvalPolicy.id)).toEqual([{
-        approvalPolicyId: approvalPolicy.id,
+      expect(yield* gateway.listProfileTools(profile.id)).toEqual([{
+        profileId: profile.id,
         connection,
         tool: ToolName.make("sendEmail"),
         decision: "require_approval"
@@ -198,51 +167,41 @@ describe("gateway store", () => {
   it.effect("stores only a hash of an API key", () =>
     Effect.gen(function*() {
       const gateway = yield* store
-      const client = yield* gateway.createClient({
-        id: yield* newClientId,
-        tenantId: defaultTenantId,
-        ...yield* tenantConfigIds(gateway),
-        name: "hash-check",
-        capabilities: ["provision_connections"]
-      })
+      const profile = yield* seedProfile(gateway)
       const key = yield* generateApiKey
-      yield* gateway.addApiKey({ id: key.id, clientId: client.id, hash: key.hash })
+      yield* gateway.addApiKey({ id: key.id, profileId: profile.id, name: "Claude Code", hash: key.hash })
 
-      const stored = yield* gateway.listApiKeys(client.id)
+      const stored = yield* gateway.listApiKeys(profile.id)
       expect(stored[0]?.hash).toBe(yield* hashApiKey(key.secret))
+      expect(stored[0]?.name).toBe("Claude Code")
       expect(JSON.stringify(stored)).not.toContain(key.secret)
     }).pipe(Effect.provide(testServices)))
 
-  it.effect("updates client authority and approval delivery together", () =>
+  it.effect("updates profile authority and approval delivery together", () =>
     Effect.gen(function*() {
       const gateway = yield* store
-      const client = yield* gateway.createClient({
-        id: yield* newClientId,
-        tenantId: defaultTenantId,
-        ...yield* tenantConfigIds(gateway),
-        name: "policy-check",
-        capabilities: []
-      })
-      expect(client.approvalMethod).toBe("elicitation")
+      const profile = yield* seedProfile(gateway)
+      expect(profile.approvalMethod).toBe("elicitation")
 
-      const updated = yield* gateway.updateClientSettings({
-        tenantId: defaultTenantId,
-        id: client.id,
-        capabilities: ["provision_connections"],
+      const updated = yield* gateway.updateProfileSettings(defaultTenantId, profile.id, {
+        capabilities: ["administer_gateway"],
         approvalMethod: "none",
         mcpSurface: "discovery",
-        approvalGroupWindowMinutes: 30
+        approvalGroupWindowMinutes: 15,
+        includeNewTools: true
       })
 
-      expect(updated.capabilities).toEqual(["provision_connections"])
+      expect(updated.capabilities).toEqual(["administer_gateway"])
       expect(updated.approvalMethod).toBe("none")
       expect(updated.mcpSurface).toBe("discovery")
+      expect(updated.approvalGroupWindowMinutes).toBe(15)
+      expect(updated.includeNewTools).toBe(true)
     }).pipe(Effect.provide(testServices)))
 
-  it.effect("creates durable delivery jobs for a client's destinations", () =>
+  it.effect("creates durable delivery jobs for a profile's destinations", () =>
     Effect.gen(function*() {
       const gateway = yield* store
-      const { accessProfile, approvalPolicy, client } = yield* seedBinding(gateway)
+      const profile = yield* seedProfile(gateway)
       const destination = yield* gateway.createApprovalDestination({
         id: yield* newApprovalDestinationId,
         tenantId: defaultTenantId,
@@ -250,17 +209,16 @@ describe("gateway store", () => {
         url: "https://notify.example/approvals",
         signingSecret: "igs_secret"
       })
-      yield* gateway.replaceClientApprovalDestinations(
+      yield* gateway.replaceProfileApprovalDestinations(
         defaultTenantId,
-        client.id,
+        profile.id,
         [destination.id]
       )
       const approval = yield* gateway.createApproval({
         id: yield* newApprovalId,
         tenantId: defaultTenantId,
-        clientId: client.id,
-        approvalPolicyId: approvalPolicy.id,
-        accessProfileId: accessProfile.id,
+        profileId: profile.id,
+        caller: noCaller,
         alias: Alias.make("mail"),
         tool: ToolName.make("sendEmail"),
         arguments: {},
@@ -290,16 +248,17 @@ describe("gateway store", () => {
 
       expect(new Headers(delivered?.headers).get("x-integrations-signature")).toMatch(/^v1=/)
       expect(String(delivered?.body)).not.toContain("arguments")
+      expect(String(delivered?.body)).toContain(profile.name)
       expect(yield* gateway.listApprovalDeliveries(defaultTenantId)).toMatchObject([{
         status: "delivered",
         attempts: 1
       }])
     }).pipe(Effect.provide(testServices)))
 
-  it.effect("groups calls to one tool within the client's window and notifies once per group", () =>
+  it.effect("groups calls to one tool within the profile's window and notifies once per group", () =>
     Effect.gen(function*() {
       const gateway = yield* store
-      const { accessProfile, approvalPolicy, client } = yield* seedBinding(gateway)
+      const profile = yield* seedProfile(gateway)
       const destination = yield* gateway.createApprovalDestination({
         id: yield* newApprovalDestinationId,
         tenantId: defaultTenantId,
@@ -307,14 +266,13 @@ describe("gateway store", () => {
         url: "https://notify.example/approvals",
         signingSecret: "igs_secret"
       })
-      yield* gateway.replaceClientApprovalDestinations(defaultTenantId, client.id, [destination.id])
+      yield* gateway.replaceProfileApprovalDestinations(defaultTenantId, profile.id, [destination.id])
       const freeze = Effect.fnUntraced(function*(tool: string, to: string, groupWindowMinutes: number) {
         return yield* gateway.createApproval({
           id: yield* newApprovalId,
           tenantId: defaultTenantId,
-          clientId: client.id,
-          approvalPolicyId: approvalPolicy.id,
-          accessProfileId: accessProfile.id,
+          profileId: profile.id,
+          caller: noCaller,
           alias: Alias.make("mail"),
           tool: ToolName.make(tool),
           arguments: { to, subject: "Launch" },
@@ -392,13 +350,12 @@ describe("gateway store", () => {
   it.effect("freezes approval arguments and settles them once", () =>
     Effect.gen(function*() {
       const gateway = yield* store
-      const { accessProfile, approvalPolicy, client } = yield* seedBinding(gateway)
+      const profile = yield* seedProfile(gateway)
       const approval = yield* gateway.createApproval({
         id: yield* newApprovalId,
         tenantId: defaultTenantId,
-        clientId: client.id,
-        approvalPolicyId: approvalPolicy.id,
-        accessProfileId: accessProfile.id,
+        profileId: profile.id,
+        caller: noCaller,
         alias: Alias.make("org___gmail___work"),
         tool: ToolName.make("sendEmail"),
         arguments: { to: ["customer@example.com"], subject: "Follow up" },
@@ -436,16 +393,15 @@ describe("gateway store", () => {
       expect(settled?.result).toEqual({ id: "msg-1" })
     }).pipe(Effect.provide(testServices)))
 
-  it.effect("revoking a client cancels its pending approvals", () =>
+  it.effect("revoking a profile cancels its pending approvals", () =>
     Effect.gen(function*() {
       const gateway = yield* store
-      const { accessProfile, approvalPolicy, client } = yield* seedBinding(gateway)
+      const profile = yield* seedProfile(gateway)
       const approval = yield* gateway.createApproval({
         id: yield* newApprovalId,
         tenantId: defaultTenantId,
-        clientId: client.id,
-        approvalPolicyId: approvalPolicy.id,
-        accessProfileId: accessProfile.id,
+        profileId: profile.id,
+        caller: noCaller,
         alias: Alias.make("org___gmail___work"),
         tool: ToolName.make("sendEmail"),
         arguments: {},
@@ -453,23 +409,72 @@ describe("gateway store", () => {
         expiresAt: yield* notYet
       })
 
-      const cancelled = yield* gateway.cancelApprovalsForClient(client.id)
+      const cancelled = yield* gateway.cancelApprovalsForProfile(profile.id)
 
       expect(cancelled).toBe(1)
       const after = yield* gateway.getApproval(defaultTenantId, approval.id)
       expect(after?.status).toBe("denied")
-      expect(after?.decidedBy).toBe("client-revoked")
+      expect(after?.decidedBy).toBe("profile-revoked")
+    }).pipe(Effect.provide(testServices)))
+
+  it.effect("reads back who made a frozen call and an audited one", () =>
+    Effect.gen(function*() {
+      const gateway = yield* store
+      const profile = yield* seedProfile(gateway)
+      const key = yield* generateApiKey
+      yield* gateway.addApiKey({ id: key.id, profileId: profile.id, name: "Claude Code", hash: key.hash })
+      const caller: Caller = {
+        apiKeyId: key.id,
+        oauthGrantId: null,
+        oauthApplicationId: null,
+        credentialName: "Claude Code",
+        agent: "claude-code/2.1"
+      }
+      const subject = yield* gateway.createSubject({ id: yield* newSubjectId, tenantId: defaultTenantId })
+
+      const approval = yield* gateway.createApproval({
+        id: yield* newApprovalId,
+        tenantId: defaultTenantId,
+        profileId: profile.id,
+        caller,
+        alias: Alias.make("org___gmail___work"),
+        tool: ToolName.make("sendEmail"),
+        arguments: {},
+        groupWindowMinutes: 0,
+        expiresAt: yield* notYet
+      })
+      yield* gateway.recordAudit({
+        tenantId: defaultTenantId,
+        id: yield* newAuditId,
+        profileId: profile.id,
+        caller,
+        authorizedBySubjectId: subject.id,
+        alias: Alias.make("org___gmail___work"),
+        tool: ToolName.make("sendEmail"),
+        connection,
+        decision: "require_approval",
+        outcome: "pending",
+        message: null
+      })
+
+      expect((yield* gateway.getApproval(defaultTenantId, approval.id))?.caller).toEqual(caller)
+      const [record] = yield* gateway.listAudit(defaultTenantId, { limit: PositiveInt.make(10), profileId: profile.id })
+      expect(record?.caller).toEqual(caller)
+      expect(record?.profileId).toBe(profile.id)
+      expect(record?.authorizedBySubjectId).toBe(subject.id)
     }).pipe(Effect.provide(testServices)))
 
   it.effect("keeps the audit record after its arguments expire", () =>
     Effect.gen(function*() {
       const gateway = yield* store
-      const { client } = yield* seedBinding(gateway)
+      const profile = yield* seedProfile(gateway)
       const now = yield* Clock.currentTimeMillis
       yield* gateway.recordAudit({
         tenantId: defaultTenantId,
         id: yield* newAuditId,
-        clientId: client.id,
+        profileId: profile.id,
+        caller: noCaller,
+        authorizedBySubjectId: null,
         alias: Alias.make("org___gmail___work"),
         tool: ToolName.make("sendEmail"),
         connection,
@@ -498,7 +503,9 @@ describe("gateway store", () => {
       yield* gateway.recordAudit({
         tenantId: defaultTenantId,
         id: yield* newAuditId,
-        clientId: null,
+        profileId: null,
+        caller: noCaller,
+        authorizedBySubjectId: null,
         alias: null,
         tool: null,
         connection: null,
@@ -545,33 +552,20 @@ describe("gateway store", () => {
       })
       expect(otherSubject.tenantId).toBe(other.id)
 
-      const mine = yield* gateway.createClient({
-        id: yield* newClientId,
-        tenantId: defaultTenantId,
-        ...yield* tenantConfigIds(gateway),
-        name: "agent",
-        capabilities: ["provision_connections", "administer_gateway"]
-      })
-      const theirs = yield* gateway.createClient({
-        id: yield* newClientId,
-        tenantId: other.id,
-        ...yield* tenantConfigIds(gateway, other.id),
-        name: "agent",
-        capabilities: ["provision_connections", "administer_gateway"]
-      })
-      expect(yield* gateway.listClients(defaultTenantId)).toHaveLength(1)
-      expect((yield* gateway.findClientByName(other.id, "agent"))?.id).toBe(theirs.id)
+      const mine = yield* seedProfile(gateway, defaultTenantId, "agent")
+      const theirs = yield* seedProfile(gateway, other.id, "agent")
+      expect(yield* gateway.listProfiles(defaultTenantId)).toHaveLength(1)
+      expect((yield* gateway.findProfileByName(other.id, "agent"))?.id).toBe(theirs.id)
 
-      expect(yield* gateway.findClientById(other.id, mine.id)).toBeUndefined()
-      expect(yield* gateway.revokeClient(other.id, mine.id)).toBeUndefined()
-      expect((yield* gateway.findClientById(defaultTenantId, mine.id))?.revokedAt).toBeNull()
+      expect(yield* gateway.findProfileById(other.id, mine.id)).toBeUndefined()
+      expect(yield* gateway.revokeProfile(other.id, mine.id)).toBeUndefined()
+      expect((yield* gateway.findProfileById(defaultTenantId, mine.id))?.revokedAt).toBeNull()
 
       const approval = yield* gateway.createApproval({
         id: yield* newApprovalId,
         tenantId: defaultTenantId,
-        clientId: mine.id,
-        approvalPolicyId: mine.approvalPolicyId,
-        accessProfileId: mine.accessProfileId,
+        profileId: mine.id,
+        caller: noCaller,
         alias: Alias.make("org___gmail___work"),
         tool: ToolName.make("sendEmail"),
         arguments: {},
@@ -585,7 +579,9 @@ describe("gateway store", () => {
       yield* gateway.recordAudit({
         tenantId: defaultTenantId,
         id: yield* newAuditId,
-        clientId: mine.id,
+        profileId: mine.id,
+        caller: noCaller,
+        authorizedBySubjectId: null,
         alias: null,
         tool: null,
         connection: null,
@@ -595,6 +591,7 @@ describe("gateway store", () => {
       })
       expect(yield* gateway.listAudit(other.id, { limit: PositiveInt.make(10) })).toEqual([])
       expect(yield* gateway.countAudit(other.id, {})).toBe(0)
+      expect((yield* gateway.overviewCounts(other.id)).profileTools).toBe(1)
 
       yield* gateway.putToolSnapshots(defaultTenantId, [{
         integration: IntegrationSlug.make("gmail"),

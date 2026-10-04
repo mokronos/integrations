@@ -1,11 +1,12 @@
 # integrations
 
 `integrations` is an agent-facing gateway for discovering external APIs,
-holding their credentials, assigning reusable tool policies to clients, and
-executing calls under policy.
+holding their credentials, deciding per profile which tools an agent may call
+and which calls wait for a human, and executing those calls.
 
-The gateway is the only component that sees credentials. Clients receive an API
-key and invoke logical `{ alias, tool }` addresses through the HTTP API.
+The gateway is the only component that sees credentials. Each app an agent runs
+in gets its own API key (or OAuth grant) for a profile and invokes logical
+`{ alias, tool }` addresses through the HTTP API or MCP.
 
 ## Quickstart
 
@@ -70,14 +71,14 @@ curl -fsSL https://raw.githubusercontent.com/mokronos/integrations/main/install.
 ```
 
 `i` mirrors the public TypeScript client: agents can discover integrations,
-manage connections, inspect schemas, invoke effective policy tools, and poll
+manage connections, inspect schemas, invoke their profile's tools, and poll
 their own approvals. `ii` is its strict operator superset, adding every
 dashboard action, human login/account commands, and local gateway lifecycle
 commands.
 
 The local gateway creates separate credentials for these commands. `i` reads
 the agent key from `~/.integrations/gateway.json`; it can provision connections
-but cannot administer clients or keys. Without a saved operator session, `ii`
+but cannot administer profiles or keys. Without a saved operator session, `ii`
 reads its administrator key from `~/.integrations/operator-gateway.json`.
 For a remote gateway, see [Self-hosting](#self-hosting).
 
@@ -122,8 +123,9 @@ export INTEGRATIONS_URL=https://integrations.example.com
 ii signup you@example.com --tenant "Your Company"
 ```
 
-Issue each agent a key with `ii client <name>` and `ii key <client-id>`, then on
-its machine:
+Create a profile with `ii profile <name>`, enable tools with
+`ii profile-tool <profile-id> <integration> <tool> ask|auto`, and issue each app
+its own key with `ii key <profile-id> "<app name>"`. Then on the app's machine:
 
 ```bash
 export INTEGRATIONS_URL=https://integrations.example.com
@@ -223,7 +225,7 @@ API to reach the gateway. `gatewayCoreLayer` from
 `@integragents/gateway-core` provides the store, the integration
 host, and OAuth sessions as Effect services on whatever `SqlClient` the
 application supplies. From there `listEffectiveTools` returns an agent's tools
-with schemas and `invokeAsClient` executes under the same policy, approval,
+with schemas and `invokeAsProfile` executes under the same decision, approval,
 and audit path the `/v1/execute` route uses. The core and the host export
 their Drizzle schemas under `./schema`, so the application's migration
 pipeline can carry the gateway's tables; pass `migrate: false` and the gateway
@@ -241,7 +243,7 @@ host in `@integragents/gateway-api` provides.
 ## Delegated access
 
 A tool can act for the person the agent is serving rather than for the
-organisation. The administrator grants it on a delegation template: a
+organisation. The administrator enables it on a delegation template: a
 user-owned connection with no subject, so its alias reads `user___gmail___work`
 rather than naming anyone. Every invocation of such a tool names a subject,
 the gateway's id for that person, which an administrator mirrors from the
@@ -262,10 +264,12 @@ Applications such as [`wf`](https://github.com/mokronos/wf) consume the client
 without importing gateway or integrations implementation.
 
 MCP clients connect to the Streamable HTTP endpoint at `/mcp` and send their
-gateway API key as a bearer token. What the server advertises depends on the
-client's MCP surface, set in the dashboard.
+gateway API key as a bearer token, or authorize through MCP OAuth and pick a
+profile. What the server advertises depends on the profile's MCP surface, set
+in the dashboard. Calls are attributed to the key or OAuth application and to
+the name the MCP client reports about itself.
 
-With the `tools` surface the server exposes that client's tools under
+With the `tools` surface the server exposes that profile's tools under
 `<connection-alias>__<tool-name>`, so tools from multiple enabled connections
 remain distinct. A connection alias spells out the whole reference —
 `org___github___work`, or `user___sebastian___github___work` for a connection

@@ -71,6 +71,41 @@
       "when": 1790442651922,
       "tag": "0009_clear_the_stranger",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1791120569585,
+      "tag": "0010_drop_profile_dependents",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1791120570247,
+      "tag": "0011_drop_client_records",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1791120570894,
+      "tag": "0012_drop_clients",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1791120571504,
+      "tag": "0013_drop_access_profiles_and_approval_policies",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1791120572103,
+      "tag": "0014_create_profiles",
+      "breakpoints": true
     }
   ]
 }

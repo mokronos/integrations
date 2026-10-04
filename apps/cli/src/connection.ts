@@ -23,7 +23,7 @@ export const describeError = (error: unknown): string => {
   // A capability refusal is the one gateway error worth explaining: the
   // credential was accepted, it just is not allowed to do this.
   if (error instanceof Forbidden && error.code === "not-permitted") {
-    return `${error.message} (use a client or human session with the required capability)`
+    return `${error.message} (use a key of a profile with that capability, or a human session)`
   }
   if (error instanceof GatewayFailure) {
     return `${error.message} (trace ${error.traceId})`

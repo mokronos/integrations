@@ -14,7 +14,7 @@ const bootstrap = (overrides: Partial<LoopbackBootstrap> = {}): LoopbackBootstra
 })
 
 const request = (headers: Readonly<Record<string, string>>): Request =>
-  new Request("http://127.0.0.1:4788/v1/clients", {
+  new Request("http://127.0.0.1:4788/v1/profiles", {
     headers: { "sec-fetch-site": "same-origin", ...headers }
   })
 
@@ -73,7 +73,7 @@ describe("mayBorrowLocalCredential", () => {
   })
 
   test("a caller that is not a browser may not: it can carry a key", () => {
-    const bare = new Request("http://127.0.0.1:4788/v1/clients", {
+    const bare = new Request("http://127.0.0.1:4788/v1/profiles", {
       headers: { host: "127.0.0.1:4788" }
     })
     expect(mayBorrowLocalCredential(bare, bootstrap())).toBe(false)

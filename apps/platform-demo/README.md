@@ -8,9 +8,9 @@ The smallest application that embeds the gateway rather than talking to it.
   start and opens the gateway core on the same connection with `migrate: false`.
 - **One process.** `gatewayCoreLayer` provides the store, the integration host
   and OAuth sessions as Effect services. The page calls `listEffectiveTools`
-  for schemas and `invokeAsClient` for execution; no HTTP hop, no API key.
-- **One page.** Create an agent (a platform row holding a gateway client), add
-  a no-auth OpenAPI integration, and run a tool under the gateway's policy.
+  for schemas and `invokeAsProfile` for execution; no HTTP hop, no API key.
+- **One page.** Create an agent (a platform row holding a gateway profile), add
+  a no-auth OpenAPI integration, and run a tool under that profile.
 
 ```bash
 bun run --cwd apps/platform-demo dev

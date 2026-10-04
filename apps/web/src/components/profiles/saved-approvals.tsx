@@ -2,13 +2,11 @@ import { Option } from "effect"
 import { Pencil, X } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
-import { parseJsonString, type ApprovalPolicyId, type ApprovalRule, type ArgumentPath, type IntegrationOverview, type Json } from "@integragents/contracts"
+import { parseJsonString, type ApprovalRule, type ArgumentPath, type Json, type ProfileId } from "@integragents/contracts"
 
 import { JsonView } from "@/components/json-view"
-import { ToolIdentity } from "@/components/integrations/connection-identity"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ConfirmButton } from "@/components/ui/confirm-button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -16,7 +14,7 @@ import { Switch } from "@/components/ui/switch"
 import { pinnedObject } from "@/lib/approval-groups"
 import { when } from "@/lib/format"
 import * as gateway from "@/lib/gateway"
-import { keys, useIntegrations, useInvalidate, useMutation } from "@/lib/queries"
+import { keys, useInvalidate, useMutation } from "@/lib/queries"
 
 const pathLabel = (path: ArgumentPath): string => path.length === 0 ? "arguments" : path.join(".")
 
@@ -27,7 +25,7 @@ const fieldsOf = (rule: ApprovalRule): ReadonlyArray<Field> => [
   ...rule.free.map((path) => ({ path, open: true, text: "" }))
 ]
 
-function EditRule({ rule, policyId }: { readonly rule: ApprovalRule; readonly policyId: ApprovalPolicyId }) {
+function EditRule({ rule, profileId }: { readonly rule: ApprovalRule; readonly profileId: ProfileId }) {
   const invalidate = useInvalidate()
   const [open, setOpen] = useState(false)
   const [fields, setFields] = useState(() => fieldsOf(rule))
@@ -42,7 +40,7 @@ function EditRule({ rule, policyId }: { readonly rule: ApprovalRule; readonly po
       free: fields.filter((field) => field.open).map((field) => field.path)
     }),
     onSuccess: () => {
-      invalidate(keys.approvalPolicy(policyId))
+      invalidate(keys.approvalRules(profileId))
       setOpen(false)
       toast.success("Saved approval updated")
     },
@@ -52,12 +50,12 @@ function EditRule({ rule, policyId }: { readonly rule: ApprovalRule; readonly po
     setFields((current) => current.map((field, at) => at === index ? { ...field, ...change } : field))
 
   return <Dialog open={open} onOpenChange={(next) => { setOpen(next); if (next) setFields(fieldsOf(rule)) }}>
-    <DialogTrigger render={<Button size="sm" variant="outline" />}><Pencil className="size-3" />Edit</DialogTrigger>
+    <DialogTrigger render={<Button size="sm" variant="ghost" />}><Pencil className="size-3" />Edit</DialogTrigger>
     <DialogContent className="sm:max-w-xl">
       <DialogHeader>
         <DialogTitle>Edit saved approval</DialogTitle>
         <DialogDescription>
-          A call is approved only when every pinned field holds exactly its value, open fields hold anything, and it sends no other field. Removing a field makes calls that send it need approval again.
+          A call runs without asking only when every pinned field holds exactly its value, open fields hold anything, and it sends no other field.
         </DialogDescription>
       </DialogHeader>
       <div className="max-h-96 space-y-2 overflow-auto">
@@ -87,31 +85,14 @@ function EditRule({ rule, policyId }: { readonly rule: ApprovalRule; readonly po
   </Dialog>
 }
 
-function RuleRow({ rule, policyId, integrations }: {
-  readonly rule: ApprovalRule
-  readonly policyId: ApprovalPolicyId
-  readonly integrations: ReadonlyArray<IntegrationOverview>
-}) {
+export function SavedApproval({ rule, profileId }: { readonly rule: ApprovalRule; readonly profileId: ProfileId }) {
   const invalidate = useInvalidate()
   const remove = useMutation({
     mutationFn: () => gateway.deleteApprovalRule(rule.id),
-    onSuccess: () => { invalidate(keys.approvalPolicy(policyId)); toast.success("Saved approval deleted") },
+    onSuccess: () => { invalidate(keys.approvalRules(profileId)); toast.success("Saved approval deleted") },
     onError: (error: Error) => toast.error("Could not delete the saved approval", { description: error.message })
   })
-  return <div id={`rule-${rule.id}`} className="space-y-2 rounded-xl border p-3">
-    <div className="flex min-w-0 items-start gap-2">
-      <ToolIdentity connection={rule.connection} alias={null} tool={rule.tool} integrations={integrations} className="min-h-0 flex-1" />
-      <EditRule rule={rule} policyId={policyId} />
-      <ConfirmButton
-        label="Delete"
-        title="Delete this saved approval?"
-        description="Calls it covered will wait for approval again."
-        confirmLabel="Delete"
-        pendingLabel="Deleting…"
-        pending={remove.isPending}
-        onConfirm={() => remove.mutateAsync().then(() => undefined)}
-      />
-    </div>
+  return <div className="space-y-2 rounded-md border p-2">
     <JsonView value={pinnedObject(rule.pinned)} label="must equal" defaultOpen />
     <div className="flex flex-wrap items-center gap-2">
       <span className="text-muted-foreground text-xs">any value:</span>
@@ -121,23 +102,16 @@ function RuleRow({ rule, policyId, integrations }: {
       <span className="text-muted-foreground ml-auto text-xs">
         saved {when(rule.createdAt)}{rule.createdBy === null ? "" : ` by ${rule.createdBy}`}
       </span>
+      <EditRule rule={rule} profileId={profileId} />
+      <ConfirmButton
+        label="Delete"
+        title="Delete this saved approval?"
+        description="Calls it covered will ask again."
+        confirmLabel="Delete"
+        pendingLabel="Deleting…"
+        pending={remove.isPending}
+        onConfirm={() => remove.mutateAsync().then(() => undefined)}
+      />
     </div>
   </div>
-}
-
-export function ApprovalRules({ policyId, rules }: { readonly policyId: ApprovalPolicyId; readonly rules: ReadonlyArray<ApprovalRule> }) {
-  const integrations = useIntegrations()
-  return <Card>
-    <CardHeader>
-      <CardTitle>Saved approvals</CardTitle>
-      <p className="text-muted-foreground text-sm">
-        Created with "Always approve". A call to a tool that requires approval runs immediately when its arguments fit one of these.
-      </p>
-    </CardHeader>
-    <CardContent className="space-y-3">
-      {rules.length === 0
-        ? <p className="text-muted-foreground py-4 text-center text-sm">Nothing saved yet.</p>
-        : rules.map((rule) => <RuleRow key={rule.id} rule={rule} policyId={policyId} integrations={integrations.data ?? []} />)}
-    </CardContent>
-  </Card>
 }

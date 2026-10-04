@@ -133,5 +133,74 @@ export const gatewayMigrations: ReadonlyArray<Migration> = [
       "CREATE TABLE `gateway_approval_rule` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`approval_policy_id` text NOT NULL,\n\t`owner` text NOT NULL,\n\t`subject` text,\n\t`integration` text NOT NULL,\n\t`connection_name` text NOT NULL,\n\t`tool` text NOT NULL,\n\t`pattern` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`created_by` text,\n\tFOREIGN KEY (`approval_policy_id`) REFERENCES `gateway_approval_policy`(`id`) ON UPDATE no action ON DELETE cascade\n);",
       "CREATE INDEX `gateway_approval_rule_route` ON `gateway_approval_rule` (`approval_policy_id`,`integration`,`connection_name`,`tool`);"
     ]
+  },
+  {
+    id: 10,
+    name: "0010_drop_profile_dependents",
+    statements: [
+      "DROP TABLE `gateway_access_profile_tool`;",
+      "DROP TABLE `gateway_api_key`;",
+      "DROP TABLE `gateway_approval_delivery`;",
+      "DROP TABLE `gateway_approval_policy_tool`;",
+      "DROP TABLE `gateway_approval_rule`;",
+      "DROP TABLE `gateway_audit_arguments`;",
+      "DROP TABLE `gateway_client_approval_destination`;",
+      "DROP TABLE `gateway_oauth_authorization_code`;",
+      "DROP TABLE `gateway_oauth_token`;"
+    ]
+  },
+  {
+    id: 11,
+    name: "0011_drop_client_records",
+    statements: [
+      "DROP TABLE `gateway_audit`;",
+      "DROP TABLE `gateway_oauth_grant`;",
+      "DROP TABLE `gateway_pending_approval`;"
+    ]
+  },
+  {
+    id: 12,
+    name: "0012_drop_clients",
+    statements: [
+      "DROP TABLE `gateway_client`;"
+    ]
+  },
+  {
+    id: 13,
+    name: "0013_drop_access_profiles_and_approval_policies",
+    statements: [
+      "DROP TABLE `gateway_access_profile`;",
+      "DROP TABLE `gateway_approval_policy`;"
+    ]
+  },
+  {
+    id: 14,
+    name: "0014_create_profiles",
+    statements: [
+      "CREATE TABLE `gateway_api_key` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`profile_id` text NOT NULL,\n\t`name` text NOT NULL,\n\t`hash` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`last_used_at` integer,\n\t`revoked_at` integer,\n\tFOREIGN KEY (`profile_id`) REFERENCES `gateway_profile`(`id`) ON UPDATE no action ON DELETE cascade\n);",
+      "CREATE UNIQUE INDEX `gateway_api_key_hash_unique` ON `gateway_api_key` (`hash`);",
+      "CREATE TABLE `gateway_approval_delivery` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`approval_id` text NOT NULL,\n\t`destination_id` text NOT NULL,\n\t`status` text NOT NULL,\n\t`attempts` integer NOT NULL,\n\t`next_attempt_at` integer,\n\t`delivered_at` integer,\n\t`last_error` text,\n\tFOREIGN KEY (`approval_id`) REFERENCES `gateway_pending_approval`(`id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`destination_id`) REFERENCES `gateway_approval_destination`(`id`) ON UPDATE no action ON DELETE no action\n);",
+      "CREATE UNIQUE INDEX `gateway_approval_delivery_once` ON `gateway_approval_delivery` (`approval_id`,`destination_id`);",
+      "CREATE INDEX `gateway_approval_delivery_due` ON `gateway_approval_delivery` (`status`,`next_attempt_at`);",
+      "CREATE TABLE `gateway_approval_rule` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`profile_id` text NOT NULL,\n\t`owner` text NOT NULL,\n\t`subject` text,\n\t`integration` text NOT NULL,\n\t`connection_name` text NOT NULL,\n\t`tool` text NOT NULL,\n\t`pattern` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`created_by` text,\n\tFOREIGN KEY (`profile_id`) REFERENCES `gateway_profile`(`id`) ON UPDATE no action ON DELETE cascade\n);",
+      "CREATE INDEX `gateway_approval_rule_route` ON `gateway_approval_rule` (`profile_id`,`integration`,`connection_name`,`tool`);",
+      "CREATE TABLE `gateway_audit` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`tenant_id` text NOT NULL,\n\t`profile_id` text,\n\t`api_key_id` text,\n\t`oauth_grant_id` text,\n\t`oauth_application_id` text,\n\t`credential_name` text,\n\t`agent` text,\n\t`authorized_by_subject_id` text,\n\t`alias` text,\n\t`tool` text,\n\t`owner` text,\n\t`subject` text,\n\t`integration` text,\n\t`connection_name` text,\n\t`decision` text,\n\t`outcome` text NOT NULL,\n\t`message` text,\n\t`created_at` integer NOT NULL,\n\tFOREIGN KEY (`tenant_id`) REFERENCES `gateway_tenant`(`id`) ON UPDATE no action ON DELETE cascade\n);",
+      "CREATE TABLE `gateway_audit_arguments` (\n\t`audit_id` text PRIMARY KEY NOT NULL,\n\t`arguments` text NOT NULL,\n\t`expires_at` integer NOT NULL,\n\tFOREIGN KEY (`audit_id`) REFERENCES `gateway_audit`(`id`) ON UPDATE no action ON DELETE cascade\n);",
+      "CREATE TABLE `gateway_oauth_authorization_code` (\n\t`hash` text PRIMARY KEY NOT NULL,\n\t`grant_id` text NOT NULL,\n\t`application_id` text NOT NULL,\n\t`redirect_uri` text NOT NULL,\n\t`code_challenge` text NOT NULL,\n\t`resource` text NOT NULL,\n\t`scope` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`expires_at` integer NOT NULL,\n\t`consumed_at` integer,\n\tFOREIGN KEY (`grant_id`) REFERENCES `gateway_oauth_grant`(`id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`application_id`) REFERENCES `gateway_oauth_application`(`id`) ON UPDATE no action ON DELETE cascade\n);",
+      "CREATE TABLE `gateway_oauth_grant` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`application_id` text NOT NULL,\n\t`subject_id` text NOT NULL,\n\t`tenant_id` text NOT NULL,\n\t`profile_id` text NOT NULL,\n\t`resource` text NOT NULL,\n\t`scope` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`last_used_at` integer,\n\t`revoked_at` integer,\n\tFOREIGN KEY (`application_id`) REFERENCES `gateway_oauth_application`(`id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`subject_id`) REFERENCES `gateway_subject`(`id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`tenant_id`) REFERENCES `gateway_tenant`(`id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`profile_id`) REFERENCES `gateway_profile`(`id`) ON UPDATE no action ON DELETE cascade\n);",
+      "CREATE UNIQUE INDEX `gateway_oauth_grant_binding` ON `gateway_oauth_grant` (`application_id`,`subject_id`,`profile_id`,`resource`,`scope`);",
+      "CREATE TABLE `gateway_oauth_token` (\n\t`hash` text PRIMARY KEY NOT NULL,\n\t`kind` text NOT NULL,\n\t`family_id` text NOT NULL,\n\t`grant_id` text NOT NULL,\n\t`application_id` text NOT NULL,\n\t`resource` text NOT NULL,\n\t`scope` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`expires_at` integer NOT NULL,\n\t`used_at` integer,\n\t`revoked_at` integer,\n\t`replaced_by_hash` text,\n\tFOREIGN KEY (`grant_id`) REFERENCES `gateway_oauth_grant`(`id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`application_id`) REFERENCES `gateway_oauth_application`(`id`) ON UPDATE no action ON DELETE cascade\n);",
+      "CREATE INDEX `gateway_oauth_token_family` ON `gateway_oauth_token` (`family_id`);",
+      "CREATE INDEX `gateway_oauth_token_grant` ON `gateway_oauth_token` (`grant_id`);",
+      "CREATE TABLE `gateway_pending_approval` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`tenant_id` text NOT NULL,\n\t`profile_id` text NOT NULL,\n\t`api_key_id` text,\n\t`oauth_grant_id` text,\n\t`oauth_application_id` text,\n\t`credential_name` text,\n\t`agent` text,\n\t`alias` text NOT NULL,\n\t`tool` text NOT NULL,\n\t`arguments` text NOT NULL,\n\t`arguments_lookup` text,\n\t`group_id` text,\n\t`status` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`expires_at` integer NOT NULL,\n\t`decided_at` integer,\n\t`decided_by` text,\n\t`result` text,\n\t`error` text,\n\t`collected_at` integer,\n\tFOREIGN KEY (`tenant_id`) REFERENCES `gateway_tenant`(`id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`profile_id`) REFERENCES `gateway_profile`(`id`) ON UPDATE no action ON DELETE cascade\n);",
+      "CREATE INDEX `gateway_pending_approval_retry` ON `gateway_pending_approval` (`tenant_id`,`profile_id`,`alias`,`tool`,`arguments_lookup`,`arguments`) WHERE collected_at IS NULL;",
+      "CREATE INDEX `gateway_pending_approval_group` ON `gateway_pending_approval` (`group_id`,`status`);",
+      "CREATE INDEX `gateway_pending_approval_open` ON `gateway_pending_approval` (`profile_id`,`tool`,`status`);",
+      "CREATE TABLE `gateway_profile` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`tenant_id` text NOT NULL,\n\t`name` text NOT NULL,\n\t`capabilities` text NOT NULL,\n\t`approval_method` text DEFAULT 'elicitation' NOT NULL,\n\t`mcp_surface` text DEFAULT 'tools' NOT NULL,\n\t`approval_group_window_minutes` integer DEFAULT 30 NOT NULL,\n\t`include_new_tools` integer DEFAULT 0 NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`revoked_at` integer,\n\tFOREIGN KEY (`tenant_id`) REFERENCES `gateway_tenant`(`id`) ON UPDATE no action ON DELETE cascade\n);",
+      "CREATE UNIQUE INDEX `gateway_profile_name_tenant` ON `gateway_profile` (`tenant_id`,`name`);",
+      "CREATE TABLE `gateway_profile_approval_destination` (\n\t`profile_id` text NOT NULL,\n\t`destination_id` text NOT NULL,\n\tPRIMARY KEY(`profile_id`, `destination_id`),\n\tFOREIGN KEY (`profile_id`) REFERENCES `gateway_profile`(`id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`destination_id`) REFERENCES `gateway_approval_destination`(`id`) ON UPDATE no action ON DELETE cascade\n);",
+      "CREATE TABLE `gateway_profile_tool` (\n\t`profile_id` text NOT NULL,\n\t`owner` text NOT NULL,\n\t`subject` text,\n\t`integration` text NOT NULL,\n\t`connection_name` text NOT NULL,\n\t`tool` text NOT NULL,\n\t`decision` text NOT NULL,\n\tPRIMARY KEY(`profile_id`, `owner`, `subject`, `integration`, `connection_name`, `tool`),\n\tFOREIGN KEY (`profile_id`) REFERENCES `gateway_profile`(`id`) ON UPDATE no action ON DELETE cascade\n);",
+      "CREATE UNIQUE INDEX `gateway_profile_tool_route` ON `gateway_profile_tool` (`profile_id`,`owner`,CASE WHEN subject IS NULL THEN '' ELSE subject END,`integration`,`connection_name`,`tool`);"
+    ]
   }
 ]
