@@ -4,7 +4,7 @@ import type {
   Alias, ApiKey, ApiKeyHash,
   ApiKeyId, ApprovalGroupWindowMinutes, ApprovalMethod, ApprovalDeliveryAttempt, ApprovalDeliveryId, McpSurface,
   ApprovalDestination, ApprovalDestinationId, ApprovalId,
-  ApprovalRule, ApprovalRuleId, ApprovalStatus, ArgumentPattern, AuditId, AuditOutcome, AuditRecord,
+  ApprovalRule, ApprovalRuleId, ApprovalStatus, ArgumentPattern, AuditApproval, AuditId, AuditOutcome, AuditRecord,
   AuthSession, Caller, ConnectionName, ConnectionRef,
   ExternalIdentity, IdentityProvider, IntegrationSlug, Login, LoginHandoff,
   LoginHandoffHash, PendingApproval, Profile, ProfileCapability, ProfileId, ProfileTool, ProfileToolInput,
@@ -105,6 +105,7 @@ export interface RecordAuditInput {
   readonly tool: ToolName | null
   readonly connection: ConnectionRef | null
   readonly decision: ToolDecision | null
+  readonly approval?: AuditApproval
   readonly outcome: AuditOutcome
   readonly message: string | null
   readonly arguments?: {

@@ -7,7 +7,7 @@ export {
   OAuthApplicationId, OAuthGrantId, OAuthApplicationKind, OAuthGrantView,
   sameConnectionRef, aliasForConnection, ProfileCapability, ApprovalMethod, McpSurface, ApprovalDestination,
   ApprovalDeliveryStatus, ApprovalDeliveryAttempt, Profile, ToolDecision, ProfileTool, ProfileToolInput,
-  Caller, PendingApproval, AuditOutcome, AuditRecord, ToolSnapshot, DriftKind, DriftEntry
+  Caller, PendingApproval, AuditApproval, AuditOutcome, AuditRecord, ToolSnapshot, DriftKind, DriftEntry
 } from "@integragents/contracts"
 import { TenantId, SubjectId, ProfileId, Profile, ProfileCapability, ApprovalMethod, Alias, ConnectionRef, ProfileTool, ToolDecision, ToolName, ApiKeyId } from "@integragents/contracts"
 import type { Caller } from "@integragents/contracts"

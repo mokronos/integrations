@@ -202,5 +202,12 @@ export const gatewayMigrations: ReadonlyArray<Migration> = [
       "CREATE TABLE `gateway_profile_tool` (\n\t`profile_id` text NOT NULL,\n\t`owner` text NOT NULL,\n\t`subject` text,\n\t`integration` text NOT NULL,\n\t`connection_name` text NOT NULL,\n\t`tool` text NOT NULL,\n\t`decision` text NOT NULL,\n\tPRIMARY KEY(`profile_id`, `owner`, `subject`, `integration`, `connection_name`, `tool`),\n\tFOREIGN KEY (`profile_id`) REFERENCES `gateway_profile`(`id`) ON UPDATE no action ON DELETE cascade\n);",
       "CREATE UNIQUE INDEX `gateway_profile_tool_route` ON `gateway_profile_tool` (`profile_id`,`owner`,CASE WHEN subject IS NULL THEN '' ELSE subject END,`integration`,`connection_name`,`tool`);"
     ]
+  },
+  {
+    id: 15,
+    name: "0015_record_how_calls_were_approved",
+    statements: [
+      "ALTER TABLE `gateway_audit` ADD `approval` text;"
+    ]
   }
 ]

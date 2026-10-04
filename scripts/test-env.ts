@@ -108,7 +108,7 @@ const seed = async (home: string, fixtureUrl: string): Promise<void> => {
   const { profiles } = decodeProfiles(await cli("main", ["profiles"], home))
   const agent = profiles.find((entry) => entry.profile.name === "local-agent")
   if (agent === undefined) throw new Error("The gateway did not create the local-agent profile")
-  await cli("main", ["profile-tool", agent.profile.id, "fixture", "echo", "auto"], home)
+  await cli("main", ["profile-tool", agent.profile.id, "fixture", "echo", "allow"], home)
 }
 
 const up = async (): Promise<void> => {

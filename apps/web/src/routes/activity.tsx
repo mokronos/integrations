@@ -15,13 +15,17 @@ import type { AuditQuery } from "@/lib/gateway"
 import { whenPresent } from "@integragents/contracts"
 import { refetchAll, useAudit, useIntegrations, useProfiles } from "@/lib/queries"
 import { Option, Schema } from "effect"
-import { AuditOutcome, type AuditRecord, type ProfileId } from "@integragents/contracts"
+import { AuditOutcome, type AuditApproval, type AuditRecord, type ProfileId } from "@integragents/contracts"
+
+const approvalLabels = {
+  approved: "approved",
+  approved_always: "approved, always from now on",
+  saved_approval: "ran by a saved approval"
+} as const satisfies Record<AuditApproval, string>
 
 /** Whether a human was involved, which the outcome alone does not say. */
 const decidedBy = (record: AuditRecord): string | undefined =>
-  record.decision === "require_approval" && (record.outcome === "succeeded" || record.outcome === "failed")
-    ? record.message?.startsWith("approved by saved rule") === true ? "saved approval" : "approved"
-    : undefined
+  record.approval === null ? undefined : approvalLabels[record.approval]
 
 const limits = [50, 100, 250, 500] as const
 const ALL = "all"

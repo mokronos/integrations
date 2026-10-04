@@ -1235,8 +1235,8 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
       yield* run(
         `INSERT INTO gateway_audit
            (id, tenant_id, profile_id, api_key_id, oauth_grant_id, oauth_application_id, credential_name, agent,
-            authorized_by_subject_id, alias, tool, owner, subject, integration, connection_name, decision, outcome, message, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            authorized_by_subject_id, alias, tool, owner, subject, integration, connection_name, decision, approval, outcome, message, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           input.id,
           input.tenantId,
@@ -1250,6 +1250,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function*(
           connection === null ? null : connection.integration,
           connection === null ? null : connection.name,
           input.decision,
+          input.approval ?? null,
           input.outcome,
           input.message,
           yield* now

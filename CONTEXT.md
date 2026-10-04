@@ -13,7 +13,7 @@ One enabled tool on one connection, with its decision. A tool that is off has no
 _Avoid_: Grant, policy rule
 
 **Decision**:
-Whether an enabled tool runs immediately (`allow`, shown as Auto) or waits for a human (`require_approval`, shown as Ask).
+Whether an enabled tool runs immediately (`allow`, shown as Allow) or waits for a human (`require_approval`, shown as Ask).
 _Avoid_: Policy
 
 **Default decision**:

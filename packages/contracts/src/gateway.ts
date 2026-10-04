@@ -171,7 +171,10 @@ export const InvocationOutcome = Schema.Union([InvocationSucceeded, InvocationPe
 export type InvocationOutcome = typeof InvocationOutcome.Type
 export const AuditOutcome = Schema.Literals(["succeeded", "failed", "denied", "pending"])
 export type AuditOutcome = typeof AuditOutcome.Type
-export const AuditRecord = Schema.Struct({ id: AuditId, profileId: Schema.NullOr(ProfileId), caller: Caller, authorizedBySubjectId: Schema.NullOr(SubjectId), alias: Schema.NullOr(Schema.String), tool: Schema.NullOr(ToolName), connection: Schema.NullOr(ConnectionRef), subject: Schema.NullOr(SubjectId), decision: Schema.NullOr(ToolDecision), outcome: AuditOutcome, message: Schema.NullOr(Schema.String), createdAt: Schema.Date })
+/** How a call that asked got to run: a human approved it once, approved it and saved the pattern, or a saved approval matched. */
+export const AuditApproval = Schema.Literals(["approved", "approved_always", "saved_approval"])
+export type AuditApproval = typeof AuditApproval.Type
+export const AuditRecord = Schema.Struct({ id: AuditId, profileId: Schema.NullOr(ProfileId), caller: Caller, authorizedBySubjectId: Schema.NullOr(SubjectId), alias: Schema.NullOr(Schema.String), tool: Schema.NullOr(ToolName), connection: Schema.NullOr(ConnectionRef), subject: Schema.NullOr(SubjectId), decision: Schema.NullOr(ToolDecision), approval: Schema.NullOr(AuditApproval), outcome: AuditOutcome, message: Schema.NullOr(Schema.String), createdAt: Schema.Date })
 export type AuditRecord = typeof AuditRecord.Type
 
 export const OAuthApplicationKind = Schema.Literals(["cimd", "dcr"])

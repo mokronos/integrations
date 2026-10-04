@@ -463,7 +463,7 @@ describe("integrations CLI acceptance", () => {
 
       const profile = parseOutput(IdOutput, (yield* operator(["profile", "sandbox"])).stdout)
       const allowed = yield* operator([
-        "profile-tool", profile.id, slug, "tickets.create", "auto",
+        "profile-tool", profile.id, slug, "tickets.create", "allow",
         "--connection", connectionName
       ])
       expect(allowed.exitCode, allowed.stderr).toBe(0)
