@@ -11,7 +11,12 @@ import {
   tsClientInstallCommand
 } from "@/lib/connect"
 
-export function ConnectTabs({ profileName, gatewayUrl, mcpUrl, apiKey }: {
+export function ConnectTabs({
+  profileName,
+  gatewayUrl,
+  mcpUrl,
+  apiKey
+}: {
   readonly profileName: string
   readonly gatewayUrl: string
   readonly mcpUrl: string
@@ -22,9 +27,18 @@ export function ConnectTabs({ profileName, gatewayUrl, mcpUrl, apiKey }: {
   return (
     <Tabs defaultValue="cli">
       <TabsList>
-        <TabsTrigger value="cli"><Terminal />CLI + skill</TabsTrigger>
-        <TabsTrigger value="mcp"><Plug />MCP</TabsTrigger>
-        <TabsTrigger value="ts"><Braces />TypeScript</TabsTrigger>
+        <TabsTrigger value="cli">
+          <Terminal />
+          CLI + skill
+        </TabsTrigger>
+        <TabsTrigger value="mcp">
+          <Plug />
+          MCP
+        </TabsTrigger>
+        <TabsTrigger value="ts">
+          <Braces />
+          TypeScript
+        </TabsTrigger>
       </TabsList>
       <TabsContent value="cli" className="space-y-3">
         <Step label="1. Install the CLI">
@@ -35,7 +49,9 @@ export function ConnectTabs({ profileName, gatewayUrl, mcpUrl, apiKey }: {
         </Step>
         <Step label="3. Point i at this gateway">
           <CopyField value={configuration} label="CLI configuration" multiline />
-          <p className="text-muted-foreground text-xs">Set these in the environment your agent runs in. They take precedence over a local gateway.</p>
+          <p className="text-muted-foreground text-xs">
+            Set these in the environment your agent runs in. They take precedence over a local gateway.
+          </p>
         </Step>
       </TabsContent>
       <TabsContent value="mcp">
@@ -53,10 +69,7 @@ export function ConnectTabs({ profileName, gatewayUrl, mcpUrl, apiKey }: {
   )
 }
 
-function Step({ label, children }: {
-  readonly label: string
-  readonly children: React.ReactNode
-}) {
+function Step({ label, children }: { readonly label: string; readonly children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
       <p className="text-sm">{label}</p>

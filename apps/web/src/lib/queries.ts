@@ -1,11 +1,7 @@
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect } from "react"
 import type { UseQueryResult } from "@tanstack/react-query"
-import type {
-  ApprovalStatus,
-  GatewayResource,
-  ProfileId
-} from "@integragents/contracts"
+import type { ApprovalStatus, GatewayResource, ProfileId } from "@integragents/contracts"
 
 import * as gateway from "@/lib/gateway"
 import type { AuditQuery } from "@/lib/gateway"
@@ -30,8 +26,7 @@ export const keys = {
 
 export const useMe = () => useQuery({ queryKey: keys.me, queryFn: gateway.fetchMe })
 
-export const useAuthProviders = () =>
-  useQuery({ queryKey: keys.authProviders, queryFn: gateway.fetchAuthProviders })
+export const useAuthProviders = () => useQuery({ queryKey: keys.authProviders, queryFn: gateway.fetchAuthProviders })
 
 export const useIntegrations = () =>
   useQuery({
@@ -47,8 +42,7 @@ export const useOAuthCallbackUrl = () =>
     select: (response) => response.oauthCallbackUrl
   })
 
-export const useConnections = () =>
-  useQuery({ queryKey: keys.connections, queryFn: gateway.listConnections })
+export const useConnections = () => useQuery({ queryKey: keys.connections, queryFn: gateway.listConnections })
 
 export const useProfiles = () =>
   useQuery({
@@ -80,9 +74,7 @@ export const useProfileApprovalDestinations = (id: ProfileId) =>
     queryFn: () => gateway.getProfileApprovalDestinations(id)
   })
 
-
-export const useOverview = () =>
-  useQuery({ queryKey: keys.overview, queryFn: gateway.fetchOverview })
+export const useOverview = () => useQuery({ queryKey: keys.overview, queryFn: gateway.fetchOverview })
 
 export const useApiKeys = (id: ProfileId) =>
   useQuery({ queryKey: keys.apiKeys(id), queryFn: () => gateway.listKeys(id) })
@@ -102,8 +94,7 @@ export const useApprovals = (status: ApprovalStatus | "all") =>
 export const useAudit = (input: AuditQuery) =>
   useQuery({ queryKey: keys.audit(input), queryFn: () => gateway.listAudit(input) })
 
-export const useOAuthGrants = () =>
-  useQuery({ queryKey: keys.oauthGrants, queryFn: gateway.listOAuthGrants })
+export const useOAuthGrants = () => useQuery({ queryKey: keys.oauthGrants, queryFn: gateway.listOAuthGrants })
 
 export const useOAuthSession = (id: string | undefined) =>
   useQuery({
@@ -122,21 +113,28 @@ const reloadedBy = {
 /** Reloads what the gateway reports changed; a fresh connection reloads everything it may have missed. */
 export const useGatewayEvents = () => {
   const client = useQueryClient()
-  useEffect(() => gateway.followEvents((event) => {
-    if (event._tag === "Connected") void client.invalidateQueries()
-    if (event._tag === "Changed") {
-      for (const queryKey of reloadedBy[event.resource]) void client.invalidateQueries({ queryKey })
-    }
-  }), [client])
+  useEffect(
+    () =>
+      gateway.followEvents((event) => {
+        if (event._tag === "Connected") void client.invalidateQueries()
+        if (event._tag === "Changed") {
+          for (const queryKey of reloadedBy[event.resource]) void client.invalidateQueries({ queryKey })
+        }
+      }),
+    [client]
+  )
 }
 
 export const useInvalidate = () => {
   const client = useQueryClient()
-  return useCallback((...groups: ReadonlyArray<ReadonlyArray<string | undefined>>) => {
-    for (const group of groups) {
-      void client.invalidateQueries({ queryKey: group })
-    }
-  }, [client])
+  return useCallback(
+    (...groups: ReadonlyArray<ReadonlyArray<string | undefined>>) => {
+      for (const group of groups) {
+        void client.invalidateQueries({ queryKey: group })
+      }
+    },
+    [client]
+  )
 }
 
 export { useMutation, useQuery }

@@ -1,18 +1,6 @@
 import { Schema } from "effect"
 import { Connection } from "./connection.ts"
 
-export const OAuthServerProbe = Schema.Struct({
-  issuer: Schema.optional(Schema.NullOr(Schema.String)),
-  authorizationUrl: Schema.String,
-  tokenUrl: Schema.String,
-  resource: Schema.optional(Schema.NullOr(Schema.String)),
-  scopesSupported: Schema.optional(Schema.Array(Schema.String)),
-  registrationEndpoint: Schema.optional(Schema.NullOr(Schema.String)),
-  tokenEndpointAuthMethodsSupported: Schema.optional(Schema.Array(Schema.String)),
-  clientIdMetadataDocumentSupported: Schema.optional(Schema.Boolean)
-})
-export type OAuthServerProbe = typeof OAuthServerProbe.Type
-
 export const OAuthStart = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("connected"),
@@ -50,5 +38,10 @@ export const OAuthSessionState = Schema.Union([
   OAuthSessionNeedsClient
 ])
 export type OAuthSessionState = typeof OAuthSessionState.Type
-export const OAuthSessionView = Schema.Struct({ id: Schema.String, integration: Schema.String, connection: Schema.String, state: OAuthSessionState })
+export const OAuthSessionView = Schema.Struct({
+  id: Schema.String,
+  integration: Schema.String,
+  connection: Schema.String,
+  state: OAuthSessionState
+})
 export type OAuthSessionView = typeof OAuthSessionView.Type

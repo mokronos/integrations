@@ -26,21 +26,23 @@ describe("stableCore", () => {
 
 describe("nextPatchVersion", () => {
   it.effect("previews the next patch", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       assert.equal(yield* nextPatchVersion("0.2.3"), "0.2.4")
       assert.equal(yield* nextPatchVersion("1.9.0-nightly.20260921.1"), "1.9.1")
-    }))
+    })
+  )
 
   it.effect("rejects a version that is not semver", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const error = yield* Effect.flip(nextPatchVersion("0.2"))
       assert.equal(error._tag, "InvalidReleaseVersionError")
-    }))
+    })
+  )
 })
 
 describe("nightlyMetadata", () => {
   it.effect("builds a dated, run-numbered prerelease", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const metadata = yield* nightlyMetadata("0.2.4", "20260921", 321, "abcdef1234567890")
       assert.deepStrictEqual(metadata, {
         channel: "nightly",
@@ -50,10 +52,11 @@ describe("nightlyMetadata", () => {
         isPrerelease: true,
         makeLatest: false
       })
-    }))
+    })
+  )
 
   it.effect("rejects malformed build coordinates", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const badDate = yield* Effect.flip(nightlyMetadata("0.2.4", "2026-09-21", 1, "abcdef1"))
       assert.equal(badDate._tag, "InvalidReleaseVersionError")
       const badSha = yield* Effect.flip(nightlyMetadata("0.2.4", "20260921", 1, "zzzz"))
@@ -62,12 +65,13 @@ describe("nightlyMetadata", () => {
       assert.equal(badRunNumber._tag, "InvalidReleaseVersionError")
       const badBase = yield* Effect.flip(nightlyMetadata("0.2.4-nightly.20260921.1", "20260921", 1, "abcdef1"))
       assert.equal(badBase._tag, "InvalidReleaseVersionError")
-    }))
+    })
+  )
 })
 
 describe("stableMetadata", () => {
   it.effect("marks a final version as latest", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const metadata = yield* stableMetadata("v0.2.3")
       assert.deepStrictEqual(metadata, {
         channel: "stable",
@@ -77,20 +81,23 @@ describe("stableMetadata", () => {
         isPrerelease: false,
         makeLatest: true
       })
-    }))
+    })
+  )
 
   it.effect("keeps a prerelease tag off the latest pointer", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const metadata = yield* stableMetadata("v0.3.0-rc.1")
       assert.isTrue(metadata.isPrerelease)
       assert.isFalse(metadata.makeLatest)
-    }))
+    })
+  )
 
   it.effect("rejects a tag that is not a release version", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const error = yield* Effect.flip(stableMetadata("nightly"))
       assert.equal(error._tag, "InvalidReleaseVersionError")
-    }))
+    })
+  )
 })
 
 describe("renderManifestVersion", () => {
@@ -107,32 +114,40 @@ describe("renderManifestVersion", () => {
 `
 
   it.effect("stamps only the top-level version", () =>
-    Effect.gen(function*() {
-      const stamped = yield* renderManifestVersion("packages/contracts/package.json", manifest, "0.2.4-nightly.20260921.1")
+    Effect.gen(function* () {
+      const stamped = yield* renderManifestVersion(
+        "packages/contracts/package.json",
+        manifest,
+        "0.2.4-nightly.20260921.1"
+      )
       assert.include(stamped, `"version": "0.2.4-nightly.20260921.1"`)
       assert.include(stamped, `"version": "nested, must not move"`)
       assert.isTrue(stamped.endsWith("}\n"))
-    }))
+    })
+  )
 
   it.effect("fails when a manifest declares no version", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const error = yield* Effect.flip(renderManifestVersion("apps/cli/package.json", `{\n  "name": "x"\n}\n`, "0.2.4"))
       assert.equal(error._tag, "ReleaseVersionNotFoundError")
-    }))
+    })
+  )
 })
 
 describe("renderGatewayVersion", () => {
   it.effect("rewrites the reported gateway version", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const rewritten = yield* renderGatewayVersion(`export const gatewayVersion = "0.2.3"\n`, "0.2.4")
       assert.equal(rewritten, `export const gatewayVersion = "0.2.4"\n`)
-    }))
+    })
+  )
 
   it.effect("fails when the constant is gone", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const error = yield* Effect.flip(renderGatewayVersion(`export const other = "0.2.3"\n`, "0.2.4"))
       assert.equal(error.file, gatewayVersionFile)
-    }))
+    })
+  )
 })
 
 describe("release surface", () => {
@@ -163,19 +178,21 @@ describe("renderReleaseDependencies", () => {
 `
 
   it.effect("pins every workspace dependency to the published range", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const linked = yield* renderReleaseDependencies("packages/core/gateway/package.json", manifest, versions)
       assert.include(linked, `"@integragents/contracts": "^0.3.1-nightly.20260921.4"`)
       assert.include(linked, `"@integragents/host": "^0.3.1-nightly.20260921.4"`)
       assert.include(linked, `"@cfworker/json-schema": "^4.1.1"`)
       assert.include(linked, `"effect": "catalog:"`)
-    }))
+    })
+  )
 
   it.effect("fails on a workspace dependency the release does not publish", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const unpublished = `{\n  "dependencies": { "@integragents/client": "workspace:^" }\n}\n`
       const error = yield* Effect.flip(renderReleaseDependencies("apps/ts/package.json", unpublished, versions))
       assert.equal(error._tag, "UnresolvedWorkspaceDependencyError")
       assert.include(error.message, "@integragents/client")
-    }))
+    })
+  )
 })

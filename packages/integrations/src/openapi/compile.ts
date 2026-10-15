@@ -8,7 +8,13 @@ import type { HttpMethod as HttpMethodType, ParameterLocation as ParameterLocati
 import { OpenApiPreview } from "@integragents/contracts"
 import type { CallParameter } from "../tool.ts"
 import { adaptInputs, type AdaptationContext } from "./adaptations/index.ts"
-import { assembleInputs, inputSchemaOf, WireLocation, type OperationInput, type WireParameter } from "./operation-inputs.ts"
+import {
+  assembleInputs,
+  inputSchemaOf,
+  WireLocation,
+  type OperationInput,
+  type WireParameter
+} from "./operation-inputs.ts"
 import {
   asJson,
   isJsonBoolean,
@@ -92,8 +98,7 @@ const normalizeSchema = (value: Json): Json => {
   return result
 }
 
-const propertiesOf = (schema: Json): Record<string, Json> =>
-  objectEntries(property(schema, "properties"))
+const propertiesOf = (schema: Json): Record<string, Json> => objectEntries(property(schema, "properties"))
 
 const definitionsOf = (schema: Json): Record<string, Json> =>
   objectEntries(property(property(schema, "components"), "schemas"))
@@ -136,10 +141,7 @@ const referencedNames = (value: Json, into: Set<string>): void => {
   }
 }
 
-const reachableDefinitions = (
-  roots: ReadonlyArray<Json>,
-  available: Record<string, Json>
-) => {
+const reachableDefinitions = (roots: ReadonlyArray<Json>, available: Record<string, Json>) => {
   const names = new Set<string>()
   for (const root of roots) referencedNames(root, names)
   const resolved: Record<string, Json> = {}
@@ -160,9 +162,7 @@ const reachableDefinitions = (
 const selfContained = (schema: Json, definitions: Record<string, Json>): Json => {
   if (!isJsonObject(schema)) return schema
   const reachable = reachableDefinitions([schema], definitions)
-  return Object.keys(reachable).length === 0
-    ? schema
-    : { ...schema, $defs: reachable }
+  return Object.keys(reachable).length === 0 ? schema : { ...schema, $defs: reachable }
 }
 
 const operationInputs = (operation: Operation) => {
@@ -189,9 +189,7 @@ const operationInputs = (operation: Operation) => {
     }
 
     for (const [name, value] of Object.entries(propertiesOf(schema))) {
-      const parameter = wire.find((candidate) =>
-        candidate.name === name && candidate.location === group.type
-      )
+      const parameter = wire.find((candidate) => candidate.name === name && candidate.location === group.type)
       if (parameter === undefined) continue
       inputs.push({ kind: "parameter", argument: name, parameter, schema: value })
     }
@@ -206,9 +204,7 @@ const successSchema = (operation: Operation): Option.Option<Json> => {
     .filter((code) => /^2\d\d$/.test(code))
     .toSorted((left, right) => Number(left) - Number(right))[0]
   if (success === undefined) return Option.none()
-  const projected = Option.liftThrowable(() =>
-    operation.getResponseAsJSONSchema(success)
-  )()
+  const projected = Option.liftThrowable(() => operation.getResponseAsJSONSchema(success))()
   return Option.flatMap(projected, (schemas) => {
     const first = Array.isArray(schemas) ? schemas[0] : undefined
     if (first === undefined) return Option.none()
@@ -242,18 +238,18 @@ const defaultExplode = (style: string): boolean => style === "form"
 
 const compileParameters = (operation: Operation): ReadonlyArray<WireParameter> =>
   operation.getParameters().flatMap((parameter) => {
-    const location = Option.getOrUndefined(
-      Schema.decodeUnknownOption(WireLocation)(parameter.in)
-    )
+    const location = Option.getOrUndefined(Schema.decodeUnknownOption(WireLocation)(parameter.in))
     if (location === undefined) return []
     const style = parameter.style ?? defaultStyle(location)
-    return [{
-      name: parameter.name,
-      location,
-      style,
-      explode: parameter.explode ?? defaultExplode(style),
-      required: parameter.required === true
-    }]
+    return [
+      {
+        name: parameter.name,
+        location,
+        style,
+        explode: parameter.explode ?? defaultExplode(style),
+        required: parameter.required === true
+      }
+    ]
   })
 
 const compileOperation = (
@@ -264,13 +260,13 @@ const compileOperation = (
   context: AdaptationContext
 ): CompiledOperation => {
   const { inputs, schemaDefinitions } = operationInputs(operation)
-  const assembled = assembleInputs(adaptInputs(inputs, {
-    ...context,
-    servers: [...Option.toArray(server), ...context.servers]
-  }))
-  const operationId = operation.hasOperationId()
-    ? operation.getOperationId()
-    : derivedName(method, path)
+  const assembled = assembleInputs(
+    adaptInputs(inputs, {
+      ...context,
+      servers: [...Option.toArray(server), ...context.servers]
+    })
+  )
+  const operationId = operation.hasOperationId() ? operation.getOperationId() : derivedName(method, path)
   return {
     name: operationId,
     method,
@@ -286,31 +282,28 @@ const compileOperation = (
     locations: assembled.locations,
     bodyProperty: assembled.bodyProperty,
     parameters: assembled.parameters,
-    contentType: operation.hasRequestBody()
-      ? Option.fromNullishOr(operation.getContentType())
-      : Option.none(),
+    contentType: operation.hasRequestBody() ? Option.fromNullishOr(operation.getContentType()) : Option.none(),
     server
   }
 }
 
 const DeclaredServers = Schema.Struct({
-  servers: Schema.optional(Schema.Array(Schema.Struct({
-    url: Schema.String,
-    variables: Schema.optional(Schema.Record(
-      Schema.String,
-      Schema.Struct({ default: Schema.optional(Schema.String) })
-    ))
-  })))
+  servers: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        url: Schema.String,
+        variables: Schema.optional(
+          Schema.Record(Schema.String, Schema.Struct({ default: Schema.optional(Schema.String) }))
+        )
+      })
+    )
+  )
 })
 
 const expandServerUrl = (
   url: string,
   variables: Readonly<Record<string, { readonly default?: string | undefined }>>
-): string =>
-  url.replace(
-    /\{([^{}]+)\}/g,
-    (whole, name: string) => variables[name]?.default ?? whole
-  )
+): string => url.replace(/\{([^{}]+)\}/g, (whole, name: string) => variables[name]?.default ?? whole)
 
 /** The `servers` an operation or path item declares for itself, if any. */
 const declaredServer = (value: Json): Option.Option<string> =>
@@ -327,21 +320,21 @@ const DeclaredSecurityScheme = Schema.Struct({
   name: Schema.optional(Schema.String),
   description: Schema.optional(Schema.String),
   openIdConnectUrl: Schema.optional(Schema.String),
-  flows: Schema.optional(Schema.Record(
-    Schema.String,
-    Schema.Struct({
-      authorizationUrl: Schema.optional(Schema.String),
-      tokenUrl: Schema.optional(Schema.String),
-      scopes: Schema.optional(Schema.Record(Schema.String, Schema.String))
-    })
-  ))
+  flows: Schema.optional(
+    Schema.Record(
+      Schema.String,
+      Schema.Struct({
+        authorizationUrl: Schema.optional(Schema.String),
+        tokenUrl: Schema.optional(Schema.String),
+        scopes: Schema.optional(Schema.Record(Schema.String, Schema.String))
+      })
+    )
+  )
 })
 
 const compileSecuritySchemes = (document: Json): ReadonlyArray<CompiledSecurityScheme> => {
   const fromComponents = property(property(document, "components"), "securitySchemes")
-  const raw = isJsonObject(fromComponents)
-    ? fromComponents
-    : property(document, "securityDefinitions")
+  const raw = isJsonObject(fromComponents) ? fromComponents : property(document, "securityDefinitions")
   if (!isJsonObject(raw)) return []
 
   return Object.entries(raw).flatMap(([name, value]) =>
@@ -349,109 +342,107 @@ const compileSecuritySchemes = (document: Json): ReadonlyArray<CompiledSecurityS
       onNone: () => [],
       onSome: (scheme) => {
         const flows = Object.values(scheme.flows ?? {})
-        const scopes = [
-          ...new Set(flows.flatMap((flow) => Object.keys(flow.scopes ?? {})))
+        const scopes = [...new Set(flows.flatMap((flow) => Object.keys(flow.scopes ?? {})))]
+        return [
+          {
+            name,
+            type: scheme.type,
+            scheme: Option.fromNullishOr(scheme.scheme),
+            bearerFormat: Option.fromNullishOr(scheme.bearerFormat),
+            in: Option.fromNullishOr(scheme.in),
+            headerName: Option.fromNullishOr(scheme.name),
+            description: Option.fromNullishOr(scheme.description),
+            openIdConnectUrl: Option.fromNullishOr(scheme.openIdConnectUrl),
+            scopes,
+            authorizationUrl: Option.fromNullishOr(
+              flows.map((flow) => flow.authorizationUrl).find((url) => url !== undefined)
+            ),
+            tokenUrl: Option.fromNullishOr(flows.map((flow) => flow.tokenUrl).find((url) => url !== undefined))
+          }
         ]
-        return [{
-          name,
-          type: scheme.type,
-          scheme: Option.fromNullishOr(scheme.scheme),
-          bearerFormat: Option.fromNullishOr(scheme.bearerFormat),
-          in: Option.fromNullishOr(scheme.in),
-          headerName: Option.fromNullishOr(scheme.name),
-          description: Option.fromNullishOr(scheme.description),
-          openIdConnectUrl: Option.fromNullishOr(scheme.openIdConnectUrl),
-          scopes,
-          authorizationUrl: Option.fromNullishOr(
-            flows.map((flow) => flow.authorizationUrl).find((url) => url !== undefined)
-          ),
-          tokenUrl: Option.fromNullishOr(
-            flows.map((flow) => flow.tokenUrl).find((url) => url !== undefined)
-          )
-        }]
       }
     })
   )
 }
 
-export const compileSpec = (
-  source: string,
-  text: string
-): Effect.Effect<CompiledSpec, SpecError> =>
+export const compileSpec = (source: string, text: string): Effect.Effect<CompiledSpec, SpecError> =>
   Effect.tryPromise({
     try: async () => {
       const normalized = new OASNormalize(text)
       const version = await normalized.version()
-      const document = version.specification === "openapi"
-        ? await normalized.bundle()
-        : await new OASNormalize(await normalized.convert()).bundle()
+      const document =
+        version.specification === "openapi"
+          ? await normalized.bundle()
+          : await new OASNormalize(await normalized.convert()).bundle()
       return document
     },
-    catch: (cause) => new SpecError({
-      source,
-      detail: describeCause(cause),
-      cause
-    })
-  }).pipe(
-    Effect.flatMap((document) => Effect.try({
-      try: (): CompiledSpec => {
-        const documentJson = asJson(document)
-        const oas = Oas.init(isJsonObject(documentJson) ? { ...documentJson } : {})
-        const definition = oas.getDefinition()
-        const operations: Array<CompiledOperation> = []
-        const securitySchemes = compileSecuritySchemes(documentJson)
-        const context: AdaptationContext = {
-          servers: (definition.servers ?? []).map((server) => server.url),
-          securitySchemes
-        }
-
-        const pathsJson = property(documentJson, "paths")
-        for (const [path, methods] of Object.entries(oas.getPaths())) {
-          const pathServer = declaredServer(property(pathsJson, path))
-          for (const [rawMethod, operation] of Object.entries(methods)) {
-            const method = Option.getOrUndefined(
-              Schema.decodeUnknownOption(HttpMethod)(rawMethod)
-            )
-            if (method === undefined) continue
-            operations.push(compileOperation(
-              method,
-              path,
-              operation,
-              Option.orElse(declaredServer(asJson(operation.schema)), () => pathServer),
-              context
-            ))
-          }
-        }
-
-        return {
-          title: Option.fromNullishOr(definition.info?.title),
-          description: Option.fromNullishOr(definition.info?.description),
-          version: Option.fromNullishOr(definition.info?.version),
-          servers: (definition.servers ?? []).map((server) => ({
-            url: server.url,
-            description: Option.fromNullishOr(server.description),
-            variables: Object.fromEntries(
-              Object.entries(server.variables ?? {}).flatMap(([name, variable]) =>
-                variable.default === undefined ? [] : [[name, String(variable.default)]]
-              )
-            )
-          })),
-          securitySchemes,
-          operations: operations.toSorted((left, right) => left.name.localeCompare(right.name)),
-          document: documentJson
-        }
-      },
-      catch: (cause) => new SpecError({
+    catch: (cause) =>
+      new SpecError({
         source,
-        detail: `Could not project operations: ${describeCause(cause)}`,
+        detail: describeCause(cause),
         cause
       })
-    }))
+  }).pipe(
+    Effect.flatMap((document) =>
+      Effect.try({
+        try: (): CompiledSpec => {
+          const documentJson = asJson(document)
+          const oas = Oas.init(isJsonObject(documentJson) ? { ...documentJson } : {})
+          const definition = oas.getDefinition()
+          const operations: Array<CompiledOperation> = []
+          const securitySchemes = compileSecuritySchemes(documentJson)
+          const context: AdaptationContext = {
+            servers: (definition.servers ?? []).map((server) => server.url),
+            securitySchemes
+          }
+
+          const pathsJson = property(documentJson, "paths")
+          for (const [path, methods] of Object.entries(oas.getPaths())) {
+            const pathServer = declaredServer(property(pathsJson, path))
+            for (const [rawMethod, operation] of Object.entries(methods)) {
+              const method = Option.getOrUndefined(Schema.decodeUnknownOption(HttpMethod)(rawMethod))
+              if (method === undefined) continue
+              operations.push(
+                compileOperation(
+                  method,
+                  path,
+                  operation,
+                  Option.orElse(declaredServer(asJson(operation.schema)), () => pathServer),
+                  context
+                )
+              )
+            }
+          }
+
+          return {
+            title: Option.fromNullishOr(definition.info?.title),
+            description: Option.fromNullishOr(definition.info?.description),
+            version: Option.fromNullishOr(definition.info?.version),
+            servers: (definition.servers ?? []).map((server) => ({
+              url: server.url,
+              description: Option.fromNullishOr(server.description),
+              variables: Object.fromEntries(
+                Object.entries(server.variables ?? {}).flatMap(([name, variable]) =>
+                  variable.default === undefined ? [] : [[name, String(variable.default)]]
+                )
+              )
+            })),
+            securitySchemes,
+            operations: operations.toSorted((left, right) => left.name.localeCompare(right.name)),
+            document: documentJson
+          }
+        },
+        catch: (cause) =>
+          new SpecError({
+            source,
+            detail: `Could not project operations: ${describeCause(cause)}`,
+            cause
+          })
+      })
+    )
   )
 
-export const previewOf = (
-  compiled: CompiledSpec
-): Effect.Effect<OpenApiPreview, SpecError> =>
+export const previewOf = (compiled: CompiledSpec): Effect.Effect<OpenApiPreview, SpecError> =>
   Schema.decodeUnknownEffect(OpenApiPreview)({
     title: Option.getOrNull(compiled.title),
     description: Option.getOrNull(compiled.description),
@@ -480,14 +471,16 @@ export const previewOf = (
       description: Option.getOrNull(scheme.description),
       openIdConnectUrl: Option.getOrNull(scheme.openIdConnectUrl)
     }))
-  }).pipe(Effect.mapError((cause) =>
-    new SpecError({
-      source: Option.getOrElse(compiled.title, () => "specification"),
-      detail: "Could not describe the document",
-      cause
-    })
-  ))
-
+  }).pipe(
+    Effect.mapError(
+      (cause) =>
+        new SpecError({
+          source: Option.getOrElse(compiled.title, () => "specification"),
+          detail: "Could not describe the document",
+          cause
+        })
+    )
+  )
 
 export const resolveServer = (
   compiled: CompiledSpec,
@@ -499,10 +492,7 @@ export const resolveServer = (
   if (Option.isSome(options.baseUrl)) return options.baseUrl
   const server = compiled.servers[0]
   if (server === undefined) return options.specSource
-  const declared = server.url.replace(
-    /\{([^{}]+)\}/g,
-    (whole, name: string) => server.variables[name] ?? whole
-  )
+  const declared = server.url.replace(/\{([^{}]+)\}/g, (whole, name: string) => server.variables[name] ?? whole)
   if (/^https?:\/\//.test(declared)) return Option.some(declared)
   return Option.map(options.specSource, (source) => new URL(declared, source).toString())
 }

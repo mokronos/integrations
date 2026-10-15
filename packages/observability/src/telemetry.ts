@@ -1,20 +1,14 @@
 import { FetchHttpClient } from "effect/http"
-import {
-  OtlpExporter,
-  OtlpLogger,
-  OtlpMetrics,
-  OtlpSerialization,
-  OtlpTracer
-} from "effect/observability"
+import { OtlpExporter, OtlpLogger, OtlpMetrics, OtlpSerialization, OtlpTracer } from "effect/observability"
 import { Config, Context, Effect, FileSystem, Layer, Logger, Option, References, Tracer } from "effect"
 import type { Scope } from "effect"
+import { allowlistedTracer } from "./span-attributes.ts"
 import { recordingTracer, TraceFile } from "./trace-file.ts"
 
 export const logLevelEnvVar = "INTEGRATIONS_LOG_LEVEL"
 
 /** The variables that configure telemetry, so a host can carry them into a service it installs. */
-export const isTelemetryEnvVar = (name: string): boolean =>
-  name === logLevelEnvVar || name.startsWith("OTEL_")
+export const isTelemetryEnvVar = (name: string): boolean => name === logLevelEnvVar || name.startsWith("OTEL_")
 
 const settings = Config.all({
   logLevel: Config.LogLevel(logLevelEnvVar).pipe(Config.withDefault("Info" as const)),
@@ -45,14 +39,15 @@ export interface Telemetry {
  * standard `OTEL_*` variables ask for it (`OTEL_EXPORTER_OTLP_ENDPOINT` plus
  * `OTEL_TRACES_EXPORTER=otlp`, `OTEL_LOGS_EXPORTER=otlp`, `OTEL_METRICS_EXPORTER=otlp`).
  */
-export const makeTelemetry = Effect.fnUntraced(function*(
+export const makeTelemetry = Effect.fnUntraced(function* (
   options: TelemetryOptions
 ): Effect.fn.Return<Telemetry, never, FileSystem.FileSystem | Scope.Scope> {
   const { logLevel, protocol } = yield* Effect.orDie(settings)
   const resource = { serviceName: options.serviceName, serviceVersion: options.serviceVersion }
-  const console = options.console === "stderr"
-    ? Logger.withConsoleError(Logger.formatLogFmt)
-    : Logger.withLeveledConsole(Logger.formatLogFmt)
+  const console =
+    options.console === "stderr"
+      ? Logger.withConsoleError(Logger.formatLogFmt)
+      : Logger.withLeveledConsole(Logger.formatLogFmt)
 
   const built = yield* Layer.build(
     Layer.mergeAll(
@@ -69,16 +64,17 @@ export const makeTelemetry = Effect.fnUntraced(function*(
 
   const traceFile = Context.getOption(built, TraceFile)
   const exporting = Context.get(built, Tracer.Tracer)
-  const tracer = Option.match(traceFile, {
-    onNone: () => exporting,
-    onSome: (file) => recordingTracer(exporting, options.serviceName, file.record)
-  })
+  const tracer = allowlistedTracer(
+    Option.match(traceFile, {
+      onNone: () => exporting,
+      onSome: (file) => recordingTracer(exporting, options.serviceName, file.record)
+    })
+  )
 
   return {
-    layer: Layer.succeedContext(built.pipe(
-      Context.add(Tracer.Tracer, tracer),
-      Context.add(References.MinimumLogLevel, logLevel)
-    )),
+    layer: Layer.succeedContext(
+      built.pipe(Context.add(Tracer.Tracer, tracer), Context.add(References.MinimumLogLevel, logLevel))
+    ),
     flush: Effect.andThen(
       Context.get(built, OtlpExporter.Flusher).flush,
       Option.match(traceFile, { onNone: () => Effect.void, onSome: (file) => file.flush })

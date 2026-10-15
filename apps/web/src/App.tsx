@@ -8,12 +8,18 @@ import { Toaster } from "@/components/ui/sonner"
 const ActivityRoute = lazy(() => import("@/routes/activity").then((route) => ({ default: route.ActivityRoute })))
 const ApprovalsRoute = lazy(() => import("@/routes/approvals").then((route) => ({ default: route.ApprovalsRoute })))
 const HomeRoute = lazy(() => import("@/routes/home").then((route) => ({ default: route.HomeRoute })))
-const IntegrationsRoute = lazy(() => import("@/routes/integrations").then((route) => ({ default: route.IntegrationsRoute })))
+const IntegrationsRoute = lazy(() =>
+  import("@/routes/integrations").then((route) => ({ default: route.IntegrationsRoute }))
+)
 const OnboardingRoute = lazy(() => import("@/routes/onboarding").then((route) => ({ default: route.OnboardingRoute })))
 const ProfilesRoute = lazy(() => import("@/routes/profiles").then((route) => ({ default: route.ProfilesRoute })))
-const ProfileDetailRoute = lazy(() => import("@/routes/profiles").then((route) => ({ default: route.ProfileDetailRoute })))
+const ProfileDetailRoute = lazy(() =>
+  import("@/routes/profiles").then((route) => ({ default: route.ProfileDetailRoute }))
+)
 const SettingsRoute = lazy(() => import("@/routes/settings").then((route) => ({ default: route.SettingsRoute })))
-const OAuthConsentRoute = lazy(() => import("@/routes/oauth-consent").then((route) => ({ default: route.OAuthConsentRoute })))
+const OAuthConsentRoute = lazy(() =>
+  import("@/routes/oauth-consent").then((route) => ({ default: route.OAuthConsentRoute }))
+)
 
 export default function App() {
   const [dark, setDark] = useState(() => localStorage.getItem("gateway-theme") !== "light")

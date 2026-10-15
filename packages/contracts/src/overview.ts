@@ -11,6 +11,7 @@ export const IntegrationOverview = Schema.Struct({
   displayUrl: Schema.optional(Schema.String),
   requiresAuthentication: Schema.Boolean,
   authMethods: Schema.Array(AuthMethod),
+  savedOAuthClientId: Schema.optional(Schema.String),
   connections: Schema.Array(Connection),
   tools: Schema.Array(Tool),
   toolError: Schema.optional(Schema.String)

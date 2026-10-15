@@ -19,12 +19,12 @@ The gateway on Cloudflare, provisioned with [Alchemy](https://alchemy.run):
 
 ## Stages
 
-| Command | Stage |
-| --- | --- |
-| `bun run dev` | `dev_$USER`, entirely local (workerd), state in `.alchemy/` |
-| `bun run deploy -- --stage staging` | `integrations-gateway-staging.<subdomain>.workers.dev` |
-| `bun run deploy -- --stage prod` | `integrations-gateway.<subdomain>.workers.dev` |
-| `bun run destroy -- --stage <stage>` | removes the stage and its data |
+| Command                              | Stage                                                       |
+| ------------------------------------ | ----------------------------------------------------------- |
+| `bun run dev`                        | `dev_$USER`, entirely local (workerd), state in `.alchemy/` |
+| `bun run deploy -- --stage staging`  | `integrations-gateway-staging.<subdomain>.workers.dev`      |
+| `bun run deploy -- --stage prod`     | `integrations-gateway.<subdomain>.workers.dev`              |
+| `bun run destroy -- --stage <stage>` | removes the stage and its data                              |
 
 Deployed stages keep their state in the account (`Cloudflare.state()`), so any
 machine or CI job sees the same records.

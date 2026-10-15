@@ -13,10 +13,5 @@ export const testServices: Layer.Layer<Crypto.Crypto | FileSystem.FileSystem> = 
 )
 
 /** A directory that the test's scope removes when it ends. */
-export const temporaryDirectory = (
-  prefix: string
-): Effect.Effect<string, never, FileSystem.FileSystem | Scope.Scope> =>
-  Effect.flatMap(
-    FileSystem.FileSystem,
-    (fs) => Effect.orDie(fs.makeTempDirectoryScoped({ prefix }))
-  )
+export const temporaryDirectory = (prefix: string): Effect.Effect<string, never, FileSystem.FileSystem | Scope.Scope> =>
+  Effect.flatMap(FileSystem.FileSystem, (fs) => Effect.orDie(fs.makeTempDirectoryScoped({ prefix })))

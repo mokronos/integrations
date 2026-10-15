@@ -47,7 +47,9 @@ describe("release installer", () => {
     await Bun.write(path.join(release, "SHA256SUMS"), `${digest}  ${asset}\n`)
 
     const fakeCurl = path.join(commands, "curl")
-    await Bun.write(fakeCurl, `#!/bin/sh
+    await Bun.write(
+      fakeCurl,
+      `#!/bin/sh
 set -eu
 output=""
 url=""
@@ -59,7 +61,8 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 cp "$FIXTURE_RELEASE/\${url##*/}" "$output"
-`)
+`
+    )
     await chmod(fakeCurl, 0o755)
 
     const environment = {

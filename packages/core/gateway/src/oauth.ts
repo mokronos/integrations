@@ -1,34 +1,35 @@
-import { Effect, Option, Schema } from "effect"
+import { Clock, Crypto, Effect, Option, Schema } from "effect"
 import type { Scope } from "effect"
 import {
   completeOAuthFlow,
-  createOAuthClient,
+  discoverOAuth,
   findOAuthClient,
-  probeOAuthServer,
+  gatewayOAuthClientSlug,
+  httpsOnlyUrlPolicy,
+  parseDestination,
   registerOAuthClient,
+  saveOAuthClient,
   startOAuthFlow
 } from "@integragents/host"
-import type { CatalogStore, Integrations, OAuthFlows } from "@integragents/host"
-import { AuthMethod, Connection, ConnectionOwner, whenPresent } from "@integragents/contracts"
+import type { CatalogStore, Integrations, OAuthFlows, OAuthSetup } from "@integragents/host"
+import { AuthMethod, Connection, ConnectionOwner, webCrypto, whenPresent } from "@integragents/contracts"
+import { sha256Hex } from "./keys.ts"
 import { oauthSetupGuidance } from "./oauth-guidance.ts"
 
-export class OAuthFlowError extends Schema.TaggedError<OAuthFlowError>()(
-  "OAuthFlowError",
-  {
-    stage: Schema.Literals([
-      "configure",
-      "client-required",
-      "discover",
-      "register",
-      "start",
-      "callback",
-      "exchange",
-      "timeout"
-    ]),
-    detail: Schema.String,
-    cause: Schema.optional(Schema.Defect())
-  }
-) {
+export class OAuthFlowError extends Schema.TaggedError<OAuthFlowError>()("OAuthFlowError", {
+  stage: Schema.Literals([
+    "configure",
+    "client-required",
+    "discover",
+    "register",
+    "start",
+    "callback",
+    "exchange",
+    "timeout"
+  ]),
+  detail: Schema.String,
+  cause: Schema.optional(Schema.Defect())
+}) {
   override get message(): string {
     return `OAuth ${this.stage} failed: ${this.detail}`
   }
@@ -39,36 +40,28 @@ export const oauthStep = <A, E extends { readonly message: string }, R>(
   detail: string,
   effect: Effect.Effect<A, E, R>
 ): Effect.Effect<A, OAuthFlowError, R> =>
-  Effect.mapError(effect, (cause) => new OAuthFlowError({
-    stage,
-    detail: `${detail}: ${cause.message}`,
-    cause
-  }))
-
-const offlineAccessScope = "offline_access"
-
-// Servers reject scopes they do not publish, so this dialect only ships when
-// discovery advertises it.
-const requestedScopes = (
-  configured: ReadonlyArray<string> | undefined,
-  supported: ReadonlyArray<string> | undefined
-): ReadonlyArray<string> => {
-  const base = configured ?? supported ?? []
-  return supported?.includes(offlineAccessScope) === true &&
-      !base.includes(offlineAccessScope)
-    ? [...base, offlineAccessScope]
-    : base
-}
+  Effect.mapError(
+    effect,
+    (cause) =>
+      new OAuthFlowError({
+        stage,
+        detail: `${detail}: ${cause.message}`,
+        cause
+      })
+  )
 
 export const decodeAuthorizationRequest = (
   input: AuthorizationRequest
 ): Effect.Effect<AuthorizationRequest, OAuthFlowError> =>
   Schema.decodeUnknownEffect(AuthorizationRequest)(input).pipe(
-    Effect.mapError((cause) => new OAuthFlowError({
-      stage: "configure",
-      detail: "The authorization request was not in the expected shape",
-      cause
-    }))
+    Effect.mapError(
+      (cause) =>
+        new OAuthFlowError({
+          stage: "configure",
+          detail: "The authorization request was not in the expected shape",
+          cause
+        })
+    )
   )
 
 export const AuthorizationRequest = Schema.Struct({
@@ -104,9 +97,59 @@ export const oauthBrowserPage = (options: {
 </body>
 </html>`
 
-export const prepareFlow = Effect.fn("OAuth.prepareFlow")(function*(
-  input: AuthorizationRequest,
+/** Where the gateway publishes its OAuth client metadata document, for servers that accept one as a client id. */
+export const clientMetadataPath = "/v1/oauth/client-metadata.json"
+export const oauthCallbackPath = "/v1/oauth/callback"
+
+const trimmedOrigin = (publicUrl: string) => publicUrl.replace(/\/+$/, "")
+
+/**
+ * The client id a server that supports client ID metadata documents can use
+ * without registration: only over HTTPS on a public host, and only when the
+ * redirect is the callback that document lists.
+ */
+const metadataDocumentClientId = (
+  setup: OAuthSetup,
+  publicUrl: string | undefined,
   redirectUri: string
+): string | undefined => {
+  if (publicUrl === undefined || !setup.discovered) return undefined
+  if (setup.server["client_id_metadata_document_supported"] !== true) return undefined
+  const methods = setup.server.token_endpoint_auth_methods_supported
+  if (methods !== undefined && !methods.includes("none")) return undefined
+  const origin = trimmedOrigin(publicUrl)
+  if (redirectUri !== `${origin}${oauthCallbackPath}`) return undefined
+  return parseDestination(`${origin}${clientMetadataPath}`, httpsOnlyUrlPolicy)?.href
+}
+
+/**
+ * A client registered for one redirect, issuer and scope set is only reused
+ * for exactly those: providers match redirects exactly, and a client
+ * registered for fewer scopes cannot be assumed to allow more.
+ */
+const registeredClientSlug = (input: {
+  readonly integration: string
+  readonly redirectUri: string
+  readonly setup: OAuthSetup
+  readonly metadataClientId: string | undefined
+}) =>
+  sha256Hex(
+    JSON.stringify([
+      input.integration,
+      input.redirectUri,
+      input.setup.server.issuer,
+      input.metadataClientId ?? null,
+      [...input.setup.scopes].sort()
+    ])
+  ).pipe(
+    Effect.provideService(Crypto.Crypto, webCrypto),
+    Effect.map((hash) => `${input.integration}-${hash.slice(0, 24)}`)
+  )
+
+export const prepareFlow = Effect.fn("OAuth.prepareFlow")(function* (
+  input: AuthorizationRequest,
+  redirectUri: string,
+  publicUrl?: string
 ): Effect.fn.Return<
   | { readonly status: "connected"; readonly connection: Connection }
   | { readonly status: "pending"; readonly state: string; readonly authorizationUrl: string },
@@ -120,45 +163,65 @@ export const prepareFlow = Effect.fn("OAuth.prepareFlow")(function*(
     })
   }
   const oauth = input.authMethod.oauth
-  const discovered = oauth.discoveryUrl === undefined
-    ? undefined
-    : yield* oauthStep("discover", `Could not read ${oauth.discoveryUrl}`,
-      probeOAuthServer(oauth.discoveryUrl))
-  const authorizationUrl = oauth.authorizationUrl ?? discovered?.authorizationUrl
-  const tokenUrl = oauth.tokenUrl ?? discovered?.tokenUrl
-  const resource = oauth.resource ?? discovered?.resource
-  const scopes = requestedScopes(oauth.scopes, discovered?.scopesSupported)
-  if (authorizationUrl === undefined || tokenUrl === undefined) {
-    return yield* new OAuthFlowError({
-      stage: "discover",
-      detail: "Could not discover OAuth authorization and token endpoints"
+  const setup = yield* oauthStep(
+    "discover",
+    `Could not discover how ${input.integration} authorizes`,
+    discoverOAuth({
+      ...whenPresent("discoveryUrl", oauth.discoveryUrl),
+      ...whenPresent("authorizationUrl", oauth.authorizationUrl),
+      ...whenPresent("tokenUrl", oauth.tokenUrl),
+      ...whenPresent("resource", oauth.resource),
+      ...whenPresent("scopes", oauth.scopes),
+      ...whenPresent("registrationEndpoint", oauth.registrationEndpoint)
     })
-  }
-  const clientSlug = `${input.integration}-gateway`
-  const reusable = input.clientId !== undefined
-    ? false
-    : Option.isSome(
-      yield* oauthStep("register", `Could not read the OAuth client for ${input.integration}`,
-        findOAuthClient(clientSlug))
+  )
+  const suppliedSlug = gatewayOAuthClientSlug(input.integration)
+  const client = yield* Effect.gen(function* () {
+    if (input.clientId !== undefined) {
+      return yield* oauthStep(
+        "register",
+        `Could not record the OAuth client for ${input.integration}`,
+        saveOAuthClient({
+          slug: suppliedSlug,
+          integration: input.integration,
+          setup,
+          clientId: input.clientId,
+          ...whenPresent("clientSecret", input.clientSecret)
+        })
+      )
+    }
+    const supplied = yield* oauthStep(
+      "register",
+      `Could not read the OAuth client for ${input.integration}`,
+      findOAuthClient(suppliedSlug)
     )
-  let client: string
-  if (input.clientId !== undefined) {
-    client = yield* oauthStep("register", `Could not record the OAuth client for ${input.integration}`,
-      createOAuthClient({
-        slug: clientSlug,
-        integration: input.integration,
-        authorizationUrl,
-        tokenUrl,
-        clientId: input.clientId!,
-        ...whenPresent("clientSecret", input.clientSecret),
-        ...whenPresent("resource", resource),
-        scopes
-      }))
-  } else if (reusable) {
-    client = clientSlug
-  } else {
-    const registrationEndpoint = oauth.registrationEndpoint ?? discovered?.registrationEndpoint
-    if (registrationEndpoint === null || registrationEndpoint === undefined) {
+    if (Option.isSome(supplied)) return supplied.value.slug
+
+    const metadataClientId = metadataDocumentClientId(setup, publicUrl, redirectUri)
+    const slug = yield* registeredClientSlug({ integration: input.integration, redirectUri, setup, metadataClientId })
+    const saved = yield* oauthStep(
+      "register",
+      `Could not read the OAuth client for ${input.integration}`,
+      findOAuthClient(slug)
+    )
+    const now = yield* Clock.currentTimeMillis
+    if (Option.isSome(saved) && (saved.value.secretExpiresAt === undefined || saved.value.secretExpiresAt > now)) {
+      return saved.value.slug
+    }
+    if (metadataClientId !== undefined) {
+      return yield* oauthStep(
+        "register",
+        `Could not record the OAuth client for ${input.integration}`,
+        saveOAuthClient({
+          slug,
+          integration: input.integration,
+          setup,
+          clientId: metadataClientId,
+          tokenAuthMethod: "none"
+        })
+      )
+    }
+    if (setup.server.registration_endpoint === undefined) {
       return yield* new OAuthFlowError({
         stage: "client-required",
         detail: oauthSetupGuidance({
@@ -168,20 +231,15 @@ export const prepareFlow = Effect.fn("OAuth.prepareFlow")(function*(
         })
       })
     }
-    client = yield* oauthStep("register", `${input.integration} refused dynamic client registration`,
-      registerOAuthClient({
-        slug: clientSlug,
-        integration: input.integration,
-        redirectUri,
-        registrationEndpoint,
-        authorizationUrl,
-        tokenUrl,
-        scopes,
-        ...whenPresent("issuer", discovered?.issuer),
-        ...whenPresent("resource", resource)
-      }))
-  }
-  const started = yield* oauthStep("start", `Could not start authorization for ${input.integration}`,
+    return yield* oauthStep(
+      "register",
+      `${input.integration} refused dynamic client registration`,
+      registerOAuthClient({ slug, integration: input.integration, setup, redirectUri })
+    )
+  })
+  const started = yield* oauthStep(
+    "start",
+    `Could not start authorization for ${input.integration}`,
     startOAuthFlow({
       client,
       integration: input.integration,
@@ -189,7 +247,8 @@ export const prepareFlow = Effect.fn("OAuth.prepareFlow")(function*(
       template: input.authMethod.template,
       redirectUri,
       ...whenPresent("owner", input.owner)
-    }))
+    })
+  )
   if (started.status === "connected") {
     return { status: "connected", connection: started.connection }
   }
@@ -204,20 +263,19 @@ export interface RemoteAuthorizationFlow {
   readonly status: "pending"
   readonly state: string
   readonly authorizationUrl: string
-  readonly complete: (input: {
-    readonly code: string
-  }) => Effect.Effect<Connection, OAuthFlowError, OAuthOperations>
+  readonly complete: (callback: URLSearchParams) => Effect.Effect<Connection, OAuthFlowError, OAuthOperations>
 }
 
 export type RemoteAuthorization =
   | RemoteAuthorizationFlow
   | { readonly status: "connected"; readonly connection: Connection }
 
-export const startRemoteAuthorization = Effect.fn("OAuth.startRemote")(function*(
+export const startRemoteAuthorization = Effect.fn("OAuth.startRemote")(function* (
   input: AuthorizationRequest & { readonly publicUrl: string }
 ): Effect.fn.Return<RemoteAuthorization, OAuthFlowError, OAuthOperations> {
   const options = yield* decodeAuthorizationRequest(input)
-  const prepared = yield* prepareFlow(options, `${input.publicUrl}/v1/oauth/callback`)
+  const origin = trimmedOrigin(input.publicUrl)
+  const prepared = yield* prepareFlow(options, `${origin}${oauthCallbackPath}`, origin)
   if (prepared.status === "connected") {
     return { status: "connected", connection: prepared.connection }
   }
@@ -226,8 +284,7 @@ export const startRemoteAuthorization = Effect.fn("OAuth.startRemote")(function*
     status: "pending",
     state,
     authorizationUrl: prepared.authorizationUrl,
-    complete: ({ code }) =>
-      oauthStep("exchange", `${input.integration} refused the authorization code`,
-        completeOAuthFlow({ state, code }))
+    complete: (callback) =>
+      oauthStep("exchange", `${input.integration} refused the authorization code`, completeOAuthFlow(callback))
   }
 })

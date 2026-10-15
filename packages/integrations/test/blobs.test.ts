@@ -35,15 +35,16 @@ const server = Effect.acquireRelease(
           })
         }
         if (url.pathname === "/upload") {
-          return request.bytes().then((received) =>
-            new Response(
-              JSON.stringify({
-                bytes: received.length,
-                sha256: createHash("sha256").update(received).digest("hex"),
-                contentType: request.headers.get("content-type")
-              }),
-              { headers: { "content-type": "application/json" } }
-            )
+          return request.bytes().then(
+            (received) =>
+              new Response(
+                JSON.stringify({
+                  bytes: received.length,
+                  sha256: createHash("sha256").update(received).digest("hex"),
+                  contentType: request.headers.get("content-type")
+                }),
+                { headers: { "content-type": "application/json" } }
+              )
           )
         }
         if (url.pathname === "/large") {
@@ -63,6 +64,7 @@ const server = Effect.acquireRelease(
 const upload = (baseUrl: string, blobId: string) =>
   Effect.flatMap(OpenApiInvoker, (invoker) =>
     invoker.call({
+      integration: "Blobs",
       call: {
         kind: "http",
         method: "post",
@@ -76,11 +78,13 @@ const upload = (baseUrl: string, blobId: string) =>
       server: baseUrl,
       input: { body: { [blobHandleKey]: blobId } },
       credential: Option.none()
-    }))
+    })
+  )
 
 const invoke = (baseUrl: string, path: string, maxInlineBytes: number) =>
   Effect.flatMap(OpenApiInvoker, (invoker) =>
     invoker.call({
+      integration: "Blobs",
       call: {
         kind: "http",
         method: "get",
@@ -93,112 +97,132 @@ const invoke = (baseUrl: string, path: string, maxInlineBytes: number) =>
       input: {},
       credential: Option.none(),
       maxInlineBytes
-    }))
+    })
+  )
 
 for (const [where, store] of stores) {
-const services = OpenApiInvoker.layer.pipe(
-  Layer.provideMerge(store),
-  Layer.provide(FetchHttpClient.layer)
-)
+  const services = OpenApiInvoker.layer.pipe(Layer.provideMerge(store), Layer.provide(FetchHttpClient.layer))
 
-describe(`byte-faithful responses, with blobs in ${where}`, () => {
-  it.live("preserves binary content exactly instead of decoding it as text", () =>
-    Effect.gen(function*() {
-      const running = yield* server
-      const result = yield* invoke(running.url.origin, "/binary", 64 * 1024)
-      const handle = decodeHandle(result)
+  describe(`byte-faithful responses, with blobs in ${where}`, () => {
+    it.live("preserves binary content exactly instead of decoding it as text", () =>
+      Effect.gen(function* () {
+        const running = yield* server
+        const result = yield* invoke(running.url.origin, "/binary", 64 * 1024)
+        const handle = decodeHandle(result)
 
-      expect(handle.contentType).toBe("application/zip")
-      expect(handle.bytes).toBe(zipBytes.length)
-      expect(handle.filename).toBe("archive.zip")
+        expect(handle.contentType).toBe("application/zip")
+        expect(handle.bytes).toBe(zipBytes.length)
+        expect(handle.filename).toBe("archive.zip")
 
-      const blobs = yield* BlobStore
-      const stored = yield* blobs.readAll(handle[blobHandleKey])
-      expect(stored).toEqual(zipBytes)
-      expect(handle.sha256).toBe(createHash("sha256").update(zipBytes).digest("hex"))
-    }).pipe(Effect.provide(services), Effect.scoped))
+        const blobs = yield* BlobStore
+        const stored = yield* blobs.readAll(handle[blobHandleKey])
+        expect(stored).toEqual(zipBytes)
+        expect(handle.sha256).toBe(createHash("sha256").update(zipBytes).digest("hex"))
+      }).pipe(Effect.provide(services), Effect.scoped)
+    )
 
-  it.live("writes oversized text to disk rather than truncating it", () =>
-    Effect.gen(function*() {
-      const running = yield* server
-      const result = yield* invoke(running.url.origin, "/large", 1024)
-      const handle = decodeHandle(result)
+    it.live("writes oversized text to disk rather than truncating it", () =>
+      Effect.gen(function* () {
+        const running = yield* server
+        const result = yield* invoke(running.url.origin, "/large", 1024)
+        const handle = decodeHandle(result)
 
-      expect(handle.note).toContain("exceeds")
-      expect(handle.preview).toContain("rows")
+        expect(handle.note).toContain("exceeds")
+        expect(handle.preview).toContain("rows")
 
-      const blobs = yield* BlobStore
-      const stored = yield* blobs.readAll(handle[blobHandleKey])
-      const parsed: unknown = JSON.parse(new TextDecoder().decode(stored))
-      expect(Schema.decodeUnknownSync(Schema.Struct({ rows: Schema.Array(Schema.Number) }))(parsed).rows)
-        .toHaveLength(4000)
-    }).pipe(Effect.provide(services), Effect.scoped))
+        const blobs = yield* BlobStore
+        const stored = yield* blobs.readAll(handle[blobHandleKey])
+        const parsed: unknown = JSON.parse(new TextDecoder().decode(stored))
+        expect(
+          Schema.decodeUnknownSync(Schema.Struct({ rows: Schema.Array(Schema.Number) }))(parsed).rows
+        ).toHaveLength(4000)
+      }).pipe(Effect.provide(services), Effect.scoped)
+    )
 
-  it.live("streams stored bytes back out as a request body", () =>
-    Effect.gen(function*() {
-      const running = yield* server
-      const blobs = yield* BlobStore
-      const stored = yield* blobs.write(
-        { contentType: "application/zip", filename: "archive.zip" },
-        Stream.succeed(zipBytes)
-      )
+    it.live("streams stored bytes back out as a request body", () =>
+      Effect.gen(function* () {
+        const running = yield* server
+        const blobs = yield* BlobStore
+        const stored = yield* blobs.write(
+          { contentType: "application/zip", filename: "archive.zip" },
+          Stream.succeed(zipBytes)
+        )
 
-      const echoed = yield* upload(running.url.origin, stored.id)
-      const report = Schema.decodeUnknownSync(Schema.Struct({
-        bytes: Schema.Number,
-        sha256: Schema.String,
-        contentType: Schema.String
-      }))(echoed)
+        const echoed = yield* upload(running.url.origin, stored.id)
+        const report = Schema.decodeUnknownSync(
+          Schema.Struct({
+            bytes: Schema.Number,
+            sha256: Schema.String,
+            contentType: Schema.String
+          })
+        )(echoed)
 
-      expect(report.bytes).toBe(zipBytes.length)
-      expect(report.sha256).toBe(createHash("sha256").update(zipBytes).digest("hex"))
-      expect(report.contentType).toBe("application/zip")
-    }).pipe(Effect.provide(services), Effect.scoped))
+        expect(report.bytes).toBe(zipBytes.length)
+        expect(report.sha256).toBe(createHash("sha256").update(zipBytes).digest("hex"))
+        expect(report.contentType).toBe("application/zip")
+      }).pipe(Effect.provide(services), Effect.scoped)
+    )
 
-  it.live("keeps small JSON inline", () =>
-    Effect.gen(function*() {
-      const running = yield* server
-      const result = yield* invoke(running.url.origin, "/small", 64 * 1024)
-      expect(result).toEqual({ ok: true })
-    }).pipe(Effect.provide(services), Effect.scoped))
+    it.live("keeps small JSON inline", () =>
+      Effect.gen(function* () {
+        const running = yield* server
+        const result = yield* invoke(running.url.origin, "/small", 64 * 1024)
+        expect(result).toEqual({ ok: true })
+      }).pipe(Effect.provide(services), Effect.scoped)
+    )
 
-  it.effect("keeps a blob larger than any one stored piece whole, prefix by prefix and streamed", () =>
-    Effect.gen(function*() {
-      const blobs = yield* BlobStore
-      const large = new Uint8Array(2_500_000).map((_, index) => (index * 31 + 7) % 256)
-      const pieces = [large.subarray(0, 700_000), large.subarray(700_000, 1_900_000), large.subarray(1_900_000)]
-      const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex")
-      const stored = yield* blobs.write({ contentType: "application/octet-stream", filename: undefined }, Stream.fromIterable(pieces))
+    it.effect("keeps a blob larger than any one stored piece whole, prefix by prefix and streamed", () =>
+      Effect.gen(function* () {
+        const blobs = yield* BlobStore
+        const large = new Uint8Array(2_500_000).map((_, index) => (index * 31 + 7) % 256)
+        const pieces = [large.subarray(0, 700_000), large.subarray(700_000, 1_900_000), large.subarray(1_900_000)]
+        const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex")
+        const stored = yield* blobs.write(
+          { contentType: "application/octet-stream", filename: undefined },
+          Stream.fromIterable(pieces)
+        )
 
-      expect(stored.bytes).toBe(large.length)
-      expect(stored.sha256).toBe(sha256(large))
-      expect(sha256(yield* blobs.readAll(stored.id))).toBe(stored.sha256)
-      expect(sha256(yield* blobs.readPrefix(stored.id, 1_100_000))).toBe(sha256(large.subarray(0, 1_100_000)))
+        expect(stored.bytes).toBe(large.length)
+        expect(stored.sha256).toBe(sha256(large))
+        expect(sha256(yield* blobs.readAll(stored.id))).toBe(stored.sha256)
+        expect(sha256(yield* blobs.readPrefix(stored.id, 1_100_000))).toBe(sha256(large.subarray(0, 1_100_000)))
 
-      const opened = yield* blobs.open(stored.id)
-      expect(opened.metadata).toEqual({ contentType: "application/octet-stream", filename: undefined, bytes: large.length })
-      const streamed = yield* Stream.runCollect(opened.content)
-      expect(sha256(Buffer.concat(streamed))).toBe(stored.sha256)
+        const opened = yield* blobs.open(stored.id)
+        expect(opened.metadata).toEqual({
+          contentType: "application/octet-stream",
+          filename: undefined,
+          bytes: large.length
+        })
+        const streamed = yield* Stream.runCollect(opened.content)
+        expect(sha256(Buffer.concat(streamed))).toBe(stored.sha256)
 
-      const empty = yield* blobs.write({ contentType: "text/plain", filename: "empty.txt" }, Stream.empty)
-      expect(yield* blobs.readAll(empty.id)).toEqual(new Uint8Array(0))
+        const empty = yield* blobs.write({ contentType: "text/plain", filename: "empty.txt" }, Stream.empty)
+        expect(yield* blobs.readAll(empty.id)).toEqual(new Uint8Array(0))
 
-      yield* blobs.discard(stored.id)
-      expect((yield* Effect.flip(blobs.readAll(stored.id)))._tag).toBe("StorageError")
-    }).pipe(Effect.provide(services), Effect.scoped))
+        yield* blobs.discard(stored.id)
+        expect((yield* Effect.flip(blobs.readAll(stored.id)))._tag).toBe("StorageError")
+      }).pipe(Effect.provide(services), Effect.scoped)
+    )
 
-  it.live("expires only the blobs stored before the cutoff", () =>
-    Effect.gen(function*() {
-      const blobs = yield* BlobStore
-      const old = yield* blobs.write({ contentType: "application/zip", filename: undefined }, Stream.succeed(zipBytes))
-      yield* Effect.sleep("20 millis")
-      const cutoff = new Date()
-      yield* Effect.sleep("20 millis")
-      const fresh = yield* blobs.write({ contentType: "application/zip", filename: undefined }, Stream.succeed(zipBytes))
+    it.live("expires only the blobs stored before the cutoff", () =>
+      Effect.gen(function* () {
+        const blobs = yield* BlobStore
+        const old = yield* blobs.write(
+          { contentType: "application/zip", filename: undefined },
+          Stream.succeed(zipBytes)
+        )
+        yield* Effect.sleep("20 millis")
+        const cutoff = new Date()
+        yield* Effect.sleep("20 millis")
+        const fresh = yield* blobs.write(
+          { contentType: "application/zip", filename: undefined },
+          Stream.succeed(zipBytes)
+        )
 
-      expect(yield* blobs.expire(cutoff)).toBe(1)
-      expect((yield* Effect.flip(blobs.readAll(old.id)))._tag).toBe("StorageError")
-      expect(yield* blobs.readAll(fresh.id)).toEqual(zipBytes)
-    }).pipe(Effect.provide(services), Effect.scoped))
-})
+        expect(yield* blobs.expire(cutoff)).toBe(1)
+        expect((yield* Effect.flip(blobs.readAll(old.id)))._tag).toBe("StorageError")
+        expect(yield* blobs.readAll(fresh.id)).toEqual(zipBytes)
+      }).pipe(Effect.provide(services), Effect.scoped)
+    )
+  })
 }

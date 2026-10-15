@@ -48,14 +48,10 @@ const withClient = <A, E>(
 
 describe("gateway metadata", () => {
   it.effect("reports an unreachable gateway separately from protocol incompatibility", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const transport = transportOf("unavailable")
 
-      const result = yield* withClient(
-        transport,
-        "https://gateway.example",
-        (client) => Effect.result(client.metadata)
-      )
+      const result = yield* withClient(transport, "https://gateway.example", (client) => Effect.result(client.metadata))
 
       expect(Result.isFailure(result)).toBe(true)
       const failure = Result.isFailure(result) ? result.failure : undefined
@@ -64,20 +60,18 @@ describe("gateway metadata", () => {
       expect(String(failure)).toContain("Retry the same command")
       expect(transport.metadataRequests()).toBe(1)
       expect(transport.authenticatedRequests()).toHaveLength(0)
-    }))
+    })
+  )
 
   it.effect("rejects an incompatible gateway before sending an authenticated request", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const transport = transportOf(gatewayProtocolVersion + 1)
 
-      const attempts = yield* withClient(
-        transport,
-        "https://gateway.example",
-        (client) =>
-          Effect.all([
-            Effect.result(client.provisioning.listConnections()),
-            Effect.result(client.provisioning.listConnections())
-          ])
+      const attempts = yield* withClient(transport, "https://gateway.example", (client) =>
+        Effect.all([
+          Effect.result(client.provisioning.listConnections()),
+          Effect.result(client.provisioning.listConnections())
+        ])
       )
 
       for (const attempt of attempts) {
@@ -88,21 +82,19 @@ describe("gateway metadata", () => {
       }
       expect(transport.metadataRequests()).toBe(1)
       expect(transport.authenticatedRequests()).toHaveLength(0)
-    }))
+    })
+  )
 
   it.effect("checks compatible metadata once and authenticates delegated calls", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const transport = transportOf(gatewayProtocolVersion)
 
-      const observed = yield* withClient(
-        transport,
-        "https://gateway.example/",
-        (client) =>
-          Effect.all({
-            metadata: client.metadata,
-            connections: client.provisioning.listConnections(),
-            health: client.health
-          })
+      const observed = yield* withClient(transport, "https://gateway.example/", (client) =>
+        Effect.all({
+          metadata: client.metadata,
+          connections: client.provisioning.listConnections(),
+          health: client.health
+        })
       )
 
       expect(observed.metadata.gatewayVersion).toBe("test")
@@ -111,5 +103,6 @@ describe("gateway metadata", () => {
       expect(transport.metadataRequests()).toBe(1)
       expect(transport.authenticatedRequests()).toHaveLength(1)
       expect(transport.authenticatedRequests()[0]?.get("authorization")).toBe("Bearer igk_test")
-    }))
+    })
+  )
 })

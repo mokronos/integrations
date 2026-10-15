@@ -17,10 +17,7 @@ describe("splitArguments", () => {
   })
 
   it("treats a field only some calls send as differing", () => {
-    const { shared, varying } = splitArguments([
-      { subject: "Launch", cc: "boss@example.com" },
-      { subject: "Launch" }
-    ])
+    const { shared, varying } = splitArguments([{ subject: "Launch", cc: "boss@example.com" }, { subject: "Launch" }])
 
     expect(shared).toEqual({ subject: "Launch" })
     expect(varying).toEqual([["cc"]])

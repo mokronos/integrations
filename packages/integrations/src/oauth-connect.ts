@@ -5,14 +5,15 @@ import {
   connectionAddress,
   ConnectionName,
   IntegrationSlug,
-  type OAuthServerProbe,
   type ConnectionOwner
 } from "@integragents/contracts"
-import { AuthTemplateSlug, OAuthClientSlug, OAuthState } from "./catalog/ids.ts"
+import { AuthTemplateSlug, OAuthClientSlug } from "./catalog/ids.ts"
 import { CatalogStore } from "./catalog/store.ts"
+import type { ClientAuthMethod } from "./catalog/store.ts"
 import { InvalidInputError, type StorageError, type OAuthError } from "./errors.ts"
 import { Integrations } from "./integrations.ts"
 import { OAuthFlows } from "./oauth/flows.ts"
+import type { OAuthMethodSettings, OAuthSetup } from "./oauth/flows.ts"
 
 const decodeId = <A, I>(
   schema: Schema.Codec<A, I, never, never>,
@@ -20,84 +21,55 @@ const decodeId = <A, I>(
   value: I
 ): Effect.Effect<A, InvalidInputError> =>
   Schema.decodeUnknownEffect(schema)(value).pipe(
-    Effect.mapError((cause) =>
-      new InvalidInputError({ field, detail: `${String(value)} is not a valid ${field}: ${cause}` }))
+    Effect.mapError(
+      (cause) => new InvalidInputError({ field, detail: `${String(value)} is not a valid ${field}: ${cause}` })
+    )
   )
 
 const defaultOwner: ConnectionOwner = "org"
 
-export const probeOAuthServer = (
-  url: string
-): Effect.Effect<OAuthServerProbe, OAuthError, OAuthFlows> =>
-  Effect.flatMap(OAuthFlows, (oauth) => oauth.probe(url))
+export const discoverOAuth = (settings: OAuthMethodSettings): Effect.Effect<OAuthSetup, OAuthError, OAuthFlows> =>
+  Effect.flatMap(OAuthFlows, (oauth) => oauth.discover(settings))
 
-export interface RegisterOAuthClientOptions {
+export const registerOAuthClient = Effect.fn("OAuthConnect.registerClient")(function* (options: {
   readonly slug: string
   readonly integration: string
+  readonly setup: OAuthSetup
   readonly redirectUri: string
-  readonly registrationEndpoint: string
-  readonly authorizationUrl: string
-  readonly tokenUrl: string
-  readonly issuer?: string
-  readonly resource?: string
-  readonly scopes: ReadonlyArray<string>
-}
-
-export const registerOAuthClient = Effect.fn("OAuthConnect.registerClient")(function*(
-  options: RegisterOAuthClientOptions
-) {
+}) {
   const oauth = yield* OAuthFlows
-  const slug = yield* decodeId(OAuthClientSlug, "client", options.slug)
-  const integration = yield* decodeId(IntegrationSlug, "integration", options.integration)
-  return yield* oauth.registerDynamicClient({
+  return yield* oauth.registerClient({
     owner: defaultOwner,
-    slug,
-    integration,
-    redirectUri: options.redirectUri,
-    registrationEndpoint: options.registrationEndpoint,
-    authorizationUrl: options.authorizationUrl,
-    tokenUrl: options.tokenUrl,
-    ...whenPresent("issuer", options.issuer),
-    ...whenPresent("resource", options.resource),
-    scopes: options.scopes
+    slug: yield* decodeId(OAuthClientSlug, "client", options.slug),
+    integration: yield* decodeId(IntegrationSlug, "integration", options.integration),
+    setup: options.setup,
+    redirectUri: options.redirectUri
   })
 })
 
-export const findOAuthClient = Effect.fn("OAuthConnect.findClient")(function*(
-  slug: string
-) {
+export const findOAuthClient = Effect.fn("OAuthConnect.findClient")(function* (slug: string) {
   const store = yield* CatalogStore
   const decoded = yield* decodeId(OAuthClientSlug, "client", slug)
   return yield* store.findOAuthClient({ owner: defaultOwner, slug: decoded })
 })
 
-export interface CreateOAuthClientOptions {
+export const saveOAuthClient = Effect.fn("OAuthConnect.saveClient")(function* (options: {
   readonly slug: string
   readonly integration: string
-  readonly authorizationUrl: string
-  readonly tokenUrl: string
+  readonly setup: OAuthSetup
   readonly clientId: string
-  readonly clientSecret?: string
-  readonly resource?: string
-  readonly scopes?: ReadonlyArray<string>
-}
-
-export const createOAuthClient = Effect.fn("OAuthConnect.createClient")(function*(
-  options: CreateOAuthClientOptions
-) {
+  readonly clientSecret?: string | undefined
+  readonly tokenAuthMethod?: ClientAuthMethod
+}) {
   const oauth = yield* OAuthFlows
-  const slug = yield* decodeId(OAuthClientSlug, "client", options.slug)
-  const integration = yield* decodeId(IntegrationSlug, "integration", options.integration)
-  return yield* oauth.createClient({
+  return yield* oauth.saveClient({
     owner: defaultOwner,
-    slug,
-    integration,
-    authorizationUrl: options.authorizationUrl,
-    tokenUrl: options.tokenUrl,
+    slug: yield* decodeId(OAuthClientSlug, "client", options.slug),
+    integration: yield* decodeId(IntegrationSlug, "integration", options.integration),
+    setup: options.setup,
     clientId: options.clientId,
     ...whenPresent("clientSecret", options.clientSecret),
-    ...whenPresent("resource", options.resource),
-    ...whenPresent("scopes", options.scopes)
+    ...whenPresent("tokenAuthMethod", options.tokenAuthMethod)
   })
 })
 
@@ -115,7 +87,7 @@ export type StartedOAuthFlow =
   | { readonly status: "connected"; readonly connection: Connection }
   | { readonly status: "redirect"; readonly authorizationUrl: string; readonly state: string }
 
-export const startOAuthFlow = Effect.fn("OAuthConnect.start")(function*(
+export const startOAuthFlow = Effect.fn("OAuthConnect.start")(function* (
   options: StartOAuthFlowOptions
 ): Effect.fn.Return<StartedOAuthFlow, OAuthError | StorageError | InvalidInputError, OAuthFlows> {
   const oauth = yield* OAuthFlows
@@ -139,14 +111,12 @@ export const startOAuthFlow = Effect.fn("OAuthConnect.start")(function*(
   }
 })
 
-export const completeOAuthFlow = Effect.fn("OAuthConnect.complete")(function*(
-  options: { readonly state: string; readonly code: string }
-) {
+/** Finishes an authorization from the parameters its callback arrived with. */
+export const completeOAuthFlow = Effect.fn("OAuthConnect.complete")(function* (callback: URLSearchParams) {
   const host = yield* Integrations
   const oauth = yield* OAuthFlows
   const store = yield* CatalogStore
-  const state = yield* decodeId(OAuthState, "state", options.state)
-  const completed = yield* oauth.complete({ state, code: options.code })
+  const completed = yield* oauth.complete(callback)
   const now = yield* Clock.currentTimeMillis
   const record = {
     owner: completed.owner,
@@ -161,14 +131,17 @@ export const completeOAuthFlow = Effect.fn("OAuthConnect.complete")(function*(
   }
   yield* store.putConnection(record)
 
-  const captured = yield* Effect.result(host.refreshConnection({
-    owner: record.owner,
-    integration: record.integration,
-    name: record.name
-  }))
-  const captureError = captured._tag === "Failure"
-    ? `Connected, but the tool list could not be read: ${captured.failure.message}`
-    : undefined
+  const captured = yield* Effect.result(
+    host.refreshConnection({
+      owner: record.owner,
+      integration: record.integration,
+      name: record.name
+    })
+  )
+  const captureError =
+    captured._tag === "Failure"
+      ? `Connected, but the tool list could not be read: ${captured.failure.message}`
+      : undefined
   if (captureError !== undefined) {
     yield* Effect.logWarning(captureError).pipe(
       Effect.annotateLogs({
@@ -180,11 +153,12 @@ export const completeOAuthFlow = Effect.fn("OAuthConnect.complete")(function*(
   }
 
   const expiry = Option.getOrUndefined(completed.expiresAt)
-  const renewalWarning = expiry === undefined
-    ? undefined
-    : `Connected, but ${record.integration} issued no refresh token: this ` +
-      `connection stops working at ${new Date(expiry).toISOString()} and has to ` +
-      `be authorized again. Grant consent when the provider asks for it.`
+  const renewalWarning =
+    expiry === undefined
+      ? undefined
+      : `Connected, but ${record.integration} issued no refresh token: this ` +
+        `connection stops working at ${new Date(expiry).toISOString()} and has to ` +
+        `be authorized again. Grant consent when the provider asks for it.`
   if (renewalWarning !== undefined) {
     yield* Effect.logWarning(renewalWarning).pipe(
       Effect.annotateLogs({
@@ -215,9 +189,13 @@ export const completeOAuthFlow = Effect.fn("OAuthConnect.complete")(function*(
     missingOAuthScopes: [],
     status: "connected",
     ...whenPresent("error", notices.length === 0 ? undefined : notices.join(" "))
-  }).pipe(Effect.mapError((cause) =>
-    new InvalidInputError({
-      field: "connection",
-      detail: `The completed connection could not be described: ${cause}`
-    })))
+  }).pipe(
+    Effect.mapError(
+      (cause) =>
+        new InvalidInputError({
+          field: "connection",
+          detail: `The completed connection could not be described: ${cause}`
+        })
+    )
+  )
 })

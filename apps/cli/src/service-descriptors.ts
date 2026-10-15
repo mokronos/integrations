@@ -3,10 +3,8 @@ import { isTelemetryEnvVar } from "@integragents/observability"
 
 export const serviceLabel = "dev.mokronos.integrations"
 
-export const serviceLogPath = (home: string): string =>
-  path.join(home, "logs", "integrations.log")
-export const serviceErrorLogPath = (home: string): string =>
-  path.join(home, "logs", "integrations.error.log")
+export const serviceLogPath = (home: string): string => path.join(home, "logs", "integrations.log")
+export const serviceErrorLogPath = (home: string): string => path.join(home, "logs", "integrations.error.log")
 
 export interface ServiceDescriptor {
   readonly program: ReadonlyArray<string>
@@ -16,9 +14,11 @@ export interface ServiceDescriptor {
 
 /** What the installed gateway runs with: its home, plus the telemetry settings of whoever installed it. */
 export const serviceEnvironment = (home: string, environment: NodeJS.ProcessEnv) => ({
-  ...Object.fromEntries(Object.entries(environment).filter(
-    (entry): entry is [string, string] => entry[1] !== undefined && isTelemetryEnvVar(entry[0])
-  )),
+  ...Object.fromEntries(
+    Object.entries(environment).filter(
+      (entry): entry is [string, string] => entry[1] !== undefined && isTelemetryEnvVar(entry[0])
+    )
+  ),
   INTEGRATIONS_HOME: home
 })
 
@@ -86,9 +86,13 @@ export const launchdPlist = (
 <plist version="1.0"><dict>
   <key>Label</key><string>${serviceLabel}</string>
   <key>ProgramArguments</key><array>
-    ${serviceArguments(descriptor).map((value) => `<string>${xmlEscape(value)}</string>`).join("\n    ")}
+    ${serviceArguments(descriptor)
+      .map((value) => `<string>${xmlEscape(value)}</string>`)
+      .join("\n    ")}
   </array>
-  <key>EnvironmentVariables</key><dict>${Object.entries(environment).map(([key, value]) => `<key>${xmlEscape(key)}</key><string>${xmlEscape(value)}</string>`).join("")}</dict>
+  <key>EnvironmentVariables</key><dict>${Object.entries(environment)
+    .map(([key, value]) => `<key>${xmlEscape(key)}</key><string>${xmlEscape(value)}</string>`)
+    .join("")}</dict>
   <key>WorkingDirectory</key><string>${xmlEscape(descriptor.home)}</string>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>

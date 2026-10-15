@@ -2,22 +2,59 @@ import { ApprovalStatus } from "./domain.ts"
 import type { Row } from "@libsql/client"
 import { Schema } from "effect"
 import {
-  ApiKeyHash, ApiKeyId, ApprovalDeliveryId, ApprovalGroupWindowMinutes, ApprovalMethod, McpSurface,
-  ApprovalDestinationId, ApprovalId, ApprovalRuleId, ArgumentPattern,
-  AuditApproval, AuditId, ConnectionName, IntegrationSlug, ProfileCapability, ProfileId, ToolDecision,
-  LoginHandoffHash, SessionTokenHash, SubjectId, TenantId, ToolName,
-  OAuthApplicationId, OAuthGrantId, OAuthApplicationKind
+  ApiKeyHash,
+  ApiKeyId,
+  ApprovalDeliveryId,
+  ApprovalGroupWindowMinutes,
+  ApprovalMethod,
+  McpSurface,
+  ApprovalDestinationId,
+  ApprovalId,
+  ApprovalRuleId,
+  ArgumentPattern,
+  AuditApproval,
+  AuditId,
+  ConnectionName,
+  IntegrationSlug,
+  ProfileCapability,
+  ProfileId,
+  ToolDecision,
+  LoginHandoffHash,
+  SessionTokenHash,
+  SubjectId,
+  TenantId,
+  ToolName,
+  OAuthApplicationId,
+  OAuthGrantId,
+  OAuthApplicationKind
 } from "./domain.ts"
 import type {
-  ApiKey, ApprovalDeliveryAttempt, ApprovalDestination, ApprovalRule,
-  AuditRecord, AuthSession, Caller, ConnectionRef, ExternalIdentity, LoginHandoff,
-  PendingApproval, Profile, ProfileTool, Subject, Tenant, ToolSnapshot
+  ApiKey,
+  ApprovalDeliveryAttempt,
+  ApprovalDestination,
+  ApprovalRule,
+  AuditRecord,
+  AuthSession,
+  Caller,
+  ConnectionRef,
+  ExternalIdentity,
+  LoginHandoff,
+  PendingApproval,
+  Profile,
+  ProfileTool,
+  Subject,
+  Tenant,
+  ToolSnapshot
 } from "./domain.ts"
 import { PasswordHash } from "./passwords.ts"
 import type { IdentityOAuthStateRecord, LoginRecord } from "./store-contract.ts"
 import { OAuthSecretHash, OAuthTokenKind } from "./mcp-oauth.ts"
 import type {
-  OAuthApplication, OAuthAuthorizationCode, OAuthAuthorizationRequest, OAuthGrant, OAuthToken
+  OAuthApplication,
+  OAuthAuthorizationCode,
+  OAuthAuthorizationRequest,
+  OAuthGrant,
+  OAuthToken
 } from "./mcp-oauth.ts"
 
 type PickedRow = Record<string, Row[string]>
@@ -271,41 +308,77 @@ const SnapshotRow = Schema.Struct({
 })
 
 const profileColumns = [
-  "id", "tenant_id", "name", "capabilities", "approval_method", "mcp_surface", "approval_group_window_minutes", "include_new_tools", "created_at", "revoked_at"
+  "id",
+  "tenant_id",
+  "name",
+  "capabilities",
+  "approval_method",
+  "mcp_surface",
+  "approval_group_window_minutes",
+  "include_new_tools",
+  "created_at",
+  "revoked_at"
 ]
 const callerColumns = ["api_key_id", "oauth_grant_id", "oauth_application_id", "credential_name", "agent"]
 const tenantColumns = ["id", "name", "created_at"]
 const subjectColumns = ["id", "tenant_id", "created_at"]
 const loginColumns = ["subject_id", "tenant_id", "email", "password_hash", "created_at"]
 const sessionColumns = ["token_hash", "subject_id", "tenant_id", "created_at", "expires_at"]
-const externalIdentityColumns = [
-  "provider", "provider_subject", "subject_id", "tenant_id", "email", "created_at"
-]
+const externalIdentityColumns = ["provider", "provider_subject", "subject_id", "tenant_id", "email", "created_at"]
 const loginHandoffColumns = [
-  "request_hash", "subject_id", "tenant_id", "email", "created_at", "expires_at", "collected_at"
+  "request_hash",
+  "subject_id",
+  "tenant_id",
+  "email",
+  "created_at",
+  "expires_at",
+  "collected_at"
 ]
-const identityOAuthStateColumns = [
-  "state_hash", "provider", "handoff_hash", "return_path", "expires_at"
-]
+const identityOAuthStateColumns = ["state_hash", "provider", "handoff_hash", "return_path", "expires_at"]
 const apiKeyColumns = ["id", "profile_id", "name", "hash", "created_at", "last_used_at", "revoked_at"]
-const profileToolColumns = [
-  "profile_id", "owner", "subject", "integration", "connection_name", "tool", "decision"
-]
+const profileToolColumns = ["profile_id", "owner", "subject", "integration", "connection_name", "tool", "decision"]
 const approvalColumns = [
-  "id", "group_id", "profile_id", ...callerColumns, "alias", "tool", "arguments", "status",
-  "created_at", "expires_at", "decided_at", "decided_by", "result", "error", "collected_at"
+  "id",
+  "group_id",
+  "profile_id",
+  ...callerColumns,
+  "alias",
+  "tool",
+  "arguments",
+  "status",
+  "created_at",
+  "expires_at",
+  "decided_at",
+  "decided_by",
+  "result",
+  "error",
+  "collected_at"
 ]
 const auditColumns = [
-  "id", "profile_id", ...callerColumns, "authorized_by_subject_id", "alias", "tool", "owner", "subject", "integration",
-  "connection_name", "decision", "approval", "outcome", "message", "created_at"
+  "id",
+  "profile_id",
+  ...callerColumns,
+  "authorized_by_subject_id",
+  "alias",
+  "tool",
+  "owner",
+  "subject",
+  "integration",
+  "connection_name",
+  "decision",
+  "approval",
+  "outcome",
+  "message",
+  "created_at"
 ]
-const snapshotColumns = [
-  "integration", "connection_name", "tool", "input_schema", "output_schema", "synced_at"
-]
+const snapshotColumns = ["integration", "connection_name", "tool", "input_schema", "output_schema", "synced_at"]
 
 export class MalformedRowError extends Error {
   readonly _tag = "MalformedRowError"
-  constructor(readonly table: string, override readonly cause: unknown) {
+  constructor(
+    readonly table: string,
+    override readonly cause: unknown
+  ) {
     super(`Malformed ${table} row`)
   }
 }
@@ -353,12 +426,10 @@ const decodeCapabilities = jsonDecoder(
   Schema.fromJsonString(Schema.Array(ProfileCapability))
 )
 
-const parseJsonColumn = (value: string): typeof Schema.Json.Type =>
-  decodeJsonText(value)
+const parseJsonColumn = (value: string): typeof Schema.Json.Type => decodeJsonText(value)
 
 const date = (value: number): Date => new Date(value)
-const nullableDate = (value: number | null): Date | null =>
-  value === null ? null : new Date(value)
+const nullableDate = (value: number | null): Date | null => (value === null ? null : new Date(value))
 export const millis = (value: Date): number => value.getTime()
 
 export const toProfile = (row: Row): Profile => {
@@ -380,13 +451,17 @@ export const toProfile = (row: Row): Profile => {
 const toCaller = (fields: typeof CallerRow.Type): Caller => ({
   apiKeyId: fields.api_key_id === null ? null : ApiKeyId.make(fields.api_key_id),
   oauthGrantId: fields.oauth_grant_id === null ? null : OAuthGrantId.make(fields.oauth_grant_id),
-  oauthApplicationId: fields.oauth_application_id === null ? null : OAuthApplicationId.make(fields.oauth_application_id),
+  oauthApplicationId:
+    fields.oauth_application_id === null ? null : OAuthApplicationId.make(fields.oauth_application_id),
   credentialName: fields.credential_name,
   agent: fields.agent
 })
 
 export const toApprovalDestination = (row: Row): ApprovalDestination => {
-  const decoded = rowDecoder("gateway_approval_destination", ApprovalDestinationRow)(pick(row, ["id", "tenant_id", "name", "type", "url", "created_at"]))
+  const decoded = rowDecoder(
+    "gateway_approval_destination",
+    ApprovalDestinationRow
+  )(pick(row, ["id", "tenant_id", "name", "type", "url", "created_at"]))
   return {
     id: ApprovalDestinationId.make(decoded.id),
     tenantId: TenantId.make(decoded.tenant_id),
@@ -398,7 +473,22 @@ export const toApprovalDestination = (row: Row): ApprovalDestination => {
 }
 
 export const toApprovalDeliveryAttempt = (row: Row): ApprovalDeliveryAttempt => {
-  const decoded = rowDecoder("gateway_approval_delivery", ApprovalDeliveryRow)(pick(row, ["id", "approval_id", "destination_id", "destination_name", "status", "attempts", "next_attempt_at", "delivered_at", "last_error"]))
+  const decoded = rowDecoder(
+    "gateway_approval_delivery",
+    ApprovalDeliveryRow
+  )(
+    pick(row, [
+      "id",
+      "approval_id",
+      "destination_id",
+      "destination_name",
+      "status",
+      "attempts",
+      "next_attempt_at",
+      "delivered_at",
+      "last_error"
+    ])
+  )
   return {
     id: ApprovalDeliveryId.make(decoded.id),
     approvalId: ApprovalId.make(decoded.approval_id),
@@ -471,9 +561,7 @@ export const toIdentityOAuthState = (row: Row): IdentityOAuthStateRecord => {
   return {
     stateHash: LoginHandoffHash.make(decoded.state_hash),
     provider: decoded.provider,
-    handoffHash: decoded.handoff_hash === null
-      ? null
-      : LoginHandoffHash.make(decoded.handoff_hash),
+    handoffHash: decoded.handoff_hash === null ? null : LoginHandoffHash.make(decoded.handoff_hash),
     returnPath: decoded.return_path,
     expiresAt: date(decoded.expires_at)
   }
@@ -504,16 +592,25 @@ export const toApiKey = (row: Row): ApiKey => {
   }
 }
 
-const stringArrayFromJson = jsonDecoder(
-  "redirect_uris_json",
-  Schema.fromJsonString(Schema.Array(Schema.String))
-)
+const stringArrayFromJson = jsonDecoder("redirect_uris_json", Schema.fromJsonString(Schema.Array(Schema.String)))
 
 export const toOAuthApplication = (row: Row): OAuthApplication => {
-  const decoded = rowDecoder("gateway_oauth_application", OAuthApplicationRow)(pick(row, [
-    "id", "kind", "client_identifier", "name", "redirect_uris_json", "metadata_json",
-    "created_at", "updated_at", "revoked_at"
-  ]))
+  const decoded = rowDecoder(
+    "gateway_oauth_application",
+    OAuthApplicationRow
+  )(
+    pick(row, [
+      "id",
+      "kind",
+      "client_identifier",
+      "name",
+      "redirect_uris_json",
+      "metadata_json",
+      "created_at",
+      "updated_at",
+      "revoked_at"
+    ])
+  )
   return {
     id: OAuthApplicationId.make(decoded.id),
     kind: decoded.kind,
@@ -528,10 +625,23 @@ export const toOAuthApplication = (row: Row): OAuthApplication => {
 }
 
 export const toOAuthAuthorizationRequest = (row: Row): OAuthAuthorizationRequest => {
-  const decoded = rowDecoder("gateway_oauth_authorization_request", OAuthAuthorizationRequestRow)(pick(row, [
-    "id", "application_id", "redirect_uri", "state", "code_challenge", "resource", "scope",
-    "created_at", "expires_at", "consumed_at"
-  ]))
+  const decoded = rowDecoder(
+    "gateway_oauth_authorization_request",
+    OAuthAuthorizationRequestRow
+  )(
+    pick(row, [
+      "id",
+      "application_id",
+      "redirect_uri",
+      "state",
+      "code_challenge",
+      "resource",
+      "scope",
+      "created_at",
+      "expires_at",
+      "consumed_at"
+    ])
+  )
   return {
     id: decoded.id,
     applicationId: OAuthApplicationId.make(decoded.application_id),
@@ -547,10 +657,23 @@ export const toOAuthAuthorizationRequest = (row: Row): OAuthAuthorizationRequest
 }
 
 export const toOAuthGrant = (row: Row): OAuthGrant => {
-  const decoded = rowDecoder("gateway_oauth_grant", OAuthGrantRow)(pick(row, [
-    "id", "application_id", "subject_id", "tenant_id", "profile_id", "resource", "scope",
-    "created_at", "last_used_at", "revoked_at"
-  ]))
+  const decoded = rowDecoder(
+    "gateway_oauth_grant",
+    OAuthGrantRow
+  )(
+    pick(row, [
+      "id",
+      "application_id",
+      "subject_id",
+      "tenant_id",
+      "profile_id",
+      "resource",
+      "scope",
+      "created_at",
+      "last_used_at",
+      "revoked_at"
+    ])
+  )
   return {
     id: OAuthGrantId.make(decoded.id),
     applicationId: OAuthApplicationId.make(decoded.application_id),
@@ -566,10 +689,23 @@ export const toOAuthGrant = (row: Row): OAuthGrant => {
 }
 
 export const toOAuthAuthorizationCode = (row: Row): OAuthAuthorizationCode => {
-  const decoded = rowDecoder("gateway_oauth_authorization_code", OAuthAuthorizationCodeRow)(pick(row, [
-    "hash", "grant_id", "application_id", "redirect_uri", "code_challenge", "resource", "scope",
-    "created_at", "expires_at", "consumed_at"
-  ]))
+  const decoded = rowDecoder(
+    "gateway_oauth_authorization_code",
+    OAuthAuthorizationCodeRow
+  )(
+    pick(row, [
+      "hash",
+      "grant_id",
+      "application_id",
+      "redirect_uri",
+      "code_challenge",
+      "resource",
+      "scope",
+      "created_at",
+      "expires_at",
+      "consumed_at"
+    ])
+  )
   return {
     hash: OAuthSecretHash.make(decoded.hash),
     grantId: OAuthGrantId.make(decoded.grant_id),
@@ -585,10 +721,25 @@ export const toOAuthAuthorizationCode = (row: Row): OAuthAuthorizationCode => {
 }
 
 export const toOAuthToken = (row: Row): OAuthToken => {
-  const decoded = rowDecoder("gateway_oauth_token", OAuthTokenRow)(pick(row, [
-    "hash", "kind", "family_id", "grant_id", "application_id", "resource", "scope",
-    "created_at", "expires_at", "used_at", "revoked_at", "replaced_by_hash"
-  ]))
+  const decoded = rowDecoder(
+    "gateway_oauth_token",
+    OAuthTokenRow
+  )(
+    pick(row, [
+      "hash",
+      "kind",
+      "family_id",
+      "grant_id",
+      "application_id",
+      "resource",
+      "scope",
+      "created_at",
+      "expires_at",
+      "used_at",
+      "revoked_at",
+      "replaced_by_hash"
+    ])
+  )
   return {
     hash: OAuthSecretHash.make(decoded.hash),
     kind: decoded.kind,
@@ -629,9 +780,20 @@ export const toProfileTool = (row: Row): ProfileTool => {
 }
 
 export const toApprovalRule = (row: Row, open: (text: string) => string): ApprovalRule => {
-  const decoded = decodeApprovalRuleRow(pick(row, [
-    "id", "profile_id", "owner", "subject", "integration", "connection_name", "tool", "pattern", "created_at", "created_by"
-  ]))
+  const decoded = decodeApprovalRuleRow(
+    pick(row, [
+      "id",
+      "profile_id",
+      "owner",
+      "subject",
+      "integration",
+      "connection_name",
+      "tool",
+      "pattern",
+      "created_at",
+      "created_by"
+    ])
+  )
   const pattern = decodePattern(open(decoded.pattern))
   return {
     id: ApprovalRuleId.make(decoded.id),
@@ -674,17 +836,19 @@ export const toAuditRecord = (row: Row): AuditRecord => {
     id: AuditId.make(decoded.id),
     profileId: decoded.profile_id === null ? null : ProfileId.make(decoded.profile_id),
     caller: toCaller(decoded),
-    authorizedBySubjectId: decoded.authorized_by_subject_id === null ? null : SubjectId.make(decoded.authorized_by_subject_id),
+    authorizedBySubjectId:
+      decoded.authorized_by_subject_id === null ? null : SubjectId.make(decoded.authorized_by_subject_id),
     alias: decoded.alias,
     tool: decoded.tool === null ? null : ToolName.make(decoded.tool),
-    connection: decoded.owner === null || decoded.integration === null || decoded.connection_name === null
-      ? null
-      : toConnectionRef({
-        owner: decoded.owner,
-        subject: decoded.subject,
-        integration: decoded.integration,
-        connection_name: decoded.connection_name
-      }),
+    connection:
+      decoded.owner === null || decoded.integration === null || decoded.connection_name === null
+        ? null
+        : toConnectionRef({
+            owner: decoded.owner,
+            subject: decoded.subject,
+            integration: decoded.integration,
+            connection_name: decoded.connection_name
+          }),
     subject: decoded.subject === null ? null : SubjectId.make(decoded.subject),
     decision: decoded.decision,
     approval: decoded.approval,

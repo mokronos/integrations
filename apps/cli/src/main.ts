@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { BunHttpClient } from "@effect/platform-bun"
-import { Data, Effect, Layer } from "effect"
+import { Data, Effect, Layer, Option } from "effect"
 import { Command, Flag } from "effect/cli"
 import { HttpClient } from "effect/http"
 import { defaultGatewayPort } from "@integragents/client"
@@ -9,13 +9,7 @@ import { controlPlaneSubcommands, operatorClientSubcommands } from "./commands.t
 import { authenticationSubcommands } from "./auth-commands.ts"
 import { openBrowser } from "./connection.ts"
 import { writeStdoutLine } from "./output.ts"
-import {
-  installService,
-  serviceLabel,
-  serviceProgram,
-  startDetachedGateway,
-  uninstallService
-} from "./service.ts"
+import { installService, serviceLabel, serviceProgram, startDetachedGateway, uninstallService } from "./service.ts"
 import packageMetadata from "../package.json" with { type: "json" }
 
 class ServeError extends Data.TaggedError("ServeError")<{ readonly message: string }> {}
@@ -34,7 +28,8 @@ const loopbackWarning = (host: string): void => {
 
 const runForeground = async (port: number, host: string): Promise<void> => {
   const { serveGateway } = await import("@integragents/local")
-  const running = await serveGateway({ port, hostname: host, httpClient: BunHttpClient.layer })
+  const { nativeConnect } = await import("@integragents/host/native-egress")
+  const running = await serveGateway({ port, hostname: host, connect: nativeConnect })
   await Effect.runPromise(writeStdoutLine(`integrations gateway listening at ${running.url}`))
   loopbackWarning(host)
   await new Promise<void>((resolve) => {
@@ -60,13 +55,11 @@ const serveCommand = Command.make(
     detach: Flag.Boolean("detach").pipe(
       Flag.withDefault(false),
       Flag.withAlias("d"),
-      Flag.withDescription(
-        "Start in the background and return, waiting until the gateway is ready"
-      )
+      Flag.withDescription("Start in the background and return, waiting until the gateway is ready")
     )
   },
   ({ port, host, detach }) =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       if (!detach) {
         return yield* Effect.tryPromise({
           try: () => runForeground(port, host),
@@ -81,6 +74,33 @@ const serveCommand = Command.make(
     })
 ).pipe(Command.withDescription("Run the integration gateway, in this terminal or detached"))
 
+const answersHealth = (url: string): Effect.Effect<boolean, never, HttpClient.HttpClient> =>
+  HttpClient.get(`${url}/v1/health`).pipe(
+    Effect.match({
+      onFailure: () => false,
+      onSuccess: (response) => response.status >= 200 && response.status < 300
+    })
+  )
+
+const healthCommand = Command.make(
+  "health",
+  {
+    url: Flag.String("url").pipe(Flag.optional, Flag.withDescription("Gateway to probe (default: the local gateway)"))
+  },
+  ({ url }) =>
+    Effect.gen(function* () {
+      const { readGatewayConfig, integrationsHome } = yield* Effect.promise(() => import("@integragents/client"))
+      const target = Option.isSome(url)
+        ? url.value
+        : ((yield* Effect.promise(() => readGatewayConfig(integrationsHome())))?.url ??
+          `http://127.0.0.1:${defaultGatewayPort}`)
+      if (!(yield* answersHealth(target))) {
+        return yield* new ServeError({ message: `The gateway at ${target} is not healthy.` })
+      }
+      yield* writeStdoutLine(`ok ${target}`)
+    })
+).pipe(Command.withDescription("Exit 0 when the gateway answers its health check"))
+
 const dashboardCommand = Command.make(
   "dashboard",
   {
@@ -90,31 +110,21 @@ const dashboardCommand = Command.make(
     )
   },
   ({ print }) =>
-    Effect.gen(function*() {
-      const { readGatewayConfig, integrationsHome } = yield* Effect.promise(() =>
-        import("@integragents/client")
-      )
+    Effect.gen(function* () {
+      const { readGatewayConfig, integrationsHome } = yield* Effect.promise(() => import("@integragents/client"))
       const config = yield* Effect.promise(() => readGatewayConfig(integrationsHome()))
       if (config === undefined) {
         return yield* new ServeError({
           message: "No gateway found. Start one with `ii serve`, then try again."
         })
       }
-      const healthy = yield* HttpClient.get(`${config.url}/v1/health`).pipe(
-        Effect.match({
-          onFailure: () => false,
-          onSuccess: (response) => response.status >= 200 && response.status < 300
-        })
-      )
-      if (!healthy) {
+      if (!(yield* answersHealth(config.url))) {
         return yield* new ServeError({
           message: `Nothing is answering at ${config.url}. Start the gateway with \`ii serve\`.`
         })
       }
       if (!print) yield* openBrowser(config.url)
-      yield* writeStdoutLine(
-        print ? config.url : `Opening the control plane at ${config.url}`
-      )
+      yield* writeStdoutLine(print ? config.url : `Opening the control plane at ${config.url}`)
     })
 ).pipe(Command.withDescription("Open the gateway's control plane in a browser"))
 
@@ -152,21 +162,20 @@ const uninstallCommand = Command.make(
   },
   ({ verbose }) =>
     uninstallService(verbose).pipe(
-      Effect.andThen(writeStdoutLine(
-        `${serviceLabel} stopped and deregistered. Connections and credentials were left in place.`
-      ))
+      Effect.andThen(
+        writeStdoutLine(`${serviceLabel} stopped and deregistered. Connections and credentials were left in place.`)
+      )
     )
 ).pipe(Command.withDescription("Stop and deregister the gateway service"))
 
 export const rootCommand = Command.make("ii").pipe(
-  Command.withDescription(
-    "Discover, authorize, delegate, and invoke integrations through the gateway"
-  ),
+  Command.withDescription("Discover, authorize, delegate, and invoke integrations through the gateway"),
   Command.withSubcommands([
     ...operatorClientSubcommands,
     ...controlPlaneSubcommands,
     ...authenticationSubcommands,
     serveCommand,
+    healthCommand,
     dashboardCommand,
     installCommand,
     uninstallCommand
@@ -180,8 +189,9 @@ export const main = async (argv: ReadonlyArray<string>): Promise<void> => {
         error.errors.length === 0
           ? Effect.void
           : Effect.sync(() => {
-            process.exitCode = 1
-          })),
+              process.exitCode = 1
+            })
+      ),
       commandSpan(argv),
       Effect.provide(Layer.merge(cliLayer("integrations-cli"), BunHttpClient.layer))
     )

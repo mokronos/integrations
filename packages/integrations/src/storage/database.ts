@@ -44,8 +44,10 @@ const decodeCells = Schema.decodeUnknownEffect(Schema.Array(Schema.Record(Schema
 
 const firstLine = (sql: string): string => sql.trim().split("\n")[0] ?? sql
 
-const storageFailure = (sql: string) => (cause: SqlError.SqlError | Schema.SchemaError): StorageError =>
-  new StorageError({ message: `Statement failed: ${firstLine(sql)} (${cause.message})`, cause })
+const storageFailure =
+  (sql: string) =>
+  (cause: SqlError.SqlError | Schema.SchemaError): StorageError =>
+    new StorageError({ message: `Statement failed: ${firstLine(sql)} (${cause.message})`, cause })
 
 function sqlDatabase(sql: SqlClient.SqlClient): Database["Service"] {
   const query = Effect.fn("Database.query")((statement: SqlStatement) =>
@@ -60,11 +62,13 @@ function sqlDatabase(sql: SqlClient.SqlClient): Database["Service"] {
   )
 
   const batch = Effect.fn("Database.batch")((statements: ReadonlyArray<SqlStatement>) =>
-    sql.withTransaction(Effect.forEach(statements, query, { discard: true })).pipe(
-      Effect.mapError((cause) =>
-        cause instanceof StorageError ? cause : storageFailure(statements[0]?.sql ?? "batch")(cause)
+    sql
+      .withTransaction(Effect.forEach(statements, query, { discard: true }))
+      .pipe(
+        Effect.mapError((cause) =>
+          cause instanceof StorageError ? cause : storageFailure(statements[0]?.sql ?? "batch")(cause)
+        )
       )
-    )
   )
 
   return { query, batch }

@@ -44,28 +44,41 @@ const connection = (name: string): Connection => ({
 
 interface RecordedFlow {
   redirectUri: string
-  completedState?: string
-  completedCode?: string
+  completedState?: string | null
+  completedCode?: string | null
   createdClientId?: string
 }
 
-const fakeAuth = (behaviour: {
-  readonly completeFails?: boolean
-  readonly storedClient?: OAuthClientRecord
-} = {}) => {
+const fakeAuth = (
+  behaviour: {
+    readonly completeFails?: boolean
+    readonly storedClient?: OAuthClientRecord
+  } = {}
+) => {
   const record: RecordedFlow = { redirectUri: "(none)" }
   let started = false
-  const dies = (member: string) => () =>
-    Effect.die(new Error(`${member} is not used by these tests`))
+  const dies = (member: string) => () => Effect.die(new Error(`${member} is not used by these tests`))
 
   const host: Context.Context<OAuthOperations> = Context.empty().pipe(
     Context.add(OAuthFlows, {
-      probe: dies("probe"),
-      registerDynamicClient: (options) => {
+      discover: (settings) =>
+        Effect.succeed({
+          server: {
+            issuer: "https://oauth2.example",
+            ...whenPresent("authorization_endpoint", settings.authorizationUrl),
+            ...whenPresent("token_endpoint", settings.tokenUrl),
+            ...whenPresent("registration_endpoint", settings.registrationEndpoint)
+          },
+          discovered: false,
+          resource: undefined,
+          scopes: []
+        }),
+      discoverResource: dies("discoverResource"),
+      registerClient: (options) => {
         record.redirectUri = options.redirectUri
         return Effect.succeed(OAuthClientSlug.make(`client-${options.slug}`))
       },
-      createClient: (options) => {
+      saveClient: (options) => {
         record.createdClientId = options.clientId
         return Effect.succeed(options.slug)
       },
@@ -77,15 +90,18 @@ const fakeAuth = (behaviour: {
           state: OAuthState.make("provider-state-1")
         })
       },
-      complete: (options) => {
+      complete: (callback) => {
         if (behaviour.completeFails === true) {
-          return Effect.fail(new OAuthError({
-            stage: "complete",
-            detail: "token exchange rejected"
-          }))
+          return Effect.fail(
+            new OAuthError({
+              stage: "complete",
+              reason: "invalid_grant",
+              detail: "token exchange rejected"
+            })
+          )
         }
-        record.completedState = options.state
-        record.completedCode = options.code
+        record.completedState = callback.get("state")
+        record.completedCode = callback.get("code")
         return Effect.succeed({
           owner: "org" as const,
           integration: IntegrationSlug.make("google"),
@@ -111,9 +127,12 @@ const fakeAuth = (behaviour: {
 }
 
 describe("remote oauth flows", () => {
-  const remote = (fake: ReturnType<typeof fakeAuth>, options: {
-    readonly onConnected?: (session: { readonly id: string }) => Effect.Effect<void>
-  } = {}) =>
+  const remote = (
+    fake: ReturnType<typeof fakeAuth>,
+    options: {
+      readonly onConnected?: (session: { readonly id: string }) => Effect.Effect<void>
+    } = {}
+  ) =>
     createOAuthSessions(fake.host, {
       publicUrl: "https://gw.example.com",
       ...whenPresent("onConnected", options.onConnected)
@@ -138,26 +157,26 @@ describe("remote oauth flows", () => {
     clientId: "already-registered",
     authorizationUrl: manualMethod.oauth.authorizationUrl,
     tokenUrl: manualMethod.oauth.tokenUrl,
-    scopes: []
+    scopes: [],
+    issParameterSupported: false
   }
 
   it.effect("parks the session for a human when the provider needs an app of its own", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const fake = fakeAuth()
 
       const session = yield* remote(fake).start(startManual)
 
       expect(session.state.status).toBe("needs-client")
       if (session.state.status !== "needs-client") return
-      expect(session.state.setupUrl).toBe(
-        `https://gw.example.com/integrations?setup=${session.id}`
-      )
+      expect(session.state.setupUrl).toBe(`https://gw.example.com/integrations?setup=${session.id}`)
       expect(session.state.guidance).toContain("does not support dynamic client registration")
       expect(session.state.guidance).toContain("https://gw.example.com/v1/oauth/callback")
-    }))
+    })
+  )
 
   it.effect("resumes a parked session once a human supplies the client", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const fake = fakeAuth()
       const sessions = remote(fake)
       const parked = yield* sessions.start(startManual)
@@ -170,10 +189,11 @@ describe("remote oauth flows", () => {
       expect(fake.record.createdClientId).toBe("typed-by-a-human")
       expect(resumed?.id).toBe(parked.id)
       expect(resumed?.state.status).toBe("pending")
-    }))
+    })
+  )
 
   it.effect("keeps the client secret out of the stored session", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const fake = fakeAuth()
       const sessions = remote(fake)
       const parked = yield* sessions.start(startManual)
@@ -185,10 +205,11 @@ describe("remote oauth flows", () => {
 
       const stored = yield* sessions.get(parked.id)
       expect(JSON.stringify(stored)).not.toContain("secret-from-the-browser")
-    }))
+    })
+  )
 
   it.effect("ignores a client for a session that is not waiting for one", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const fake = fakeAuth()
       const sessions = remote(fake)
       const pending = yield* sessions.start(startGoogle)
@@ -196,20 +217,22 @@ describe("remote oauth flows", () => {
       const resumed = yield* sessions.provideClient(pending.id, { clientId: "too-late" })
 
       expect(resumed).toBeUndefined()
-    }))
+    })
+  )
 
   it.effect("reuses an OAuth client a human already registered", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const fake = fakeAuth({ storedClient })
 
       const session = yield* remote(fake).start(startManual)
 
       expect(session.state.status).toBe("pending")
       expect(fake.record.createdClientId).toBeUndefined()
-    }))
+    })
+  )
 
   it.effect("registers against the public URL instead of a loopback port", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const fake = fakeAuth()
 
       const session = yield* remote(fake).start(startGoogle)
@@ -218,10 +241,11 @@ describe("remote oauth flows", () => {
       expect(session.state.status).toBe("pending")
       if (session.state.status !== "pending") return
       expect(session.state.authorizationUrl).toContain("accounts.example")
-    }))
+    })
+  )
 
   it.effect("completes by provider state exactly once", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const fake = fakeAuth()
       const completed: Array<string> = []
       const sessions = remote(fake, {
@@ -229,7 +253,10 @@ describe("remote oauth flows", () => {
       })
       yield* sessions.start(startGoogle)
 
-      const done = yield* sessions.completeByState("provider-state-1", { code: "abc" })
+      const done = yield* sessions.completeByState(
+        "provider-state-1",
+        new URLSearchParams({ state: "provider-state-1", code: "abc" })
+      )
 
       expect(done?.state.status).toBe("connected")
       if (done === undefined) throw new Error("Expected OAuth completion")
@@ -237,25 +264,37 @@ describe("remote oauth flows", () => {
       expect(fake.record.completedCode).toBe("abc")
       expect(completed).toEqual([done.id])
 
-      expect(yield* sessions.completeByState("provider-state-1", { code: "abc" })).toBeUndefined()
+      expect(
+        yield* sessions.completeByState(
+          "provider-state-1",
+          new URLSearchParams({ state: "provider-state-1", code: "abc" })
+        )
+      ).toBeUndefined()
       expect(completed).toEqual([done.id])
-      expect(yield* sessions.completeByState("never-seen", { code: "abc" })).toBeUndefined()
-    }))
+      expect(
+        yield* sessions.completeByState("never-seen", new URLSearchParams({ state: "never-seen", code: "abc" }))
+      ).toBeUndefined()
+    })
+  )
 
   it.effect("records the failure on the session when the exchange is refused", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const sessions = remote(fakeAuth({ completeFails: true }))
       yield* sessions.start(startGoogle)
 
-      const failed = yield* sessions.completeByState("provider-state-1", { code: "bad" })
+      const failed = yield* sessions.completeByState(
+        "provider-state-1",
+        new URLSearchParams({ state: "provider-state-1", code: "bad" })
+      )
 
       expect(failed?.state.status).toBe("failed")
       if (failed?.state.status !== "failed") return
       expect(failed.state.message).toContain("token exchange rejected")
-    }))
+    })
+  )
 
   it.effect("local mode still owns an ephemeral listener and needs no public URL", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const fake = fakeAuth()
       const sessions = createOAuthSessions(fake.host, { authorizeLocally: authorizeInBrowser })
 
@@ -264,7 +303,8 @@ describe("remote oauth flows", () => {
       expect(fake.record.redirectUri).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/oauth\/callback$/)
       expect(session.state.status).toBe("pending")
       yield* sessions.stop()
-    }))
+    })
+  )
 })
 
 describe("the remote callback route", () => {
@@ -287,40 +327,38 @@ describe("the remote callback route", () => {
   }
 
   /** A browser arriving at the callback route, and the page it is shown. */
-  const callbacks = Effect.fnUntraced(function*(
-    oauth: Parameters<typeof createGatewayHandler>[0]["oauth"]
-  ) {
+  const callbacks = Effect.fnUntraced(function* (oauth: Parameters<typeof createGatewayHandler>[0]["oauth"]) {
     const store = yield* gatewayStore("gateway-oauth-")
     const { handle } = createGatewayHandler({
-    events: yield* makeGatewayEvents,
+      events: yield* makeGatewayEvents,
       httpClient: FetchHttpClient.layer,
       integrationServices: stubIntegrationsContext(),
       store,
       retentionDays: 30,
       oauth
     })
-    return Effect.fnUntraced(function*(pathname: string) {
-      const response = yield* Effect.promise(() =>
-        handle(new Request(`http://gateway.test${pathname}`)))
+    return Effect.fnUntraced(function* (pathname: string) {
+      const response = yield* Effect.promise(() => handle(new Request(`http://gateway.test${pathname}`)))
       return { status: response.status, text: yield* Effect.promise(() => response.text()) }
     })
   })
 
   it.effect("connects when the state is known and shows the human a page", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       let completed: { state?: string; code?: string } | undefined
       const call = yield* callbacks({
         ...notUsed,
-        completeByState: (state, input) => Effect.sync(() => {
-          completed = { state, code: input.code }
-          return {
-            id: "s1",
-            integration: "google",
-            connection: "default",
-            request,
-            state: { status: "connected", connection: connection("default") }
-          }
-        })
+        completeByState: (state, input) =>
+          Effect.sync(() => {
+            completed = { state, code: input.get("code") ?? "" }
+            return {
+              id: "s1",
+              integration: "google",
+              connection: "default",
+              request,
+              state: { status: "connected", connection: connection("default") }
+            }
+          })
       })
 
       const response = yield* call("/v1/oauth/callback?state=provider-state-1&code=abc")
@@ -328,10 +366,11 @@ describe("the remote callback route", () => {
       expect(response.status).toBe(200)
       expect(response.text).toContain("Account connected")
       expect(completed?.code).toBe("abc")
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("answers an unknown or error callback with a readable page, not JSON", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const call = yield* callbacks({
         ...notUsed,
         completeByState: () => Effect.sync((): undefined => undefined)
@@ -346,24 +385,27 @@ describe("the remote callback route", () => {
       )
       expect(errored.status).toBe(400)
       expect(errored.text).toContain("User declined")
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("reports a flow that failed during completion", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const call = yield* callbacks({
         ...notUsed,
-        completeByState: () => Effect.succeed({
-          id: "s1",
-          integration: "google",
-          connection: "default",
-          request,
-          state: { status: "failed", message: "token exchange rejected" }
-        })
+        completeByState: () =>
+          Effect.succeed({
+            id: "s1",
+            integration: "google",
+            connection: "default",
+            request,
+            state: { status: "failed", message: "token exchange rejected" }
+          })
       })
 
       const response = yield* call("/v1/oauth/callback?state=provider-state-1&code=abc")
 
       expect(response.status).toBe(400)
       expect(response.text).toContain("token exchange rejected")
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 })

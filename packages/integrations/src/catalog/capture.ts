@@ -49,9 +49,7 @@ const record = (
     ...whenPresent("outputSchema", tool.outputSchema),
     call: tool.call,
     capturedAt
-  }).pipe(Effect.mapError((cause) =>
-    new StorageError({ message: `Could not capture tool ${tool.name}`, cause })
-  ))
+  }).pipe(Effect.mapError((cause) => new StorageError({ message: `Could not capture tool ${tool.name}`, cause })))
 
 export const captureMcpTools = (
   target: CaptureTarget,
@@ -66,12 +64,11 @@ export const captureMcpTools = (
       ...whenPresent("inputSchema", definition.inputSchema),
       ...whenPresent(
         "outputSchema",
-        definition.outputSchema === undefined
-          ? undefined
-          : normalizeOutputSchema(definition.outputSchema)
+        definition.outputSchema === undefined ? undefined : normalizeOutputSchema(definition.outputSchema)
       ),
       call: { kind: "mcp", tool: definition.name }
-    }))
+    })
+  )
 
 export const captureOpenApiTools = (
   target: CaptureTarget,
@@ -81,10 +78,7 @@ export const captureOpenApiTools = (
   Effect.forEach(spec.operations, (operation) =>
     record(target, capturedAt, {
       name: operation.name,
-      description: Option.getOrElse(
-        operation.summary,
-        () => Option.getOrElse(operation.description, () => "")
-      ),
+      description: Option.getOrElse(operation.summary, () => Option.getOrElse(operation.description, () => "")),
       readOnly: operation.readOnly,
       inputSchema: operation.inputSchema,
       ...whenPresent("outputSchema", Option.getOrUndefined(operation.outputSchema)),
@@ -98,4 +92,5 @@ export const captureOpenApiTools = (
         ...whenPresent("bodyProperty", Option.getOrUndefined(operation.bodyProperty)),
         ...whenPresent("server", Option.getOrUndefined(operation.server))
       }
-    }))
+    })
+  )

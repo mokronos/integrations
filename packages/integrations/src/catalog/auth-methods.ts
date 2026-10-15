@@ -3,18 +3,21 @@ import type { CompiledSecurityScheme } from "../openapi/compile.ts"
 import { whenPresent } from "@integragents/contracts"
 import type { AuthMethod, AuthPlacement, McpProbe } from "@integragents/contracts"
 
-const bearerPlacements: ReadonlyArray<AuthPlacement> = [{
-  carrier: "header",
-  name: "Authorization",
-  prefix: "Bearer "
-}]
+const bearerPlacements: ReadonlyArray<AuthPlacement> = [
+  {
+    carrier: "header",
+    name: "Authorization",
+    prefix: "Bearer "
+  }
+]
 
-const basicPlacements: ReadonlyArray<AuthPlacement> = [{
-  carrier: "header",
-  name: "Authorization",
-  prefix: "Basic "
-}]
-
+const basicPlacements: ReadonlyArray<AuthPlacement> = [
+  {
+    carrier: "header",
+    name: "Authorization",
+    prefix: "Basic "
+  }
+]
 
 const noAuthMethod: AuthMethod = {
   id: "none",
@@ -31,28 +34,26 @@ const bearerMethod: AuthMethod = {
   placements: bearerPlacements
 }
 
-export const mcpAuthMethods = (
-  probe: McpProbe,
-  endpoint: string
-): ReadonlyArray<AuthMethod> => {
+export const mcpAuthMethods = (probe: McpProbe, endpoint: string): ReadonlyArray<AuthMethod> => {
   if (!probe.requiresAuthentication) return [noAuthMethod]
   if (!probe.requiresOAuth) return [bearerMethod]
-  return [{
-    id: "oauth2",
-    label: "OAuth",
-    kind: "oauth",
-    template: "oauth2",
-    oauth: {
-      discoveryUrl: endpoint,
-      supportsDynamicRegistration: probe.supportsDynamicRegistration,
-      ...whenPresent("scopes", probe.scopes.length === 0 ? undefined : probe.scopes)
-    }
-  }, bearerMethod]
+  return [
+    {
+      id: "oauth2",
+      label: "OAuth",
+      kind: "oauth",
+      template: "oauth2",
+      oauth: {
+        discoveryUrl: endpoint,
+        supportsDynamicRegistration: probe.supportsDynamicRegistration,
+        ...whenPresent("scopes", probe.scopes.length === 0 ? undefined : probe.scopes)
+      }
+    },
+    bearerMethod
+  ]
 }
 
-const httpSchemeMethod = (
-  scheme: CompiledSecurityScheme
-): Option.Option<AuthMethod> => {
+const httpSchemeMethod = (scheme: CompiledSecurityScheme): Option.Option<AuthMethod> => {
   const kind = Option.getOrElse(scheme.scheme, () => "bearer").toLowerCase()
   if (kind === "basic") {
     return Option.some({
@@ -75,9 +76,7 @@ const httpSchemeMethod = (
   return Option.none()
 }
 
-const apiKeyMethod = (
-  scheme: CompiledSecurityScheme
-): Option.Option<AuthMethod> => {
+const apiKeyMethod = (scheme: CompiledSecurityScheme): Option.Option<AuthMethod> => {
   const carrier: "header" | "query" | "cookie" = Option.getOrElse(
     scheme.in,
     (): "header" | "query" | "cookie" => "header"
@@ -95,16 +94,11 @@ const apiKeyMethod = (
   })
 }
 
-const oauthMethod = (
-  scheme: CompiledSecurityScheme
-): Option.Option<AuthMethod> => {
+const oauthMethod = (scheme: CompiledSecurityScheme): Option.Option<AuthMethod> => {
   const discoveryUrl = scheme.openIdConnectUrl
   const authorizationUrl = scheme.authorizationUrl
   const tokenUrl = scheme.tokenUrl
-  if (
-    Option.isNone(discoveryUrl) &&
-    (Option.isNone(authorizationUrl) || Option.isNone(tokenUrl))
-  ) {
+  if (Option.isNone(discoveryUrl) && (Option.isNone(authorizationUrl) || Option.isNone(tokenUrl))) {
     return Option.none()
   }
   return Option.some({
@@ -121,9 +115,7 @@ const oauthMethod = (
   })
 }
 
-export const openApiAuthMethods = (
-  schemes: ReadonlyArray<CompiledSecurityScheme>
-): ReadonlyArray<AuthMethod> => {
+export const openApiAuthMethods = (schemes: ReadonlyArray<CompiledSecurityScheme>): ReadonlyArray<AuthMethod> => {
   const methods = schemes.flatMap((scheme) => {
     switch (scheme.type) {
       case "http":
@@ -138,12 +130,8 @@ export const openApiAuthMethods = (
   return methods.length === 0 ? [noAuthMethod] : methods
 }
 
-export const findAuthMethod = (
-  methods: ReadonlyArray<AuthMethod>,
-  template: string
-): Option.Option<AuthMethod> =>
+export const findAuthMethod = (methods: ReadonlyArray<AuthMethod>, template: string): Option.Option<AuthMethod> =>
   Option.fromNullishOr(methods.find((method) => method.template === template))
 
-export const requiresAuthentication = (
-  methods: ReadonlyArray<AuthMethod>
-): boolean => methods.length > 0 && !methods.some((method) => method.kind === "none")
+export const requiresAuthentication = (methods: ReadonlyArray<AuthMethod>): boolean =>
+  methods.length > 0 && !methods.some((method) => method.kind === "none")

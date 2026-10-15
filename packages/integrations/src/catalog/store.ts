@@ -43,9 +43,14 @@ export const ConnectionRecord = Schema.Struct({
   oauthClient: Schema.optional(Schema.String),
   oauthClientOwner: Schema.optional(ConnectionOwner),
   oauthScope: Schema.optional(Schema.String),
+  /** Why the provider stopped honouring this connection's grant; it stays unusable until authorized again. */
+  reconnectReason: Schema.optional(Schema.String),
   createdAt: Schema.Number
 })
 export type ConnectionRecord = typeof ConnectionRecord.Type
+
+export const ClientAuthMethod = Schema.Literals(["none", "client_secret_basic", "client_secret_post"])
+export type ClientAuthMethod = typeof ClientAuthMethod.Type
 
 export const OAuthClientRecord = Schema.Struct({
   owner: ConnectionOwner,
@@ -58,7 +63,9 @@ export const OAuthClientRecord = Schema.Struct({
   issuer: Schema.optional(Schema.String),
   resource: Schema.optional(Schema.String),
   scopes: Schema.Array(Schema.String),
-  tokenAuthMethod: Schema.optional(Schema.String)
+  tokenAuthMethod: Schema.optional(ClientAuthMethod),
+  issParameterSupported: Schema.Boolean,
+  secretExpiresAt: Schema.optional(Schema.Number)
 })
 export type OAuthClientRecord = typeof OAuthClientRecord.Type
 
@@ -73,7 +80,8 @@ export const OAuthFlowRecord = Schema.Struct({
   codeVerifier: Schema.String,
   redirectUri: Schema.String,
   resource: Schema.optional(Schema.String),
-  scopes: Schema.Array(Schema.String)
+  scopes: Schema.Array(Schema.String),
+  nonce: Schema.optional(Schema.String)
 })
 export type OAuthFlowRecord = typeof OAuthFlowRecord.Type
 
@@ -94,13 +102,16 @@ const number = (row: SqlRow, column: string): number => {
   return Predicate.isNumber(value) ? value : Number(value ?? 0)
 }
 
+const optionalNumber = (row: SqlRow, column: string): number | undefined => {
+  const value = row[column]
+  return Predicate.isNumber(value) ? value : undefined
+}
+
 const decodeJsonArray = <A>(schema: Schema.Codec<A>) => {
   const decode = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(schema)))
   return (raw: string, column: string): Effect.Effect<ReadonlyArray<A>, StorageError> =>
     decode(raw.length === 0 ? "[]" : raw).pipe(
-      Effect.mapError((cause) =>
-        new StorageError({ message: `Malformed ${column} column`, cause })
-      )
+      Effect.mapError((cause) => new StorageError({ message: `Malformed ${column} column`, cause }))
     )
 }
 
@@ -123,9 +134,9 @@ const decodeIntegrationRow = (row: SqlRow) =>
       ...whenPresent("displayUrl", optionalText(row, "display_url")),
       authMethods,
       createdAt: number(row, "created_at")
-    }).pipe(Effect.mapError((cause) =>
-      new StorageError({ message: `Malformed integration row ${text(row, "slug")}`, cause })
-    ))
+    }).pipe(
+      Effect.mapError((cause) => new StorageError({ message: `Malformed integration row ${text(row, "slug")}`, cause }))
+    )
   })
 
 const decodeConnectionRow = (row: SqlRow) =>
@@ -140,10 +151,11 @@ const decodeConnectionRow = (row: SqlRow) =>
     ...whenPresent("oauthClient", optionalText(row, "oauth_client")),
     ...whenPresent("oauthClientOwner", optionalText(row, "oauth_client_owner")),
     ...whenPresent("oauthScope", optionalText(row, "oauth_scope")),
+    ...whenPresent("reconnectReason", optionalText(row, "reconnect_reason")),
     createdAt: number(row, "created_at")
-  }).pipe(Effect.mapError((cause) =>
-    new StorageError({ message: `Malformed connection row ${text(row, "name")}`, cause })
-  ))
+  }).pipe(
+    Effect.mapError((cause) => new StorageError({ message: `Malformed connection row ${text(row, "name")}`, cause }))
+  )
 
 const decodeOAuthClientRow = (row: SqlRow) =>
   Effect.gen(function* () {
@@ -159,10 +171,14 @@ const decodeOAuthClientRow = (row: SqlRow) =>
       ...whenPresent("issuer", optionalText(row, "issuer")),
       ...whenPresent("resource", optionalText(row, "resource")),
       scopes,
-      ...whenPresent("tokenAuthMethod", optionalText(row, "token_auth_method"))
-    }).pipe(Effect.mapError((cause) =>
-      new StorageError({ message: `Malformed oauth_client row ${text(row, "slug")}`, cause })
-    ))
+      ...whenPresent("tokenAuthMethod", optionalText(row, "token_auth_method")),
+      issParameterSupported: number(row, "iss_parameter_supported") === 1,
+      ...whenPresent("secretExpiresAt", optionalNumber(row, "secret_expires_at"))
+    }).pipe(
+      Effect.mapError(
+        (cause) => new StorageError({ message: `Malformed oauth_client row ${text(row, "slug")}`, cause })
+      )
+    )
   })
 
 const decodeJsonColumn = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))
@@ -171,17 +187,15 @@ const decodeCall = Schema.decodeUnknownEffect(Schema.fromJsonString(ToolCall))
 const decodeToolRow = (row: SqlRow) =>
   Effect.gen(function* () {
     const call = yield* decodeCall(text(row, "call")).pipe(
-      Effect.mapError((cause) =>
-        new StorageError({ message: `Malformed call for ${text(row, "address")}`, cause })
-      )
+      Effect.mapError((cause) => new StorageError({ message: `Malformed call for ${text(row, "address")}`, cause }))
     )
     const optionalJson = (column: string) =>
       Effect.gen(function* () {
         const raw = optionalText(row, column)
         if (raw === undefined) return undefined
         return yield* decodeJsonColumn(raw).pipe(
-          Effect.mapError((cause) =>
-            new StorageError({ message: `Malformed ${column} for ${text(row, "address")}`, cause })
+          Effect.mapError(
+            (cause) => new StorageError({ message: `Malformed ${column} for ${text(row, "address")}`, cause })
           )
         )
       })
@@ -199,9 +213,9 @@ const decodeToolRow = (row: SqlRow) =>
       ...whenPresent("outputSchema", outputSchema),
       call,
       capturedAt: number(row, "captured_at")
-    }).pipe(Effect.mapError((cause) =>
-      new StorageError({ message: `Malformed tool row ${text(row, "address")}`, cause })
-    ))
+    }).pipe(
+      Effect.mapError((cause) => new StorageError({ message: `Malformed tool row ${text(row, "address")}`, cause }))
+    )
   })
 
 const decodeOAuthFlowRow = (row: SqlRow) =>
@@ -218,16 +232,21 @@ const decodeOAuthFlowRow = (row: SqlRow) =>
       codeVerifier: text(row, "code_verifier"),
       redirectUri: text(row, "redirect_uri"),
       ...whenPresent("resource", optionalText(row, "resource")),
-      scopes
-    }).pipe(Effect.mapError((cause) =>
-      new StorageError({ message: "Malformed oauth_flow row", cause })
-    ))
+      scopes,
+      ...whenPresent("nonce", optionalText(row, "nonce"))
+    }).pipe(Effect.mapError((cause) => new StorageError({ message: "Malformed oauth_flow row", cause })))
   })
 
 export interface ToolFilter {
   readonly integration?: IntegrationSlug
   readonly owner?: ConnectionOwner
   readonly connection?: ConnectionName
+}
+
+export interface ConnectionReference {
+  readonly owner: ConnectionOwner
+  readonly integration: IntegrationSlug
+  readonly name: ConnectionName
 }
 
 export interface ConnectionFilter {
@@ -239,18 +258,10 @@ export interface ConnectionFilter {
 export class CatalogStore extends Context.Service<
   CatalogStore,
   {
-    readonly listIntegrations: () => Effect.Effect<
-      ReadonlyArray<IntegrationRecord>,
-      StorageError
-    >
-    readonly findIntegration: (
-      slug: IntegrationSlug
-    ) => Effect.Effect<Option.Option<IntegrationRecord>, StorageError>
+    readonly listIntegrations: () => Effect.Effect<ReadonlyArray<IntegrationRecord>, StorageError>
+    readonly findIntegration: (slug: IntegrationSlug) => Effect.Effect<Option.Option<IntegrationRecord>, StorageError>
     readonly putIntegration: (record: IntegrationRecord) => Effect.Effect<void, StorageError>
-    readonly renameIntegration: (
-      slug: IntegrationSlug,
-      name: string
-    ) => Effect.Effect<void, StorageError>
+    readonly renameIntegration: (slug: IntegrationSlug, name: string) => Effect.Effect<void, StorageError>
     readonly removeIntegration: (slug: IntegrationSlug) => Effect.Effect<void, StorageError>
 
     readonly listConnections: (
@@ -262,6 +273,7 @@ export class CatalogStore extends Context.Service<
       readonly integration: IntegrationSlug
       readonly name: ConnectionName
     }) => Effect.Effect<void, StorageError>
+    readonly requireReconnect: (reference: ConnectionReference, reason: string) => Effect.Effect<void, StorageError>
 
     readonly listOAuthClients: (
       integration: IntegrationSlug
@@ -273,16 +285,10 @@ export class CatalogStore extends Context.Service<
     readonly putOAuthClient: (record: OAuthClientRecord) => Effect.Effect<void, StorageError>
 
     readonly putOAuthFlow: (record: OAuthFlowRecord) => Effect.Effect<void, StorageError>
-    readonly takeOAuthFlow: (
-      state: OAuthState
-    ) => Effect.Effect<Option.Option<OAuthFlowRecord>, StorageError>
+    readonly takeOAuthFlow: (state: OAuthState) => Effect.Effect<Option.Option<OAuthFlowRecord>, StorageError>
 
-    readonly listTools: (
-      filter?: ToolFilter
-    ) => Effect.Effect<ReadonlyArray<IntegrationTool>, StorageError>
-    readonly findTool: (
-      address: ToolAddress
-    ) => Effect.Effect<Option.Option<IntegrationTool>, StorageError>
+    readonly listTools: (filter?: ToolFilter) => Effect.Effect<ReadonlyArray<IntegrationTool>, StorageError>
+    readonly findTool: (address: ToolAddress) => Effect.Effect<Option.Option<IntegrationTool>, StorageError>
     readonly replaceTools: (
       connection: {
         readonly owner: ConnectionOwner
@@ -292,21 +298,15 @@ export class CatalogStore extends Context.Service<
       tools: ReadonlyArray<IntegrationTool>
     ) => Effect.Effect<void, StorageError>
 
-    readonly findSpecDocument: (
-      source: string
-    ) => Effect.Effect<Option.Option<string>, StorageError>
-    readonly putSpecDocument: (
-      source: string,
-      content: string
-    ) => Effect.Effect<void, StorageError>
+    readonly findSpecDocument: (source: string) => Effect.Effect<Option.Option<string>, StorageError>
+    readonly putSpecDocument: (source: string, content: string) => Effect.Effect<void, StorageError>
   }
 >()("@integragents/host/CatalogStore") {
   static readonly layer: Layer.Layer<CatalogStore, never, Database> = Layer.effect(
     CatalogStore,
     Effect.gen(function* () {
       const database = yield* Database
-      const write = (statement: SqlStatement) =>
-        Effect.asVoid(database.query(statement))
+      const write = (statement: SqlStatement) => Effect.asVoid(database.query(statement))
 
       const listIntegrations = Effect.fn("CatalogStore.listIntegrations")(function* () {
         const rows = yield* database.query({
@@ -315,22 +315,19 @@ export class CatalogStore extends Context.Service<
         return yield* Effect.forEach(rows, decodeIntegrationRow)
       })
 
-      const findIntegration = Effect.fn("CatalogStore.findIntegration")(
-        function* (slug: IntegrationSlug) {
-          const rows = yield* database.query({
-            sql: "SELECT * FROM integration WHERE slug = ?",
-            params: [slug]
-          })
-          const row = rows[0]
-          if (row === undefined) return Option.none()
-          return Option.some(yield* decodeIntegrationRow(row))
-        }
-      )
+      const findIntegration = Effect.fn("CatalogStore.findIntegration")(function* (slug: IntegrationSlug) {
+        const rows = yield* database.query({
+          sql: "SELECT * FROM integration WHERE slug = ?",
+          params: [slug]
+        })
+        const row = rows[0]
+        if (row === undefined) return Option.none()
+        return Option.some(yield* decodeIntegrationRow(row))
+      })
 
-      const putIntegration = Effect.fn("CatalogStore.putIntegration")(
-        (record: IntegrationRecord) =>
-          write({
-            sql: `INSERT INTO integration
+      const putIntegration = Effect.fn("CatalogStore.putIntegration")((record: IntegrationRecord) =>
+        write({
+          sql: `INSERT INTO integration
                     (slug, name, description, kind, endpoint, mcp_era, spec_source, spec_format,
                      base_url, display_url, auth_methods, created_at)
                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -345,73 +342,68 @@ export class CatalogStore extends Context.Service<
                     base_url = excluded.base_url,
                     display_url = excluded.display_url,
                     auth_methods = excluded.auth_methods`,
-            params: [
-              record.slug,
-              record.name,
-              record.description,
-              record.kind,
-              nullable(record.endpoint),
-              nullable(record.mcpEra),
-              nullable(record.specSource),
-              nullable(record.specFormat),
-              nullable(record.baseUrl),
-              nullable(record.displayUrl),
-              JSON.stringify(record.authMethods),
-              record.createdAt
-            ]
-          })
+          params: [
+            record.slug,
+            record.name,
+            record.description,
+            record.kind,
+            nullable(record.endpoint),
+            nullable(record.mcpEra),
+            nullable(record.specSource),
+            nullable(record.specFormat),
+            nullable(record.baseUrl),
+            nullable(record.displayUrl),
+            JSON.stringify(record.authMethods),
+            record.createdAt
+          ]
+        })
       )
 
-      const renameIntegration = Effect.fn("CatalogStore.renameIntegration")(
-        (slug: IntegrationSlug, name: string) =>
-          write({
-            sql: "UPDATE integration SET name = ? WHERE slug = ?",
-            params: [name, slug]
-          })
+      const renameIntegration = Effect.fn("CatalogStore.renameIntegration")((slug: IntegrationSlug, name: string) =>
+        write({
+          sql: "UPDATE integration SET name = ? WHERE slug = ?",
+          params: [name, slug]
+        })
       )
 
-      const removeIntegration = Effect.fn("CatalogStore.removeIntegration")(
-        (slug: IntegrationSlug) =>
-          database.batch([
-            { sql: "DELETE FROM connection WHERE integration = ?", params: [slug] },
-            { sql: "DELETE FROM oauth_client WHERE integration = ?", params: [slug] },
-            { sql: "DELETE FROM integration WHERE slug = ?", params: [slug] }
-          ])
+      const removeIntegration = Effect.fn("CatalogStore.removeIntegration")((slug: IntegrationSlug) =>
+        database.batch([
+          { sql: "DELETE FROM connection WHERE integration = ?", params: [slug] },
+          { sql: "DELETE FROM oauth_client WHERE integration = ?", params: [slug] },
+          { sql: "DELETE FROM integration WHERE slug = ?", params: [slug] }
+        ])
       )
 
-      const listConnections = Effect.fn("CatalogStore.listConnections")(
-        function* (filter: ConnectionFilter = {}) {
-          const clauses: Array<string> = []
-          const params: Array<SqlValue> = []
-          if (filter.integration !== undefined) {
-            clauses.push("integration = ?")
-            params.push(filter.integration)
-          }
-          if (filter.owner !== undefined) {
-            clauses.push("owner = ?")
-            params.push(filter.owner)
-          }
-          if (filter.name !== undefined) {
-            clauses.push("name = ?")
-            params.push(filter.name)
-          }
-          const where = clauses.length === 0 ? "" : ` WHERE ${clauses.join(" AND ")}`
-          const rows = yield* database.query({
-            sql: `SELECT * FROM connection${where} ORDER BY integration, owner, name`,
-            params
-          })
-          return yield* Effect.forEach(rows, decodeConnectionRow)
+      const listConnections = Effect.fn("CatalogStore.listConnections")(function* (filter: ConnectionFilter = {}) {
+        const clauses: Array<string> = []
+        const params: Array<SqlValue> = []
+        if (filter.integration !== undefined) {
+          clauses.push("integration = ?")
+          params.push(filter.integration)
         }
-      )
+        if (filter.owner !== undefined) {
+          clauses.push("owner = ?")
+          params.push(filter.owner)
+        }
+        if (filter.name !== undefined) {
+          clauses.push("name = ?")
+          params.push(filter.name)
+        }
+        const where = clauses.length === 0 ? "" : ` WHERE ${clauses.join(" AND ")}`
+        const rows = yield* database.query({
+          sql: `SELECT * FROM connection${where} ORDER BY integration, owner, name`,
+          params
+        })
+        return yield* Effect.forEach(rows, decodeConnectionRow)
+      })
 
-      const putConnection = Effect.fn("CatalogStore.putConnection")(
-        (record: ConnectionRecord) =>
-          write({
-            sql: `INSERT INTO connection
+      const putConnection = Effect.fn("CatalogStore.putConnection")((record: ConnectionRecord) =>
+        write({
+          sql: `INSERT INTO connection
                     (owner, integration, name, template, provider, identity_label,
                      description, oauth_client, oauth_client_owner, oauth_scope,
-                     created_at)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     reconnect_reason, created_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                   ON CONFLICT(owner, integration, name) DO UPDATE SET
                     template = excluded.template,
                     provider = excluded.provider,
@@ -419,21 +411,23 @@ export class CatalogStore extends Context.Service<
                     description = excluded.description,
                     oauth_client = excluded.oauth_client,
                     oauth_client_owner = excluded.oauth_client_owner,
-                    oauth_scope = excluded.oauth_scope`,
-            params: [
-              record.owner,
-              record.integration,
-              record.name,
-              record.template,
-              record.provider,
-              nullable(record.identityLabel),
-              nullable(record.description),
-              nullable(record.oauthClient),
-              nullable(record.oauthClientOwner),
-              nullable(record.oauthScope),
-              record.createdAt
-            ]
-          })
+                    oauth_scope = excluded.oauth_scope,
+                    reconnect_reason = excluded.reconnect_reason`,
+          params: [
+            record.owner,
+            record.integration,
+            record.name,
+            record.template,
+            record.provider,
+            nullable(record.identityLabel),
+            nullable(record.description),
+            nullable(record.oauthClient),
+            nullable(record.oauthClientOwner),
+            nullable(record.oauthScope),
+            nullable(record.reconnectReason),
+            record.createdAt
+          ]
+        })
       )
 
       const removeConnection = Effect.fn("CatalogStore.removeConnection")(
@@ -448,39 +442,48 @@ export class CatalogStore extends Context.Service<
           })
       )
 
-      const listOAuthClients = Effect.fn("CatalogStore.listOAuthClients")(
-        function* (integration: IntegrationSlug) {
-          const rows = yield* database.query({
-            sql: "SELECT * FROM oauth_client WHERE integration = ?",
-            params: [integration]
-          })
-          return yield* Effect.forEach(rows, decodeOAuthClientRow)
-        }
-      )
+      const connectionKey = (reference: ConnectionReference): Array<SqlValue> => [
+        reference.owner,
+        reference.integration,
+        reference.name
+      ]
 
-      const findOAuthClient = Effect.fn("CatalogStore.findOAuthClient")(
-        function* (reference: {
-          readonly owner: ConnectionOwner
-          readonly slug: OAuthClientSlug
-        }) {
-          const rows = yield* database.query({
-            sql: "SELECT * FROM oauth_client WHERE owner = ? AND slug = ?",
-            params: [reference.owner, reference.slug]
-          })
-          const row = rows[0]
-          if (row === undefined) return Option.none()
-          return Option.some(yield* decodeOAuthClientRow(row))
-        }
-      )
-
-      const putOAuthClient = Effect.fn("CatalogStore.putOAuthClient")(
-        (record: OAuthClientRecord) =>
+      const requireReconnect = Effect.fn("CatalogStore.requireReconnect")(
+        (reference: ConnectionReference, reason: string) =>
           write({
-            sql: `INSERT INTO oauth_client
+            sql: "UPDATE connection SET reconnect_reason = ? WHERE owner = ? AND integration = ? AND name = ?",
+            params: [reason, ...connectionKey(reference)]
+          })
+      )
+
+      const listOAuthClients = Effect.fn("CatalogStore.listOAuthClients")(function* (integration: IntegrationSlug) {
+        const rows = yield* database.query({
+          sql: "SELECT * FROM oauth_client WHERE integration = ?",
+          params: [integration]
+        })
+        return yield* Effect.forEach(rows, decodeOAuthClientRow)
+      })
+
+      const findOAuthClient = Effect.fn("CatalogStore.findOAuthClient")(function* (reference: {
+        readonly owner: ConnectionOwner
+        readonly slug: OAuthClientSlug
+      }) {
+        const rows = yield* database.query({
+          sql: "SELECT * FROM oauth_client WHERE owner = ? AND slug = ?",
+          params: [reference.owner, reference.slug]
+        })
+        const row = rows[0]
+        if (row === undefined) return Option.none()
+        return Option.some(yield* decodeOAuthClientRow(row))
+      })
+
+      const putOAuthClient = Effect.fn("CatalogStore.putOAuthClient")((record: OAuthClientRecord) =>
+        write({
+          sql: `INSERT INTO oauth_client
                     (owner, slug, integration, client_id, authorization_url, token_url,
                      registration_endpoint, issuer, resource, scopes, token_auth_method,
-                     created_at)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     iss_parameter_supported, secret_expires_at, created_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                   ON CONFLICT(owner, slug) DO UPDATE SET
                     integration = excluded.integration,
                     client_id = excluded.client_id,
@@ -490,89 +493,84 @@ export class CatalogStore extends Context.Service<
                     issuer = excluded.issuer,
                     resource = excluded.resource,
                     scopes = excluded.scopes,
-                    token_auth_method = excluded.token_auth_method`,
-            params: [
-              record.owner,
-              record.slug,
-              record.integration,
-              record.clientId,
-              record.authorizationUrl,
-              record.tokenUrl,
-              nullable(record.registrationEndpoint),
-              nullable(record.issuer),
-              nullable(record.resource),
-              JSON.stringify(record.scopes),
-              nullable(record.tokenAuthMethod),
-              Date.now()
-            ]
-          })
+                    token_auth_method = excluded.token_auth_method,
+                    iss_parameter_supported = excluded.iss_parameter_supported,
+                    secret_expires_at = excluded.secret_expires_at`,
+          params: [
+            record.owner,
+            record.slug,
+            record.integration,
+            record.clientId,
+            record.authorizationUrl,
+            record.tokenUrl,
+            nullable(record.registrationEndpoint),
+            nullable(record.issuer),
+            nullable(record.resource),
+            JSON.stringify(record.scopes),
+            nullable(record.tokenAuthMethod),
+            record.issParameterSupported ? 1 : 0,
+            nullable(record.secretExpiresAt),
+            Date.now()
+          ]
+        })
       )
 
-      const putOAuthFlow = Effect.fn("CatalogStore.putOAuthFlow")(
-        (record: OAuthFlowRecord) =>
-          write({
-            sql: `INSERT INTO oauth_flow
+      const putOAuthFlow = Effect.fn("CatalogStore.putOAuthFlow")((record: OAuthFlowRecord) =>
+        write({
+          sql: `INSERT INTO oauth_flow
                     (state, owner, integration, connection, template, client_owner,
-                     client_slug, code_verifier, redirect_uri, resource, scopes, created_at)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            params: [
-              record.state,
-              record.owner,
-              record.integration,
-              record.connection,
-              record.template,
-              record.clientOwner,
-              record.clientSlug,
-              record.codeVerifier,
-              record.redirectUri,
-              nullable(record.resource),
-              JSON.stringify(record.scopes),
-              Date.now()
-            ]
-          })
+                     client_slug, code_verifier, redirect_uri, resource, scopes, nonce, created_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          params: [
+            record.state,
+            record.owner,
+            record.integration,
+            record.connection,
+            record.template,
+            record.clientOwner,
+            record.clientSlug,
+            record.codeVerifier,
+            record.redirectUri,
+            nullable(record.resource),
+            JSON.stringify(record.scopes),
+            nullable(record.nonce),
+            Date.now()
+          ]
+        })
       )
 
-      const takeOAuthFlow = Effect.fn("CatalogStore.takeOAuthFlow")(
-        function* (state: OAuthState) {
-          const rows = yield* database.query({
-            sql: "SELECT * FROM oauth_flow WHERE state = ?",
-            params: [state]
-          })
-          const row = rows[0]
-          if (row === undefined) return Option.none()
-          const record = yield* decodeOAuthFlowRow(row)
-          yield* write({
-            sql: "DELETE FROM oauth_flow WHERE state = ?",
-            params: [state]
-          })
-          return Option.some(record)
-        }
-      )
+      const takeOAuthFlow = Effect.fn("CatalogStore.takeOAuthFlow")(function* (state: OAuthState) {
+        const rows = yield* database.query({
+          sql: "DELETE FROM oauth_flow WHERE state = ? RETURNING *",
+          params: [state]
+        })
+        const row = rows[0]
+        if (row === undefined) return Option.none()
+        return Option.some(yield* decodeOAuthFlowRow(row))
+      })
 
-      const listTools = Effect.fn("CatalogStore.listTools")(
-        function* (filter: ToolFilter = {}) {
-          const clauses: Array<string> = []
-          const params: Array<SqlValue> = []
-          if (filter.integration !== undefined) {
-            clauses.push("integration = ?")
-            params.push(filter.integration)
-          }
-          if (filter.owner !== undefined) {
-            clauses.push("owner = ?")
-            params.push(filter.owner)
-          }
-          if (filter.connection !== undefined) {
-            clauses.push("connection = ?")
-            params.push(filter.connection)
-          }
-          const where = clauses.length === 0 ? "" : ` WHERE ${clauses.join(" AND ")}`
-          const rows = yield* database.query({
-            sql: `SELECT * FROM tool${where} ORDER BY integration, owner, connection, name`,
-            params
-          })
-          return yield* Effect.forEach(rows, decodeToolRow)
+      const listTools = Effect.fn("CatalogStore.listTools")(function* (filter: ToolFilter = {}) {
+        const clauses: Array<string> = []
+        const params: Array<SqlValue> = []
+        if (filter.integration !== undefined) {
+          clauses.push("integration = ?")
+          params.push(filter.integration)
         }
-      )
+        if (filter.owner !== undefined) {
+          clauses.push("owner = ?")
+          params.push(filter.owner)
+        }
+        if (filter.connection !== undefined) {
+          clauses.push("connection = ?")
+          params.push(filter.connection)
+        }
+        const where = clauses.length === 0 ? "" : ` WHERE ${clauses.join(" AND ")}`
+        const rows = yield* database.query({
+          sql: `SELECT * FROM tool${where} ORDER BY integration, owner, connection, name`,
+          params
+        })
+        return yield* Effect.forEach(rows, decodeToolRow)
+      })
 
       const findTool = Effect.fn("CatalogStore.findTool")(function* (address: ToolAddress) {
         const rows = yield* database.query({
@@ -584,66 +582,60 @@ export class CatalogStore extends Context.Service<
         return Option.some(yield* decodeToolRow(row))
       })
 
-      const replaceTools = Effect.fn("CatalogStore.replaceTools")((
-        connection: {
-          readonly owner: ConnectionOwner
-          readonly integration: IntegrationSlug
-          readonly name: ConnectionName
-        },
-        tools: ReadonlyArray<IntegrationTool>
-      ) =>
-        database.batch([
-          {
-            sql: "DELETE FROM tool WHERE owner = ? AND integration = ? AND connection = ?",
-            params: [connection.owner, connection.integration, connection.name]
+      const replaceTools = Effect.fn("CatalogStore.replaceTools")(
+        (
+          connection: {
+            readonly owner: ConnectionOwner
+            readonly integration: IntegrationSlug
+            readonly name: ConnectionName
           },
-          ...tools.map((tool) => ({
-            sql: `INSERT INTO tool
+          tools: ReadonlyArray<IntegrationTool>
+        ) =>
+          database.batch([
+            {
+              sql: "DELETE FROM tool WHERE owner = ? AND integration = ? AND connection = ?",
+              params: [connection.owner, connection.integration, connection.name]
+            },
+            ...tools.map((tool) => ({
+              sql: `INSERT INTO tool
                     (address, owner, integration, connection, name, description,
                      read_only, input_schema, output_schema, call, captured_at)
                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            params: [
-              tool.address,
-              tool.owner,
-              tool.integration,
-              tool.connection,
-              tool.name,
-              tool.description,
-              tool.readOnly ? 1 : 0,
-              nullable(tool.inputSchema === undefined
-                ? undefined
-                : JSON.stringify(tool.inputSchema)),
-              nullable(tool.outputSchema === undefined
-                ? undefined
-                : JSON.stringify(tool.outputSchema)),
-              JSON.stringify(tool.call),
-              tool.capturedAt
-            ] satisfies ReadonlyArray<SqlValue>
-          }))
-        ])
+              params: [
+                tool.address,
+                tool.owner,
+                tool.integration,
+                tool.connection,
+                tool.name,
+                tool.description,
+                tool.readOnly ? 1 : 0,
+                nullable(tool.inputSchema === undefined ? undefined : JSON.stringify(tool.inputSchema)),
+                nullable(tool.outputSchema === undefined ? undefined : JSON.stringify(tool.outputSchema)),
+                JSON.stringify(tool.call),
+                tool.capturedAt
+              ] satisfies ReadonlyArray<SqlValue>
+            }))
+          ])
       )
 
-      const findSpecDocument = Effect.fn("CatalogStore.findSpecDocument")(
-        function* (source: string) {
-          const rows = yield* database.query({
-            sql: "SELECT content FROM spec_document WHERE source = ?",
-            params: [source]
-          })
-          const row = rows[0]
-          return row === undefined ? Option.none() : Option.some(text(row, "content"))
-        }
-      )
+      const findSpecDocument = Effect.fn("CatalogStore.findSpecDocument")(function* (source: string) {
+        const rows = yield* database.query({
+          sql: "SELECT content FROM spec_document WHERE source = ?",
+          params: [source]
+        })
+        const row = rows[0]
+        return row === undefined ? Option.none() : Option.some(text(row, "content"))
+      })
 
-      const putSpecDocument = Effect.fn("CatalogStore.putSpecDocument")(
-        (source: string, content: string) =>
-          write({
-            sql: `INSERT INTO spec_document (source, content, fetched_at)
+      const putSpecDocument = Effect.fn("CatalogStore.putSpecDocument")((source: string, content: string) =>
+        write({
+          sql: `INSERT INTO spec_document (source, content, fetched_at)
                   VALUES (?, ?, ?)
                   ON CONFLICT(source) DO UPDATE SET
                     content = excluded.content,
                     fetched_at = excluded.fetched_at`,
-            params: [source, content, Date.now()]
-          })
+          params: [source, content, Date.now()]
+        })
       )
 
       return {
@@ -655,6 +647,7 @@ export class CatalogStore extends Context.Service<
         listConnections,
         putConnection,
         removeConnection,
+        requireReconnect,
         listOAuthClients,
         findOAuthClient,
         putOAuthClient,

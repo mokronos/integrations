@@ -12,7 +12,11 @@ const agents: ReadonlyArray<{ readonly id: CodingAgent; readonly label: string; 
   { id: "opencode", label: "OpenCode", host: "opencode.ai" }
 ]
 
-export function AgentConnect({ profileName, url, apiKey }: {
+export function AgentConnect({
+  profileName,
+  url,
+  apiKey
+}: {
   readonly profileName: string
   readonly url: string
   readonly apiKey: string
@@ -26,22 +30,33 @@ export function AgentConnect({ profileName, url, apiKey }: {
             {agent.label}
           </TabsTrigger>
         ))}
-        <TabsTrigger value="other"><Plug />Other</TabsTrigger>
+        <TabsTrigger value="other">
+          <Plug />
+          Other
+        </TabsTrigger>
       </TabsList>
       {agents.map((agent) => {
         const setup = agentSetup(agent.id, profileName, url, apiKey)
         return (
           <TabsContent key={agent.id} value={agent.id} className="space-y-2">
-            {setup.browserLogin.map((snippet) => <SnippetField key={snippet.label} snippet={snippet} />)}
-            <p className="text-muted-foreground text-xs">{setup.browserLoginHint} You will choose this profile during authorization.</p>
+            {setup.browserLogin.map((snippet) => (
+              <SnippetField key={snippet.label} snippet={snippet} />
+            ))}
+            <p className="text-muted-foreground text-xs">
+              {setup.browserLoginHint} You will choose this profile during authorization.
+            </p>
             <ApiKeyAlternative snippet={setup.apiKey} />
           </TabsContent>
         )
       })}
       <TabsContent value="other" className="space-y-2">
         <SnippetField snippet={{ label: "Browser login configuration", value: mcpOAuthConfiguration(url) }} />
-        <p className="text-muted-foreground text-xs">For MCP clients that support OAuth. You will choose this profile during authorization.</p>
-        <ApiKeyAlternative snippet={{ label: "API key configuration", value: mcpConfiguration(profileName, url, apiKey) }} />
+        <p className="text-muted-foreground text-xs">
+          For MCP clients that support OAuth. You will choose this profile during authorization.
+        </p>
+        <ApiKeyAlternative
+          snippet={{ label: "API key configuration", value: mcpConfiguration(profileName, url, apiKey) }}
+        />
       </TabsContent>
     </Tabs>
   )

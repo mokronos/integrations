@@ -8,8 +8,10 @@ import { Config, Option } from "effect"
  */
 export const optionalText = (name: string): Config.Config<Option.Option<string>> =>
   Config.option(Config.String(name)).pipe(
-    Config.map(Option.flatMap((value) => {
-      const trimmed = value.trim()
-      return trimmed.length === 0 ? Option.none() : Option.some(trimmed)
-    }))
+    Config.map(
+      Option.flatMap((value) => {
+        const trimmed = value.trim()
+        return trimmed.length === 0 ? Option.none() : Option.some(trimmed)
+      })
+    )
   )

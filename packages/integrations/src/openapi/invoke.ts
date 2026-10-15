@@ -2,6 +2,7 @@ import { buildRequest } from "./request.ts"
 import { Context, Effect, Layer, Option, Stream } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/http"
 import { describeCause, InvocationError, SpecError, StorageError } from "../errors.ts"
+import { hostOf, refusedDestination, transportCode } from "../unreachable.ts"
 import type { HttpCall } from "../tool.ts"
 import { missingArguments, splitArguments } from "./arguments.ts"
 import { AuthPlacement } from "@integragents/contracts"
@@ -34,9 +35,7 @@ const applyCredential = (
   Option.match(credential, {
     onNone: () => request,
     onSome: (resolved) => {
-      const placements = resolved.placements.length === 0
-        ? [bearerPlacement]
-        : resolved.placements
+      const placements = resolved.placements.length === 0 ? [bearerPlacement] : resolved.placements
       const url = new URL(request.url)
       const headers = { ...request.headers }
       for (const placement of placements) {
@@ -59,10 +58,7 @@ const applyCredential = (
 const jsonContentType = /^application\/(?:[\w.+-]+\+)?json\b/i
 const ndjsonContentType = /^application\/(?:x-)?nd-?json\b/i
 
-const decodeBody = (
-  contentType: string,
-  body: string
-): Json => {
+const decodeBody = (contentType: string, body: string): Json => {
   if (body.length === 0) return null
   if (ndjsonContentType.test(contentType)) {
     return body
@@ -89,6 +85,7 @@ const errorDetail = (contentType: string, body: string): string => {
 }
 
 export interface OpenApiCall {
+  readonly integration: string
   readonly call: HttpCall
   readonly tool: string
   readonly server: string
@@ -104,170 +101,168 @@ const previewBytes = 600
 
 const utf8 = new TextDecoder()
 
+/**
+ * The gateway sends the request, not the user's browser, so the message names
+ * the integration and host to check. The errno-style code goes to the span and
+ * logs; the failure itself never leaves, since it carries the whole request.
+ */
+const unreachable = (call: OpenApiCall, url: string, cause: unknown, status?: number) => {
+  const host = hostOf(url)
+  const code = transportCode(cause)
+  const detail = Option.match(refusedDestination(cause), {
+    onNone: () => `${call.integration} could not reach ${host}. Check its base URL and that the service is online.`,
+    onSome: (refused) => `${call.integration}: ${refused.message}`
+  })
+  const annotations = {
+    integration: call.integration,
+    "server.address": host,
+    ...whenPresent("error.code", Option.getOrUndefined(code))
+  }
+  return Effect.annotateCurrentSpan(annotations).pipe(
+    Effect.andThen(Effect.logWarning("OpenAPI upstream unreachable").pipe(Effect.annotateLogs(annotations))),
+    Effect.andThen(Effect.fail(new InvocationError({ code: "network", detail, ...whenPresent("status", status) })))
+  )
+}
+
 export class OpenApiInvoker extends Context.Service<
   OpenApiInvoker,
   {
-    readonly call: (
-      call: OpenApiCall
-    ) => Effect.Effect<Json, InvocationError | SpecError | StorageError>
+    readonly call: (call: OpenApiCall) => Effect.Effect<Json, InvocationError | SpecError | StorageError>
   }
 >()("@integragents/host/OpenApiInvoker") {
-  static readonly layer: Layer.Layer<
-    OpenApiInvoker,
-    never,
-    HttpClient.HttpClient | BlobStore
-  > = Layer.effect(
+  static readonly layer: Layer.Layer<OpenApiInvoker, never, HttpClient.HttpClient | BlobStore> = Layer.effect(
     OpenApiInvoker,
     Effect.gen(function* () {
       const client = yield* HttpClient.HttpClient
       const blobs = yield* BlobStore
       return {
-      call: Effect.fn("OpenApiInvoker.call")(function* (call: OpenApiCall) {
-        const split = splitArguments(call.call, call.input)
-        if (split.unknown.length > 0) {
-          return yield* new InvocationError({
-            code: "unknown_argument",
-            detail: `${call.tool} does not accept: ${split.unknown.join(", ")}`
+        call: Effect.fn("OpenApiInvoker.call")(function* (call: OpenApiCall) {
+          const split = splitArguments(call.call, call.input)
+          if (split.unknown.length > 0) {
+            return yield* new InvocationError({
+              code: "unknown_argument",
+              detail: `${call.tool} does not accept: ${split.unknown.join(", ")}`
+            })
+          }
+          const missing = missingArguments(call.call, split.parameters)
+          if (missing.length > 0) {
+            return yield* new InvocationError({
+              code: "missing_argument",
+              detail: `${call.tool} requires: ${missing.join(", ")}`
+            })
+          }
+
+          const built = yield* Effect.try({
+            try: () =>
+              buildRequest({
+                call: call.call,
+                server: call.server,
+                parameters: split.parameters,
+                requestBody: split.requestBody
+              }),
+            catch: (cause) =>
+              new SpecError({
+                source: call.tool,
+                detail: `Could not build the request: ${describeCause(cause)}`,
+                cause
+              })
           })
-        }
-        const missing = missingArguments(call.call, split.parameters)
-        if (missing.length > 0) {
-          return yield* new InvocationError({
-            code: "missing_argument",
-            detail: `${call.tool} requires: ${missing.join(", ")}`
+
+          const prepared = applyCredential({ url: built.url, headers: { ...built.headers } }, call.credential)
+
+          const request = HttpClientRequest.make(built.method)(prepared.url, {
+            headers: { accept: "application/json, */*", ...prepared.headers }
           })
-        }
 
-        const built = yield* Effect.try({
-          try: () => buildRequest({
-            call: call.call,
-            server: call.server,
-            parameters: split.parameters,
-            requestBody: split.requestBody
-          }),
-          catch: (cause) => new SpecError({
-            source: call.tool,
-            detail: `Could not build the request: ${describeCause(cause)}`,
-            cause
-          })
-        })
+          const withBody = Option.isNone(built.body)
+            ? Effect.succeed(request)
+            : built.body.value.kind === "text"
+              ? Effect.succeed(
+                  HttpClientRequest.bodyText(request, built.body.value.value, request.headers["content-type"])
+                )
+              : Effect.map(blobs.open(built.body.value.id), (opened) =>
+                  HttpClientRequest.bodyStream(request, opened.content, {
+                    contentType: opened.metadata.contentType,
+                    contentLength: opened.metadata.bytes
+                  })
+                )
 
-        const prepared = applyCredential(
-          { url: built.url, headers: { ...built.headers } },
-          call.credential
-        )
-
-        const request = HttpClientRequest.make(built.method)(prepared.url, {
-          headers: { accept: "application/json, */*", ...prepared.headers }
-        })
-
-        const withBody = Option.isNone(built.body)
-          ? Effect.succeed(request)
-          : built.body.value.kind === "text"
-          ? Effect.succeed(HttpClientRequest.bodyText(
-            request,
-            built.body.value.value,
-            request.headers["content-type"]
-          ))
-          : Effect.map(blobs.open(built.body.value.id), (opened) =>
-            HttpClientRequest.bodyStream(request, opened.content, {
-              contentType: opened.metadata.contentType,
-              contentLength: opened.metadata.bytes
-            }))
-
-        const response = yield* client.execute(yield* withBody).pipe(
-          Effect.mapError((cause) => new InvocationError({
-            code: "transport_error",
-            detail: `${built.method} ${built.url}: ${describeCause(cause)}`
-          })),
-          Effect.timeoutOrElse({
-            duration: call.timeoutMillis ?? defaultTimeoutMillis,
-            orElse: () => Effect.fail(new InvocationError({
-              code: "timeout",
-              detail: `${call.tool} did not answer in time: ${built.method} ${built.url}`
-            }))
-          })
-        )
-
-        const contentType = response.headers["content-type"] ?? ""
-
-        if (response.status < 200 || response.status >= 300) {
-          const body = yield* response.text.pipe(
-            Effect.mapError((cause) => new InvocationError({
-              code: "response_error",
-              detail: describeCause(cause),
-              status: response.status
-            }))
+          const response = yield* client.execute(yield* withBody).pipe(
+            Effect.catch((cause) => unreachable(call, built.url, cause)),
+            Effect.timeoutOrElse({
+              duration: call.timeoutMillis ?? defaultTimeoutMillis,
+              orElse: () =>
+                Effect.fail(
+                  new InvocationError({
+                    code: "timeout",
+                    detail: `${call.tool} did not answer in time from ${hostOf(built.url)}`
+                  })
+                )
+            })
           )
-          return yield* new InvocationError({
-            code: `http_${response.status}`,
-            // `built.url` and not the prepared one: a credential can be placed
-            // in the query string, and this text reaches the caller.
-            detail: `${built.method} ${built.url}: ${errorDetail(contentType, body)}`,
-            status: response.status
-          })
-        }
 
-        const limit = call.maxInlineBytes ?? defaultMaxInlineBytes
-        const textual = isTextualContentType(contentType)
-        const declared = Number(response.headers["content-length"])
+          const contentType = response.headers["content-type"] ?? ""
 
-        // The common case — a small JSON answer that announced its size — never
-        // touches the disk.
-        if (textual && Number.isFinite(declared) && declared <= limit) {
-          const buffer = yield* response.arrayBuffer.pipe(
-            Effect.mapError((cause) => new InvocationError({
-              code: "response_error",
-              detail: describeCause(cause),
-              status: response.status
-            }))
-          )
-          return decodeBody(contentType, utf8.decode(buffer))
-        }
-
-        // Everything else is streamed to disk before anything decides what it
-        // is. Bytes are the lossless superset: text can be recovered from them,
-        // but a decode that has already happened cannot be undone.
-        const filename = filenameFromDisposition(response.headers["content-disposition"])
-        const stored = yield* blobs.write(
-          { contentType, filename },
-          response.stream.pipe(Stream.mapError((cause) =>
-            new InvocationError({
-              code: "response_error",
-              detail: describeCause(cause),
+          if (response.status < 200 || response.status >= 300) {
+            const body = yield* response.text.pipe(
+              Effect.catch((cause) => unreachable(call, built.url, cause, response.status))
+            )
+            return yield* new InvocationError({
+              code: `http_${response.status}`,
+              // `built.url` and not the prepared one: a credential can be placed
+              // in the query string, and this text reaches the caller.
+              detail: `${built.method} ${built.url}: ${errorDetail(contentType, body)}`,
               status: response.status
             })
-          ))
-        )
+          }
 
-        if (textual && stored.bytes <= limit) {
-          const bytes = yield* blobs.readAll(stored.id)
-          yield* blobs.discard(stored.id)
-          return decodeBody(contentType, utf8.decode(bytes))
-        }
+          const limit = call.maxInlineBytes ?? defaultMaxInlineBytes
+          const textual = isTextualContentType(contentType)
+          const declared = Number(response.headers["content-length"])
 
-        const preview = textual
-          ? utf8.decode(yield* blobs.readPrefix(stored.id, previewBytes))
-          : undefined
+          // The common case — a small JSON answer that announced its size — never
+          // touches the disk.
+          if (textual && Number.isFinite(declared) && declared <= limit) {
+            const buffer = yield* response.arrayBuffer.pipe(
+              Effect.catch((cause) => unreachable(call, built.url, cause, response.status))
+            )
+            return decodeBody(contentType, utf8.decode(buffer))
+          }
 
-        return {
-          [blobHandleKey]: stored.id,
-          bytes: stored.bytes,
-          contentType,
-          sha256: stored.sha256,
-          note: textual
-            ? oversizeNote(contentType, stored.bytes, limit)
-            : binaryNote(contentType),
-          ...whenPresent("filename", filename),
-          ...whenPresent("preview", preview)
-        }
-      })
+          // Everything else is streamed to disk before anything decides what it
+          // is. Bytes are the lossless superset: text can be recovered from them,
+          // but a decode that has already happened cannot be undone.
+          const filename = filenameFromDisposition(response.headers["content-disposition"])
+          const stored = yield* blobs.write(
+            { contentType, filename },
+            response.stream.pipe(
+              Stream.catch((cause) => Stream.fromEffect(unreachable(call, built.url, cause, response.status)))
+            )
+          )
+
+          if (textual && stored.bytes <= limit) {
+            const bytes = yield* blobs.readAll(stored.id)
+            yield* blobs.discard(stored.id)
+            return decodeBody(contentType, utf8.decode(bytes))
+          }
+
+          const preview = textual ? utf8.decode(yield* blobs.readPrefix(stored.id, previewBytes)) : undefined
+
+          return {
+            [blobHandleKey]: stored.id,
+            bytes: stored.bytes,
+            contentType,
+            sha256: stored.sha256,
+            note: textual ? oversizeNote(contentType, stored.bytes, limit) : binaryNote(contentType),
+            ...whenPresent("filename", filename),
+            ...whenPresent("preview", preview)
+          }
+        })
       }
     })
   )
 
-  static readonly unavailableTestLayer: Layer.Layer<OpenApiInvoker> = Layer.succeed(
-    OpenApiInvoker,
-    { call: () => Effect.die("Unexpected OpenAPI invocation") }
-  )
+  static readonly unavailableTestLayer: Layer.Layer<OpenApiInvoker> = Layer.succeed(OpenApiInvoker, {
+    call: () => Effect.die("Unexpected OpenAPI invocation")
+  })
 }

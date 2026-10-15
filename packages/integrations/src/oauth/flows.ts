@@ -1,141 +1,40 @@
-import {
-  discoverAuthorizationServerMetadata,
-  discoverOAuthProtectedResourceMetadata,
-  exchangeAuthorization,
-  refreshAuthorization,
-  registerClient,
-  startAuthorization
-} from "@modelcontextprotocol/client"
 import { Clock, Context, Effect, Layer, Option, Schema } from "effect"
-import { Base64Url } from "effect/encoding"
+import type * as oauth from "oauth4webapi"
+import { connectionAddress, ConnectionName, IntegrationSlug, webCrypto, whenPresent } from "@integragents/contracts"
+import type { ConnectionOwner } from "@integragents/contracts"
 import { CatalogStore } from "../catalog/store.ts"
-import type { OAuthClientRecord } from "../catalog/store.ts"
+import type { ClientAuthMethod, OAuthClientRecord } from "../catalog/store.ts"
+import { AuthTemplateSlug, OAuthClientSlug, OAuthState } from "../catalog/ids.ts"
+import type { Egress } from "../egress/egress.ts"
+import { OAuthError, StorageError } from "../errors.ts"
 import {
   connectionCredentialKey,
   CredentialStore,
   oauthClientCredentialKey,
   readTokens,
-  writeTokens
+  StoredTokens
 } from "../storage/credentials.ts"
-import type { StoredTokens } from "../storage/credentials.ts"
-import { webCrypto } from "@integragents/contracts"
-import { describeCause, OAuthError, StorageError } from "../errors.ts"
-import { OAuthClientSlug, OAuthState } from "../catalog/ids.ts"
-import { connectionAddress, ConnectionName, IntegrationSlug } from "@integragents/contracts"
-import { AuthTemplateSlug } from "../catalog/ids.ts"
-import { whenPresent } from "@integragents/contracts"
-import { OAuthServerProbe, ConnectionOwner } from "@integragents/contracts"
+import { boundScopes, OAuthProtocol, preferredAuthMethod, suppliedAuthMethod } from "./protocol.ts"
+import type { ClientCredentials, Protocol, TokenResponse } from "./protocol.ts"
 
-const ServerMetadata = Schema.Struct({
-  issuer: Schema.optional(Schema.String),
-  authorization_endpoint: Schema.optional(Schema.String),
-  token_endpoint: Schema.optional(Schema.String),
-  registration_endpoint: Schema.optional(Schema.String),
-  scopes_supported: Schema.optional(Schema.Array(Schema.String)),
-  token_endpoint_auth_methods_supported: Schema.optional(Schema.Array(Schema.String))
-})
-type ServerMetadata = typeof ServerMetadata.Type
+/** How an integration says it authorizes, as recorded on its auth method. */
+export interface OAuthMethodSettings {
+  readonly discoveryUrl?: string | undefined
+  readonly authorizationUrl?: string | undefined
+  readonly tokenUrl?: string | undefined
+  readonly resource?: string | null | undefined
+  readonly scopes?: ReadonlyArray<string> | undefined
+  readonly registrationEndpoint?: string | undefined
+}
 
-const decodeServerMetadata = Schema.decodeUnknownEffect(ServerMetadata)
-
-const TokenResponse = Schema.Struct({
-  access_token: Schema.String,
-  token_type: Schema.optional(Schema.String),
-  refresh_token: Schema.optional(Schema.String),
-  expires_in: Schema.optional(Schema.Number),
-  scope: Schema.optional(Schema.String)
-})
-
-const decodeTokenResponse = Schema.decodeUnknownEffect(TokenResponse)
-
-const RegisteredClient = Schema.Struct({
-  client_id: Schema.String,
-  client_secret: Schema.optional(Schema.String),
-  token_endpoint_auth_method: Schema.optional(Schema.String)
-})
-
-const decodeRegisteredClient = Schema.decodeUnknownEffect(RegisteredClient)
-
-const discover = (
-  url: string
-): Effect.Effect<{
-  readonly metadata: ServerMetadata
-  readonly resource: Option.Option<string>
-}, OAuthError> =>
-  Effect.tryPromise({
-    try: async () => {
-      const resource = await discoverOAuthProtectedResourceMetadata(url).catch(() => undefined)
-      const authorizationServer = resource?.authorization_servers?.[0] ?? url
-      const metadata = await discoverAuthorizationServerMetadata(authorizationServer)
-      if (metadata === undefined) {
-        throw new Error(`No authorization server metadata at ${authorizationServer}`)
-      }
-      return { metadata, resource: resource?.resource }
-    },
-    catch: (cause) => new OAuthError({
-      stage: "probe",
-      detail: describeCause(cause),
-      cause
-    })
-  }).pipe(
-    Effect.flatMap((found) =>
-      decodeServerMetadata(found.metadata).pipe(
-        Effect.mapError((cause) =>
-          new OAuthError({
-            stage: "probe",
-            detail: "Authorization server metadata was unreadable",
-            cause
-          })
-        ),
-        Effect.map((metadata) => ({
-          metadata,
-          resource: Option.fromNullishOr(found.resource)
-        }))
-      )
-    )
-  )
-
-const resourceUrl = (resource: string | undefined): URL | undefined =>
-  resource === undefined ? undefined : new URL(resource)
-
-const requestedTokenAuthMethod = "client_secret_post"
-
-const clientMetadata = (redirectUri: string, scopes: ReadonlyArray<string>) => ({
-  client_name: "integrations gateway",
-  redirect_uris: [redirectUri],
-  grant_types: ["authorization_code", "refresh_token"],
-  response_types: ["code"],
-  token_endpoint_auth_method: requestedTokenAuthMethod,
-  ...whenPresent("scope", scopes.length === 0 ? undefined : scopes.join(" "))
-})
-
-const noRedirectUris: ReadonlyArray<string> = []
-
-// Providers disagree on how a client asks for a refresh token, and no discovery
-// document advertises which dialect applies. RFC 6749 requires servers to ignore
-// request parameters they do not recognise, so every dialect ships every time.
-const offlineAccessParams: ReadonlyArray<readonly [string, string]> = [
-  ["access_type", "offline"],
-  ["token_access_type", "offline"],
-  ["prompt", "consent"]
-]
-
-const clientInformation = (
-  record: OAuthClientRecord,
-  secret: Option.Option<string>
-) => ({
-  client_id: record.clientId,
-  ...whenPresent("client_secret", Option.getOrUndefined(secret)),
-  ...whenPresent("token_endpoint_auth_method", record.tokenAuthMethod),
-  redirect_uris: noRedirectUris
-})
-
-const metadataOf = (record: OAuthClientRecord) => ({
-  issuer: record.issuer ?? record.authorizationUrl,
-  authorization_endpoint: record.authorizationUrl,
-  token_endpoint: record.tokenUrl,
-  response_types_supported: ["code"]
-})
+/** What an authorization will ask for, worked out from discovery or the configured endpoints. */
+export interface OAuthSetup {
+  readonly server: oauth.AuthorizationServer
+  /** Whether `server` came from the issuer's own metadata, so its issuer can be checked. */
+  readonly discovered: boolean
+  readonly resource: string | undefined
+  readonly scopes: ReadonlyArray<string>
+}
 
 export interface StartOptions {
   readonly owner: ConnectionOwner
@@ -163,238 +62,242 @@ export interface OAuthAccess {
   readonly expiresAt?: number
 }
 
+export interface ConnectionGrant {
+  readonly owner: ConnectionOwner
+  readonly integration: IntegrationSlug
+  readonly connection: ConnectionName
+  readonly clientOwner: ConnectionOwner
+  readonly client: OAuthClientSlug
+}
+
+const offlineAccessScope = "offline_access"
+const refreshSkewMillis = 60_000
+/** A claim older than this belonged to a refresh that may have spent a rotating token before failing. */
+const abandonedClaimMillis = 60_000
+const claimPollInterval = "100 millis"
+const minimumStateLength = 32
+
+const serverOf = (client: OAuthClientRecord): oauth.AuthorizationServer => ({
+  issuer: client.issuer ?? new URL(client.tokenUrl).origin,
+  authorization_endpoint: client.authorizationUrl,
+  token_endpoint: client.tokenUrl,
+  authorization_response_iss_parameter_supported: client.issParameterSupported
+})
+
+const encodeTokens = Schema.encodeSync(Schema.fromJsonString(StoredTokens))
+
+const failure = (stage: OAuthError["stage"], reason: OAuthError["reason"], detail: string) =>
+  new OAuthError({ stage, reason, detail })
+
+/** Failures that mean the grant itself is dead, as opposed to the provider being unreachable for now. */
+const deadGrant = (error: OAuthError): boolean =>
+  error.reason === "invalid_grant" ||
+  error.reason === "invalid_client" ||
+  error.reason === "invalid_scope" ||
+  error.reason === "destination_blocked"
+
 export class OAuthFlows extends Context.Service<
   OAuthFlows,
   {
-    readonly probe: (url: string) => Effect.Effect<OAuthServerProbe, OAuthError>
-    readonly registerDynamicClient: (options: {
+    readonly discover: (settings: OAuthMethodSettings) => Effect.Effect<OAuthSetup, OAuthError>
+    /** The protected resource metadata and challenge `endpoint` publishes, if any. */
+    readonly discoverResource: Protocol["discoverResource"]
+    readonly registerClient: (options: {
       readonly owner: ConnectionOwner
       readonly slug: OAuthClientSlug
       readonly integration: IntegrationSlug
+      readonly setup: OAuthSetup
       readonly redirectUri: string
-      readonly registrationEndpoint: string
-      readonly authorizationUrl: string
-      readonly tokenUrl: string
-      readonly issuer?: string
-      readonly resource?: string
-      readonly scopes: ReadonlyArray<string>
     }) => Effect.Effect<OAuthClientSlug, OAuthError | StorageError>
-    readonly createClient: (options: {
+    /** Records a client the gateway did not register itself: one a person created, or its metadata document. */
+    readonly saveClient: (options: {
       readonly owner: ConnectionOwner
       readonly slug: OAuthClientSlug
       readonly integration: IntegrationSlug
-      readonly authorizationUrl: string
-      readonly tokenUrl: string
+      readonly setup: OAuthSetup
       readonly clientId: string
-      readonly clientSecret?: string
-      readonly resource?: string
-      readonly scopes?: ReadonlyArray<string>
+      readonly clientSecret?: string | undefined
+      readonly tokenAuthMethod?: ClientAuthMethod
     }) => Effect.Effect<OAuthClientSlug, StorageError>
     readonly start: (
       options: StartOptions
-    ) => Effect.Effect<
-      { readonly authorizationUrl: string; readonly state: OAuthState },
-      OAuthError | StorageError
-    >
-    readonly complete: (options: {
-      readonly state: OAuthState
-      readonly code: string
-    }) => Effect.Effect<CompletedAuthorization, OAuthError | StorageError>
-    readonly accessToken: (reference: {
-      readonly owner: ConnectionOwner
-      readonly integration: IntegrationSlug
-      readonly connection: ConnectionName
-      readonly clientOwner: ConnectionOwner
-      readonly client: OAuthClientSlug
-    }) => Effect.Effect<Option.Option<OAuthAccess>, OAuthError | StorageError>
+    ) => Effect.Effect<{ readonly authorizationUrl: string; readonly state: OAuthState }, OAuthError | StorageError>
+    /** Finishes the authorization the callback's parameters belong to. */
+    readonly complete: (callback: URLSearchParams) => Effect.Effect<CompletedAuthorization, OAuthError | StorageError>
+    /**
+     * The connection's current access token, refreshed when it is about to
+     * expire or when `renew` says the provider just rejected it.
+     */
+    readonly accessToken: (
+      grant: ConnectionGrant,
+      options?: { readonly renew?: boolean }
+    ) => Effect.Effect<Option.Option<OAuthAccess>, OAuthError | StorageError>
   }
 >()("@integragents/host/OAuthFlows") {
-  static readonly layer: Layer.Layer<
-    OAuthFlows,
-    never,
-    CatalogStore | CredentialStore
-  > = Layer.effect(
+  static readonly layer: Layer.Layer<OAuthFlows, never, CatalogStore | CredentialStore | Egress> = Layer.effect(
     OAuthFlows,
     Effect.gen(function* () {
       const store = yield* CatalogStore
       const credentials = yield* CredentialStore
+      const protocol = yield* OAuthProtocol
 
       const clientSecret = (record: OAuthClientRecord) =>
         credentials.get(oauthClientCredentialKey(record.owner, record.slug))
 
-      const requireClient = Effect.fn("OAuthFlows.requireClient")(function* (reference: {
-        readonly owner: ConnectionOwner
-        readonly slug: OAuthClientSlug
-      }) {
+      const requireClient = Effect.fn("OAuthFlows.requireClient")(function* (
+        stage: OAuthError["stage"],
+        reference: { readonly owner: ConnectionOwner; readonly slug: OAuthClientSlug }
+      ) {
         const found = yield* store.findOAuthClient(reference)
-        return yield* Option.match(found, {
-          onNone: () => Effect.fail(new OAuthError({
-            stage: "start",
-            detail: `No OAuth client ${reference.owner}/${reference.slug}`
-          })),
-          onSome: Effect.succeed
-        })
-      })
-
-      const probe = Effect.fn("OAuthFlows.probe")(function* (url: string) {
-        const found = yield* discover(url)
-        const metadata = found.metadata
-        const authorizationUrl = metadata.authorization_endpoint
-        const tokenUrl = metadata.token_endpoint
-        if (authorizationUrl === undefined || tokenUrl === undefined) {
-          return yield* new OAuthError({
-            stage: "probe",
-            detail: `${url} publishes no authorization or token endpoint`
-          })
+        if (Option.isNone(found)) {
+          return yield* failure(stage, "invalid_client", `No OAuth client ${reference.owner}/${reference.slug}`)
         }
-        return yield* Schema.decodeUnknownEffect(OAuthServerProbe)({
-          issuer: metadata.issuer ?? null,
-          authorizationUrl,
-          tokenUrl,
-          resource: Option.getOrNull(found.resource),
-          scopesSupported: metadata.scopes_supported ?? [],
-          registrationEndpoint: metadata.registration_endpoint ?? null,
-          tokenEndpointAuthMethodsSupported:
-            metadata.token_endpoint_auth_methods_supported ?? [],
-          clientIdMetadataDocumentSupported: false
-        }).pipe(Effect.mapError((cause) =>
-          new OAuthError({ stage: "probe", detail: "Could not describe the probe", cause })
-        ))
+        const secret = yield* clientSecret(found.value)
+        const credentials: ClientCredentials = {
+          clientId: found.value.clientId,
+          clientSecret: Option.getOrUndefined(secret),
+          tokenAuthMethod: found.value.tokenAuthMethod ?? "client_secret_post"
+        }
+        return { record: found.value, credentials }
       })
 
-      const registerDynamicClient = Effect.fn("OAuthFlows.registerDynamicClient")(
-        function* (options: {
-          readonly owner: ConnectionOwner
-          readonly slug: OAuthClientSlug
-          readonly integration: IntegrationSlug
-          readonly redirectUri: string
-          readonly registrationEndpoint: string
-          readonly authorizationUrl: string
-          readonly tokenUrl: string
-          readonly issuer?: string
-          readonly resource?: string
-          readonly scopes: ReadonlyArray<string>
-        }) {
-          const registered = yield* Effect.tryPromise({
-            try: () => registerClient(options.authorizationUrl, {
-              metadata: {
-                issuer: options.issuer ?? options.authorizationUrl,
-                authorization_endpoint: options.authorizationUrl,
-                token_endpoint: options.tokenUrl,
-                registration_endpoint: options.registrationEndpoint,
-                response_types_supported: ["code"]
-              },
-              clientMetadata: clientMetadata(options.redirectUri, options.scopes),
-              ...whenPresent(
-                "scope",
-                options.scopes.length === 0 ? undefined : options.scopes.join(" ")
-              )
-            }),
-            catch: (cause) => new OAuthError({
-              stage: "register",
-              detail: describeCause(cause),
-              cause
-            })
-          })
-
-          const decoded = yield* decodeRegisteredClient(registered).pipe(
-            Effect.mapError((cause) =>
-              new OAuthError({
-                stage: "register",
-                detail: "The server's registration response was unreadable",
-                cause
-              })
-            )
-          )
-
-          const now = yield* Clock.currentTimeMillis
-          yield* store.putOAuthClient({
-            owner: options.owner,
-            slug: options.slug,
-            integration: options.integration,
-            clientId: decoded.client_id,
-            authorizationUrl: options.authorizationUrl,
-            tokenUrl: options.tokenUrl,
-            registrationEndpoint: options.registrationEndpoint,
-            ...whenPresent("issuer", options.issuer),
-            ...whenPresent("resource", options.resource),
-            scopes: options.scopes,
-            tokenAuthMethod: decoded.token_endpoint_auth_method ?? requestedTokenAuthMethod
-          })
-          if (decoded.client_secret !== undefined) {
-            yield* credentials.set(
-              oauthClientCredentialKey(options.owner, options.slug),
-              decoded.client_secret
-            )
+      const discover = Effect.fn("OAuthFlows.discover")(function* (settings: OAuthMethodSettings) {
+        if (settings.discoveryUrl === undefined) {
+          if (settings.authorizationUrl === undefined || settings.tokenUrl === undefined) {
+            return yield* failure("discover", "unsupported", "No authorization and token endpoints are configured")
           }
-          yield* Effect.annotateCurrentSpan("registeredAt", now)
-          return options.slug
+          const authorizationUrl = yield* protocol.destination("discover", settings.authorizationUrl)
+          const tokenUrl = yield* protocol.destination("discover", settings.tokenUrl)
+          const registrationEndpoint =
+            settings.registrationEndpoint === undefined
+              ? undefined
+              : yield* protocol.destination("discover", settings.registrationEndpoint)
+          return {
+            server: {
+              issuer: tokenUrl.origin,
+              authorization_endpoint: authorizationUrl.href,
+              token_endpoint: tokenUrl.href,
+              ...whenPresent("registration_endpoint", registrationEndpoint?.href)
+            },
+            discovered: false,
+            resource: settings.resource ?? undefined,
+            scopes: boundScopes(settings.scopes ?? [])
+          } satisfies OAuthSetup
         }
-      )
+        const found = yield* protocol.discoverServer(settings.discoveryUrl)
+        const methods = found.server.code_challenge_methods_supported
+        if (methods !== undefined && !methods.includes("S256")) {
+          return yield* failure("discover", "unsupported", "The authorization server does not support PKCE with S256")
+        }
+        const resource = Option.getOrUndefined(found.resource)
+        const challenge = Option.getOrUndefined(found.challenge)
+        const requested = settings.scopes ?? challenge?.scopes ?? resource?.scopes_supported ?? []
+        const scopes =
+          found.server.scopes_supported?.includes(offlineAccessScope) === true &&
+          !requested.includes(offlineAccessScope)
+            ? [...requested, offlineAccessScope]
+            : requested
+        return {
+          server: found.server,
+          discovered: true,
+          resource: settings.resource === null ? undefined : (settings.resource ?? resource?.resource),
+          scopes: boundScopes(scopes)
+        } satisfies OAuthSetup
+      })
 
-      const createClient = Effect.fn("OAuthFlows.createClient")(function* (options: {
+      const clientRecord = (options: {
         readonly owner: ConnectionOwner
         readonly slug: OAuthClientSlug
         readonly integration: IntegrationSlug
-        readonly authorizationUrl: string
-        readonly tokenUrl: string
+        readonly setup: OAuthSetup
         readonly clientId: string
-        readonly clientSecret?: string
-        readonly resource?: string
-        readonly scopes?: ReadonlyArray<string>
-      }) {
-        yield* store.putOAuthClient({
+        readonly tokenAuthMethod: ClientAuthMethod
+        readonly secretExpiresAt?: number | undefined
+      }): Effect.Effect<OAuthClientRecord, OAuthError> => {
+        const server = options.setup.server
+        if (server.authorization_endpoint === undefined || server.token_endpoint === undefined) {
+          return Effect.fail(failure("register", "unsupported", "The provider has no authorization or token endpoint"))
+        }
+        return Effect.succeed({
           owner: options.owner,
           slug: options.slug,
           integration: options.integration,
           clientId: options.clientId,
-          authorizationUrl: options.authorizationUrl,
-          tokenUrl: options.tokenUrl,
-          ...whenPresent("resource", options.resource),
-          scopes: options.scopes ?? []
+          authorizationUrl: server.authorization_endpoint,
+          tokenUrl: server.token_endpoint,
+          ...whenPresent("registrationEndpoint", server.registration_endpoint),
+          ...whenPresent("issuer", options.setup.discovered ? server.issuer : undefined),
+          ...whenPresent("resource", options.setup.resource),
+          scopes: options.setup.scopes,
+          tokenAuthMethod: options.tokenAuthMethod,
+          issParameterSupported:
+            options.setup.discovered && server.authorization_response_iss_parameter_supported === true,
+          ...whenPresent("secretExpiresAt", options.secretExpiresAt)
         })
-        if (options.clientSecret !== undefined && options.clientSecret.length > 0) {
-          yield* credentials.set(
-            oauthClientCredentialKey(options.owner, options.slug),
-            options.clientSecret
-          )
+      }
+
+      const registerClient = Effect.fn("OAuthFlows.registerClient")(function* (options: {
+        readonly owner: ConnectionOwner
+        readonly slug: OAuthClientSlug
+        readonly integration: IntegrationSlug
+        readonly setup: OAuthSetup
+        readonly redirectUri: string
+      }) {
+        if (options.setup.server.registration_endpoint === undefined) {
+          return yield* failure("register", "unsupported", "The provider does not offer dynamic client registration")
+        }
+        const registered = yield* protocol.register({
+          server: options.setup.server,
+          redirectUri: options.redirectUri,
+          scopes: options.setup.scopes,
+          tokenAuthMethod: preferredAuthMethod(options.setup.server)
+        })
+        yield* store.putOAuthClient(
+          yield* clientRecord({
+            ...options,
+            clientId: registered.clientId,
+            tokenAuthMethod: registered.tokenAuthMethod,
+            secretExpiresAt: registered.secretExpiresAt
+          })
+        )
+        if (registered.clientSecret !== undefined) {
+          yield* credentials.set(oauthClientCredentialKey(options.owner, options.slug), registered.clientSecret)
         }
         return options.slug
       })
 
+      const saveClient = Effect.fn("OAuthFlows.saveClient")(function* (options: {
+        readonly owner: ConnectionOwner
+        readonly slug: OAuthClientSlug
+        readonly integration: IntegrationSlug
+        readonly setup: OAuthSetup
+        readonly clientId: string
+        readonly clientSecret?: string | undefined
+        readonly tokenAuthMethod?: ClientAuthMethod
+      }) {
+        const secret =
+          options.clientSecret === undefined || options.clientSecret.length === 0 ? undefined : options.clientSecret
+        const record = yield* clientRecord({
+          ...options,
+          tokenAuthMethod: options.tokenAuthMethod ?? suppliedAuthMethod(options.setup.server, secret !== undefined)
+        }).pipe(Effect.mapError((cause) => new StorageError({ message: cause.detail })))
+        yield* store.putOAuthClient(record)
+        const key = oauthClientCredentialKey(options.owner, options.slug)
+        yield* secret === undefined ? credentials.remove(key) : credentials.set(key, secret)
+        return options.slug
+      })
+
       const start = Effect.fn("OAuthFlows.start")(function* (options: StartOptions) {
-        const client = yield* requireClient({
-          owner: options.clientOwner,
-          slug: options.client
+        const client = yield* requireClient("start", { owner: options.clientOwner, slug: options.client })
+        const began = yield* protocol.authorizationRequest({
+          server: serverOf(client.record),
+          client: client.credentials,
+          redirectUri: options.redirectUri,
+          scopes: client.record.scopes,
+          resource: client.record.resource,
+          withNonce: client.record.issuer !== undefined && client.record.scopes.includes("openid")
         })
-        const secret = yield* clientSecret(client)
-        const state = OAuthState.make(
-          Base64Url.encode(yield* Effect.orDie(webCrypto.randomBytes(32)))
-        )
-
-        const began = yield* Effect.tryPromise({
-          try: () => startAuthorization(client.authorizationUrl, {
-            metadata: metadataOf(client),
-            clientInformation: clientInformation(client, secret),
-            redirectUrl: options.redirectUri,
-            state,
-            ...whenPresent(
-              "scope",
-              client.scopes.length === 0 ? undefined : client.scopes.join(" ")
-            ),
-            ...whenPresent("resource", resourceUrl(client.resource))
-          }),
-          catch: (cause) => new OAuthError({
-            stage: "start",
-            detail: describeCause(cause),
-            cause
-          })
-        })
-
-        for (const [name, value] of offlineAccessParams) {
-          began.authorizationUrl.searchParams.set(name, value)
-        }
-
+        const state = OAuthState.make(began.state)
         yield* store.putOAuthFlow({
           state,
           owner: options.owner,
@@ -405,99 +308,74 @@ export class OAuthFlows extends Context.Service<
           clientSlug: options.client,
           codeVerifier: began.codeVerifier,
           redirectUri: options.redirectUri,
-          ...whenPresent("resource", client.resource),
-          scopes: client.scopes
+          ...whenPresent("resource", client.record.resource),
+          scopes: client.record.scopes,
+          ...whenPresent("nonce", began.nonce)
         })
-
-        return {
-          authorizationUrl: began.authorizationUrl.toString(),
-          state
-        }
+        return { authorizationUrl: began.authorizationUrl, state }
       })
 
-      const persistTokens = Effect.fn("OAuthFlows.persistTokens")(function* (options: {
-        readonly owner: ConnectionOwner
-        readonly integration: IntegrationSlug
-        readonly connection: ConnectionName
-        readonly response: typeof TokenResponse.Type
-      }) {
+      const persistTokens = Effect.fn("OAuthFlows.persistTokens")(function* (
+        response: TokenResponse,
+        previous: Option.Option<StoredTokens>
+      ) {
         const now = yield* Clock.currentTimeMillis
-        const expiresAt = options.response.expires_in === undefined
-          ? undefined
-          : now + options.response.expires_in * 1000
-        const address = connectionAddress({
-          owner: options.owner,
-          integration: options.integration,
-          connection: options.connection
-        })
+        const refreshToken =
+          response.refresh_token ??
+          Option.getOrUndefined(Option.flatMapNullishOr(previous, (tokens) => tokens.refreshToken))
+        const expiresAt = response.expires_in === undefined ? undefined : now + response.expires_in * 1000
         const tokens: StoredTokens = {
-          accessToken: options.response.access_token,
-          ...whenPresent("tokenType", options.response.token_type),
-          ...whenPresent("refreshToken", options.response.refresh_token),
+          accessToken: response.access_token,
+          tokenType: response.token_type,
+          ...whenPresent("refreshToken", refreshToken),
           ...whenPresent("expiresAt", expiresAt),
-          ...whenPresent("scope", options.response.scope)
+          ...whenPresent("scope", response.scope)
         }
-        yield* writeTokens(credentials, connectionCredentialKey(address), tokens)
-        return {
-          scope: Option.fromNullishOr(options.response.scope),
-          expiresAt: options.response.refresh_token === undefined
-            ? Option.fromNullishOr(expiresAt)
-            : Option.none()
-        }
+        return tokens
       })
 
-      const complete = Effect.fn("OAuthFlows.complete")(function* (options: {
-        readonly state: OAuthState
-        readonly code: string
-      }) {
-        const pending = yield* store.takeOAuthFlow(options.state)
-        const flow = yield* Option.match(pending, {
-          onNone: () => Effect.fail(new OAuthError({
-            stage: "complete",
-            detail: "This authorization is not pending; start it again"
-          })),
-          onSome: Effect.succeed
+      const callbackFailure = (detail: string) => failure("complete", "invalid_callback", detail)
+
+      const complete = Effect.fn("OAuthFlows.complete")(function* (callback: URLSearchParams) {
+        const states = callback.getAll("state")
+        const state = states[0]
+        if (states.length !== 1 || state === undefined || state.length < minimumStateLength) {
+          return yield* callbackFailure("The callback does not carry exactly one valid state")
+        }
+        const pending = yield* store.takeOAuthFlow(OAuthState.make(state))
+        if (Option.isNone(pending)) {
+          return yield* failure("complete", "not_pending", "This authorization is not pending; start it again")
+        }
+        const flow = pending.value
+        const redirect = new URL(flow.redirectUri)
+        for (const name of new Set(redirect.searchParams.keys())) {
+          const expected = redirect.searchParams.getAll(name)
+          const actual = callback.getAll(name)
+          if (expected.length !== actual.length || expected.some((value, index) => actual[index] !== value)) {
+            return yield* callbackFailure("The callback does not match the redirect it was sent to")
+          }
+        }
+        const callbackUrl = new URL(redirect)
+        callbackUrl.search = callback.toString()
+
+        const client = yield* requireClient("complete", { owner: flow.clientOwner, slug: flow.clientSlug })
+        const response = yield* protocol.exchange({
+          server: serverOf(client.record),
+          client: client.credentials,
+          callback: callbackUrl,
+          state,
+          redirectUri: flow.redirectUri,
+          codeVerifier: flow.codeVerifier,
+          resource: flow.resource,
+          nonce: flow.nonce
         })
-
-        const client = yield* requireClient({
-          owner: flow.clientOwner,
-          slug: flow.clientSlug
-        })
-        const secret = yield* clientSecret(client)
-
-        const exchanged = yield* Effect.tryPromise({
-          try: () => exchangeAuthorization(client.authorizationUrl, {
-            metadata: metadataOf(client),
-            clientInformation: clientInformation(client, secret),
-            authorizationCode: options.code,
-            codeVerifier: flow.codeVerifier,
-            redirectUri: flow.redirectUri,
-            ...whenPresent("resource", resourceUrl(flow.resource))
-          }),
-          catch: (cause) => new OAuthError({
-            stage: "complete",
-            detail: describeCause(cause),
-            cause
-          })
-        })
-
-        const response = yield* decodeTokenResponse(exchanged).pipe(
-          Effect.mapError((cause) =>
-            new OAuthError({
-              stage: "complete",
-              detail: "The token response was unreadable",
-              cause
-            })
-          )
-        )
-
-        const stored = yield* persistTokens({
+        const tokens = yield* persistTokens(response, Option.none())
+        const address = connectionAddress({
           owner: flow.owner,
           integration: flow.integration,
-          connection: flow.connection,
-          response
+          connection: flow.connection
         })
-
+        yield* credentials.set(connectionCredentialKey(address), encodeTokens(tokens))
         return {
           owner: flow.owner,
           integration: flow.integration,
@@ -505,99 +383,98 @@ export class OAuthFlows extends Context.Service<
           template: flow.template,
           clientOwner: flow.clientOwner,
           client: flow.clientSlug,
-          scope: stored.scope,
-          expiresAt: stored.expiresAt
-        }
+          scope: Option.fromNullishOr(tokens.scope),
+          expiresAt: tokens.refreshToken === undefined ? Option.fromNullishOr(tokens.expiresAt) : Option.none()
+        } satisfies CompletedAuthorization
       })
 
-      const refreshSkewMillis = 60_000
+      const reconnect = (grant: ConnectionGrant, reason: string) =>
+        store
+          .requireReconnect({ owner: grant.owner, integration: grant.integration, name: grant.connection }, reason)
+          .pipe(Effect.andThen(Effect.fail(failure("refresh", "reconnect_required", reason))))
 
-      const accessToken = Effect.fn("OAuthFlows.accessToken")(function* (reference: {
-        readonly owner: ConnectionOwner
-        readonly integration: IntegrationSlug
-        readonly connection: ConnectionName
-        readonly clientOwner: ConnectionOwner
-        readonly client: OAuthClientSlug
-      }) {
-        const address = connectionAddress({
-          owner: reference.owner,
-          integration: reference.integration,
-          connection: reference.connection
-        })
-        const key = connectionCredentialKey(address)
-        const held = yield* readTokens(credentials, key)
-        if (Option.isNone(held)) return Option.none<OAuthAccess>()
-        const tokens = held.value
+      const accessOf = (tokens: StoredTokens): OAuthAccess => ({
+        value: tokens.accessToken,
+        ...whenPresent("expiresAt", tokens.refreshToken === undefined ? tokens.expiresAt : undefined)
+      })
 
-        const now = yield* Clock.currentTimeMillis
-        const spent = tokens.expiresAt !== undefined &&
-          tokens.expiresAt - refreshSkewMillis <= now
-        if (!spent) {
-          return Option.some({
-            value: tokens.accessToken,
-            ...whenPresent("expiresAt", tokens.refreshToken === undefined ? tokens.expiresAt : undefined)
-          })
-        }
+      const accessToken = Effect.fn("OAuthFlows.accessToken")(function* (
+        grant: ConnectionGrant,
+        options: { readonly renew?: boolean } = {}
+      ) {
+        const key = connectionCredentialKey(connectionAddress(grant))
+        let rejected: string | undefined
+        let first = true
+        while (true) {
+          const connection = (yield* store.listConnections({
+            owner: grant.owner,
+            integration: grant.integration,
+            name: grant.connection
+          }))[0]
+          if (connection?.reconnectReason !== undefined) {
+            return yield* failure("refresh", "reconnect_required", connection.reconnectReason)
+          }
+          const held = yield* readTokens(credentials, key)
+          if (Option.isNone(held)) return Option.none<OAuthAccess>()
+          const tokens = held.value
+          if (first && options.renew === true) rejected = tokens.accessToken
+          first = false
+          const now = yield* Clock.currentTimeMillis
+          const expired = tokens.expiresAt !== undefined && tokens.expiresAt - refreshSkewMillis <= now
+          if (!expired && tokens.accessToken !== rejected) return Option.some(accessOf(tokens))
+          const refreshToken = tokens.refreshToken
+          if (refreshToken === undefined) {
+            return yield* reconnect(
+              grant,
+              expired
+                ? "The access token expired and no refresh token is available"
+                : "The provider rejected the access token and issued no refresh token"
+            )
+          }
 
-        if (tokens.refreshToken === undefined) {
-          return yield* new OAuthError({
-            stage: "refresh",
-            detail: "The access token expired and no refresh token is available"
-          })
-        }
+          const claim = yield* Effect.orDie(webCrypto.randomUUIDv4)
+          const claimed = yield* credentials.claim(key, claim, now)
+          if (claimed._tag === "Missing") return Option.none<OAuthAccess>()
+          if (claimed._tag === "Held") {
+            if (now - claimed.since > abandonedClaimMillis) {
+              return yield* reconnect(grant, "A token refresh was interrupted before it finished")
+            }
+            yield* Effect.sleep(claimPollInterval)
+            continue
+          }
 
-        const client = yield* requireClient({
-          owner: reference.clientOwner,
-          slug: reference.client
-        })
-        const secret = yield* clientSecret(client)
-
-        const refreshed = yield* Effect.tryPromise({
-          try: () => refreshAuthorization(client.authorizationUrl, {
-            metadata: metadataOf(client),
-            clientInformation: clientInformation(client, secret),
-            refreshToken: tokens.refreshToken ?? "",
-            ...whenPresent("resource", resourceUrl(client.resource))
-          }),
-          catch: (cause) => new OAuthError({
-            stage: "refresh",
-            detail: describeCause(cause),
-            cause
-          })
-        })
-
-        const response = yield* decodeTokenResponse(refreshed).pipe(
-          Effect.mapError((cause) =>
-            new OAuthError({
-              stage: "refresh",
-              detail: "The refreshed token response was unreadable",
-              cause
+          const client = yield* requireClient("refresh", { owner: grant.clientOwner, slug: grant.client })
+          const refreshed = yield* Effect.result(
+            protocol.refresh({
+              server: serverOf(client.record),
+              client: client.credentials,
+              refreshToken,
+              resource: client.record.resource
             })
           )
-        )
-
-        const stored = yield* persistTokens({
-          owner: reference.owner,
-          integration: reference.integration,
-          connection: reference.connection,
-          response: response.refresh_token === undefined
-            ? { ...response, refresh_token: tokens.refreshToken }
-            : response
-        })
-        return Option.some({
-          value: response.access_token,
-          ...whenPresent("expiresAt", Option.getOrUndefined(stored.expiresAt))
-        })
+          if (refreshed._tag === "Failure") {
+            yield* credentials.settleClaim(key, claim, Option.none())
+            const error = refreshed.failure
+            return yield* deadGrant(error)
+              ? reconnect(grant, `The provider refused the refresh: ${error.detail}`)
+              : Effect.fail(error)
+          }
+          const next = yield* persistTokens(refreshed.success, Option.some(tokens))
+          const settled = yield* credentials.settleClaim(key, claim, Option.some(encodeTokens(next)))
+          if (!settled) continue
+          return Option.some(accessOf(next))
+        }
       })
 
       return {
-        probe,
-        registerDynamicClient,
-        createClient,
+        discover,
+        discoverResource: protocol.discoverResource,
+        registerClient,
+        saveClient,
         start,
         complete,
         accessToken
       }
     })
-  )
+  ).pipe(Layer.provide(OAuthProtocol.layer))
 }

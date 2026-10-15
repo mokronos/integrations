@@ -26,26 +26,31 @@ function RevokeApp({ row, profile }: { readonly row: AppRow; readonly profile: P
   const invalidate = useInvalidate()
   const name = row.kind === "key" ? row.key.name : row.grant.applicationName
   const revoke = useMutation({
-    mutationFn: () => row.kind === "key"
-      ? gateway.revokeKey(row.key.id).then(() => undefined)
-      : gateway.revokeOAuthGrant(row.grant.id).then(() => undefined),
+    mutationFn: () =>
+      row.kind === "key"
+        ? gateway.revokeKey(row.key.id).then(() => undefined)
+        : gateway.revokeOAuthGrant(row.grant.id).then(() => undefined),
     onSuccess: () => {
       invalidate(keys.apiKeys(profile.id), keys.oauthGrants, keys.profiles)
       toast.success(`${name} can no longer call this profile`)
     },
     onError: (error: Error) => toast.error("Could not revoke access", { description: error.message })
   })
-  return <ConfirmButton
-    label="Revoke"
-    title={`Revoke ${name}?`}
-    description={row.kind === "key"
-      ? "This key stops working immediately. Other apps on this profile keep their access."
-      : "Its access and refresh tokens stop working immediately. Other apps on this profile keep their access."}
-    confirmLabel="Revoke"
-    pendingLabel="Revoking…"
-    pending={revoke.isPending}
-    onConfirm={() => revoke.mutateAsync()}
-  />
+  return (
+    <ConfirmButton
+      label="Revoke"
+      title={`Revoke ${name}?`}
+      description={
+        row.kind === "key"
+          ? "This key stops working immediately. Other apps on this profile keep their access."
+          : "Its access and refresh tokens stop working immediately. Other apps on this profile keep their access."
+      }
+      confirmLabel="Revoke"
+      pendingLabel="Revoking…"
+      pending={revoke.isPending}
+      onConfirm={() => revoke.mutateAsync()}
+    />
+  )
 }
 
 export function ProfileApps({ profile }: { readonly profile: Profile }) {
@@ -55,69 +60,120 @@ export function ProfileApps({ profile }: { readonly profile: Profile }) {
   const mcpUrl = useMcpUrl()
   const [showRevoked, setShowRevoked] = useState(false)
   const rows: ReadonlyArray<AppRow> = [
-    ...(grants.data ?? []).filter((grant) => grant.profileId === profile.id).map((grant) => ({ kind: "oauth" as const, grant })),
+    ...(grants.data ?? [])
+      .filter((grant) => grant.profileId === profile.id)
+      .map((grant) => ({ kind: "oauth" as const, grant })),
     ...(apiKeys.data ?? []).map((key) => ({ kind: "key" as const, key }))
   ]
   const live = rows.filter((row) => !rowRevoked(row))
   const revoked = rows.length - live.length
   const shown = showRevoked ? rows : live
 
-  return <div className="space-y-4">
-    <Card>
-      <CardHeader>
-        <CardTitle>Apps using this profile</CardTitle>
-        <CardDescription>
-          Every app has its own key or OAuth grant. Calls are recorded under its name, and revoking one leaves the others working.
-        </CardDescription>
-        <CardAction><AddAppButton profile={profile} variant={live.length === 0 ? "default" : "outline"} /></CardAction>
-      </CardHeader>
-      <CardContent className="p-0">
-        {apiKeys.isPending || grants.isPending ? <div className="p-4"><LoadingRows rows={2} /></div> : <Table>
-          <TableHeader><TableRow><TableHead>App</TableHead><TableHead>Connected with</TableHead><TableHead>Added</TableHead><TableHead>Last used</TableHead><TableHead /></TableRow></TableHeader>
-          <TableBody>
-            {shown.length === 0
-              ? <TableRow><TableCell colSpan={5} className="text-muted-foreground py-8 text-center">No app is connected yet. Add one with a key, or authorize it through MCP below.</TableCell></TableRow>
-              : shown.map((row) => <TableRow key={row.kind === "key" ? row.key.id : row.grant.id} className={rowRevoked(row) ? "opacity-55" : undefined}>
-                <TableCell className="font-medium">{row.kind === "key" ? row.key.name : row.grant.applicationName}</TableCell>
-                <TableCell className="text-muted-foreground text-sm">
-                  {row.kind === "key" ? "API key" : `Browser login by ${row.grant.subjectEmail}`}
-                </TableCell>
-                <TableCell className="text-muted-foreground text-sm">{when(row.kind === "key" ? row.key.createdAt : row.grant.createdAt)}</TableCell>
-                <TableCell className="text-muted-foreground text-sm">
-                  {(row.kind === "key" ? row.key.lastUsedAt : row.grant.lastUsedAt) === null ? "Never" : when(row.kind === "key" ? row.key.lastUsedAt : row.grant.lastUsedAt)}
-                </TableCell>
-                <TableCell className="text-right">
-                  {rowRevoked(row) ? <Badge variant="outline">revoked</Badge> : <RevokeApp row={row} profile={profile} />}
-                </TableCell>
-              </TableRow>)}
-          </TableBody>
-        </Table>}
-      </CardContent>
-      {revoked === 0 ? null : (
-        <CardFooter>
-          <Button variant="ghost" size="sm" onClick={() => setShowRevoked((value) => !value)}>
-            {showRevoked ? "Hide revoked" : `Show ${revoked} revoked`}
-          </Button>
-        </CardFooter>
-      )}
-    </Card>
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Apps using this profile</CardTitle>
+          <CardDescription>
+            Every app has its own key or OAuth grant. Calls are recorded under its name, and revoking one leaves the
+            others working.
+          </CardDescription>
+          <CardAction>
+            <AddAppButton profile={profile} variant={live.length === 0 ? "default" : "outline"} />
+          </CardAction>
+        </CardHeader>
+        <CardContent className="p-0">
+          {apiKeys.isPending || grants.isPending ? (
+            <div className="p-4">
+              <LoadingRows rows={2} />
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>App</TableHead>
+                  <TableHead>Connected with</TableHead>
+                  <TableHead>Added</TableHead>
+                  <TableHead>Last used</TableHead>
+                  <TableHead />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {shown.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-muted-foreground py-8 text-center">
+                      No app is connected yet. Add one with a key, or authorize it through MCP below.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  shown.map((row) => (
+                    <TableRow
+                      key={row.kind === "key" ? row.key.id : row.grant.id}
+                      className={rowRevoked(row) ? "opacity-55" : undefined}
+                    >
+                      <TableCell className="font-medium">
+                        {row.kind === "key" ? row.key.name : row.grant.applicationName}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-sm">
+                        {row.kind === "key" ? "API key" : `Browser login by ${row.grant.subjectEmail}`}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-sm">
+                        {when(row.kind === "key" ? row.key.createdAt : row.grant.createdAt)}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-sm">
+                        {(row.kind === "key" ? row.key.lastUsedAt : row.grant.lastUsedAt) === null
+                          ? "Never"
+                          : when(row.kind === "key" ? row.key.lastUsedAt : row.grant.lastUsedAt)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {rowRevoked(row) ? (
+                          <Badge variant="outline">revoked</Badge>
+                        ) : (
+                          <RevokeApp row={row} profile={profile} />
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+        {revoked === 0 ? null : (
+          <CardFooter>
+            <Button variant="ghost" size="sm" onClick={() => setShowRevoked((value) => !value)}>
+              {showRevoked ? "Hide revoked" : `Show ${revoked} revoked`}
+            </Button>
+          </CardFooter>
+        )}
+      </Card>
 
-    <Card>
-      <CardHeader>
-        <CardTitle>Connect an app</CardTitle>
-        <CardDescription>Through MCP with a browser login, the CLI and skill, or the TypeScript client.</CardDescription>
-      </CardHeader>
-      <CardContent>
-        {gatewayUrl.isPending || mcpUrl.isPending
-          ? <LoadingRows rows={2} />
-          : gatewayUrl.data === undefined || mcpUrl.data === undefined
-          ? <p className="text-muted-foreground text-sm">
-            This gateway has no public URL to name. Start it on loopback, or set
-            <code className="mx-1 font-mono text-xs">INTEGRATIONS_PUBLIC_URL</code>
-            to the address agents reach it at.
-          </p>
-          : <ConnectTabs profileName={profile.name} gatewayUrl={gatewayUrl.data} mcpUrl={mcpUrl.data} apiKey={apiKeyPlaceholder} />}
-      </CardContent>
-    </Card>
-  </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Connect an app</CardTitle>
+          <CardDescription>
+            Through MCP with a browser login, the CLI and skill, or the TypeScript client.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {gatewayUrl.isPending || mcpUrl.isPending ? (
+            <LoadingRows rows={2} />
+          ) : gatewayUrl.data === undefined || mcpUrl.data === undefined ? (
+            <p className="text-muted-foreground text-sm">
+              This gateway has no public URL to name. Start it on loopback, or set
+              <code className="mx-1 font-mono text-xs">INTEGRATIONS_PUBLIC_URL</code>
+              to the address agents reach it at.
+            </p>
+          ) : (
+            <ConnectTabs
+              profileName={profile.name}
+              gatewayUrl={gatewayUrl.data}
+              mcpUrl={mcpUrl.data}
+              apiKey={apiKeyPlaceholder}
+            />
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  )
 }

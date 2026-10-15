@@ -14,13 +14,11 @@ export const oauthSetupGuidance = (input: {
   readonly redirectUri: string
 }): string => {
   const oauth = input.method.oauth ?? {}
-  const host = integrationsOf(oauth.authorizationUrl) ??
-    integrationsOf(oauth.discoveryUrl) ??
-    integrationsOf(oauth.tokenUrl)
+  const host =
+    integrationsOf(oauth.authorizationUrl) ?? integrationsOf(oauth.discoveryUrl) ?? integrationsOf(oauth.tokenUrl)
   const scopes = oauth.scopes ?? []
-  const scopeLines = scopes.length === 0
-    ? []
-    : [`Scopes to request:\n${scopes.map((scope) => `  - ${scope}`).join("\n")}`]
+  const scopeLines =
+    scopes.length === 0 ? [] : [`Scopes to request:\n${scopes.map((scope) => `  - ${scope}`).join("\n")}`]
   // The client secret is what a human is here to protect, so the browser form
   // leads and the flags stay available for an unattended setup.
   const retry =
@@ -47,8 +45,7 @@ export const oauthSetupGuidance = (input: {
   }
   if (
     host !== undefined &&
-    (host.endsWith("microsoftonline.com") || host.endsWith("microsoft.com") ||
-      host.endsWith("live.com"))
+    (host.endsWith("microsoftonline.com") || host.endsWith("microsoft.com") || host.endsWith("live.com"))
   ) {
     return [
       preamble,

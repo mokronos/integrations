@@ -3,7 +3,6 @@ import { SpecError } from "../errors.ts"
 import { isJsonBoolean, isJsonObject, isJsonString, type Json } from "@integragents/contracts"
 import { whenPresent } from "@integragents/contracts"
 
-
 const DiscoverySchemaRef = Schema.Struct({
   $ref: Schema.optional(Schema.String)
 })
@@ -34,9 +33,11 @@ const DiscoveryMethod = Schema.Struct({
   response: Schema.optional(DiscoverySchemaRef),
   scopes: Schema.optional(Schema.Array(Schema.String)),
   supportsMediaUpload: Schema.optional(Schema.Boolean),
-  mediaUpload: Schema.optional(Schema.Struct({
-    accept: Schema.optional(Schema.Array(Schema.String))
-  }))
+  mediaUpload: Schema.optional(
+    Schema.Struct({
+      accept: Schema.optional(Schema.Array(Schema.String))
+    })
+  )
 })
 type DiscoveryMethod = typeof DiscoveryMethod.Type
 
@@ -58,14 +59,17 @@ const DiscoveryDocument = Schema.Struct({
   parameters: Schema.optional(Schema.Record(Schema.String, DiscoveryParameter)),
   schemas: Schema.optional(Schema.Record(Schema.String, Schema.Json)),
   resources: Schema.optional(Schema.Record(Schema.String, Schema.Json)),
-  auth: Schema.optional(Schema.Struct({
-    oauth2: Schema.optional(Schema.Struct({
-      scopes: Schema.optional(Schema.Record(
-        Schema.String,
-        Schema.Struct({ description: Schema.optional(Schema.String) })
-      ))
-    }))
-  }))
+  auth: Schema.optional(
+    Schema.Struct({
+      oauth2: Schema.optional(
+        Schema.Struct({
+          scopes: Schema.optional(
+            Schema.Record(Schema.String, Schema.Struct({ description: Schema.optional(Schema.String) }))
+          )
+        })
+      )
+    })
+  )
 })
 type DiscoveryDocument = typeof DiscoveryDocument.Type
 
@@ -74,15 +78,27 @@ export const isGoogleDiscoveryUrl = (url: string): boolean =>
   /^https?:\/\/[^/]*\.googleapis\.com\/\$discovery\/rest/.test(url) ||
   /\/discovery\/v1\/apis\/[^/]+\/[^/]+\/rest$/.test(url)
 
+/** APIs the central Discovery directory does not list; their documents live on the service's own host. */
+const serviceHostedDiscovery = new Set(["analyticsdata", "forms", "keep", "photospicker"])
+
+const centralDiscoveryPath = /^\/discovery\/v1\/apis\/([a-z0-9_-]+)\/([A-Za-z0-9._-]+)\/rest\/?$/
+
+/** Where a Discovery document is actually served, for the URL a user gave. */
+export const googleDiscoveryFetchUrl = (url: string): string => {
+  const parsed = URL.parse(url)
+  if (parsed === null || parsed.hostname !== "www.googleapis.com" || parsed.search !== "") return url
+  const [, service, version] = centralDiscoveryPath.exec(parsed.pathname) ?? []
+  if (service === undefined || version === undefined || !serviceHostedDiscovery.has(service)) return url
+  return `https://${service}.googleapis.com/$discovery/rest?version=${version}`
+}
+
 const rewriteRefs = (value: Json): Json => {
   if (Array.isArray(value)) return value.map(rewriteRefs)
   if (!isJsonObject(value)) return value
   const result: Record<string, Json> = {}
   for (const [key, entry] of Object.entries(value)) {
     if (key === "$ref" && isJsonString(entry)) {
-      result["$ref"] = entry.startsWith("#/")
-        ? entry
-        : `#/components/schemas/${entry}`
+      result["$ref"] = entry.startsWith("#/") ? entry : `#/components/schemas/${entry}`
       continue
     }
     if (key === "required" && isJsonBoolean(entry)) continue
@@ -94,7 +110,7 @@ const rewriteRefs = (value: Json): Json => {
 
 const parameterSchema = (parameter: DiscoveryParameter): Json => {
   const base = {
-    type: parameter.type === "any" ? "string" : parameter.type ?? "string",
+    type: parameter.type === "any" ? "string" : (parameter.type ?? "string"),
     ...whenPresent("format", parameter.format),
     ...whenPresent("description", parameter.description),
     ...whenPresent("pattern", parameter.pattern),
@@ -113,13 +129,15 @@ const openApiParameters = (
   Object.entries(parameters).flatMap(([name, parameter]) => {
     const inPath = parameter.location === "path"
     if (inPath && !pathTemplate.includes(`{${name}}`)) return []
-    return [{
-      name,
-      in: inPath ? "path" : "query",
-      required: inPath ? true : parameter.required === true,
-      ...whenPresent("description", parameter.description),
-      schema: parameterSchema(parameter)
-    }]
+    return [
+      {
+        name,
+        in: inPath ? "path" : "query",
+        required: inPath ? true : parameter.required === true,
+        ...whenPresent("description", parameter.description),
+        schema: parameterSchema(parameter)
+      }
+    ]
   })
 
 const requestBody = (method: DiscoveryMethod): Option.Option<Json> => {
@@ -149,20 +167,14 @@ const responses = (method: DiscoveryMethod): Json => {
   }
 }
 
-const collectMethods = (
-  resources: Readonly<Record<string, Json>>
-): ReadonlyArray<DiscoveryMethod> => {
+const collectMethods = (resources: Readonly<Record<string, Json>>): ReadonlyArray<DiscoveryMethod> => {
   const collected: Array<DiscoveryMethod> = []
   const walk = (entries: Readonly<Record<string, Json>>): void => {
     for (const value of Object.values(entries)) {
-      const resource = Option.getOrUndefined(
-        Schema.decodeUnknownOption(DiscoveryResource)(value)
-      )
+      const resource = Option.getOrUndefined(Schema.decodeUnknownOption(DiscoveryResource)(value))
       if (resource === undefined) continue
       for (const rawMethod of Object.values(resource.methods ?? {})) {
-        const method = Option.getOrUndefined(
-          Schema.decodeUnknownOption(DiscoveryMethod)(rawMethod)
-        )
+        const method = Option.getOrUndefined(Schema.decodeUnknownOption(DiscoveryMethod)(rawMethod))
         if (method !== undefined) collected.push(method)
       }
       if (resource.resources !== undefined) walk(resource.resources)
@@ -183,10 +195,7 @@ const convertDocument = (document: DiscoveryDocument): Json => {
   for (const method of methods) {
     const path = `/${method.path.replace(/^\//, "")}`
     const verb = method.httpMethod.toLowerCase()
-    const parameters = openApiParameters(
-      { ...globalParameters, ...method.parameters },
-      path
-    )
+    const parameters = openApiParameters({ ...globalParameters, ...method.parameters }, path)
     const body = requestBody(method)
     const operation = {
       operationId: method.id ?? `${verb}${path.replace(/[^A-Za-z0-9]+/g, "_")}`,
@@ -195,10 +204,7 @@ const convertDocument = (document: DiscoveryDocument): Json => {
       parameters: [...parameters],
       responses: responses(method),
       ...whenPresent("deprecated", method.deprecated === true ? true : undefined),
-      ...whenPresent(
-        "security",
-        method.scopes === undefined ? undefined : [{ oauth2: [...method.scopes] }]
-      ),
+      ...whenPresent("security", method.scopes === undefined ? undefined : [{ oauth2: [...method.scopes] }]),
       ...whenPresent("requestBody", Option.getOrUndefined(body))
     }
     const existing = paths[path] ?? {}
@@ -206,24 +212,16 @@ const convertDocument = (document: DiscoveryDocument): Json => {
   }
 
   const schemas = Object.fromEntries(
-    Object.entries(document.schemas ?? {}).map(([name, schema]) => [
-      name,
-      rewriteRefs(schema)
-    ])
+    Object.entries(document.schemas ?? {}).map(([name, schema]) => [name, rewriteRefs(schema)])
   )
 
   const scopes = Object.fromEntries(
-    Object.entries(document.auth?.oauth2?.scopes ?? {}).map(([scope, detail]) => [
-      scope,
-      detail.description ?? scope
-    ])
+    Object.entries(document.auth?.oauth2?.scopes ?? {}).map(([scope, detail]) => [scope, detail.description ?? scope])
   )
 
   const root = document.rootUrl?.replace(/\/+$/, "")
   const servicePath = (document.servicePath ?? "").replace(/^\/+|\/+$/g, "")
-  const serverUrl = root === undefined
-    ? document.baseUrl
-    : servicePath.length === 0 ? root : `${root}/${servicePath}`
+  const serverUrl = root === undefined ? document.baseUrl : servicePath.length === 0 ? root : `${root}/${servicePath}`
 
   return {
     openapi: "3.0.3",
@@ -232,49 +230,44 @@ const convertDocument = (document: DiscoveryDocument): Json => {
       version: document.version ?? "v1",
       ...whenPresent("description", document.description)
     },
-    ...whenPresent(
-      "servers",
-      serverUrl === undefined ? undefined : [{ url: serverUrl }]
-    ),
+    ...whenPresent("servers", serverUrl === undefined ? undefined : [{ url: serverUrl }]),
     paths,
     components: {
       schemas,
       ...whenPresent(
         "securitySchemes",
-        Object.keys(scopes).length === 0 ? undefined : {
-          oauth2: {
-            type: "oauth2",
-            flows: {
-              authorizationCode: {
-                authorizationUrl: googleAuthorizationUrl,
-                tokenUrl: googleTokenUrl,
-                scopes
+        Object.keys(scopes).length === 0
+          ? undefined
+          : {
+              oauth2: {
+                type: "oauth2",
+                flows: {
+                  authorizationCode: {
+                    authorizationUrl: googleAuthorizationUrl,
+                    tokenUrl: googleTokenUrl,
+                    scopes
+                  }
+                }
               }
             }
-          }
-        }
       )
     },
     ...whenPresent(
       "externalDocs",
-      document.documentationLink === undefined
-        ? undefined
-        : { url: document.documentationLink }
+      document.documentationLink === undefined ? undefined : { url: document.documentationLink }
     )
   }
 }
 
-export const convertGoogleDiscovery = (
-  source: string,
-  text: string
-): Effect.Effect<string, SpecError> =>
+export const convertGoogleDiscovery = (source: string, text: string): Effect.Effect<string, SpecError> =>
   Schema.decodeUnknownEffect(Schema.fromJsonString(DiscoveryDocument))(text).pipe(
-    Effect.mapError((cause) =>
-      new SpecError({
-        source,
-        detail: "Not a readable Google Discovery document",
-        cause
-      })
+    Effect.mapError(
+      (cause) =>
+        new SpecError({
+          source,
+          detail: "Not a readable Google Discovery document",
+          cause
+        })
     ),
     Effect.map((document) => JSON.stringify(convertDocument(document)))
   )

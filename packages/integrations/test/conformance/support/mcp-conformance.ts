@@ -11,10 +11,8 @@ export interface McpConformanceTarget {
   readonly assertResult: (result: Json) => void
 }
 
-export const verifyMcpConformance = (
-  target: McpConformanceTarget
-): Effect.Effect<void, Error, McpClient> =>
-  Effect.gen(function*() {
+export const verifyMcpConformance = (target: McpConformanceTarget): Effect.Effect<void, Error, McpClient> =>
+  Effect.gen(function* () {
     const host = yield* McpClient
     const server = { endpoint: target.endpoint, era: Option.none() }
     const { tools } = yield* host.listTools(server, target.credential)
@@ -27,12 +25,7 @@ export const verifyMcpConformance = (
     expect(tool?.description?.length).toBeGreaterThan(0)
     expect(tool?.inputSchema).toBeDefined()
 
-    const result = yield* host.callTool(
-      server,
-      target.credential,
-      target.expectedTool,
-      target.input
-    )
-    target.assertResult(result)
+    const result = yield* host.callTool(server, target.credential, target.expectedTool, target.input)
+    expect(result.kind).toBe("complete")
+    if (result.kind === "complete") target.assertResult(result.result)
   })
-

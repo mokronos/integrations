@@ -16,8 +16,10 @@ export interface PageModel {
 }
 
 const escape = (text: string): string =>
-  text.replace(/[&<>"']/g, (character) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[character] ?? character)
+  text.replace(
+    /[&<>"']/g,
+    (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character] ?? character
+  )
 
 const json = (value: Json): string => escape(JSON.stringify(value, null, 2))
 

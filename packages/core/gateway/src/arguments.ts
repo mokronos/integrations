@@ -15,7 +15,10 @@ const draftOf = (schema: JsonObject): SchemaDraft => {
 const asDocument = (schema: JsonObject): JsonSchemaDocument => ({ ...schema })
 
 const describeLocation = (instanceLocation: string): string => {
-  const path = instanceLocation.replace(/^#\/?/, "").split("/").filter((part) => part.length > 0)
+  const path = instanceLocation
+    .replace(/^#\/?/, "")
+    .split("/")
+    .filter((part) => part.length > 0)
   return path.length === 0 ? "arguments" : path.join(".")
 }
 
@@ -34,7 +37,10 @@ export const invalidArguments = (
   const locations = result.errors.map((unit) => unit.instanceLocation)
   const seen = new Set<string>()
   const issues = result.errors
-    .filter((unit) => !locations.some((other) => other !== unit.instanceLocation && other.startsWith(`${unit.instanceLocation}/`)))
+    .filter(
+      (unit) =>
+        !locations.some((other) => other !== unit.instanceLocation && other.startsWith(`${unit.instanceLocation}/`))
+    )
     .map((unit) => ({ path: describeLocation(unit.instanceLocation), message: unit.error }))
     .filter((issue) => {
       const key = `${issue.path}: ${issue.message}`
@@ -45,9 +51,10 @@ export const invalidArguments = (
   const headline = issues[0]
   return {
     status: "invalid",
-    message: headline === undefined
-      ? `The arguments do not match what ${tool} accepts`
-      : `${tool} rejected its arguments: ${headline.path} ${headline.message}`,
+    message:
+      headline === undefined
+        ? `The arguments do not match what ${tool} accepts`
+        : `${tool} rejected its arguments: ${headline.path} ${headline.message}`,
     issues
   }
 }

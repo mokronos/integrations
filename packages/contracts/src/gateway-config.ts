@@ -6,9 +6,7 @@ import { Schema } from "effect"
 
 export const defaultGatewayPort = 4788
 
-export const integrationsHome = (
-  environment: NodeJS.ProcessEnv = process.env
-): string => {
+export const integrationsHome = (environment: NodeJS.ProcessEnv = process.env): string => {
   const configured = environment["INTEGRATIONS_HOME"]
   return configured === undefined || configured.length === 0
     ? path.join(homedir(), ".integrations")
@@ -27,17 +25,13 @@ export const GatewayConfigFile = Schema.Struct({
 })
 export type GatewayConfigFile = typeof GatewayConfigFile.Type
 
-export const gatewayConfigPath = (home: string): string =>
-  path.join(home, "gateway.json")
+export const gatewayConfigPath = (home: string): string => path.join(home, "gateway.json")
 
-export const operatorGatewayConfigPath = (home: string): string =>
-  path.join(home, "operator-gateway.json")
+export const operatorGatewayConfigPath = (home: string): string => path.join(home, "operator-gateway.json")
 
 const decodeConfig = Schema.decodeUnknownSync(Schema.fromJsonString(GatewayConfigFile))
 
-export const readGatewayConfig = async (
-  home: string
-): Promise<GatewayConfigFile | undefined> => {
+export const readGatewayConfig = async (home: string): Promise<GatewayConfigFile | undefined> => {
   try {
     return decodeConfig(await readFile(gatewayConfigPath(home), "utf8"))
   } catch {
@@ -45,9 +39,7 @@ export const readGatewayConfig = async (
   }
 }
 
-export const readOperatorGatewayConfig = async (
-  home: string
-): Promise<GatewayConfigFile | undefined> => {
+export const readOperatorGatewayConfig = async (home: string): Promise<GatewayConfigFile | undefined> => {
   try {
     return decodeConfig(await readFile(operatorGatewayConfigPath(home), "utf8"))
   } catch {
@@ -61,15 +53,11 @@ const writeConfig = async (location: string, config: GatewayConfigFile): Promise
   chmodSync(location, 0o600)
 }
 
-export const writeGatewayConfig = async (
-  home: string,
-  config: GatewayConfigFile
-): Promise<void> => writeConfig(gatewayConfigPath(home), config)
+export const writeGatewayConfig = async (home: string, config: GatewayConfigFile): Promise<void> =>
+  writeConfig(gatewayConfigPath(home), config)
 
-export const writeOperatorGatewayConfig = async (
-  home: string,
-  config: GatewayConfigFile
-): Promise<void> => writeConfig(operatorGatewayConfigPath(home), config)
+export const writeOperatorGatewayConfig = async (home: string, config: GatewayConfigFile): Promise<void> =>
+  writeConfig(operatorGatewayConfigPath(home), config)
 
 export interface ClientConnection {
   readonly url: string

@@ -61,48 +61,45 @@ export type DriftReport = {
   readonly tools: number
 }
 
-export class DriftRefreshError extends Schema.TaggedError<DriftRefreshError>()(
-  "DriftRefreshError",
-  {
-    integration: Schema.String,
-    cause: Schema.Defect()
-  }
-) {}
+export class DriftRefreshError extends Schema.TaggedError<DriftRefreshError>()("DriftRefreshError", {
+  integration: Schema.String,
+  cause: Schema.Defect()
+}) {}
 
-export const refreshIntegrationSnapshot = Effect.fn("Drift.refreshIntegrationSnapshot")(
-  function*(
-    dependencies: {
-      readonly store: GatewayStore
-      readonly integrations: ToolCatalogReader
-    },
-    integration: string,
-    tenantId: TenantId
-  ): Effect.fn.Return<DriftReport, DriftRefreshError | GatewayStoreError> {
-    const slug = IntegrationSlug.make(integration)
-    const checkedAt = yield* DateTime.nowAsDate
-    const tools = yield* dependencies.integrations.listTools({ integration: slug }).pipe(
-      Effect.mapError((cause) => new DriftRefreshError({ integration, cause }))
-    )
-    const current: ReadonlyArray<ToolSnapshot> = tools.map((tool) => ({
-      integration: slug,
-      connection: tool.connection,
-      tool: tool.name,
-      inputSchema: tool.inputSchema ?? null,
-      outputSchema: tool.outputSchema ?? null,
-      syncedAt: checkedAt
-    }))
-    const previous = yield* dependencies.store.listToolSnapshots(tenantId, slug)
-    const baseline = previous.length === 0
-    const entries = baseline ? [] : diffSnapshots(previous, current)
-    yield* dependencies.store.putToolSnapshots(tenantId, current)
-    yield* dependencies.store.forgetToolSnapshots(
-      tenantId,
-      entries.filter((entry) => entry.kind === "removed").map((entry) => ({
+export const refreshIntegrationSnapshot = Effect.fn("Drift.refreshIntegrationSnapshot")(function* (
+  dependencies: {
+    readonly store: GatewayStore
+    readonly integrations: ToolCatalogReader
+  },
+  integration: string,
+  tenantId: TenantId
+): Effect.fn.Return<DriftReport, DriftRefreshError | GatewayStoreError> {
+  const slug = IntegrationSlug.make(integration)
+  const checkedAt = yield* DateTime.nowAsDate
+  const tools = yield* dependencies.integrations
+    .listTools({ integration: slug })
+    .pipe(Effect.mapError((cause) => new DriftRefreshError({ integration, cause })))
+  const current: ReadonlyArray<ToolSnapshot> = tools.map((tool) => ({
+    integration: slug,
+    connection: tool.connection,
+    tool: tool.name,
+    inputSchema: tool.inputSchema ?? null,
+    outputSchema: tool.outputSchema ?? null,
+    syncedAt: checkedAt
+  }))
+  const previous = yield* dependencies.store.listToolSnapshots(tenantId, slug)
+  const baseline = previous.length === 0
+  const entries = baseline ? [] : diffSnapshots(previous, current)
+  yield* dependencies.store.putToolSnapshots(tenantId, current)
+  yield* dependencies.store.forgetToolSnapshots(
+    tenantId,
+    entries
+      .filter((entry) => entry.kind === "removed")
+      .map((entry) => ({
         integration: slug,
         connection: entry.connection,
         tool: entry.tool
       }))
-    )
-    return { integration, entries, checkedAt, baseline, tools: current.length }
-  }
-)
+  )
+  return { integration, entries, checkedAt, baseline, tools: current.length }
+})

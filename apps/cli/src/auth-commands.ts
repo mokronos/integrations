@@ -20,23 +20,19 @@ const passwordFlag = () =>
     Flag.withDescription("Password. Omit to enter it without terminal echo")
   )
 
-const password = (
-  provided: Option.Option<Redacted.Redacted<string>>,
-  message = "Password"
-) =>
+const password = (provided: Option.Option<Redacted.Redacted<string>>, message = "Password") =>
   Option.match(provided, {
     onNone: () => Prompt.run(Prompt.Password({ message })).pipe(Effect.map(Redacted.value)),
     onSome: (value) => Effect.succeed(Redacted.value(value))
   })
 
-const authTask = <A, E, R>(
-  task: Effect.Effect<A, E, R>
-): Effect.Effect<A, IntegrationsCliError, R> =>
+const authTask = <A, E, R>(task: Effect.Effect<A, E, R>): Effect.Effect<A, IntegrationsCliError, R> =>
   Effect.mapError(task, (cause) => cliError(describeError(cause)))
 
 const controlPlaneTask = (
-  task: (client: ControlPlaneClient) =>
-    Effect.Effect<typeof Schema.Json.Type, IntegrationsCliError, HttpClient.HttpClient>
+  task: (
+    client: ControlPlaneClient
+  ) => Effect.Effect<typeof Schema.Json.Type, IntegrationsCliError, HttpClient.HttpClient>
 ): Effect.Effect<typeof Schema.Json.Type, IntegrationsCliError, HttpClient.HttpClient> =>
   authTask(Effect.flatMap(connectToControlPlane(), task))
 
@@ -55,28 +51,30 @@ export const loginCommand = Command.make(
     )
   },
   ({ email, password: provided, noOpen, timeout }) =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const explicitEmail = Option.getOrUndefined(email)
       const context = yield* Effect.context()
-      const session = explicitEmail === undefined
-        ? yield* authTask(loginOperatorInBrowser({
-          noOpen,
-          timeoutSeconds: timeout,
-          onAuthorization: (url) => Effect.runPromiseWith(context)(writeStdoutLine(
-            `${noOpen ? "Open" : "If the browser does not open, visit"}: ${url}`
-          ))
-        }))
-        : yield* Effect.gen(function*() {
-          const secret = yield* password(provided)
-          return yield* authTask(loginOperator({ email: explicitEmail, password: secret }))
-        })
+      const session =
+        explicitEmail === undefined
+          ? yield* authTask(
+              loginOperatorInBrowser({
+                noOpen,
+                timeoutSeconds: timeout,
+                onAuthorization: (url) =>
+                  Effect.runPromiseWith(context)(
+                    writeStdoutLine(`${noOpen ? "Open" : "If the browser does not open, visit"}: ${url}`)
+                  )
+              })
+            )
+          : yield* Effect.gen(function* () {
+              const secret = yield* password(provided)
+              return yield* authTask(loginOperator({ email: explicitEmail, password: secret }))
+            })
       yield* writeStdoutLine(jsonOutput({ authenticated: true, email: session.email }, false))
     })
 ).pipe(
   Command.withAlias("auth"),
-  Command.withDescription(
-    "Sign in through the browser, or pass an email to use a password"
-  )
+  Command.withDescription("Sign in through the browser, or pass an email to use a password")
 )
 
 export const signupCommand = Command.make(
@@ -84,40 +82,35 @@ export const signupCommand = Command.make(
   {
     email: Argument.String("email"),
     password: passwordFlag(),
-    tenant: Flag.String("tenant").pipe(
-      Flag.optional,
-      Flag.withDescription("Tenant name for a newly claimed gateway")
-    )
+    tenant: Flag.String("tenant").pipe(Flag.optional, Flag.withDescription("Tenant name for a newly claimed gateway"))
   },
   ({ email, password: provided, tenant }) =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const secret = yield* password(provided, "Choose a password")
-      const session = yield* authTask(signupOperator({
-        email,
-        password: secret,
-        ...whenPresent("tenantName", Option.getOrUndefined(tenant))
-      }))
+      const session = yield* authTask(
+        signupOperator({
+          email,
+          password: secret,
+          ...whenPresent("tenantName", Option.getOrUndefined(tenant))
+        })
+      )
       yield* writeStdoutLine(jsonOutput({ authenticated: true, email: session.email }, false))
     })
 ).pipe(Command.withDescription("Claim an unconfigured gateway and sign in"))
 
-export const logoutCommand = Command.make(
-  "logout",
-  {},
-  () => authTask(logoutOperator()).pipe(
-    Effect.flatMap(() => writeStdoutLine(jsonOutput({ authenticated: false }, false)))
-  )
+export const logoutCommand = Command.make("logout", {}, () =>
+  authTask(logoutOperator()).pipe(Effect.flatMap(() => writeStdoutLine(jsonOutput({ authenticated: false }, false))))
 ).pipe(Command.withDescription("Revoke and forget the saved human session"))
 
-export const whoamiCommand = Command.make(
-  "whoami",
-  {},
-  () => authTask(Effect.gen(function*() {
-    const saved = yield* readOperatorSession()
-    if (saved === undefined) return { authenticated: false }
-    const client = yield* connectToControlPlane()
-    return yield* client.request("GET", "/v1/auth/me")
-  })).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(result, false))))
+export const whoamiCommand = Command.make("whoami", {}, () =>
+  authTask(
+    Effect.gen(function* () {
+      const saved = yield* readOperatorSession()
+      if (saved === undefined) return { authenticated: false }
+      const client = yield* connectToControlPlane()
+      return yield* client.request("GET", "/v1/auth/me")
+    })
+  ).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(result, false))))
 ).pipe(Command.withDescription("Show the human identity saved for ii"))
 
 const changeEmailCommand = Command.make(
@@ -127,7 +120,7 @@ const changeEmailCommand = Command.make(
     password: passwordFlag()
   },
   ({ email, password: provided }) =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const secret = yield* password(provided, "Current password")
       const result = yield* controlPlaneTask((client) =>
         client.request("POST", "/v1/auth/email", { email, password: secret })
@@ -153,10 +146,8 @@ const changePasswordCommand = Command.make(
     )
   },
   ({ current, next, initial }) =>
-    Effect.gen(function*() {
-      const currentPassword = initial
-        ? undefined
-        : yield* password(current, "Current password")
+    Effect.gen(function* () {
+      const currentPassword = initial ? undefined : yield* password(current, "Current password")
       const newPassword = yield* password(next, "New password")
       const result = yield* controlPlaneTask((client) =>
         client.request("POST", "/v1/auth/password", {
@@ -181,7 +172,7 @@ const deleteAccountCommand = Command.make(
     if (!yes) {
       return Effect.fail(cliError("Account deletion requires --yes"))
     }
-    return Effect.gen(function*() {
+    return Effect.gen(function* () {
       const secret = yield* password(provided, "Current password")
       const result = yield* controlPlaneTask((client) =>
         client.request("POST", "/v1/auth/account/delete", { password: secret })
@@ -194,11 +185,7 @@ const deleteAccountCommand = Command.make(
 
 export const accountCommand = Command.make("account").pipe(
   Command.withDescription("Manage the signed-in human account"),
-  Command.withSubcommands([
-    changeEmailCommand,
-    changePasswordCommand,
-    deleteAccountCommand
-  ])
+  Command.withSubcommands([changeEmailCommand, changePasswordCommand, deleteAccountCommand])
 )
 
 export const authenticationSubcommands = [

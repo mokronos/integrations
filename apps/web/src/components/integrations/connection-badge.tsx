@@ -1,10 +1,11 @@
-
 import { Badge } from "@/components/ui/badge"
 import type { IntegrationOverview } from "@integragents/contracts"
 
 export function ConnectionBadge({ integration }: { readonly integration: IntegrationOverview }) {
   const connected = integration.connections.filter((connection) => connection.status === "connected").length
-  const needsAuthorization = integration.connections.filter((connection) => connection.status === "reauthorization_required").length
+  const needsAuthorization = integration.connections.filter(
+    (connection) => connection.status === "reauthorization_required"
+  ).length
   if (connected > 0 || needsAuthorization > 0) {
     return (
       <>

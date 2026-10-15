@@ -21,7 +21,10 @@ import { mcpConfiguration } from "@/lib/mcp"
 import { keys, useInvalidate, useMcpUrl, useMutation } from "@/lib/queries"
 
 /** Issues one app its own key, named after the app, so its calls are attributed and it can be cut off alone. */
-export function AddAppButton({ profile, variant = "default" }: {
+export function AddAppButton({
+  profile,
+  variant = "default"
+}: {
   readonly profile: Profile
   readonly variant?: "default" | "outline"
 }) {
@@ -57,18 +60,33 @@ export function AddAppButton({ profile, variant = "default" }: {
               : "The gateway stores only its hash. The key cannot be shown again."}
           </DialogDescription>
         </DialogHeader>
-        {secret === undefined
-          ? (
-            <form className="space-y-1.5" onSubmit={(event) => { event.preventDefault(); if (name.trim()) issue.mutate() }}>
-              <Label htmlFor="app-name">App name</Label>
-              <Input id="app-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Claude Code" autoFocus />
-            </form>
-          )
-          : <CopyField value={secret} label="Key" />}
+        {secret === undefined ? (
+          <form
+            className="space-y-1.5"
+            onSubmit={(event) => {
+              event.preventDefault()
+              if (name.trim()) issue.mutate()
+            }}
+          >
+            <Label htmlFor="app-name">App name</Label>
+            <Input
+              id="app-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="e.g. Claude Code"
+              autoFocus
+            />
+          </form>
+        ) : (
+          <CopyField value={secret} label="Key" />
+        )}
         <DialogFooter>
-          {secret === undefined
-            ? <Button onClick={() => issue.mutate()} disabled={name.trim().length === 0 || issue.isPending}>{issue.isPending ? "Issuing…" : "Issue key"}</Button>
-            : <>
+          {secret === undefined ? (
+            <Button onClick={() => issue.mutate()} disabled={name.trim().length === 0 || issue.isPending}>
+              {issue.isPending ? "Issuing…" : "Issue key"}
+            </Button>
+          ) : (
+            <>
               {mcpUrl === undefined ? null : (
                 <Button
                   variant="outline"
@@ -81,7 +99,8 @@ export function AddAppButton({ profile, variant = "default" }: {
                 </Button>
               )}
               <Button onClick={() => changeOpen(false)}>Done</Button>
-            </>}
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -3,12 +3,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
 import { FetchHttpClient } from "effect/http"
 import { whenPresent } from "@integragents/contracts"
-import {
-  createGatewayHandler,
-  defaultTenantId,
-  generateApiKey,
-  newProfileId
-} from "./gateway.ts"
+import { createGatewayHandler, defaultTenantId, generateApiKey, newProfileId } from "./gateway.ts"
 import type { GatewayStore } from "./gateway.ts"
 import { stubIntegrationsContext } from "./stubs.ts"
 import { gatewayStore, testServices } from "./fixtures.ts"
@@ -22,7 +17,7 @@ const bodyOf = (response: Response) =>
   )
 
 describe("gateway traffic shaping", () => {
-  const keyFor = Effect.fnUntraced(function*(store: GatewayStore, name: string) {
+  const keyFor = Effect.fnUntraced(function* (store: GatewayStore, name: string) {
     const profile = yield* store.createProfile({
       id: yield* newProfileId,
       tenantId: defaultTenantId,
@@ -35,16 +30,18 @@ describe("gateway traffic shaping", () => {
     return key
   })
 
-  const setup = Effect.fnUntraced(function*(options: {
-    readonly addressLimit?: number
-    readonly principalLimit?: number
-    readonly maxBodyBytes?: number
-  } = {}) {
+  const setup = Effect.fnUntraced(function* (
+    options: {
+      readonly addressLimit?: number
+      readonly principalLimit?: number
+      readonly maxBodyBytes?: number
+    } = {}
+  ) {
     const store = yield* gatewayStore("gateway-limits-")
     const key = yield* keyFor(store, "local")
 
     const { handle } = createGatewayHandler({
-    events: yield* makeGatewayEvents,
+      events: yield* makeGatewayEvents,
       httpClient: FetchHttpClient.layer,
       integrationServices: stubIntegrationsContext(),
       store,
@@ -65,15 +62,17 @@ describe("gateway traffic shaping", () => {
 
     const send = (request: Request) => Effect.promise(() => handle(request))
     const get = (pathname: string, secret?: string) =>
-      send(new Request(`http://gateway.test${pathname}`, {
-        headers: secret === undefined ? {} : { authorization: `Bearer ${secret}` }
-      }))
+      send(
+        new Request(`http://gateway.test${pathname}`, {
+          headers: secret === undefined ? {} : { authorization: `Bearer ${secret}` }
+        })
+      )
 
     return { store, key, send, get }
   })
 
   it.effect("an address that exhausts its pre-auth bucket gets 429 with Retry-After", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const { get } = yield* setup({ addressLimit: 2 })
 
       expect((yield* get("/v1/tools")).status).toBe(401)
@@ -83,10 +82,11 @@ describe("gateway traffic shaping", () => {
       expect(refused.status).toBe(429)
       expect(refused.headers.get("retry-after")).toBe("60")
       expect((yield* bodyOf(refused))["code"]).toBe("rate-limited")
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("health stays reachable under load — it is what the monitor polls", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const { get } = yield* setup({ addressLimit: 1 })
 
       expect((yield* get("/v1/health")).status).toBe(200)
@@ -94,10 +94,11 @@ describe("gateway traffic shaping", () => {
       expect((yield* get("/v1/tools")).status).toBe(429)
 
       expect((yield* get("/v1/health")).status).toBe(200)
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("one exhausted principal does not starve another", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const { get, key, store } = yield* setup({ principalLimit: 2, addressLimit: 10_000 })
       const neighbour = yield* keyFor(store, "neighbour")
 
@@ -106,24 +107,28 @@ describe("gateway traffic shaping", () => {
       expect((yield* get("/v1/tools", key.secret)).status).toBe(429)
 
       expect((yield* get("/v1/tools", neighbour.secret)).status).toBe(200)
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("an oversized body is refused with 413 before any handler runs", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const { key, send } = yield* setup({ maxBodyBytes: 16 })
       const body = JSON.stringify({ name: "x".repeat(64) })
 
-      const response = yield* send(new Request("http://gateway.test/v1/profiles", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${key.secret}`,
-          "content-length": String(Buffer.byteLength(body))
-        },
-        body
-      }))
+      const response = yield* send(
+        new Request("http://gateway.test/v1/profiles", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${key.secret}`,
+            "content-length": String(Buffer.byteLength(body))
+          },
+          body
+        })
+      )
 
       expect(response.status).toBe(413)
       expect(String((yield* bodyOf(response))["error"])).toContain("exceeds")
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 })

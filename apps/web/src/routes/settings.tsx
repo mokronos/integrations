@@ -6,11 +6,25 @@ import { Page } from "@/components/page"
 import { useSession } from "@/components/auth-gate"
 import { Bell, Plus } from "lucide-react"
 import type { ApprovalDestinationId } from "@integragents/contracts"
-import { changeEmail, changePassword, createApprovalDestination, deleteAccount, deleteApprovalDestination } from "@/lib/gateway"
+import {
+  changeEmail,
+  changePassword,
+  createApprovalDestination,
+  deleteAccount,
+  deleteApprovalDestination
+} from "@/lib/gateway"
 import { keys, useApprovalDestinations, useInvalidate, useMutation } from "@/lib/queries"
 import { ConfirmButton } from "@/components/ui/confirm-button"
 import { CopyField } from "@/components/ui/copy-field"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger
+} from "@/components/ui/dialog"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
   AlertDialog,
@@ -24,15 +38,7 @@ import {
   AlertDialogTrigger
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle
-} from "@/components/ui/card"
+import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -50,8 +56,8 @@ export function SettingsRoute() {
             <CardHeader>
               <CardTitle>Account</CardTitle>
               <CardDescription>
-                This browser uses the local gateway's operator key, so there is no account to manage.
-                Account settings appear on a hosted gateway once you sign in.
+                This browser uses the local gateway's operator key, so there is no account to manage. Account settings
+                appear on a hosted gateway once you sign in.
               </CardDescription>
             </CardHeader>
           </Card>
@@ -74,9 +80,8 @@ export function SettingsRoute() {
           <CardHeader>
             <CardTitle>Workspace</CardTitle>
             <CardDescription>
-              Tenant{" "}
-              <code className="text-xs">{session.tenantId}</code>
-              . Connections, profiles, and approvals are private to it.
+              Tenant <code className="text-xs">{session.tenantId}</code>. Connections, profiles, and approvals are
+              private to it.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -119,48 +124,75 @@ function CreateDestination() {
     }
   }
   const secret = create.data?.signingSecret
-  return <Dialog open={open} onOpenChange={changeOpen}>
-    <DialogTrigger render={<Button size="sm" variant="outline" />}><Plus className="size-4" />Add webhook</DialogTrigger>
-    <DialogContent>
-      <DialogHeader>
-        <DialogTitle>{secret === undefined ? "Add a webhook" : "Copy the signing secret now"}</DialogTitle>
-        <DialogDescription>
-          {secret === undefined
-            ? "The gateway posts here whenever a call asks for approval. A notification carries no arguments and cannot approve anything."
-            : "Use it to verify each notification's signature. It cannot be shown again."}
-        </DialogDescription>
-      </DialogHeader>
-      {secret === undefined
-        ? <div className="space-y-4">
-          <div className="space-y-1.5"><Label htmlFor="destination-name">Name</Label><Input id="destination-name" value={name} onChange={(event) => setName(event.target.value)} /></div>
-          <div className="space-y-1.5"><Label htmlFor="destination-url">Public HTTPS URL</Label><Input id="destination-url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com/approval-events" /></div>
-        </div>
-        : <CopyField value={secret} label="Signing secret" />}
-      <DialogFooter>
-        {secret === undefined
-          ? <Button disabled={!name.trim() || !url.trim() || create.isPending} onClick={() => create.mutate()}>{create.isPending ? "Adding…" : "Add"}</Button>
-          : <Button onClick={() => changeOpen(false)}>Done</Button>}
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
+  return (
+    <Dialog open={open} onOpenChange={changeOpen}>
+      <DialogTrigger render={<Button size="sm" variant="outline" />}>
+        <Plus className="size-4" />
+        Add webhook
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{secret === undefined ? "Add a webhook" : "Copy the signing secret now"}</DialogTitle>
+          <DialogDescription>
+            {secret === undefined
+              ? "The gateway posts here whenever a call asks for approval. A notification carries no arguments and cannot approve anything."
+              : "Use it to verify each notification's signature. It cannot be shown again."}
+          </DialogDescription>
+        </DialogHeader>
+        {secret === undefined ? (
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="destination-name">Name</Label>
+              <Input id="destination-name" value={name} onChange={(event) => setName(event.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="destination-url">Public HTTPS URL</Label>
+              <Input
+                id="destination-url"
+                value={url}
+                onChange={(event) => setUrl(event.target.value)}
+                placeholder="https://example.com/approval-events"
+              />
+            </div>
+          </div>
+        ) : (
+          <CopyField value={secret} label="Signing secret" />
+        )}
+        <DialogFooter>
+          {secret === undefined ? (
+            <Button disabled={!name.trim() || !url.trim() || create.isPending} onClick={() => create.mutate()}>
+              {create.isPending ? "Adding…" : "Add"}
+            </Button>
+          ) : (
+            <Button onClick={() => changeOpen(false)}>Done</Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
 }
 
 function DeleteDestination({ id, name }: { readonly id: ApprovalDestinationId; readonly name: string }) {
   const invalidate = useInvalidate()
   const remove = useMutation({
     mutationFn: () => deleteApprovalDestination(id),
-    onSuccess: () => { invalidate(keys.approvalDestinations, keys.profiles); toast.success(`${name} removed`) },
+    onSuccess: () => {
+      invalidate(keys.approvalDestinations, keys.profiles)
+      toast.success(`${name} removed`)
+    },
     onError: (error: Error) => toast.error("Could not remove the destination", { description: error.message })
   })
-  return <ConfirmButton
-    label="Remove"
-    title={`Remove ${name}?`}
-    description="Profiles stop notifying it. Approvals already sent are unaffected."
-    confirmLabel="Remove"
-    pendingLabel="Removing…"
-    pending={remove.isPending}
-    onConfirm={() => remove.mutateAsync().then(() => undefined)}
-  />
+  return (
+    <ConfirmButton
+      label="Remove"
+      title={`Remove ${name}?`}
+      description="Profiles stop notifying it. Approvals already sent are unaffected."
+      confirmLabel="Remove"
+      pendingLabel="Removing…"
+      pending={remove.isPending}
+      onConfirm={() => remove.mutateAsync().then(() => undefined)}
+    />
+  )
 }
 
 function NotificationDestinations() {
@@ -169,13 +201,24 @@ function NotificationDestinations() {
     <Card>
       <CardHeader>
         <CardTitle>Approval notifications</CardTitle>
-        <CardDescription>Webhooks a profile can notify when a call asks for approval. Choose them per profile under its settings.</CardDescription>
-        <CardAction><CreateDestination /></CardAction>
+        <CardDescription>
+          Webhooks a profile can notify when a call asks for approval. Choose them per profile under its settings.
+        </CardDescription>
+        <CardAction>
+          <CreateDestination />
+        </CardAction>
       </CardHeader>
       <CardContent className="space-y-2">
         {destinations.isPending ? <Skeleton className="h-14 w-full" /> : null}
-        {destinations.error ? <Alert variant="destructive"><AlertTitle>Could not load destinations</AlertTitle><AlertDescription>{destinations.error.message}</AlertDescription></Alert> : null}
-        {!destinations.isPending && (destinations.data ?? []).length === 0 ? <p className="text-muted-foreground text-sm">No webhooks yet.</p> : null}
+        {destinations.error ? (
+          <Alert variant="destructive">
+            <AlertTitle>Could not load destinations</AlertTitle>
+            <AlertDescription>{destinations.error.message}</AlertDescription>
+          </Alert>
+        ) : null}
+        {!destinations.isPending && (destinations.data ?? []).length === 0 ? (
+          <p className="text-muted-foreground text-sm">No webhooks yet.</p>
+        ) : null}
         {(destinations.data ?? []).map((destination) => (
           <div key={destination.id} className="flex items-center gap-3 rounded-lg border p-3">
             <Bell className="text-muted-foreground size-4 shrink-0" />
@@ -207,7 +250,12 @@ function ChangeEmailCard() {
         <CardTitle>Change email</CardTitle>
         <CardDescription>Confirm with your current password.</CardDescription>
       </CardHeader>
-      <form onSubmit={(event) => { event.preventDefault(); save.mutate() }}>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault()
+          save.mutate()
+        }}
+      >
         <CardContent className="grid gap-4">
           <div className="grid gap-2">
             <Label htmlFor="new-email">New email</Label>
@@ -269,23 +317,26 @@ function ChangePasswordCard({ hasPassword }: { readonly hasPassword: boolean }) 
             : "A password enables email changes and password-confirmed account deletion."}
         </CardDescription>
       </CardHeader>
-      <form onSubmit={(event) => { event.preventDefault(); save.mutate() }}>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault()
+          save.mutate()
+        }}
+      >
         <CardContent className="grid gap-4">
-          {hasPassword
-            ? (
-              <div className="grid gap-2">
-                <Label htmlFor="current-password">Current password</Label>
-                <Input
-                  id="current-password"
-                  type="password"
-                  required
-                  autoComplete="current-password"
-                  value={currentPassword}
-                  onChange={(event) => setCurrentPassword(event.target.value)}
-                />
-              </div>
-            )
-            : null}
+          {hasPassword ? (
+            <div className="grid gap-2">
+              <Label htmlFor="current-password">Current password</Label>
+              <Input
+                id="current-password"
+                type="password"
+                required
+                autoComplete="current-password"
+                value={currentPassword}
+                onChange={(event) => setCurrentPassword(event.target.value)}
+              />
+            </div>
+          ) : null}
           <div className="grid gap-2">
             <Label htmlFor="new-password">New password</Label>
             <Input
@@ -326,9 +377,8 @@ function DeleteAccountCard({ hasPassword }: { readonly hasPassword: boolean }) {
       <CardHeader>
         <CardTitle>Delete account</CardTitle>
         <CardDescription>
-          Removes your sign-in, sessions, profiles, API keys, and approval
-          history. Vendor connections stored in the integration host's credential store
-          are not reclaimed. This cannot be undone.
+          Removes your sign-in, sessions, profiles, API keys, and approval history. Vendor connections stored in the
+          integration host's credential store are not reclaimed. This cannot be undone.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -340,8 +390,7 @@ function DeleteAccountCard({ hasPassword }: { readonly hasPassword: boolean }) {
             <AlertDialogHeader>
               <AlertDialogTitle>Delete your account?</AlertDialogTitle>
               <AlertDialogDescription>
-                Your workspace and everything scoped to it is removed. If others
-                share it, only your membership goes.
+                Your workspace and everything scoped to it is removed. If others share it, only your membership goes.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <div className="grid gap-2">
@@ -374,13 +423,11 @@ function DeleteAccountCard({ hasPassword }: { readonly hasPassword: boolean }) {
           </AlertDialogContent>
         </AlertDialog>
       </CardContent>
-      {!hasPassword
-        ? (
-          <CardFooter>
-            <p className="text-muted-foreground text-xs">Add a password above before deleting this account.</p>
-          </CardFooter>
-        )
-        : null}
+      {!hasPassword ? (
+        <CardFooter>
+          <p className="text-muted-foreground text-xs">Add a password above before deleting this account.</p>
+        </CardFooter>
+      ) : null}
     </Card>
   )
 }

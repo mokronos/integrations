@@ -6,7 +6,9 @@ const outcomes = {
   failed: { label: "Failed", variant: "destructive" },
   denied: { label: "Denied", variant: "destructive" },
   pending: { label: "Approval requested", variant: "default" }
-} as const satisfies Readonly<Record<AuditOutcome, { readonly label: string; readonly variant: "default" | "secondary" | "destructive" }>>
+} as const satisfies Readonly<
+  Record<AuditOutcome, { readonly label: string; readonly variant: "default" | "secondary" | "destructive" }>
+>
 
 export function AuditOutcomeBadge({ outcome }: { readonly outcome: AuditOutcome }) {
   const display = outcomes[outcome]

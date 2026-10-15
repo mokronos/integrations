@@ -4,7 +4,12 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
-export function EditableTitle({ value, onSave, saving, disabled = false }: {
+export function EditableTitle({
+  value,
+  onSave,
+  saving,
+  disabled = false
+}: {
   readonly value: string
   readonly onSave: (name: string) => void
   readonly saving: boolean
@@ -18,7 +23,15 @@ export function EditableTitle({ value, onSave, saving, disabled = false }: {
       <span className="flex min-w-0 items-center gap-1">
         <span>{value}</span>
         {disabled ? null : (
-          <Button variant="ghost" size="sm" aria-label="Rename" onClick={() => { setDraft(value); setEditing(true) }}>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="Rename"
+            onClick={() => {
+              setDraft(value)
+              setEditing(true)
+            }}
+          >
             <Pencil className="size-3" />
           </Button>
         )}
@@ -31,7 +44,10 @@ export function EditableTitle({ value, onSave, saving, disabled = false }: {
       className="flex min-w-0 items-center gap-1"
       onSubmit={(event) => {
         event.preventDefault()
-        if (draft.trim().length > 0) { onSave(draft.trim()); setEditing(false) }
+        if (draft.trim().length > 0) {
+          onSave(draft.trim())
+          setEditing(false)
+        }
       }}
     >
       <Input
@@ -40,9 +56,17 @@ export function EditableTitle({ value, onSave, saving, disabled = false }: {
         value={draft}
         aria-label="Name"
         onChange={(event) => setDraft(event.target.value)}
-        onKeyDown={(event) => { if (event.key === "Escape") setEditing(false) }}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") setEditing(false)
+        }}
       />
-      <Button type="submit" variant="ghost" size="sm" aria-label="Save name" disabled={saving || draft.trim().length === 0}>
+      <Button
+        type="submit"
+        variant="ghost"
+        size="sm"
+        aria-label="Save name"
+        disabled={saving || draft.trim().length === 0}
+      >
         <Check className="size-3" />
       </Button>
       <Button type="button" variant="ghost" size="sm" aria-label="Cancel rename" onClick={() => setEditing(false)}>

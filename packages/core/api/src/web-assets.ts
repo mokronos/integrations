@@ -5,15 +5,9 @@ import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
 import * as BunHttpPlatform from "@effect/platform-bun/BunHttpPlatform"
 import * as BunPath from "@effect/platform-bun/BunPath"
 import { Config, Effect, FileSystem, Layer, Option, Result } from "effect"
-import {
-  HttpServerError,
-  HttpServerRequest,
-  HttpServerResponse,
-  HttpStaticServer
-} from "effect/http"
+import { HttpServerError, HttpServerRequest, HttpServerResponse, HttpStaticServer } from "effect/http"
 
-const webAssetsDirectory = (): string =>
-  path.resolve(import.meta.dirname ?? process.cwd(), "../../../../apps/web/dist")
+const webAssetsDirectory = (): string => path.resolve(import.meta.dirname ?? process.cwd(), "../../../../apps/web/dist")
 
 /**
  * Serving the built control plane needs a real filesystem, which the gateway's
@@ -49,24 +43,17 @@ export interface WebAssetsOptions {
   readonly directories?: ReadonlyArray<string>
 }
 
-export const createWebAssets = (
-  options: WebAssetsOptions = {}
-): Effect.Effect<WebAssets> =>
-  Effect.gen(function*() {
+export const createWebAssets = (options: WebAssetsOptions = {}): Effect.Effect<WebAssets> =>
+  Effect.gen(function* () {
     const configured = yield* Config.option(Config.String("INTEGRATIONS_WEB_DIR"))
-    const directory =
-      options.directories?.[0] ??
-      Option.getOrUndefined(configured) ??
-      webAssetsDirectory()
+    const directory = options.directories?.[0] ?? Option.getOrUndefined(configured) ?? webAssetsDirectory()
 
     const fileSystem = yield* FileSystem.FileSystem
     const built = yield* Effect.result(fileSystem.stat(directory))
     if (Result.isFailure(built) || built.success.type !== "Directory") {
       return {
         directory: undefined,
-        respond: Effect.succeed(
-          HttpServerResponse.text(notBuiltMessage(directory), { status: 503 })
-        )
+        respond: Effect.succeed(HttpServerResponse.text(notBuiltMessage(directory), { status: 503 }))
       }
     }
 

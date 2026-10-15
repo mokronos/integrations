@@ -16,26 +16,29 @@ const integration = {
   description: "A notebook",
   kind: "mcp" as const,
   endpoint: "https://notes.example.com/mcp",
-  authMethods: [{
-    id: "none",
-    label: "No authentication",
-    kind: "none" as const,
-    template: "none"
-  }],
+  authMethods: [
+    {
+      id: "none",
+      label: "No authentication",
+      kind: "none" as const,
+      template: "none"
+    }
+  ],
   createdAt: 1
 }
 
 describe("integrations", () => {
   it.effect("round-trips a record through SQL, JSON columns included", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const store = yield* CatalogStore
       yield* store.putIntegration(integration)
 
       expect(Option.getOrThrow(yield* store.findIntegration(notes))).toEqual(integration)
-    }).pipe(Effect.provide(catalog)))
+    }).pipe(Effect.provide(catalog))
+  )
 
   it.effect("upserts rather than duplicating on a second install", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const store = yield* CatalogStore
       yield* store.putIntegration(integration)
       yield* store.putIntegration({ ...integration, name: "Renamed" })
@@ -43,16 +46,18 @@ describe("integrations", () => {
       const all = yield* store.listIntegrations()
       expect(all).toHaveLength(1)
       expect(all[0]?.name).toBe("Renamed")
-    }).pipe(Effect.provide(catalog)))
+    }).pipe(Effect.provide(catalog))
+  )
 
   it.effect("reads an absent slug as absent rather than failing", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const store = yield* CatalogStore
 
       const found = yield* store.findIntegration(IntegrationSlug.make("absent"))
 
       expect(Option.isNone(found)).toBe(true)
-    }).pipe(Effect.provide(catalog)))
+    }).pipe(Effect.provide(catalog))
+  )
 })
 
 describe("connections", () => {
@@ -66,7 +71,7 @@ describe("connections", () => {
   }
 
   it.effect("keeps an absent optional absent rather than reading back a null", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const store = yield* CatalogStore
       yield* store.putIntegration(integration)
       yield* store.putConnection(connection)
@@ -75,10 +80,11 @@ describe("connections", () => {
 
       expect(found).toEqual(connection)
       expect(found).not.toHaveProperty("oauthScope")
-    }).pipe(Effect.provide(catalog)))
+    }).pipe(Effect.provide(catalog))
+  )
 
   it.effect("filters by owner tier, integration and name", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const store = yield* CatalogStore
       yield* store.putIntegration(integration)
       yield* store.putConnection(connection)
@@ -93,7 +99,8 @@ describe("connections", () => {
         org: (yield* store.listConnections({ owner: "org" })).length,
         named: (yield* store.listConnections({ name: ConnectionName.make("personal") })).length
       }).toEqual({ all: 2, org: 1, named: 1 })
-    }).pipe(Effect.provide(catalog)))
+    }).pipe(Effect.provide(catalog))
+  )
 })
 
 describe("OAuth flows", () => {
@@ -105,11 +112,12 @@ describe("OAuth flows", () => {
     authorizationUrl: "https://auth.example.com/authorize",
     tokenUrl: "https://auth.example.com/token",
     scopes: ["read", "write"],
-    tokenAuthMethod: "client_secret_post"
+    tokenAuthMethod: "client_secret_post" as const,
+    issParameterSupported: true
   }
 
   it.effect("round-trips a client, arrays included, and holds no secret", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const store = yield* CatalogStore
       yield* store.putOAuthClient(client)
 
@@ -118,10 +126,11 @@ describe("OAuth flows", () => {
       const record = Option.getOrThrow(found)
       expect(record).toEqual(client)
       expect(Object.keys(record)).not.toContain("clientSecret")
-    }).pipe(Effect.provide(catalog)))
+    }).pipe(Effect.provide(catalog))
+  )
 
   it.effect("spends a state value once, so a replayed callback finds nothing", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const store = yield* CatalogStore
       const state = OAuthState.make("state-1")
       yield* store.putOAuthFlow({
@@ -139,5 +148,6 @@ describe("OAuth flows", () => {
 
       expect(Option.isSome(yield* store.takeOAuthFlow(state))).toBe(true)
       expect(Option.isSome(yield* store.takeOAuthFlow(state))).toBe(false)
-    }).pipe(Effect.provide(catalog)))
+    }).pipe(Effect.provide(catalog))
+  )
 })

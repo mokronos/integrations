@@ -2,14 +2,10 @@ import * as Cloudflare from "alchemy/Cloudflare"
 import { SqliteClient } from "@effect/sql-sqlite-do"
 import { decodeBase64UrlField } from "@integragents/contracts"
 import { createGatewayService } from "@integragents/gateway-api"
-import { BlobStore } from "@integragents/host"
-import {
-  createEncryption,
-  deliverDueApprovalNotifications,
-  runMaintenance
-} from "@integragents/gateway-core"
+import { BlobStore, platformConnect } from "@integragents/host"
+import { createEncryption, deliverDueApprovalNotifications, runMaintenance } from "@integragents/gateway-core"
 import { Effect, Layer, Schema } from "effect"
-import { FetchHttpClient, HttpServerRequest, HttpServerResponse } from "effect/http"
+import { HttpServerRequest, HttpServerResponse } from "effect/http"
 
 /** Blobs share the object's SQLite storage; `r2Blobs` from ./r2-blobs.ts replaces this once R2 is enabled. */
 const blobs = Effect.succeed(BlobStore.sqlLayer)
@@ -26,16 +22,16 @@ const GatewayEnvironment = Schema.Struct({
  */
 export class Gateway extends Cloudflare.DurableObject<Gateway>()(
   "Gateway",
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const blobStore = yield* blobs
     const environment = yield* Cloudflare.WorkerEnvironment
-    return Effect.gen(function*() {
+    return Effect.gen(function* () {
       const state = yield* Cloudflare.DurableObjectState
       const env = yield* Schema.decodeUnknownEffect(GatewayEnvironment)(environment).pipe(Effect.orDie)
       const masterKey = decodeBase64UrlField("INTEGRATIONS_MASTER_KEY", env.INTEGRATIONS_MASTER_KEY)
       const service = yield* Effect.promise(() =>
         createGatewayService({
-          httpClient: FetchHttpClient.layer,
+          connect: () => platformConnect,
           sqlClient: SqliteClient.layer({ storage: state.raw.storage }),
           blobs: blobStore,
           encryption: createEncryption(masterKey),
@@ -44,7 +40,7 @@ export class Gateway extends Cloudflare.DurableObject<Gateway>()(
         })
       )
       return {
-        fetch: Effect.gen(function*() {
+        fetch: Effect.gen(function* () {
           const request = yield* HttpServerRequest.HttpServerRequest
           const remoteAddress = request.headers["cf-connecting-ip"]
           const web = yield* HttpServerRequest.toWeb(request).pipe(Effect.orDie)
@@ -56,12 +52,14 @@ export class Gateway extends Cloudflare.DurableObject<Gateway>()(
         }),
         maintain: () =>
           runMaintenance(service.store, service.blobs).pipe(
-            Effect.andThen(deliverDueApprovalNotifications({
-              store: service.store,
-              dashboardUrl: env.INTEGRATIONS_PUBLIC_URL
-            })),
+            Effect.andThen(
+              deliverDueApprovalNotifications({
+                store: service.store,
+                dashboardUrl: env.INTEGRATIONS_PUBLIC_URL
+              })
+            ),
             Effect.withSpan("Maintenance.scheduled"),
-            Effect.provide(Layer.merge(FetchHttpClient.layer, service.telemetry)),
+            Effect.provide(Layer.merge(service.egress, service.telemetry)),
             Effect.ensuring(Effect.promise(() => service.flushTelemetry())),
             Effect.orDie
           )

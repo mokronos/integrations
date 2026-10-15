@@ -12,11 +12,13 @@ const chunkBytes = 1024 * 1024
 const Bytes = Schema.Union([Schema.Uint8Array, Schema.instanceOf(ArrayBuffer)])
 const ChunkRows = Schema.Array(Schema.Struct({ data: Bytes }))
 const IdRows = Schema.Array(Schema.Struct({ id: Schema.String }))
-const MetadataRows = Schema.Array(Schema.Struct({
-  content_type: Schema.String,
-  filename: Schema.NullOr(Schema.String),
-  bytes: Schema.Number
-}))
+const MetadataRows = Schema.Array(
+  Schema.Struct({
+    content_type: Schema.String,
+    filename: Schema.NullOr(Schema.String),
+    bytes: Schema.Number
+  })
+)
 
 const concat = (chunks: ReadonlyArray<Uint8Array>): Uint8Array => {
   const joined = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0))
@@ -58,14 +60,11 @@ export const sqlBlobStore = (sql: SqlClient.SqlClient): BlobStore["Service"] => 
   const chunkCount = (bytes: number) => Math.ceil(bytes / chunkBytes)
 
   const discard = (id: BlobId) =>
-    Effect.ignore(Effect.all([
-      sql`DELETE FROM blob WHERE id = ${id}`,
-      sql`DELETE FROM blob_chunk WHERE blob = ${id}`
-    ]))
+    Effect.ignore(Effect.all([sql`DELETE FROM blob WHERE id = ${id}`, sql`DELETE FROM blob_chunk WHERE blob = ${id}`]))
 
   return {
     write: (descriptor, content) =>
-      Effect.gen(function*() {
+      Effect.gen(function* () {
         const id = BlobId.make(randomBytes(16).toString("hex"))
         const hash = createHash("sha256")
         let bytes = 0
@@ -78,7 +77,7 @@ export const sqlBlobStore = (sql: SqlClient.SqlClient): BlobStore["Service"] => 
           )
 
         yield* Stream.runForEach(content, (chunk) =>
-          Effect.gen(function*() {
+          Effect.gen(function* () {
             hash.update(chunk)
             bytes += chunk.byteLength
             pending = concat([pending, chunk])
@@ -86,7 +85,8 @@ export const sqlBlobStore = (sql: SqlClient.SqlClient): BlobStore["Service"] => 
               yield* insert(pending.subarray(0, chunkBytes))
               pending = pending.subarray(chunkBytes)
             }
-          })).pipe(Effect.onError(() => discard(id)))
+          })
+        ).pipe(Effect.onError(() => discard(id)))
         if (pending.byteLength > 0) yield* insert(pending)
 
         const createdAt = yield* Clock.currentTimeMillis
@@ -137,14 +137,18 @@ export const sqlBlobStore = (sql: SqlClient.SqlClient): BlobStore["Service"] => 
     discard,
 
     expire: (before) =>
-      sql.withTransaction(Effect.gen(function*() {
-        yield* sql`DELETE FROM blob_chunk WHERE blob IN (SELECT id FROM blob WHERE created_at < ${before.getTime()})`
-        return yield* sql`DELETE FROM blob WHERE created_at < ${before.getTime()} RETURNING id`.pipe(
-          Effect.flatMap(Schema.decodeUnknownEffect(IdRows))
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            yield* sql`DELETE FROM blob_chunk WHERE blob IN (SELECT id FROM blob WHERE created_at < ${before.getTime()})`
+            return yield* sql`DELETE FROM blob WHERE created_at < ${before.getTime()} RETURNING id`.pipe(
+              Effect.flatMap(Schema.decodeUnknownEffect(IdRows))
+            )
+          })
         )
-      })).pipe(
-        Effect.map((expired) => expired.length),
-        Effect.mapError(failure("Could not expire blobs"))
-      )
+        .pipe(
+          Effect.map((expired) => expired.length),
+          Effect.mapError(failure("Could not expire blobs"))
+        )
   }
 }

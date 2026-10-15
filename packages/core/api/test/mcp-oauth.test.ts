@@ -2,13 +2,7 @@ import { makeGatewayEvents } from "@integragents/gateway-core"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http"
-import {
-  createGatewayHandler,
-  defaultTenantId,
-  generateApiKey,
-  newProfileId,
-  sha256Base64Url
-} from "./gateway.ts"
+import { createGatewayHandler, defaultTenantId, generateApiKey, newProfileId, sha256Base64Url } from "./gateway.ts"
 import { gatewayStore, testServices } from "./fixtures.ts"
 import { stubIntegrationsContext } from "./stubs.ts"
 
@@ -19,17 +13,19 @@ const Consent = Schema.Struct({
   profiles: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String }))
 })
 const Redirect = Schema.Struct({ redirect: Schema.String })
-const Grants = Schema.Struct({ grants: Schema.Array(Schema.Struct({ id: Schema.String, subjectEmail: Schema.String })) })
+const Grants = Schema.Struct({
+  grants: Schema.Array(Schema.Struct({ id: Schema.String, subjectEmail: Schema.String }))
+})
 const Revocation = Schema.Struct({ revoked: Schema.Boolean })
 const Tokens = Schema.Struct({
   access_token: Schema.String,
   refresh_token: Schema.String,
   token_type: Schema.Literal("Bearer"),
   expires_in: Schema.Number,
-  scope: Schema.Literal("mcp")
+  scope: Schema.Literal("mcp offline_access")
 })
 
-const setup = Effect.fnUntraced(function*(httpClient: Layer.Layer<HttpClient.HttpClient> = FetchHttpClient.layer) {
+const setup = Effect.fnUntraced(function* (httpClient: Layer.Layer<HttpClient.HttpClient> = FetchHttpClient.layer) {
   const store = yield* gatewayStore("gateway-mcp-oauth-")
   const profile = yield* store.createProfile({
     id: yield* newProfileId,
@@ -63,25 +59,105 @@ const request = (
   path: string,
   init?: RequestInit,
   localSecret?: string
-) => Effect.promise(() => handle(
-  new Request(`http://127.0.0.1:3210${path}`, init),
-  localSecret === undefined ? undefined : { localSecret }
-))
+) =>
+  Effect.promise(() =>
+    handle(new Request(`http://127.0.0.1:3210${path}`, init), localSecret === undefined ? undefined : { localSecret })
+  )
+
+const cimdAuthorization = (clientIdentifier: string) =>
+  Effect.gen(function* () {
+    const authorize = new URL("http://127.0.0.1:3210/oauth/authorize")
+    authorize.searchParams.set("response_type", "code")
+    authorize.searchParams.set("client_id", clientIdentifier)
+    authorize.searchParams.set("redirect_uri", "http://127.0.0.1:9876/callback")
+    authorize.searchParams.set("resource", "http://127.0.0.1:3210/mcp")
+    authorize.searchParams.set("scope", "mcp offline_access")
+    authorize.searchParams.set(
+      "code_challenge",
+      yield* sha256Base64Url("client-id-metadata-document-verifier-0123456789")
+    )
+    authorize.searchParams.set("code_challenge_method", "S256")
+    return new Request(authorize)
+  })
 
 describe("MCP OAuth authorization server", () => {
+  it.effect("never fetches client metadata from a private address", () =>
+    Effect.gen(function* () {
+      const fetched: Array<string> = []
+      const httpClient = Layer.succeed(
+        HttpClient.HttpClient,
+        HttpClient.make((request) => {
+          fetched.push(request.url)
+          return Effect.succeed(HttpClientResponse.fromWeb(request, Response.json({})))
+        })
+      )
+      const gateway = yield* setup(httpClient)
+      for (const clientIdentifier of [
+        "https://169.254.169.254/latest/meta-data",
+        "https://[fd00::1]/client.json",
+        "https://100.64.0.1/client.json",
+        "https://metadata.internal/client.json",
+        "https://localhost/client.json"
+      ]) {
+        const authorization = yield* Effect.flatMap(cimdAuthorization(clientIdentifier), (request) =>
+          Effect.promise(() => gateway.handle(request))
+        )
+        expect(authorization.status).toBe(400)
+      }
+      expect(fetched).toEqual([])
+      yield* Effect.promise(() => gateway.dispose())
+    }).pipe(Effect.provide(testServices))
+  )
+
+  it.effect("refuses client metadata larger than 64 KiB even without a content-length", () =>
+    Effect.gen(function* () {
+      const clientIdentifier = "https://client.example/oauth/metadata.json"
+      const document = JSON.stringify({
+        client_id: clientIdentifier,
+        client_name: "x".repeat(70 * 1024),
+        redirect_uris: ["http://127.0.0.1/callback"]
+      })
+      const httpClient = Layer.succeed(
+        HttpClient.HttpClient,
+        HttpClient.make((request) =>
+          Effect.succeed(
+            HttpClientResponse.fromWeb(
+              request,
+              new Response(new Blob([document]).stream(), { headers: { "content-type": "application/json" } })
+            )
+          )
+        )
+      )
+      const gateway = yield* setup(httpClient)
+      const authorization = yield* Effect.flatMap(cimdAuthorization(clientIdentifier), (request) =>
+        Effect.promise(() => gateway.handle(request))
+      )
+      expect(authorization.status).toBe(400)
+      expect(yield* gateway.store.findOAuthApplication(clientIdentifier)).toBeUndefined()
+      yield* Effect.promise(() => gateway.dispose())
+    }).pipe(Effect.provide(testServices))
+  )
+
   it.effect("treats a client ID metadata document as the primary registration path", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const clientIdentifier = "https://client.example/oauth/metadata.json"
       const httpClient = Layer.succeed(
         HttpClient.HttpClient,
-        HttpClient.make((request) => Effect.succeed(HttpClientResponse.fromWeb(request, Response.json({
-          client_id: clientIdentifier,
-          client_name: "CIMD application",
-          redirect_uris: ["http://127.0.0.1/callback"],
-          grant_types: ["authorization_code", "refresh_token"],
-          response_types: ["code"],
-          token_endpoint_auth_method: "none"
-        }))))
+        HttpClient.make((request) =>
+          Effect.succeed(
+            HttpClientResponse.fromWeb(
+              request,
+              Response.json({
+                client_id: clientIdentifier,
+                client_name: "CIMD application",
+                redirect_uris: ["http://127.0.0.1/callback"],
+                grant_types: ["authorization_code", "refresh_token"],
+                response_types: ["code"],
+                token_endpoint_auth_method: "none"
+              })
+            )
+          )
+        )
       )
       const gateway = yield* setup(httpClient)
       const verifier = "client-id-metadata-document-verifier-0123456789"
@@ -106,10 +182,11 @@ describe("MCP OAuth authorization server", () => {
       const consentBody = Schema.decodeUnknownSync(Consent)(yield* Effect.promise(() => consent.json()))
       expect(consentBody.application).toEqual({ name: "CIMD application", kind: "cimd" })
       yield* Effect.promise(() => gateway.dispose())
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("discovers, authorizes locally, rotates tokens, and revokes the grant", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const gateway = yield* setup()
 
       const protectedMetadata = yield* request(gateway.handle, "/.well-known/oauth-protected-resource/mcp")
@@ -117,11 +194,15 @@ describe("MCP OAuth authorization server", () => {
       const protectedBody = Schema.decodeUnknownSync(JsonObject)(yield* Effect.promise(() => protectedMetadata.json()))
       expect(protectedBody["resource"]).toBe("http://127.0.0.1:3210/mcp")
       expect(protectedBody["authorization_servers"]).toEqual(["http://127.0.0.1:3210"])
+      expect(protectedBody["scopes_supported"]).toEqual(["mcp", "offline_access"])
+      const challenged = yield* request(gateway.handle, "/mcp", { method: "POST" })
+      expect(challenged.headers.get("www-authenticate")).toContain(`scope="mcp offline_access"`)
 
       const serverMetadata = yield* request(gateway.handle, "/.well-known/oauth-authorization-server")
       const serverBody = Schema.decodeUnknownSync(JsonObject)(yield* Effect.promise(() => serverMetadata.json()))
       expect(serverBody["client_id_metadata_document_supported"]).toBe(true)
       expect(serverBody["registration_endpoint"]).toBe("http://127.0.0.1:3210/oauth/register")
+      expect(serverBody["scopes_supported"]).toEqual(["mcp", "offline_access"])
 
       const registered = yield* request(gateway.handle, "/oauth/register", {
         method: "POST",
@@ -144,7 +225,7 @@ describe("MCP OAuth authorization server", () => {
       authorize.searchParams.set("client_id", application.client_id)
       authorize.searchParams.set("redirect_uri", "http://127.0.0.1:4567/callback")
       authorize.searchParams.set("resource", "http://127.0.0.1:3210/mcp")
-      authorize.searchParams.set("scope", "mcp")
+      authorize.searchParams.set("scope", "offline_access mcp")
       authorize.searchParams.set("state", "test-state")
       authorize.searchParams.set("code_challenge", challenge)
       authorize.searchParams.set("code_challenge_method", "S256")
@@ -180,19 +261,22 @@ describe("MCP OAuth authorization server", () => {
       expect(callback.searchParams.get("state")).toBe("test-state")
       expect(callback.searchParams.get("iss")).toBe("http://127.0.0.1:3210")
 
-      const exchange = (form: URLSearchParams) => request(gateway.handle, "/oauth/token", {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: form.toString()
-      })
-      const tokenResponse = yield* exchange(new URLSearchParams({
-        grant_type: "authorization_code",
-        client_id: application.client_id,
-        code: callback.searchParams.get("code") ?? "",
-        code_verifier: verifier,
-        redirect_uri: "http://127.0.0.1:4567/callback",
-        resource: "http://127.0.0.1:3210/mcp"
-      }))
+      const exchange = (form: URLSearchParams) =>
+        request(gateway.handle, "/oauth/token", {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: form.toString()
+        })
+      const tokenResponse = yield* exchange(
+        new URLSearchParams({
+          grant_type: "authorization_code",
+          client_id: application.client_id,
+          code: callback.searchParams.get("code") ?? "",
+          code_verifier: verifier,
+          redirect_uri: "http://127.0.0.1:4567/callback",
+          resource: "http://127.0.0.1:3210/mcp"
+        })
+      )
       expect(tokenResponse.status).toBe(200)
       const tokens = Schema.decodeUnknownSync(Tokens)(yield* Effect.promise(() => tokenResponse.json()))
 
@@ -206,21 +290,25 @@ describe("MCP OAuth authorization server", () => {
       })
       expect(restWithAccess.status).toBe(401)
 
-      const refreshResponse = yield* exchange(new URLSearchParams({
-        grant_type: "refresh_token",
-        client_id: application.client_id,
-        refresh_token: tokens.refresh_token,
-        resource: "http://127.0.0.1:3210/mcp"
-      }))
+      const refreshResponse = yield* exchange(
+        new URLSearchParams({
+          grant_type: "refresh_token",
+          client_id: application.client_id,
+          refresh_token: tokens.refresh_token,
+          resource: "http://127.0.0.1:3210/mcp"
+        })
+      )
       expect(refreshResponse.status).toBe(200)
       const rotated = Schema.decodeUnknownSync(Tokens)(yield* Effect.promise(() => refreshResponse.json()))
 
-      const reuse = yield* exchange(new URLSearchParams({
-        grant_type: "refresh_token",
-        client_id: application.client_id,
-        refresh_token: tokens.refresh_token,
-        resource: "http://127.0.0.1:3210/mcp"
-      }))
+      const reuse = yield* exchange(
+        new URLSearchParams({
+          grant_type: "refresh_token",
+          client_id: application.client_id,
+          refresh_token: tokens.refresh_token,
+          resource: "http://127.0.0.1:3210/mcp"
+        })
+      )
       expect(reuse.status).toBe(400)
       const invalidatedFamily = yield* request(gateway.handle, "/mcp", {
         method: "GET",
@@ -239,7 +327,9 @@ describe("MCP OAuth authorization server", () => {
         { method: "DELETE" },
         gateway.key.secret
       )
-      expect(Schema.decodeUnknownSync(Revocation)(yield* Effect.promise(() => revocation.json()))).toEqual({ revoked: true })
+      expect(Schema.decodeUnknownSync(Revocation)(yield* Effect.promise(() => revocation.json()))).toEqual({
+        revoked: true
+      })
       const revoked = yield* request(gateway.handle, "/mcp", {
         method: "GET",
         headers: { authorization: `Bearer ${tokens.access_token}` }
@@ -247,5 +337,6 @@ describe("MCP OAuth authorization server", () => {
       expect(revoked.status).toBe(401)
 
       yield* Effect.promise(() => gateway.dispose())
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 })

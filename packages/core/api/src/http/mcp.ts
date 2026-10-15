@@ -7,25 +7,32 @@ import {
   inputResponse,
   McpServer
 } from "@modelcontextprotocol/server"
-import type { ServerContext } from "@modelcontextprotocol/server"
+import type { InputRequest, ServerContext } from "@modelcontextprotocol/server"
 import {
   Alias,
   asJson,
+  InputResponses,
   isJsonObject,
   objectEntries,
   ToolName,
   webCryptoLayer,
   whenPresent
 } from "@integragents/contracts"
-import type { Json, Profile, ToolDecision } from "@integragents/contracts"
-import { Integrations } from "@integragents/host"
+import type { InputRequests, Json, Profile, ToolDecision } from "@integragents/contracts"
+import { Integrations, unrelayableInputMessage } from "@integragents/host"
 import type { IntegrationServices } from "@integragents/host"
-import { authenticateKey, GatewayStoreService, keyOrigin, listEffectiveTools, oauthOrigin } from "@integragents/gateway-core"
-import type { ApiKey, GatewayStore, OAuthActor } from "@integragents/gateway-core"
+import {
+  authenticateKey,
+  GatewayStoreService,
+  keyOrigin,
+  listEffectiveTools,
+  oauthOrigin
+} from "@integragents/gateway-core"
+import type { ApiKey, GatewayStore, Interaction, OAuthActor } from "@integragents/gateway-core"
 import { Context, Effect, Layer, ManagedRuntime, Option, Predicate, Schema } from "effect"
 import { Headers, HttpTraceContext } from "effect/http"
 import type { HttpClient } from "effect/http"
-import { agentTools, invokeTool } from "./mcp-tools.ts"
+import { agentTools, approvalDescription, invokeTool } from "./mcp-tools.ts"
 import type { AgentTool, ApprovalPrompt, McpCaller, ToolOutput } from "./mcp-tools.ts"
 import { capture, ErrorCapture } from "./observability.ts"
 import type { ErrorSink } from "./observability.ts"
@@ -48,9 +55,7 @@ const defaultInputSchema = {
 
 const presentedSecret = (request: Request): string | undefined => {
   const authorization = request.headers.get("authorization")
-  const bearer = authorization === null
-    ? undefined
-    : /^Bearer\s+(.+)$/i.exec(authorization.trim())?.[1]
+  const bearer = authorization === null ? undefined : /^Bearer\s+(.+)$/i.exec(authorization.trim())?.[1]
   return bearer ?? request.headers.get("x-api-key") ?? undefined
 }
 
@@ -65,18 +70,18 @@ const authenticationFailure = (status: "unknown-key" | "key-revoked" | "profile-
 
 const toolName = (alias: Alias, name: ToolName): string => `${alias}__${name}`
 
-const awaitsApproval = "Calls to this tool are held until a human approves them."
-
 /** The approval decision belongs in the description: the model reads that. */
 const describeEffectiveTool = (tool: {
   readonly description?: string | undefined
   readonly decision: ToolDecision
-}): string | undefined =>
-  tool.decision !== "require_approval"
+}): string | undefined => {
+  const approval = approvalDescription(tool.decision)
+  return approval === undefined
     ? tool.description
     : tool.description === undefined
-      ? awaitsApproval
-      : `${tool.description}\n\n${awaitsApproval}`
+      ? approval
+      : `${tool.description}\n\n${approval}`
+}
 
 const explains = (failure: Error): failure is Error & { readonly error: string } =>
   "error" in failure && Predicate.isString(failure.error) && failure.error.length > 0
@@ -89,7 +94,24 @@ const contentOf = (text: string, isError: boolean) => ({
   isError
 })
 
-const approvalInput = "approval"
+/** Namespaced, so other input requests can ride along in the same round. */
+const approvalInputKey = "integrations/approval"
+
+/** The approval form: one optional choice, and nothing else a client may send back. */
+const approvalForm = {
+  type: "object",
+  properties: {
+    remember: {
+      type: "boolean",
+      title: "Always approve these exact arguments",
+      description: "Save an approval so later calls to this tool with the same arguments run without asking.",
+      default: false
+    }
+  }
+} as const
+
+const ApprovalAnswer = Schema.Struct({ remember: Schema.optional(Schema.Boolean) })
+const decodeApprovalAnswer = Schema.decodeUnknownOption(ApprovalAnswer, { onExcessProperty: "error" })
 
 /**
  * Only 2026-07-28 requests carry their client's capabilities, so only they can
@@ -109,10 +131,12 @@ const EnvelopeClientInfo = Schema.Struct({
 const decodeEnvelopeClientInfo = Schema.decodeUnknownOption(EnvelopeClientInfo)
 
 const agentOf = (context: ServerContext): string | undefined =>
-  Option.getOrUndefined(Option.map(decodeEnvelopeClientInfo(context.mcpReq.envelope), (envelope) => {
-    const info = envelope[CLIENT_INFO_META_KEY]
-    return info.version === undefined ? info.name : `${info.name} ${info.version}`
-  }))
+  Option.getOrUndefined(
+    Option.map(decodeEnvelopeClientInfo(context.mcpReq.envelope), (envelope) => {
+      const info = envelope[CLIENT_INFO_META_KEY]
+      return info.version === undefined ? info.name : `${info.name} ${info.version}`
+    })
+  )
 
 const approvalPromptOf = (context: ServerContext): ApprovalPrompt => {
   const envelope = decodeEnvelopeElicitation(context.mcpReq.envelope)
@@ -120,21 +144,84 @@ const approvalPromptOf = (context: ServerContext): ApprovalPrompt => {
   if (elicitation === undefined || (elicitation.form === undefined && elicitation.url !== undefined)) {
     return { kind: "unsupported" }
   }
-  const answer = inputResponse(context.mcpReq.inputResponses, approvalInput)
-  return answer.kind === "elicit" ? { kind: "answered", action: answer.action } : { kind: "unanswered" }
+  const answer = inputResponse(context.mcpReq.inputResponses, approvalInputKey)
+  if (answer.kind !== "elicit") return { kind: "unanswered" }
+  if (answer.action !== "accept") return { kind: "answered", action: answer.action, remember: false }
+  return Option.match(decodeApprovalAnswer(answer.content ?? {}), {
+    onNone: (): ApprovalPrompt => ({ kind: "malformed" }),
+    onSome: ({ remember }): ApprovalPrompt => ({ kind: "answered", action: "accept", remember: remember === true })
+  })
 }
 
-const replyOf = (output: ToolOutput) =>
-  output.kind === "result"
-    ? contentOf(JSON.stringify(output.value), output.failed)
-    : inputRequired({
-      inputRequests: {
-        [approvalInput]: inputRequired.elicit({
-          message: output.message,
-          requestedSchema: { type: "object", properties: {} }
-        })
-      }
-    })
+/** An upstream server's input requests ride under their own prefix, apart from the gateway's own keys. */
+const upstreamInputPrefix = "upstream/"
+
+const decodeInputResponses = Schema.decodeUnknownOption(InputResponses)
+const decodeRequestState = Schema.decodeUnknownOption(Schema.String)
+
+/**
+ * A client that can answer an elicitation can answer the upstream's rounds
+ * too. When it calls again with `requestState`, its answers to the upstream
+ * keys go back without their prefix.
+ */
+const interactionOf = (context: ServerContext, prompt: ApprovalPrompt): Interaction => {
+  const relay = prompt.kind !== "unsupported"
+  const requestState = Option.getOrUndefined(decodeRequestState(context.mcpReq.requestState()))
+  if (requestState === undefined) return { relay }
+  const responses = Option.getOrElse(decodeInputResponses(context.mcpReq.inputResponses), (): InputResponses => ({}))
+  const upstream = Object.fromEntries(
+    Object.entries(responses).flatMap(([key, value]) =>
+      key.startsWith(upstreamInputPrefix) ? [[key.slice(upstreamInputPrefix.length), value]] : []
+    )
+  )
+  return { relay, answer: { inputResponses: upstream, requestState } }
+}
+
+const UpstreamElicitation = Schema.Struct({
+  method: Schema.Literal("elicitation/create"),
+  params: Schema.Struct({ message: Schema.String, requestedSchema: Schema.Record(Schema.String, Schema.Json) })
+})
+const decodeUpstreamElicitation = Schema.decodeUnknownOption(UpstreamElicitation)
+
+/** The SDK re-checks the upstream's form against what elicitation may ask, refusing anything else. */
+const relayedRequest = (request: Json): Option.Option<InputRequest> =>
+  Option.flatMap(decodeUpstreamElicitation(request), ({ params }) =>
+    Option.liftThrowable(() =>
+      inputRequired.elicit({
+        message: params.message,
+        requestedSchema: fromJsonSchema<Record<string, Json>>(params.requestedSchema)
+      })
+    )()
+  )
+
+const relayedRound = (requests: InputRequests, requestState: string) => {
+  const relayed = Object.entries(requests).map(
+    ([key, request]) => [`${upstreamInputPrefix}${key}`, relayedRequest(request)] as const
+  )
+  return relayed.every(([, request]) => Option.isSome(request))
+    ? inputRequired({
+        inputRequests: Object.fromEntries(
+          relayed.flatMap(([key, request]) => (Option.isSome(request) ? [[key, request.value]] : []))
+        ),
+        requestState
+      })
+    : contentOf(unrelayableInputMessage(requests), true)
+}
+
+const replyOf = (output: ToolOutput) => {
+  switch (output.kind) {
+    case "result":
+      return contentOf(JSON.stringify(output.value), output.failed)
+    case "ask-approval":
+      return inputRequired({
+        inputRequests: {
+          [approvalInputKey]: inputRequired.elicit({ message: output.message, requestedSchema: approvalForm })
+        }
+      })
+    case "input-required":
+      return relayedRound(output.inputRequests, output.requestState)
+  }
+}
 
 type McpRuntime = ManagedRuntime.ManagedRuntime<GatewayOperationServices, never>
 
@@ -152,22 +239,32 @@ const resultOf = (
   call: { readonly tool: string; readonly caller: McpCaller; readonly request: Request | undefined },
   effect: Effect.Effect<ToolOutput, Error, GatewayOperationServices>
 ) =>
-  runtime.runPromise(effect.pipe(
-    Effect.tap((output) => Effect.annotateCurrentSpan("mcp.tool.outcome", output.kind === "result" ? output.failed ? "failed" : "result" : output.kind)),
-    Effect.tapError((failure) =>
-      Effect.logInfo("MCP tool call refused", failure).pipe(
-        Effect.annotateLogs({ "error.tag": Predicate.hasProperty(failure, "_tag") ? String(failure._tag) : failure.name })
-      )),
-    Effect.match({
-      onSuccess: replyOf,
-      onFailure: (failure: Error) => contentOf(describeFailure(failure), true)
-    }),
-    Effect.withSpan("Mcp.callTool", {
-      kind: "server",
-      attributes: { "mcp.tool": call.tool, "profile.id": call.caller.profile.id },
-      ...spanOptionsFor(call.request)
-    })
-  ))
+  runtime.runPromise(
+    effect.pipe(
+      Effect.tap((output) =>
+        Effect.annotateCurrentSpan(
+          "mcp.tool.outcome",
+          output.kind === "result" ? (output.failed ? "failed" : "result") : output.kind
+        )
+      ),
+      Effect.tapError((failure) =>
+        Effect.logInfo("MCP tool call refused", failure).pipe(
+          Effect.annotateLogs({
+            "error.tag": Predicate.hasProperty(failure, "_tag") ? String(failure._tag) : failure.name
+          })
+        )
+      ),
+      Effect.match({
+        onSuccess: replyOf,
+        onFailure: (failure: Error) => contentOf(describeFailure(failure), true)
+      }),
+      Effect.withSpan("Mcp.callTool", {
+        kind: "server",
+        attributes: { "mcp.tool": call.tool, "profile.id": call.caller.profile.id },
+        ...spanOptionsFor(call.request)
+      })
+    )
+  )
 
 export interface McpGatewayOptions {
   readonly store: GatewayStore
@@ -177,12 +274,15 @@ export interface McpGatewayOptions {
   readonly telemetry: Layer.Layer<never>
   readonly errorCapture?: ErrorSink
   readonly oauth?: {
-    readonly authenticate: (token: string) => Promise<{
-      readonly profile: Profile
-      readonly actor: OAuthActor
-      readonly expiresAt: Date
-      readonly scope: "mcp"
-    } | undefined>
+    readonly authenticate: (token: string) => Promise<
+      | {
+          readonly profile: Profile
+          readonly actor: OAuthActor
+          readonly expiresAt: Date
+          readonly scope: "mcp"
+        }
+      | undefined
+    >
     readonly challenge: (error?: string) => string
   }
 }
@@ -197,21 +297,19 @@ type McpPrincipal = {
 
 const callerFor = (principal: McpPrincipal, context: ServerContext): McpCaller => {
   const agent = agentOf(context)
+  const approvalPrompt = approvalPromptOf(context)
   return {
     profile: principal.profile,
-    origin: principal.credential.kind === "key"
-      ? keyOrigin(principal.credential.key, agent)
-      : oauthOrigin(principal.credential.actor, agent),
-    approvalPrompt: approvalPromptOf(context)
+    origin:
+      principal.credential.kind === "key"
+        ? keyOrigin(principal.credential.key, agent)
+        : oauthOrigin(principal.credential.actor, agent),
+    approvalPrompt,
+    interaction: interactionOf(context, approvalPrompt)
   }
 }
 
-const registerAgentTool = (
-  server: McpServer,
-  runtime: McpRuntime,
-  principal: McpPrincipal,
-  tool: AgentTool
-): void => {
+const registerAgentTool = (server: McpServer, runtime: McpRuntime, principal: McpPrincipal, tool: AgentTool): void => {
   server.registerTool(
     tool.name,
     {
@@ -221,13 +319,17 @@ const registerAgentTool = (
     },
     async (arguments_, context) => {
       const caller = callerFor(principal, context)
-      return resultOf(runtime, { tool: tool.name, caller, request: context.http?.req }, tool.run(caller, asJson(arguments_)))
+      return resultOf(
+        runtime,
+        { tool: tool.name, caller, request: context.http?.req },
+        tool.run(caller, asJson(arguments_))
+      )
     }
   )
 }
 
 const effectiveToolsOf = (profile: Profile) =>
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const store = yield* GatewayStoreService
     const integrations = yield* Integrations
     return yield* capture(listEffectiveTools(store, profile.id, { schemas: true, integrations }))
@@ -250,14 +352,17 @@ const serverFor = async (
     return server
   }
 
-  const effective = await runtime.runPromise(effectiveToolsOf(profile).pipe(
-    Effect.withSpan("Mcp.listTools", { attributes: { "profile.id": profile.id }, ...spanOptionsFor(request) })
-  ))
+  const effective = await runtime.runPromise(
+    effectiveToolsOf(profile).pipe(
+      Effect.withSpan("Mcp.listTools", { attributes: { "profile.id": profile.id }, ...spanOptionsFor(request) })
+    )
+  )
   for (const tool of effective) {
     const name = ToolName.make(tool.tool)
-    const inputSchema = tool.inputSchema !== undefined && isJsonObject(tool.inputSchema)
-      ? objectEntries(tool.inputSchema)
-      : defaultInputSchema
+    const inputSchema =
+      tool.inputSchema !== undefined && isJsonObject(tool.inputSchema)
+        ? objectEntries(tool.inputSchema)
+        : defaultInputSchema
     server.registerTool(
       toolName(tool.alias, name),
       {
@@ -267,11 +372,15 @@ const serverFor = async (
       },
       async (arguments_, context) => {
         const caller = callerFor(principal, context)
-        return resultOf(runtime, { tool: toolName(tool.alias, name), caller, request: context.http?.req }, invokeTool(caller, {
-          alias: tool.alias,
-          tool: name,
-          arguments: asJson(arguments_)
-        }))
+        return resultOf(
+          runtime,
+          { tool: toolName(tool.alias, name), caller, request: context.http?.req },
+          invokeTool(caller, {
+            alias: tool.alias,
+            tool: name,
+            arguments: asJson(arguments_)
+          })
+        )
       }
     )
   }
@@ -284,33 +393,39 @@ export interface McpGatewayHandle {
 }
 
 export const createMcpGatewayHandler = (options: McpGatewayOptions): McpGatewayHandle => {
-  const runtime: McpRuntime = ManagedRuntime.make(Layer.mergeAll(
-    Layer.succeedContext(options.services),
-    Layer.succeed(GatewayConfig, options.settings),
-    options.errorCapture === undefined
-      ? ErrorCapture.logging
-      : Layer.succeed(ErrorCapture, options.errorCapture),
-    options.httpClient,
-    webCryptoLayer,
-    options.telemetry
-  ))
+  const runtime: McpRuntime = ManagedRuntime.make(
+    Layer.mergeAll(
+      Layer.succeedContext(options.services),
+      Layer.succeed(GatewayConfig, options.settings),
+      options.errorCapture === undefined ? ErrorCapture.logging : Layer.succeed(ErrorCapture, options.errorCapture),
+      options.httpClient,
+      webCryptoLayer,
+      options.telemetry
+    )
+  )
   const authenticate = (secret: string, request: Request | undefined) =>
-    runtime.runPromise(capture(authenticateKey(options.store, secret)).pipe(
-      Effect.withSpan("Mcp.authenticate", spanOptionsFor(request))
-    ))
+    runtime.runPromise(
+      capture(authenticateKey(options.store, secret)).pipe(Effect.withSpan("Mcp.authenticate", spanOptionsFor(request)))
+    )
   const resolve = async (secret: string, request: Request | undefined) => {
     if (secret.startsWith("igoa_") && options.oauth !== undefined) {
       const oauth = await options.oauth.authenticate(secret)
       return oauth === undefined
         ? undefined
-        : { principal: { profile: oauth.profile, credential: { kind: "oauth", actor: oauth.actor } } satisfies McpPrincipal, scope: oauth.scope }
+        : {
+            principal: {
+              profile: oauth.profile,
+              credential: { kind: "oauth", actor: oauth.actor }
+            } satisfies McpPrincipal,
+            scope: oauth.scope
+          }
     }
     const apiKey = await authenticate(secret, request)
     return apiKey.status === "authenticated"
       ? {
-        principal: { profile: apiKey.profile, credential: { kind: "key", key: apiKey.key } } satisfies McpPrincipal,
-        scope: apiKey.profile.capabilities.join(" ")
-      }
+          principal: { profile: apiKey.profile, credential: { kind: "key", key: apiKey.key } } satisfies McpPrincipal,
+          scope: apiKey.profile.capabilities.join(" ")
+        }
       : apiKey
   }
   const handler = createMcpHandler(async ({ authInfo, requestInfo }) => {

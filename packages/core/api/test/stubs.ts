@@ -1,10 +1,17 @@
 import { Context, Effect, Option } from "effect"
-import { BlobStore, CatalogStore, Integrations, McpClient, OAuthFlows, OpenApiInvoker, SpecCache, ToolNotFoundError } from "@integragents/host"
+import {
+  BlobStore,
+  CatalogStore,
+  Integrations,
+  McpClient,
+  OAuthFlows,
+  OpenApiInvoker,
+  SpecCache,
+  ToolNotFoundError
+} from "@integragents/host"
 import type { IntegrationServices } from "@integragents/host"
 
-export const stubIntegrations = (
-  overrides: Partial<Integrations["Service"]> = {}
-): Integrations["Service"] => ({
+export const stubIntegrations = (overrides: Partial<Integrations["Service"]> = {}): Integrations["Service"] => ({
   listIntegrations: () => Effect.succeed([]),
   findIntegration: () => Effect.succeed(Option.none()),
   addMcp: dies("addMcp"),
@@ -12,6 +19,7 @@ export const stubIntegrations = (
   renameIntegration: dies("renameIntegration"),
   removeIntegration: dies("removeIntegration"),
   createConnection: dies("createConnection"),
+  savedOAuthClientId: () => Effect.succeed(Option.none()),
   listConnections: () => Effect.succeed([]),
   removeConnection: dies("removeConnection"),
   refreshConnection: dies("refreshConnection"),
@@ -26,9 +34,7 @@ export const stubIntegrations = (
 const dies = (member: string) => () =>
   Effect.die(new Error(`stubIntegrations: ${member} is not stubbed for these tests`))
 
-export const catalogStoreFake = (
-  overrides: Partial<CatalogStore["Service"]> = {}
-): CatalogStore["Service"] => ({
+export const catalogStoreFake = (overrides: Partial<CatalogStore["Service"]> = {}): CatalogStore["Service"] => ({
   ...catalogStore,
   putConnection: () => Effect.void,
   findOAuthClient: () => Effect.succeed(Option.none()),
@@ -44,6 +50,7 @@ const catalogStore: CatalogStore["Service"] = {
   listConnections: dies("CatalogStore.listConnections"),
   putConnection: dies("CatalogStore.putConnection"),
   removeConnection: dies("CatalogStore.removeConnection"),
+  requireReconnect: dies("CatalogStore.requireReconnect"),
   listOAuthClients: dies("CatalogStore.listOAuthClients"),
   findOAuthClient: dies("CatalogStore.findOAuthClient"),
   putOAuthClient: dies("CatalogStore.putOAuthClient"),
@@ -88,9 +95,10 @@ export const stubIntegrationsContext = (
     }),
     Context.add(OpenApiInvoker, { call: dies("OpenApiInvoker.call") }),
     Context.add(OAuthFlows, {
-      probe: dies("OAuthFlows.probe"),
-      registerDynamicClient: dies("OAuthFlows.registerDynamicClient"),
-      createClient: dies("OAuthFlows.createClient"),
+      discover: dies("OAuthFlows.discover"),
+      discoverResource: dies("OAuthFlows.discoverResource"),
+      registerClient: dies("OAuthFlows.registerClient"),
+      saveClient: dies("OAuthFlows.saveClient"),
       start: dies("OAuthFlows.start"),
       complete: dies("OAuthFlows.complete"),
       accessToken: dies("OAuthFlows.accessToken")

@@ -57,5 +57,17 @@ export const integrationMigrations: ReadonlyArray<Migration> = [
     statements: [
       "ALTER TABLE `connection` DROP COLUMN `expires_at`;"
     ]
+  },
+  {
+    id: 6,
+    name: "0006_nasty_gambit",
+    statements: [
+      "ALTER TABLE `connection` ADD `reconnect_reason` text;",
+      "ALTER TABLE `credential` ADD `claim` text;",
+      "ALTER TABLE `credential` ADD `claimed_at` integer;",
+      "ALTER TABLE `oauth_client` ADD `iss_parameter_supported` integer DEFAULT 0 NOT NULL;",
+      "ALTER TABLE `oauth_client` ADD `secret_expires_at` integer;",
+      "ALTER TABLE `oauth_flow` ADD `nonce` text;"
+    ]
   }
 ]

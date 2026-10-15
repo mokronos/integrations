@@ -1,12 +1,6 @@
 import { describe, expect, test } from "@effect/vitest"
 import { Schema } from "effect"
-import {
-  Alias,
-  aliasForConnection,
-  ConnectionName,
-  IntegrationSlug,
-  SubjectId
-} from "../src/domain.ts"
+import { Alias, aliasForConnection, ConnectionName, IntegrationSlug, SubjectId } from "../src/domain.ts"
 import type { ConnectionRef } from "../src/domain.ts"
 
 const org = (integration: string, name: string): ConnectionRef => ({
@@ -29,22 +23,16 @@ const isJsIdentifier = (value: string): boolean => /^[A-Za-z_$][A-Za-z0-9_$]*$/.
 describe("naming a connection", () => {
   test("reads as its parts, separated by the joiner", () => {
     expect(String(aliasForConnection(org("linear", "work")))).toBe("org___linear___work")
-    expect(String(aliasForConnection(user("sebastian", "linear", "work")))).toBe(
-      "user___sebastian___linear___work"
-    )
+    expect(String(aliasForConnection(user("sebastian", "linear", "work")))).toBe("user___sebastian___linear___work")
   })
 
   test("carries an underscore inside a part through as itself", () => {
-    expect(String(aliasForConnection(org("mcp_linear_app", "default")))).toBe(
-      "org___mcp_linear_app___default"
-    )
+    expect(String(aliasForConnection(org("mcp_linear_app", "default")))).toBe("org___mcp_linear_app___default")
   })
 
   test("widens a hyphen, which is not addressable in generated code", () => {
     expect(String(aliasForConnection(org("linear", "client-x")))).toBe("org___linear___client__x")
-    expect(String(aliasForConnection(org("github-mcp", "default")))).toBe(
-      "org___github__mcp___default"
-    )
+    expect(String(aliasForConnection(org("github-mcp", "default")))).toBe("org___github__mcp___default")
   })
 
   test("escapes a subject, because an identity provider chose it", () => {
@@ -54,25 +42,23 @@ describe("naming a connection", () => {
     // An escaped leading byte merges with the joiner. No part can ever *end*
     // in an underscore, and the subject is the only part that can begin with
     // one, so the longer run still marks exactly one boundary.
-    expect(String(aliasForConnection(user("A1", "linear", "work")))).toBe(
-      "user_____411___linear___work"
-    )
+    expect(String(aliasForConnection(user("A1", "linear", "work")))).toBe("user_____411___linear___work")
   })
 
   test("keeps apart two connections a naive join would merge", () => {
     expect(aliasForConnection(org("a_b", "c"))).not.toBe(aliasForConnection(org("a", "b_c")))
     expect(aliasForConnection(org("a-b", "c"))).not.toBe(aliasForConnection(org("a_b", "c")))
-    expect(aliasForConnection(org("a", "b"))).not.toBe(
-      aliasForConnection(user("a", "a", "b"))
-    )
+    expect(aliasForConnection(org("a", "b"))).not.toBe(aliasForConnection(user("a", "a", "b")))
   })
 
   test("tells a delegation template apart from one subject's connection", () => {
-    expect(aliasForConnection({
-      owner: "user",
-      integration: IntegrationSlug.make("gmail"),
-      name: ConnectionName.make("work")
-    })).not.toBe(aliasForConnection(user("sebastian", "gmail", "work")))
+    expect(
+      aliasForConnection({
+        owner: "user",
+        integration: IntegrationSlug.make("gmail"),
+        name: ConnectionName.make("work")
+      })
+    ).not.toBe(aliasForConnection(user("sebastian", "gmail", "work")))
   })
 
   test("refuses a part that could grow the joiner", () => {

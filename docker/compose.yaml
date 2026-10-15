@@ -4,6 +4,8 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+      args:
+        - BUN_VERSION
     restart: unless-stopped
     ports:
       - "${INTEGRATIONS_PORT:-4788}:4788"

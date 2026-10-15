@@ -4,7 +4,11 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 
-export function CopyButton({ value, label, className }: {
+export function CopyButton({
+  value,
+  label,
+  className
+}: {
   readonly value: string
   readonly label: string
   readonly className?: string
@@ -21,7 +25,13 @@ export function CopyButton({ value, label, className }: {
     }
   }
   return (
-    <Button variant="ghost" size="icon-sm" className={className} onClick={copy} aria-label={`Copy ${label.toLowerCase()}`}>
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      className={className}
+      onClick={copy}
+      aria-label={`Copy ${label.toLowerCase()}`}
+    >
       {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
     </Button>
   )

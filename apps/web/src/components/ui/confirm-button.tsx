@@ -14,7 +14,17 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 
-export function ConfirmButton({ label, title, description, confirmLabel, pendingLabel, onConfirm, pending, blocked = false, children }: {
+export function ConfirmButton({
+  label,
+  title,
+  description,
+  confirmLabel,
+  pendingLabel,
+  onConfirm,
+  pending,
+  blocked = false,
+  children
+}: {
   readonly label: string
   readonly title: string
   readonly description: string
@@ -28,7 +38,9 @@ export function ConfirmButton({ label, title, description, confirmLabel, pending
   const [open, setOpen] = useState(false)
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>
-      <AlertDialogTrigger render={<Button variant="outline" size="sm" className="text-destructive hover:text-destructive" />}>
+      <AlertDialogTrigger
+        render={<Button variant="outline" size="sm" className="text-destructive hover:text-destructive" />}
+      >
         <Trash2 className="size-3" />
         {label}
       </AlertDialogTrigger>
@@ -44,7 +56,10 @@ export function ConfirmButton({ label, title, description, confirmLabel, pending
             disabled={pending || blocked}
             onClick={(event) => {
               event.preventDefault()
-              void onConfirm().then(() => setOpen(false), () => undefined)
+              void onConfirm().then(
+                () => setOpen(false),
+                () => undefined
+              )
             }}
           >
             {pending ? pendingLabel : confirmLabel}

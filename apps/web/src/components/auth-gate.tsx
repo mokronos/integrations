@@ -3,13 +3,7 @@ import { LogIn } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle
-} from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -46,11 +40,7 @@ export function AuthGate({ children }: { readonly children: ReactNode }) {
     return <AuthCard onAuthenticated={() => me.refetch().then(() => undefined)} />
   }
 
-  return (
-    <SessionContext value={me.data}>
-      {children}
-    </SessionContext>
-  )
+  return <SessionContext value={me.data}>{children}</SessionContext>
 }
 
 type OnAuthenticated = () => Promise<void>
@@ -76,46 +66,47 @@ function AuthCard({ onAuthenticated }: { readonly onAuthenticated: OnAuthenticat
         <CardHeader>
           <CardTitle>Integrations control plane</CardTitle>
           <CardDescription>
-            Sign in to manage connections, clients, and approvals. Agents use API
-            keys minted here; humans sign in.
+            Sign in to manage connections, clients, and approvals. Agents use API keys minted here; humans sign in.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {google?.enabled === true
-            ? (
-              <>
-                <Button type="button" variant="outline" className="w-full" onClick={continueWithGoogle}>
-                  <LogIn className="size-4" /> Continue with Google
-                </Button>
-                <div className="text-muted-foreground my-4 flex items-center gap-3 text-xs">
-                  <span className="h-px flex-1 bg-border" /> or use a password
-                  <span className="h-px flex-1 bg-border" />
-                </div>
-              </>
-            )
-            : null}
-          {providers?.signupOpen === true
-            ? (
-              <Tabs value={tab} onValueChange={(value) => setTab(value === "signup" ? "signup" : "signin")}>
-                <TabsList className="w-full">
-                  <TabsTrigger value="signin" className="flex-1">Sign in</TabsTrigger>
-                  <TabsTrigger value="signup" className="flex-1">Create account</TabsTrigger>
-                </TabsList>
-                <TabsContent value="signin">
-                  <SignInForm onAuthenticated={onAuthenticated} />
-                </TabsContent>
-                <TabsContent value="signup">
-                  <SignUpForm
-                    onAuthenticated={onAuthenticated}
-                    onClosed={() => {
-                      toast.error("Signup is closed on this gateway")
-                      setTab("signin")
-                    }}
-                  />
-                </TabsContent>
-              </Tabs>
-            )
-            : <SignInForm onAuthenticated={onAuthenticated} />}
+          {google?.enabled === true ? (
+            <>
+              <Button type="button" variant="outline" className="w-full" onClick={continueWithGoogle}>
+                <LogIn className="size-4" /> Continue with Google
+              </Button>
+              <div className="text-muted-foreground my-4 flex items-center gap-3 text-xs">
+                <span className="h-px flex-1 bg-border" /> or use a password
+                <span className="h-px flex-1 bg-border" />
+              </div>
+            </>
+          ) : null}
+          {providers?.signupOpen === true ? (
+            <Tabs value={tab} onValueChange={(value) => setTab(value === "signup" ? "signup" : "signin")}>
+              <TabsList className="w-full">
+                <TabsTrigger value="signin" className="flex-1">
+                  Sign in
+                </TabsTrigger>
+                <TabsTrigger value="signup" className="flex-1">
+                  Create account
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent value="signin">
+                <SignInForm onAuthenticated={onAuthenticated} />
+              </TabsContent>
+              <TabsContent value="signup">
+                <SignUpForm
+                  onAuthenticated={onAuthenticated}
+                  onClosed={() => {
+                    toast.error("Signup is closed on this gateway")
+                    setTab("signin")
+                  }}
+                />
+              </TabsContent>
+            </Tabs>
+          ) : (
+            <SignInForm onAuthenticated={onAuthenticated} />
+          )}
         </CardContent>
       </Card>
     </div>
@@ -132,7 +123,13 @@ function SignInForm({ onAuthenticated }: { readonly onAuthenticated: OnAuthentic
   })
 
   return (
-    <form onSubmit={(event) => { event.preventDefault(); signIn.mutate() }} className="mt-4 grid gap-4">
+    <form
+      onSubmit={(event) => {
+        event.preventDefault()
+        signIn.mutate()
+      }}
+      className="mt-4 grid gap-4"
+    >
       <div className="grid gap-2">
         <Label htmlFor="signin-email">Email</Label>
         <Input
@@ -175,13 +172,20 @@ function SignUpForm({
   const create = useMutation({
     mutationFn: () => signUp({ email, password, tenantName }),
     onSuccess: onAuthenticated,
-    onError: (error: Error) => error instanceof GatewayError && error.code === "signup-closed"
-      ? onClosed()
-      : toast.error("Could not create the account", { description: error.message })
+    onError: (error: Error) =>
+      error instanceof GatewayError && error.code === "signup-closed"
+        ? onClosed()
+        : toast.error("Could not create the account", { description: error.message })
   })
 
   return (
-    <form onSubmit={(event) => { event.preventDefault(); create.mutate() }} className="mt-4 grid gap-4">
+    <form
+      onSubmit={(event) => {
+        event.preventDefault()
+        create.mutate()
+      }}
+      className="mt-4 grid gap-4"
+    >
       <div className="grid gap-2">
         <Label htmlFor="signup-email">Email</Label>
         <Input

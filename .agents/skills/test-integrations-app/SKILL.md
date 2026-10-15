@@ -32,6 +32,8 @@ INTEGRATIONS_HOME=<home> bun run apps/cli/src/main.ts profiles           # --hel
 
 The dashboard at `dashboard.url` is a Vite dev server. It proxies `/v1` to the sandbox gateway, reloads on source edits across `apps/web` and `packages/*`, and signs in automatically with the gateway's loopback credential.
 
+For a bug, go red first: reproduce the wrong behavior in the sandbox on the unfixed code and keep what showed it (the response, the trace, the screenshot), then run the same steps green after the fix. A setup failure is not the bug reproducing. Poll for the state you wait on; a fixed sleep is not a wait.
+
 Done when the behavior the change is about has happened in the sandbox, not just in unit tests.
 
 ## 3. Capture evidence

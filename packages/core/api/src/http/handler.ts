@@ -13,11 +13,7 @@ import {
 import { HttpApiBuilder } from "effect/http-api"
 import { HttpApiSchemaError } from "effect/http-api/HttpApiError"
 import { GatewayApi } from "./api.ts"
-import {
-  Authority,
-  authorityLayer,
-  CurrentRequestContext
-} from "./authority.ts"
+import { Authority, authorityLayer, CurrentRequestContext } from "./authority.ts"
 import type { RateLimits } from "./authority.ts"
 import {
   AdministrativeLayer,
@@ -85,20 +81,18 @@ const bodyLimitLayer = (limits: { readonly request: number; readonly upload: num
   HttpRouter.use((router) =>
     router.addGlobalMiddleware((httpEffect) =>
       Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) => {
-        const declared = Schema.decodeUnknownOption(NonNegativeIntFromString)(
-          request.headers["content-length"]
-        )
+        const declared = Schema.decodeUnknownOption(NonNegativeIntFromString)(request.headers["content-length"])
         // Blob uploads are the one route whose whole purpose is a large body.
-        const maxBytes = new URL(request.url, "http://localhost").pathname === "/v1/blobs"
-          ? limits.upload
-          : limits.request
+        const maxBytes =
+          new URL(request.url, "http://localhost").pathname === "/v1/blobs" ? limits.upload : limits.request
         return Option.getOrElse(declared, () => 0) > maxBytes
-          ? Effect.succeed(HttpServerResponse.jsonUnsafe(
-            { error: `Request body exceeds ${maxBytes} bytes` },
-            { status: 413 }
-          ))
+          ? Effect.succeed(
+              HttpServerResponse.jsonUnsafe({ error: `Request body exceeds ${maxBytes} bytes` }, { status: 413 })
+            )
           : httpEffect
-      })))
+      })
+    )
+  )
 
 const encodeGatewayFailure = Schema.encodeSync(GatewayFailure)
 
@@ -110,32 +104,36 @@ const failureLayer = () =>
         (cause) => Cause.hasDies(cause) || Cause.hasFails(cause),
         (cause) => {
           const defect = Cause.findDefect(cause)
-          const schemaError = Result.isSuccess(defect) && HttpApiSchemaError.is(defect.success)
-            ? defect.success
-            : undefined
+          const schemaError =
+            Result.isSuccess(defect) && HttpApiSchemaError.is(defect.success) ? defect.success : undefined
           if (schemaError !== undefined) {
-            return Effect.succeed(HttpServerResponse.jsonUnsafe(
-              {
-                error: schemaError.cause instanceof Error
-                  ? schemaError.cause.message
-                  : "Request body did not match the expected shape"
-              },
-              { status: 400 }
-            ))
-          }
-          return Effect.map(
-            traceIdFor(cause),
-            (traceId) =>
+            return Effect.succeed(
               HttpServerResponse.jsonUnsafe(
-                encodeGatewayFailure(new GatewayFailure({
+                {
+                  error:
+                    schemaError.cause instanceof Error
+                      ? schemaError.cause.message
+                      : "Request body did not match the expected shape"
+                },
+                { status: 400 }
+              )
+            )
+          }
+          return Effect.map(traceIdFor(cause), (traceId) =>
+            HttpServerResponse.jsonUnsafe(
+              encodeGatewayFailure(
+                new GatewayFailure({
                   message: "The gateway could not complete this request",
                   traceId
-                })),
-                { status: 500 }
-              )
+                })
+              ),
+              { status: 500 }
+            )
           )
         }
-      )))
+      )
+    )
+  )
 
 export const defaultMaxBodyBytes = 1024 * 1024
 
@@ -148,18 +146,15 @@ const settingsOf = (options: GatewayHandlerOptions): GatewaySettings => ({
 })
 
 export const gatewayAppLayer = (options: GatewayHandlerOptions) => {
-  const errorCapture = options.errorCapture === undefined
-    ? ErrorCapture.logging
-    : Layer.succeed(ErrorCapture, options.errorCapture)
+  const errorCapture =
+    options.errorCapture === undefined ? ErrorCapture.logging : Layer.succeed(ErrorCapture, options.errorCapture)
 
   const services = Layer.succeedContext(gatewayServicesContext(options))
   const dependencies = Layer.mergeAll(
     errorCapture,
     services,
     Layer.succeed(GatewayConfig, settingsOf(options)),
-    options.sessions === undefined
-      ? SessionPolicy.closed
-      : Layer.succeed(SessionPolicy, options.sessions),
+    options.sessions === undefined ? SessionPolicy.closed : Layer.succeed(SessionPolicy, options.sessions),
     ControlPlaneAssets.layerOf(options.webAssets)
   )
 
@@ -181,23 +176,20 @@ export const gatewayAppLayer = (options: GatewayHandlerOptions) => {
     Path.layer
   )
   const base = failureLayer().pipe(
-    Layer.provideMerge(bodyLimitLayer({
-      request: options.maxBodyBytes ?? defaultMaxBodyBytes,
-      upload: options.maxUploadBytes ?? defaultMaxUploadBytes
-    })),
+    Layer.provideMerge(
+      bodyLimitLayer({
+        request: options.maxBodyBytes ?? defaultMaxBodyBytes,
+        upload: options.maxUploadBytes ?? defaultMaxUploadBytes
+      })
+    ),
     Layer.provideMerge(platform),
     Layer.provideMerge(errorCapture)
   )
   const authority = (options.authority ?? authorityLayer(whenPresent("rateLimits", options.rateLimits))).pipe(
     Layer.provide(services)
   )
-  return base.pipe(
-    Layer.provideMerge(groups),
-    Layer.provideMerge(authority)
-  )
+  return base.pipe(Layer.provideMerge(groups), Layer.provideMerge(authority))
 }
-
-
 
 /** Every path the gateway answers, as URL patterns; the rest belongs to the dashboard. */
 export const gatewayRoutes: ReadonlyArray<string> = [
@@ -220,24 +212,26 @@ export const createGatewayHandler = (options: GatewayHandlerOptions): GatewayHan
   const telemetry = options.telemetry ?? Layer.empty
   const app = HttpApiBuilder.layer(GatewayApi).pipe(
     Layer.provideMerge(gatewayAppLayer(options)),
-    HttpRouter.provideRequest(Layer.mergeAll(
-      options.httpClient,
-      webCryptoLayer,
-      Layer.succeedContext(gatewayServicesContext(options)),
-      Layer.succeed(GatewayConfig, settingsOf(options)),
-      options.errorCapture === undefined ? ErrorCapture.logging : Layer.succeed(ErrorCapture, options.errorCapture)
-    ))
+    HttpRouter.provideRequest(
+      Layer.mergeAll(
+        options.httpClient,
+        webCryptoLayer,
+        Layer.succeedContext(gatewayServicesContext(options)),
+        Layer.succeed(GatewayConfig, settingsOf(options)),
+        options.errorCapture === undefined ? ErrorCapture.logging : Layer.succeed(ErrorCapture, options.errorCapture)
+      )
+    )
   )
   const web = HttpEffect.toWebHandlerLayerWith(
-    app.pipe(Layer.provideMerge(Layer.merge(
-      telemetry,
-      HttpMiddleware.layerTracerDisabledForUrls(["/v1/health", "/v1/metadata", "/v1/events"])
-    ))), {
-    toHandler: (context) =>
-      Effect.succeed(
-        Context.getUnsafe(HttpRouter.HttpRouter)(context).asHttpEffect()
+    app.pipe(
+      Layer.provideMerge(
+        Layer.merge(telemetry, HttpMiddleware.layerTracerDisabledForUrls(["/v1/health", "/v1/metadata", "/v1/events"]))
       )
-  })
+    ),
+    {
+      toHandler: (context) => Effect.succeed(Context.getUnsafe(HttpRouter.HttpRouter)(context).asHttpEffect())
+    }
+  )
   const contextFor = (requestContext: GatewayRequestContext | undefined) =>
     requestContext === undefined
       ? undefined

@@ -14,19 +14,22 @@ describe("integration registry", () => {
           const url = new URL(request.url)
           paths.push(url.pathname + url.search)
           return Response.json({
-            results: [{
-              domain: "example.com",
-              name: "Example",
-              description: "Example integration",
-              surfaces: [
-                { kind: "mcp", slug: "example-mcp", url: "https://example.com/mcp" },
-                { kind: "openapi", slug: "example-api", url: "https://example.com/openapi.json" }
-              ]
-            }, {
-              domain: "nothing.example",
-              name: "nothing.example",
-              description: "No developer endpoints found"
-            }]
+            results: [
+              {
+                domain: "example.com",
+                name: "Example",
+                description: "Example integration",
+                surfaces: [
+                  { kind: "mcp", slug: "example-mcp", url: "https://example.com/mcp" },
+                  { kind: "openapi", slug: "example-api", url: "https://example.com/openapi.json" }
+                ]
+              },
+              {
+                domain: "nothing.example",
+                name: "nothing.example",
+                description: "No developer endpoints found"
+              }
+            ]
           })
         }
       })
@@ -45,5 +48,6 @@ describe("integration registry", () => {
       } finally {
         server.stop()
       }
-    }))
+    })
+  )
 })

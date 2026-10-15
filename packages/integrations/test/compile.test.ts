@@ -1,7 +1,11 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Option } from "effect"
 import { compileSpec, previewOf, resolveServer } from "../src/openapi/compile.ts"
-import { convertGoogleDiscovery, isGoogleDiscoveryUrl } from "../src/openapi/google-discovery.ts"
+import {
+  convertGoogleDiscovery,
+  googleDiscoveryFetchUrl,
+  isGoogleDiscoveryUrl
+} from "../src/openapi/google-discovery.ts"
 import { isJsonObject, property, type Json } from "@integragents/contracts"
 
 const spec = JSON.stringify({
@@ -46,9 +50,7 @@ const spec = JSON.stringify({
       },
       post: {
         operationId: "addNode",
-        parameters: [
-          { name: "treeId", in: "path", required: true, schema: { type: "string" } }
-        ],
+        parameters: [{ name: "treeId", in: "path", required: true, schema: { type: "string" } }],
         requestBody: {
           required: true,
           content: {
@@ -63,27 +65,24 @@ const spec = JSON.stringify({
 
 describe("compiling a specification", () => {
   it.effect("projects every operation without choking on a recursive schema", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const compiled = yield* compileSpec("https://example.com/openapi.json", spec)
-      expect(compiled.operations.map((operation) => operation.name)).toEqual([
-        "addNode",
-        "listNodes"
-      ])
+      expect(compiled.operations.map((operation) => operation.name)).toEqual(["addNode", "listNodes"])
       expect(Option.getOrNull(compiled.title)).toBe("Example")
-    }))
+    })
+  )
 
   it.effect("calls a safe method read-only and nothing else", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const compiled = yield* compileSpec("https://example.com/openapi.json", spec)
-      const readOnly = new Map(
-        compiled.operations.map((operation) => [operation.name, operation.readOnly])
-      )
+      const readOnly = new Map(compiled.operations.map((operation) => [operation.name, operation.readOnly]))
       expect(readOnly.get("listNodes")).toBe(true)
       expect(readOnly.get("addNode")).toBe(false)
-    }))
+    })
+  )
 
   it.effect("flattens parameters into one object and records where each came from", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const compiled = yield* compileSpec("https://example.com/openapi.json", spec)
       const list = compiled.operations.find((operation) => operation.name === "listNodes")
       expect(list?.locations).toEqual({
@@ -92,51 +91,64 @@ describe("compiling a specification", () => {
         "X-Trace": "header"
       })
       const properties = property(list?.inputSchema ?? null, "properties")
-      expect(Object.keys(isJsonObject(properties) ? properties : {}).toSorted())
-        .toEqual(["X-Trace", "depth", "treeId"])
-    }))
+      expect(Object.keys(isJsonObject(properties) ? properties : {}).toSorted()).toEqual(["X-Trace", "depth", "treeId"])
+    })
+  )
 
   it.effect("carries only the definitions a schema reaches", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const compiled = yield* compileSpec("https://example.com/openapi.json", spec)
       const add = compiled.operations.find((operation) => operation.name === "addNode")
       const defs = property(add?.inputSchema ?? null, "$defs")
       expect(Object.keys(isJsonObject(defs) ? defs : {})).toEqual(["Node"])
-    }))
+    })
+  )
 
   it.effect("keeps a body that is a reference whole under its own property", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const compiled = yield* compileSpec("https://example.com/openapi.json", spec)
       const add = compiled.operations.find((operation) => operation.name === "addNode")
       expect(Option.getOrNull(add?.bodyProperty ?? Option.none())).toBe("body")
       expect(add?.locations["body"]).toBe("body")
-    }))
+    })
+  )
 
   it.effect("derives the auth methods the document declares", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const compiled = yield* compileSpec("https://example.com/openapi.json", spec)
       expect(compiled.securitySchemes.map((entry) => entry.name)).toEqual(["bearerAuth"])
-    }))
+    })
+  )
 })
 
 describe("resolving the server", () => {
   it.effect("resolves a relative server against where the document was fetched", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const compiled = yield* compileSpec("https://example.com/openapi.json", spec)
-      expect(Option.getOrNull(resolveServer(compiled, {
-        baseUrl: Option.none(),
-        specSource: Option.some("https://example.com/openapi.json")
-      }))).toBe("https://example.com/api/v2")
-    }))
+      expect(
+        Option.getOrNull(
+          resolveServer(compiled, {
+            baseUrl: Option.none(),
+            specSource: Option.some("https://example.com/openapi.json")
+          })
+        )
+      ).toBe("https://example.com/api/v2")
+    })
+  )
 
   it.effect("prefers an operator's override over the document", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const compiled = yield* compileSpec("https://example.com/openapi.json", spec)
-      expect(Option.getOrNull(resolveServer(compiled, {
-        baseUrl: Option.some("https://staging.example.com"),
-        specSource: Option.some("https://example.com/openapi.json")
-      }))).toBe("https://staging.example.com")
-    }))
+      expect(
+        Option.getOrNull(
+          resolveServer(compiled, {
+            baseUrl: Option.some("https://staging.example.com"),
+            specSource: Option.some("https://example.com/openapi.json")
+          })
+        )
+      ).toBe("https://staging.example.com")
+    })
+  )
 })
 
 describe("an operation that declares its own server", () => {
@@ -166,38 +178,43 @@ describe("an operation that declares its own server", () => {
     }
   })
 
-  const operationNamed = (compiled: { operations: ReadonlyArray<{ name: string; server: Option.Option<string> }> }, name: string) =>
-    Option.getOrNull(compiled.operations.find((operation) => operation.name === name)!.server)
+  const operationNamed = (
+    compiled: { operations: ReadonlyArray<{ name: string; server: Option.Option<string> }> },
+    name: string
+  ) => Option.getOrNull(compiled.operations.find((operation) => operation.name === name)!.server)
 
   it.effect("takes the base the operation declares, not the document's", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const compiled = yield* compileSpec("https://example.com/drive.json", perOperation)
-      expect(operationNamed(compiled, "drive.about.get"))
-        .toBe("https://www.googleapis.com/drive/v3/")
-    }))
+      expect(operationNamed(compiled, "drive.about.get")).toBe("https://www.googleapis.com/drive/v3/")
+    })
+  )
 
   it.effect("inherits a base the path item declares", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const compiled = yield* compileSpec("https://example.com/drive.json", perOperation)
       expect(operationNamed(compiled, "regional.get")).toBe("https://eu.example.com")
-    }))
+    })
+  )
 
   it.effect("leaves an operation the document says nothing about to the integration", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const compiled = yield* compileSpec("https://example.com/drive.json", perOperation)
       expect(operationNamed(compiled, "drive.files.createMedia")).toBeNull()
-    }))
+    })
+  )
 })
 
 describe("previewing a specification", () => {
   it.effect("summarises without installing anything", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const compiled = yield* compileSpec("https://example.com/openapi.json", spec)
       const preview = yield* previewOf(compiled)
       expect(preview.operationCount).toBe(2)
       expect(preview.servers).toEqual([{ url: "/api/v2", description: null }])
       expect(preview.securitySchemes[0]?.type).toBe("http")
-    }))
+    })
+  )
 })
 
 describe("Google Discovery", () => {
@@ -260,15 +277,21 @@ describe("Google Discovery", () => {
   })
 
   it("recognises the URLs that serve Discovery rather than OpenAPI", () => {
-    expect(isGoogleDiscoveryUrl(
+    expect(isGoogleDiscoveryUrl("https://www.googleapis.com/discovery/v1/apis/gmail/v1/rest")).toBe(true)
+    expect(isGoogleDiscoveryUrl("https://petstore3.swagger.io/api/v3/openapi.json")).toBe(false)
+  })
+
+  it("fetches APIs the central directory does not list from their own host", () => {
+    expect(googleDiscoveryFetchUrl("https://www.googleapis.com/discovery/v1/apis/analyticsdata/v1beta/rest")).toBe(
+      "https://analyticsdata.googleapis.com/$discovery/rest?version=v1beta"
+    )
+    expect(googleDiscoveryFetchUrl("https://www.googleapis.com/discovery/v1/apis/gmail/v1/rest")).toBe(
       "https://www.googleapis.com/discovery/v1/apis/gmail/v1/rest"
-    )).toBe(true)
-    expect(isGoogleDiscoveryUrl("https://petstore3.swagger.io/api/v3/openapi.json"))
-      .toBe(false)
+    )
   })
 
   it.effect("converts into a document the same compilation path accepts", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const converted = yield* convertGoogleDiscovery("gmail", discovery)
       const compiled = yield* compileSpec("gmail", converted)
       expect(Option.getOrNull(compiled.title)).toBe("Gmail API")
@@ -279,46 +302,42 @@ describe("Google Discovery", () => {
           variables: {}
         }
       ])
-      const send = compiled.operations.find(
-        (operation) => operation.name === "gmail.users.messages.send"
-      )
+      const send = compiled.operations.find((operation) => operation.name === "gmail.users.messages.send")
       expect(send).toBeDefined()
       expect(send?.readOnly).toBe(false)
       expect(send?.locations["userId"]).toBe("path")
-    }))
+    })
+  )
 
   it.effect("keeps the request body callable, with its recursive schema intact", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const converted = yield* convertGoogleDiscovery("gmail", discovery)
       const compiled = yield* compileSpec("gmail", converted)
-      const send = compiled.operations.find(
-        (operation) => operation.name === "gmail.users.messages.send"
-      )!
+      const send = compiled.operations.find((operation) => operation.name === "gmail.users.messages.send")!
       expect(send.locations["body"]).toBe("body")
       const defs: Json = property(send.inputSchema, "$defs")
-      expect(Object.keys(isJsonObject(defs) ? defs : {}).toSorted())
-        .toEqual(["Message", "MessagePart"])
+      expect(Object.keys(isJsonObject(defs) ? defs : {}).toSorted()).toEqual(["Message", "MessagePart"])
       expect(Option.getOrNull(send.bodyProperty)).toBe("body")
-    }))
+    })
+  )
 
   it.effect("derives OAuth with the scopes the method declares", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const converted = yield* convertGoogleDiscovery("gmail", discovery)
       const compiled = yield* compileSpec("gmail", converted)
       const [scheme] = compiled.securitySchemes
       expect(scheme?.type).toBe("oauth2")
-      expect(Option.getOrNull(scheme?.tokenUrl ?? Option.none()))
-        .toBe("https://oauth2.googleapis.com/token")
+      expect(Option.getOrNull(scheme?.tokenUrl ?? Option.none())).toBe("https://oauth2.googleapis.com/token")
       expect(scheme?.scopes).toEqual(["https://www.googleapis.com/auth/gmail.send"])
-    }))
+    })
+  )
 
   it.effect("drops a global parameter the path does not mention", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const converted = yield* convertGoogleDiscovery("gmail", discovery)
       const compiled = yield* compileSpec("gmail", converted)
-      const send = compiled.operations.find(
-        (operation) => operation.name === "gmail.users.messages.send"
-      )!
+      const send = compiled.operations.find((operation) => operation.name === "gmail.users.messages.send")!
       expect(send.locations["alt"]).toBe("query")
-    }))
+    })
+  )
 })

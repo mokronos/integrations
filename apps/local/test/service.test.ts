@@ -17,6 +17,7 @@ import {
   resolveOperatorConnection,
   serveGateway
 } from "../index.ts"
+import { nativeConnect } from "@integragents/host/native-egress"
 import { temporaryDirectory, testServices } from "./fixtures.ts"
 
 const services = Layer.merge(testServices, FetchHttpClient.layer)
@@ -24,13 +25,14 @@ const services = Layer.merge(testServices, FetchHttpClient.layer)
 /** A gateway on a loopback port, stopped when the test's scope ends. */
 const gateway = Effect.flatMap(temporaryDirectory("gateway-serve-"), (home) =>
   Effect.acquireRelease(
-    Effect.promise(() => serveGateway({ home, port: 0, httpClient: FetchHttpClient.layer })),
+    Effect.promise(() => serveGateway({ home, port: 0, connect: nativeConnect })),
     (running) => Effect.promise(() => running.stop())
-  ))
+  )
+)
 
 describe("gateway service", () => {
   it.live("binds to loopback and answers health", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const running = yield* gateway
 
       expect(running.url).toMatch(/^http:\/\/127\.0\.0\.1:/)
@@ -40,10 +42,11 @@ describe("gateway service", () => {
       const metadata = Schema.decodeUnknownSync(GatewayMetadata)(yield* response.json)
       expect(metadata.gatewayVersion).toBe(gatewayVersion)
       expect(response.headers["cache-control"]).toBe("no-store")
-    }).pipe(Effect.provide(services)))
+    }).pipe(Effect.provide(services))
+  )
 
   it.live("bootstraps separate local agent and operator profiles", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const running = yield* gateway
 
       const config = yield* Effect.promise(() => readGatewayConfig(running.service.home))
@@ -68,10 +71,11 @@ describe("gateway service", () => {
         headers: { authorization: `Bearer ${operatorConfig?.apiKey ?? ""}` }
       })
       expect(allowed.status).toBe(200)
-    }).pipe(Effect.provide(services)))
+    }).pipe(Effect.provide(services))
+  )
 
   it.live("writes the config file as a credential, not world-readable", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const running = yield* gateway
       const fs = yield* FileSystem.FileSystem
 
@@ -80,13 +84,14 @@ describe("gateway service", () => {
 
       expect(Number(info.mode) & 0o777).toBe(0o600)
       expect(Number(operatorInfo.mode) & 0o777).toBe(0o600)
-    }).pipe(Effect.provide(services)))
+    }).pipe(Effect.provide(services))
+  )
 
   it.live("revokes the former local keys when the gateway restarts", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const home = yield* temporaryDirectory("gateway-restart-")
       const first = yield* Effect.acquireRelease(
-        Effect.promise(() => serveGateway({ home, port: 0, httpClient: FetchHttpClient.layer })),
+        Effect.promise(() => serveGateway({ home, port: 0, connect: nativeConnect })),
         (running) => Effect.promise(() => running.stop())
       )
       const oldAgent = yield* Effect.promise(() => readGatewayConfig(home))
@@ -94,7 +99,7 @@ describe("gateway service", () => {
       yield* Effect.promise(() => first.stop())
 
       const second = yield* Effect.acquireRelease(
-        Effect.promise(() => serveGateway({ home, port: 0, httpClient: FetchHttpClient.layer })),
+        Effect.promise(() => serveGateway({ home, port: 0, connect: nativeConnect })),
         (running) => Effect.promise(() => running.stop())
       )
       for (const key of [oldAgent?.apiKey, oldOperator?.apiKey]) {
@@ -103,23 +108,25 @@ describe("gateway service", () => {
         })
         expect(response.status).toBe(401)
       }
-    }).pipe(Effect.provide(services)))
+    }).pipe(Effect.provide(services))
+  )
 
   it.live("beyond loopback, takes its master key only from the environment", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const home = yield* temporaryDirectory("gateway-exposed-")
       const fs = yield* FileSystem.FileSystem
 
-      const refused = yield* Effect.flip(Effect.tryPromise(() =>
-        serveGateway({ home, hostname: "0.0.0.0", port: 0, httpClient: FetchHttpClient.layer })
-      ))
+      const refused = yield* Effect.flip(
+        Effect.tryPromise(() => serveGateway({ home, hostname: "0.0.0.0", port: 0, connect: nativeConnect }))
+      )
 
       expect(String(refused.cause)).toContain("INTEGRATIONS_MASTER_KEY is required")
       expect(yield* Effect.orDie(fs.exists(`${home}/gateway.key`))).toBe(false)
-    }).pipe(Effect.provide(services)))
+    }).pipe(Effect.provide(services))
+  )
 
   it.live("the control plane's own page is authenticated, a page on another site is not", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const running = yield* gateway
 
       const ownPage = yield* HttpClient.get(`${running.url}/v1/profiles`, {
@@ -131,10 +138,11 @@ describe("gateway service", () => {
         headers: { "sec-fetch-site": "cross-site", origin: "https://evil.example.com" }
       })
       expect(elsewhere.status).toBe(401)
-    }).pipe(Effect.provide(services)))
+    }).pipe(Effect.provide(services))
+  )
 
   it.live("an explicit key wins over the ambient one", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const running = yield* gateway
       const store = running.service.store
       const sandbox = yield* store.createProfile({
@@ -152,37 +160,39 @@ describe("gateway service", () => {
       })
 
       expect(response.status).toBe(403)
-    }).pipe(Effect.provide(services)))
+    }).pipe(Effect.provide(services))
+  )
 
   it.live("prefers an explicit environment over the local config file", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const running = yield* gateway
 
-      const fromFile = yield* Effect.promise(() =>
-        resolveClientConnection({ INTEGRATIONS_HOME: running.service.home }))
+      const fromFile = yield* Effect.promise(() => resolveClientConnection({ INTEGRATIONS_HOME: running.service.home }))
       const operatorFromFile = yield* Effect.promise(() =>
-        resolveOperatorConnection({ INTEGRATIONS_HOME: running.service.home }))
+        resolveOperatorConnection({ INTEGRATIONS_HOME: running.service.home })
+      )
       const fromEnvironment = yield* Effect.promise(() =>
         resolveClientConnection({
           INTEGRATIONS_HOME: running.service.home,
           INTEGRATIONS_URL: "https://gateway.example",
           INTEGRATIONS_API_KEY: "igk_remote"
-        }))
+        })
+      )
 
       expect(fromFile?.url).toBe(running.url)
       expect(operatorFromFile?.url).toBe(running.url)
       expect(operatorFromFile?.apiKey).not.toBe(fromFile?.apiKey)
       expect(fromEnvironment?.url).toBe("https://gateway.example")
       expect(fromEnvironment?.apiKey).toBe("igk_remote")
-    }).pipe(Effect.provide(services)))
+    }).pipe(Effect.provide(services))
+  )
 
   it.live("reports no connection when neither environment nor config exists", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const home = yield* temporaryDirectory("gateway-empty-")
 
-      expect(yield* Effect.promise(() =>
-        resolveClientConnection({ INTEGRATIONS_HOME: home }))).toBeUndefined()
-      expect(yield* Effect.promise(() =>
-        resolveOperatorConnection({ INTEGRATIONS_HOME: home }))).toBeUndefined()
-    }).pipe(Effect.provide(services)))
+      expect(yield* Effect.promise(() => resolveClientConnection({ INTEGRATIONS_HOME: home }))).toBeUndefined()
+      expect(yield* Effect.promise(() => resolveOperatorConnection({ INTEGRATIONS_HOME: home }))).toBeUndefined()
+    }).pipe(Effect.provide(services))
+  )
 })

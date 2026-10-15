@@ -6,9 +6,7 @@ export type IntegrationSearchKind = typeof IntegrationSearchKind.Type
 export const IntegrationSearchQuery = Schema.Struct({
   q: Schema.String.check(Schema.isTrimmed()),
   kind: Schema.optional(IntegrationSearchKind),
-  limit: Schema.optional(
-    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))
-  )
+  limit: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 })))
 })
 export type IntegrationSearchQuery = typeof IntegrationSearchQuery.Type
 

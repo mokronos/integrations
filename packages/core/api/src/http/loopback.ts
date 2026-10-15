@@ -15,9 +15,7 @@ const withoutPort = (host: string): string => {
 
 export const isLoopbackAddress = (address: string | undefined): boolean => {
   if (address === undefined || address.length === 0) return false
-  const bare = address.startsWith("[") && address.endsWith("]")
-    ? address.slice(1, -1)
-    : address
+  const bare = address.startsWith("[") && address.endsWith("]") ? address.slice(1, -1) : address
   const unmapped = bare.startsWith("::ffff:") ? bare.slice("::ffff:".length) : bare
   if (unmapped === "::1" || unmapped === "0:0:0:0:0:0:0:1") return true
   return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(unmapped)
@@ -26,8 +24,7 @@ export const isLoopbackAddress = (address: string | undefined): boolean => {
 export const isLoopbackHostHeader = (host: string | null): boolean => {
   if (host === null || host.length === 0) return false
   const name = withoutPort(host.trim()).toLowerCase()
-  return name === "localhost" || name === "[::1]" || name === "::1" ||
-    /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(name)
+  return name === "localhost" || name === "[::1]" || name === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(name)
 }
 
 export interface LoopbackBootstrap {
@@ -48,10 +45,7 @@ const headersOf = (get: (name: string) => string | null): BorrowHeaders => ({
   secFetchSite: get("sec-fetch-site")
 })
 
-export const mayBorrowLocalCredential = (
-  request: Request,
-  bootstrap: LoopbackBootstrap
-): boolean => {
+export const mayBorrowLocalCredential = (request: Request, bootstrap: LoopbackBootstrap): boolean => {
   const headers = headersOf((name) => request.headers.get(name))
   return mayBorrow(headers, bootstrap)
 }
@@ -60,16 +54,16 @@ export const mayBorrowLocalCredentialHeaders = (
   headers: Readonly<Record<string, string | undefined>>,
   bootstrap: LoopbackBootstrap
 ): boolean =>
-  mayBorrow({
-    host: headers["host"] ?? null,
-    origin: headers["origin"] ?? null,
-    secFetchSite: headers["sec-fetch-site"] ?? null
-  }, bootstrap)
+  mayBorrow(
+    {
+      host: headers["host"] ?? null,
+      origin: headers["origin"] ?? null,
+      secFetchSite: headers["sec-fetch-site"] ?? null
+    },
+    bootstrap
+  )
 
-const mayBorrow = (
-  headers: ReturnType<typeof headersOf>,
-  bootstrap: LoopbackBootstrap
-): boolean => {
+const mayBorrow = (headers: ReturnType<typeof headersOf>, bootstrap: LoopbackBootstrap): boolean => {
   if (!bootstrap.boundToLoopback) return false
   if (!isLoopbackAddress(bootstrap.remoteAddress)) return false
   if (!isLoopbackHostHeader(headers.host)) return false

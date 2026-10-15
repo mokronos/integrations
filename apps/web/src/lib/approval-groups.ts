@@ -1,4 +1,11 @@
-import { argumentPattern, isJsonObject, type ArgumentPath, type Json, type JsonObject, type ListedApproval } from "@integragents/contracts"
+import {
+  argumentPattern,
+  isJsonObject,
+  type ArgumentPath,
+  type Json,
+  type JsonObject,
+  type ListedApproval
+} from "@integragents/contracts"
 
 /** Newest group first, each group's calls in the order they were made. */
 export const groupApprovals = (
@@ -11,7 +18,8 @@ export const groupApprovals = (
     else group.push(approval)
   }
   return [...groups.values()].map((group) =>
-    [...group].sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime()))
+    [...group].sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime())
+  )
 }
 
 export interface ArgumentSplit {
@@ -29,8 +37,9 @@ const place = (target: JsonObject, path: ArgumentPath, value: Json): JsonObject 
   return { ...target, [head]: place(existing !== undefined && isJsonObject(existing) ? existing : {}, rest, value) }
 }
 
-export const pinnedObject = (pinned: ReadonlyArray<{ readonly path: ArgumentPath; readonly value: Json }>): JsonObject =>
-  pinned.reduce<JsonObject>((shared, entry) => place(shared, entry.path, entry.value), {})
+export const pinnedObject = (
+  pinned: ReadonlyArray<{ readonly path: ArgumentPath; readonly value: Json }>
+): JsonObject => pinned.reduce<JsonObject>((shared, entry) => place(shared, entry.path, entry.value), {})
 
 export const splitArguments = (calls: ReadonlyArray<Json>): ArgumentSplit => {
   const { pinned, free } = argumentPattern(calls)
@@ -39,6 +48,6 @@ export const splitArguments = (calls: ReadonlyArray<Json>): ArgumentSplit => {
 
 export const argumentAt = (value: Json, path: ArgumentPath): Json | undefined =>
   path.reduce<Json | undefined>(
-    (current, key) => current !== undefined && isJsonObject(current) ? current[key] : undefined,
+    (current, key) => (current !== undefined && isJsonObject(current) ? current[key] : undefined),
     value
   )

@@ -22,10 +22,8 @@ import {
 } from "lucide-react"
 
 const REPO = "https://github.com/mokronos/integrations"
-const INSTALL =
-  "curl -fsSL https://raw.githubusercontent.com/mokronos/integrations/main/install.sh | sh"
-const INSTALL_SKILL =
-  "npx skills add https://github.com/mokronos/integrations/tree/main/.agents/skills/integrations -g"
+const INSTALL = "curl -fsSL https://raw.githubusercontent.com/mokronos/integrations/main/install.sh | sh"
+const INSTALL_SKILL = "npx skills add https://github.com/mokronos/integrations/tree/main/.agents/skills/integrations -g"
 const QUICKSTART = [
   {
     n: "1",
@@ -340,8 +338,8 @@ function Hero() {
         </h1>
         <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-pretty text-neutral-400">
           Install the gateway, add one skill, and your agent uses the
-          <span className="font-mono text-[0.9em] text-neutral-200"> i</span> CLI directly to
-          discover, connect, and call external services under your policies.
+          <span className="font-mono text-[0.9em] text-neutral-200"> i</span> CLI directly to discover, connect, and
+          call external services under your policies.
         </p>
         <div className="mx-auto mt-9 max-w-4xl overflow-hidden rounded-2xl border border-white/10 bg-neutral-950/90 text-left shadow-2xl shadow-orange-500/5">
           <div className="flex items-center gap-2 border-b border-white/10 px-4 py-3">
@@ -416,8 +414,8 @@ function LogoCloud() {
           If it has an API, it can be an integration
         </h2>
         <p className="mx-auto mt-3 max-w-xl text-center text-neutral-400">
-          First-class support for OAuth, bearer tokens, and API keys — plus anything describable
-          by an OpenAPI document or an MCP server.
+          First-class support for OAuth, bearer tokens, and API keys — plus anything describable by an OpenAPI document
+          or an MCP server.
         </p>
         <div className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {INTEGRATIONS.map((integration) => (
@@ -452,18 +450,13 @@ function HowItWorks() {
   return (
     <section id="how" className="scroll-mt-20 border-y border-white/5 bg-white/[0.015] py-20">
       <div className="mx-auto max-w-6xl px-6">
-        <p className="text-center text-sm font-medium tracking-widest text-orange-400/90 uppercase">
-          How it works
-        </p>
+        <p className="text-center text-sm font-medium tracking-widest text-orange-400/90 uppercase">How it works</p>
         <h2 className="mx-auto mt-4 max-w-xl text-center text-3xl font-semibold tracking-tight text-balance">
           Install once. Then ask your agent.
         </h2>
         <div className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {STEPS.map((step) => (
-            <div
-              key={step.n}
-              className="relative rounded-2xl border border-white/5 bg-neutral-950/60 p-6"
-            >
+            <div key={step.n} className="relative rounded-2xl border border-white/5 bg-neutral-950/60 p-6">
               <div className="flex items-center justify-between">
                 <span className="grid size-10 place-items-center rounded-xl bg-orange-500/10">
                   <step.icon className="size-5 text-orange-400" />
@@ -505,16 +498,11 @@ function CodeShowcase() {
       <div className="mx-auto max-w-6xl px-6">
         <div className="grid items-start gap-10 lg:grid-cols-[1fr_1.2fr]">
           <div>
-            <p className="text-sm font-medium tracking-widest text-orange-400/90 uppercase">
-              Built for agents
-            </p>
-            <h2 className="mt-4 text-3xl font-semibold tracking-tight text-balance">
-              Three peers, one gateway API
-            </h2>
+            <p className="text-sm font-medium tracking-widest text-orange-400/90 uppercase">Built for agents</p>
+            <h2 className="mt-4 text-3xl font-semibold tracking-tight text-balance">Three peers, one gateway API</h2>
             <p className="mt-4 leading-relaxed text-neutral-400">
-              The <span className="font-mono text-[0.9em] text-neutral-200">i</span> CLI, the
-              TypeScript client, and the MCP server are peers: each consumes the same versioned
-              HTTP API, so no surface can drift from another.
+              The <span className="font-mono text-[0.9em] text-neutral-200">i</span> CLI, the TypeScript client, and the
+              MCP server are peers: each consumes the same versioned HTTP API, so no surface can drift from another.
             </p>
             <ul className="mt-6 space-y-3 text-sm">
               {[
@@ -539,9 +527,7 @@ function CodeShowcase() {
                   type="button"
                   onClick={() => setTab(entry.id)}
                   className={`rounded-t-lg px-4 py-2.5 font-mono text-[13px] transition ${
-                    tab === entry.id
-                      ? "bg-white/10 text-white"
-                      : "text-neutral-500 hover:text-neutral-300"
+                    tab === entry.id ? "bg-white/10 text-white" : "text-neutral-500 hover:text-neutral-300"
                   }`}
                 >
                   {entry.label}
@@ -553,9 +539,7 @@ function CodeShowcase() {
                 <span className="size-2.5 rounded-full bg-orange-500/70" />
               </div>
             </div>
-            <pre className="overflow-x-auto p-5 font-mono text-[13px] leading-relaxed text-neutral-200">
-              {snippet}
-            </pre>
+            <pre className="overflow-x-auto p-5 font-mono text-[13px] leading-relaxed text-neutral-200">{snippet}</pre>
           </div>
         </div>
       </div>
@@ -567,15 +551,13 @@ function Deploy() {
   return (
     <section id="deploy" className="scroll-mt-20 py-20">
       <div className="mx-auto max-w-6xl px-6">
-        <p className="text-center text-sm font-medium tracking-widest text-orange-400/90 uppercase">
-          Run it your way
-        </p>
+        <p className="text-center text-sm font-medium tracking-widest text-orange-400/90 uppercase">Run it your way</p>
         <h2 className="mx-auto mt-4 max-w-xl text-center text-3xl font-semibold tracking-tight text-balance">
           Your machine, your server, your process
         </h2>
         <p className="mx-auto mt-3 max-w-xl text-center text-neutral-400">
-          The gateway holds your credentials, so it runs where you do. Start local; move to a
-          server when more than one machine needs it.
+          The gateway holds your credentials, so it runs where you do. Start local; move to a server when more than one
+          machine needs it.
         </p>
         <div className="mt-10 grid grid-cols-1 gap-3 lg:grid-cols-3">
           {DEPLOYMENTS.map((deployment) => (
@@ -620,9 +602,7 @@ function Features() {
   return (
     <section id="features" className="scroll-mt-20 border-y border-white/5 bg-white/[0.015] py-20">
       <div className="mx-auto max-w-6xl px-6">
-        <p className="text-center text-sm font-medium tracking-widest text-orange-400/90 uppercase">
-          Why integrations
-        </p>
+        <p className="text-center text-sm font-medium tracking-widest text-orange-400/90 uppercase">Why integrations</p>
         <h2 className="mx-auto mt-4 max-w-xl text-center text-3xl font-semibold tracking-tight text-balance">
           Stop pasting API keys into every agent
         </h2>
@@ -652,15 +632,13 @@ function Security() {
         <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-b from-orange-500/[0.08] to-transparent p-10 sm:p-14">
           <div className="grid items-start gap-10 lg:grid-cols-2">
             <div>
-              <p className="text-sm font-medium tracking-widest text-orange-400/90 uppercase">
-                Security model
-              </p>
+              <p className="text-sm font-medium tracking-widest text-orange-400/90 uppercase">Security model</p>
               <h2 className="mt-4 text-3xl font-semibold tracking-tight text-balance">
                 Least privilege, enforced at execution
               </h2>
               <p className="mt-4 leading-relaxed text-neutral-400">
-                A profile turns each tool off, or on with Ask or Allow. Changing one agent's profile
-                never changes another's, and every call names the app that made it.
+                A profile turns each tool off, or on with Ask or Allow. Changing one agent's profile never changes
+                another's, and every call names the app that made it.
               </p>
             </div>
             <ul className="space-y-4">
@@ -681,10 +659,7 @@ function Security() {
                   body: "Invocations, approvals, and denials land in one trail per gateway."
                 }
               ].map((item) => (
-                <li
-                  key={item.title}
-                  className="flex gap-4 rounded-2xl border border-white/5 bg-black/40 p-5"
-                >
+                <li key={item.title} className="flex gap-4 rounded-2xl border border-white/5 bg-black/40 p-5">
                   <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-orange-500/10">
                     <item.icon className="size-5 text-orange-400" />
                   </span>
@@ -711,8 +686,8 @@ function GetStarted() {
             From zero to agent-powered integrations
           </h2>
           <p className="mx-auto mt-4 max-w-2xl text-neutral-400">
-            The local gateway must be running for <span className="font-mono text-neutral-200">i</span> to work.
-            After that, the skill gives your agent the full workflow.
+            The local gateway must be running for <span className="font-mono text-neutral-200">i</span> to work. After
+            that, the skill gives your agent the full workflow.
           </p>
           <div className="mt-9 grid gap-3 text-left lg:grid-cols-3">
             {QUICKSTART.map((step) => (
@@ -733,7 +708,8 @@ function GetStarted() {
             ))}
           </div>
           <p className="mt-6 text-center text-sm text-neutral-500">
-            Want a visual control plane? Run <span className="font-mono text-neutral-300">ii dashboard</span> after installation.
+            Want a visual control plane? Run <span className="font-mono text-neutral-300">ii dashboard</span> after
+            installation.
           </p>
           <div className="mt-7 flex flex-wrap items-center justify-center gap-3 text-center">
             <a

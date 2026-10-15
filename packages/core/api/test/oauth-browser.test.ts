@@ -13,6 +13,7 @@ import {
   OAuthFlows,
   OAuthState
 } from "@integragents/host"
+import type { OAuthSetup } from "@integragents/host"
 import { createOAuthSessions, OAuthFlowError } from "@integragents/gateway-core"
 import type { OAuthOperations } from "@integragents/gateway-core"
 import { testServices } from "./fixtures.ts"
@@ -47,8 +48,18 @@ const connected: Connection = {
   status: "connected"
 }
 
-const notUsed = (member: string) => () =>
-  Effect.die(new Error(`${member} is not used by these tests`))
+const manualSetup: OAuthSetup = {
+  server: {
+    issuer: "https://provider.test",
+    authorization_endpoint: "https://provider.test/authorize",
+    token_endpoint: "https://provider.test/token"
+  },
+  discovered: false,
+  resource: undefined,
+  scopes: []
+}
+
+const notUsed = (member: string) => () => Effect.die(new Error(`${member} is not used by these tests`))
 
 const catalogStore: CatalogStore["Service"] = {
   putConnection: () => Effect.void,
@@ -59,6 +70,7 @@ const catalogStore: CatalogStore["Service"] = {
   removeIntegration: notUsed("CatalogStore.removeIntegration"),
   listConnections: notUsed("CatalogStore.listConnections"),
   removeConnection: notUsed("CatalogStore.removeConnection"),
+  requireReconnect: notUsed("CatalogStore.requireReconnect"),
   listOAuthClients: notUsed("CatalogStore.listOAuthClients"),
   findOAuthClient: notUsed("CatalogStore.findOAuthClient"),
   putOAuthClient: notUsed("CatalogStore.putOAuthClient"),
@@ -81,6 +93,7 @@ const integrations: Integrations["Service"] = {
   renameIntegration: notUsed("Integrations.renameIntegration"),
   removeIntegration: notUsed("Integrations.removeIntegration"),
   createConnection: notUsed("Integrations.createConnection"),
+  savedOAuthClientId: notUsed("Integrations.savedOAuthClientId"),
   listConnections: notUsed("Integrations.listConnections"),
   removeConnection: notUsed("Integrations.removeConnection"),
   toolSummaries: notUsed("Integrations.toolSummaries"),
@@ -110,16 +123,21 @@ const operations = (
   } = {}
 ) => {
   let redirectUri: string | undefined
+  let callbackSeen: URLSearchParams | undefined
   const gate = behaviour.completeGate
-  const held = gate === undefined ? Effect.void : Effect.suspend(() => {
-    Deferred.doneUnsafe(gate.entered, Exit.void)
-    return Deferred.await(gate.release)
-  })
+  const held =
+    gate === undefined
+      ? Effect.void
+      : Effect.suspend(() => {
+          Deferred.doneUnsafe(gate.entered, Exit.void)
+          return Deferred.await(gate.release)
+        })
   const host: Context.Context<OAuthOperations> = Context.empty().pipe(
     Context.add(OAuthFlows, {
-      probe: notUsed("probe"),
-      registerDynamicClient: notUsed("registerDynamicClient"),
-      createClient: () => Effect.succeed(OAuthClientSlug.make("provider-gateway")),
+      discover: () => Effect.succeed(manualSetup),
+      discoverResource: notUsed("discoverResource"),
+      registerClient: notUsed("registerClient"),
+      saveClient: () => Effect.succeed(OAuthClientSlug.make("provider-gateway")),
       start: (options) => {
         redirectUri = options.redirectUri
         return Effect.succeed({
@@ -127,26 +145,36 @@ const operations = (
           state: OAuthState.make("state-123")
         })
       },
-      complete: () =>
-        Effect.flatMap(held, () =>
-          behaviour.completeFails === undefined
-            ? Effect.succeed({
-              owner: "org" as const,
-              integration: IntegrationSlug.make("provider"),
-              connection: ConnectionName.make("primary"),
-              template: AuthTemplateSlug.make("oauth"),
-              clientOwner: "org" as const,
-              client: OAuthClientSlug.make("provider-gateway"),
-              scope: Option.none(),
-              expiresAt: Option.none()
+      complete: (callback) =>
+        Effect.flatMap(
+          Effect.andThen(
+            held,
+            Effect.sync(() => {
+              callbackSeen = callback
             })
-            : Effect.fail(new OAuthError({ stage: "complete", detail: behaviour.completeFails }))),
+          ),
+          () =>
+            behaviour.completeFails === undefined
+              ? Effect.succeed({
+                  owner: "org" as const,
+                  integration: IntegrationSlug.make("provider"),
+                  connection: ConnectionName.make("primary"),
+                  template: AuthTemplateSlug.make("oauth"),
+                  clientOwner: "org" as const,
+                  client: OAuthClientSlug.make("provider-gateway"),
+                  scope: Option.none(),
+                  expiresAt: Option.none()
+                })
+              : Effect.fail(
+                  new OAuthError({ stage: "complete", reason: "invalid_grant", detail: behaviour.completeFails })
+                )
+        ),
       accessToken: notUsed("accessToken")
     }),
     Context.add(CatalogStore, catalogStore),
     Context.add(Integrations, integrations)
   )
-  return { redirectUriUsed: () => redirectUri, host }
+  return { redirectUriUsed: () => redirectUri, callbackSeen: () => callbackSeen, host }
 }
 
 const request = {
@@ -161,16 +189,20 @@ const request = {
  * The flow only settles once a browser reaches its loopback listener, so it
  * runs on its own fiber and announces the URL the provider would redirect to.
  */
-const started = Effect.fnUntraced(function*(
+const started = Effect.fnUntraced(function* (
   auth: ReturnType<typeof operations>,
   overrides: { readonly timeoutMs?: number } = {}
 ) {
   const announced = yield* Deferred.make<string>()
-  const fiber = yield* Effect.forkChild(Effect.scoped(authorizeInBrowser({
-    ...request,
-    onAuthorizationUrl: (url) => Deferred.doneUnsafe(announced, Exit.succeed(url)),
-    ...overrides
-  }).pipe(Effect.provide(auth.host))))
+  const fiber = yield* Effect.forkChild(
+    Effect.scoped(
+      authorizeInBrowser({
+        ...request,
+        onAuthorizationUrl: (url) => Deferred.doneUnsafe(announced, Exit.succeed(url)),
+        ...overrides
+      }).pipe(Effect.provide(auth.host))
+    )
+  )
   yield* Deferred.await(announced)
   const redirectUri = auth.redirectUriUsed()
   if (redirectUri === undefined) throw new Error("the flow announced no redirect URI")
@@ -185,9 +217,7 @@ const callback = (redirectUri: string, query: Record<string, string>) => {
 }
 
 /** The typed failure the flow ended with, insisting it failed rather than died. */
-const failureOf = <A>(
-  fiber: Fiber.Fiber<A, OAuthFlowError>
-): Effect.Effect<OAuthFlowError> =>
+const failureOf = <A>(fiber: Fiber.Fiber<A, OAuthFlowError>): Effect.Effect<OAuthFlowError> =>
   Effect.flatMap(Fiber.await(fiber), (settled) => {
     if (Exit.isSuccess(settled)) throw new Error("expected the flow to fail")
     const found = Cause.findError(settled.cause)
@@ -207,7 +237,7 @@ const portIsFree = (redirectUri: string): Effect.Effect<boolean> =>
 
 describe("authorizing through the loopback listener", () => {
   it.live("completes when the provider returns a matching state and code", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const auth = operations()
       const { fiber, redirectUri } = yield* started(auth)
 
@@ -215,10 +245,11 @@ describe("authorizing through the loopback listener", () => {
 
       expect(page.status).toBe(200)
       expect(yield* Fiber.join(fiber)).toEqual(connected)
-    }).pipe(Effect.provide(services)))
+    }).pipe(Effect.provide(services))
+  )
 
   it.live("refuses a callback whose state does not match the flow", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const auth = operations()
       const { fiber, redirectUri } = yield* started(auth, { timeoutMs: 1_000 })
 
@@ -227,26 +258,28 @@ describe("authorizing through the loopback listener", () => {
       expect(page.status).toBe(400)
       expect(yield* page.text).toContain("state could not be verified")
       expect((yield* failureOf(fiber)).stage).toBe("timeout")
-    }).pipe(Effect.provide(services)))
+    }).pipe(Effect.provide(services))
+  )
 
-  it.live("fails the flow when the provider returns no code", () =>
-    Effect.gen(function*() {
-      const auth = operations()
+  it.live("hands a provider's refusal to the exchange, which fails the flow", () =>
+    Effect.gen(function* () {
+      const auth = operations({ completeFails: "the provider returned access_denied" })
       const { fiber, redirectUri } = yield* started(auth)
 
-      const page = yield* callback(redirectUri, {
-        state: "state-123",
-        error_description: "user declined"
-      })
+      const page = yield* callback(redirectUri, { state: "state-123", error: "access_denied" })
 
       expect(page.status).toBe(400)
       const failure = yield* failureOf(fiber)
-      expect(failure.stage).toBe("callback")
-      expect(failure.detail).toContain("user declined")
-    }).pipe(Effect.provide(services)))
+      expect({
+        stage: failure.stage,
+        refused: failure.detail.includes("access_denied"),
+        forwarded: auth.callbackSeen()?.get("error")
+      }).toEqual({ stage: "exchange", refused: true, forwarded: "access_denied" })
+    }).pipe(Effect.provide(services))
+  )
 
   it.live("fails the flow when the token exchange is refused", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const auth = operations({ completeFails: "token endpoint said no" })
       const { fiber, redirectUri } = yield* started(auth)
 
@@ -257,17 +290,16 @@ describe("authorizing through the loopback listener", () => {
       const failure = yield* failureOf(fiber)
       expect(failure.stage).toBe("exchange")
       expect(failure.detail).toContain("token endpoint said no")
-    }).pipe(Effect.provide(services)))
+    }).pipe(Effect.provide(services))
+  )
 
   it.live("refuses a second callback once one is in flight", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const gate = completeGate()
       const auth = operations({ completeGate: gate })
       const { fiber, redirectUri } = yield* started(auth)
 
-      const first = yield* Effect.forkChild(
-        callback(redirectUri, { state: "state-123", code: "auth-code" })
-      )
+      const first = yield* Effect.forkChild(callback(redirectUri, { state: "state-123", code: "auth-code" }))
       yield* Deferred.await(gate.entered)
       const replay = yield* callback(redirectUri, { state: "state-123", code: "auth-code" })
 
@@ -275,20 +307,22 @@ describe("authorizing through the loopback listener", () => {
       yield* Deferred.succeed(gate.release, undefined)
       expect((yield* Fiber.join(first)).status).toBe(200)
       expect(yield* Fiber.join(fiber)).toEqual(connected)
-    }).pipe(Effect.provide(services)))
+    }).pipe(Effect.provide(services))
+  )
 
   it.effect("gives up after the timeout rather than holding the listener forever", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const auth = operations()
       const { fiber } = yield* started(auth, { timeoutMs: 1_000 })
 
       yield* TestClock.adjust("1 second")
 
       expect((yield* failureOf(fiber)).detail).toContain("timed out after 1 seconds")
-    }).pipe(Effect.provide(services)))
+    }).pipe(Effect.provide(services))
+  )
 
   it.live("stops the listener once the flow settles", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const auth = operations()
       const { fiber, redirectUri } = yield* started(auth)
 
@@ -296,12 +330,13 @@ describe("authorizing through the loopback listener", () => {
       yield* Fiber.await(fiber)
 
       expect(yield* portIsFree(redirectUri)).toBe(true)
-    }).pipe(Effect.provide(services)))
+    }).pipe(Effect.provide(services))
+  )
 })
 
 describe("shutting down while an authorization is in flight", () => {
   it.live("stop() cancels the flow and releases its listener", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const auth = operations()
       const sessions = createOAuthSessions(auth.host, { authorizeLocally: authorizeInBrowser })
 
@@ -319,5 +354,6 @@ describe("shutting down while an authorization is in flight", () => {
       yield* sessions.stop()
 
       expect(yield* portIsFree(redirectUri)).toBe(true)
-    }).pipe(Effect.provide(services)))
+    }).pipe(Effect.provide(services))
+  )
 })

@@ -1,0 +1,10 @@
+name: Setup
+description: Install the Bun pinned in .bun-version and the workspace dependencies.
+runs:
+  using: composite
+  steps:
+    - uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: .bun-version
+    - run: bun install --frozen-lockfile
+      shell: bash

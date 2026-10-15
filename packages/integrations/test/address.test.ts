@@ -1,6 +1,14 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Option } from "effect"
-import { ConnectionName, connectionAddress, IntegrationSlug, parseToolAddress, slugify, ToolName, toolAddress } from "@integragents/contracts"
+import {
+  ConnectionName,
+  connectionAddress,
+  IntegrationSlug,
+  parseToolAddress,
+  slugify,
+  ToolName,
+  toolAddress
+} from "@integragents/contracts"
 
 describe("tool addresses", () => {
   const parts = {
@@ -50,8 +58,7 @@ describe("connection addresses", () => {
 
 describe("slugify", () => {
   it("derives an addressable slug from a human name", () => {
-    expect(String(Option.getOrThrow(slugify("Swagger Petstore - OpenAPI 3.0"))))
-      .toBe("swagger_petstore_openapi_3_0")
+    expect(String(Option.getOrThrow(slugify("Swagger Petstore - OpenAPI 3.0")))).toBe("swagger_petstore_openapi_3_0")
     expect(String(Option.getOrThrow(slugify("api.example.com")))).toBe("api_example_com")
   })
 

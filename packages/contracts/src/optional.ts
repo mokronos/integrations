@@ -1,9 +1,6 @@
 import { Option } from "effect"
 
-export const whenPresent = <K extends string, V>(
-  key: K,
-  value: V | null | undefined
-): { readonly [P in K]?: V } =>
+export const whenPresent = <K extends string, V>(key: K, value: V | null | undefined): { readonly [P in K]?: V } =>
   Option.match(Option.fromNullishOr(value), {
     onNone: () => ({}),
     onSome: (present) => {
@@ -27,10 +24,7 @@ export const whenPresentMap = <K extends string, V, W>(
     }
   })
 
-export const whenPresentFields = <V, T extends object>(
-  value: V | null | undefined,
-  fields: (present: V) => T
-) =>
+export const whenPresentFields = <V, T extends object>(value: V | null | undefined, fields: (present: V) => T) =>
   Option.match(Option.fromNullishOr(value), {
     onNone: () => ({}),
     onSome: fields

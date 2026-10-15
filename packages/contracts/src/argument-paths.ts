@@ -38,8 +38,9 @@ export const argumentPattern = (calls: ReadonlyArray<Json>): ArgumentPattern => 
   const free: Array<ArgumentPath> = []
   for (const [key, path] of paths) {
     const first = flattened[0]?.get(key)
-    const agreed = first !== undefined
-      && flattened.every((call) => {
+    const agreed =
+      first !== undefined &&
+      flattened.every((call) => {
         const leaf = call.get(key)
         return leaf !== undefined && canonicalJson(leaf.value) === canonicalJson(first.value)
       })
@@ -65,7 +66,8 @@ export const matchesPattern = (pattern: ArgumentPattern, call: Json): boolean =>
     const leaf = leaves.get(pathKey(entry.path))
     return leaf !== undefined && canonicalJson(leaf.value) === canonicalJson(entry.value)
   })
-  const nothingElse = [...leaves.values()].every((leaf) =>
-    pinned.has(pathKey(leaf.path)) || pattern.free.some((free) => startsWith(leaf.path, free)))
+  const nothingElse = [...leaves.values()].every(
+    (leaf) => pinned.has(pathKey(leaf.path)) || pattern.free.some((free) => startsWith(leaf.path, free))
+  )
   return everyPinnedHolds && nothingElse
 }

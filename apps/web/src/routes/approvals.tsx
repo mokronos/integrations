@@ -21,9 +21,10 @@ export function ApprovalsRoute() {
   const selected = searchParams.get("approval")
   const [view, setView] = useState<typeof View.Type>("waiting")
   const approvals = useApprovals(view === "waiting" ? "pending" : "all")
-  const shown = view === "waiting"
-    ? approvals.data ?? []
-    : (approvals.data ?? []).filter((approval) => approval.status !== "pending").slice(0, decidedShown)
+  const shown =
+    view === "waiting"
+      ? (approvals.data ?? [])
+      : (approvals.data ?? []).filter((approval) => approval.status !== "pending").slice(0, decidedShown)
 
   useEffect(() => {
     if (selected === null || approvals.isPending) return
@@ -31,7 +32,10 @@ export function ApprovalsRoute() {
   }, [approvals.isPending, selected])
 
   return (
-    <Page title="Approvals" description="Calls waiting for your decision. An approved call runs once, exactly as shown.">
+    <Page
+      title="Approvals"
+      description="Calls waiting for your decision. An approved call runs once, exactly as shown."
+    >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Tabs value={view} onValueChange={(value) => setView(decodeView(value))}>
           <TabsList>
@@ -39,23 +43,27 @@ export function ApprovalsRoute() {
             <TabsTrigger value="decided">Recently decided</TabsTrigger>
           </TabsList>
         </Tabs>
-        {view === "decided" ? <Button variant="ghost" size="sm" render={<Link to="/activity" />}>Full history in Activity</Button> : null}
+        {view === "decided" ? (
+          <Button variant="ghost" size="sm" render={<Link to="/activity" />}>
+            Full history in Activity
+          </Button>
+        ) : null}
       </div>
 
       <QueryError error={approvals.error} />
 
-      {approvals.isPending
-        ? <LoadingRows />
-        : shown.length === 0
-        ? (
-          <Card>
-            <CardContent className="text-muted-foreground flex flex-col items-center gap-2 py-12 text-sm">
-              <ShieldCheck className="size-6" />
-              {view === "waiting" ? "Nothing is waiting for you." : "Nothing decided yet."}
-            </CardContent>
-          </Card>
-        )
-        : <ApprovalList approvals={shown} selected={selected} />}
+      {approvals.isPending ? (
+        <LoadingRows />
+      ) : shown.length === 0 ? (
+        <Card>
+          <CardContent className="text-muted-foreground flex flex-col items-center gap-2 py-12 text-sm">
+            <ShieldCheck className="size-6" />
+            {view === "waiting" ? "Nothing is waiting for you." : "Nothing decided yet."}
+          </CardContent>
+        </Card>
+      ) : (
+        <ApprovalList approvals={shown} selected={selected} />
+      )}
     </Page>
   )
 }

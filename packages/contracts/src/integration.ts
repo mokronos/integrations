@@ -16,16 +16,18 @@ export const AuthMethod = Schema.Struct({
   kind: Schema.Literals(["oauth", "apikey", "header", "none"]),
   template: Schema.String,
   placements: Schema.optional(Schema.Array(AuthPlacement)),
-  oauth: Schema.optional(Schema.Struct({
-    discoveryUrl: Schema.optional(Schema.String),
-    authorizationUrl: Schema.optional(Schema.String),
-    tokenUrl: Schema.optional(Schema.String),
-    resource: Schema.optional(Schema.NullOr(Schema.String)),
-    scopes: Schema.optional(Schema.Array(Schema.String)),
-    registrationEndpoint: Schema.optional(Schema.String),
-    supportsDynamicRegistration: Schema.optional(Schema.Boolean),
-    supportsClientIdMetadataDocument: Schema.optional(Schema.Boolean)
-  }))
+  oauth: Schema.optional(
+    Schema.Struct({
+      discoveryUrl: Schema.optional(Schema.String),
+      authorizationUrl: Schema.optional(Schema.String),
+      tokenUrl: Schema.optional(Schema.String),
+      resource: Schema.optional(Schema.NullOr(Schema.String)),
+      scopes: Schema.optional(Schema.Array(Schema.String)),
+      registrationEndpoint: Schema.optional(Schema.String),
+      supportsDynamicRegistration: Schema.optional(Schema.Boolean),
+      supportsClientIdMetadataDocument: Schema.optional(Schema.Boolean)
+    })
+  )
 })
 export type AuthMethod = typeof AuthMethod.Type
 
@@ -64,28 +66,34 @@ export const OpenApiPreview = Schema.Struct({
   description: Schema.NullOr(Schema.String),
   version: Schema.NullOr(Schema.String),
   operationCount: Schema.Number,
-  operations: Schema.Array(Schema.Struct({
-    operationId: Schema.String,
-    method: Schema.Literals(["get", "put", "post", "delete", "patch", "head", "options", "trace"]),
-    path: Schema.String,
-    summary: Schema.NullOr(Schema.String),
-    tags: Schema.Array(Schema.String),
-    deprecated: Schema.Boolean
-  })),
+  operations: Schema.Array(
+    Schema.Struct({
+      operationId: Schema.String,
+      method: Schema.Literals(["get", "put", "post", "delete", "patch", "head", "options", "trace"]),
+      path: Schema.String,
+      summary: Schema.NullOr(Schema.String),
+      tags: Schema.Array(Schema.String),
+      deprecated: Schema.Boolean
+    })
+  ),
   tags: Schema.Array(Schema.String),
-  servers: Schema.Array(Schema.Struct({
-    url: Schema.String,
-    description: Schema.NullOr(Schema.String)
-  })),
-  securitySchemes: Schema.Array(Schema.Struct({
-    name: Schema.String,
-    type: Schema.Literals(["http", "apiKey", "oauth2", "openIdConnect"]),
-    scheme: Schema.NullOr(Schema.String),
-    bearerFormat: Schema.NullOr(Schema.String),
-    in: Schema.NullOr(Schema.Literals(["header", "query", "cookie"])),
-    headerName: Schema.NullOr(Schema.String),
-    description: Schema.NullOr(Schema.String),
-    openIdConnectUrl: Schema.NullOr(Schema.String)
-  }))
+  servers: Schema.Array(
+    Schema.Struct({
+      url: Schema.String,
+      description: Schema.NullOr(Schema.String)
+    })
+  ),
+  securitySchemes: Schema.Array(
+    Schema.Struct({
+      name: Schema.String,
+      type: Schema.Literals(["http", "apiKey", "oauth2", "openIdConnect"]),
+      scheme: Schema.NullOr(Schema.String),
+      bearerFormat: Schema.NullOr(Schema.String),
+      in: Schema.NullOr(Schema.Literals(["header", "query", "cookie"])),
+      headerName: Schema.NullOr(Schema.String),
+      description: Schema.NullOr(Schema.String),
+      openIdConnectUrl: Schema.NullOr(Schema.String)
+    })
+  )
 })
 export type OpenApiPreview = typeof OpenApiPreview.Type

@@ -28,8 +28,7 @@ const decodeText = Schema.decodeUnknownOption(McpTextContent)
 const decodeEnvelopeSchema = Schema.decodeUnknownOption(McpEnvelopeOutputSchema)
 const decodeJsonString = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
 
-export const normalizeOutputSchema = (schema: Json): Json =>
-  Option.isSome(decodeEnvelopeSchema(schema)) ? {} : schema
+export const normalizeOutputSchema = (schema: Json): Json => (Option.isSome(decodeEnvelopeSchema(schema)) ? {} : schema)
 
 const soleText = (content: ReadonlyArray<Json>): Option.Option<string> => {
   const first = content[0]
@@ -37,10 +36,7 @@ const soleText = (content: ReadonlyArray<Json>): Option.Option<string> => {
   return Option.map(decodeText(first), (text) => text.text)
 }
 
-export const normalizeToolResult = (
-  tool: string,
-  data: Json
-): Effect.Effect<Json, InvocationError> => {
+export const normalizeToolResult = (tool: string, data: Json): Effect.Effect<Json, InvocationError> => {
   const envelope = Option.getOrUndefined(decodeEnvelope(data))
   if (envelope === undefined) return Effect.succeed(data)
 
@@ -48,16 +44,20 @@ export const normalizeToolResult = (
   const text = soleText(content)
 
   if (envelope.isError === true) {
-    return Effect.fail(new InvocationError({
-      code: "tool_error",
-      detail: Option.getOrElse(text, () => `${tool} reported an error`)
-    }))
+    return Effect.fail(
+      new InvocationError({
+        code: "tool_error",
+        detail: Option.getOrElse(text, () => `${tool} reported an error`)
+      })
+    )
   }
   if (envelope.structuredContent !== undefined) {
     return Effect.succeed(envelope.structuredContent)
   }
-  return Effect.succeed(Option.match(text, {
-    onNone: (): Json => content.length > 0 ? content : data,
-    onSome: (only) => Option.getOrElse(decodeJsonString(only), (): Json => only)
-  }))
+  return Effect.succeed(
+    Option.match(text, {
+      onNone: (): Json => (content.length > 0 ? content : data),
+      onSome: (only) => Option.getOrElse(decodeJsonString(only), (): Json => only)
+    })
+  )
 }

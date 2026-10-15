@@ -6,19 +6,13 @@ import { Schema } from "effect"
  */
 const slugPattern = /^[a-z0-9]+(?:[_-][a-z0-9]+)*$/
 
-export const IntegrationSlug = Schema.String.check(Schema.isPattern(slugPattern)).pipe(
-  Schema.brand("IntegrationSlug")
-)
+export const IntegrationSlug = Schema.String.check(Schema.isPattern(slugPattern)).pipe(Schema.brand("IntegrationSlug"))
 export type IntegrationSlug = typeof IntegrationSlug.Type
 
-export const ConnectionName = Schema.String.check(Schema.isPattern(slugPattern)).pipe(
-  Schema.brand("ConnectionName")
-)
+export const ConnectionName = Schema.String.check(Schema.isPattern(slugPattern)).pipe(Schema.brand("ConnectionName"))
 export type ConnectionName = typeof ConnectionName.Type
 
-export const ToolName = Schema.String.check(Schema.isMinLength(1)).pipe(
-  Schema.brand("ToolName")
-)
+export const ToolName = Schema.String.check(Schema.isMinLength(1)).pipe(Schema.brand("ToolName"))
 export type ToolName = typeof ToolName.Type
 
 /** Who a connection belongs to: the organisation, or one person by subject id. */
@@ -29,9 +23,7 @@ export const ConnectionOwner = Schema.Union([
 export type ConnectionOwner = typeof ConnectionOwner.Type
 
 /** Aliases address tools in generated code, so they stay valid JS identifiers. */
-export const Alias = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_]*$/)).pipe(
-  Schema.brand("Alias")
-)
+export const Alias = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_]*$/)).pipe(Schema.brand("Alias"))
 export type Alias = typeof Alias.Type
 
 export const ApprovalStatus = Schema.Literals(["pending", "executing", "approved", "denied", "expired"])

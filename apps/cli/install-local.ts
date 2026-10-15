@@ -59,9 +59,7 @@ const defaultDirectory = async (): Promise<string> => {
   return path.join(homedir(), ".local", "bin")
 }
 
-export const parseInstallOptions = async (
-  argv: ReadonlyArray<string>
-): Promise<InstallOptions> => {
+export const parseInstallOptions = async (argv: ReadonlyArray<string>): Promise<InstallOptions> => {
   let directory: string | undefined
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index]
@@ -72,13 +70,12 @@ export const parseInstallOptions = async (
     index += 1
   }
   return Schema.decodeUnknownSync(InstallOptions)({
-    directory: directory ?? await defaultDirectory()
+    directory: directory ?? (await defaultDirectory())
   })
 }
 
 const managedShim = (contents: string): boolean =>
-  contents.includes("Local development install of") &&
-  contents.includes("written by: bun run install:local")
+  contents.includes("Local development install of") && contents.includes("written by: bun run install:local")
 
 const clearTarget = async (target: string): Promise<void> => {
   let existing: Awaited<ReturnType<typeof lstat>>
@@ -114,20 +111,22 @@ exec ${shellQuote(process.execPath)} ${shellQuote(installable.entry)} "$@"
 
 const shellPathEntries = (): ReadonlyArray<string> => {
   const injected = `node_modules${path.sep}.bin`
-  return (process.env["PATH"] ?? "").split(path.delimiter)
+  return (process.env["PATH"] ?? "")
+    .split(path.delimiter)
     .filter((entry) => entry.length > 0 && !entry.endsWith(injected))
 }
 
 const resolvesToTarget = async (candidate: string, target: string): Promise<boolean> =>
-  candidate === target || await readlink(candidate)
+  candidate === target ||
+  (await readlink(candidate)
     .then((value) => path.resolve(path.dirname(candidate), value) === target)
-    .catch(() => false)
+    .catch(() => false))
 
 const shadowingWarning = async (target: string): Promise<string | undefined> => {
   const name = path.basename(target)
   for (const entry of shellPathEntries()) {
     const candidate = path.join(entry, name)
-    if (!await Bun.file(candidate).exists()) continue
+    if (!(await Bun.file(candidate).exists())) continue
     if (await resolvesToTarget(candidate, target)) return undefined
     return `PATH resolves ${name} to ${candidate}, which shadows this install.`
   }
@@ -138,7 +137,7 @@ export const installLocal = async (options: InstallOptions): Promise<void> => {
   const decoded = Schema.decodeUnknownSync(InstallOptions)(options)
   await mkdir(decoded.directory, { recursive: true })
   for (const installable of installables) {
-    if (!await Bun.file(installable.entry).exists()) {
+    if (!(await Bun.file(installable.entry).exists())) {
       throw new Error(`CLI entry point is missing: ${installable.entry}`)
     }
     const target = path.join(decoded.directory, installable.name)

@@ -19,18 +19,18 @@ const fixtures = [
 
 describe("pinned production OpenAPI specifications", () => {
   for (const fixture of fixtures) {
-    it.effect(`compiles ${fixture.name}`, () =>
-      Effect.gen(function*() {
-        const bytes = yield* Effect.promise(() => Bun.file(fixture.file).arrayBuffer())
+    it.effect(
+      `compiles ${fixture.name}`,
+      () =>
+        Effect.gen(function* () {
+          const bytes = yield* Effect.promise(() => Bun.file(fixture.file).arrayBuffer())
 
-        const compiled = yield* compileSpec(
-          fixture.source,
-          new TextDecoder().decode(bytes)
-        )
-        expect(compiled.operations.length).toBeGreaterThanOrEqual(fixture.minimumOperations)
-        expect(compiled.operations.every((operation) => operation.name.length > 0)).toBe(true)
-        expect(new Set(compiled.operations.map((operation) => operation.name)).size)
-          .toBe(compiled.operations.length)
-      }), 60_000)
+          const compiled = yield* compileSpec(fixture.source, new TextDecoder().decode(bytes))
+          expect(compiled.operations.length).toBeGreaterThanOrEqual(fixture.minimumOperations)
+          expect(compiled.operations.every((operation) => operation.name.length > 0)).toBe(true)
+          expect(new Set(compiled.operations.map((operation) => operation.name)).size).toBe(compiled.operations.length)
+        }),
+      60_000
+    )
   }
 })

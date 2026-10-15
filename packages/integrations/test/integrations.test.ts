@@ -7,6 +7,7 @@ import {
   oauthClientCredentialKey,
   writeTokens
 } from "../src/storage/credentials.ts"
+import { McpError } from "../src/errors.ts"
 import { Integrations } from "../src/integrations.ts"
 import { McpClient } from "../src/mcp/client.ts"
 import { OAuthFlows } from "../src/oauth/flows.ts"
@@ -31,41 +32,45 @@ const notesProbe: McpProbe = {
   instructions: "A notebook."
 }
 
-const stubMcp = (options: {
-  readonly readOnly?: boolean
-  readonly omitReadOnlyHint?: boolean
-  readonly onCall?: (tool: string, credential: Option.Option<string>) => void
-  readonly onList?: () => void
-} = {}): Layer.Layer<McpClient> =>
+const stubMcp = (
+  options: {
+    readonly readOnly?: boolean
+    readonly omitReadOnlyHint?: boolean
+    readonly onCall?: (tool: string, credential: Option.Option<string>) => void
+    readonly onList?: () => void
+  } = {}
+): Layer.Layer<McpClient> =>
   Layer.effect(
     McpClient,
     Effect.sync(() => ({
-      probe: () => Effect.succeed({
-        connected: true,
-        requiresAuthentication: false,
-        requiresOAuth: false,
-        supportsDynamicRegistration: false,
-        scopes: [],
-        name: "Notes",
-        slug: "notes",
-        era: "legacy",
-        serverName: "Notes",
-        instructions: "A notebook."
-      }),
+      probe: () =>
+        Effect.succeed({
+          connected: true,
+          requiresAuthentication: false,
+          requiresOAuth: false,
+          supportsDynamicRegistration: false,
+          scopes: [],
+          name: "Notes",
+          slug: "notes",
+          era: "legacy",
+          serverName: "Notes",
+          instructions: "A notebook."
+        }),
       listTools: () => {
         options.onList?.()
-        const searchNotes = options.omitReadOnlyHint === true
-          ? {
-              name: "search_notes",
-              description: "Search the notebook.",
-              inputSchema: { type: "object", properties: { q: { type: "string" } } }
-            }
-          : {
-              name: "search_notes",
-              description: "Search the notebook.",
-              inputSchema: { type: "object", properties: { q: { type: "string" } } },
-              annotations: { readOnlyHint: options.readOnly ?? true }
-            }
+        const searchNotes =
+          options.omitReadOnlyHint === true
+            ? {
+                name: "search_notes",
+                description: "Search the notebook.",
+                inputSchema: { type: "object", properties: { q: { type: "string" } } }
+              }
+            : {
+                name: "search_notes",
+                description: "Search the notebook.",
+                inputSchema: { type: "object", properties: { q: { type: "string" } } },
+                annotations: { readOnlyHint: options.readOnly ?? true }
+              }
         return Effect.succeed({
           era: "legacy",
           tools: [
@@ -80,11 +85,27 @@ const stubMcp = (options: {
         })
       },
       callTool: (_endpoint, credential, tool) => {
-        options.onCall?.(tool, Option.map(credential, (value) => value.headerValue))
-        return Effect.succeed({ content: [{ type: "text", text: `${tool} ran` }] })
+        options.onCall?.(
+          tool,
+          Option.map(credential, (value) => value.headerValue)
+        )
+        return Effect.succeed({
+          kind: "complete" as const,
+          result: { content: [{ type: "text", text: `${tool} ran` }] },
+          declined: []
+        })
       }
     }))
   )
+
+const rejectingMcp: Layer.Layer<McpClient> = Layer.effect(
+  McpClient,
+  Effect.map(Effect.service(McpClient).pipe(Effect.provide(stubMcp())), (stub) => ({
+    ...stub,
+    callTool: (server: { readonly endpoint: string }) =>
+      Effect.fail(new McpError({ endpoint: server.endpoint, reason: "unauthorized", detail: "401" }))
+  }))
+)
 
 const testIntegrations = (mcp: Layer.Layer<McpClient> = stubMcp()) =>
   stubbedLayer(Layer.mergeAll(mcp, OpenApiInvoker.unavailableTestLayer))
@@ -120,7 +141,7 @@ const install = Effect.fn("install")(function* () {
 
 describe("the catalog", () => {
   it.effect("records what a probe found, and calls it removable", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const host = yield* Integrations
       yield* install()
       const integrations = yield* host.listIntegrations()
@@ -130,17 +151,19 @@ describe("the catalog", () => {
       expect(integrations[0]?.description).toBe("A notebook.")
       expect(integrations[0]?.canRemove).toBe(true)
       expect(integrations[0]?.authMethods[0]?.kind).toBe("none")
-    }).pipe(Effect.provide(testIntegrations())))
+    }).pipe(Effect.provide(testIntegrations()))
+  )
 
   it.effect("answers nothing for a slug it does not hold", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const host = yield* Integrations
       const found = yield* host.findIntegration(IntegrationSlug.make("absent"))
       expect(Option.isNone(found)).toBe(true)
-    }).pipe(Effect.provide(testIntegrations())))
+    }).pipe(Effect.provide(testIntegrations()))
+  )
 
   it.effect("reports an expired OAuth connection without a refresh token as requiring authorization", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis
       const store = yield* CatalogStore
       const credentials = yield* CredentialStore
@@ -150,12 +173,14 @@ describe("the catalog", () => {
         description: "A notebook.",
         kind: "mcp",
         endpoint: "https://notes.example.com/mcp",
-        authMethods: [{
-          id: "oauth2",
-          label: "OAuth",
-          kind: "oauth",
-          template: "oauth2"
-        }],
+        authMethods: [
+          {
+            id: "oauth2",
+            label: "OAuth",
+            kind: "oauth",
+            template: "oauth2"
+          }
+        ],
         createdAt: now
       })
       yield* store.putConnection({
@@ -170,11 +195,13 @@ describe("the catalog", () => {
       })
       yield* writeTokens(
         credentials,
-        connectionCredentialKey(connectionAddress({
-          owner: "org",
-          integration: notes,
-          connection: primary
-        })),
+        connectionCredentialKey(
+          connectionAddress({
+            owner: "org",
+            integration: notes,
+            connection: primary
+          })
+        ),
         { accessToken: "expired", expiresAt: now - 1 }
       )
       const connections = yield* (yield* Integrations).listConnections()
@@ -182,10 +209,52 @@ describe("the catalog", () => {
 
       expect(connection?.status).toBe("reauthorization_required")
       expect(connection?.error).toContain("no refresh token")
-    }).pipe(Effect.provide(testIntegrations())))
+    }).pipe(Effect.provide(testIntegrations()))
+  )
+
+  it.effect("asks for authorization again when the provider rejects a token that cannot be refreshed", () =>
+    Effect.gen(function* () {
+      const now = yield* Clock.currentTimeMillis
+      const store = yield* CatalogStore
+      const credentials = yield* CredentialStore
+      const host = yield* Integrations
+      yield* store.putIntegration({
+        slug: notes,
+        name: "Notes",
+        description: "A notebook.",
+        kind: "mcp",
+        endpoint: "https://notes.example.com/mcp",
+        authMethods: [{ id: "oauth2", label: "OAuth", kind: "oauth", template: "oauth2" }],
+        createdAt: now
+      })
+      yield* store.putConnection({
+        owner: "org",
+        integration: notes,
+        name: primary,
+        template: AuthTemplateSlug.make("oauth2"),
+        provider: "oauth",
+        oauthClient: "notes-client",
+        oauthClientOwner: "org",
+        createdAt: now
+      })
+      yield* writeTokens(
+        credentials,
+        connectionCredentialKey(connectionAddress({ owner: "org", integration: notes, connection: primary })),
+        { accessToken: "revoked" }
+      )
+      yield* host.refreshConnection({ owner: "org", integration: notes, name: primary })
+      const [tool] = yield* store.listTools({ integration: notes })
+      const failure = yield* Effect.flip(host.execute(tool?.address ?? ToolAddress.make("missing"), {}))
+      const [connection] = yield* host.listConnections()
+      expect({
+        failure: failure._tag === "OAuthError" ? failure.reason : failure._tag,
+        status: connection?.status
+      }).toEqual({ failure: "reconnect_required", status: "reauthorization_required" })
+    }).pipe(Effect.provide(testIntegrations(rejectingMcp)))
+  )
 
   it.effect("uses the sealed OAuth grant expiry when reporting connection health", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis
       const tokenExpiry = now + 3_600_000
       const store = yield* CatalogStore
@@ -196,12 +265,14 @@ describe("the catalog", () => {
         description: "A notebook.",
         kind: "mcp",
         endpoint: "https://notes.example.com/mcp",
-        authMethods: [{
-          id: "oauth2",
-          label: "OAuth",
-          kind: "oauth",
-          template: "oauth2"
-        }],
+        authMethods: [
+          {
+            id: "oauth2",
+            label: "OAuth",
+            kind: "oauth",
+            template: "oauth2"
+          }
+        ],
         createdAt: now
       })
       yield* store.putConnection({
@@ -216,11 +287,13 @@ describe("the catalog", () => {
       })
       yield* writeTokens(
         credentials,
-        connectionCredentialKey(connectionAddress({
-          owner: "org",
-          integration: notes,
-          connection: primary
-        })),
+        connectionCredentialKey(
+          connectionAddress({
+            owner: "org",
+            integration: notes,
+            connection: primary
+          })
+        ),
         { accessToken: "current", expiresAt: tokenExpiry }
       )
       const connections = yield* (yield* Integrations).listConnections()
@@ -229,10 +302,11 @@ describe("the catalog", () => {
       expect(connection?.status).toBe("connected")
       expect(connection?.expiresAt).toBe(tokenExpiry)
       expect(connection?.error).toBeUndefined()
-    }).pipe(Effect.provide(testIntegrations())))
+    }).pipe(Effect.provide(testIntegrations()))
+  )
 
   it.effect("reports no expiry for an OAuth grant that renews itself", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis
       const store = yield* CatalogStore
       const credentials = yield* CredentialStore
@@ -242,12 +316,14 @@ describe("the catalog", () => {
         description: "A notebook.",
         kind: "mcp",
         endpoint: "https://notes.example.com/mcp",
-        authMethods: [{
-          id: "oauth2",
-          label: "OAuth",
-          kind: "oauth",
-          template: "oauth2"
-        }],
+        authMethods: [
+          {
+            id: "oauth2",
+            label: "OAuth",
+            kind: "oauth",
+            template: "oauth2"
+          }
+        ],
         createdAt: now
       })
       yield* store.putConnection({
@@ -262,11 +338,13 @@ describe("the catalog", () => {
       })
       yield* writeTokens(
         credentials,
-        connectionCredentialKey(connectionAddress({
-          owner: "org",
-          integration: notes,
-          connection: primary
-        })),
+        connectionCredentialKey(
+          connectionAddress({
+            owner: "org",
+            integration: notes,
+            connection: primary
+          })
+        ),
         { accessToken: "current", refreshToken: "renew", expiresAt: now + 3_600_000 }
       )
       const connections = yield* (yield* Integrations).listConnections()
@@ -274,40 +352,48 @@ describe("the catalog", () => {
 
       expect(connection?.status).toBe("connected")
       expect(connection?.expiresAt).toBeNull()
-    }).pipe(Effect.provide(testIntegrations())))
+    }).pipe(Effect.provide(testIntegrations()))
+  )
 
   it.effect("takes a connection's tools with it when the integration goes", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const host = yield* Integrations
       yield* install()
       yield* host.removeIntegration(notes)
       const remaining = yield* host.listConnections()
       expect(remaining).toEqual([])
-    }).pipe(Effect.provide(testIntegrations())))
+    }).pipe(Effect.provide(testIntegrations()))
+  )
 
   it.effect("refuses to guess a credential for a template the integration dropped", () =>
-    Effect.gen(function*() {
-      const outcome = yield* withIntegrations(Effect.result(Effect.gen(function* () {
-        const host = yield* Integrations
-        const store = yield* CatalogStore
-        yield* install()
-        const found = yield* store.findIntegration(notes)
-        const record = Option.getOrThrow(found)
-        yield* store.putIntegration({
-          ...record,
-          authMethods: [{
-            id: "oauth2",
-            label: "OAuth",
-            kind: "oauth",
-            template: "oauth2"
-          }]
-        })
-        return yield* host.refreshConnection({
-          owner: "org",
-          integration: notes,
-          name: primary
-        })
-      })))
+    Effect.gen(function* () {
+      const outcome = yield* withIntegrations(
+        Effect.result(
+          Effect.gen(function* () {
+            const host = yield* Integrations
+            const store = yield* CatalogStore
+            yield* install()
+            const found = yield* store.findIntegration(notes)
+            const record = Option.getOrThrow(found)
+            yield* store.putIntegration({
+              ...record,
+              authMethods: [
+                {
+                  id: "oauth2",
+                  label: "OAuth",
+                  kind: "oauth",
+                  template: "oauth2"
+                }
+              ]
+            })
+            return yield* host.refreshConnection({
+              owner: "org",
+              integration: notes,
+              name: primary
+            })
+          })
+        )
+      )
       expect(outcome._tag).toBe("Failure")
       if (outcome._tag === "Failure") {
         expect(outcome.failure._tag).toBe("InvalidInputError")
@@ -315,10 +401,11 @@ describe("the catalog", () => {
           expect(outcome.failure.detail).toContain("no longer offers")
         }
       }
-    }))
+    })
+  )
 
   it.effect("renames an integration without moving what addresses it", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const host = yield* Integrations
       yield* install()
       yield* host.renameIntegration(notes, "Field Notes")
@@ -330,10 +417,11 @@ describe("the catalog", () => {
       }
       expect(Option.getOrNull(after.name)).toBe("Field Notes")
       expect(after.addresses).toEqual(["tools.notes.org.primary"])
-    }).pipe(Effect.provide(testIntegrations())))
+    }).pipe(Effect.provide(testIntegrations()))
+  )
 
   it.effect("takes the credentials of every connection with it too", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const host = yield* Integrations
       const credentials = yield* CredentialStore
       yield* host.addMcp({
@@ -355,10 +443,11 @@ describe("the catalog", () => {
       const after = yield* credentials.get(connectionCredentialKey(address))
       const held = { before: Option.isSome(before), after: Option.isSome(after) }
       expect(held).toEqual({ before: true, after: false })
-    }).pipe(Effect.provide(testIntegrations())))
+    }).pipe(Effect.provide(testIntegrations()))
+  )
 
   it.effect("forgets its OAuth clients, so adding it again registers afresh", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const host = yield* Integrations
       const oauth = yield* OAuthFlows
       const store = yield* CatalogStore
@@ -370,11 +459,19 @@ describe("the catalog", () => {
         probe: notesProbe
       })
       const client = { owner: "org" as const, slug: OAuthClientSlug.make("notes-gateway") }
-      yield* oauth.createClient({
+      yield* oauth.saveClient({
         ...client,
         integration: notes,
-        authorizationUrl: "https://notes.example.com/authorize",
-        tokenUrl: "https://notes.example.com/token",
+        setup: {
+          server: {
+            issuer: "https://notes.example.com",
+            authorization_endpoint: "https://notes.example.com/authorize",
+            token_endpoint: "https://notes.example.com/token"
+          },
+          discovered: false,
+          resource: undefined,
+          scopes: []
+        },
         clientId: "client-1",
         clientSecret: "secret-1"
       })
@@ -384,37 +481,44 @@ describe("the catalog", () => {
         secret: Option.isSome(yield* credentials.get(oauthClientCredentialKey(client.owner, client.slug)))
       }
       expect(left).toEqual({ client: false, secret: false })
-    }).pipe(Effect.provide(testIntegrations())))
+    }).pipe(Effect.provide(testIntegrations()))
+  )
 })
 
 describe("connections", () => {
   it.effect("refuses a template the integration does not offer", () =>
-    Effect.gen(function*() {
-      const outcome = yield* withIntegrations(Effect.result(Effect.gen(function* () {
-        const host = yield* Integrations
-        yield* install()
-        return yield* host.createConnection({
-          owner: "org",
-          integration: notes,
-          name: ConnectionName.make("second"),
-          template: AuthTemplateSlug.make("bearer")
-        })
-      })))
+    Effect.gen(function* () {
+      const outcome = yield* withIntegrations(
+        Effect.result(
+          Effect.gen(function* () {
+            const host = yield* Integrations
+            yield* install()
+            return yield* host.createConnection({
+              owner: "org",
+              integration: notes,
+              name: ConnectionName.make("second"),
+              template: AuthTemplateSlug.make("bearer")
+            })
+          })
+        )
+      )
       expect(outcome._tag).toBe("Failure")
       if (outcome._tag === "Failure") {
         expect(outcome.failure._tag).toBe("InvalidInputError")
       }
-    }))
+    })
+  )
 
   it.effect("addresses a connection by owner tier, integration and name", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const connection = yield* withIntegrations(install())
       expect(String(connection.address)).toBe("tools.notes.org.primary")
       expect(connection.owner).toBe("org")
-    }))
+    })
+  )
 
   it.effect("drops the credential with the connection", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const host = yield* Integrations
       const credentials = yield* CredentialStore
       yield* host.addMcp({
@@ -436,14 +540,19 @@ describe("connections", () => {
       const after = yield* credentials.get(connectionCredentialKey(address))
       const held = { before: Option.isSome(before), after: Option.isSome(after) }
       expect(held).toEqual({ before: true, after: false })
-    }).pipe(Effect.provide(testIntegrations())))
+    }).pipe(Effect.provide(testIntegrations()))
+  )
 })
 
 describe("tools", () => {
   it.effect("captures once, so listing never reaches the endpoint again", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       let listings = 0
-      const counted = stubMcp({ onList: () => { listings += 1 } })
+      const counted = stubMcp({
+        onList: () => {
+          listings += 1
+        }
+      })
       const seen = yield* withIntegrations(
         Effect.gen(function* () {
           const host = yield* Integrations
@@ -459,12 +568,17 @@ describe("tools", () => {
       )
       expect(seen.afterConnect).toBe(1)
       expect(seen.afterReads).toBe(1)
-    }))
+    })
+  )
 
   it.effect("re-reads the endpoint only when asked to refresh", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       let listings = 0
-      const counted = stubMcp({ onList: () => { listings += 1 } })
+      const counted = stubMcp({
+        onList: () => {
+          listings += 1
+        }
+      })
       const seen = yield* withIntegrations(
         Effect.gen(function* () {
           const host = yield* Integrations
@@ -475,29 +589,39 @@ describe("tools", () => {
         counted
       )
       expect(seen).toBe(2)
-    }))
+    })
+  )
 
   it.effect("drops a tool the upstream stopped exposing", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       let shrunk = false
       const shrinking = Layer.effect(
         McpClient,
         Effect.sync(() => ({
-          probe: () => Effect.succeed({
-            connected: true, requiresAuthentication: false, requiresOAuth: false,
-            supportsDynamicRegistration: false, scopes: [], name: "Notes", slug: "notes",
-            era: "legacy", serverName: "Notes", instructions: null
-          }),
-          listTools: () => Effect.succeed({
-            era: "legacy",
-            tools: shrunk
-              ? [{ name: "search_notes", description: "", annotations: { readOnlyHint: true } }]
-              : [
-                { name: "search_notes", description: "", annotations: { readOnlyHint: true } },
-                { name: "write_note", description: "", annotations: { readOnlyHint: false } }
-              ]
-          }),
-          callTool: () => Effect.succeed({ content: [] })
+          probe: () =>
+            Effect.succeed({
+              connected: true,
+              requiresAuthentication: false,
+              requiresOAuth: false,
+              supportsDynamicRegistration: false,
+              scopes: [],
+              name: "Notes",
+              slug: "notes",
+              era: "legacy",
+              serverName: "Notes",
+              instructions: null
+            }),
+          listTools: () =>
+            Effect.succeed({
+              era: "legacy",
+              tools: shrunk
+                ? [{ name: "search_notes", description: "", annotations: { readOnlyHint: true } }]
+                : [
+                    { name: "search_notes", description: "", annotations: { readOnlyHint: true } },
+                    { name: "write_note", description: "", annotations: { readOnlyHint: false } }
+                  ]
+            }),
+          callTool: () => Effect.succeed({ kind: "complete" as const, result: { content: [] }, declined: [] })
         }))
       )
       const names = yield* withIntegrations(
@@ -513,10 +637,11 @@ describe("tools", () => {
         shrinking
       )
       expect(names).toEqual({ before: 2, after: ["search_notes"] })
-    }))
+    })
+  )
 
   it.effect("addresses every tool a connection exposes", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const host = yield* Integrations
       yield* install()
       const tools = yield* host.listTools({ integration: notes })
@@ -524,10 +649,11 @@ describe("tools", () => {
         "tools.notes.org.primary.search_notes",
         "tools.notes.org.primary.write_note"
       ])
-    }).pipe(Effect.provide(testIntegrations())))
+    }).pipe(Effect.provide(testIntegrations()))
+  )
 
   it.effect("allows only a tool its own source declares read-only", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const host = yield* Integrations
       yield* install()
       const tools = yield* host.toolSummaries({ integration: notes })
@@ -536,10 +662,11 @@ describe("tools", () => {
         search_notes: "allow",
         write_note: "require_approval"
       })
-    }).pipe(Effect.provide(testIntegrations())))
+    }).pipe(Effect.provide(testIntegrations()))
+  )
 
   it.effect("requires approval when a source declares no read-only hint at all", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const decisions = yield* withIntegrations(
         Effect.gen(function* () {
           const host = yield* Integrations
@@ -550,10 +677,11 @@ describe("tools", () => {
         stubMcp({ omitReadOnlyHint: true })
       )
       expect(decisions).toEqual(["require_approval", "require_approval"])
-    }))
+    })
+  )
 
   it.effect("resolves a tool by integration and name as well as by address", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const host = yield* Integrations
       yield* install()
       const byName = yield* host.describeTool({ integration: notes, name: "search_notes" })
@@ -563,106 +691,114 @@ describe("tools", () => {
         byName: "tools.notes.org.primary.search_notes",
         byAddress: "tools.notes.org.primary.search_notes"
       })
-    }).pipe(Effect.provide(testIntegrations())))
+    }).pipe(Effect.provide(testIntegrations()))
+  )
 
   it.effect("rejects an address it holds no tool for", () =>
-    Effect.gen(function*() {
-      const outcome = yield* withIntegrations(Effect.result(Effect.gen(function* () {
-        const host = yield* Integrations
-        yield* install()
-        return yield* host.execute(
-          ToolAddress.make("tools.notes.org.absent.search_notes"),
-          {}
+    Effect.gen(function* () {
+      const outcome = yield* withIntegrations(
+        Effect.result(
+          Effect.gen(function* () {
+            const host = yield* Integrations
+            yield* install()
+            return yield* host.execute(ToolAddress.make("tools.notes.org.absent.search_notes"), {})
+          })
         )
-      })))
+      )
       expect(outcome._tag).toBe("Failure")
       if (outcome._tag === "Failure") {
         expect(outcome.failure._tag).toBe("ToolNotFoundError")
       }
-    }))
+    })
+  )
 
   it("cannot be handed an address that is not addressable", () => {
     expect(() => ToolAddress.make("tools.notes.org.primary")).toThrow()
     expect(() => ToolAddress.make("notes.org.primary.search_notes")).toThrow()
   })
 
-  it.effect("surfaces a server-reported tool error as a failure", () =>
-    Effect.gen(function*() {
+  it.effect("surfaces a server-reported tool error as a failure, naming input it declined to ask for", () =>
+    Effect.gen(function* () {
       const failing = Layer.effect(
         McpClient,
         Effect.sync(() => ({
-          probe: () => Effect.succeed({
-            connected: true,
-            requiresAuthentication: false,
-            requiresOAuth: false,
-            supportsDynamicRegistration: false,
-            scopes: [],
-            name: "Notes",
-            slug: "notes",
-            era: "legacy",
-            serverName: "Notes",
-            instructions: null
-          }),
-          listTools: () => Effect.succeed({
-            era: "legacy",
-            tools: [{
-              name: "search_notes",
-              description: "Search the notebook.",
-              annotations: { readOnlyHint: true }
-            }]
-          }),
-          callTool: () => Effect.succeed({
-            content: [{ type: "text", text: "the notebook is locked" }],
-            isError: true
-          })
+          probe: () =>
+            Effect.succeed({
+              connected: true,
+              requiresAuthentication: false,
+              requiresOAuth: false,
+              supportsDynamicRegistration: false,
+              scopes: [],
+              name: "Notes",
+              slug: "notes",
+              era: "legacy",
+              serverName: "Notes",
+              instructions: null
+            }),
+          listTools: () =>
+            Effect.succeed({
+              era: "legacy",
+              tools: [
+                {
+                  name: "search_notes",
+                  description: "Search the notebook.",
+                  annotations: { readOnlyHint: true }
+                }
+              ]
+            }),
+          callTool: () =>
+            Effect.succeed({
+              kind: "complete" as const,
+              result: { content: [{ type: "text", text: "the notebook is locked" }], isError: true },
+              declined: ["Unlock code?"]
+            })
         }))
       )
       const outcome = yield* withIntegrations(
-        Effect.result(Effect.gen(function* () {
-          const host = yield* Integrations
-          yield* install()
-          return yield* host.execute(
-            ToolAddress.make("tools.notes.org.primary.search_notes"),
-            {}
-          )
-        })),
+        Effect.result(
+          Effect.gen(function* () {
+            const host = yield* Integrations
+            yield* install()
+            return yield* host.execute(ToolAddress.make("tools.notes.org.primary.search_notes"), {})
+          })
+        ),
         failing
       )
       expect(outcome._tag).toBe("Failure")
       if (outcome._tag === "Failure") {
         expect(outcome.failure._tag).toBe("InvocationError")
         expect(outcome.failure.message).toContain("the notebook is locked")
+        expect(outcome.failure.message).toContain(
+          "The server asked for input the gateway cannot relay to this caller: Unlock code?"
+        )
       }
-    }))
+    })
+  )
 
   it.effect("unwraps an MCP envelope on the way out", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const host = yield* Integrations
       yield* install()
-      const out = yield* host.execute(
-        ToolAddress.make("tools.notes.org.primary.search_notes"),
-        { q: "kitchen" }
-      )
-      expect(out).toBe("search_notes ran")
-    }).pipe(Effect.provide(testIntegrations())))
+      const out = yield* host.execute(ToolAddress.make("tools.notes.org.primary.search_notes"), { q: "kitchen" })
+      expect(out).toEqual({ kind: "complete", result: "search_notes ran" })
+    }).pipe(Effect.provide(testIntegrations()))
+  )
 
   it.effect("sends no credential for a connection that needs none", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const seen: Array<Option.Option<string>> = []
       yield* withIntegrations(
         Effect.gen(function* () {
           const host = yield* Integrations
           yield* install()
-          yield* host.execute(
-            ToolAddress.make("tools.notes.org.primary.search_notes"),
-            {}
-          )
+          yield* host.execute(ToolAddress.make("tools.notes.org.primary.search_notes"), {})
         }),
         stubMcp({ onCall: (_tool, credential) => seen.push(credential) })
       )
       expect(seen).toHaveLength(1)
       expect(Option.isNone(seen[0] ?? Option.none())).toBe(true)
-    }))
+    })
+  )
 })
 
 describe("recompiling OpenAPI tools", () => {
@@ -670,39 +806,45 @@ describe("recompiling OpenAPI tools", () => {
   const items = IntegrationSlug.make("items")
 
   it.effect("rebuilds stored tools that an older compile left behind", () =>
-    withIntegrations(Effect.gen(function* () {
-      const store = yield* CatalogStore
-      const host = yield* Integrations
-      yield* store.putSpecDocument(source, JSON.stringify({
-        openapi: "3.0.3",
-        info: { title: "Items", version: "1" },
-        servers: [{ url: "https://items.example.com" }],
-        paths: {
-          "/items": {
-            get: {
-              operationId: "listItems",
-              parameters: [{ name: "filter[status]", in: "query", schema: { type: "string" } }],
-              responses: { "200": { description: "ok" } }
+    withIntegrations(
+      Effect.gen(function* () {
+        const store = yield* CatalogStore
+        const host = yield* Integrations
+        yield* store.putSpecDocument(
+          source,
+          JSON.stringify({
+            openapi: "3.0.3",
+            info: { title: "Items", version: "1" },
+            servers: [{ url: "https://items.example.com" }],
+            paths: {
+              "/items": {
+                get: {
+                  operationId: "listItems",
+                  parameters: [{ name: "filter[status]", in: "query", schema: { type: "string" } }],
+                  responses: { "200": { description: "ok" } }
+                }
+              }
             }
-          }
-        }
-      }))
-      yield* host.addOpenApi({ spec: source, slug: items })
-      yield* host.createConnection({
-        owner: "org",
-        integration: items,
-        name: primary,
-        template: AuthTemplateSlug.make("none")
+          })
+        )
+        yield* host.addOpenApi({ spec: source, slug: items })
+        yield* host.createConnection({
+          owner: "org",
+          integration: items,
+          name: primary,
+          template: AuthTemplateSlug.make("none")
+        })
+        const current = yield* store.listTools({ integration: items })
+        yield* store.replaceTools(
+          { owner: "org", integration: items, name: primary },
+          current.map((tool) => ({ ...tool, inputSchema: { type: "object", properties: { "filter[status]": {} } } }))
+        )
+
+        yield* host.recompileOpenApiTools()
+
+        const rebuilt = yield* store.listTools({ integration: items })
+        expect(rebuilt.map((tool) => tool.inputSchema)).toEqual(current.map((tool) => tool.inputSchema))
       })
-      const current = yield* store.listTools({ integration: items })
-      yield* store.replaceTools(
-        { owner: "org", integration: items, name: primary },
-        current.map((tool) => ({ ...tool, inputSchema: { type: "object", properties: { "filter[status]": {} } } }))
-      )
-
-      yield* host.recompileOpenApiTools()
-
-      const rebuilt = yield* store.listTools({ integration: items })
-      expect(rebuilt.map((tool) => tool.inputSchema)).toEqual(current.map((tool) => tool.inputSchema))
-    })))
+    )
+  )
 })

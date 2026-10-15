@@ -2,13 +2,7 @@ import { createWriteStream, mkdirSync, readFileSync } from "node:fs"
 import path from "node:path"
 import type { GatewayClient } from "@integragents/client"
 import { Effect, Schema, Stream } from "effect"
-import {
-  BlobHandle,
-  blobHandleKey,
-  localFileKey,
-  LocalFileRef,
-  type Json
-} from "@integragents/contracts"
+import { BlobHandle, blobHandleKey, localFileKey, LocalFileRef, type Json } from "@integragents/contracts"
 import { integrationsHome } from "@integragents/contracts/gateway-config"
 import { cliError, describeError, type IntegrationsCliError } from "./connection.ts"
 
@@ -28,13 +22,9 @@ const contentTypes = new Map([
   [".zip", "application/zip"]
 ])
 
-const contentTypeFor = (extension: string): string =>
-  contentTypes.get(extension) ?? "application/octet-stream"
+const contentTypeFor = (extension: string): string => contentTypes.get(extension) ?? "application/octet-stream"
 
-const uploadFile = Effect.fn("Cli.uploadFile")(function*(
-  client: GatewayClient,
-  file: string
-) {
+const uploadFile = Effect.fn("Cli.uploadFile")(function* (client: GatewayClient, file: string) {
   const resolved = path.resolve(file)
   const bytes = yield* Effect.try({
     try: () => new Uint8Array(readFileSync(resolved)),
@@ -75,7 +65,8 @@ export const resolveFileArguments = (
 
     return Effect.map(
       Effect.forEach(Object.entries(record.value), ([key, nested]) =>
-        Effect.map(visit(nested), (decoded) => [key, decoded] as const)),
+        Effect.map(visit(nested), (decoded) => [key, decoded] as const)
+      ),
       (entries) => Object.fromEntries(entries)
     )
   }
@@ -91,7 +82,7 @@ const destinationFor = (handle: BlobHandle, out: string | undefined): string => 
   return path.join(downloadDirectory(), name)
 }
 
-const fetchBlob = Effect.fn("Cli.fetchBlob")(function*(
+const fetchBlob = Effect.fn("Cli.fetchBlob")(function* (
   client: GatewayClient,
   handle: BlobHandle,
   destination: string
@@ -108,11 +99,14 @@ const fetchBlob = Effect.fn("Cli.fetchBlob")(function*(
   yield* Stream.runForEach(content, (chunk: Uint8Array) =>
     Effect.callback<void>((resume) => {
       file.write(chunk, () => resume(Effect.void))
-    })).pipe(
-      Effect.ensuring(Effect.callback<void>((resume) => {
+    })
+  ).pipe(
+    Effect.ensuring(
+      Effect.callback<void>((resume) => {
         file.end(() => resume(Effect.void))
-      }))
+      })
     )
+  )
   return destination
 })
 
@@ -144,7 +138,8 @@ export const materializeBlobs = (
 
     return Effect.map(
       Effect.forEach(Object.entries(record.value), ([key, nested]) =>
-        Effect.map(visit(nested), (decoded) => [key, decoded] as const)),
+        Effect.map(visit(nested), (decoded) => [key, decoded] as const)
+      ),
       (entries) => Object.fromEntries(entries)
     )
   }

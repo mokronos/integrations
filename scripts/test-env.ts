@@ -54,7 +54,10 @@ const spawn = (command: ReadonlyArray<string>, options: { cwd: string; log: stri
 
 const waitFor = async (url: string, what: string): Promise<void> => {
   for (let attempt = 0; attempt < 120; attempt++) {
-    const answered = await fetch(url).then(() => true, () => false)
+    const answered = await fetch(url).then(
+      () => true,
+      () => false
+    )
     if (answered) return
     await Bun.sleep(250)
   }
@@ -68,7 +71,11 @@ const cli = async (program: "agent" | "main", args: ReadonlyArray<string>, home:
     stdout: "pipe",
     stderr: "pipe"
   })
-  const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
+  const [out, err, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited
+  ])
   if (code !== 0) throw new Error(`${program === "agent" ? "i" : "ii"} ${args.join(" ")} failed: ${err || out}`)
   return out
 }
@@ -96,9 +103,13 @@ const stop = async (environment: Environment): Promise<void> => {
   }
 }
 
-const decodeProfiles = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Struct({
-  profiles: Schema.Array(Schema.Struct({ profile: Schema.Struct({ id: Schema.String, name: Schema.String }) }))
-})))
+const decodeProfiles = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      profiles: Schema.Array(Schema.Struct({ profile: Schema.Struct({ id: Schema.String, name: Schema.String }) }))
+    })
+  )
+)
 
 const read = async (home: string): Promise<Environment> =>
   decodeEnvironment(await readFile(path.join(home, "test-env.json"), "utf8"))
@@ -112,13 +123,13 @@ const seed = async (home: string, fixtureUrl: string): Promise<void> => {
 }
 
 const up = async (): Promise<void> => {
-  const home = path.resolve(flag("--home") ?? await mkdtemp(path.join(tmpdir(), "integrations-test.")))
+  const home = path.resolve(flag("--home") ?? (await mkdtemp(path.join(tmpdir(), "integrations-test."))))
   const previous = await read(home).catch(() => undefined)
   if (previous !== undefined) await stop(previous)
   await mkdir(home, { recursive: true })
 
   // A restart keeps its ports: the seeded integration remembers the fixture's URL.
-  const portOf = (url: string | undefined) => url === undefined ? freePort() : Number(new URL(url).port)
+  const portOf = (url: string | undefined) => (url === undefined ? freePort() : Number(new URL(url).port))
   const gatewayPort = portOf(previous?.gateway.url)
   const dashboardPort = portOf(previous?.dashboard.url)
   const fixturePort = portOf(previous?.fixture.url)
@@ -138,15 +149,29 @@ const up = async (): Promise<void> => {
     },
     fixture: {
       url: fixture,
-      pid: spawn(["bun", "run", "scripts/fixture-mcp.ts", String(fixturePort)], { cwd: root, log: path.join(home, "fixture.log") })
+      pid: spawn(["bun", "run", "scripts/fixture-mcp.ts", String(fixturePort)], {
+        cwd: root,
+        log: path.join(home, "fixture.log")
+      })
     },
     dashboard: {
       url: dashboard,
-      pid: spawn(["bun", "node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", String(dashboardPort), "--strictPort"], {
-        cwd: path.join(root, "apps/web"),
-        log: path.join(home, "dashboard.log"),
-        env: { INTEGRATIONS_URL: gateway }
-      })
+      pid: spawn(
+        [
+          "bun",
+          "node_modules/vite/bin/vite.js",
+          "--host",
+          "127.0.0.1",
+          "--port",
+          String(dashboardPort),
+          "--strictPort"
+        ],
+        {
+          cwd: path.join(root, "apps/web"),
+          log: path.join(home, "dashboard.log"),
+          env: { INTEGRATIONS_URL: gateway }
+        }
+      )
     },
     traces: path.join(home, "logs")
   }
@@ -168,7 +193,11 @@ const status = async (): Promise<void> => {
   const home = flag("--home")
   if (home === undefined) throw new Error("status needs --home <dir>")
   const environment = await read(path.resolve(home))
-  const answers = (url: string) => fetch(url).then(() => true, () => false)
+  const answers = (url: string) =>
+    fetch(url).then(
+      () => true,
+      () => false
+    )
   const [gatewayUp, dashboardUp, fixtureUp] = await Promise.all([
     answers(`${environment.gateway.url}/v1/health`),
     answers(environment.dashboard.url),
@@ -181,24 +210,34 @@ const screenshot = async (): Promise<void> => {
   const home = flag("--home")
   if (home === undefined) throw new Error("screenshot needs --home <dir>")
   const environment = await read(path.resolve(home))
-  const route = process.argv.slice(3).find((argument, index, all) =>
-    argument.startsWith("/") && !(all[index - 1] ?? "").startsWith("--")) ?? "/"
+  const route =
+    process.argv
+      .slice(3)
+      .find((argument, index, all) => argument.startsWith("/") && !(all[index - 1] ?? "").startsWith("--")) ?? "/"
   const browser = Bun.which("chromium") ?? Bun.which("google-chrome-stable") ?? Bun.which("google-chrome")
   if (browser === null) throw new Error("no chromium or google-chrome on PATH")
-  const output = path.join(environment.home, "shots", `${route === "/" ? "overview" : route.slice(1).replaceAll("/", "-")}-${Date.now()}.png`)
+  const output = path.join(
+    environment.home,
+    "shots",
+    `${route === "/" ? "overview" : route.slice(1).replaceAll("/", "-")}-${Date.now()}.png`
+  )
   await mkdir(path.dirname(output), { recursive: true })
-  const child = Bun.spawn([
-    browser,
-    "--headless=new",
-    "--disable-gpu",
-    "--no-first-run",
-    `--user-data-dir=${path.join(environment.home, "browser")}`,
-    `--window-size=${flag("--width") ?? "1280"},${flag("--height") ?? "800"}`,
-    "--virtual-time-budget=8000",
-    `--screenshot=${output}`,
-    `${environment.dashboard.url}${route}`
-  ], { stdout: "ignore", stderr: "ignore" })
-  if (await child.exited !== 0 || !(await Bun.file(output).exists())) throw new Error(`${browser} did not write ${output}`)
+  const child = Bun.spawn(
+    [
+      browser,
+      "--headless=new",
+      "--disable-gpu",
+      "--no-first-run",
+      `--user-data-dir=${path.join(environment.home, "browser")}`,
+      `--window-size=${flag("--width") ?? "1280"},${flag("--height") ?? "800"}`,
+      "--virtual-time-budget=8000",
+      `--screenshot=${output}`,
+      `${environment.dashboard.url}${route}`
+    ],
+    { stdout: "ignore", stderr: "ignore" }
+  )
+  if ((await child.exited) !== 0 || !(await Bun.file(output).exists()))
+    throw new Error(`${browser} did not write ${output}`)
   console.log(output)
 }
 
@@ -218,11 +257,16 @@ const down = async (): Promise<void> => {
 
 const command = (() => {
   switch (process.argv[2]) {
-    case "up": return up
-    case "status": return status
-    case "screenshot": return screenshot
-    case "down": return down
-    default: return undefined
+    case "up":
+      return up
+    case "status":
+      return status
+    case "screenshot":
+      return screenshot
+    case "down":
+      return down
+    default:
+      return undefined
   }
 })()
 if (command === undefined) {

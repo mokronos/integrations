@@ -7,6 +7,8 @@ import { Reactivity } from "effect/reactivity"
 import { SqlClient } from "effect/sql"
 import { LibsqlClient } from "@effect/sql-libsql"
 import { CatalogStore } from "./catalog/store.ts"
+import { Egress } from "./egress/egress.ts"
+import { defaultUrlPolicy } from "./egress/url-policy.ts"
 import { CredentialStore } from "./storage/credentials.ts"
 import { BlobStore } from "./storage/blobs.ts"
 import { Database } from "./storage/database.ts"
@@ -24,16 +26,18 @@ export const unavailableHttpClientLayer: Layer.Layer<HttpClient.HttpClient> = La
   HttpClient.make(() => Effect.die("Unexpected HTTP request"))
 )
 
-const clientsLayer: Layer.Layer<
-  McpClient | OpenApiInvoker,
-  never,
-  HttpClient.HttpClient | BlobStore
-> = Layer.mergeAll(McpClient.layer, OpenApiInvoker.layer)
+const unavailableEgressLayer: Layer.Layer<Egress> = Layer.succeed(Egress, {
+  policy: defaultUrlPolicy,
+  fetch: () => Promise.reject(new Error("Unexpected HTTP request"))
+})
+
+const clientsLayer: Layer.Layer<McpClient | OpenApiInvoker, never, HttpClient.HttpClient | Egress | BlobStore> =
+  Layer.mergeAll(McpClient.layer, OpenApiInvoker.layer)
 
 const capabilitiesLayer: Layer.Layer<
   Integrations | OAuthFlows | SpecCache | CatalogStore,
   never,
-  Database | CredentialStore | HttpClient.HttpClient | McpClient | OpenApiInvoker
+  Database | CredentialStore | HttpClient.HttpClient | Egress | McpClient | OpenApiInvoker
 > = Integrations.layer.pipe(
   Layer.provideMerge(Layer.mergeAll(SpecCache.layer, OAuthFlows.layer)),
   Layer.provideMerge(CatalogStore.layer)
@@ -51,8 +55,7 @@ export type IntegrationServices =
 /** The migration set the catalog's tables come from; stamped in `integration_migration`. */
 export const integrationMigrationSet = { ledger: "integration_migration", migrations: integrationMigrations } as const
 
-export const applyIntegrationMigrations = (sql: SqlClient.SqlClient) =>
-  applyMigrations(sql, integrationMigrationSet)
+export const applyIntegrationMigrations = (sql: SqlClient.SqlClient) => applyMigrations(sql, integrationMigrationSet)
 
 export interface IntegrationLayerOptions {
   readonly encryption: Encryption
@@ -65,7 +68,7 @@ export interface IntegrationLayerOptions {
  */
 export const integrationLayer = (
   options: IntegrationLayerOptions
-): Layer.Layer<IntegrationServices, never, SqlClient.SqlClient | HttpClient.HttpClient> =>
+): Layer.Layer<IntegrationServices, never, SqlClient.SqlClient | HttpClient.HttpClient | Egress> =>
   capabilitiesLayer.pipe(
     Layer.provideMerge(clientsLayer),
     Layer.provideMerge(options.blobs),
@@ -94,16 +97,11 @@ export const temporarySqlLayer: Layer.Layer<SqlClient.SqlClient> = Layer.unwrap(
 export const stubbedLayer = (
   clients: Layer.Layer<McpClient | OpenApiInvoker>
 ): Layer.Layer<
-  | Integrations
-  | OAuthFlows
-  | SpecCache
-  | CatalogStore
-  | McpClient
-  | OpenApiInvoker
-  | Database
-  | CredentialStore
+  Integrations | OAuthFlows | SpecCache | CatalogStore | McpClient | OpenApiInvoker | Database | CredentialStore
 > =>
   capabilitiesLayer.pipe(
-    Layer.provideMerge(Layer.mergeAll(clients, unavailableHttpClientLayer)),
-    Layer.provideMerge(Layer.mergeAll(Database.layer.pipe(Layer.provide(temporarySqlLayer)), CredentialStore.memoryLayer))
+    Layer.provideMerge(Layer.mergeAll(clients, unavailableHttpClientLayer, unavailableEgressLayer)),
+    Layer.provideMerge(
+      Layer.mergeAll(Database.layer.pipe(Layer.provide(temporarySqlLayer)), CredentialStore.memoryLayer)
+    )
   )

@@ -5,13 +5,7 @@ import { Argument, Command, Flag } from "effect/cli"
 import type { IntegrationsCliError } from "../connection.ts"
 import { cliError, describeError } from "../connection.ts"
 import type { Page, Window } from "../output.ts"
-import {
-  jsonOutput,
-  page,
-  pageFields,
-  withNext,
-  writeStdoutLine
-} from "../output.ts"
+import { jsonOutput, page, pageFields, withNext, writeStdoutLine } from "../output.ts"
 import type { ControlPlaneClient } from "../session.ts"
 import { connectToControlPlane } from "../session.ts"
 
@@ -23,10 +17,7 @@ const verboseFlag = () =>
   )
 
 const limitFlag = () =>
-  Flag.Int("limit").pipe(
-    Flag.optional,
-    Flag.withDescription("Return at most this many rows (default: all of them)")
-  )
+  Flag.Int("limit").pipe(Flag.optional, Flag.withDescription("Return at most this many rows (default: all of them)"))
 
 const offsetFlag = () =>
   Flag.Int("offset").pipe(
@@ -34,10 +25,7 @@ const offsetFlag = () =>
     Flag.withDescription("Skip this many rows. Listings are ordered, so a window is stable")
   )
 
-const window = (
-  limit: Option.Option<number>,
-  offset: Option.Option<number>
-): Window => ({
+const window = (limit: Option.Option<number>, offset: Option.Option<number>): Window => ({
   limit: Option.getOrUndefined(limit),
   offset: Option.getOrUndefined(offset)
 })
@@ -58,12 +46,10 @@ const record = <A>(value: A | undefined): Record<string, typeof Schema.Json.Type
 const array = <A>(value: A | undefined): ReadonlyArray<Record<string, typeof Schema.Json.Type>> =>
   Option.getOrElse(Schema.decodeUnknownOption(JsonArray)(value), () => []).map(record)
 
-const text = (value: Schema.Json | undefined): string => value === undefined || value === null ? "" : String(value)
+const text = (value: Schema.Json | undefined): string => (value === undefined || value === null ? "" : String(value))
 
-const sortedBy = <A>(
-  items: ReadonlyArray<A>,
-  key: (item: A) => string
-): ReadonlyArray<A> => [...items].sort((left, right) => key(left).localeCompare(key(right)))
+const sortedBy = <A>(items: ReadonlyArray<A>, key: (item: A) => string): ReadonlyArray<A> =>
+  [...items].sort((left, right) => key(left).localeCompare(key(right)))
 
 const listing = <A>(
   result: Page<A>,
@@ -77,14 +63,19 @@ const listing = <A>(
     readonly extra?: Record<string, typeof Schema.Json.Type>
   }
 ): Effect.Effect<void> =>
-  writeStdoutLine(jsonOutput(
-    withNext({
-      ...options.extra,
-      [options.key]: result.items.map(options.row),
-      ...pageFields(result, options.narrowing)
-    }, options.next),
-    options.verbose
-  ))
+  writeStdoutLine(
+    jsonOutput(
+      withNext(
+        {
+          ...options.extra,
+          [options.key]: result.items.map(options.row),
+          ...pageFields(result, options.narrowing)
+        },
+        options.next
+      ),
+      options.verbose
+    )
+  )
 
 export const profilesCommand = Command.make(
   "profiles",
@@ -140,10 +131,9 @@ export const profileCommand = Command.make(
     return controlPlaneTask((client) => client.request("POST", "/v1/profiles", body)).pipe(
       Effect.flatMap((result) => {
         const created = record(result)
-        return writeStdoutLine(jsonOutput(
-          withNext(created, `ii profile-tool ${text(created["id"])} <integration> <tool> ask`),
-          false
-        ))
+        return writeStdoutLine(
+          jsonOutput(withNext(created, `ii profile-tool ${text(created["id"])} <integration> <tool> ask`), false)
+        )
       })
     )
   }
@@ -158,22 +148,22 @@ export const profileToolsCommand = Command.make(
     verbose: verboseFlag()
   },
   ({ profileId, limit, offset, verbose }) =>
-    controlPlaneTask((client) =>
-      client.request("GET", `/v1/profiles/${encodeURIComponent(profileId)}/tools`)
-    ).pipe(Effect.flatMap((result) => {
-      const all = sortedBy(array(record(result)["tools"]), (tool) => `${text(tool["alias"])}.${text(tool["tool"])}`)
-      return listing(page(all, window(limit, offset)), {
-        key: "tools",
-        narrowing: "window with --limit/--offset",
-        verbose,
-        empty: "No tools enabled.",
-        next: `ii profile-tool ${profileId} <integration> <tool> off|ask|allow`,
-        row: (tool) => tool
+    controlPlaneTask((client) => client.request("GET", `/v1/profiles/${encodeURIComponent(profileId)}/tools`)).pipe(
+      Effect.flatMap((result) => {
+        const all = sortedBy(array(record(result)["tools"]), (tool) => `${text(tool["alias"])}.${text(tool["tool"])}`)
+        return listing(page(all, window(limit, offset)), {
+          key: "tools",
+          narrowing: "window with --limit/--offset",
+          verbose,
+          empty: "No tools enabled.",
+          next: `ii profile-tool ${profileId} <integration> <tool> off|ask|allow`,
+          row: (tool) => tool
+        })
       })
-    }))
+    )
 ).pipe(Command.withDescription("List the tools a profile enables and whether each asks first"))
 
-const targetConnections = Effect.fn("Cli.targetConnections")(function*(
+const targetConnections = Effect.fn("Cli.targetConnections")(function* (
   client: ControlPlaneClient,
   integration: string,
   requested: Option.Option<string>
@@ -206,36 +196,41 @@ export const profileToolCommand = Command.make(
     )
   },
   ({ profileId, connection, integration, setting, tool }) =>
-    controlPlaneTask((client) => Effect.gen(function*() {
-      const route = `/v1/profiles/${encodeURIComponent(profileId)}/tools`
-      const current = array(record(yield* client.request("GET", route))["tools"])
-      const targets = yield* targetConnections(client, integration, connection)
-      const replaced = new Set(targets.map((target) => `${target.owner}/${target.name}`))
-      const kept = current
-        .filter((entry) => {
-          const existing = record(entry["connection"])
-          return text(existing["integration"]) !== integration ||
-            text(entry["tool"]) !== tool ||
-            !replaced.has(`${text(existing["owner"])}/${text(existing["name"])}`)
+    controlPlaneTask((client) =>
+      Effect.gen(function* () {
+        const route = `/v1/profiles/${encodeURIComponent(profileId)}/tools`
+        const current = array(record(yield* client.request("GET", route))["tools"])
+        const targets = yield* targetConnections(client, integration, connection)
+        const replaced = new Set(targets.map((target) => `${target.owner}/${target.name}`))
+        const kept = current
+          .filter((entry) => {
+            const existing = record(entry["connection"])
+            return (
+              text(existing["integration"]) !== integration ||
+              text(entry["tool"]) !== tool ||
+              !replaced.has(`${text(existing["owner"])}/${text(existing["name"])}`)
+            )
+          })
+          .map((entry) => ({
+            connection: record(entry["connection"]),
+            tool: text(entry["tool"]),
+            decision: text(entry["decision"])
+          }))
+        return yield* client.request("POST", route, {
+          tools:
+            setting === "off"
+              ? kept
+              : [
+                  ...kept,
+                  ...targets.map((target) => ({
+                    connection: { owner: target.owner, integration, name: target.name },
+                    tool,
+                    decision: setting === "allow" ? "allow" : "require_approval"
+                  }))
+                ]
         })
-        .map((entry) => ({
-          connection: record(entry["connection"]),
-          tool: text(entry["tool"]),
-          decision: text(entry["decision"])
-        }))
-      return yield* client.request("POST", route, {
-        tools: setting === "off"
-          ? kept
-          : [
-            ...kept,
-            ...targets.map((target) => ({
-              connection: { owner: target.owner, integration, name: target.name },
-              tool,
-              decision: setting === "allow" ? "allow" : "require_approval"
-            }))
-          ]
       })
-    })).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false))))
+    ).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), false))))
 ).pipe(Command.withDescription("Turn one tool off, or on with ask or allow, in a profile"))
 
 export const keyCommand = Command.make(
@@ -243,16 +238,18 @@ export const keyCommand = Command.make(
   {
     profileId: Argument.String("profile-id"),
     name: Argument.String("name").pipe(
-      Argument.withDescription("The app that will use the key, such as \"Claude Code\". Calls are attributed to it")
+      Argument.withDescription('The app that will use the key, such as "Claude Code". Calls are attributed to it')
     )
   },
   ({ name, profileId }) =>
     controlPlaneTask((client) =>
       client.request("POST", `/v1/profiles/${encodeURIComponent(profileId)}/keys`, { name })
-    ).pipe(Effect.flatMap((result) => {
-      const issued = record(result)
-      return writeStdoutLine(jsonOutput(issued, false))
-    }))
+    ).pipe(
+      Effect.flatMap((result) => {
+        const issued = record(result)
+        return writeStdoutLine(jsonOutput(issued, false))
+      })
+    )
 ).pipe(Command.withDescription("Issue an API key for one app of a profile. Shown once"))
 
 export const keysCommand = Command.make(
@@ -264,27 +261,25 @@ export const keysCommand = Command.make(
     verbose: verboseFlag()
   },
   ({ profileId, limit, offset, verbose }) =>
-    controlPlaneTask((client) =>
-      client.request("GET", `/v1/profiles/${encodeURIComponent(profileId)}/keys`)
-    ).pipe(Effect.flatMap((result) => {
-      const all = sortedBy(array(record(result)["keys"]), (key) => text(key["createdAt"]))
-      return listing(page(all, window(limit, offset)), {
-        key: "keys",
-        narrowing: "window with --limit/--offset",
-        verbose,
-        empty: "No keys issued.",
-        next: "ii revoke key <key-id>",
-        row: (key) => key
+    controlPlaneTask((client) => client.request("GET", `/v1/profiles/${encodeURIComponent(profileId)}/keys`)).pipe(
+      Effect.flatMap((result) => {
+        const all = sortedBy(array(record(result)["keys"]), (key) => text(key["createdAt"]))
+        return listing(page(all, window(limit, offset)), {
+          key: "keys",
+          narrowing: "window with --limit/--offset",
+          verbose,
+          empty: "No keys issued.",
+          next: "ii revoke key <key-id>",
+          row: (key) => key
+        })
       })
-    }))
+    )
 ).pipe(Command.withDescription("List a profile's API keys. Secrets are never shown again"))
 
 export const revokeCommand = Command.make(
   "revoke",
   {
-    kind: Argument.Literals("kind", ["profile", "key"]).pipe(
-      Argument.withDescription("What to revoke")
-    ),
+    kind: Argument.Literals("kind", ["profile", "key"]).pipe(Argument.withDescription("What to revoke")),
     id: Argument.String("id")
   },
   ({ kind, id }) =>
@@ -296,12 +291,10 @@ export const revokeCommand = Command.make(
           : `/v1/keys/${encodeURIComponent(id)}/revoke`,
         {}
       )
-    ).pipe(Effect.flatMap((result) => {
-      const body = record(result)
-      return writeStdoutLine(jsonOutput({ revoked: true, kind, id, ...body }, false))
-    }))
-).pipe(
-  Command.withDescription(
-    "Revoke a profile or one API key. Revoked rows stay as history"
-  )
-)
+    ).pipe(
+      Effect.flatMap((result) => {
+        const body = record(result)
+        return writeStdoutLine(jsonOutput({ revoked: true, kind, id, ...body }, false))
+      })
+    )
+).pipe(Command.withDescription("Revoke a profile or one API key. Revoked rows stay as history"))

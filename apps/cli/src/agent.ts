@@ -7,9 +7,7 @@ import { clientSubcommands } from "./commands.ts"
 import packageMetadata from "../package.json" with { type: "json" }
 
 export const rootCommand = Command.make("i").pipe(
-  Command.withDescription(
-    "Discover, connect, and invoke integrations"
-  ),
+  Command.withDescription("Discover, connect, and invoke integrations"),
   Command.withSubcommands(clientSubcommands)
 )
 
@@ -20,8 +18,9 @@ export const main = async (argv: ReadonlyArray<string>): Promise<void> => {
         error.errors.length === 0
           ? Effect.void
           : Effect.sync(() => {
-            process.exitCode = 1
-          })),
+              process.exitCode = 1
+            })
+      ),
       commandSpan(argv),
       Effect.provide(Layer.merge(cliLayer("integrations-agent-cli"), BunHttpClient.layer))
     )

@@ -20,26 +20,27 @@ import {
   type IntegrationDiscovery
 } from "@integragents/contracts"
 
-export const installClassified = Effect.fn("Integrations.install")(function*(
+export const installClassified = Effect.fn("Integrations.install")(function* (
   classification: EndpointClassification
 ): Effect.fn.Return<Integration, IntegrationFailure, Integrations> {
   const host = yield* Integrations
   const decoded = yield* Schema.decodeUnknownEffect(EndpointClassification)(classification).pipe(
-    Effect.mapError((cause) => new InvalidInputError({
-      field: "classification",
-      detail: `Could not read the endpoint classification: ${String(cause)}`
-    }))
+    Effect.mapError(
+      (cause) =>
+        new InvalidInputError({
+          field: "classification",
+          detail: `Could not read the endpoint classification: ${String(cause)}`
+        })
+    )
   )
   const slug = IntegrationSlug.make(decoded.slug)
   const existing = yield* host.findIntegration(slug)
   if (Option.isSome(existing)) {
-    if (
-      existing.value.displayUrl !== undefined &&
-      existing.value.displayUrl !== decoded.endpoint
-    ) {
+    if (existing.value.displayUrl !== undefined && existing.value.displayUrl !== decoded.endpoint) {
       return yield* new InvalidInputError({
         field: "slug",
-        detail: `${decoded.slug} is already installed and points at ${existing.value.displayUrl}. ` +
+        detail:
+          `${decoded.slug} is already installed and points at ${existing.value.displayUrl}. ` +
           `Discover this URL under a different name.`
       })
     }
@@ -71,7 +72,7 @@ const named = (
   ...whenPresent("slug", options.slug)
 })
 
-const ensureConnection = Effect.fn("Integrations.ensureConnection")(function*(
+const ensureConnection = Effect.fn("Integrations.ensureConnection")(function* (
   integration: Integration,
   connectionName: ConnectionName
 ): Effect.fn.Return<boolean, IntegrationFailure, Integrations> {
@@ -91,14 +92,10 @@ const ensureConnection = Effect.fn("Integrations.ensureConnection")(function*(
   return true
 })
 
-export const provisionIntegration = Effect.fn("Integrations.provision")(function*(
+export const provisionIntegration = Effect.fn("Integrations.provision")(function* (
   url: string,
   options: DiscoverIntegrationsOptions = {}
-): Effect.fn.Return<
-  IntegrationDiscovery,
-  IntegrationFailure | DetectionError,
-  Integrations | ClassifyServices
-> {
+): Effect.fn.Return<IntegrationDiscovery, IntegrationFailure | DetectionError, Integrations | ClassifyServices> {
   const host = yield* Integrations
   const classification = named(yield* classify(url), options)
   const integration = yield* installClassified(classification)
@@ -110,8 +107,6 @@ export const provisionIntegration = Effect.fn("Integrations.provision")(function
     integration,
     requiresAuthentication: requiresAuthentication(integration.authMethods),
     authMethods: integration.authMethods,
-    tools: connected
-      ? yield* host.listTools({ integration: integration.slug, connection: connectionName })
-      : []
+    tools: connected ? yield* host.listTools({ integration: integration.slug, connection: connectionName }) : []
   }
 })

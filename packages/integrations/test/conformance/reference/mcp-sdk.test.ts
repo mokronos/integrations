@@ -1,15 +1,16 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Option } from "effect"
-import { FetchHttpClient } from "effect/http"
+import { Egress } from "../../../src/egress/egress.ts"
+import { defaultUrlPolicy } from "../../../src/egress/url-policy.ts"
 import { McpClient } from "../../../src/mcp/client.ts"
 import { verifyMcpConformance } from "../support/mcp-conformance.ts"
 import { referenceMcpServer } from "../support/reference-mcp.ts"
 
-const services = McpClient.layer.pipe(Layer.provide(FetchHttpClient.layer))
+const services = McpClient.layer.pipe(Layer.provide(Egress.layer(defaultUrlPolicy)))
 
 describe("official MCP SDK reference server", () => {
   it.live("passes the MCP client conformance contract", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const endpoint = yield* referenceMcpServer
 
       yield* verifyMcpConformance({
@@ -30,10 +31,11 @@ describe("official MCP SDK reference server", () => {
           })
         }
       })
-    }).pipe(Effect.provide(services)))
+    }).pipe(Effect.provide(services))
+  )
 
   it.live("is identified through a real SDK handshake", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const endpoint = yield* referenceMcpServer
 
       const probe = yield* Effect.flatMap(McpClient, (host) => host.probe(endpoint))
@@ -41,5 +43,6 @@ describe("official MCP SDK reference server", () => {
       expect(probe.connected).toBe(true)
       expect(probe.serverName).toBe("official-sdk-reference")
       expect(probe.era).toBe("modern")
-    }).pipe(Effect.provide(services)))
+    }).pipe(Effect.provide(services))
+  )
 })

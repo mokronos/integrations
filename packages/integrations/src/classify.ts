@@ -6,14 +6,9 @@ import { McpClient } from "./mcp/client.ts"
 import { SpecCache } from "./openapi/cache.ts"
 
 const hostNameOf = (url: string): string =>
-  Option.getOrElse(
-    Option.liftThrowable(() => serviceName(new URL(url).hostname))(),
-    () => url
-  )
+  Option.getOrElse(Option.liftThrowable(() => serviceName(new URL(url).hostname))(), () => url)
 
-const asMcp = (
-  url: string
-): Effect.Effect<EndpointClassification, DetectionError, McpClient> =>
+const asMcp = (url: string): Effect.Effect<EndpointClassification, DetectionError, McpClient> =>
   Effect.gen(function* () {
     const mcp = yield* McpClient
     const probe = yield* mcp.probe(url)
@@ -25,13 +20,9 @@ const asMcp = (
       probe
     }
     return classified
-  }).pipe(
-    Effect.mapError((cause) => new DetectionError({ url, detail: cause.detail }))
-  )
+  }).pipe(Effect.mapError((cause) => new DetectionError({ url, detail: cause.detail })))
 
-const asOpenApi = (
-  url: string
-): Effect.Effect<EndpointClassification, DetectionError, SpecCache> =>
+const asOpenApi = (url: string): Effect.Effect<EndpointClassification, DetectionError, SpecCache> =>
   Effect.gen(function* () {
     const specs = yield* SpecCache
     const spec = yield* specs.compileUrl(url)
@@ -43,9 +34,7 @@ const asOpenApi = (
       slug: Option.getOrElse(slugify(name), () => "api")
     }
     return classified
-  }).pipe(
-    Effect.mapError((cause) => new DetectionError({ url, detail: cause.detail }))
-  )
+  }).pipe(Effect.mapError((cause) => new DetectionError({ url, detail: cause.detail })))
 
 export const classify = Effect.fn("Discovery.classify")(function* (url: string) {
   const mcp = yield* Effect.result(asMcp(url))
@@ -56,7 +45,7 @@ export const classify = Effect.fn("Discovery.classify")(function* (url: string) 
 
   return yield* new DetectionError({
     url,
-    detail: `it is not an MCP endpoint (${mcp.failure.detail}) `
-      + `and not an OpenAPI document (${openapi.failure.detail})`
+    detail:
+      `it is not an MCP endpoint (${mcp.failure.detail}) ` + `and not an OpenAPI document (${openapi.failure.detail})`
   })
 })

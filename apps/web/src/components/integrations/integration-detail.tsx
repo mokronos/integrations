@@ -18,72 +18,51 @@ import { Item, ItemActions, ItemContent, ItemDescription, ItemMedia, ItemTitle }
 import { pluralise, when } from "@/lib/format"
 import * as gateway from "@/lib/gateway"
 import { keys, useInvalidate, useMutation } from "@/lib/queries"
-import {
-  type Connection,
-  type IntegrationOverview,
-  type Tool
-} from "@integragents/contracts"
+import { type Connection, type IntegrationOverview, type Tool } from "@integragents/contracts"
 import { cn } from "@/lib/utils"
-import { ConnectDialog } from "./connect-dialog"
+import { ConnectDialog, ReauthorizeDialog, reauthorizationMethod } from "./connect-dialog"
 import { ConnectionBadge } from "./connection-badge"
 import { ConnectionIdentity } from "./connection-identity"
 import { IntegrationIcon, integrationHost } from "./integration-icon"
 const isConnected = (integration: IntegrationOverview): boolean =>
   integration.connections.some((connection) => connection.status === "connected")
 
-const connectionAuthLabel = (
-  integration: IntegrationOverview,
-  connection: Connection
-): string => integration.authMethods.find((method) => method.template === connection.template)?.label
-  ?? `Unavailable method (${connection.template})`
+const connectionAuthLabel = (integration: IntegrationOverview, connection: Connection): string =>
+  integration.authMethods.find((method) => method.template === connection.template)?.label ??
+  `Unavailable method (${connection.template})`
 function ToolCard({ tool }: { readonly tool: Tool }) {
   const [open, setOpen] = useState(false)
   return (
     <div className="min-w-0 rounded-lg border">
       <Item
-        render={
-          <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} />
-        }
+        render={<button type="button" aria-expanded={open} onClick={() => setOpen(!open)} />}
         className="cursor-pointer select-none hover:bg-muted"
       >
         <ItemMedia>
-            <ChevronRight
-              aria-hidden
-              className={cn("size-4 transition-transform", open && "rotate-90")}
-            />
-          </ItemMedia>
-          <ItemContent>
-            <ItemTitle>
-              <span className="min-w-0 truncate">{tool.name}</span>
-              <Badge variant="outline" className="shrink-0">{tool.connection}</Badge>
-            </ItemTitle>
-            {tool.description.length === 0
-              ? null
-              : <ItemDescription className="truncate">{tool.description}</ItemDescription>}
-          </ItemContent>
+          <ChevronRight aria-hidden className={cn("size-4 transition-transform", open && "rotate-90")} />
+        </ItemMedia>
+        <ItemContent>
+          <ItemTitle>
+            <span className="min-w-0 truncate">{tool.name}</span>
+            <Badge variant="outline" className="shrink-0">
+              {tool.connection}
+            </Badge>
+          </ItemTitle>
+          {tool.description.length === 0 ? null : (
+            <ItemDescription className="truncate">{tool.description}</ItemDescription>
+          )}
+        </ItemContent>
       </Item>
 
-      {open
-        ? (
-          <div className="space-y-3 border-t p-3">
-            {tool.description.length === 0
-              ? null
-              : <p className="text-muted-foreground text-sm">{tool.description}</p>}
-            <div className="grid min-w-0 gap-2 xl:grid-cols-2">
-              <SchemaView
-                schema={tool.inputSchema}
-                definitions={tool.schemaDefinitions}
-                label="input"
-              />
-              <SchemaView
-                schema={tool.outputSchema}
-                definitions={tool.schemaDefinitions}
-                label="output"
-              />
-            </div>
+      {open ? (
+        <div className="space-y-3 border-t p-3">
+          {tool.description.length === 0 ? null : <p className="text-muted-foreground text-sm">{tool.description}</p>}
+          <div className="grid min-w-0 gap-2 xl:grid-cols-2">
+            <SchemaView schema={tool.inputSchema} definitions={tool.schemaDefinitions} label="input" />
+            <SchemaView schema={tool.outputSchema} definitions={tool.schemaDefinitions} label="output" />
           </div>
-        )
-        : null}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -96,14 +75,14 @@ function RemoveIntegration({ integration }: { readonly integration: IntegrationO
     onSuccess: (result) => {
       invalidate(keys.integrations, keys.connections, keys.overview)
       toast.success(`${integration.name} removed`, {
-        description: result.connections.length === 0
-          ? undefined
-          : `${pluralise(result.connections.length, "connection")} removed with it.`
+        description:
+          result.connections.length === 0
+            ? undefined
+            : `${pluralise(result.connections.length, "connection")} removed with it.`
       })
       void navigate("/integrations")
     },
-    onError: (error: Error) =>
-      toast.error("Could not remove the integration", { description: error.message })
+    onError: (error: Error) => toast.error("Could not remove the integration", { description: error.message })
   })
 
   return (
@@ -116,21 +95,19 @@ function RemoveIntegration({ integration }: { readonly integration: IntegrationO
       pending={remove.isPending}
       onConfirm={() => remove.mutateAsync().then(() => undefined)}
     >
-      {integration.connections.length === 0
-        ? null
-        : (
-          <div className="space-y-1 text-sm">
-            <p>
-              {pluralise(integration.connections.length, "connection")} goes with it,
-              along with the stored credentials and every policy rule naming them:
-            </p>
-            <ul className="text-muted-foreground list-inside list-disc font-mono text-xs">
-              {integration.connections.map((connection) => (
-                <li key={connection.address}>{connection.name}</li>
-              ))}
-            </ul>
-          </div>
-        )}
+      {integration.connections.length === 0 ? null : (
+        <div className="space-y-1 text-sm">
+          <p>
+            {pluralise(integration.connections.length, "connection")} goes with it, along with the stored credentials
+            and every policy rule naming them:
+          </p>
+          <ul className="text-muted-foreground list-inside list-disc font-mono text-xs">
+            {integration.connections.map((connection) => (
+              <li key={connection.address}>{connection.name}</li>
+            ))}
+          </ul>
+        </div>
+      )}
     </ConfirmButton>
   )
 }
@@ -152,39 +129,52 @@ function IntegrationName({ integration }: { readonly integration: IntegrationOve
   )
 }
 
-function ConnectionRow({ integration, connection, onDisconnect, disconnecting }: {
+function ConnectionRow({
+  integration,
+  connection,
+  onDisconnect,
+  disconnecting
+}: {
   readonly integration: IntegrationOverview
   readonly connection: Connection
   readonly onDisconnect: () => Promise<void>
   readonly disconnecting: boolean
 }) {
+  const reauthorize = reauthorizationMethod(integration, connection)
   return (
     <li className="min-w-0">
       <Item variant="outline" size="sm">
         <ItemContent>
           <ItemTitle>
-            <ConnectionIdentity connection={connectionRefOf(connection.owner, connection.integration, connection.name)} integration={integration} showIntegration={false} />
+            <ConnectionIdentity
+              connection={connectionRefOf(connection.owner, connection.integration, connection.name)}
+              integration={integration}
+              showIntegration={false}
+            />
             <Badge variant={connection.status === "connected" ? "default" : "destructive"}>
               {connection.status === "connected" ? "connected" : "reauthorization required"}
             </Badge>
           </ItemTitle>
           <ItemDescription className="flex flex-wrap items-center gap-2">
-            {connection.expiresAt === undefined || connection.expiresAt === null
-              ? null
-              : <span>expires {when(new Date(connection.expiresAt))}</span>}
+            {connection.expiresAt === undefined || connection.expiresAt === null ? null : (
+              <span>expires {when(new Date(connection.expiresAt))}</span>
+            )}
             <span>via {connectionAuthLabel(integration, connection)}</span>
           </ItemDescription>
-          {connection.oauthScope === undefined || connection.oauthScope === null
-            ? null
-            : <ItemDescription>OAuth scopes: {connection.oauthScope}</ItemDescription>}
-          {connection.missingOAuthScopes === undefined || connection.missingOAuthScopes.length === 0
-            ? null
-            : <ItemDescription className="text-destructive">Missing scopes: {connection.missingOAuthScopes.join(", ")}</ItemDescription>}
-          {connection.error === undefined ? null : (
-            <p className="text-destructive mt-1 text-xs">{connection.error}</p>
+          {connection.oauthScope === undefined || connection.oauthScope === null ? null : (
+            <ItemDescription>OAuth scopes: {connection.oauthScope}</ItemDescription>
           )}
+          {connection.missingOAuthScopes === undefined || connection.missingOAuthScopes.length === 0 ? null : (
+            <ItemDescription className="text-destructive">
+              Missing scopes: {connection.missingOAuthScopes.join(", ")}
+            </ItemDescription>
+          )}
+          {connection.error === undefined ? null : <p className="text-destructive mt-1 text-xs">{connection.error}</p>}
         </ItemContent>
         <ItemActions>
+          {reauthorize === undefined ? null : (
+            <ReauthorizeDialog integration={integration} connection={connection} method={reauthorize} />
+          )}
           <ConfirmButton
             label="Disconnect"
             title={`Disconnect ${connection.identityLabel ?? connection.name}?`}
@@ -254,30 +244,34 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
               <RemoveIntegration integration={integration} />
             </div>
           </div>
-          {integration.description.length === 0
-            ? null
-            : <p className="text-muted-foreground text-sm">{integration.description}</p>}
+          {integration.description.length === 0 ? null : (
+            <p className="text-muted-foreground text-sm">{integration.description}</p>
+          )}
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <p className="text-xs font-medium uppercase tracking-wide">Connections</p>
-            {integration.connections.length === 0
-              ? <p className="text-muted-foreground text-sm">Not connected yet. Connect an account to use its tools.</p>
-              : (
-                <ul className="space-y-2">
-                  {integration.connections.map((connection) => (
-                    <ConnectionRow
-                      key={connection.address}
-                      integration={integration}
-                      connection={connection}
-                      onDisconnect={() => disconnect.mutateAsync(connection).then(() => undefined)}
-                      disconnecting={disconnect.isPending}
-                    />
-                  ))}
-                </ul>
-              )}
+            {integration.connections.length === 0 ? (
+              <p className="text-muted-foreground text-sm">Not connected yet. Connect an account to use its tools.</p>
+            ) : (
+              <ul className="space-y-2">
+                {integration.connections.map((connection) => (
+                  <ConnectionRow
+                    key={connection.address}
+                    integration={integration}
+                    connection={connection}
+                    onDisconnect={() => disconnect.mutateAsync(connection).then(() => undefined)}
+                    disconnecting={disconnect.isPending}
+                  />
+                ))}
+              </ul>
+            )}
             {disconnect.error === null ? null : (
-              <OperationError title="Disconnect failed" step="Removing the stored connection" error={disconnect.error} />
+              <OperationError
+                title="Disconnect failed"
+                step="Removing the stored connection"
+                error={disconnect.error}
+              />
             )}
           </div>
 
@@ -290,7 +284,9 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
               <dl className="grid gap-3 text-sm sm:grid-cols-3">
                 <div className="min-w-0">
                   <dt className="text-muted-foreground text-xs uppercase">Slug</dt>
-                  <dd><code className="break-all font-mono">{integration.slug}</code></dd>
+                  <dd>
+                    <code className="break-all font-mono">{integration.slug}</code>
+                  </dd>
                 </div>
                 <div className="min-w-0">
                   <dt className="text-muted-foreground text-xs uppercase">Kind</dt>
@@ -312,13 +308,15 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
                   <ExternalLink className="size-3 shrink-0" />
                 </a>
               )}
-              {integration.authMethods.length === 0
-                ? <p className="text-destructive text-sm">No supported authentication option was discovered.</p>
-                : (
-                  <div className="grid gap-2 xl:grid-cols-2">
-                    {integration.authMethods.map((method) => <AuthMethodDetails key={method.id} method={method} />)}
-                  </div>
-                )}
+              {integration.authMethods.length === 0 ? (
+                <p className="text-destructive text-sm">No supported authentication option was discovered.</p>
+              ) : (
+                <div className="grid gap-2 xl:grid-cols-2">
+                  {integration.authMethods.map((method) => (
+                    <AuthMethodDetails key={method.id} method={method} />
+                  ))}
+                </div>
+              )}
             </div>
           </details>
         </CardContent>
@@ -344,22 +342,24 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
             <Alert variant="destructive">
               <AlertTitle>Could not refresh tools</AlertTitle>
               <AlertDescription>
-                <p><span className="font-medium">Stopped at:</span> Reading tools from the live endpoint</p>
+                <p>
+                  <span className="font-medium">Stopped at:</span> Reading tools from the live endpoint
+                </p>
                 <p>{integration.toolError}</p>
               </AlertDescription>
             </Alert>
           )}
-          {integration.tools.length === 0
-            ? (
-              <p className="text-muted-foreground text-sm">
-                {isConnected(integration)
-                  ? "This connection exposes no callable tools."
-                  : "Connect it to see what it exposes."}
-              </p>
-            )
-            : tools.length === 0
-              ? <p className="text-muted-foreground text-sm">Nothing matches that filter.</p>
-              : tools.map((tool) => <ToolCard key={tool.address} tool={tool} />)}
+          {integration.tools.length === 0 ? (
+            <p className="text-muted-foreground text-sm">
+              {isConnected(integration)
+                ? "This connection exposes no callable tools."
+                : "Connect it to see what it exposes."}
+            </p>
+          ) : tools.length === 0 ? (
+            <p className="text-muted-foreground text-sm">Nothing matches that filter.</p>
+          ) : (
+            tools.map((tool) => <ToolCard key={tool.address} tool={tool} />)
+          )}
         </CardContent>
       </Card>
     </div>

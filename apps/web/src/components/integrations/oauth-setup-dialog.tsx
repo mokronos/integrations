@@ -66,83 +66,76 @@ export function OAuthSetupDialog() {
   if (sessionId === undefined) return null
 
   return (
-    <Dialog open onOpenChange={(next) => next ? undefined : close()}>
+    <Dialog open onOpenChange={(next) => (next ? undefined : close())}>
       <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>
             Register an OAuth application{integration === undefined ? "" : ` for ${integration.name}`}
           </DialogTitle>
           <DialogDescription>
-            An agent asked to connect this integration and stopped here. The
-            provider needs an OAuth application that only you can create, so the
-            client secret is typed here and goes straight to the gateway.
+            An agent asked to connect this integration and stopped here. The provider needs an OAuth application that
+            only you can create, so the client secret is typed here and goes straight to the gateway.
           </DialogDescription>
         </DialogHeader>
 
-        {session.error !== null
-          ? (
-            <OperationError
-              title="That setup link is not usable"
-              step="Reading the OAuth session"
-              error={session.error}
+        {session.error !== null ? (
+          <OperationError
+            title="That setup link is not usable"
+            step="Reading the OAuth session"
+            error={session.error}
+          />
+        ) : state === undefined ? (
+          <p className="text-muted-foreground text-sm">Loading the pending connection…</p>
+        ) : state.status === "connected" ? (
+          <Alert>
+            <Check />
+            <AlertTitle>Connected</AlertTitle>
+            <AlertDescription>
+              {integration?.name ?? session.data?.integration} is authorized. The waiting agent has been told.
+            </AlertDescription>
+          </Alert>
+        ) : state.status === "failed" ? (
+          <OperationError
+            title="Authorization failed"
+            step="Provider authorization and token exchange"
+            error={new Error(state.message)}
+          />
+        ) : state.status === "pending" ? (
+          <AwaitingAuthorization
+            description="The application was saved. Finish the provider's consent page."
+            authorizationUrl={state.authorizationUrl}
+          />
+        ) : (
+          <div className="space-y-4">
+            {method === undefined ? null : <OAuthSetupPanel method={method} callbackUrl={callbackUrl} />}
+            <OAuthClientFields
+              idPrefix="setup"
+              clientId={clientId}
+              clientSecret={clientSecret}
+              onClientIdChange={setClientId}
+              onClientSecretChange={setClientSecret}
             />
-          )
-          : state === undefined
-          ? <p className="text-muted-foreground text-sm">Loading the pending connection…</p>
-          : state.status === "connected"
-          ? (
-            <Alert>
-              <Check />
-              <AlertTitle>Connected</AlertTitle>
-              <AlertDescription>
-                {integration?.name ?? session.data?.integration} is authorized. The
-                waiting agent has been told.
-              </AlertDescription>
-            </Alert>
-          )
-          : state.status === "failed"
-          ? (
-            <OperationError
-              title="Authorization failed"
-              step="Provider authorization and token exchange"
-              error={new Error(state.message)}
-            />
-          )
-          : state.status === "pending"
-          ? <AwaitingAuthorization description="The application was saved. Finish the provider's consent page." authorizationUrl={state.authorizationUrl} />
-          : (
-            <div className="space-y-4">
-              {method === undefined
-                ? null
-                : <OAuthSetupPanel method={method} callbackUrl={callbackUrl} />}
-              <OAuthClientFields
-                idPrefix="setup"
-                clientId={clientId}
-                clientSecret={clientSecret}
-                onClientIdChange={setClientId}
-                onClientSecretChange={setClientSecret}
+            {submit.error === null ? null : (
+              <OperationError
+                title="The provider rejected that application"
+                step="Saving the OAuth client and starting authorization"
+                error={submit.error}
               />
-              {submit.error === null ? null : (
-                <OperationError
-                  title="The provider rejected that application"
-                  step="Saving the OAuth client and starting authorization"
-                  error={submit.error}
-                />
-              )}
-            </div>
-          )}
+            )}
+          </div>
+        )}
 
         <DialogFooter>
-          {state?.status === "needs-client"
-            ? (
-              <Button
-                onClick={() => submit.mutate(sessionId)}
-                disabled={submit.isPending || clientId.trim().length === 0}
-              >
-                {submit.isPending ? "Saving…" : "Save and authorize"}
-              </Button>
-            )
-            : <Button onClick={close}>Done</Button>}
+          {state?.status === "needs-client" ? (
+            <Button
+              onClick={() => submit.mutate(sessionId)}
+              disabled={submit.isPending || clientId.trim().length === 0}
+            >
+              {submit.isPending ? "Saving…" : "Save and authorize"}
+            </Button>
+          ) : (
+            <Button onClick={close}>Done</Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

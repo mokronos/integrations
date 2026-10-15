@@ -27,9 +27,8 @@ export const dropGoogleSystemParameters = (
   context: AdaptationContext
 ): ReadonlyArray<OperationInput> =>
   context.servers.some(isGoogleApi)
-    ? inputs.filter((input) =>
-      input.kind === "body" ||
-      input.parameter.location !== "query" ||
-      !systemParameters.has(input.parameter.name)
-    )
+    ? inputs.filter(
+        (input) =>
+          input.kind === "body" || input.parameter.location !== "query" || !systemParameters.has(input.parameter.name)
+      )
     : inputs

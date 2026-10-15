@@ -1,20 +1,63 @@
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import type { NonNegativeInt, PositiveInt } from "@integragents/contracts"
 import type {
-  Alias, ApiKey, ApiKeyHash,
-  ApiKeyId, ApprovalGroupWindowMinutes, ApprovalMethod, ApprovalDeliveryAttempt, ApprovalDeliveryId, McpSurface,
-  ApprovalDestination, ApprovalDestinationId, ApprovalId,
-  ApprovalRule, ApprovalRuleId, ApprovalStatus, ArgumentPattern, AuditApproval, AuditId, AuditOutcome, AuditRecord,
-  AuthSession, Caller, ConnectionName, ConnectionRef,
-  ExternalIdentity, IdentityProvider, IntegrationSlug, Login, LoginHandoff,
-  LoginHandoffHash, PendingApproval, Profile, ProfileCapability, ProfileId, ProfileTool, ProfileToolInput,
-  SessionTokenHash, Subject, SubjectId, Tenant, TenantId, ToolDecision, ToolName, ToolSnapshot,
-  OAuthApplicationId, OAuthGrantId, OAuthGrantView
+  Alias,
+  ApiKey,
+  ApiKeyHash,
+  ApiKeyId,
+  ApprovalGroupWindowMinutes,
+  ApprovalMethod,
+  ApprovalDeliveryAttempt,
+  ApprovalDeliveryId,
+  McpSurface,
+  ApprovalDestination,
+  ApprovalDestinationId,
+  ApprovalId,
+  ApprovalRule,
+  ApprovalRuleId,
+  ApprovalStatus,
+  ArgumentPattern,
+  AuditApproval,
+  AuditId,
+  AuditOutcome,
+  AuditRecord,
+  AuthSession,
+  Caller,
+  ConnectionName,
+  ConnectionRef,
+  ExternalIdentity,
+  IdentityProvider,
+  IntegrationSlug,
+  Login,
+  LoginHandoff,
+  LoginHandoffHash,
+  PendingApproval,
+  Profile,
+  ProfileCapability,
+  ProfileId,
+  ProfileTool,
+  ProfileToolInput,
+  SessionTokenHash,
+  Subject,
+  SubjectId,
+  Tenant,
+  TenantId,
+  ToolDecision,
+  ToolName,
+  ToolSnapshot,
+  OAuthApplicationId,
+  OAuthGrantId,
+  OAuthGrantView
 } from "./domain.ts"
 import type { PasswordHash } from "./passwords.ts"
 import type {
-  OAuthActor, OAuthApplication, OAuthAuthorizationCode, OAuthAuthorizationRequest,
-  OAuthGrant, OAuthSecretHash, OAuthToken
+  OAuthActor,
+  OAuthApplication,
+  OAuthAuthorizationCode,
+  OAuthAuthorizationRequest,
+  OAuthGrant,
+  OAuthSecretHash,
+  OAuthToken
 } from "./mcp-oauth.ts"
 
 export interface CreateTenantInput {
@@ -126,6 +169,10 @@ export interface GatewayOverviewCounts {
  * runs on a SqlClient, so there is no promise boundary to lift over.
  */
 export interface GatewayStore {
+  /** Seals state that travels through a caller and must come back unread and unaltered. */
+  sealState(text: string): Effect.Effect<string>
+  /** What `sealState` sealed; nothing for any other text, including a tampered seal. */
+  openState(token: string): Effect.Effect<Option.Option<string>>
 
   createTenant(input?: CreateTenantInput): Effect.Effect<Tenant, GatewayStoreError>
   listTenants(): Effect.Effect<ReadonlyArray<Tenant>, GatewayStoreError>
@@ -150,7 +197,10 @@ export interface GatewayStore {
   changeLoginPassword(subjectId: SubjectId, passwordHash: string): Effect.Effect<void, GatewayStoreError>
   deleteSubject(subjectId: SubjectId): Effect.Effect<void, GatewayStoreError>
   deleteTenant(id: TenantId): Effect.Effect<void, GatewayStoreError>
-  revokeSubjectSessions(subjectId: SubjectId, exceptTokenHash?: SessionTokenHash): Effect.Effect<number, GatewayStoreError>
+  revokeSubjectSessions(
+    subjectId: SubjectId,
+    exceptTokenHash?: SessionTokenHash
+  ): Effect.Effect<number, GatewayStoreError>
 
   createSession(input: {
     readonly tokenHash: SessionTokenHash
@@ -199,11 +249,18 @@ export interface GatewayStore {
   overviewCounts(tenantId: TenantId): Effect.Effect<GatewayOverviewCounts, GatewayStoreError>
   findProfileById(tenantId: TenantId, id: ProfileId): Effect.Effect<Profile | undefined, GatewayStoreError>
   findProfileByName(tenantId: TenantId, name: string): Effect.Effect<Profile | undefined, GatewayStoreError>
-  updateProfileSettings(tenantId: TenantId, id: ProfileId, settings: ProfileSettings): Effect.Effect<Profile, GatewayStoreError>
+  updateProfileSettings(
+    tenantId: TenantId,
+    id: ProfileId,
+    settings: ProfileSettings
+  ): Effect.Effect<Profile, GatewayStoreError>
   renameProfile(tenantId: TenantId, id: ProfileId, name: string): Effect.Effect<Profile, GatewayStoreError>
   revokeProfile(tenantId: TenantId, id: ProfileId): Effect.Effect<void, GatewayStoreError>
   listProfileTools(id: ProfileId): Effect.Effect<ReadonlyArray<ProfileTool>, GatewayStoreError>
-  replaceProfileTools(id: ProfileId, tools: ReadonlyArray<ProfileToolInput>): Effect.Effect<ReadonlyArray<ProfileTool>, GatewayStoreError>
+  replaceProfileTools(
+    id: ProfileId,
+    tools: ReadonlyArray<ProfileToolInput>
+  ): Effect.Effect<ReadonlyArray<ProfileTool>, GatewayStoreError>
 
   createApprovalDestination(input: {
     readonly id: ApprovalDestinationId
@@ -214,10 +271,22 @@ export interface GatewayStore {
   }): Effect.Effect<ApprovalDestination, GatewayStoreError>
   listApprovalDestinations(tenantId: TenantId): Effect.Effect<ReadonlyArray<ApprovalDestination>, GatewayStoreError>
   deleteApprovalDestination(tenantId: TenantId, id: ApprovalDestinationId): Effect.Effect<void, GatewayStoreError>
-  listProfileApprovalDestinationIds(profileId: ProfileId): Effect.Effect<ReadonlyArray<ApprovalDestinationId>, GatewayStoreError>
-  replaceProfileApprovalDestinations(tenantId: TenantId, profileId: ProfileId, ids: ReadonlyArray<ApprovalDestinationId>): Effect.Effect<ReadonlyArray<ApprovalDestinationId>, GatewayStoreError>
-  listApprovalDeliveries(tenantId: TenantId, status?: ApprovalStatus): Effect.Effect<ReadonlyArray<ApprovalDeliveryAttempt>, GatewayStoreError>
-  claimDueApprovalDeliveries(now: Date, limit: number): Effect.Effect<ReadonlyArray<ApprovalDeliveryJob>, GatewayStoreError>
+  listProfileApprovalDestinationIds(
+    profileId: ProfileId
+  ): Effect.Effect<ReadonlyArray<ApprovalDestinationId>, GatewayStoreError>
+  replaceProfileApprovalDestinations(
+    tenantId: TenantId,
+    profileId: ProfileId,
+    ids: ReadonlyArray<ApprovalDestinationId>
+  ): Effect.Effect<ReadonlyArray<ApprovalDestinationId>, GatewayStoreError>
+  listApprovalDeliveries(
+    tenantId: TenantId,
+    status?: ApprovalStatus
+  ): Effect.Effect<ReadonlyArray<ApprovalDeliveryAttempt>, GatewayStoreError>
+  claimDueApprovalDeliveries(
+    now: Date,
+    limit: number
+  ): Effect.Effect<ReadonlyArray<ApprovalDeliveryJob>, GatewayStoreError>
   settleApprovalDelivery(input: {
     readonly id: ApprovalDeliveryId
     readonly status: "delivered" | "retrying" | "failed"
@@ -225,9 +294,16 @@ export interface GatewayStore {
     readonly error: string | null
   }): Effect.Effect<void, GatewayStoreError>
 
-  addApiKey(input: { readonly id: ApiKeyId; readonly profileId: ProfileId; readonly name: string; readonly hash: ApiKeyHash }): Effect.Effect<ApiKey, GatewayStoreError>
+  addApiKey(input: {
+    readonly id: ApiKeyId
+    readonly profileId: ProfileId
+    readonly name: string
+    readonly hash: ApiKeyHash
+  }): Effect.Effect<ApiKey, GatewayStoreError>
   listApiKeys(profileId: ProfileId): Effect.Effect<ReadonlyArray<ApiKey>, GatewayStoreError>
-  findApiKeyByHash(hash: ApiKeyHash): Effect.Effect<{ readonly key: ApiKey; readonly profile: Profile } | undefined, GatewayStoreError>
+  findApiKeyByHash(
+    hash: ApiKeyHash
+  ): Effect.Effect<{ readonly key: ApiKey; readonly profile: Profile } | undefined, GatewayStoreError>
   touchApiKey(id: ApiKeyId): Effect.Effect<void, GatewayStoreError>
   revokeApiKey(id: ApiKeyId): Effect.Effect<void, GatewayStoreError>
 
@@ -241,7 +317,9 @@ export interface GatewayStore {
   }): Effect.Effect<OAuthApplication, GatewayStoreError>
   findOAuthApplication(clientIdentifier: string): Effect.Effect<OAuthApplication | undefined, GatewayStoreError>
   findOAuthApplicationById(id: OAuthApplicationId): Effect.Effect<OAuthApplication | undefined, GatewayStoreError>
-  createOAuthAuthorizationRequest(input: Omit<OAuthAuthorizationRequest, "createdAt" | "consumedAt">): Effect.Effect<OAuthAuthorizationRequest, GatewayStoreError>
+  createOAuthAuthorizationRequest(
+    input: Omit<OAuthAuthorizationRequest, "createdAt" | "consumedAt">
+  ): Effect.Effect<OAuthAuthorizationRequest, GatewayStoreError>
   getOAuthAuthorizationRequest(id: string): Effect.Effect<OAuthAuthorizationRequest | undefined, GatewayStoreError>
   consumeOAuthAuthorizationRequest(id: string): Effect.Effect<OAuthAuthorizationRequest | undefined, GatewayStoreError>
   findOrCreateOAuthGrant(input: {
@@ -255,9 +333,15 @@ export interface GatewayStore {
   }): Effect.Effect<OAuthGrant, GatewayStoreError>
   listOAuthGrants(tenantId: TenantId): Effect.Effect<ReadonlyArray<OAuthGrantView>, GatewayStoreError>
   revokeOAuthGrant(tenantId: TenantId, id: OAuthGrantId): Effect.Effect<boolean, GatewayStoreError>
-  createOAuthAuthorizationCode(input: Omit<OAuthAuthorizationCode, "createdAt" | "consumedAt">): Effect.Effect<void, GatewayStoreError>
-  consumeOAuthAuthorizationCode(hash: OAuthSecretHash): Effect.Effect<OAuthAuthorizationCode | undefined, GatewayStoreError>
-  createOAuthTokens(tokens: ReadonlyArray<Omit<OAuthToken, "createdAt" | "usedAt" | "revokedAt" | "replacedByHash">>): Effect.Effect<void, GatewayStoreError>
+  createOAuthAuthorizationCode(
+    input: Omit<OAuthAuthorizationCode, "createdAt" | "consumedAt">
+  ): Effect.Effect<void, GatewayStoreError>
+  consumeOAuthAuthorizationCode(
+    hash: OAuthSecretHash
+  ): Effect.Effect<OAuthAuthorizationCode | undefined, GatewayStoreError>
+  createOAuthTokens(
+    tokens: ReadonlyArray<Omit<OAuthToken, "createdAt" | "usedAt" | "revokedAt" | "replacedByHash">>
+  ): Effect.Effect<void, GatewayStoreError>
   rotateOAuthRefreshToken(input: {
     readonly hash: OAuthSecretHash
     readonly applicationId: OAuthApplicationId
@@ -267,15 +351,16 @@ export interface GatewayStore {
     readonly accessExpiresAt: Date
     readonly refreshExpiresAt: Date
   }): Effect.Effect<OAuthToken | "reused" | undefined, GatewayStoreError>
-  resolveOAuthAccessToken(input: {
-    readonly hash: OAuthSecretHash
-    readonly resource: string
-  }): Effect.Effect<{
-    readonly profile: Profile
-    readonly actor: OAuthActor
-    readonly expiresAt: Date
-    readonly scope: "mcp"
-  } | undefined, GatewayStoreError>
+  resolveOAuthAccessToken(input: { readonly hash: OAuthSecretHash; readonly resource: string }): Effect.Effect<
+    | {
+        readonly profile: Profile
+        readonly actor: OAuthActor
+        readonly expiresAt: Date
+        readonly scope: "mcp"
+      }
+    | undefined,
+    GatewayStoreError
+  >
 
   createApprovalRule(input: {
     readonly id: ApprovalRuleId
@@ -292,10 +377,13 @@ export interface GatewayStore {
 
   createApproval(input: CreateApprovalInput): Effect.Effect<PendingApproval, GatewayStoreError>
   getApproval(tenantId: TenantId, id: ApprovalId): Effect.Effect<PendingApproval | undefined, GatewayStoreError>
-  listApprovals(tenantId: TenantId, status?: ApprovalStatus): Effect.Effect<ReadonlyArray<PendingApproval>, GatewayStoreError>
-  findUncollectedApproval(input: Pick<CreateApprovalInput,
-    "tenantId" | "profileId" | "alias" | "tool" | "arguments"
-  >): Effect.Effect<PendingApproval | undefined, GatewayStoreError>
+  listApprovals(
+    tenantId: TenantId,
+    status?: ApprovalStatus
+  ): Effect.Effect<ReadonlyArray<PendingApproval>, GatewayStoreError>
+  findUncollectedApproval(
+    input: Pick<CreateApprovalInput, "tenantId" | "profileId" | "alias" | "tool" | "arguments">
+  ): Effect.Effect<PendingApproval | undefined, GatewayStoreError>
   collectApproval(tenantId: TenantId, id: ApprovalId): Effect.Effect<boolean, GatewayStoreError>
   claimApproval(input: {
     readonly tenantId: TenantId
@@ -314,7 +402,10 @@ export interface GatewayStore {
 
   recordAudit(input: RecordAuditInput): Effect.Effect<void, GatewayStoreError>
   listAudit(tenantId: TenantId, options: AuditQuery): Effect.Effect<ReadonlyArray<AuditRecord>, GatewayStoreError>
-  countAudit(tenantId: TenantId, options: Omit<AuditQuery, "limit" | "offset">): Effect.Effect<number, GatewayStoreError>
+  countAudit(
+    tenantId: TenantId,
+    options: Omit<AuditQuery, "limit" | "offset">
+  ): Effect.Effect<number, GatewayStoreError>
   expireAuditArguments(now: Date): Effect.Effect<number, GatewayStoreError>
 
   putToolSnapshots(tenantId: TenantId, snapshots: ReadonlyArray<ToolSnapshot>): Effect.Effect<void, GatewayStoreError>
@@ -336,21 +427,14 @@ export interface GatewayStore {
   close(): Effect.Effect<void, GatewayStoreError>
 }
 
-export const GatewayStoreFailureKind = Schema.Literals([
-  "driver",
-  "malformed-row",
-  "constraint"
-])
+export const GatewayStoreFailureKind = Schema.Literals(["driver", "malformed-row", "constraint"])
 export type GatewayStoreFailureKind = typeof GatewayStoreFailureKind.Type
 
-export class GatewayStoreError extends Schema.TaggedError<GatewayStoreError>()(
-  "GatewayStoreError",
-  {
-    operation: Schema.String,
-    kind: GatewayStoreFailureKind,
-    cause: Schema.Defect()
-  }
-) {
+export class GatewayStoreError extends Schema.TaggedError<GatewayStoreError>()("GatewayStoreError", {
+  operation: Schema.String,
+  kind: GatewayStoreFailureKind,
+  cause: Schema.Defect()
+}) {
   override get message(): string {
     return `${this.operation} failed (${this.kind})`
   }

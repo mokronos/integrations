@@ -9,8 +9,7 @@ export class IntegrationsCliError extends Data.TaggedError("IntegrationsCliError
   readonly message: string
 }> {}
 
-export const cliError = (message: string): IntegrationsCliError =>
-  new IntegrationsCliError({ message })
+export const cliError = (message: string): IntegrationsCliError => new IntegrationsCliError({ message })
 
 // The gateway routes spell their human-readable text `error`, not `message`,
 // so an Error carrying one reads as empty until it is asked for by name.
@@ -33,16 +32,14 @@ export const describeError = (error: unknown): string => {
   return explains(error) ? error.error : String(error)
 }
 
-export const connectToGateway = Effect.fn("Cli.connectToGateway")(function*(): Effect.fn.Return<
+export const connectToGateway = Effect.fn("Cli.connectToGateway")(function* (): Effect.fn.Return<
   GatewayClient,
   IntegrationsCliError,
   HttpClient.HttpClient
 > {
   const connection = yield* Effect.promise(() => resolveClientConnection())
   if (connection === undefined) {
-    return yield* cliError(
-      "No integrations service found. Set INTEGRATIONS_URL and INTEGRATIONS_API_KEY."
-    )
+    return yield* cliError("No integrations service found. Set INTEGRATIONS_URL and INTEGRATIONS_API_KEY.")
   }
   return yield* makeGatewayClient(connection)
 })
@@ -52,22 +49,25 @@ export const connectToGateway = Effect.fn("Cli.connectToGateway")(function*(): E
  * none we know how to ask, is not a reason to fail the command — the URL was
  * printed either way.
  */
-export const openBrowser = (
-  url: string
-): Effect.Effect<void, never, ChildProcessSpawner.ChildProcessSpawner> => {
-  const [program, ...arguments_] = process.platform === "darwin"
-    ? ["open", url]
-    : process.platform === "win32"
-      ? ["cmd", "/c", "start", "", url]
-      : ["xdg-open", url]
-  return Effect.flatMap(
-    ChildProcessSpawner.ChildProcessSpawner,
-    (spawner) =>
-      Effect.asVoid(Effect.forkDetach(Effect.ignore(
-        spawner.exitCode(ChildProcess.make(program ?? "xdg-open", arguments_, {
-          stdout: "ignore",
-          stderr: "ignore"
-        }))
-      )))
+export const openBrowser = (url: string): Effect.Effect<void, never, ChildProcessSpawner.ChildProcessSpawner> => {
+  const [program, ...arguments_] =
+    process.platform === "darwin"
+      ? ["open", url]
+      : process.platform === "win32"
+        ? ["cmd", "/c", "start", "", url]
+        : ["xdg-open", url]
+  return Effect.flatMap(ChildProcessSpawner.ChildProcessSpawner, (spawner) =>
+    Effect.asVoid(
+      Effect.forkDetach(
+        Effect.ignore(
+          spawner.exitCode(
+            ChildProcess.make(program ?? "xdg-open", arguments_, {
+              stdout: "ignore",
+              stderr: "ignore"
+            })
+          )
+        )
+      )
+    )
   )
 }

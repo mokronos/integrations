@@ -1,7 +1,12 @@
 import { CopyButton, copyButtonOverlay } from "@/components/ui/copy-button"
 import { cn } from "@/lib/utils"
 
-export function CopyField({ value, label, multiline = false, className }: {
+export function CopyField({
+  value,
+  label,
+  multiline = false,
+  className
+}: {
   readonly value: string
   readonly label: string
   readonly multiline?: boolean

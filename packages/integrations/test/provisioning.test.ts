@@ -25,9 +25,7 @@ const classification: EndpointClassification = {
   }
 }
 
-const installed = (
-  overrides: Omit<Partial<Integration>, "slug"> & { readonly slug: string }
-): Integration => ({
+const installed = (overrides: Omit<Partial<Integration>, "slug"> & { readonly slug: string }): Integration => ({
   name: overrides.slug,
   description: "",
   kind: "mcp",
@@ -43,8 +41,7 @@ const integrationsWith = (options: {
   readonly existing?: Integration
   readonly added: Array<{ readonly slug: string; readonly name: string }>
 }): Context.Context<Integrations> => {
-  const dies = (member: string) => () =>
-    Effect.die(new Error(`${member} is not used by these tests`))
+  const dies = (member: string) => () => Effect.die(new Error(`${member} is not used by these tests`))
   return Context.make(Integrations, {
     listIntegrations: dies("listIntegrations"),
     findIntegration: (slug) => {
@@ -58,13 +55,17 @@ const integrationsWith = (options: {
       options.added.push({ slug: input.slug, name: input.name ?? input.slug })
       return Effect.succeed(input.slug)
     },
-    addOpenApi: () => Effect.fail(new SpecError({
-      source: classification.endpoint,
-      detail: "not an OpenAPI document"
-    })),
+    addOpenApi: () =>
+      Effect.fail(
+        new SpecError({
+          source: classification.endpoint,
+          detail: "not an OpenAPI document"
+        })
+      ),
     renameIntegration: dies("renameIntegration"),
     removeIntegration: dies("removeIntegration"),
     createConnection: dies("createConnection"),
+    savedOAuthClientId: dies("savedOAuthClientId"),
     listConnections: () => Effect.succeed([]),
     removeConnection: dies("removeConnection"),
     refreshConnection: dies("refreshConnection"),
@@ -76,62 +77,57 @@ const integrationsWith = (options: {
   })
 }
 
-const install = (
-  classified: typeof classification,
-  host: Context.Context<Integrations>
-) => Effect.exit(installClassified(classified).pipe(Effect.provide(host)))
+const install = (classified: typeof classification, host: Context.Context<Integrations>) =>
+  Effect.exit(installClassified(classified).pipe(Effect.provide(host)))
 
 describe("provisioning a discovered URL", () => {
   it.effect("installs under the name and slug the caller chose", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const added: Array<{ readonly slug: string; readonly name: string }> = []
-      const exit = yield* install(
-        { ...classification, slug: "gmail", name: "Gmail" },
-        integrationsWith({ added })
-      )
+      const exit = yield* install({ ...classification, slug: "gmail", name: "Gmail" }, integrationsWith({ added }))
 
       expect(added).toEqual([{ slug: "gmail", name: "Gmail" }])
       expect(Exit.isSuccess(exit) && String(exit.value.slug)).toBe("gmail")
-    }))
+    })
+  )
 
   it.effect("falls back to what the endpoint said it was", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const added: Array<{ readonly slug: string; readonly name: string }> = []
       yield* install(classification, integrationsWith({ added }))
 
       expect(added).toEqual([{ slug: "gmailmcp", name: "Gmailmcp" }])
-    }))
+    })
+  )
 
   it.effect("is idempotent for the URL already installed under that slug", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const added: Array<{ readonly slug: string; readonly name: string }> = []
       const existing = installed({ slug: "gmailmcp", name: "Gmail" })
       const exit = yield* install(classification, integrationsWith({ existing, added }))
 
       expect(added).toEqual([])
       expect(Exit.isSuccess(exit) && exit.value.name).toBe("Gmail")
-    }))
+    })
+  )
 
   it.effect("refuses a name already taken by a different endpoint", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const added: Array<{ readonly slug: string; readonly name: string }> = []
       const existing = installed({
         slug: "gmail",
         name: "Gmail",
         displayUrl: "https://mail.example.com/mcp"
       })
-      const exit = yield* install(
-        { ...classification, slug: "gmail" },
-        integrationsWith({ existing, added })
-      )
+      const exit = yield* install({ ...classification, slug: "gmail" }, integrationsWith({ existing, added }))
 
       expect(Exit.isFailure(exit)).toBe(true)
       if (Exit.isFailure(exit)) {
         const failure = Cause.findError(exit.cause)
         expect(Result.isSuccess(failure) && failure.success._tag).toBe("InvalidInputError")
-        expect(Result.isSuccess(failure) && failure.success.message)
-          .toContain("https://mail.example.com/mcp")
+        expect(Result.isSuccess(failure) && failure.success.message).toContain("https://mail.example.com/mcp")
       }
       expect(added).toEqual([])
-    }))
+    })
+  )
 })

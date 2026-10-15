@@ -38,16 +38,16 @@ const entriesOf = (value: Json): ReadonlyArray<readonly [string, Json]> =>
 
 const delimiter = (style: string): string => {
   switch (style) {
-    case "spaceDelimited": return " "
-    case "pipeDelimited": return "|"
-    default: return ","
+    case "spaceDelimited":
+      return " "
+    case "pipeDelimited":
+      return "|"
+    default:
+      return ","
   }
 }
 
-const queryPairs = (
-  parameter: CallParameter,
-  value: Json
-): ReadonlyArray<readonly [string, string]> => {
+const queryPairs = (parameter: CallParameter, value: Json): ReadonlyArray<readonly [string, string]> => {
   const { name, style, explode } = parameter
 
   if (Array.isArray(value)) {
@@ -64,10 +64,7 @@ const queryPairs = (
     if (explode) {
       return entries.map(([key, entry]) => [key, scalar(entry)] as const)
     }
-    return [[
-      name,
-      entries.flatMap(([key, entry]) => [key, scalar(entry)]).join(",")
-    ] as const]
+    return [[name, entries.flatMap(([key, entry]) => [key, scalar(entry)]).join(",")] as const]
   }
 
   return [[name, scalar(value)] as const]
@@ -93,15 +90,12 @@ const pathSegment = (parameter: CallParameter, value: Json): string => {
   if (isJsonObject(value)) {
     const entries = entriesOf(value)
     const flat = entries.flatMap(([key, entry]) => [key, scalar(entry)]).map(encodeURIComponent)
-    const exploded = entries
-      .map(([key, entry]) => `${encodeURIComponent(key)}=${encode(entry)}`)
+    const exploded = entries.map(([key, entry]) => `${encodeURIComponent(key)}=${encode(entry)}`)
     switch (parameter.style) {
       case "label":
         return parameter.explode ? `.${exploded.join(".")}` : `.${flat.join(",")}`
       case "matrix":
-        return parameter.explode
-          ? `;${exploded.join(";")}`
-          : `;${parameter.name}=${flat.join(",")}`
+        return parameter.explode ? `;${exploded.join(";")}` : `;${parameter.name}=${flat.join(",")}`
       default:
         return parameter.explode ? exploded.join(",") : flat.join(",")
     }
@@ -109,9 +103,12 @@ const pathSegment = (parameter: CallParameter, value: Json): string => {
 
   const single = encode(value)
   switch (parameter.style) {
-    case "label": return `.${single}`
-    case "matrix": return `;${parameter.name}=${single}`
-    default: return single
+    case "label":
+      return `.${single}`
+    case "matrix":
+      return `;${parameter.name}=${single}`
+    default:
+      return single
   }
 }
 
@@ -119,10 +116,7 @@ const jsonContentType = /^application\/(?:[\w.+-]+\+)?json\b/i
 
 const decodeBlobRef = Schema.decodeUnknownOption(BlobRef)
 
-const encodeBody = (
-  call: HttpCall,
-  body: Json
-): Option.Option<RequestBody> => {
+const encodeBody = (call: HttpCall, body: Json): Option.Option<RequestBody> => {
   const referenced = decodeBlobRef(body)
   if (Option.isSome(referenced)) {
     return Option.some({ kind: "blob", id: referenced.value[blobHandleKey] })
@@ -155,9 +149,7 @@ export const buildRequest = (options: BuildRequestOptions): BuiltRequest => {
   const base = options.server.replace(/\/+$/, "")
 
   const path = call.path.replace(/\{([^{}]+)\}/g, (whole, name: string) => {
-    const parameter = call.parameters.find((candidate) =>
-      candidate.location === "path" && candidate.name === name
-    )
+    const parameter = call.parameters.find((candidate) => candidate.location === "path" && candidate.name === name)
     const value = parameter === undefined ? undefined : options.parameters[parameter.argument]
     if (parameter === undefined || value === undefined) return whole
     return pathSegment(parameter, value)
@@ -178,9 +170,7 @@ export const buildRequest = (options: BuildRequestOptions): BuiltRequest => {
         }
         break
       case "header":
-        headers[parameter.name] = Array.isArray(value)
-          ? value.map(scalar).join(",")
-          : scalar(value)
+        headers[parameter.name] = Array.isArray(value) ? value.map(scalar).join(",") : scalar(value)
         break
       case "cookie":
         headers["cookie"] = [headers["cookie"], `${parameter.name}=${scalar(value)}`]

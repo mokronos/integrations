@@ -58,11 +58,16 @@ export class BlobStore extends Context.Service<
   }
 >()("@integragents/host/BlobStore") {
   static readonly fileLayer = (directory: string): Layer.Layer<BlobStore> =>
-    Layer.effect(BlobStore, Effect.sync(() => fileBlobStore(path.join(directory, "blobs"))))
+    Layer.effect(
+      BlobStore,
+      Effect.sync(() => fileBlobStore(path.join(directory, "blobs")))
+    )
 
   /** Blobs in the host's database, for hosts without a durable disk. */
-  static readonly sqlLayer: Layer.Layer<BlobStore, never, SqlClient.SqlClient> =
-    Layer.effect(BlobStore, Effect.map(SqlClient.SqlClient, sqlBlobStore))
+  static readonly sqlLayer: Layer.Layer<BlobStore, never, SqlClient.SqlClient> = Layer.effect(
+    BlobStore,
+    Effect.map(SqlClient.SqlClient, sqlBlobStore)
+  )
 
   static readonly temporaryLayer: Layer.Layer<BlobStore> = Layer.effect(
     BlobStore,
@@ -105,7 +110,7 @@ const fileBlobStore = (directory: string): BlobStore["Service"] => {
 
   return {
     write: (descriptor, content) =>
-      Effect.gen(function*() {
+      Effect.gen(function* () {
         const id = BlobId.make(randomBytes(16).toString("hex"))
         yield* Effect.try({
           try: () => mkdirSync(directory, { recursive: true, mode: 0o700 }),
@@ -125,11 +130,14 @@ const fileBlobStore = (directory: string): BlobStore["Service"] => {
                   : Effect.fail(storageFailure(`Could not write blob ${id}`)(error))
               )
             )
-          })).pipe(
-            Effect.ensuring(Effect.callback<void>((resume) => {
+          })
+        ).pipe(
+          Effect.ensuring(
+            Effect.callback<void>((resume) => {
               handle.end(() => resume(Effect.void))
-            }))
+            })
           )
+        )
         const stored: StoredBlob = {
           id,
           bytes,
@@ -188,9 +196,9 @@ const fileBlobStore = (directory: string): BlobStore["Service"] => {
         try: () =>
           existsSync(directory)
             ? readdirSync(directory)
-              .filter((name) => name.endsWith(".json"))
-              .map((name) => BlobId.make(name.slice(0, -".json".length)))
-              .filter((id) => statSync(metadataPath(id)).mtimeMs < before.getTime())
+                .filter((name) => name.endsWith(".json"))
+                .map((name) => BlobId.make(name.slice(0, -".json".length)))
+                .filter((id) => statSync(metadataPath(id)).mtimeMs < before.getTime())
             : [],
         catch: storageFailure(`Could not list blobs in ${directory}`)
       }).pipe(

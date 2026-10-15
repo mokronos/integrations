@@ -14,11 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.3.14
-      - run: bun install --frozen-lockfile
-      - run: bun run typecheck
+      - uses: ./.github/actions/setup
+      - run: bun run check
       - run: bun run test
       - run: bun run build
       - run: bun run build:control-plane
@@ -29,3 +26,35 @@ jobs:
           ln -s "${{ runner.temp }}/integrations" "${{ runner.temp }}/ii"
           "${{ runner.temp }}/i" --help >/dev/null
           "${{ runner.temp }}/ii" --help >/dev/null
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v3
+      - id: bun
+        run: echo "version=$(cat .bun-version)" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          build-args: BUN_VERSION=${{ steps.bun.outputs.version }}
+          tags: integrations:ci
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke-test image
+        run: |
+          set -euo pipefail
+          docker run -d --name gateway -p 4788:4788 \
+            -e INTEGRATIONS_MASTER_KEY="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')" \
+            integrations:ci
+          trap 'docker logs gateway; docker rm -f gateway >/dev/null' EXIT
+          for _ in $(seq 60); do
+            status="$(docker inspect --format '{{.State.Health.Status}}' gateway)"
+            [ "$status" = healthy ] && break
+            [ "$status" = unhealthy ] && exit 1
+            sleep 1
+          done
+          [ "$status" = healthy ]
+          curl -fsS http://127.0.0.1:4788/v1/health

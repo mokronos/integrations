@@ -15,10 +15,9 @@ import {
   stopService
 } from "../apps/cli/src/service.ts"
 
-const run = <A, E>(effect: Effect.Effect<A, E, ChildProcessSpawner.ChildProcessSpawner | HttpClient.HttpClient>): Promise<A> =>
-  Effect.runPromise(effect.pipe(
-    Effect.provide(Layer.merge(FetchHttpClient.layer, BunServices.layer))
-  ))
+const run = <A, E>(
+  effect: Effect.Effect<A, E, ChildProcessSpawner.ChildProcessSpawner | HttpClient.HttpClient>
+): Promise<A> => Effect.runPromise(effect.pipe(Effect.provide(Layer.merge(FetchHttpClient.layer, BunServices.layer))))
 
 /**
  * What the gateway holds that only means something alongside its tables: the
@@ -26,7 +25,13 @@ const run = <A, E>(effect: Effect.Effect<A, E, ChildProcessSpawner.ChildProcessS
  * belongs to a client row. The master key stays, because it encrypts the data
  * rather than being any of it, and so do the logs and anything downloaded.
  */
-const discardedEntries = ["gateway.sqlite", "gateway.sqlite-wal", "gateway.sqlite-shm", "blobs", "gateway.json"] as const
+const discardedEntries = [
+  "gateway.sqlite",
+  "gateway.sqlite-wal",
+  "gateway.sqlite-shm",
+  "blobs",
+  "gateway.json"
+] as const
 
 export const usage = `Delete this machine's gateway database and start over.
 
@@ -54,7 +59,7 @@ const reset = async (argv: ReadonlyArray<string>): Promise<void> => {
     return
   }
   const home = integrationsHome()
-  if (!await confirmed(home, argv.includes("--yes") || argv.includes("-y"))) {
+  if (!(await confirmed(home, argv.includes("--yes") || argv.includes("-y")))) {
     process.exitCode = 1
     return
   }

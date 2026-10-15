@@ -31,20 +31,19 @@ const secretBytes = 32
 const randomBytes = (size: number): Effect.Effect<Uint8Array, never, Crypto.Crypto> =>
   Effect.flatMap(Crypto.Crypto, (crypto) => Effect.orDie(crypto.randomBytes(size)))
 
-const uuid: Effect.Effect<string, never, Crypto.Crypto> = Effect.flatMap(
-  Crypto.Crypto,
-  (crypto) => Effect.orDie(crypto.randomUUIDv4)
+const uuid: Effect.Effect<string, never, Crypto.Crypto> = Effect.flatMap(Crypto.Crypto, (crypto) =>
+  Effect.orDie(crypto.randomUUIDv4)
 )
 
 export const sha256Hex = (text: string): Effect.Effect<string, never, Crypto.Crypto> =>
-  Effect.flatMap(Crypto.Crypto, (crypto) =>
-    Effect.orDie(crypto.digest("SHA-256", utf8Bytes(text)))
-  ).pipe(Effect.map(Hex.encode))
+  Effect.flatMap(Crypto.Crypto, (crypto) => Effect.orDie(crypto.digest("SHA-256", utf8Bytes(text)))).pipe(
+    Effect.map(Hex.encode)
+  )
 
 export const sha256Base64Url = (text: string): Effect.Effect<string, never, Crypto.Crypto> =>
-  Effect.flatMap(Crypto.Crypto, (crypto) =>
-    Effect.orDie(crypto.digest("SHA-256", utf8Bytes(text)))
-  ).pipe(Effect.map(Base64Url.encode))
+  Effect.flatMap(Crypto.Crypto, (crypto) => Effect.orDie(crypto.digest("SHA-256", utf8Bytes(text)))).pipe(
+    Effect.map(Base64Url.encode)
+  )
 
 const prefixedSecret = (prefix: string): Effect.Effect<string, never, Crypto.Crypto> =>
   Effect.map(randomBytes(secretBytes), (bytes) => `${prefix}${Base64Url.encode(bytes)}`)
@@ -55,16 +54,14 @@ export interface IssuedApiKey {
   readonly hash: ApiKeyHash
 }
 
-export const generateApiKey: Effect.Effect<IssuedApiKey, never, Crypto.Crypto> = Effect.gen(
-  function*() {
-    const secret = yield* prefixedSecret(keyPrefix)
-    return {
-      id: ApiKeyId.make(yield* uuid),
-      secret,
-      hash: yield* hashApiKey(secret)
-    }
+export const generateApiKey: Effect.Effect<IssuedApiKey, never, Crypto.Crypto> = Effect.gen(function* () {
+  const secret = yield* prefixedSecret(keyPrefix)
+  return {
+    id: ApiKeyId.make(yield* uuid),
+    secret,
+    hash: yield* hashApiKey(secret)
   }
-)
+})
 
 export const hashApiKey = (secret: string): Effect.Effect<ApiKeyHash, never, Crypto.Crypto> =>
   Effect.map(sha256Hex(secret), ApiKeyHash.make)
@@ -74,59 +71,41 @@ export interface IssuedLoginHandoff {
   readonly hash: LoginHandoffHash
 }
 
-export const generateLoginHandoff: Effect.Effect<IssuedLoginHandoff, never, Crypto.Crypto> = Effect
-  .gen(function*() {
-    const secret = yield* prefixedSecret("igl_")
-    return { secret, hash: yield* hashLoginHandoff(secret) }
-  })
+export const generateLoginHandoff: Effect.Effect<IssuedLoginHandoff, never, Crypto.Crypto> = Effect.gen(function* () {
+  const secret = yield* prefixedSecret("igl_")
+  return { secret, hash: yield* hashLoginHandoff(secret) }
+})
 
-export const hashLoginHandoff = (
-  secret: string
-): Effect.Effect<LoginHandoffHash, never, Crypto.Crypto> =>
+export const hashLoginHandoff = (secret: string): Effect.Effect<LoginHandoffHash, never, Crypto.Crypto> =>
   Effect.map(sha256Hex(secret), LoginHandoffHash.make)
 
-export const generateApprovalSigningSecret: Effect.Effect<string, never, Crypto.Crypto> =
-  prefixedSecret("igs_")
+export const generateApprovalSigningSecret: Effect.Effect<string, never, Crypto.Crypto> = prefixedSecret("igs_")
 
 /** Session tokens carry the same prefix and entropy as approval secrets. */
 export const sessionSecret: Effect.Effect<string, never, Crypto.Crypto> = prefixedSecret("igs_")
 
-export const newProfileId: Effect.Effect<ProfileId, never, Crypto.Crypto> = Effect.map(
+export const newProfileId: Effect.Effect<ProfileId, never, Crypto.Crypto> = Effect.map(uuid, ProfileId.make)
+export const newApprovalRuleId: Effect.Effect<ApprovalRuleId, never, Crypto.Crypto> = Effect.map(
   uuid,
-  ProfileId.make
+  ApprovalRuleId.make
 )
-export const newApprovalRuleId: Effect.Effect<ApprovalRuleId, never, Crypto.Crypto> = Effect.map(uuid, ApprovalRuleId.make)
-export const newApprovalId: Effect.Effect<ApprovalId, never, Crypto.Crypto> = Effect.map(
+export const newApprovalId: Effect.Effect<ApprovalId, never, Crypto.Crypto> = Effect.map(uuid, ApprovalId.make)
+export const newApprovalDestinationId: Effect.Effect<ApprovalDestinationId, never, Crypto.Crypto> = Effect.map(
   uuid,
-  ApprovalId.make
+  ApprovalDestinationId.make
 )
-export const newApprovalDestinationId: Effect.Effect<
-  ApprovalDestinationId,
-  never,
-  Crypto.Crypto
-> = Effect.map(uuid, ApprovalDestinationId.make)
-export const newApprovalDeliveryId: Effect.Effect<ApprovalDeliveryId, never, Crypto.Crypto> = Effect
-  .map(uuid, ApprovalDeliveryId.make)
-export const newAuditId: Effect.Effect<AuditId, never, Crypto.Crypto> = Effect.map(
+export const newApprovalDeliveryId: Effect.Effect<ApprovalDeliveryId, never, Crypto.Crypto> = Effect.map(
   uuid,
-  AuditId.make
+  ApprovalDeliveryId.make
 )
-export const newTenantId: Effect.Effect<TenantId, never, Crypto.Crypto> = Effect.map(
-  uuid,
-  TenantId.make
-)
-export const newSubjectId: Effect.Effect<SubjectId, never, Crypto.Crypto> = Effect.map(
-  uuid,
-  SubjectId.make
-)
+export const newAuditId: Effect.Effect<AuditId, never, Crypto.Crypto> = Effect.map(uuid, AuditId.make)
+export const newTenantId: Effect.Effect<TenantId, never, Crypto.Crypto> = Effect.map(uuid, TenantId.make)
+export const newSubjectId: Effect.Effect<SubjectId, never, Crypto.Crypto> = Effect.map(uuid, SubjectId.make)
 export const newOAuthApplicationId: Effect.Effect<OAuthApplicationId, never, Crypto.Crypto> = Effect.map(
   uuid,
   OAuthApplicationId.make
 )
-export const newOAuthGrantId: Effect.Effect<OAuthGrantId, never, Crypto.Crypto> = Effect.map(
-  uuid,
-  OAuthGrantId.make
-)
+export const newOAuthGrantId: Effect.Effect<OAuthGrantId, never, Crypto.Crypto> = Effect.map(uuid, OAuthGrantId.make)
 export const newOAuthRequestId: Effect.Effect<string, never, Crypto.Crypto> = prefixedSecret("igor_")
 export const newOAuthAuthorizationCode: Effect.Effect<string, never, Crypto.Crypto> = prefixedSecret("igoc_")
 export const newOAuthAccessToken: Effect.Effect<string, never, Crypto.Crypto> = prefixedSecret("igoa_")

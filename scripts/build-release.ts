@@ -45,18 +45,17 @@ const repositoryDirectory = path.resolve(import.meta.dirname, "..")
 const webDirectory = path.join(repositoryDirectory, "apps", "web", "dist")
 
 const webAssetModule = async (): Promise<string> => {
-  const paths = (await Array.fromAsync(
-    new Bun.Glob("**/*").scan({ cwd: webDirectory, onlyFiles: true })
-  )).sort()
+  const paths = (await Array.fromAsync(new Bun.Glob("**/*").scan({ cwd: webDirectory, onlyFiles: true }))).sort()
   if (!paths.includes("index.html")) {
     throw new Error(`Built dashboard not found at ${webDirectory}`)
   }
 
-  const imports = paths.map((relativePath, index) =>
-    `import asset${index} from ${JSON.stringify(path.join(webDirectory, relativePath))} with { type: "file" }`
+  const imports = paths.map(
+    (relativePath, index) =>
+      `import asset${index} from ${JSON.stringify(path.join(webDirectory, relativePath))} with { type: "file" }`
   )
-  const records = paths.map((relativePath, index) =>
-    `  { path: ${JSON.stringify(relativePath)}, source: asset${index} }`
+  const records = paths.map(
+    (relativePath, index) => `  { path: ${JSON.stringify(relativePath)}, source: asset${index} }`
   )
   return `${imports.join("\n")}\n\nexport const embeddedWebAssets = [\n${records.join(",\n")}\n]\n`
 }
@@ -64,10 +63,12 @@ const webAssetModule = async (): Promise<string> => {
 const nativePackageFile = (packageName: string): string => {
   const directoryName = packageName.replace("/", "+")
   const pattern = `node_modules/.bun/${directoryName}@*/node_modules/${packageName}/index.node`
-  const matches = Array.from(new Bun.Glob(pattern).scanSync({
-    cwd: repositoryDirectory,
-    dot: true
-  }))
+  const matches = Array.from(
+    new Bun.Glob(pattern).scanSync({
+      cwd: repositoryDirectory,
+      dot: true
+    })
+  )
   const match = matches[0]
   if (match === undefined) {
     throw new Error(`${packageName} is not installed; run bun install --os '*' --cpu '*'`)
@@ -84,17 +85,14 @@ const releasePlugin = (target: typeof CompileTarget.Type): BunPlugin => {
         path: "embedded-web",
         namespace: "integrations-release"
       }))
-      build.onLoad(
-        { filter: /^embedded-web$/, namespace: "integrations-release" },
-        async () => ({ contents: await webAssetModule(), loader: "ts" })
-      )
+      build.onLoad({ filter: /^embedded-web$/, namespace: "integrations-release" }, async () => ({
+        contents: await webAssetModule(),
+        loader: "ts"
+      }))
       build.onLoad({ filter: /\/libsql\/index\.js$/ }, async (arguments_) => {
         const source = await Bun.file(arguments_.path).text()
         const dynamicRequire = "return require(`@libsql/${target}`);"
-        const specialized = source.replace(
-          dynamicRequire,
-          `return require(${JSON.stringify(nativePackage)});`
-        )
+        const specialized = source.replace(dynamicRequire, `return require(${JSON.stringify(nativePackage)});`)
         if (specialized === source) {
           throw new Error(`Could not specialize the native libSQL loader at ${arguments_.path}`)
         }

@@ -40,6 +40,16 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./native-egress": {
+      "development": "./src/egress/native.ts",
+      "bun": "./src/egress/native.ts",
+      "types": "./dist/egress/native.d.ts",
+      "default": "./dist/egress/native.js"
+    },
+    "./test-oauth-server": {
+      "development": "./test/support/oauth-server.ts",
+      "bun": "./test/support/oauth-server.ts"
+    },
     "./schema": {
       "development": "./src/db/schema.ts",
       "bun": "./src/db/schema.ts",
@@ -59,6 +69,8 @@
     "@modelcontextprotocol/client": "2.0.0",
     "@integragents/contracts": "workspace:^",
     "@integragents/observability": "workspace:^",
+    "ipaddr.js": "catalog:",
+    "oauth4webapi": "catalog:",
     "oas": "catalog:",
     "oas-normalize": "catalog:"
   },

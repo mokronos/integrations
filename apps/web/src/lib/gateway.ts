@@ -76,14 +76,15 @@ const asGatewayError = (failure: Error): GatewayError => {
   }
   return new GatewayError({
     message: messageOf(failure),
-    ...whenPresent("code", Predicate.hasProperty(failure, "code") && Predicate.isString(failure.code) ? failure.code : undefined)
+    ...whenPresent(
+      "code",
+      Predicate.hasProperty(failure, "code") && Predicate.isString(failure.code) ? failure.code : undefined
+    )
   })
 }
 
 const endpoints = Effect.runSync(
-  HttpApiClient.make(GatewayApi, { baseUrl: window.location.origin }).pipe(
-    Effect.provide(FetchHttpClient.layer)
-  )
+  HttpApiClient.make(GatewayApi, { baseUrl: window.location.origin }).pipe(Effect.provide(FetchHttpClient.layer))
 )
 
 const run = <A, E extends Error>(effect: Effect.Effect<A, E>): Promise<A> =>
@@ -104,7 +105,8 @@ export const followEvents = (onEvent: (event: GatewayEvent) => void): (() => voi
   const fiber = Effect.runFork(
     endpoints.administrative.events().pipe(
       Effect.flatMap((events) =>
-        Stream.runForEach(Stream.timeout(events, eventStreamStallAfter), (event) => Effect.sync(() => onEvent(event)))),
+        Stream.runForEach(Stream.timeout(events, eventStreamStallAfter), (event) => Effect.sync(() => onEvent(event)))
+      ),
       Effect.andThen(Effect.fail(new EventStreamStalled())),
       Effect.provideService(FetchHttpClient.RequestInit, { credentials: "same-origin" }),
       Effect.retry(Schedule.spaced(Duration.seconds(3)))
@@ -128,9 +130,11 @@ export const searchRegistry = async (input: {
   readonly kind?: IntegrationSearchKind
   readonly limit: number
 }) =>
-  await run(endpoints.provisioning.registrySearch({
-    query: { q: input.query, ...whenPresent("kind", input.kind), limit: PositiveInt.make(input.limit) }
-  }))
+  await run(
+    endpoints.provisioning.registrySearch({
+      query: { q: input.query, ...whenPresent("kind", input.kind), limit: PositiveInt.make(input.limit) }
+    })
+  )
 
 export const discoverIntegration = async (input: {
   readonly url: string
@@ -140,13 +144,14 @@ export const discoverIntegration = async (input: {
 }) => await run(endpoints.provisioning.discover({ payload: input }))
 
 export const renameIntegration = async (input: { readonly slug: string; readonly name: string }) =>
-  await run(endpoints.provisioning.renameIntegration({
-    params: { slug: input.slug },
-    payload: { name: input.name }
-  }))
+  await run(
+    endpoints.provisioning.renameIntegration({
+      params: { slug: input.slug },
+      payload: { name: input.name }
+    })
+  )
 
-export const listConnections = async () =>
-  (await run(endpoints.provisioning.listConnections())).connections
+export const listConnections = async () => (await run(endpoints.provisioning.listConnections())).connections
 
 export const createConnection = async (input: {
   readonly integration: string
@@ -163,8 +168,7 @@ export const startOAuth = async (input: {
   readonly clientSecret?: string
 }) => await run(endpoints.provisioning.startOAuth({ payload: input }))
 
-export const getOAuthSession = async (id: string) =>
-  await run(endpoints.provisioning.oauthSession({ params: { id } }))
+export const getOAuthSession = async (id: string) => await run(endpoints.provisioning.oauthSession({ params: { id } }))
 
 export const provideOAuthClient = async (
   id: string,
@@ -179,7 +183,11 @@ export const removeConnection = async (input: { readonly integration: string; re
 
 export const listProfiles = async () => {
   const response = await run(endpoints.administrative.listProfiles())
-  return { profiles: response.profiles, gatewayUrl: response.gatewayUrl ?? undefined, mcpUrl: response.mcpUrl ?? undefined }
+  return {
+    profiles: response.profiles,
+    gatewayUrl: response.gatewayUrl ?? undefined,
+    mcpUrl: response.mcpUrl ?? undefined
+  }
 }
 
 export const fetchOverview = async () => await run(endpoints.administrative.overview())
@@ -230,27 +238,27 @@ export const replaceProfileApprovalDestinations = async (
   id: ProfileId,
   destinationIds: ReadonlyArray<ApprovalDestinationId>
 ) =>
-  (await run(endpoints.administrative.replaceProfileApprovalDestinations({
-    params: { id },
-    payload: { destinationIds }
-  }))).destinationIds
+  (
+    await run(
+      endpoints.administrative.replaceProfileApprovalDestinations({
+        params: { id },
+        payload: { destinationIds }
+      })
+    )
+  ).destinationIds
 
 export const issueKey = async (id: ProfileId, name: string) =>
   await run(endpoints.administrative.issueKey({ params: { id }, payload: { name } }))
 
-export const listKeys = async (id: ProfileId) =>
-  (await run(endpoints.administrative.listKeys({ params: { id } }))).keys
+export const listKeys = async (id: ProfileId) => (await run(endpoints.administrative.listKeys({ params: { id } }))).keys
 
-export const revokeKey = async (id: ApiKeyId) =>
-  await run(endpoints.administrative.revokeKey({ params: { id } }))
+export const revokeKey = async (id: ApiKeyId) => await run(endpoints.administrative.revokeKey({ params: { id } }))
 
 export const revokeProfile = async (id: ProfileId) =>
   await run(endpoints.administrative.revokeProfile({ params: { id } }))
 
 export const listApprovals = async (status?: ApprovalStatus) =>
   (await run(endpoints.administrative.listApprovals({ query: whenPresent("status", status) }))).approvals
-
-
 
 export const decideApprovals = async (
   verdict: ApprovalVerdict,
@@ -275,17 +283,19 @@ export type AuditQuery = {
 }
 
 export const listAudit = async (input: AuditQuery) =>
-  await run(endpoints.administrative.audit({
-    query: {
-      limit: PositiveInt.make(input.limit),
-      offset: NonNegativeInt.make(input.offset),
-      ...whenPresent("profileId", input.profileId),
-      ...whenPresent("alias", input.alias === undefined ? undefined : Alias.make(input.alias)),
-      ...whenPresent("tool", input.tool),
-      ...whenPresent("outcome", input.outcome),
-      ...whenPresent("since", input.since === undefined ? undefined : new Date(input.since))
-    }
-  }))
+  await run(
+    endpoints.administrative.audit({
+      query: {
+        limit: PositiveInt.make(input.limit),
+        offset: NonNegativeInt.make(input.offset),
+        ...whenPresent("profileId", input.profileId),
+        ...whenPresent("alias", input.alias === undefined ? undefined : Alias.make(input.alias)),
+        ...whenPresent("tool", input.tool),
+        ...whenPresent("outcome", input.outcome),
+        ...whenPresent("since", input.since === undefined ? undefined : new Date(input.since))
+      }
+    })
+  )
 
 export const refreshDrift = async (integration?: string) =>
   (await run(endpoints.administrative.refreshDrift({ query: whenPresent("integration", integration) }))).reports
@@ -312,26 +322,25 @@ export const logOut = async () => await run(endpoints.auth.logout())
 export const changeEmail = async (input: { readonly email: string; readonly password: string }) =>
   (await run(endpoints.auth.changeEmail({ payload: input }))).email
 
-export const changePassword = async (input: {
-  readonly currentPassword?: string
-  readonly newPassword: string
-}) => (await run(endpoints.auth.changePassword({ payload: input }))).revokedSessions
+export const changePassword = async (input: { readonly currentPassword?: string; readonly newPassword: string }) =>
+  (await run(endpoints.auth.changePassword({ payload: input }))).revokedSessions
 
 export const deleteAccount = async (input: { readonly password?: string }) =>
   await run(endpoints.auth.deleteAccount({ payload: input }))
 
 export type OAuthConsent = Awaited<ReturnType<typeof getOAuthConsent>>
 
-export const getOAuthConsent = async (id: string) =>
-  await run(endpoints.oauth.consent({ query: { id } }))
+export const getOAuthConsent = async (id: string) => await run(endpoints.oauth.consent({ query: { id } }))
 
 export const decideOAuthConsent = async (id: string, decision: OAuthConsentDecision) =>
-  (await run(decision.decision === "deny"
-    ? endpoints.oauth.decideConsent({ query: { id }, payload: decision })
-    : endpoints.oauth.decideConsent({ query: { id }, payload: decision }))).redirect
+  (
+    await run(
+      decision.decision === "deny"
+        ? endpoints.oauth.decideConsent({ query: { id }, payload: decision })
+        : endpoints.oauth.decideConsent({ query: { id }, payload: decision })
+    )
+  ).redirect
 
-export const listOAuthGrants = async () =>
-  (await run(endpoints.oauth.listGrants())).grants
+export const listOAuthGrants = async () => (await run(endpoints.oauth.listGrants())).grants
 
-export const revokeOAuthGrant = async (id: OAuthGrantId) =>
-  await run(endpoints.oauth.revokeGrant({ params: { id } }))
+export const revokeOAuthGrant = async (id: OAuthGrantId) => await run(endpoints.oauth.revokeGrant({ params: { id } }))

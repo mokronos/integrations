@@ -50,5 +50,8 @@
     "@integragents/gateway-core": "workspace:^",
     "@integragents/client": "workspace:^",
     "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@integragents/host": "workspace:^"
   }
 }

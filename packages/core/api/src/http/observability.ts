@@ -9,10 +9,7 @@ export interface CaptureContext {
 }
 
 export interface ErrorSink {
-  readonly captureException: (
-    cause: Cause.Cause<unknown>,
-    context: CaptureContext
-  ) => Effect.Effect<void>
+  readonly captureException: (cause: Cause.Cause<unknown>, context: CaptureContext) => Effect.Effect<void>
 }
 
 /** The trace this request runs in, which is what an operator looks the failure up by. */
@@ -31,9 +28,7 @@ const loggingCapture: ErrorSink = {
     )
 }
 
-export class ErrorCapture extends Context.Service<ErrorCapture, ErrorSink>()(
-  "@integragents/gateway-api/ErrorCapture"
-) {
+export class ErrorCapture extends Context.Service<ErrorCapture, ErrorSink>()("@integragents/gateway-api/ErrorCapture") {
   static readonly logging: Layer.Layer<ErrorCapture> = Layer.succeed(ErrorCapture, loggingCapture)
 
   static readonly noop: Layer.Layer<ErrorCapture> = Layer.succeed(ErrorCapture, {
@@ -58,17 +53,14 @@ export const capture = <A, E, R>(
   effect: Effect.Effect<A, E | GatewayStoreError | StorageError | PasswordError | OAuthSessionError, R>
 ) =>
   effect.pipe(
-    Effect.catchTag(
-      ["GatewayStoreError", "StorageError", "PasswordError", "OAuthSessionError"],
-      (error) =>
-        Effect.flatMap(resolveCapture, (sink) => {
-        const operation = error instanceof GatewayStoreError
-          || error instanceof PasswordError
-          || error instanceof OAuthSessionError
-          ? error.operation
-          : error instanceof StorageError
-          ? error.message
-          : "unknown"
+    Effect.catchTag(["GatewayStoreError", "StorageError", "PasswordError", "OAuthSessionError"], (error) =>
+      Effect.flatMap(resolveCapture, (sink) => {
+        const operation =
+          error instanceof GatewayStoreError || error instanceof PasswordError || error instanceof OAuthSessionError
+            ? error.operation
+            : error instanceof StorageError
+              ? error.message
+              : "unknown"
         const kind = error instanceof GatewayStoreError ? error.kind : undefined
         return sink.captureException(Cause.fail(error), { operation, ...whenPresent("kind", kind) }).pipe(
           Effect.andThen(currentTraceId),
@@ -83,7 +75,5 @@ export const traceIdFor = (cause: Cause.Cause<unknown>): Effect.Effect<string> =
   if (Result.isSuccess(defect) && defect.success instanceof CapturedFailure) {
     return Effect.succeed(defect.success.traceId)
   }
-  return Effect.flatMap(resolveCapture, (sink) => sink.captureException(cause, {})).pipe(
-    Effect.andThen(currentTraceId)
-  )
+  return Effect.flatMap(resolveCapture, (sink) => sink.captureException(cause, {})).pipe(Effect.andThen(currentTraceId))
 }

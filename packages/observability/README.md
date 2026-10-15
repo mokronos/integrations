@@ -8,12 +8,12 @@ Tracing and logging for the gateway and the CLIs.
 
 ## Where things land
 
-| What | Where |
-| --- | --- |
-| Gateway spans (`ii serve`, detached or installed) | `$INTEGRATIONS_HOME/logs/gateway.trace.ndjson` |
-| CLI spans (`i`, `ii`) | `$INTEGRATIONS_HOME/logs/cli.trace.ndjson` |
+| What                                                      | Where                                                                                             |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Gateway spans (`ii serve`, detached or installed)         | `$INTEGRATIONS_HOME/logs/gateway.trace.ndjson`                                                    |
+| CLI spans (`i`, `ii`)                                     | `$INTEGRATIONS_HOME/logs/cli.trace.ndjson`                                                        |
 | Gateway console output of a detached or installed gateway | `$INTEGRATIONS_HOME/logs/integrations.log` (info), `integrations.error.log` (warnings and errors) |
-| Cloudflare (`apps/host-cloudflare`) | Workers Logs, plus OTLP when `OTEL_*` is set at deploy |
+| Cloudflare (`apps/host-cloudflare`)                       | Workers Logs, plus OTLP when `OTEL_*` is set at deploy                                            |
 
 `$INTEGRATIONS_HOME` defaults to `~/.integrations`.
 
@@ -62,14 +62,14 @@ jq -c 'select(.name == "Invocation.settle") | .attributes' gateway.trace.ndjson 
 
 ## Configuration
 
-| Variable | Effect |
-| --- | --- |
-| `INTEGRATIONS_LOG_LEVEL` | Minimum level for console logs and span events (`Debug`, `Info` (default), `Warn`, `Error`, …) |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | Base URL of an OTLP/HTTP collector; `/v1/traces`, `/v1/logs`, `/v1/metrics` are appended |
-| `OTEL_TRACES_EXPORTER`, `OTEL_LOGS_EXPORTER`, `OTEL_METRICS_EXPORTER` | Must include `otlp` for that signal to be exported |
-| `OTEL_EXPORTER_OTLP_HEADERS` | Headers for the collector, e.g. `authorization=Bearer%20…` |
-| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` (default) or `http/json` |
-| `OTEL_SDK_DISABLED` | `true` turns OTLP export off |
+| Variable                                                              | Effect                                                                                         |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `INTEGRATIONS_LOG_LEVEL`                                              | Minimum level for console logs and span events (`Debug`, `Info` (default), `Warn`, `Error`, …) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`                                         | Base URL of an OTLP/HTTP collector; `/v1/traces`, `/v1/logs`, `/v1/metrics` are appended       |
+| `OTEL_TRACES_EXPORTER`, `OTEL_LOGS_EXPORTER`, `OTEL_METRICS_EXPORTER` | Must include `otlp` for that signal to be exported                                             |
+| `OTEL_EXPORTER_OTLP_HEADERS`                                          | Headers for the collector, e.g. `authorization=Bearer%20…`                                     |
+| `OTEL_EXPORTER_OTLP_PROTOCOL`                                         | `http/protobuf` (default) or `http/json`                                                       |
+| `OTEL_SDK_DISABLED`                                                   | `true` turns OTLP export off                                                                   |
 
 `ii install` copies these variables from the installing shell into the systemd unit or launchd plist. After changing them, run `ii install` again.
 
@@ -89,7 +89,7 @@ Grafana is then at <http://localhost:3000>: Tempo has the traces and Loki the lo
 
 - **Name spans `Service.method`**, e.g. `Invocation.settle` or `GatewayStore.listClients`, with `Effect.fn("Service.method")`. HTTP spans are named by Effect (`http.server POST`, `http.client GET`).
 - **Put spans at boundaries**, not around every helper. Boundaries here are API and MCP entry points, store calls, upstream calls, and CLI commands.
-- **Attach identifiers as attributes** with `Effect.annotateCurrentSpan`, using dotted keys such as `client.id`, `tool.alias`, `connection.integration` and `invocation.outcome`. Never attach secrets or argument values.
+- **Attach identifiers as attributes** with `Effect.annotateCurrentSpan`, using dotted keys such as `profile.id`, `tool.alias`, `connection.integration` and `invocation.outcome`. Never attach secrets or argument values. Attributes under `http.`, `url.`, `server.`, `client.`, `user_agent.` and `network.` are dropped unless allowlisted in `src/span-attributes.ts`, so the full URL, query string, and headers never leave the process.
 - **Log with `Effect.logInfo` / `logWarning` / `logError` inside the span it belongs to**, so the log reaches the trace file. Put the error's tag in `Effect.annotateLogs({ "error.tag": … })`.
 
 ## Using it

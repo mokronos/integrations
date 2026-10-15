@@ -6,13 +6,7 @@ import { Argument, Command, Flag } from "effect/cli"
 import type { IntegrationsCliError } from "../connection.ts"
 import { cliError, connectToGateway, describeError, openBrowser } from "../connection.ts"
 import type { Page, Window } from "../output.ts"
-import {
-  jsonOutput,
-  page,
-  pageFields,
-  withNext,
-  writeStdoutLine
-} from "../output.ts"
+import { jsonOutput, page, pageFields, withNext, writeStdoutLine } from "../output.ts"
 
 const verboseFlag = () =>
   Flag.Boolean("verbose").pipe(
@@ -22,10 +16,7 @@ const verboseFlag = () =>
   )
 
 const limitFlag = () =>
-  Flag.Int("limit").pipe(
-    Flag.optional,
-    Flag.withDescription("Return at most this many rows (default: all of them)")
-  )
+  Flag.Int("limit").pipe(Flag.optional, Flag.withDescription("Return at most this many rows (default: all of them)"))
 
 const offsetFlag = () =>
   Flag.Int("offset").pipe(
@@ -39,10 +30,7 @@ const connectionFlag = () =>
     Flag.withDescription("Connection name (default: default)")
   )
 
-const window = (
-  limit: Option.Option<number>,
-  offset: Option.Option<number>
-): Window => ({
+const window = (limit: Option.Option<number>, offset: Option.Option<number>): Window => ({
   limit: Option.getOrUndefined(limit),
   offset: Option.getOrUndefined(offset)
 })
@@ -66,12 +54,10 @@ const record = <A>(value: A | undefined): Record<string, typeof Schema.Json.Type
 const array = <A>(value: A | undefined): ReadonlyArray<Record<string, typeof Schema.Json.Type>> =>
   Option.getOrElse(Schema.decodeUnknownOption(JsonArray)(value), () => []).map(record)
 
-const text = (value: Schema.Json | undefined): string => value === undefined || value === null ? "" : String(value)
+const text = (value: Schema.Json | undefined): string => (value === undefined || value === null ? "" : String(value))
 
-const sortedBy = <A>(
-  items: ReadonlyArray<A>,
-  key: (item: A) => string
-): ReadonlyArray<A> => [...items].sort((left, right) => key(left).localeCompare(key(right)))
+const sortedBy = <A>(items: ReadonlyArray<A>, key: (item: A) => string): ReadonlyArray<A> =>
+  [...items].sort((left, right) => key(left).localeCompare(key(right)))
 
 const listing = <A>(
   result: Page<A>,
@@ -85,14 +71,19 @@ const listing = <A>(
     readonly extra?: Record<string, typeof Schema.Json.Type>
   }
 ): Effect.Effect<void> =>
-  writeStdoutLine(jsonOutput(
-    withNext({
-      ...options.extra,
-      [options.key]: result.items.map(options.row),
-      ...pageFields(result, options.narrowing)
-    }, options.next),
-    options.verbose
-  ))
+  writeStdoutLine(
+    jsonOutput(
+      withNext(
+        {
+          ...options.extra,
+          [options.key]: result.items.map(options.row),
+          ...pageFields(result, options.narrowing)
+        },
+        options.next
+      ),
+      options.verbose
+    )
+  )
 
 const environmentValue = (name: string): string => {
   const value = process.env[name]
@@ -105,197 +96,206 @@ const credentialValues = (
   credentialValuesFlag: string | undefined
 ): Record<string, string> => {
   if (credentialValuesFlag !== undefined) {
-    return Object.fromEntries(credentialValuesFlag.split(",").map((pair) => {
-      const [variable, name] = pair.split("=")
-      if (variable === undefined || name === undefined) {
-        throw cliError(`--credential-values expects VARIABLE=ENV_NAME pairs, got "${pair}"`)
-      }
-      return [variable.trim(), environmentValue(name.trim())]
-    }))
+    return Object.fromEntries(
+      credentialValuesFlag.split(",").map((pair) => {
+        const [variable, name] = pair.split("=")
+        if (variable === undefined || name === undefined) {
+          throw cliError(`--credential-values expects VARIABLE=ENV_NAME pairs, got "${pair}"`)
+        }
+        return [variable.trim(), environmentValue(name.trim())]
+      })
+    )
   }
   return credentialEnv === undefined ? {} : { token: environmentValue(credentialEnv) }
 }
 
-export const connectCommand = (runGateway: GatewayTask) => Command.make(
-  "connect",
-  {
-    integration: Argument.String("integration"),
-    connection: connectionFlag(),
-    template: Flag.String("template").pipe(Flag.optional),
-    credentialEnv: Flag.String("credential-env").pipe(
-      Flag.optional,
-      Flag.withDescription("Environment variable containing an API key or bearer token")
-    ),
-    credentialValues: Flag.String("credential-values").pipe(
-      Flag.optional,
-      Flag.withDescription("Comma-separated VARIABLE=ENV_NAME mappings for multi-value auth")
-    ),
-    clientId: Flag.String("client-id").pipe(Flag.optional),
-    clientSecretEnv: Flag.String("client-secret-env").pipe(Flag.optional),
-    noOpen: Flag.Boolean("no-open").pipe(Flag.withDefault(false)),
-    timeout: Flag.Int("timeout").pipe(Flag.withDefault(300)),
-    setupTimeout: Flag.Int("setup-timeout").pipe(
-      Flag.withDefault(1800),
-      Flag.withDescription(
-        "Seconds to wait for a human to register an OAuth client in the dashboard"
-      )
-    ),
-    verbose: verboseFlag()
-  },
-  (options) =>
-    runGateway((client) => Effect.gen(function*() {
-      const catalog = yield* client.provisioning.listIntegrations()
-      const integration = array(catalog["integrations"]).find((candidate) =>
-        text(candidate["slug"]) === options.integration
-      )
-      if (integration === undefined) {
-        return yield* cliError(
-          `Unknown integration ${options.integration}. Run: i discover <url>`
-        )
-      }
-      const methods = array(integration["authMethods"])
-      const template = Option.getOrUndefined(options.template)
-      const credentialsOffered = Option.isSome(options.credentialEnv) ||
-        Option.isSome(options.credentialValues)
-      const oauthMethod = methods.find((method) =>
-        text(method["kind"]) === "oauth" &&
-        (template === undefined || text(method["template"]) === template)
-      )
-
-      if (oauthMethod !== undefined && credentialsOffered && template === undefined) {
-        const alternatives = methods.filter((method) => text(method["kind"]) !== "oauth")
-        return yield* cliError(
-          alternatives.length === 0
-            ? `${options.integration} only supports OAuth, so --credential-env cannot be used. Drop it and authorize in a browser.`
-            : `${options.integration} supports OAuth and ${alternatives.map((method) => text(method["template"])).join(", ")
-            }. Name the one you mean with --template.`
-        )
-      }
-
-      if (oauthMethod !== undefined) {
-        const secretName = Option.getOrUndefined(options.clientSecretEnv)
-        const started = yield* client.provisioning.startOAuth({ payload: {
-          integration: options.integration,
-          connection: options.connection,
-          ...whenPresent("template", template),
-          ...Option.match(options.clientId, {
-            onNone: () => ({}),
-            onSome: (value) => ({ clientId: value })
-          }),
-          ...whenPresentMap("clientSecret", secretName, environmentValue),
-          timeoutSeconds: options.timeout
-        } })
-        const sessionId = text(started["id"])
-        const state = record(started["state"])
-        const authorizationUrl = text(state["authorizationUrl"])
-        const setupUrl = text(state["setupUrl"])
-        const needsClient = text(state["status"]) === "needs-client"
-        if (text(state["status"]) === "pending" && authorizationUrl.length > 0) {
-          console.error(`Authorize in your browser:\n${authorizationUrl}`)
-          if (!options.noOpen) yield* openBrowser(authorizationUrl)
-        }
-        if (needsClient) {
-          console.error(
-            `${text(state["guidance"])}\n\n` +
-            `A human has to enter the client id and secret here, so they are never handed to an agent:\n  ${setupUrl}\n\n` +
-            `Waiting up to ${options.setupTimeout} seconds for that to happen.`
+export const connectCommand = (runGateway: GatewayTask) =>
+  Command.make(
+    "connect",
+    {
+      integration: Argument.String("integration"),
+      connection: connectionFlag(),
+      template: Flag.String("template").pipe(Flag.optional),
+      credentialEnv: Flag.String("credential-env").pipe(
+        Flag.optional,
+        Flag.withDescription("Environment variable containing an API key or bearer token")
+      ),
+      credentialValues: Flag.String("credential-values").pipe(
+        Flag.optional,
+        Flag.withDescription("Comma-separated VARIABLE=ENV_NAME mappings for multi-value auth")
+      ),
+      clientId: Flag.String("client-id").pipe(Flag.optional),
+      clientSecretEnv: Flag.String("client-secret-env").pipe(Flag.optional),
+      noOpen: Flag.Boolean("no-open").pipe(Flag.withDefault(false)),
+      timeout: Flag.Int("timeout").pipe(Flag.withDefault(300)),
+      setupTimeout: Flag.Int("setup-timeout").pipe(
+        Flag.withDefault(1800),
+        Flag.withDescription("Seconds to wait for a human to register an OAuth client in the dashboard")
+      ),
+      verbose: verboseFlag()
+    },
+    (options) =>
+      runGateway((client) =>
+        Effect.gen(function* () {
+          const catalog = yield* client.provisioning.listIntegrations()
+          const integration = array(catalog["integrations"]).find(
+            (candidate) => text(candidate["slug"]) === options.integration
           )
-          if (!options.noOpen) yield* openBrowser(setupUrl)
-        }
-        let announced = authorizationUrl
-        const poll = Effect.gen(function*() {
-          const session = yield* client.provisioning.oauthSession({ params: { id: sessionId } })
-          const current = record(session["state"])
-          if (text(current["status"]) === "connected") return record(current["connection"])
-          if (text(current["status"]) === "failed") {
-            return yield* cliError(`Connection failed: ${text(current["message"])}`)
+          if (integration === undefined) {
+            return yield* cliError(`Unknown integration ${options.integration}. Run: i discover <url>`)
           }
-          const url = text(current["authorizationUrl"])
-          if (url.length > 0 && url !== announced) {
-            announced = url
-            console.error(`Authorize in your browser:\n${url}`)
+          const methods = array(integration["authMethods"])
+          const template = Option.getOrUndefined(options.template)
+          const credentialsOffered = Option.isSome(options.credentialEnv) || Option.isSome(options.credentialValues)
+          const oauthMethod = methods.find(
+            (method) =>
+              text(method["kind"]) === "oauth" && (template === undefined || text(method["template"]) === template)
+          )
+
+          if (oauthMethod !== undefined && credentialsOffered && template === undefined) {
+            const alternatives = methods.filter((method) => text(method["kind"]) !== "oauth")
+            return yield* cliError(
+              alternatives.length === 0
+                ? `${options.integration} only supports OAuth, so --credential-env cannot be used. Drop it and authorize in a browser.`
+                : `${options.integration} supports OAuth and ${alternatives
+                    .map((method) => text(method["template"]))
+                    .join(", ")}. Name the one you mean with --template.`
+            )
           }
-          return undefined
-        })
-        const budget = needsClient ? options.setupTimeout : options.timeout
-        const settled = yield* poll.pipe(
-          Effect.repeat({
-            schedule: Schedule.spaced(Duration.millis(500)),
-            while: (connection) => connection === undefined
-          }),
-          Effect.timeoutOrElse({
-            duration: Duration.seconds(Math.max(1, budget)),
-            orElse: () => Effect.succeed(undefined)
+
+          if (oauthMethod !== undefined) {
+            const secretName = Option.getOrUndefined(options.clientSecretEnv)
+            const started = yield* client.provisioning.startOAuth({
+              payload: {
+                integration: options.integration,
+                connection: options.connection,
+                ...whenPresent("template", template),
+                ...Option.match(options.clientId, {
+                  onNone: () => ({}),
+                  onSome: (value) => ({ clientId: value })
+                }),
+                ...whenPresentMap("clientSecret", secretName, environmentValue),
+                timeoutSeconds: options.timeout
+              }
+            })
+            const sessionId = text(started["id"])
+            const state = record(started["state"])
+            const authorizationUrl = text(state["authorizationUrl"])
+            const setupUrl = text(state["setupUrl"])
+            const needsClient = text(state["status"]) === "needs-client"
+            if (text(state["status"]) === "pending" && authorizationUrl.length > 0) {
+              console.error(`Authorize in your browser:\n${authorizationUrl}`)
+              if (!options.noOpen) yield* openBrowser(authorizationUrl)
+            }
+            if (needsClient) {
+              console.error(
+                `${text(state["guidance"])}\n\n` +
+                  `A human has to enter the client id and secret here, so they are never handed to an agent:\n  ${setupUrl}\n\n` +
+                  `Waiting up to ${options.setupTimeout} seconds for that to happen.`
+              )
+              if (!options.noOpen) yield* openBrowser(setupUrl)
+            }
+            let announced = authorizationUrl
+            const poll = Effect.gen(function* () {
+              const session = yield* client.provisioning.oauthSession({ params: { id: sessionId } })
+              const current = record(session["state"])
+              if (text(current["status"]) === "connected") return record(current["connection"])
+              if (text(current["status"]) === "failed") {
+                return yield* cliError(`Connection failed: ${text(current["message"])}`)
+              }
+              const url = text(current["authorizationUrl"])
+              if (url.length > 0 && url !== announced) {
+                announced = url
+                console.error(`Authorize in your browser:\n${url}`)
+              }
+              return undefined
+            })
+            const budget = needsClient ? options.setupTimeout : options.timeout
+            const settled = yield* poll.pipe(
+              Effect.repeat({
+                schedule: Schedule.spaced(Duration.millis(500)),
+                while: (connection) => connection === undefined
+              }),
+              Effect.timeoutOrElse({
+                duration: Duration.seconds(Math.max(1, budget)),
+                orElse: () => Effect.succeed(undefined)
+              })
+            )
+            if (settled !== undefined) return settled
+            return yield* cliError(
+              needsClient
+                ? `No OAuth client was registered at ${setupUrl} within ${budget} seconds`
+                : `OAuth authorization timed out after ${budget} seconds`
+            )
+          }
+
+          const values = credentialValues(
+            Option.getOrUndefined(options.credentialEnv),
+            Option.getOrUndefined(options.credentialValues)
+          )
+          return yield* client.provisioning.connect({
+            payload: {
+              integration: options.integration,
+              connection: options.connection,
+              ...whenPresent("template", template),
+              values
+            }
           })
-        )
-        if (settled !== undefined) return settled
-        return yield* cliError(
-          needsClient
-            ? `No OAuth client was registered at ${setupUrl} within ${budget} seconds`
-            : `OAuth authorization timed out after ${budget} seconds`
-        )
-      }
-
-      const values = credentialValues(
-        Option.getOrUndefined(options.credentialEnv),
-        Option.getOrUndefined(options.credentialValues)
-      )
-      return yield* client.provisioning.connect({ payload: {
-        integration: options.integration,
-        connection: options.connection,
-        ...whenPresent("template", template),
-        values
-      } })
-    })).pipe(Effect.flatMap((result) => {
-      const connection = record(result["connection"] ?? result)
-      const tools = array(result["tools"])
-      const storedName = text(connection["name"])
-      if (storedName.length > 0 && storedName !== options.connection) {
-        console.error(
-          `Note: connection stored as "${storedName}", not "${options.connection}". Use that name from here on.`
-        )
-      }
-      return writeStdoutLine(jsonOutput(
-        withNext(
-          options.verbose ? { connection, tools } : { connection, toolCount: tools.length },
-          `i tools ${text(connection["integration"])}`
-        ),
-        options.verbose
-      ))
-    }))
-).pipe(Command.withDescription("Authorize an integration"))
-
-export const connectionsCommand = (runGateway: GatewayTask) => Command.make(
-  "connections",
-  { limit: limitFlag(), offset: offsetFlag(), verbose: verboseFlag() },
-  ({ limit, offset, verbose }) =>
-    runGateway((client) => client.provisioning.listConnections()).pipe(
-      Effect.flatMap((result) => {
-        const all = sortedBy(
-          array(record(result)["connections"]),
-          (connection) => `${text(connection["integration"])} ${text(connection["name"])}`
-        )
-        return listing(page(all, window(limit, offset)), {
-          key: "connections",
-          narrowing: "window with --limit/--offset",
-          verbose,
-          empty: "No connected integrations.",
-          row: (connection) => connection
         })
-      })
-    )
-).pipe(Command.withDescription("List connections"))
+      ).pipe(
+        Effect.flatMap((result) => {
+          const connection = record(result["connection"] ?? result)
+          const tools = array(result["tools"])
+          const storedName = text(connection["name"])
+          if (storedName.length > 0 && storedName !== options.connection) {
+            console.error(
+              `Note: connection stored as "${storedName}", not "${options.connection}". Use that name from here on.`
+            )
+          }
+          return writeStdoutLine(
+            jsonOutput(
+              withNext(
+                options.verbose ? { connection, tools } : { connection, toolCount: tools.length },
+                `i tools ${text(connection["integration"])}`
+              ),
+              options.verbose
+            )
+          )
+        })
+      )
+  ).pipe(Command.withDescription("Authorize an integration"))
 
-export const disconnectCommand = (runGateway: GatewayTask) => Command.make(
-  "disconnect",
-  { integration: Argument.String("integration"), connection: connectionFlag() },
-  ({ integration, connection }) =>
-    runGateway((client) =>
-      client.provisioning.removeConnection({ params: { integration, name: connection } })).pipe(
-      Effect.flatMap((result) => {
-        const removed = text(record(result)["connection"] ?? connection)
-        return writeStdoutLine(
-          jsonOutput({ disconnected: true, integration, connection: removed }, false)
-        )
-      }))
-).pipe(Command.withDescription("Delete a connection"))
+export const connectionsCommand = (runGateway: GatewayTask) =>
+  Command.make(
+    "connections",
+    { limit: limitFlag(), offset: offsetFlag(), verbose: verboseFlag() },
+    ({ limit, offset, verbose }) =>
+      runGateway((client) => client.provisioning.listConnections()).pipe(
+        Effect.flatMap((result) => {
+          const all = sortedBy(
+            array(record(result)["connections"]),
+            (connection) => `${text(connection["integration"])} ${text(connection["name"])}`
+          )
+          return listing(page(all, window(limit, offset)), {
+            key: "connections",
+            narrowing: "window with --limit/--offset",
+            verbose,
+            empty: "No connected integrations.",
+            row: (connection) => connection
+          })
+        })
+      )
+  ).pipe(Command.withDescription("List connections"))
+
+export const disconnectCommand = (runGateway: GatewayTask) =>
+  Command.make(
+    "disconnect",
+    { integration: Argument.String("integration"), connection: connectionFlag() },
+    ({ integration, connection }) =>
+      runGateway((client) => client.provisioning.removeConnection({ params: { integration, name: connection } })).pipe(
+        Effect.flatMap((result) => {
+          const removed = text(record(result)["connection"] ?? connection)
+          return writeStdoutLine(jsonOutput({ disconnected: true, integration, connection: removed }, false))
+        })
+      )
+  ).pipe(Command.withDescription("Delete a connection"))

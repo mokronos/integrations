@@ -1,10 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Option } from "effect"
-import {
-  mcpAuthMethods,
-  openApiAuthMethods,
-  requiresAuthentication
-} from "../src/catalog/auth-methods.ts"
+import { mcpAuthMethods, openApiAuthMethods, requiresAuthentication } from "../src/catalog/auth-methods.ts"
 import type { CompiledSecurityScheme } from "../src/openapi/compile.ts"
 import type { McpProbe } from "@integragents/contracts"
 
@@ -73,9 +69,7 @@ describe("MCP auth methods", () => {
       "https://gmailmcp.googleapis.com/mcp/v1"
     )
     expect(methods.map((method) => method.template)).toEqual(["oauth2", "bearer"])
-    expect(methods[0]?.oauth?.scopes).toEqual([
-      "https://www.googleapis.com/auth/gmail.readonly"
-    ])
+    expect(methods[0]?.oauth?.scopes).toEqual(["https://www.googleapis.com/auth/gmail.readonly"])
     expect(requiresAuthentication(methods)).toBe(true)
   })
 
@@ -106,19 +100,17 @@ describe("OpenAPI auth methods", () => {
       prefix: ""
     })
 
-    const [query] = openApiAuthMethods([
-      scheme({ name: "key", type: "apiKey", in: Option.some("query") })
-    ])
+    const [query] = openApiAuthMethods([scheme({ name: "key", type: "apiKey", in: Option.some("query") })])
     expect(query?.placements?.[0]?.carrier).toBe("query")
   })
 
   it("declines a scheme it could not satisfy rather than offering it", () => {
-    expect(openApiAuthMethods([
-      scheme({ name: "session", type: "apiKey", in: Option.some("cookie") })
-    ])[0]?.kind).toBe("none")
-    expect(openApiAuthMethods([
-      scheme({ name: "digest", type: "http", scheme: Option.some("digest") })
-    ])[0]?.kind).toBe("none")
+    expect(openApiAuthMethods([scheme({ name: "session", type: "apiKey", in: Option.some("cookie") })])[0]?.kind).toBe(
+      "none"
+    )
+    expect(openApiAuthMethods([scheme({ name: "digest", type: "http", scheme: Option.some("digest") })])[0]?.kind).toBe(
+      "none"
+    )
   })
 
   it("declines an OAuth scheme with no way to run a flow", () => {

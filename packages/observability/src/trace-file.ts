@@ -50,9 +50,9 @@ const outcomeOf = (exit: Parameters<Tracer.Span["end"]>[1]): Pick<TraceRecord, "
   Exit.isSuccess(exit)
     ? { outcome: "success" }
     : {
-      outcome: Cause.hasInterruptsOnly(exit.cause) ? "interrupted" : "failure",
-      cause: Cause.pretty(exit.cause)
-    }
+        outcome: Cause.hasInterruptsOnly(exit.cause) ? "interrupted" : "failure",
+        cause: Cause.pretty(exit.cause)
+      }
 
 /** Wraps a tracer so every sampled span it ends is also handed to `record`. */
 export const recordingTracer = (
@@ -118,12 +118,12 @@ export const recordingTracer = (
     ...whenPresent("context", delegate.context)
   })
 
-const open = Effect.fnUntraced(function*(path: string) {
+const open = Effect.fnUntraced(function* (path: string) {
   const fs = yield* FileSystem.FileSystem
   const lock = yield* Semaphore.make(1)
   let pending: Array<string> = []
 
-  const rotate = Effect.gen(function*() {
+  const rotate = Effect.gen(function* () {
     yield* fs.remove(`${path}.${rotatedFiles}`, { force: true })
     for (let index = rotatedFiles - 1; index >= 1; index--) {
       if (yield* fs.exists(`${path}.${index}`)) {
@@ -137,7 +137,7 @@ const open = Effect.fnUntraced(function*(path: string) {
     if (pending.length === 0) return Effect.void
     const chunk = pending.join("")
     pending = []
-    return Effect.gen(function*() {
+    return Effect.gen(function* () {
       const size = yield* fs.stat(path).pipe(
         Effect.map((info) => Number(info.size)),
         Effect.orElseSucceed(() => 0)
@@ -167,10 +167,13 @@ const open = Effect.fnUntraced(function*(path: string) {
  * An append-only NDJSON file of finished spans, written in batches and rotated
  * by size so it never outgrows `rotatedFiles` × 10 MiB.
  */
-export class TraceFile extends Context.Service<TraceFile, {
-  readonly record: (span: TraceRecord) => void
-  readonly flush: Effect.Effect<void>
-}>()("@integragents/observability/TraceFile") {
+export class TraceFile extends Context.Service<
+  TraceFile,
+  {
+    readonly record: (span: TraceRecord) => void
+    readonly flush: Effect.Effect<void>
+  }
+>()("@integragents/observability/TraceFile") {
   static readonly layer = (path: string): Layer.Layer<TraceFile, never, FileSystem.FileSystem> =>
     Layer.effect(TraceFile, open(path))
 }

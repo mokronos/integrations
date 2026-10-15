@@ -15,17 +15,17 @@ export interface WireParameter {
 
 export type OperationInput =
   | {
-    readonly kind: "parameter"
-    readonly argument: string
-    readonly parameter: WireParameter
-    readonly schema: Json
-  }
+      readonly kind: "parameter"
+      readonly argument: string
+      readonly parameter: WireParameter
+      readonly schema: Json
+    }
   | {
-    readonly kind: "body"
-    readonly argument: string
-    readonly schema: Json
-    readonly required: boolean
-  }
+      readonly kind: "body"
+      readonly argument: string
+      readonly schema: Json
+      readonly required: boolean
+    }
 
 export interface AssembledInputs {
   readonly properties: Record<string, Json>
@@ -49,9 +49,7 @@ const locationOf = (input: OperationInput): ParameterLocation =>
 const fallbackArgument = (input: OperationInput): string =>
   input.kind === "body" ? "requestBody" : `${input.argument}_${input.parameter.location}`
 
-const withUniqueArguments = (
-  inputs: ReadonlyArray<OperationInput>
-): ReadonlyArray<OperationInput> => {
+const withUniqueArguments = (inputs: ReadonlyArray<OperationInput>): ReadonlyArray<OperationInput> => {
   const taken = new Set<string>()
   const claim = (input: OperationInput): string => {
     const fallback = fallbackArgument(input)

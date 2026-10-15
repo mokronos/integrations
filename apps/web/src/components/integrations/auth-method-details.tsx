@@ -30,15 +30,18 @@ const kindDetails = {
 const placementLabel = (method: AuthMethod): string | undefined => {
   const placements = method.placements ?? []
   if (placements.length === 0) return undefined
-  return placements.map((placement) => {
-    const carrier = placement.carrier === "header"
-      ? "Header"
-      : placement.carrier === "query" ? "Query parameter" : "Environment variable"
-    const prefix = placement.prefix.length === 0
-      ? ""
-      : ` · ${placement.prefix.trim()} prefix`
-    return `${carrier}: ${placement.name}${prefix}`
-  }).join(" · ")
+  return placements
+    .map((placement) => {
+      const carrier =
+        placement.carrier === "header"
+          ? "Header"
+          : placement.carrier === "query"
+            ? "Query parameter"
+            : "Environment variable"
+      const prefix = placement.prefix.length === 0 ? "" : ` · ${placement.prefix.trim()} prefix`
+      return `${carrier}: ${placement.name}${prefix}`
+    })
+    .join(" · ")
 }
 
 const oauthDetail = (method: AuthMethod): string | undefined => {
@@ -76,22 +79,20 @@ export function AuthMethodDetails({
             {selected ? <Badge>selected</Badge> : null}
           </div>
           <p className="text-muted-foreground text-xs">{details.description}</p>
-          {placement === undefined
-            ? null
-            : <p className="text-muted-foreground font-mono text-xs">{placement}</p>}
-          {oauth === undefined
-            ? null
-            : <p className="text-muted-foreground text-xs">{oauth}</p>}
+          {placement === undefined ? null : <p className="text-muted-foreground font-mono text-xs">{placement}</p>}
+          {oauth === undefined ? null : <p className="text-muted-foreground text-xs">{oauth}</p>}
         </div>
       </div>
-      {scopes.length === 0
-        ? null
-        : (
-          <div className="flex flex-wrap gap-1 pl-10">
-            <span className="text-muted-foreground mr-1 text-xs">Scopes</span>
-            {scopes.map((scope) => <Badge key={scope} variant="secondary">{scope}</Badge>)}
-          </div>
-        )}
+      {scopes.length === 0 ? null : (
+        <div className="flex flex-wrap gap-1 pl-10">
+          <span className="text-muted-foreground mr-1 text-xs">Scopes</span>
+          {scopes.map((scope) => (
+            <Badge key={scope} variant="secondary">
+              {scope}
+            </Badge>
+          ))}
+        </div>
+      )}
     </>
   )
 

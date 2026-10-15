@@ -23,6 +23,7 @@ i integrations # list all integrations
 ```
 
 If it isn't connected, connect it:
+
 ```bash
 i search linear                              # 1. find the integration's discovery URL
 i discover https://mcp.linear.app/mcp        # 2. register it; returns slug, tools, auth templates

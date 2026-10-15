@@ -1,12 +1,15 @@
 # AGENTS.md
 
 When im using these words im talking about the following:
+
 - "you": i mean you, the coding agent helping me implement and design this system
 - "agent": i'm talking about the agent that is using this library/system to create workflows, etc.
 - "user": i'm talking about the user of the agent
 
 ## Development
+
 This project is in an early stage of development.
+
 - Don't create db migrations, if they aren't auto-generated
   - Each package declares its tables once, in Drizzle: the gateway in
     `packages/core/gateway/src/db/schema.ts`, the integration host in
@@ -14,6 +17,14 @@ This project is in an early stage of development.
     `bun run db:generate` in that package, which writes the SQL and embeds it
     for the runtime. Never hand-edit `db/migrations/*.sql` or a `*.gen.ts`.
 - Don't create any shims or backwards compatibility code
+
+## Migrations
+
+Migrations must keep the app online. A gateway applies them when it starts, while an older gateway may still be serving the same data (a rolling Cloudflare deploy, a service restart).
+
+- **Expand, deploy, contract.** Add the new table or column first, ship the code that uses it, and drop the old one in a later release once no running code reads it. Never drop or rename a required column before its replacement is deployed.
+- **Applied migrations are immutable.** Change the Drizzle schema and generate a new migration; the migrator refuses a renamed or rewritten one.
+- **Migrations run on real data.** Each one must succeed on tables that hold rows and keep those rows; `packages/core/gateway/test/migrate.test.ts` seeds every table before the newest migration and checks the rows survive.
 
 ## Type Discipline
 
@@ -26,20 +37,22 @@ This project is in an early stage of development.
 
 ## Verifying
 
-- **Smallest proof first.** Run `bun --bun run vitest run <test files>` for the tests covering your change, then `bun run lint` and `bun run typecheck`. Run the full `bun run test` before committing a change that crosses packages.
+- **Smallest proof first.** Run `bun --bun run vitest run <test files>` for the tests covering your change, then `bun run format` and `bun run check` (format check, lint, typecheck, test boundary). Run the full `bun run test` before committing a change that crosses packages.
+- **Red before green.** A bug fix starts with a test that goes red on the unfixed code; record the failing assertion. A setup error or an unrelated timeout is not red. Check the reported test count, so a filtered-out test is not mistaken for green. Wait on a condition, not a fixed sleep.
 - **Test behavior.** A test earns its place by catching a regression in logic or wire behavior; one that restates the implementation does not.
 - **Run it for real.** Changes to the dashboard, the gateway's HTTP/MCP behavior, or CLI output get one pass in a sandbox with the `test-integrations-app` skill. UI claims in your reply come with screenshots.
 - **Debug from traces.** When something fails, read the trace before adding logging: every process appends its spans to `$INTEGRATIONS_HOME/logs/*.trace.ndjson`, and a failed request prints `(trace <id>)`. Queries are in `packages/observability/README.md`.
 
 ## After Task Routine
+
 - refresh the local install of cli + gateway + dashboard, etc. when you finish a task or commit something
 
 ## Effect
 
 Don't be afraid to use unstable modules from effect.
 
-
 <!-- effect-solutions:start -->
+
 ## Effect Best Practices
 
 **IMPORTANT:** Always consult effect-solutions before writing Effect code.

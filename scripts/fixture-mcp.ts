@@ -1,10 +1,11 @@
 /**
- * A throwaway upstream MCP server for manual testing: one `echo` tool, no auth.
+ * A throwaway upstream MCP server for manual testing, no auth: `echo`, and
+ * `greet`, which asks for a name in an `input_required` round first.
  * Prints every traceparent it receives, so a run shows whether the gateway propagated the trace.
  *
  *   bun run scripts/fixture-mcp.ts [port]
  */
-import { createMcpHandler, fromJsonSchema, McpServer } from "@modelcontextprotocol/server"
+import { createMcpHandler, fromJsonSchema, inputRequired, inputResponse, McpServer } from "@modelcontextprotocol/server"
 
 const port = Number(process.argv[2] ?? 47_912)
 
@@ -20,6 +21,28 @@ const handler = createMcpHandler(() => {
       })
     },
     async ({ text }) => ({ content: [{ type: "text", text: text ?? "pong" }] })
+  )
+  server.registerTool(
+    "greet",
+    {
+      description: "Greets whoever answers the name it asks for",
+      inputSchema: fromJsonSchema<Record<string, never>>({ type: "object", properties: {} })
+    },
+    async (_arguments, context) => {
+      const answer = inputResponse(context.mcpReq.inputResponses, "name")
+      if (answer.kind !== "elicit") {
+        return inputRequired({
+          inputRequests: {
+            name: inputRequired.elicit({
+              message: "What is your name?",
+              requestedSchema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] }
+            })
+          }
+        })
+      }
+      const name = answer.action === "accept" ? String(answer.content?.["name"]) : "stranger"
+      return { content: [{ type: "text", text: `hello ${name}` }] }
+    }
   )
   return server
 })

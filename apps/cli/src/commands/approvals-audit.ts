@@ -7,13 +7,7 @@ import { ApprovalId } from "@integragents/gateway-core/domain"
 import type { IntegrationsCliError } from "../connection.ts"
 import { cliError, connectToGateway, describeError } from "../connection.ts"
 import type { Page, Window } from "../output.ts"
-import {
-  jsonOutput,
-  page,
-  pageFields,
-  withNext,
-  writeStdoutLine
-} from "../output.ts"
+import { jsonOutput, page, pageFields, withNext, writeStdoutLine } from "../output.ts"
 import type { ControlPlaneClient } from "../session.ts"
 import { connectToControlPlane } from "../session.ts"
 
@@ -25,10 +19,7 @@ const verboseFlag = () =>
   )
 
 const limitFlag = () =>
-  Flag.Int("limit").pipe(
-    Flag.optional,
-    Flag.withDescription("Return at most this many rows (default: all of them)")
-  )
+  Flag.Int("limit").pipe(Flag.optional, Flag.withDescription("Return at most this many rows (default: all of them)"))
 
 const offsetFlag = () =>
   Flag.Int("offset").pipe(
@@ -36,10 +27,7 @@ const offsetFlag = () =>
     Flag.withDescription("Skip this many rows. Listings are ordered, so a window is stable")
   )
 
-const window = (
-  limit: Option.Option<number>,
-  offset: Option.Option<number>
-): Window => ({
+const window = (limit: Option.Option<number>, offset: Option.Option<number>): Window => ({
   limit: Option.getOrUndefined(limit),
   offset: Option.getOrUndefined(offset)
 })
@@ -69,12 +57,10 @@ const record = <A>(value: A | undefined): Record<string, typeof Schema.Json.Type
 const array = <A>(value: A | undefined): ReadonlyArray<Record<string, typeof Schema.Json.Type>> =>
   Option.getOrElse(Schema.decodeUnknownOption(JsonArray)(value), () => []).map(record)
 
-const text = (value: Schema.Json | undefined): string => value === undefined || value === null ? "" : String(value)
+const text = (value: Schema.Json | undefined): string => (value === undefined || value === null ? "" : String(value))
 
-const sortedBy = <A>(
-  items: ReadonlyArray<A>,
-  key: (item: A) => string
-): ReadonlyArray<A> => [...items].sort((left, right) => key(left).localeCompare(key(right)))
+const sortedBy = <A>(items: ReadonlyArray<A>, key: (item: A) => string): ReadonlyArray<A> =>
+  [...items].sort((left, right) => key(left).localeCompare(key(right)))
 
 const listing = <A>(
   result: Page<A>,
@@ -88,14 +74,19 @@ const listing = <A>(
     readonly extra?: Record<string, typeof Schema.Json.Type>
   }
 ): Effect.Effect<void> =>
-  writeStdoutLine(jsonOutput(
-    withNext({
-      ...options.extra,
-      [options.key]: result.items.map(options.row),
-      ...pageFields(result, options.narrowing)
-    }, options.next),
-    options.verbose
-  ))
+  writeStdoutLine(
+    jsonOutput(
+      withNext(
+        {
+          ...options.extra,
+          [options.key]: result.items.map(options.row),
+          ...pageFields(result, options.narrowing)
+        },
+        options.next
+      ),
+      options.verbose
+    )
+  )
 
 export const approvalsCommand = Command.make(
   "approvals",
@@ -107,34 +98,32 @@ export const approvalsCommand = Command.make(
   },
   ({ status, limit, offset, verbose }) =>
     controlPlaneTask((client) =>
-      client.request(
-        "GET",
-        Option.isNone(status) ? "/v1/approvals" : `/v1/approvals?status=${status.value}`
-      )
-    ).pipe(Effect.flatMap((result) => {
-      const all = [...array(record(result)["approvals"])].sort((left, right) =>
-        text(right["createdAt"]).localeCompare(text(left["createdAt"]))
-      )
-      return listing(page(all, window(limit, offset)), {
-        key: "approvals",
-        narrowing: "narrow with --status, or window with --limit/--offset",
-        verbose,
-        empty: "No approvals.",
-        next: "ii approve <id>",
-        row: (approval) => approval
+      client.request("GET", Option.isNone(status) ? "/v1/approvals" : `/v1/approvals?status=${status.value}`)
+    ).pipe(
+      Effect.flatMap((result) => {
+        const all = [...array(record(result)["approvals"])].sort((left, right) =>
+          text(right["createdAt"]).localeCompare(text(left["createdAt"]))
+        )
+        return listing(page(all, window(limit, offset)), {
+          key: "approvals",
+          narrowing: "narrow with --status, or window with --limit/--offset",
+          verbose,
+          empty: "No approvals.",
+          next: "ii approve <id>",
+          row: (approval) => approval
+        })
       })
-    }))
+    )
 ).pipe(Command.withDescription("List frozen invocations awaiting a decision"))
 
 export const approvalCommand = Command.make(
   "approval",
   { id: Argument.String("approval-id"), verbose: verboseFlag() },
   ({ id, verbose }) =>
-    gatewayTask((client) => client.delegated.approval({ params: { id: ApprovalId.make(id) } })).pipe(Effect.flatMap((approval) =>
-      writeStdoutLine(jsonOutput(approval, verbose))
-    ))
+    gatewayTask((client) => client.delegated.approval({ params: { id: ApprovalId.make(id) } })).pipe(
+      Effect.flatMap((approval) => writeStdoutLine(jsonOutput(approval, verbose)))
+    )
 ).pipe(Command.withDescription("Read one frozen invocation, as the caller that proposed it"))
-
 
 export const approveCommand = Command.make(
   "approve",
@@ -143,12 +132,12 @@ export const approveCommand = Command.make(
     verbose: verboseFlag()
   },
   ({ id, verbose }) =>
-    controlPlaneTask((client) =>
-      client.request("POST", `/v1/approvals/${encodeURIComponent(id)}/approve`, {})
-    ).pipe(Effect.flatMap((result) => {
-      const body = record(result)
-      return writeStdoutLine(jsonOutput(body, verbose))
-    }))
+    controlPlaneTask((client) => client.request("POST", `/v1/approvals/${encodeURIComponent(id)}/approve`, {})).pipe(
+      Effect.flatMap((result) => {
+        const body = record(result)
+        return writeStdoutLine(jsonOutput(body, verbose))
+      })
+    )
 ).pipe(Command.withDescription("Approve a frozen invocation; the gateway then performs it"))
 
 export const denyCommand = Command.make(
@@ -158,20 +147,15 @@ export const denyCommand = Command.make(
     verbose: verboseFlag()
   },
   ({ id, verbose }) =>
-    controlPlaneTask((client) =>
-      client.request("POST", `/v1/approvals/${encodeURIComponent(id)}/deny`, {})
-    ).pipe(Effect.flatMap((result) =>
-      writeStdoutLine(jsonOutput(record(result), verbose))
-    ))
+    controlPlaneTask((client) => client.request("POST", `/v1/approvals/${encodeURIComponent(id)}/deny`, {})).pipe(
+      Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), verbose)))
+    )
 ).pipe(Command.withDescription("Deny a frozen invocation"))
 
 export const auditCommand = Command.make(
   "audit",
   {
-    limit: Flag.Int("limit").pipe(
-      Flag.withDefault(50),
-      Flag.withDescription("How many records to read (default: 50)")
-    ),
+    limit: Flag.Int("limit").pipe(Flag.withDefault(50), Flag.withDescription("How many records to read (default: 50)")),
     offset: offsetFlag(),
     profile: Flag.String("profile").pipe(Flag.optional, Flag.withDescription("Only this profile id")),
     alias: Flag.String("alias").pipe(Flag.optional, Flag.withDescription("Only this alias")),
@@ -198,16 +182,15 @@ export const auditCommand = Command.make(
       if (Option.isSome(options.outcome)) parameters.set("outcome", options.outcome.value)
       if (Option.isSome(options.since)) parameters.set("since", options.since.value)
       return client.request("GET", `/v1/audit?${parameters.toString()}`)
-    }).pipe(Effect.flatMap((result) => {
-      const body = record(result)
-      const records = array(body["records"])
-      const total = Predicate.isNumber(body["total"]) ? body["total"] : records.length
-      const offset = Predicate.isNumber(body["offset"]) ? body["offset"] : 0
-      return writeStdoutLine(jsonOutput(
-        { records, count: total, showing: records.length, offset },
-        options.verbose
-      ))
-    }))
+    }).pipe(
+      Effect.flatMap((result) => {
+        const body = record(result)
+        const records = array(body["records"])
+        const total = Predicate.isNumber(body["total"]) ? body["total"] : records.length
+        const offset = Predicate.isNumber(body["offset"]) ? body["offset"] : 0
+        return writeStdoutLine(jsonOutput({ records, count: total, showing: records.length, offset }, options.verbose))
+      })
+    )
 ).pipe(Command.withDescription("Read the gateway's audit trail"))
 
 export const driftCommand = Command.make(
@@ -226,50 +209,44 @@ export const driftCommand = Command.make(
           ? "/v1/drift/refresh"
           : `/v1/drift/refresh?integration=${encodeURIComponent(integration.value)}`
       )
-    ).pipe(Effect.flatMap((result) => {
-      const reports = array(record(result)["reports"])
-      const baselines = reports.filter((report) => report["baseline"] === true)
-      const entries = sortedBy(
-        reports.flatMap((report): ReadonlyArray<Record<string, typeof Schema.Json.Type>> =>
-          array(report["entries"]).map((entry) => ({ ...entry, integration: report["integration"] ?? null }))
-        ),
-        (entry) => `${text(entry["integration"])} ${text(entry["tool"])}`
-      )
-      const baselineNote = baselines.length === 0
-        ? undefined
-        : `Recorded a baseline for ${baselines.map((report) => text(report["integration"])).join(", ")
-        }; drift is reported from the next refresh.`
-      return listing(page(entries, window(limit, offset)), {
-        key: "drift",
-        narrowing: "window with --limit/--offset",
-        verbose,
-        empty: baselineNote ?? "No drift since the last refresh.",
-        extra: {
-          checked: reports.length,
-          ...whenPresent("baseline", baselineNote)
-        },
-        row: (entry) => entry
-      })
-    }))
-).pipe(
-  Command.withDescription(
-    "Re-read tools and report what a vendor added, removed, or reshaped since the last sync"
-  )
-)
-
-
-export const maintenanceCommand = Command.make(
-  "maintenance",
-  {},
-  () =>
-    controlPlaneTask((client) => client.request("POST", "/v1/maintenance", {})).pipe(
+    ).pipe(
       Effect.flatMap((result) => {
-        const body = record(result)
-        return writeStdoutLine(jsonOutput(body, false))
+        const reports = array(record(result)["reports"])
+        const baselines = reports.filter((report) => report["baseline"] === true)
+        const entries = sortedBy(
+          reports.flatMap((report): ReadonlyArray<Record<string, typeof Schema.Json.Type>> =>
+            array(report["entries"]).map((entry) => ({ ...entry, integration: report["integration"] ?? null }))
+          ),
+          (entry) => `${text(entry["integration"])} ${text(entry["tool"])}`
+        )
+        const baselineNote =
+          baselines.length === 0
+            ? undefined
+            : `Recorded a baseline for ${baselines
+                .map((report) => text(report["integration"]))
+                .join(", ")}; drift is reported from the next refresh.`
+        return listing(page(entries, window(limit, offset)), {
+          key: "drift",
+          narrowing: "window with --limit/--offset",
+          verbose,
+          empty: baselineNote ?? "No drift since the last refresh.",
+          extra: {
+            checked: reports.length,
+            ...whenPresent("baseline", baselineNote)
+          },
+          row: (entry) => entry
+        })
       })
     )
 ).pipe(
-  Command.withDescription(
-    "Run the sweep the gateway runs on a clock: expire frozen calls and aged-out arguments"
-  )
+  Command.withDescription("Re-read tools and report what a vendor added, removed, or reshaped since the last sync")
 )
+
+export const maintenanceCommand = Command.make("maintenance", {}, () =>
+  controlPlaneTask((client) => client.request("POST", "/v1/maintenance", {})).pipe(
+    Effect.flatMap((result) => {
+      const body = record(result)
+      return writeStdoutLine(jsonOutput(body, false))
+    })
+  )
+).pipe(Command.withDescription("Run the sweep the gateway runs on a clock: expire frozen calls and aged-out arguments"))

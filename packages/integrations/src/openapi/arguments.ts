@@ -44,17 +44,12 @@ export const splitArguments = (call: HttpCall, input: Json): SplitArguments => {
   }
   return {
     parameters,
-    requestBody: Object.keys(bodyProperties).length === 0
-      ? Option.none()
-      : Option.some(bodyProperties),
+    requestBody: Object.keys(bodyProperties).length === 0 ? Option.none() : Option.some(bodyProperties),
     unknown
   }
 }
 
-export const missingArguments = (
-  call: HttpCall,
-  parameters: Readonly<Record<string, Json>>
-): ReadonlyArray<string> =>
+export const missingArguments = (call: HttpCall, parameters: Readonly<Record<string, Json>>): ReadonlyArray<string> =>
   call.parameters
     .filter((parameter) => parameter.required && parameters[parameter.argument] === undefined)
     .map((parameter) => parameter.argument)

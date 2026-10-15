@@ -12,12 +12,12 @@ const canonicalise = (value: Json): Json =>
   Array.isArray(value)
     ? value.map(canonicalise)
     : isJsonObject(value)
-    ? Object.fromEntries(
-      Object.entries(value)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, nested]) => [key, canonicalise(nested)])
-    )
-    : value
+      ? Object.fromEntries(
+          Object.entries(value)
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([key, nested]) => [key, canonicalise(nested)])
+        )
+      : value
 
 /** Equal JSON values serialise identically, whatever order their keys arrived in. */
 export const canonicalJson = (value: Json): string => JSON.stringify(canonicalise(value))
@@ -27,21 +27,16 @@ export const isJsonString = (value: Json): value is string => Predicate.isString
 export const isJsonBoolean = (value: Json): value is boolean => Predicate.isBoolean(value)
 
 // oxlint-disable-next-line anti-slop/no-unknown-parameters
-export const asJson = (value: unknown): Json =>
-  Option.getOrElse(decodeJson(value), (): Json => null)
+export const asJson = (value: unknown): Json => Option.getOrElse(decodeJson(value), (): Json => null)
 
-export const property = (value: Json, key: string): Json =>
-  isJsonObject(value) ? value[key] ?? null : null
+export const property = (value: Json, key: string): Json => (isJsonObject(value) ? (value[key] ?? null) : null)
 
 export const stringEntries = (value: Json): ReadonlyArray<string> =>
   Array.isArray(value) ? value.filter(isJsonString) : []
 
-export const objectEntries = (value: Json): Record<string, Json> =>
-  isJsonObject(value) ? { ...value } : {}
+export const objectEntries = (value: Json): Record<string, Json> => (isJsonObject(value) ? { ...value } : {})
 
-export const parseJsonString = Schema.decodeUnknownOption(
-  Schema.fromJsonString(Schema.Json)
-)
+export const parseJsonString = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
 
 export type JsonEncodable =
   | Json

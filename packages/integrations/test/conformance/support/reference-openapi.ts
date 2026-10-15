@@ -1,10 +1,5 @@
 import { Effect, Schema, Scope } from "effect"
-import {
-  HttpApi,
-  HttpApiEndpoint,
-  HttpApiGroup,
-  OpenApi
-} from "effect/http-api"
+import { HttpApi, HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/http-api"
 
 const EchoBody = Schema.Struct({ message: Schema.String })
 const EchoResult = Schema.Struct({
@@ -28,11 +23,10 @@ export const ReferenceApi = HttpApi.make("ReferenceApi").add(ReferenceGroup)
 export const referenceOpenApiDocument = JSON.stringify(OpenApi.fromApi(ReferenceApi))
 
 /** The reference API's server, stopped when the test's scope ends. */
-export const referenceOpenApiServer: Effect.Effect<string, never, Scope.Scope> =
-  Effect.acquireRelease(
-    Effect.sync(() => startReferenceOpenApiServer()),
-    (server) => Effect.sync(() => server.stop())
-  ).pipe(Effect.map((server) => server.baseUrl))
+export const referenceOpenApiServer: Effect.Effect<string, never, Scope.Scope> = Effect.acquireRelease(
+  Effect.sync(() => startReferenceOpenApiServer()),
+  (server) => Effect.sync(() => server.stop())
+).pipe(Effect.map((server) => server.baseUrl))
 
 interface ReferenceOpenApiServer {
   readonly baseUrl: string
@@ -50,21 +44,18 @@ const startReferenceOpenApiServer = (): ReferenceOpenApiServer => {
         return new Response("not found", { status: 404 })
       }
 
-      return Effect.runPromise(Effect.gen(function*() {
-        const body = yield* Schema.decodeUnknownEffect(EchoBody)(yield* Effect.promise(
-          () => request.json()
-        ))
-        const result = yield* Schema.encodeEffect(EchoResult)({
-          id: decodeURIComponent(match[1] ?? ""),
-          search: url.searchParams.get("search") ?? "",
-          trace: request.headers.get("x-trace") ?? "",
-          message: body.message
-        })
-        return Response.json(result)
-      }).pipe(Effect.catch(() => Effect.succeed(Response.json(
-        { error: "invalid request" },
-        { status: 400 }
-      )))))
+      return Effect.runPromise(
+        Effect.gen(function* () {
+          const body = yield* Schema.decodeUnknownEffect(EchoBody)(yield* Effect.promise(() => request.json()))
+          const result = yield* Schema.encodeEffect(EchoResult)({
+            id: decodeURIComponent(match[1] ?? ""),
+            search: url.searchParams.get("search") ?? "",
+            trace: request.headers.get("x-trace") ?? "",
+            message: body.message
+          })
+          return Response.json(result)
+        }).pipe(Effect.catch(() => Effect.succeed(Response.json({ error: "invalid request" }, { status: 400 }))))
+      )
     }
   })
 
@@ -73,4 +64,3 @@ const startReferenceOpenApiServer = (): ReferenceOpenApiServer => {
     stop: () => server.stop(true)
   }
 }
-

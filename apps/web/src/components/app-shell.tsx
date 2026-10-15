@@ -119,7 +119,8 @@ export function AppShell({
                   isActive
                     ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
                     : "hover:bg-sidebar-accent/50"
-                )}
+                )
+              }
             >
               {({ isActive }) => (
                 <>
@@ -132,47 +133,45 @@ export function AppShell({
           ))}
         </nav>
         <div className={cn("mt-auto space-y-3", expanded ? "px-2" : "flex justify-center")}>
-          {expanded
-            ? (
-              <>
-                <label htmlFor="appearance" className="flex cursor-pointer items-center gap-2 text-sm">
-                  {dark ? <Moon className="size-4" /> : <Sun className="size-4" />}
-                  <span>Dark mode</span>
-                  <Switch
-                    id="appearance"
-                    className="ml-auto"
-                    checked={dark}
-                    onCheckedChange={onDarkChange}
-                  />
-                </label>
-                {session?.authenticated === true && session.kind === "session"
-                  ? <SignOutButton />
-                  : null}
-              </>
-            )
-            : (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                aria-label={dark ? "Use light mode" : "Use dark mode"}
-                title={dark ? "Use light mode" : "Use dark mode"}
-                onClick={() => onDarkChange(!dark)}
-              >
-                {dark ? <Moon /> : <Sun />}
-              </Button>
-            )}
+          {expanded ? (
+            <>
+              <label htmlFor="appearance" className="flex cursor-pointer items-center gap-2 text-sm">
+                {dark ? <Moon className="size-4" /> : <Sun className="size-4" />}
+                <span>Dark mode</span>
+                <Switch id="appearance" className="ml-auto" checked={dark} onCheckedChange={onDarkChange} />
+              </label>
+              {session?.authenticated === true && session.kind === "session" ? <SignOutButton /> : null}
+            </>
+          ) : (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label={dark ? "Use light mode" : "Use dark mode"}
+              title={dark ? "Use light mode" : "Use dark mode"}
+              onClick={() => onDarkChange(!dark)}
+            >
+              {dark ? <Moon /> : <Sun />}
+            </Button>
+          )}
         </div>
       </aside>
       <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
-        <Suspense fallback={
-          <div className="flex flex-1 flex-col gap-6 p-4 sm:p-6" aria-hidden>
-            <div className="space-y-2"><Skeleton className="h-8 w-48" /><Skeleton className="h-4 w-72 max-w-full" /></div>
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              {Array.from({ length: 6 }, (_, index) => <Skeleton key={index} className="h-32 w-full" />)}
+        <Suspense
+          fallback={
+            <div className="flex flex-1 flex-col gap-6 p-4 sm:p-6" aria-hidden>
+              <div className="space-y-2">
+                <Skeleton className="h-8 w-48" />
+                <Skeleton className="h-4 w-72 max-w-full" />
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {Array.from({ length: 6 }, (_, index) => (
+                  <Skeleton key={index} className="h-32 w-full" />
+                ))}
+              </div>
             </div>
-          </div>
-        }>
+          }
+        >
           <Outlet />
         </Suspense>
       </main>

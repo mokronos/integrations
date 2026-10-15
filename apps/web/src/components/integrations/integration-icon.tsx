@@ -4,8 +4,7 @@ import { useState } from "react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 
-const logoUrl = (host: string): string =>
-  `https://integrations.sh/logo/${host}?sz=128`
+const logoUrl = (host: string): string => `https://integrations.sh/logo/${host}?sz=128`
 
 const hostLike = /^[a-z0-9][a-z0-9-]*(\.[a-z0-9-]+)+$/i
 

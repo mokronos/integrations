@@ -26,9 +26,8 @@ import { openStore, temporaryDirectory, testServices } from "./fixtures.ts"
 import { toApproval, toAuditRecord } from "../src/store-rows.ts"
 
 /** The nested path proves the store creates the directory it was pointed at. */
-const store = Effect.flatMap(
-  temporaryDirectory("gateway-store-"),
-  (directory) => openStore(path.join(directory, "nested"))
+const store = Effect.flatMap(temporaryDirectory("gateway-store-"), (directory) =>
+  openStore(path.join(directory, "nested"))
 )
 
 const connection: ConnectionRef = {
@@ -38,7 +37,7 @@ const connection: ConnectionRef = {
   name: ConnectionName.make("work")
 }
 
-const seedProfile = Effect.fnUntraced(function*(
+const seedProfile = Effect.fnUntraced(function* (
   store: GatewayStore,
   tenantId = defaultTenantId,
   name = `profile-${crypto.randomUUID()}`
@@ -120,33 +119,37 @@ describe("gateway store", () => {
   })
 
   it.effect("creating a profile under a taken id changes nothing about the existing one", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const gateway = yield* store
       const profile = yield* seedProfile(gateway)
       const before = yield* gateway.listProfileTools(profile.id)
 
-      const result = yield* Effect.result(gateway.createProfile({
-        id: profile.id,
-        tenantId: defaultTenantId,
-        name: "Rollback setup",
-        capabilities: [],
-        tools: [{ connection, tool: ToolName.make("archiveEmail"), decision: "allow" }]
-      }))
+      const result = yield* Effect.result(
+        gateway.createProfile({
+          id: profile.id,
+          tenantId: defaultTenantId,
+          name: "Rollback setup",
+          capabilities: [],
+          tools: [{ connection, tool: ToolName.make("archiveEmail"), decision: "allow" }]
+        })
+      )
 
       expect(result._tag).toBe("Failure")
       expect(yield* gateway.findProfileById(defaultTenantId, profile.id)).toEqual(profile)
       expect(yield* gateway.listProfileTools(profile.id)).toEqual(before)
       expect(yield* gateway.findProfileByName(defaultTenantId, "Rollback setup")).toBeUndefined()
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("creates the database directory it was pointed at, with no profile in it", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const gateway = yield* store
       expect(yield* gateway.listProfiles(defaultTenantId)).toEqual([])
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("persists profiles and their tool decisions", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const gateway = yield* store
       const profile = yield* seedProfile(gateway)
 
@@ -156,16 +159,19 @@ describe("gateway store", () => {
         includeNewTools: false,
         revokedAt: null
       })
-      expect(yield* gateway.listProfileTools(profile.id)).toEqual([{
-        profileId: profile.id,
-        connection,
-        tool: ToolName.make("sendEmail"),
-        decision: "require_approval"
-      }])
-    }).pipe(Effect.provide(testServices)))
+      expect(yield* gateway.listProfileTools(profile.id)).toEqual([
+        {
+          profileId: profile.id,
+          connection,
+          tool: ToolName.make("sendEmail"),
+          decision: "require_approval"
+        }
+      ])
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("stores only a hash of an API key", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const gateway = yield* store
       const profile = yield* seedProfile(gateway)
       const key = yield* generateApiKey
@@ -175,10 +181,11 @@ describe("gateway store", () => {
       expect(stored[0]?.hash).toBe(yield* hashApiKey(key.secret))
       expect(stored[0]?.name).toBe("Claude Code")
       expect(JSON.stringify(stored)).not.toContain(key.secret)
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("updates profile authority and approval delivery together", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const gateway = yield* store
       const profile = yield* seedProfile(gateway)
       expect(profile.approvalMethod).toBe("elicitation")
@@ -196,10 +203,11 @@ describe("gateway store", () => {
       expect(updated.mcpSurface).toBe("discovery")
       expect(updated.approvalGroupWindowMinutes).toBe(15)
       expect(updated.includeNewTools).toBe(true)
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("creates durable delivery jobs for a profile's destinations", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const gateway = yield* store
       const profile = yield* seedProfile(gateway)
       const destination = yield* gateway.createApprovalDestination({
@@ -209,11 +217,7 @@ describe("gateway store", () => {
         url: "https://notify.example/approvals",
         signingSecret: "igs_secret"
       })
-      yield* gateway.replaceProfileApprovalDestinations(
-        defaultTenantId,
-        profile.id,
-        [destination.id]
-      )
+      yield* gateway.replaceProfileApprovalDestinations(defaultTenantId, profile.id, [destination.id])
       const approval = yield* gateway.createApproval({
         id: yield* newApprovalId,
         tenantId: defaultTenantId,
@@ -225,22 +229,31 @@ describe("gateway store", () => {
         groupWindowMinutes: 0,
         expiresAt: yield* notYet
       })
-      expect(yield* gateway.listApprovalDeliveries(defaultTenantId, "pending")).toMatchObject([{
-        approvalId: approval.id,
-        destinationId: destination.id,
-        destinationName: "phone",
-        status: "pending",
-        attempts: 0
-      }])
+      expect(yield* gateway.listApprovalDeliveries(defaultTenantId, "pending")).toMatchObject([
+        {
+          approvalId: approval.id,
+          destinationId: destination.id,
+          destinationName: "phone",
+          status: "pending",
+          attempts: 0
+        }
+      ])
 
       let delivered: RequestInit | undefined
-      const httpClient = FetchHttpClient.layer.pipe(Layer.provide(Layer.succeed(
-        FetchHttpClient.Fetch,
-        Object.assign(async (_url: RequestInfo | URL, init?: RequestInit) => {
-          delivered = init
-          return new Response(null, { status: 204 })
-        }, { preconnect: globalThis.fetch.preconnect })
-      )))
+      const httpClient = FetchHttpClient.layer.pipe(
+        Layer.provide(
+          Layer.succeed(
+            FetchHttpClient.Fetch,
+            Object.assign(
+              async (_url: RequestInfo | URL, init?: RequestInit) => {
+                delivered = init
+                return new Response(null, { status: 204 })
+              },
+              { preconnect: globalThis.fetch.preconnect }
+            )
+          )
+        )
+      )
       yield* deliverDueApprovalNotifications({
         store: gateway,
         dashboardUrl: "https://gateway.example"
@@ -249,14 +262,17 @@ describe("gateway store", () => {
       expect(new Headers(delivered?.headers).get("x-integrations-signature")).toMatch(/^v1=/)
       expect(String(delivered?.body)).not.toContain("arguments")
       expect(String(delivered?.body)).toContain(profile.name)
-      expect(yield* gateway.listApprovalDeliveries(defaultTenantId)).toMatchObject([{
-        status: "delivered",
-        attempts: 1
-      }])
-    }).pipe(Effect.provide(testServices)))
+      expect(yield* gateway.listApprovalDeliveries(defaultTenantId)).toMatchObject([
+        {
+          status: "delivered",
+          attempts: 1
+        }
+      ])
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("groups calls to one tool within the profile's window and notifies once per group", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const gateway = yield* store
       const profile = yield* seedProfile(gateway)
       const destination = yield* gateway.createApprovalDestination({
@@ -267,7 +283,7 @@ describe("gateway store", () => {
         signingSecret: "igs_secret"
       })
       yield* gateway.replaceProfileApprovalDestinations(defaultTenantId, profile.id, [destination.id])
-      const freeze = Effect.fnUntraced(function*(tool: string, to: string, groupWindowMinutes: number) {
+      const freeze = Effect.fnUntraced(function* (tool: string, to: string, groupWindowMinutes: number) {
         return yield* gateway.createApproval({
           id: yield* newApprovalId,
           tenantId: defaultTenantId,
@@ -289,7 +305,14 @@ describe("gateway store", () => {
       expect(otherTool.groupId).toBe(otherTool.id)
 
       for (const { id } of [first, second]) {
-        yield* gateway.settleApproval({ tenantId: defaultTenantId, id, status: "denied", decidedBy: null, result: null, error: null })
+        yield* gateway.settleApproval({
+          tenantId: defaultTenantId,
+          id,
+          status: "denied",
+          decidedBy: null,
+          result: null,
+          error: null
+        })
       }
       const afterDecided = yield* freeze("sendEmail", "c@example.com", 30)
       expect(afterDecided.groupId).toBe(afterDecided.id)
@@ -301,11 +324,14 @@ describe("gateway store", () => {
       expect(ungrouped.groupId).toBe(ungrouped.id)
 
       const notified = (yield* gateway.listApprovalDeliveries(defaultTenantId)).map((delivery) => delivery.approvalId)
-      expect(new Set(notified)).toEqual(new Set([first.id, otherTool.id, afterDecided.id, afterWindow.id, ungrouped.id]))
-    }).pipe(Effect.provide(testServices)))
+      expect(new Set(notified)).toEqual(
+        new Set([first.id, otherTool.id, afterDecided.id, afterWindow.id, ungrouped.id])
+      )
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("completes and consumes login handoffs and OAuth state once", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const gateway = yield* store
       const tenant = yield* gateway.createTenant({ name: "OAuth workspace" })
       const subject = yield* gateway.createSubject({
@@ -324,12 +350,14 @@ describe("gateway store", () => {
         expiresAt: yield* notYet
       })
 
-      expect(yield* gateway.completeLoginHandoff({
-        requestHash: handoff.hash,
-        subjectId: subject.id,
-        tenantId: tenant.id,
-        email: "oauth@example.com"
-      })).toBe(true)
+      expect(
+        yield* gateway.completeLoginHandoff({
+          requestHash: handoff.hash,
+          subjectId: subject.id,
+          tenantId: tenant.id,
+          email: "oauth@example.com"
+        })
+      ).toBe(true)
       expect(yield* gateway.collectLoginHandoff(handoff.hash)).toBe(true)
       expect(yield* gateway.collectLoginHandoff(handoff.hash)).toBe(false)
 
@@ -342,13 +370,13 @@ describe("gateway store", () => {
         expiresAt: yield* notYet
       })
 
-      expect((yield* gateway.consumeIdentityOAuthState(state.hash))?.returnPath)
-        .toBe("/approvals?approval=ap_1")
+      expect((yield* gateway.consumeIdentityOAuthState(state.hash))?.returnPath).toBe("/approvals?approval=ap_1")
       expect(yield* gateway.consumeIdentityOAuthState(state.hash)).toBeUndefined()
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("freezes approval arguments and settles them once", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const gateway = yield* store
       const profile = yield* seedProfile(gateway)
       const approval = yield* gateway.createApproval({
@@ -391,10 +419,11 @@ describe("gateway store", () => {
       expect(settled?.status).toBe("approved")
       expect(settled?.decidedBy).toBe("sebastian")
       expect(settled?.result).toEqual({ id: "msg-1" })
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("revoking a profile cancels its pending approvals", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const gateway = yield* store
       const profile = yield* seedProfile(gateway)
       const approval = yield* gateway.createApproval({
@@ -415,10 +444,11 @@ describe("gateway store", () => {
       const after = yield* gateway.getApproval(defaultTenantId, approval.id)
       expect(after?.status).toBe("denied")
       expect(after?.decidedBy).toBe("profile-revoked")
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("reads back who made a frozen call and an audited one", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const gateway = yield* store
       const profile = yield* seedProfile(gateway)
       const key = yield* generateApiKey
@@ -462,10 +492,11 @@ describe("gateway store", () => {
       expect(record?.caller).toEqual(caller)
       expect(record?.profileId).toBe(profile.id)
       expect(record?.authorizedBySubjectId).toBe(subject.id)
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("keeps the audit record after its arguments expire", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const gateway = yield* store
       const profile = yield* seedProfile(gateway)
       const now = yield* Clock.currentTimeMillis
@@ -495,10 +526,11 @@ describe("gateway store", () => {
       expect(records[0]?.subject).toBe(SubjectId.make("sebastian"))
       expect(records[0]?.decision).toBe("allow")
       expect(records[0]?.outcome).toBe("succeeded")
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("records a denial that never reached a connection", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const gateway = yield* store
       yield* gateway.recordAudit({
         tenantId: defaultTenantId,
@@ -517,10 +549,11 @@ describe("gateway store", () => {
       const records = yield* gateway.listAudit(defaultTenantId, { limit: PositiveInt.make(10) })
       expect(records[0]?.outcome).toBe("denied")
       expect(records[0]?.connection).toBeNull()
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("upserts tool snapshots so a resync overwrites rather than duplicates", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const gateway = yield* store
       const integration = IntegrationSlug.make("gmail")
       const base = {
@@ -530,20 +563,17 @@ describe("gateway store", () => {
         outputSchema: null,
         syncedAt: new Date(yield* Clock.currentTimeMillis)
       }
-      yield* gateway.putToolSnapshots(defaultTenantId, [
-        { ...base, inputSchema: { type: "object" } }
-      ])
-      yield* gateway.putToolSnapshots(defaultTenantId, [
-        { ...base, inputSchema: { type: "string" } }
-      ])
+      yield* gateway.putToolSnapshots(defaultTenantId, [{ ...base, inputSchema: { type: "object" } }])
+      yield* gateway.putToolSnapshots(defaultTenantId, [{ ...base, inputSchema: { type: "string" } }])
 
       const snapshots = yield* gateway.listToolSnapshots(defaultTenantId, integration)
       expect(snapshots).toHaveLength(1)
       expect(snapshots[0]?.inputSchema).toEqual({ type: "string" })
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("keeps tenants blind to each other", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const gateway = yield* store
       const other = yield* gateway.createTenant({ name: "Acme" })
       const otherSubject = yield* gateway.createSubject({
@@ -593,16 +623,19 @@ describe("gateway store", () => {
       expect(yield* gateway.countAudit(other.id, {})).toBe(0)
       expect((yield* gateway.overviewCounts(other.id)).profileTools).toBe(1)
 
-      yield* gateway.putToolSnapshots(defaultTenantId, [{
-        integration: IntegrationSlug.make("gmail"),
-        connection: ConnectionName.make("work"),
-        tool: ToolName.make("sendEmail"),
-        inputSchema: null,
-        outputSchema: null,
-        syncedAt: new Date(yield* Clock.currentTimeMillis)
-      }])
+      yield* gateway.putToolSnapshots(defaultTenantId, [
+        {
+          integration: IntegrationSlug.make("gmail"),
+          connection: ConnectionName.make("work"),
+          tool: ToolName.make("sendEmail"),
+          inputSchema: null,
+          outputSchema: null,
+          syncedAt: new Date(yield* Clock.currentTimeMillis)
+        }
+      ])
       expect(yield* gateway.listToolSnapshots(other.id, IntegrationSlug.make("gmail"))).toEqual([])
       expect(yield* gateway.countSubjects(defaultTenantId)).toBe(0)
       expect(yield* gateway.countSubjects(other.id)).toBe(1)
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 })

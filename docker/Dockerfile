@@ -1,7 +1,8 @@
 # Build context is the repository root:
-#   docker build -f docker/Dockerfile -t integrations .
+#   docker build -f docker/Dockerfile --build-arg BUN_VERSION="$(cat .bun-version)" -t integrations .
 
-FROM --platform=$BUILDPLATFORM oven/bun:1.3.14 AS build
+ARG BUN_VERSION
+FROM --platform=$BUILDPLATFORM oven/bun:${BUN_VERSION} AS build
 ARG TARGETARCH
 ARG VERSION
 WORKDIR /app
@@ -26,5 +27,6 @@ COPY --from=build /out/integrations /usr/local/bin/integrations
 COPY --from=build --chown=nonroot:nonroot /out/data /data
 VOLUME ["/data"]
 EXPOSE 4788
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --start-interval=1s --retries=3 CMD ["/usr/local/bin/integrations", "health"]
 ENTRYPOINT ["/usr/local/bin/integrations"]
 CMD ["serve", "--host", "0.0.0.0", "--port", "4788"]

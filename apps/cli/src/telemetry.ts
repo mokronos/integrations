@@ -18,6 +18,9 @@ export const cliLayer = (serviceName: string) =>
 export const commandSpan = (argv: ReadonlyArray<string>) =>
   Effect.withSpan("Cli.command", {
     attributes: {
-      "cli.command": argv.filter((argument) => !argument.startsWith("-")).slice(0, 2).join(" ")
+      "cli.command": argv
+        .filter((argument) => !argument.startsWith("-"))
+        .slice(0, 2)
+        .join(" ")
     }
   })

@@ -4,7 +4,14 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 
-export function OAuthClientFields({ idPrefix, clientId, clientSecret, onClientIdChange, onClientSecretChange, disabled = false }: {
+export function OAuthClientFields({
+  idPrefix,
+  clientId,
+  clientSecret,
+  onClientIdChange,
+  onClientSecretChange,
+  disabled = false
+}: {
   readonly idPrefix: string
   readonly clientId: string
   readonly clientSecret: string
@@ -39,7 +46,10 @@ export function OAuthClientFields({ idPrefix, clientId, clientSecret, onClientId
   )
 }
 
-export function AwaitingAuthorization({ description, authorizationUrl }: {
+export function AwaitingAuthorization({
+  description,
+  authorizationUrl
+}: {
   readonly description: string
   readonly authorizationUrl: string | undefined
 }) {
@@ -50,7 +60,12 @@ export function AwaitingAuthorization({ description, authorizationUrl }: {
       <AlertDescription className="space-y-2">
         <p>{description}</p>
         {authorizationUrl === undefined ? null : (
-          <a className="inline-flex items-center gap-1 font-medium" href={authorizationUrl} target="_blank" rel="noreferrer">
+          <a
+            className="inline-flex items-center gap-1 font-medium"
+            href={authorizationUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
             Open authorization page <ExternalLink className="size-3" />
           </a>
         )}

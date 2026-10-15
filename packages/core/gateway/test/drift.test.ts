@@ -41,16 +41,18 @@ const integrationsWithTools = (
   tools: ReadonlyArray<{ name: string; input: Tool["inputSchema"] }>
 ): ToolCatalogReader => ({
   listTools: () =>
-    Effect.succeed(tools.map((tool) => ({
-      address: ToolAddress.make(`tools.tickets.org.default.${tool.name}`),
-      name: ToolName.make(tool.name),
-      description: "",
-      integration: IntegrationSlug.make("tickets"),
-      owner: "org",
-      connection: ConnectionName.make("default"),
-      defaultDecision: "require_approval",
-      inputSchema: tool.input
-    })))
+    Effect.succeed(
+      tools.map((tool) => ({
+        address: ToolAddress.make(`tools.tickets.org.default.${tool.name}`),
+        name: ToolName.make(tool.name),
+        description: "",
+        integration: IntegrationSlug.make("tickets"),
+        owner: "org",
+        connection: ConnectionName.make("default"),
+        defaultDecision: "require_approval",
+        inputSchema: tool.input
+      }))
+    )
 })
 
 describe("catalog drift", () => {
@@ -60,10 +62,7 @@ describe("catalog drift", () => {
   })
 
   it("reports a rename as one removal and one addition", () => {
-    const entries = diffSnapshots(
-      [snapshot("send_email", null)],
-      [snapshot("sendEmail", null)]
-    )
+    const entries = diffSnapshots([snapshot("send_email", null)], [snapshot("sendEmail", null)])
 
     expect(entries.map((entry) => `${entry.kind} ${entry.tool}`).sort()).toEqual([
       "added sendEmail",
@@ -72,10 +71,7 @@ describe("catalog drift", () => {
   })
 
   it("reports a reshaped schema under the same name", () => {
-    const entries = diffSnapshots(
-      [snapshot("create", { type: "object" })],
-      [snapshot("create", { type: "string" })]
-    )
+    const entries = diffSnapshots([snapshot("create", { type: "object" })], [snapshot("create", { type: "string" })])
 
     expect(entries).toEqual([
       {
@@ -88,7 +84,7 @@ describe("catalog drift", () => {
   })
 
   it.effect("surfaces new tools, which profiles otherwise leave invisible", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const gateway = yield* store
       const first = yield* refreshIntegrationSnapshot(
         { store: gateway, integrations: integrationsWithTools([{ name: "create", input: null }]) },
@@ -118,10 +114,11 @@ describe("catalog drift", () => {
           tool: ToolName.make("deleteEverything")
         }
       ])
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("does not report the same removal on every later refresh", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const gateway = yield* store
       const refresh = (tools: ReadonlyArray<{ name: string; input: Tool["inputSchema"] }>) =>
         refreshIntegrationSnapshot(
@@ -129,14 +126,18 @@ describe("catalog drift", () => {
           "tickets",
           defaultTenantId
         )
-      yield* refresh([{ name: "create", input: null }, { name: "legacy", input: null }])
+      yield* refresh([
+        { name: "create", input: null },
+        { name: "legacy", input: null }
+      ])
 
       const removal = yield* refresh([{ name: "create", input: null }])
       const afterwards = yield* refresh([{ name: "create", input: null }])
 
       expect(removal.entries.map((entry) => entry.kind)).toEqual(["removed"])
       expect(afterwards.entries).toEqual([])
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 })
 
 describe("gateway maintenance", () => {
@@ -155,7 +156,7 @@ describe("gateway maintenance", () => {
   }
 
   it.effect("turns an undecided approval into an expired one", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const gateway = yield* store
       const profile = yield* gateway.createProfile({
         id: yield* newProfileId,
@@ -176,7 +177,8 @@ describe("gateway maintenance", () => {
             arguments: {},
             groupWindowMinutes: 0,
             expiresAt
-          }))
+          })
+        )
       const stale = yield* freeze("create", new Date((yield* Clock.currentTimeMillis) - 1_000))
       const fresh = yield* freeze("close", new Date((yield* Clock.currentTimeMillis) + 60_000))
 
@@ -185,10 +187,11 @@ describe("gateway maintenance", () => {
       expect(result.expiredApprovals).toBe(1)
       expect((yield* gateway.getApproval(defaultTenantId, stale.id))?.status).toBe("expired")
       expect((yield* gateway.getApproval(defaultTenantId, fresh.id))?.status).toBe("pending")
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("expires an approval once its window passes, not before", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const gateway = yield* store
       const profile = yield* gateway.createProfile({
         id: yield* newProfileId,
@@ -216,10 +219,11 @@ describe("gateway maintenance", () => {
 
       expect((yield* maintain(gateway)).expiredApprovals).toBe(1)
       expect((yield* gateway.getApproval(defaultTenantId, frozen.id))?.status).toBe("expired")
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("ages out audit arguments while keeping the record", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const gateway = yield* store
       yield* gateway.recordAudit({
         tenantId: defaultTenantId,
@@ -239,12 +243,12 @@ describe("gateway maintenance", () => {
       const result = yield* maintain(gateway)
 
       expect(result.expiredAuditArguments).toBe(1)
-      expect(yield* gateway.listAudit(defaultTenantId, { limit: PositiveInt.make(10) }))
-        .toHaveLength(1)
-    }).pipe(Effect.provide(testServices)))
+      expect(yield* gateway.listAudit(defaultTenantId, { limit: PositiveInt.make(10) })).toHaveLength(1)
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("is safe to run when there is nothing to do", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const gateway = yield* store
       expect(yield* maintain(gateway)).toEqual({
         expiredApprovals: 0,
@@ -254,10 +258,11 @@ describe("gateway maintenance", () => {
         expiredOAuthState: 0,
         expiredBlobs: 0
       })
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("deletes abandoned identity and terminal login flows", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const gateway = yield* store
       const handoff = yield* generateLoginHandoff
       const state = yield* generateLoginHandoff
@@ -274,5 +279,6 @@ describe("gateway maintenance", () => {
       expect((yield* maintain(gateway)).expiredIdentityFlows).toBe(2)
       expect(yield* gateway.getLoginHandoff(handoff.hash)).toBeUndefined()
       expect(yield* gateway.consumeIdentityOAuthState(state.hash)).toBeUndefined()
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 })

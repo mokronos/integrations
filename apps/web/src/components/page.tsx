@@ -22,9 +22,7 @@ export function Page({
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="space-y-1">
           <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">{title}</h1>
-          {description === undefined
-            ? null
-            : <p className="text-muted-foreground text-sm">{description}</p>}
+          {description === undefined ? null : <p className="text-muted-foreground text-sm">{description}</p>}
         </div>
         {actions === undefined ? null : <div className="flex flex-wrap items-center gap-2">{actions}</div>}
       </header>
@@ -44,9 +42,11 @@ export function ReloadButton({ onClick }: { readonly onClick: () => Promise<void
   }
   return (
     <Button variant="outline" size="icon" onClick={refresh} disabled={state !== "idle"} aria-label="Refresh">
-      {state === "done"
-        ? <Check className="size-4 animate-in fade-in zoom-in-50 duration-200" />
-        : <RefreshCw className={cn("size-4", state === "busy" && "animate-spin")} />}
+      {state === "done" ? (
+        <Check className="size-4 animate-in fade-in zoom-in-50 duration-200" />
+      ) : (
+        <RefreshCw className={cn("size-4", state === "busy" && "animate-spin")} />
+      )}
     </Button>
   )
 }
@@ -57,9 +57,7 @@ export function QueryError({ error }: { readonly error: Error | null | undefined
     <Alert variant="destructive">
       <AlertTriangle />
       <AlertTitle>The gateway refused that</AlertTitle>
-      <AlertDescription className="min-w-0 break-words">
-        {error.message}
-      </AlertDescription>
+      <AlertDescription className="min-w-0 break-words">{error.message}</AlertDescription>
     </Alert>
   )
 }
@@ -67,7 +65,9 @@ export function QueryError({ error }: { readonly error: Error | null | undefined
 export function LoadingRows({ rows = 4 }: { readonly rows?: number }) {
   return (
     <div className="space-y-2">
-      {Array.from({ length: rows }, (_, index) => <Skeleton key={index} className="h-12 w-full" />)}
+      {Array.from({ length: rows }, (_, index) => (
+        <Skeleton key={index} className="h-12 w-full" />
+      ))}
     </div>
   )
 }

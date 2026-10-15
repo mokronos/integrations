@@ -17,9 +17,8 @@ export interface Window {
 
 export const page = <A>(items: ReadonlyArray<A>, window: Window): Page<A> => {
   const offset = Math.max(0, window.offset ?? 0)
-  const limited = window.limit === undefined
-    ? items.slice(offset)
-    : items.slice(offset, offset + Math.max(0, window.limit))
+  const limited =
+    window.limit === undefined ? items.slice(offset) : items.slice(offset, offset + Math.max(0, window.limit))
   return { items: limited, count: items.length, limit: window.limit, offset }
 }
 
@@ -28,10 +27,9 @@ export const pageFields = <A>(result: Page<A>, narrowing: string) => {
   return {
     count: result.count,
     ...whenTrue(windowed, () => ({ showing: result.items.length, offset: result.offset })),
-    ...whenTrue(
-      result.count > largeListing && !windowed,
-      () => ({ hint: `${result.count} rows — ${narrowing}, or pipe this into jq` })
-    )
+    ...whenTrue(result.count > largeListing && !windowed, () => ({
+      hint: `${result.count} rows — ${narrowing}, or pipe this into jq`
+    }))
   }
 }
 
@@ -60,4 +58,4 @@ export const writeStdoutLine = (text: string): Effect.Effect<void> =>
 export const withNext = (
   body: Record<string, typeof Schema.Json.Type>,
   next: string | undefined
-): Record<string, typeof Schema.Json.Type> => next === undefined ? body : { ...body, next }
+): Record<string, typeof Schema.Json.Type> => (next === undefined ? body : { ...body, next })

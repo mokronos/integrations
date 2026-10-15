@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Option, Schema, Scope } from "effect"
-import { FetchHttpClient } from "effect/http"
+import { Egress } from "../src/egress/egress.ts"
+import { defaultUrlPolicy } from "../src/egress/url-policy.ts"
 import { McpClient } from "../src/mcp/client.ts"
 
 const JsonRpcRequest = Schema.Struct({
@@ -80,20 +81,19 @@ const startServer = (options: {
           }
           return new Response(null, { status: 202 })
         }
-        })
+      })
       return server
     }),
     (server) => Effect.promise(() => server.stop(true))
   ).pipe(Effect.map((server) => `http://127.0.0.1:${server.port}/mcp`))
 
-const probe = (endpoint: string) =>
-  Effect.flatMap(McpClient, (mcp) => mcp.probe(endpoint))
+const probe = (endpoint: string) => Effect.flatMap(McpClient, (mcp) => mcp.probe(endpoint))
 
-const services = McpClient.layer.pipe(Layer.provide(FetchHttpClient.layer))
+const services = McpClient.layer.pipe(Layer.provide(Egress.layer(defaultUrlPolicy)))
 
 describe("probing an MCP endpoint", () => {
   it.live("requires auth when the endpoint declares an authority, however it answers", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const scope = "https://www.googleapis.com/auth/gmail.readonly"
 
       const found = yield* probe(yield* startServer({ publishes: true, scopes: [scope] }))
@@ -105,15 +105,17 @@ describe("probing an MCP endpoint", () => {
       expect(found.requiresOAuth).toBe(true)
       expect(found.scopes).toEqual([scope])
       expect(found.supportsDynamicRegistration).toBe(false)
-    }).pipe(Effect.provide(services)))
+    }).pipe(Effect.provide(services))
+  )
 
   it.live("asks for nothing when the endpoint declares no authority", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const found = yield* probe(yield* startServer({ publishes: false }))
 
       expect(found.connected).toBe(true)
       expect(found.requiresAuthentication).toBe(false)
       expect(found.requiresOAuth).toBe(false)
       expect(found.scopes).toEqual([])
-    }).pipe(Effect.provide(services)))
+    }).pipe(Effect.provide(services))
+  )
 })

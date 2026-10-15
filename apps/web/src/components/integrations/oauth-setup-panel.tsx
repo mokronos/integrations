@@ -19,9 +19,8 @@ const oauthProviderOf = (method: AuthMethod): OAuthProvider => {
     return "google"
   }
   if (
-    hosts.some((host) =>
-      host.endsWith("microsoftonline.com") || host.endsWith("microsoft.com") ||
-      host.endsWith("live.com")
+    hosts.some(
+      (host) => host.endsWith("microsoftonline.com") || host.endsWith("microsoft.com") || host.endsWith("live.com")
     )
   ) {
     return "microsoft"
@@ -33,7 +32,7 @@ const providerSetupSteps = {
   google: [
     "Google Cloud Console > APIs & Services > Library: enable this API.",
     "OAuth consent screen: add the scopes this connection requests.",
-    "Credentials > Create credentials > OAuth client ID, type \"Web application\"."
+    'Credentials > Create credentials > OAuth client ID, type "Web application".'
   ],
   microsoft: [
     "portal.azure.com > Microsoft Entra ID > App registrations > New registration.",
@@ -79,16 +78,20 @@ export function OAuthSetupPanel({
         )}
       </div>
       <p className="text-muted-foreground text-xs">
-        This provider does not support dynamic client registration, so a redirect
-        URI must be registered there first — exactly as written:
+        This provider does not support dynamic client registration, so a redirect URI must be registered there first —
+        exactly as written:
       </p>
-      {callbackUrl === undefined
-        ? <p className="text-muted-foreground rounded border bg-background px-2 py-1 text-xs">
+      {callbackUrl === undefined ? (
+        <p className="text-muted-foreground rounded border bg-background px-2 py-1 text-xs">
           unavailable — start the gateway with a public URL or on loopback
         </p>
-        : <CopyField value={callbackUrl} label="Redirect URI" />}
+      ) : (
+        <CopyField value={callbackUrl} label="Redirect URI" />
+      )}
       <ol className="text-muted-foreground list-decimal space-y-0.5 pl-5 text-xs">
-        {providerSetupSteps[provider].map((step) => <li key={step}>{step}</li>)}
+        {providerSetupSteps[provider].map((step) => (
+          <li key={step}>{step}</li>
+        ))}
       </ol>
     </div>
   )

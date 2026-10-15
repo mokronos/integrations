@@ -35,19 +35,41 @@ export function OAuthConsentRoute() {
     <div className="flex min-h-svh items-center justify-center p-4">
       <Card className="w-full max-w-xl">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2"><ShieldCheck className="size-5" /> Authorize MCP access</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            <ShieldCheck className="size-5" /> Authorize MCP access
+          </CardTitle>
           <CardDescription>
-            {view === undefined ? <Skeleton className="h-5 w-64 max-w-full" /> : `${view.application.name} wants to connect to this gateway.`}
+            {view === undefined ? (
+              <Skeleton className="h-5 w-64 max-w-full" />
+            ) : (
+              `${view.application.name} wants to connect to this gateway.`
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
-          {error === null ? null : <Alert variant="destructive"><AlertTitle>Authorization failed</AlertTitle><AlertDescription>{error.message}</AlertDescription></Alert>}
-          {view === undefined ? <div className="space-y-5" aria-hidden><Skeleton className="h-24 w-full" /><Skeleton className="h-20 w-full" /><Skeleton className="h-12 w-full" /></div> : (
+          {error === null ? null : (
+            <Alert variant="destructive">
+              <AlertTitle>Authorization failed</AlertTitle>
+              <AlertDescription>{error.message}</AlertDescription>
+            </Alert>
+          )}
+          {view === undefined ? (
+            <div className="space-y-5" aria-hidden>
+              <Skeleton className="h-24 w-full" />
+              <Skeleton className="h-20 w-full" />
+              <Skeleton className="h-12 w-full" />
+            </div>
+          ) : (
             <>
               <div className="rounded-md border p-3 text-sm">
                 <p className="font-medium">{view.application.name}</p>
                 <p className="text-muted-foreground mt-1 break-all text-xs">{view.application.clientIdentifier}</p>
-                <p className="text-muted-foreground mt-2 text-xs">Registration: {view.application.kind === "cimd" ? "Client ID Metadata Document" : "Dynamic Client Registration compatibility"}</p>
+                <p className="text-muted-foreground mt-2 text-xs">
+                  Registration:{" "}
+                  {view.application.kind === "cimd"
+                    ? "Client ID Metadata Document"
+                    : "Dynamic Client Registration compatibility"}
+                </p>
               </div>
               <div className="grid gap-2">
                 <Label>Profile</Label>
@@ -65,17 +87,33 @@ export function OAuthConsentRoute() {
                     <p>Gateway access: {selectedProfile.capabilities.join(", ") || "tool access only"}</p>
                   </div>
                 )}
-                {view.profiles.length === 0 ? <p className="text-muted-foreground text-xs">Create a profile in the dashboard first.</p> : null}
+                {view.profiles.length === 0 ? (
+                  <p className="text-muted-foreground text-xs">Create a profile in the dashboard first.</p>
+                ) : null}
               </div>
               <p className="text-sm">
-                {view.application.name} can use the tools the profile turns on, and its calls are recorded under its name. You can revoke it from the profile at any time.
+                {view.application.name} can use the tools the profile turns on, and its calls are recorded under its
+                name. You can revoke it from the profile at any time.
               </p>
             </>
           )}
         </CardContent>
         <CardFooter className="justify-end gap-2">
-          <Button variant="outline" disabled={busy || view === undefined} onClick={() => decide.mutate({ decision: "deny" })}>Deny</Button>
-          <Button disabled={busy || profileId === undefined} onClick={() => { if (profileId !== undefined) decide.mutate({ decision: "approve", profileId }) }}>{busy ? "Authorizing…" : "Authorize"}</Button>
+          <Button
+            variant="outline"
+            disabled={busy || view === undefined}
+            onClick={() => decide.mutate({ decision: "deny" })}
+          >
+            Deny
+          </Button>
+          <Button
+            disabled={busy || profileId === undefined}
+            onClick={() => {
+              if (profileId !== undefined) decide.mutate({ decision: "approve", profileId })
+            }}
+          >
+            {busy ? "Authorizing…" : "Authorize"}
+          </Button>
         </CardFooter>
       </Card>
     </div>

@@ -7,14 +7,7 @@ import { PositiveInt } from "@integragents/contracts"
 import type { IntegrationsCliError } from "../connection.ts"
 import { cliError, connectToGateway, describeError } from "../connection.ts"
 import type { Page, Window } from "../output.ts"
-import {
-  inline,
-  jsonOutput,
-  page,
-  pageFields,
-  withNext,
-  writeStdoutLine
-} from "../output.ts"
+import { inline, jsonOutput, page, pageFields, withNext, writeStdoutLine } from "../output.ts"
 
 const verboseFlag = () =>
   Flag.Boolean("verbose").pipe(
@@ -24,10 +17,7 @@ const verboseFlag = () =>
   )
 
 const limitFlag = () =>
-  Flag.Int("limit").pipe(
-    Flag.optional,
-    Flag.withDescription("Return at most this many rows (default: all of them)")
-  )
+  Flag.Int("limit").pipe(Flag.optional, Flag.withDescription("Return at most this many rows (default: all of them)"))
 
 const offsetFlag = () =>
   Flag.Int("offset").pipe(
@@ -41,10 +31,7 @@ const connectionFlag = () =>
     Flag.withDescription("Connection name (default: default)")
   )
 
-const window = (
-  limit: Option.Option<number>,
-  offset: Option.Option<number>
-): Window => ({
+const window = (limit: Option.Option<number>, offset: Option.Option<number>): Window => ({
   limit: Option.getOrUndefined(limit),
   offset: Option.getOrUndefined(offset)
 })
@@ -68,12 +55,10 @@ const record = <A>(value: A | undefined): Record<string, typeof Schema.Json.Type
 const array = <A>(value: A | undefined): ReadonlyArray<Record<string, typeof Schema.Json.Type>> =>
   Option.getOrElse(Schema.decodeUnknownOption(JsonArray)(value), () => []).map(record)
 
-const text = (value: Schema.Json | undefined): string => value === undefined || value === null ? "" : String(value)
+const text = (value: Schema.Json | undefined): string => (value === undefined || value === null ? "" : String(value))
 
-const sortedBy = <A>(
-  items: ReadonlyArray<A>,
-  key: (item: A) => string
-): ReadonlyArray<A> => [...items].sort((left, right) => key(left).localeCompare(key(right)))
+const sortedBy = <A>(items: ReadonlyArray<A>, key: (item: A) => string): ReadonlyArray<A> =>
+  [...items].sort((left, right) => key(left).localeCompare(key(right)))
 
 const listing = <A>(
   result: Page<A>,
@@ -87,232 +72,238 @@ const listing = <A>(
     readonly extra?: Record<string, typeof Schema.Json.Type>
   }
 ): Effect.Effect<void> =>
-  writeStdoutLine(jsonOutput(
-    withNext({
-      ...options.extra,
-      [options.key]: result.items.map(options.row),
-      ...pageFields(result, options.narrowing)
-    }, options.next),
-    options.verbose
-  ))
-
-export const discoverCommand = (runGateway: GatewayTask) => Command.make(
-  "discover",
-  {
-    url: Argument.String("url").pipe(
-      Argument.withDescription("MCP endpoint or OpenAPI document URL")
-    ),
-    connection: connectionFlag(),
-    slug: Flag.String("slug").pipe(
-      Flag.optional,
-      Flag.withDescription("Address it as this instead of a name derived from the URL")
-    ),
-    name: Flag.String("name").pipe(
-      Flag.optional,
-      Flag.withDescription("Show it under this name instead of the derived one")
-    ),
-    verbose: verboseFlag()
-  },
-  ({ url, connection, slug: chosenSlug, name, verbose }) =>
-    runGateway((client) =>
-      client.provisioning.discover({ payload: {
-        url,
-        connection,
-        ...whenPresent("slug", Option.getOrUndefined(chosenSlug)),
-        ...whenPresent("name", Option.getOrUndefined(name))
-      } }))
-      .pipe(Effect.flatMap((result) => {
-        const body = record(result)
-        const integration = record(body["integration"])
-        const tools = array(body["tools"])
-        const slug = text(integration["slug"])
-        return writeStdoutLine(jsonOutput(
-          withNext(
-            verbose ? body : { integration, toolCount: tools.length },
-            `i connect ${slug}`
-          ),
-          verbose
-        ))
-      }))
-).pipe(Command.withDescription("Detect and register an integration"))
-
-export const searchCommand = (runGateway: GatewayTask) => Command.make(
-  "search",
-  {
-    query: Argument.String("query").pipe(
-      Argument.withDescription("Service name, domain, or integration keyword")
-    ),
-    kind: Flag.Literals("kind", ["mcp", "openapi", "graphql", "cli"]).pipe(
-      Flag.optional,
-      Flag.withDescription("Limit results to one integration kind")
-    ),
-    limit: Flag.Int("limit").pipe(
-      Flag.withDefault(5),
-      Flag.withDescription("How many results to ask the registry for (default: 5)")
-    ),
-    verbose: verboseFlag()
-  },
-  ({ query, kind, limit, verbose }) =>
-    runGateway((client) => client.provisioning.registrySearch({ query: {
-      q: query,
-      limit: PositiveInt.make(limit),
-      ...whenPresent("kind", Option.getOrUndefined(kind))
-    } })).pipe(Effect.flatMap((result) => {
-      const body = record(result)
-      const results = array(body["results"])
-      return writeStdoutLine(jsonOutput(
-        withNext({ ...body, count: results.length }, "i discover <url>"),
-        verbose
-      ))
-    }))
-).pipe(Command.withDescription("Search integrations.sh for exact integration URLs"))
-
-export const renameCommand = (runGateway: GatewayTask) => Command.make(
-  "rename",
-  {
-    integration: Argument.String("integration").pipe(
-      Argument.withDescription("Integration slug")
-    ),
-    name: Argument.String("name").pipe(
-      Argument.withDescription("What to show it as from now on")
-    ),
-    verbose: verboseFlag()
-  },
-  ({ integration, name, verbose }) =>
-    runGateway((client) =>
-      client.provisioning.renameIntegration({ params: { slug: integration }, payload: { name } })).pipe(
-      Effect.flatMap((result) =>
-        writeStdoutLine(jsonOutput(record(result), verbose))
-      )
-    )
-).pipe(Command.withDescription(
-  "Change an integration's display name. Its slug does not change"
-))
-
-export const integrationsCommand = (runGateway: GatewayTask) => Command.make(
-  "integrations",
-  {
-    limit: limitFlag(),
-    offset: offsetFlag(),
-    verbose: verboseFlag()
-  },
-  ({ limit, offset, verbose }) =>
-    runGateway((client) => client.provisioning.listIntegrations()).pipe(
-      Effect.flatMap((result) => {
-        const all = sortedBy(array(record(result)["integrations"]), (entry) => text(entry["slug"]))
-        return listing(page(all, window(limit, offset)), {
-          key: "integrations",
-          narrowing: "window with --limit/--offset",
-          verbose,
-          empty: "No integrations discovered.",
-          next: "i tools <integration>",
-          row: (integration) =>
-            verbose ? integration : {
-              slug: integration["slug"] ?? null,
-              kind: integration["kind"] ?? null,
-              name: integration["name"] ?? null,
-              connections: array(integration["connections"])
-                .filter((connection) => text(connection["status"]) === "connected").length,
-              reauthorizationRequired: array(integration["connections"])
-                .filter((connection) => text(connection["status"]) === "reauthorization_required").length
-            }
-        })
-      })
-    )
-).pipe(Command.withDescription("List registered integrations"))
-
-export const toolsCommand = (runGateway: GatewayTask) => Command.make(
-  "tools",
-  {
-    integration: Argument.String("integration"),
-    filter: Flag.String("filter").pipe(
-      Flag.optional,
-      Flag.withDescription("Only list tools whose name or description contains this text")
-    ),
-    connection: Flag.String("connection").pipe(
-      Flag.optional,
-      Flag.withDescription("Only list tools available through this connection")
-    ),
-    limit: limitFlag(),
-    offset: offsetFlag(),
-    verbose: verboseFlag()
-  },
-  ({ integration, connection, filter, limit, offset, verbose }) =>
-    runGateway((client) => client.delegated.listTools({ query: {
-      schemas: true,
-      integration: IntegrationSlug.make(integration),
-      ...whenPresent(
-        "connection",
-        Option.map(connection, ConnectionName.make).pipe(Option.getOrUndefined)
-      )
-    } })).pipe(Effect.flatMap((result) => {
-      const term = Option.getOrUndefined(filter)?.toLowerCase()
-      const all = array(record(result)["tools"])
-      const matching = term === undefined
-        ? all
-        : all.filter((tool) =>
-          text(tool["tool"]).toLowerCase().includes(term) ||
-          text(tool["description"]).toLowerCase().includes(term)
-        )
-      const visible = page(
-        sortedBy(matching, (tool) => text(tool["name"])),
-        window(limit, offset)
-      )
-      const only = visible.items.length === 1 ? record(visible.items[0]) : undefined
-      const alias = text(only?.["alias"])
-      const tool = text(only?.["tool"])
-      return listing(
-        visible,
+  writeStdoutLine(
+    jsonOutput(
+      withNext(
         {
-          key: "tools",
-          narrowing: "narrow with --filter <text>, or window with --limit/--offset",
-          verbose,
-          empty: term === undefined ? "No tools available." : `No tools match "${term}".`,
-          next: alias.length > 0 && tool.length > 0
-            ? `i schema ${alias} ${tool}`
-            : "i schema <alias> <tool>",
-          extra: {
-            integration,
-            ...whenPresent("connection", Option.getOrUndefined(connection))
-          },
-          row: (tool) =>
-            verbose ? tool : {
-              alias: tool["alias"] ?? null,
-              connection: record(tool["connection"])["name"] ?? null,
-              tool: tool["tool"] ?? null,
-              decision: tool["decision"] ?? null,
-              description: inline(text(tool["description"]), 200)
-            }
-        }
-      )
-    }))
-).pipe(Command.withDescription("List tool names and descriptions for an integration"))
+          ...options.extra,
+          [options.key]: result.items.map(options.row),
+          ...pageFields(result, options.narrowing)
+        },
+        options.next
+      ),
+      options.verbose
+    )
+  )
 
-export const schemaCommand = (runGateway: GatewayTask) => Command.make(
-  "schema",
-  {
-    alias: Argument.String("alias").pipe(Argument.withDescription("Connection alias, as listed by `i tools`")),
-    tool: Argument.String("tool").pipe(Argument.withDescription("Tool name")),
-    verbose: verboseFlag()
-  },
-  ({ alias, tool, verbose }) =>
-    runGateway((client) => client.delegated.listTools({ query: { schemas: true } })).pipe(Effect.flatMap((effective) => {
-      const found = effective.tools.find((candidate) => candidate.alias === alias && candidate.tool === tool)
-      if (found === undefined) {
-        return Effect.fail(cliError(`${tool} is not available to this key through ${alias}`))
-      }
-      const detail = record(found)
-      const core = Object.fromEntries(
-        Object.entries(detail).filter(([key]) =>
-          key !== "inputTypeScript" && key !== "outputTypeScript"
-        )
+export const discoverCommand = (runGateway: GatewayTask) =>
+  Command.make(
+    "discover",
+    {
+      url: Argument.String("url").pipe(Argument.withDescription("MCP endpoint or OpenAPI document URL")),
+      connection: connectionFlag(),
+      slug: Flag.String("slug").pipe(
+        Flag.optional,
+        Flag.withDescription("Address it as this instead of a name derived from the URL")
+      ),
+      name: Flag.String("name").pipe(
+        Flag.optional,
+        Flag.withDescription("Show it under this name instead of the derived one")
+      ),
+      verbose: verboseFlag()
+    },
+    ({ url, connection, slug: chosenSlug, name, verbose }) =>
+      runGateway((client) =>
+        client.provisioning.discover({
+          payload: {
+            url,
+            connection,
+            ...whenPresent("slug", Option.getOrUndefined(chosenSlug)),
+            ...whenPresent("name", Option.getOrUndefined(name))
+          }
+        })
+      ).pipe(
+        Effect.flatMap((result) => {
+          const body = record(result)
+          const integration = record(body["integration"])
+          const tools = array(body["tools"])
+          const slug = text(integration["slug"])
+          return writeStdoutLine(
+            jsonOutput(
+              withNext(verbose ? body : { integration, toolCount: tools.length }, `i connect ${slug}`),
+              verbose
+            )
+          )
+        })
       )
-      return writeStdoutLine(jsonOutput(
-        withNext(
-          verbose ? detail : core,
-          `i execute ${found.alias} ${tool} '<json>'`
-        ),
-        verbose
-      ))
-    }))
-).pipe(Command.withDescription("Show one tool's description and input/output schemas"))
+  ).pipe(Command.withDescription("Detect and register an integration"))
+
+export const searchCommand = (runGateway: GatewayTask) =>
+  Command.make(
+    "search",
+    {
+      query: Argument.String("query").pipe(Argument.withDescription("Service name, domain, or integration keyword")),
+      kind: Flag.Literals("kind", ["mcp", "openapi", "graphql", "cli"]).pipe(
+        Flag.optional,
+        Flag.withDescription("Limit results to one integration kind")
+      ),
+      limit: Flag.Int("limit").pipe(
+        Flag.withDefault(5),
+        Flag.withDescription("How many results to ask the registry for (default: 5)")
+      ),
+      verbose: verboseFlag()
+    },
+    ({ query, kind, limit, verbose }) =>
+      runGateway((client) =>
+        client.provisioning.registrySearch({
+          query: {
+            q: query,
+            limit: PositiveInt.make(limit),
+            ...whenPresent("kind", Option.getOrUndefined(kind))
+          }
+        })
+      ).pipe(
+        Effect.flatMap((result) => {
+          const body = record(result)
+          const results = array(body["results"])
+          return writeStdoutLine(jsonOutput(withNext({ ...body, count: results.length }, "i discover <url>"), verbose))
+        })
+      )
+  ).pipe(Command.withDescription("Search integrations.sh for exact integration URLs"))
+
+export const renameCommand = (runGateway: GatewayTask) =>
+  Command.make(
+    "rename",
+    {
+      integration: Argument.String("integration").pipe(Argument.withDescription("Integration slug")),
+      name: Argument.String("name").pipe(Argument.withDescription("What to show it as from now on")),
+      verbose: verboseFlag()
+    },
+    ({ integration, name, verbose }) =>
+      runGateway((client) =>
+        client.provisioning.renameIntegration({ params: { slug: integration }, payload: { name } })
+      ).pipe(Effect.flatMap((result) => writeStdoutLine(jsonOutput(record(result), verbose))))
+  ).pipe(Command.withDescription("Change an integration's display name. Its slug does not change"))
+
+export const integrationsCommand = (runGateway: GatewayTask) =>
+  Command.make(
+    "integrations",
+    {
+      limit: limitFlag(),
+      offset: offsetFlag(),
+      verbose: verboseFlag()
+    },
+    ({ limit, offset, verbose }) =>
+      runGateway((client) => client.provisioning.listIntegrations()).pipe(
+        Effect.flatMap((result) => {
+          const all = sortedBy(array(record(result)["integrations"]), (entry) => text(entry["slug"]))
+          return listing(page(all, window(limit, offset)), {
+            key: "integrations",
+            narrowing: "window with --limit/--offset",
+            verbose,
+            empty: "No integrations discovered.",
+            next: "i tools <integration>",
+            row: (integration) =>
+              verbose
+                ? integration
+                : {
+                    slug: integration["slug"] ?? null,
+                    kind: integration["kind"] ?? null,
+                    name: integration["name"] ?? null,
+                    connections: array(integration["connections"]).filter(
+                      (connection) => text(connection["status"]) === "connected"
+                    ).length,
+                    reauthorizationRequired: array(integration["connections"]).filter(
+                      (connection) => text(connection["status"]) === "reauthorization_required"
+                    ).length
+                  }
+          })
+        })
+      )
+  ).pipe(Command.withDescription("List registered integrations"))
+
+export const toolsCommand = (runGateway: GatewayTask) =>
+  Command.make(
+    "tools",
+    {
+      integration: Argument.String("integration"),
+      filter: Flag.String("filter").pipe(
+        Flag.optional,
+        Flag.withDescription("Only list tools whose name or description contains this text")
+      ),
+      connection: Flag.String("connection").pipe(
+        Flag.optional,
+        Flag.withDescription("Only list tools available through this connection")
+      ),
+      limit: limitFlag(),
+      offset: offsetFlag(),
+      verbose: verboseFlag()
+    },
+    ({ integration, connection, filter, limit, offset, verbose }) =>
+      runGateway((client) =>
+        client.delegated.listTools({
+          query: {
+            schemas: true,
+            integration: IntegrationSlug.make(integration),
+            ...whenPresent("connection", Option.map(connection, ConnectionName.make).pipe(Option.getOrUndefined))
+          }
+        })
+      ).pipe(
+        Effect.flatMap((result) => {
+          const term = Option.getOrUndefined(filter)?.toLowerCase()
+          const all = array(record(result)["tools"])
+          const matching =
+            term === undefined
+              ? all
+              : all.filter(
+                  (tool) =>
+                    text(tool["tool"]).toLowerCase().includes(term) ||
+                    text(tool["description"]).toLowerCase().includes(term)
+                )
+          const visible = page(
+            sortedBy(matching, (tool) => text(tool["name"])),
+            window(limit, offset)
+          )
+          const only = visible.items.length === 1 ? record(visible.items[0]) : undefined
+          const alias = text(only?.["alias"])
+          const tool = text(only?.["tool"])
+          return listing(visible, {
+            key: "tools",
+            narrowing: "narrow with --filter <text>, or window with --limit/--offset",
+            verbose,
+            empty: term === undefined ? "No tools available." : `No tools match "${term}".`,
+            next: alias.length > 0 && tool.length > 0 ? `i schema ${alias} ${tool}` : "i schema <alias> <tool>",
+            extra: {
+              integration,
+              ...whenPresent("connection", Option.getOrUndefined(connection))
+            },
+            row: (tool) =>
+              verbose
+                ? tool
+                : {
+                    alias: tool["alias"] ?? null,
+                    connection: record(tool["connection"])["name"] ?? null,
+                    tool: tool["tool"] ?? null,
+                    decision: tool["decision"] ?? null,
+                    description: inline(text(tool["description"]), 200)
+                  }
+          })
+        })
+      )
+  ).pipe(Command.withDescription("List tool names and descriptions for an integration"))
+
+export const schemaCommand = (runGateway: GatewayTask) =>
+  Command.make(
+    "schema",
+    {
+      alias: Argument.String("alias").pipe(Argument.withDescription("Connection alias, as listed by `i tools`")),
+      tool: Argument.String("tool").pipe(Argument.withDescription("Tool name")),
+      verbose: verboseFlag()
+    },
+    ({ alias, tool, verbose }) =>
+      runGateway((client) => client.delegated.listTools({ query: { schemas: true } })).pipe(
+        Effect.flatMap((effective) => {
+          const found = effective.tools.find((candidate) => candidate.alias === alias && candidate.tool === tool)
+          if (found === undefined) {
+            return Effect.fail(cliError(`${tool} is not available to this key through ${alias}`))
+          }
+          const detail = record(found)
+          const core = Object.fromEntries(
+            Object.entries(detail).filter(([key]) => key !== "inputTypeScript" && key !== "outputTypeScript")
+          )
+          return writeStdoutLine(
+            jsonOutput(withNext(verbose ? detail : core, `i execute ${found.alias} ${tool} '<json>'`), verbose)
+          )
+        })
+      )
+  ).pipe(Command.withDescription("Show one tool's description and input/output schemas"))

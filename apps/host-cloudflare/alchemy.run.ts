@@ -5,14 +5,12 @@ import { Effect, Layer } from "effect"
 import GatewayWorkerLive, { GatewayWorker } from "./src/worker.ts"
 
 /** Local development keeps its state on this machine; every deployed stage shares it through Cloudflare. */
-const state = Layer.unwrap(
-  Effect.map(AlchemyContext, ({ dev }) => dev ? Alchemy.localState() : Cloudflare.state())
-)
+const state = Layer.unwrap(Effect.map(AlchemyContext, ({ dev }) => (dev ? Alchemy.localState() : Cloudflare.state())))
 
 export default Alchemy.Stack(
   "integrations",
   { providers: Cloudflare.providers(), state },
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const gateway = yield* GatewayWorker
     return { url: gateway.url }
   }).pipe(Effect.provide(GatewayWorkerLive))

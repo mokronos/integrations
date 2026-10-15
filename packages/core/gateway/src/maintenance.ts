@@ -13,7 +13,7 @@ export type MaintenanceResult = {
   readonly expiredBlobs: number
 }
 
-export const runMaintenance = Effect.fn("Maintenance.run")(function*(
+export const runMaintenance = Effect.fn("Maintenance.run")(function* (
   store: GatewayStore,
   blobs: BlobStore["Service"],
   cutoff?: Date
@@ -43,7 +43,8 @@ export const maintenanceLoop = <E, R>(
     Effect.catchCause((cause) =>
       Effect.logWarning("gateway maintenance sweep failed", cause).pipe(
         Effect.annotateLogs({ operation: "Maintenance.sweep" })
-      )),
+      )
+    ),
     Effect.repeat(options.interval ?? Schedule.spaced("1 minute")),
     Effect.andThen(Effect.never)
   )

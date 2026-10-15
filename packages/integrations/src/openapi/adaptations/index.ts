@@ -14,14 +14,9 @@ export type { AdaptationContext } from "./context.ts"
 
 const adaptations: ReadonlyArray<
   (inputs: ReadonlyArray<OperationInput>, context: AdaptationContext) => ReadonlyArray<OperationInput>
-> = [
-  dropCredentialParameters,
-  dropGoogleSystemParameters,
-  modelSafeArgumentNames
-]
+> = [dropCredentialParameters, dropGoogleSystemParameters, modelSafeArgumentNames]
 
 export const adaptInputs = (
   inputs: ReadonlyArray<OperationInput>,
   context: AdaptationContext
-): ReadonlyArray<OperationInput> =>
-  adaptations.reduce((current, adapt) => adapt(current, context), inputs)
+): ReadonlyArray<OperationInput> => adaptations.reduce((current, adapt) => adapt(current, context), inputs)

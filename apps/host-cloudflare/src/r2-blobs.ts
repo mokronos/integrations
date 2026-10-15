@@ -33,7 +33,7 @@ const r2 = <A>(message: string, operation: Effect.Effect<A, Cloudflare.R2.R2Erro
 const r2BlobStore = (bucket: Cloudflare.R2.ReadWriteBucketClient): BlobStore["Service"] => {
   const body = (id: BlobId, options?: Cloudflare.R2.GetOptions) =>
     r2(`Could not read blob ${id}`, bucket.get(id, options)).pipe(
-      Effect.flatMap((object) => object === null ? Effect.fail(missing(id)) : Effect.succeed(object))
+      Effect.flatMap((object) => (object === null ? Effect.fail(missing(id)) : Effect.succeed(object)))
     )
 
   const bytesOf = (object: Cloudflare.R2.ObjectBody, id: BlobId) =>
@@ -41,7 +41,7 @@ const r2BlobStore = (bucket: Cloudflare.R2.ReadWriteBucketClient): BlobStore["Se
 
   return {
     write: (descriptor, content) =>
-      Effect.gen(function*() {
+      Effect.gen(function* () {
         const id = BlobId.make(Hex.encode(crypto.getRandomValues(new Uint8Array(16))))
         const metadata = {
           httpMetadata: { contentType: descriptor.contentType },
@@ -54,11 +54,16 @@ const r2BlobStore = (bucket: Cloudflare.R2.ReadWriteBucketClient): BlobStore["Se
         let upload: Cloudflare.R2.MultipartUpload | undefined
         const parts: Array<Cloudflare.R2.UploadedPart> = []
 
-        const uploadFullParts = Effect.gen(function*() {
+        const uploadFullParts = Effect.gen(function* () {
           let buffered = concat(pending)
           while (buffered.byteLength >= partBytes) {
             upload ??= yield* r2(`Could not write blob ${id}`, bucket.createMultipartUpload(id, metadata))
-            parts.push(yield* r2(`Could not write blob ${id}`, upload.uploadPart(parts.length + 1, buffered.subarray(0, partBytes))))
+            parts.push(
+              yield* r2(
+                `Could not write blob ${id}`,
+                upload.uploadPart(parts.length + 1, buffered.subarray(0, partBytes))
+              )
+            )
             buffered = buffered.subarray(partBytes)
           }
           pending = [buffered]
@@ -71,9 +76,7 @@ const r2BlobStore = (bucket: Cloudflare.R2.ReadWriteBucketClient): BlobStore["Se
           pending.push(chunk)
           pendingBytes += chunk.byteLength
           return pendingBytes >= partBytes ? uploadFullParts : Effect.void
-        }).pipe(
-          Effect.onError(() => upload === undefined ? Effect.void : Effect.ignore(r2("abort", upload.abort())))
-        )
+        }).pipe(Effect.onError(() => (upload === undefined ? Effect.void : Effect.ignore(r2("abort", upload.abort())))))
 
         const rest = concat(pending)
         if (upload === undefined) {

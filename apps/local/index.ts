@@ -10,8 +10,5 @@ const bundledWebDirectory = path.join(import.meta.dirname, "web")
 export const serveGateway = (options: ServeOptions): Promise<RunningGateway> =>
   serveGatewayApi({
     ...options,
-    webDirectory:
-      options.webDirectory ??
-      process.env["INTEGRATIONS_WEB_DIR"] ??
-      bundledWebDirectory
+    webDirectory: options.webDirectory ?? process.env["INTEGRATIONS_WEB_DIR"] ?? bundledWebDirectory
   })

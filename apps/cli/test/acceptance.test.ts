@@ -2,14 +2,9 @@ import { randomBytes } from "node:crypto"
 import path from "node:path"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Schema } from "effect"
+import { Base64Url } from "effect/encoding"
 import { FetchHttpClient, HttpBody, HttpClient, HttpClientRequest } from "effect/http"
-import { serveGateway } from "@integragents/local"
-import {
-  aliasForConnection,
-  ConnectionName,
-  createEncryption,
-  IntegrationSlug
-} from "@integragents/gateway-core"
+import { aliasForConnection, ConnectionName, IntegrationSlug } from "@integragents/contracts"
 import { temporaryDirectory, testServices } from "./fixtures.ts"
 
 const services = Layer.merge(testServices, FetchHttpClient.layer)
@@ -18,8 +13,7 @@ const repoRoot = path.resolve(import.meta.dirname, "../../..")
 const agentCli = path.join(repoRoot, "apps", "cli", "src", "agent.ts")
 const operatorCli = path.join(repoRoot, "apps", "cli", "src", "main.ts")
 
-const parseOutput = <A>(schema: Schema.Codec<A>, text: string): A =>
-  Schema.decodeUnknownSync(schema)(JSON.parse(text))
+const parseOutput = <A>(schema: Schema.Codec<A>, text: string): A => Schema.decodeUnknownSync(schema)(JSON.parse(text))
 
 const orgAlias = (integration: string, name: string): string =>
   aliasForConnection({
@@ -42,11 +36,13 @@ const ConnectionsOutput = Schema.Struct({
 const ToolsOutput = Schema.Struct({
   count: Schema.Number,
   next: Schema.String,
-  tools: Schema.Array(Schema.Struct({
-    alias: Schema.String,
-    tool: Schema.String,
-    connection: Schema.String
-  })),
+  tools: Schema.Array(
+    Schema.Struct({
+      alias: Schema.String,
+      tool: Schema.String,
+      connection: Schema.String
+    })
+  ),
   showing: Schema.optional(Schema.Number)
 })
 const WindowedToolsOutput = Schema.Struct({
@@ -56,18 +52,22 @@ const WindowedToolsOutput = Schema.Struct({
   tools: Schema.Array(Schema.Json)
 })
 const KeysOutput = Schema.Struct({
-  keys: Schema.Array(Schema.Struct({
-    id: Schema.String,
-    name: Schema.String,
-    revokedAt: Schema.NullOr(Schema.String)
-  }))
+  keys: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      name: Schema.String,
+      revokedAt: Schema.NullOr(Schema.String)
+    })
+  )
 })
 const AuditOutput = Schema.Struct({
-  records: Schema.Array(Schema.Struct({
-    tool: Schema.NullOr(Schema.String),
-    outcome: Schema.String,
-    caller: Schema.Struct({ credentialName: Schema.NullOr(Schema.String) })
-  }))
+  records: Schema.Array(
+    Schema.Struct({
+      tool: Schema.NullOr(Schema.String),
+      outcome: Schema.String,
+      caller: Schema.Struct({ credentialName: Schema.NullOr(Schema.String) })
+    })
+  )
 })
 const AuthenticationOutput = Schema.Struct({
   authenticated: Schema.Boolean,
@@ -78,11 +78,7 @@ const CatalogOutput = Schema.Struct({
 })
 
 /** A CLI invocation, as a shell would make it. */
-const run = (
-  cli: string,
-  args: ReadonlyArray<string>,
-  environment: Readonly<Record<string, string | undefined>>
-) =>
+const run = (cli: string, args: ReadonlyArray<string>, environment: Readonly<Record<string, string | undefined>>) =>
   Effect.promise(async () => {
     const subprocess = Bun.spawn({
       cmd: [process.execPath, "run", cli, ...args],
@@ -111,16 +107,20 @@ const startVendor = Effect.acquireRelease(
         const baseUrl = `http://127.0.0.1:${server.port}`
         if (url.pathname === "/api/search") {
           return Response.json({
-            results: [{
-              domain: "acceptance.test",
-              name: "Acceptance Tickets",
-              description: "Creates tickets for the acceptance journey",
-              surfaces: [{
-                kind: "openapi",
-                slug: "acceptance-tickets",
-                url: `${baseUrl}/openapi.json`
-              }]
-            }]
+            results: [
+              {
+                domain: "acceptance.test",
+                name: "Acceptance Tickets",
+                description: "Creates tickets for the acceptance journey",
+                surfaces: [
+                  {
+                    kind: "openapi",
+                    slug: "acceptance-tickets",
+                    url: `${baseUrl}/openapi.json`
+                  }
+                ]
+              }
+            ]
           })
         }
         if (url.pathname === "/openapi.json") {
@@ -169,9 +169,7 @@ const startVendor = Effect.acquireRelease(
         }
         if (url.pathname !== "/tickets") return new Response("not found", { status: 404 })
         seenKeys.push(request.headers.get("x-api-key"))
-        const body = await Schema.decodeUnknownPromise(
-          Schema.Struct({ title: Schema.String })
-        )(await request.json())
+        const body = await Schema.decodeUnknownPromise(Schema.Struct({ title: Schema.String }))(await request.json())
         invocations += 1
         return Response.json({ id: "T-1", title: body.title })
       }
@@ -187,16 +185,47 @@ const startVendor = Effect.acquireRelease(
   (vendor) => Effect.promise(() => vendor.server.stop(true))
 )
 
-/** A gateway serving on a loopback port, stopped with the test's scope. */
-const startGateway = Effect.fnUntraced(function*(registryUrl?: string) {
-  const home = yield* temporaryDirectory("integrations-acceptance-")
-  const gateway = yield* Effect.acquireRelease(
-    Effect.promise(() =>
-      registryUrl === undefined
-        ? serveGateway({ home, port: 0, httpClient: FetchHttpClient.layer })
-        : serveGateway({ home, port: 0, registryUrl, httpClient: FetchHttpClient.layer })),
-    (running) => Effect.promise(() => running.stop())
+const listening = /listening at (\S+)/
+
+/** `ii serve` in its own process, stopped with the test's scope once it announces its URL. */
+const serveProcess = (args: ReadonlyArray<string>, environment: Readonly<Record<string, string | undefined>>) =>
+  Effect.acquireRelease(
+    Effect.promise(async () => {
+      const subprocess = Bun.spawn({
+        cmd: [process.execPath, "run", operatorCli, "serve", "--port", "0", ...args],
+        cwd: repoRoot,
+        stdout: "pipe",
+        stderr: "pipe",
+        env: { ...environment, NO_COLOR: "1" }
+      })
+      const reader = subprocess.stdout.pipeThrough(new TextDecoderStream()).getReader()
+      let output = ""
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) throw new Error(`ii serve exited before listening: ${await new Response(subprocess.stderr).text()}`)
+        output += value
+        const url = listening.exec(output)?.[1]
+        if (url !== undefined) {
+          reader.releaseLock()
+          return { subprocess, url }
+        }
+      }
+    }),
+    ({ subprocess }) =>
+      Effect.promise(async () => {
+        subprocess.kill()
+        await subprocess.exited
+      })
   )
+
+/** A gateway serving on a loopback port, stopped with the test's scope. */
+const startGateway = Effect.fnUntraced(function* (registryUrl?: string) {
+  const home = yield* temporaryDirectory("integrations-acceptance-")
+  const gateway = yield* serveProcess([], {
+    ...process.env,
+    INTEGRATIONS_HOME: home,
+    INTEGRATIONS_REGISTRY_URL: registryUrl
+  })
   const config = yield* Effect.promise(() => Bun.file(path.join(home, "gateway.json")).text())
   const { apiKey } = parseOutput(ApiKeyConfig, config)
   const operatorConfig = yield* Effect.promise(() => Bun.file(path.join(home, "operator-gateway.json")).text())
@@ -218,159 +247,152 @@ const startGateway = Effect.fnUntraced(function*(registryUrl?: string) {
 })
 
 /** A gateway reachable off loopback, as a deployed one would be. */
-const startRemoteGateway = Effect.fnUntraced(function*() {
+const startRemoteGateway = Effect.fnUntraced(function* () {
   const serverHome = yield* temporaryDirectory("integrations-remote-server-")
   const clientHome = yield* temporaryDirectory("integrations-remote-client-")
-  const gateway = yield* Effect.acquireRelease(
-    Effect.promise(() =>
-      serveGateway({
-        httpClient: FetchHttpClient.layer,
-        home: serverHome,
-        encryption: createEncryption(randomBytes(32)),
-        hostname: "0.0.0.0",
-        port: 0,
-        publicUrl: "https://gateway.example"
-      })),
-    (running) => Effect.promise(() => running.stop())
-  )
+  const gateway = yield* serveProcess(["--host", "0.0.0.0"], {
+    ...process.env,
+    INTEGRATIONS_HOME: serverHome,
+    INTEGRATIONS_MASTER_KEY: Base64Url.encode(randomBytes(32)),
+    INTEGRATIONS_PUBLIC_URL: "https://gateway.example"
+  })
+  const url = `http://127.0.0.1:${new URL(gateway.url).port}`
   return {
-    url: `http://127.0.0.1:${gateway.port}`,
+    url,
     environment: {
       ...process.env,
       INTEGRATIONS_HOME: clientHome,
-      INTEGRATIONS_URL: `http://127.0.0.1:${gateway.port}`,
+      INTEGRATIONS_URL: url,
       INTEGRATIONS_API_KEY: undefined,
       NO_COLOR: "1"
     }
   }
 })
 
-const loginOperator = Effect.fnUntraced(function*(
-  gateway: { readonly environment: Readonly<Record<string, string | undefined>> }
-) {
-  const signedUp = yield* run(operatorCli, [
-    "signup",
-    "--password",
-    "correct horse battery",
-    "operator@example.com"
-  ], gateway.environment)
+const loginOperator = Effect.fnUntraced(function* (gateway: {
+  readonly environment: Readonly<Record<string, string | undefined>>
+}) {
+  const signedUp = yield* run(
+    operatorCli,
+    ["signup", "--password", "correct horse battery", "operator@example.com"],
+    gateway.environment
+  )
   expect(`signup exit ${signedUp.exitCode}: ${signedUp.stderr}`).toBe("signup exit 0: ")
 })
 
 describe("integrations CLI acceptance", () => {
-  it.live("local ii uses the operator key while i uses the agent key", () =>
-    Effect.gen(function*() {
-      const gateway = yield* startGateway()
-      const environment = { ...gateway.environment, INTEGRATIONS_ADMIN_API_KEY: undefined }
-      const listed = yield* run(operatorCli, ["profiles"], environment)
-      expect(listed.exitCode, listed.stderr).toBe(0)
-      const connected = yield* run(agentCli, ["connections"], environment)
-      expect(connected.exitCode, connected.stderr).toBe(0)
-    }).pipe(Effect.provide(services)), 30_000)
+  it.live(
+    "local ii uses the operator key while i uses the agent key",
+    () =>
+      Effect.gen(function* () {
+        const gateway = yield* startGateway()
+        const environment = { ...gateway.environment, INTEGRATIONS_ADMIN_API_KEY: undefined }
+        const listed = yield* run(operatorCli, ["profiles"], environment)
+        expect(listed.exitCode, listed.stderr).toBe(0)
+        const connected = yield* run(agentCli, ["connections"], environment)
+        expect(connected.exitCode, connected.stderr).toBe(0)
+      }).pipe(Effect.provide(services)),
+    30_000
+  )
 
-  it.live("a remote ii uses a login session while i uses only its delegated API key", () =>
-    Effect.gen(function*() {
-      const gateway = yield* startRemoteGateway()
-      const operator = (args: ReadonlyArray<string>) =>
-        run(operatorCli, args, gateway.environment)
+  it.live(
+    "a remote ii uses a login session while i uses only its delegated API key",
+    () =>
+      Effect.gen(function* () {
+        const gateway = yield* startRemoteGateway()
+        const operator = (args: ReadonlyArray<string>) => run(operatorCli, args, gateway.environment)
 
-      const signedUp = yield* operator([
-        "signup",
-        "--password",
-        "correct horse battery",
-        "remote@example.com"
-      ])
-      expect(signedUp.exitCode, signedUp.stderr).toBe(0)
+        const signedUp = yield* operator(["signup", "--password", "correct horse battery", "remote@example.com"])
+        expect(signedUp.exitCode, signedUp.stderr).toBe(0)
 
-      const catalog = yield* operator(["integrations"])
-      expect(catalog.exitCode, catalog.stderr).toBe(0)
+        const catalog = yield* operator(["integrations"])
+        expect(catalog.exitCode, catalog.stderr).toBe(0)
 
-      const login = yield* (HttpClient.execute(HttpClientRequest.setBody(
-        HttpClientRequest.post(`${gateway.url}/v1/auth/login`),
-        HttpBody.jsonUnsafe({
-          email: "remote@example.com",
-          password: "correct horse battery"
+        const login = yield* HttpClient.execute(
+          HttpClientRequest.setBody(
+            HttpClientRequest.post(`${gateway.url}/v1/auth/login`),
+            HttpBody.jsonUnsafe({
+              email: "remote@example.com",
+              password: "correct horse battery"
+            })
+          )
+        )
+        expect(login.status).toBe(200)
+        const setCookie = login.headers["set-cookie"] ?? ""
+        expect(setCookie).toContain("Secure")
+        const cookie = setCookie.split(";", 1)[0] ?? ""
+        const remoteCatalogResponse = yield* HttpClient.get(`${gateway.url}/v1/integrations`, {
+          headers: { cookie }
         })
-      )))
-      expect(login.status).toBe(200)
-      const setCookie = login.headers["set-cookie"] ?? ""
-      expect(setCookie).toContain("Secure")
-      const cookie = setCookie.split(";", 1)[0] ?? ""
-      const remoteCatalogResponse = yield* (HttpClient.get(`${gateway.url}/v1/integrations`, {
-        headers: { cookie }
-      }))
-      expect(remoteCatalogResponse.status).toBe(200)
-      const remoteCatalog = Schema.decodeUnknownSync(CatalogOutput)(
-        yield* (remoteCatalogResponse.json)
-      )
-      expect(remoteCatalog.oauthCallbackUrl).toBe(
-        "https://gateway.example/v1/oauth/callback"
-      )
+        expect(remoteCatalogResponse.status).toBe(200)
+        const remoteCatalog = Schema.decodeUnknownSync(CatalogOutput)(yield* remoteCatalogResponse.json)
+        expect(remoteCatalog.oauthCallbackUrl).toBe("https://gateway.example/v1/oauth/callback")
 
-      const profile = parseOutput(
-        IdOutput,
-        (yield* operator(["profile", "remote-agent", "--provision"])).stdout
-      )
-      const key = parseOutput(SecretOutput, (yield* operator(["key", profile.id, "Remote agent"])).stdout)
-      const agentEnvironment = {
-        ...gateway.environment,
-        INTEGRATIONS_API_KEY: key.secret
-      }
-      const connections = yield* run(agentCli, ["connections"], agentEnvironment)
-      expect(connections.exitCode, connections.stderr).toBe(0)
-      expect(parseOutput(ConnectionsOutput, connections.stdout).connections).toEqual([])
+        const profile = parseOutput(IdOutput, (yield* operator(["profile", "remote-agent", "--provision"])).stdout)
+        const key = parseOutput(SecretOutput, (yield* operator(["key", profile.id, "Remote agent"])).stdout)
+        const agentEnvironment = {
+          ...gateway.environment,
+          INTEGRATIONS_API_KEY: key.secret
+        }
+        const connections = yield* run(agentCli, ["connections"], agentEnvironment)
+        expect(connections.exitCode, connections.stderr).toBe(0)
+        expect(parseOutput(ConnectionsOutput, connections.stdout).connections).toEqual([])
 
-      const administrative = yield* run(agentCli, ["profiles"], agentEnvironment)
-      expect(administrative.exitCode).not.toBe(0)
-      expect(administrative.stderr).toContain("Unknown subcommand")
+        const administrative = yield* run(agentCli, ["profiles"], agentEnvironment)
+        expect(administrative.exitCode).not.toBe(0)
+        expect(administrative.stderr).toContain("Unknown subcommand")
 
-      expect((yield* operator(["logout"])).exitCode).toBe(0)
-      const afterLogout = yield* operator(["profiles"])
-      expect(afterLogout.exitCode).not.toBe(0)
-      expect(afterLogout.stderr).toContain("No operator credential found")
-    }).pipe(Effect.provide(services)), 40_000)
+        expect((yield* operator(["logout"])).exitCode).toBe(0)
+        const afterLogout = yield* operator(["profiles"])
+        expect(afterLogout.exitCode).not.toBe(0)
+        expect(afterLogout.stderr).toContain("No operator credential found")
+      }).pipe(Effect.provide(services)),
+    40_000
+  )
 
-  it.live("ii signs a human out and back in without an API key", () =>
-    Effect.gen(function*() {
-      const gateway = yield* startGateway()
-      yield* loginOperator(gateway)
-      const environment = { ...gateway.environment, INTEGRATIONS_API_KEY: undefined }
-      const operator = (args: ReadonlyArray<string>) => run(operatorCli, args, environment)
+  it.live(
+    "ii signs a human out and back in without an API key",
+    () =>
+      Effect.gen(function* () {
+        const gateway = yield* startGateway()
+        yield* loginOperator(gateway)
+        const environment = { ...gateway.environment, INTEGRATIONS_API_KEY: undefined }
+        const operator = (args: ReadonlyArray<string>) => run(operatorCli, args, environment)
 
-      const signedIn = parseOutput(AuthenticationOutput, (yield* operator(["whoami"])).stdout)
-      expect(signedIn).toEqual({ authenticated: true, email: "operator@example.com" })
+        const signedIn = parseOutput(AuthenticationOutput, (yield* operator(["whoami"])).stdout)
+        expect(signedIn).toEqual({ authenticated: true, email: "operator@example.com" })
 
-      const logout = yield* operator(["logout"])
-      expect(logout.exitCode, logout.stderr).toBe(0)
-      const signedOut = parseOutput(AuthenticationOutput, (yield* operator(["whoami"])).stdout)
-      expect(signedOut).toEqual({ authenticated: false })
+        const logout = yield* operator(["logout"])
+        expect(logout.exitCode, logout.stderr).toBe(0)
+        const signedOut = parseOutput(AuthenticationOutput, (yield* operator(["whoami"])).stdout)
+        expect(signedOut).toEqual({ authenticated: false })
 
-      const login = yield* operator([
-        "login",
-        "--password",
-        "correct horse battery",
-        "operator@example.com"
-      ])
-      expect(login.exitCode, login.stderr).toBe(0)
-      const signedInAgain = parseOutput(AuthenticationOutput, (yield* operator(["whoami"])).stdout)
-      expect(signedInAgain).toEqual({ authenticated: true, email: "operator@example.com" })
-    }).pipe(Effect.provide(services)), 30_000)
+        const login = yield* operator(["login", "--password", "correct horse battery", "operator@example.com"])
+        expect(login.exitCode, login.stderr).toBe(0)
+        const signedInAgain = parseOutput(AuthenticationOutput, (yield* operator(["whoami"])).stdout)
+        expect(signedInAgain).toEqual({ authenticated: true, email: "operator@example.com" })
+      }).pipe(Effect.provide(services)),
+    30_000
+  )
 
-  it.live("an agent searches, discovers, connects, inspects, and invokes a connection — all through the gateway", () =>
-    Effect.gen(function*() {
+  it.live(
+    "an agent searches, discovers, connects, inspects, and invokes a connection — all through the gateway",
+    () =>
+      Effect.gen(function* () {
         const vendor = yield* startVendor
         const gateway = yield* startGateway(vendor.registryUrl)
-        const integrations = (args: ReadonlyArray<string>) =>
-          run(agentCli, args, gateway.environment)
+        const integrations = (args: ReadonlyArray<string>) => run(agentCli, args, gateway.environment)
 
         const searched = yield* integrations(["search", "acceptance tickets"])
         expect(searched.exitCode, searched.stderr).toBe(0)
         const SearchBody = Schema.Struct({
           query: Schema.String,
-          results: Schema.Array(Schema.Struct({
-            name: Schema.String,
-            surfaces: Schema.Array(Schema.Struct({ url: Schema.optional(Schema.String) }))
-          }))
+          results: Schema.Array(
+            Schema.Struct({
+              name: Schema.String,
+              surfaces: Schema.Array(Schema.Struct({ url: Schema.optional(Schema.String) }))
+            })
+          )
         })
         const searchBody = Schema.decodeUnknownSync(SearchBody)(JSON.parse(searched.stdout))
         expect(searchBody.query).toBe("acceptance tickets")
@@ -385,18 +407,11 @@ describe("integrations CLI acceptance", () => {
           integration: Schema.Struct({ slug: Schema.String }),
           next: Schema.String
         })
-        const discoveredBody = Schema.decodeUnknownSync(DiscoverBody)(
-          JSON.parse(discovered.stdout)
-        )
+        const discoveredBody = Schema.decodeUnknownSync(DiscoverBody)(JSON.parse(discovered.stdout))
         const slug = discoveredBody.integration.slug
         expect(discoveredBody.next).toBe(`i connect ${slug}`)
 
-        const connected = yield* integrations([
-          "connect",
-          slug,
-          "--credential-env",
-          "ACCEPTANCE_TOKEN"
-        ])
+        const connected = yield* integrations(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
         expect(connected.exitCode, connected.stderr).toBe(0)
         expect(connected.stdout).not.toContain("acceptance-secret")
 
@@ -409,11 +424,13 @@ describe("integrations CLI acceptance", () => {
         const connectionName = listed.connections[0]?.name ?? ""
         const alias = orgAlias(slug, connectionName)
 
-        expect(toolsOutput.tools).toEqual([{
-          alias,
-          connection: connectionName,
-          tool: "tickets.create"
-        }])
+        expect(toolsOutput.tools).toEqual([
+          {
+            alias,
+            connection: connectionName,
+            tool: "tickets.create"
+          }
+        ])
         expect(toolsOutput.next).toBe(`i schema ${alias} tickets.create`)
 
         const schema = yield* integrations(["schema", alias, "tickets.create"])
@@ -426,182 +443,215 @@ describe("integrations CLI acceptance", () => {
           run(operatorCli, args, { ...gateway.environment, INTEGRATIONS_API_KEY: undefined })
         const profile = parseOutput(IdOutput, (yield* operator(["profile", "acceptance-agent"])).stdout)
         const included = yield* operator([
-          "profile-tool", profile.id, slug, "tickets.create", "ask",
-          "--connection", connectionName
+          "profile-tool",
+          profile.id,
+          slug,
+          "tickets.create",
+          "ask",
+          "--connection",
+          connectionName
         ])
         expect(included.exitCode, included.stderr).toBe(0)
         const key = parseOutput(SecretOutput, (yield* operator(["key", profile.id, "acceptance"])).stdout)
 
-        const executed = yield* run(agentCli, [
-          "execute",
-          orgAlias(slug, connectionName),
-          "tickets.create",
-          JSON.stringify({ body: { title: "Connected" } })
-        ], { ...gateway.environment, INTEGRATIONS_API_KEY: key.secret })
+        const executed = yield* run(
+          agentCli,
+          [
+            "execute",
+            orgAlias(slug, connectionName),
+            "tickets.create",
+            JSON.stringify({ body: { title: "Connected" } })
+          ],
+          { ...gateway.environment, INTEGRATIONS_API_KEY: key.secret }
+        )
         expect(executed.exitCode, executed.stderr).toBe(0)
         expect(executed.stdout).toContain("pending")
         expect(vendor.invocations()).toBe(0)
-    }).pipe(Effect.provide(services)), 60_000)
+      }).pipe(Effect.provide(services)),
+    60_000
+  )
 
-  it.live("a delegated key reaches only what its profile enables, and its calls carry the key's name", () =>
-    Effect.gen(function*() {
-      const vendor = yield* startVendor
-      const gateway = yield* startGateway()
-      yield* loginOperator(gateway)
-      const clientCli = (args: ReadonlyArray<string>, environment = gateway.environment) =>
-        run(agentCli, args, environment)
-      const operator = (args: ReadonlyArray<string>) =>
-        run(operatorCli, args, { ...gateway.environment, INTEGRATIONS_API_KEY: undefined })
+  it.live(
+    "a delegated key reaches only what its profile enables, and its calls carry the key's name",
+    () =>
+      Effect.gen(function* () {
+        const vendor = yield* startVendor
+        const gateway = yield* startGateway()
+        yield* loginOperator(gateway)
+        const clientCli = (args: ReadonlyArray<string>, environment = gateway.environment) =>
+          run(agentCli, args, environment)
+        const operator = (args: ReadonlyArray<string>) =>
+          run(operatorCli, args, { ...gateway.environment, INTEGRATIONS_API_KEY: undefined })
 
-      const discovered = parseOutput(DiscoveredOutput, (yield* clientCli(["discover", vendor.specUrl])).stdout)
-      const slug = discovered.integration.slug
-      yield* clientCli(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
-      const connections = parseOutput(ConnectionsOutput, (yield* clientCli(["connections"])).stdout)
-      const connectionName = connections.connections[0]?.name ?? ""
-      const operatorCatalog = yield* operator(["integrations"])
-      expect(operatorCatalog.exitCode, operatorCatalog.stderr).toBe(0)
+        const discovered = parseOutput(DiscoveredOutput, (yield* clientCli(["discover", vendor.specUrl])).stdout)
+        const slug = discovered.integration.slug
+        yield* clientCli(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
+        const connections = parseOutput(ConnectionsOutput, (yield* clientCli(["connections"])).stdout)
+        const connectionName = connections.connections[0]?.name ?? ""
+        const operatorCatalog = yield* operator(["integrations"])
+        expect(operatorCatalog.exitCode, operatorCatalog.stderr).toBe(0)
 
-      const profile = parseOutput(IdOutput, (yield* operator(["profile", "sandbox"])).stdout)
-      const allowed = yield* operator([
-        "profile-tool", profile.id, slug, "tickets.create", "allow",
-        "--connection", connectionName
-      ])
-      expect(allowed.exitCode, allowed.stderr).toBe(0)
-      const key = parseOutput(SecretOutput, (yield* operator(["key", profile.id, "Sandbox agent"])).stdout)
-      const sandbox = {
-        ...gateway.environment,
-        INTEGRATIONS_API_KEY: key.secret
-      }
+        const profile = parseOutput(IdOutput, (yield* operator(["profile", "sandbox"])).stdout)
+        const allowed = yield* operator([
+          "profile-tool",
+          profile.id,
+          slug,
+          "tickets.create",
+          "allow",
+          "--connection",
+          connectionName
+        ])
+        expect(allowed.exitCode, allowed.stderr).toBe(0)
+        const key = parseOutput(SecretOutput, (yield* operator(["key", profile.id, "Sandbox agent"])).stdout)
+        const sandbox = {
+          ...gateway.environment,
+          INTEGRATIONS_API_KEY: key.secret
+        }
 
-      const escalation = yield* clientCli(["profile", "escalated"], sandbox)
-      expect(escalation.exitCode).toBe(1)
-      expect(escalation.stderr).toContain("Unknown subcommand")
+        const escalation = yield* clientCli(["profile", "escalated"], sandbox)
+        expect(escalation.exitCode).toBe(1)
+        expect(escalation.stderr).toContain("Unknown subcommand")
 
-      const discoverAttempt = yield* clientCli(["discover", vendor.specUrl], sandbox)
-      expect(discoverAttempt.exitCode).toBe(1)
-      expect(discoverAttempt.stderr).toContain("a profile with that capability")
+        const discoverAttempt = yield* clientCli(["discover", vendor.specUrl], sandbox)
+        expect(discoverAttempt.exitCode).toBe(1)
+        expect(discoverAttempt.stderr).toContain("a profile with that capability")
 
-      const visible = parseOutput(
-        ToolsOutput,
-        (yield* clientCli(["tools", slug, "--connection", connectionName], sandbox)).stdout
-      )
-      expect(visible.tools.map((tool) => tool.tool)).toEqual(["tickets.create"])
-      expect(visible.tools[0]?.connection).toBe(connectionName)
-      expect(visible.tools[0]?.alias).toBe(orgAlias(slug, connectionName))
-      expect(visible.next).toBe(`i schema ${orgAlias(slug, connectionName)} tickets.create`)
-      const visibleSchema = yield* clientCli([
-        "schema", orgAlias(slug, connectionName), "tickets.create"
-      ], sandbox)
-      expect(visibleSchema.exitCode, visibleSchema.stderr).toBe(0)
-      const hiddenSchema = yield* clientCli([
-        "schema", orgAlias(slug, connectionName), "tickets.delete"
-      ], sandbox)
-      expect(hiddenSchema.exitCode).toBe(1)
-      expect(hiddenSchema.stderr).toContain("not available to this key")
+        const visible = parseOutput(
+          ToolsOutput,
+          (yield* clientCli(["tools", slug, "--connection", connectionName], sandbox)).stdout
+        )
+        expect(visible.tools.map((tool) => tool.tool)).toEqual(["tickets.create"])
+        expect(visible.tools[0]?.connection).toBe(connectionName)
+        expect(visible.tools[0]?.alias).toBe(orgAlias(slug, connectionName))
+        expect(visible.next).toBe(`i schema ${orgAlias(slug, connectionName)} tickets.create`)
+        const visibleSchema = yield* clientCli(["schema", orgAlias(slug, connectionName), "tickets.create"], sandbox)
+        expect(visibleSchema.exitCode, visibleSchema.stderr).toBe(0)
+        const hiddenSchema = yield* clientCli(["schema", orgAlias(slug, connectionName), "tickets.delete"], sandbox)
+        expect(hiddenSchema.exitCode).toBe(1)
+        expect(hiddenSchema.stderr).toContain("not available to this key")
 
-      const executed = yield* clientCli([
-        "execute",
-        orgAlias(slug, connectionName),
-        "tickets.create",
-        JSON.stringify({ body: { title: "Delegated" } })
-      ], sandbox)
-      expect(executed.exitCode, executed.stderr).toBe(0)
-      expect(executed.stdout).toContain("succeeded")
-      expect(vendor.seenKeys()).toEqual(["acceptance-secret"])
+        const executed = yield* clientCli(
+          [
+            "execute",
+            orgAlias(slug, connectionName),
+            "tickets.create",
+            JSON.stringify({ body: { title: "Delegated" } })
+          ],
+          sandbox
+        )
+        expect(executed.exitCode, executed.stderr).toBe(0)
+        expect(executed.stdout).toContain("succeeded")
+        expect(vendor.seenKeys()).toEqual(["acceptance-secret"])
 
-      const refused = yield* clientCli([
-        "execute",
-        orgAlias(slug, connectionName),
-        "tickets.delete",
-        "{}"
-      ], sandbox)
-      expect(refused.exitCode).toBe(1)
+        const refused = yield* clientCli(["execute", orgAlias(slug, connectionName), "tickets.delete", "{}"], sandbox)
+        expect(refused.exitCode).toBe(1)
 
-      const audit = parseOutput(AuditOutput, (yield* operator(["audit", "--profile", profile.id])).stdout)
-      expect(audit.records.map(({ tool, outcome, caller }) => ({ tool, outcome, credentialName: caller.credentialName })))
-        .toEqual([
+        const audit = parseOutput(AuditOutput, (yield* operator(["audit", "--profile", profile.id])).stdout)
+        expect(
+          audit.records.map(({ tool, outcome, caller }) => ({ tool, outcome, credentialName: caller.credentialName }))
+        ).toEqual([
           { tool: "tickets.delete", outcome: "denied", credentialName: "Sandbox agent" },
           { tool: "tickets.create", outcome: "succeeded", credentialName: "Sandbox agent" }
         ])
-    }).pipe(Effect.provide(services)), 60_000)
+      }).pipe(Effect.provide(services)),
+    60_000
+  )
 
-  it.live("listings return every row, and window only when asked", () =>
-    Effect.gen(function*() {
-      const vendor = yield* startVendor
-      const gateway = yield* startGateway()
-      const integrations = (args: ReadonlyArray<string>) =>
-        run(agentCli, args, gateway.environment)
+  it.live(
+    "listings return every row, and window only when asked",
+    () =>
+      Effect.gen(function* () {
+        const vendor = yield* startVendor
+        const gateway = yield* startGateway()
+        const integrations = (args: ReadonlyArray<string>) => run(agentCli, args, gateway.environment)
 
-      const discovered = parseOutput(DiscoveredOutput, (yield* integrations(["discover", vendor.specUrl])).stdout)
-      const slug = discovered.integration.slug
-      yield* integrations(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
+        const discovered = parseOutput(DiscoveredOutput, (yield* integrations(["discover", vendor.specUrl])).stdout)
+        const slug = discovered.integration.slug
+        yield* integrations(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
 
-      const whole = parseOutput(ToolsOutput, (yield* integrations(["tools", slug])).stdout)
-      expect(whole.tools).toHaveLength(whole.count)
-      expect(whole.showing).toBeUndefined()
+        const whole = parseOutput(ToolsOutput, (yield* integrations(["tools", slug])).stdout)
+        expect(whole.tools).toHaveLength(whole.count)
+        expect(whole.showing).toBeUndefined()
 
-      const windowed = parseOutput(
-        WindowedToolsOutput,
-        (yield* integrations(["tools", slug, "--limit", "1", "--offset", "0"])).stdout
-      )
-      expect(windowed.tools).toHaveLength(1)
-      expect(windowed.showing).toBe(1)
-      expect(windowed.count).toBe(whole.count)
-
-      const catalog = parseOutput(CountOutput, (yield* integrations(["integrations"])).stdout)
-      expect(catalog.count).toBeGreaterThan(0)
-    }).pipe(Effect.provide(services)), 40_000)
-
-  it.live("turning a tool off removes authority, a copied profile keeps its own, and a key can be listed and revoked", () =>
-    Effect.gen(function*() {
-      const vendor = yield* startVendor
-      const gateway = yield* startGateway()
-      yield* loginOperator(gateway)
-      const clientCli = (args: ReadonlyArray<string>, environment = gateway.environment) =>
-        run(agentCli, args, environment)
-      const operator = (args: ReadonlyArray<string>) =>
-        run(operatorCli, args, { ...gateway.environment, INTEGRATIONS_API_KEY: undefined })
-
-      const discovered = parseOutput(DiscoveredOutput, (yield* clientCli(["discover", vendor.specUrl])).stdout)
-      const slug = discovered.integration.slug
-      yield* clientCli(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
-      const connections = parseOutput(ConnectionsOutput, (yield* clientCli(["connections"])).stdout)
-      const connectionName = connections.connections[0]?.name ?? ""
-      const alias = orgAlias(slug, connectionName)
-      const profile = parseOutput(IdOutput, (yield* operator(["profile", "sandbox"])).stdout)
-      yield* operator(["profile-tool", profile.id, slug, "tickets.create", "ask", "--connection", connectionName])
-      const copy = parseOutput(IdOutput, (yield* operator(["profile", "sandbox-copy", "--copy-from", profile.id])).stdout)
-      const key = parseOutput(KeyOutput, (yield* operator(["key", profile.id, "Sandbox agent"])).stdout)
-      const copyKey = parseOutput(KeyOutput, (yield* operator(["key", copy.id, "Copy agent"])).stdout)
-
-      const keys = parseOutput(KeysOutput, (yield* operator(["keys", profile.id])).stdout)
-      expect(keys.keys.map(({ id, name }) => ({ id, name }))).toEqual([{ id: key.id, name: "Sandbox agent" }])
-
-      const execute = (secret: string, title: string) =>
-        clientCli(
-          ["execute", alias, "tickets.create", JSON.stringify({ body: { title } })],
-          { ...gateway.environment, INTEGRATIONS_API_KEY: secret }
+        const windowed = parseOutput(
+          WindowedToolsOutput,
+          (yield* integrations(["tools", slug, "--limit", "1", "--offset", "0"])).stdout
         )
+        expect(windowed.tools).toHaveLength(1)
+        expect(windowed.showing).toBe(1)
+        expect(windowed.count).toBe(whole.count)
 
-      const asked = yield* execute(key.secret, "Asked")
-      expect(`asked exit ${asked.exitCode}: ${asked.stderr}`).toBe("asked exit 0: ")
-      expect(JSON.parse(asked.stdout)).toMatchObject({ status: "pending" })
+        const catalog = parseOutput(CountOutput, (yield* integrations(["integrations"])).stdout)
+        expect(catalog.count).toBeGreaterThan(0)
+      }).pipe(Effect.provide(services)),
+    40_000
+  )
 
-      const turnedOff = yield* operator(["profile-tool", profile.id, slug, "tickets.create", "off", "--connection", connectionName])
-      expect(turnedOff.exitCode, turnedOff.stderr).toBe(0)
+  it.live(
+    "turning a tool off removes authority, a copied profile keeps its own, and a key can be listed and revoked",
+    () =>
+      Effect.gen(function* () {
+        const vendor = yield* startVendor
+        const gateway = yield* startGateway()
+        yield* loginOperator(gateway)
+        const clientCli = (args: ReadonlyArray<string>, environment = gateway.environment) =>
+          run(agentCli, args, environment)
+        const operator = (args: ReadonlyArray<string>) =>
+          run(operatorCli, args, { ...gateway.environment, INTEGRATIONS_API_KEY: undefined })
 
-      const afterOff = yield* execute(key.secret, "Off")
-      expect(afterOff.exitCode).toBe(1)
-      expect(JSON.parse(afterOff.stdout)).toMatchObject({ status: "denied" })
-      const fromCopy = yield* execute(copyKey.secret, "Copy")
-      expect(fromCopy.exitCode, fromCopy.stderr).toBe(0)
-      expect(JSON.parse(fromCopy.stdout)).toMatchObject({ status: "pending" })
+        const discovered = parseOutput(DiscoveredOutput, (yield* clientCli(["discover", vendor.specUrl])).stdout)
+        const slug = discovered.integration.slug
+        yield* clientCli(["connect", slug, "--credential-env", "ACCEPTANCE_TOKEN"])
+        const connections = parseOutput(ConnectionsOutput, (yield* clientCli(["connections"])).stdout)
+        const connectionName = connections.connections[0]?.name ?? ""
+        const alias = orgAlias(slug, connectionName)
+        const profile = parseOutput(IdOutput, (yield* operator(["profile", "sandbox"])).stdout)
+        yield* operator(["profile-tool", profile.id, slug, "tickets.create", "ask", "--connection", connectionName])
+        const copy = parseOutput(
+          IdOutput,
+          (yield* operator(["profile", "sandbox-copy", "--copy-from", profile.id])).stdout
+        )
+        const key = parseOutput(KeyOutput, (yield* operator(["key", profile.id, "Sandbox agent"])).stdout)
+        const copyKey = parseOutput(KeyOutput, (yield* operator(["key", copy.id, "Copy agent"])).stdout)
 
-      const revokedKey = yield* operator(["revoke", "key", key.id])
-      expect(revokedKey.exitCode, revokedKey.stderr).toBe(0)
+        const keys = parseOutput(KeysOutput, (yield* operator(["keys", profile.id])).stdout)
+        expect(keys.keys.map(({ id, name }) => ({ id, name }))).toEqual([{ id: key.id, name: "Sandbox agent" }])
 
-      const withRevokedKey = yield* execute(key.secret, "Revoked key")
-      expect(withRevokedKey.exitCode).toBe(1)
-      expect(vendor.invocations()).toBe(0)
-    }).pipe(Effect.provide(services)), 60_000)
+        const execute = (secret: string, title: string) =>
+          clientCli(["execute", alias, "tickets.create", JSON.stringify({ body: { title } })], {
+            ...gateway.environment,
+            INTEGRATIONS_API_KEY: secret
+          })
+
+        const asked = yield* execute(key.secret, "Asked")
+        expect(`asked exit ${asked.exitCode}: ${asked.stderr}`).toBe("asked exit 0: ")
+        expect(JSON.parse(asked.stdout)).toMatchObject({ status: "pending" })
+
+        const turnedOff = yield* operator([
+          "profile-tool",
+          profile.id,
+          slug,
+          "tickets.create",
+          "off",
+          "--connection",
+          connectionName
+        ])
+        expect(turnedOff.exitCode, turnedOff.stderr).toBe(0)
+
+        const afterOff = yield* execute(key.secret, "Off")
+        expect(afterOff.exitCode).toBe(1)
+        expect(JSON.parse(afterOff.stdout)).toMatchObject({ status: "denied" })
+        const fromCopy = yield* execute(copyKey.secret, "Copy")
+        expect(fromCopy.exitCode, fromCopy.stderr).toBe(0)
+        expect(JSON.parse(fromCopy.stdout)).toMatchObject({ status: "pending" })
+
+        const revokedKey = yield* operator(["revoke", "key", key.id])
+        expect(revokedKey.exitCode, revokedKey.stderr).toBe(0)
+
+        const withRevokedKey = yield* execute(key.secret, "Revoked key")
+        expect(withRevokedKey.exitCode).toBe(1)
+        expect(vendor.invocations()).toBe(0)
+      }).pipe(Effect.provide(services)),
+    60_000
+  )
 })

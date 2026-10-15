@@ -50,16 +50,14 @@ const assertLedgerIsKnown = (set: MigrationSet, applied: ReadonlyArray<{ id: num
  * would never run on a fresh database, and it has no answer for a ledger
  * carrying migrations this build does not know about.
  */
-export const applyMigrations = Effect.fn("Migrations.apply")(function*(
+export const applyMigrations = Effect.fn("Migrations.apply")(function* (
   sql: SqlClient.SqlClient,
   set: MigrationSet
 ): Effect.fn.Return<ReadonlyArray<Migration>, SqlError.SqlError> {
   yield* sql.unsafe(
     `CREATE TABLE IF NOT EXISTS ${set.ledger} (id INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at INTEGER NOT NULL)`
   )
-  const rows = yield* sql.unsafe<{ id: number; name: string }>(
-    `SELECT id, name FROM ${set.ledger} ORDER BY id`
-  )
+  const rows = yield* sql.unsafe<{ id: number; name: string }>(`SELECT id, name FROM ${set.ledger} ORDER BY id`)
   const applied = decodeApplied(rows.map((row) => ({ id: row.id, name: row.name })))
   assertLedgerIsKnown(set, applied)
   const done = new Set(applied.map((row) => row.id))
@@ -70,15 +68,18 @@ export const applyMigrations = Effect.fn("Migrations.apply")(function*(
 
   const at = yield* Clock.currentTimeMillis
   for (const migration of pending) {
-    yield* sql.withTransaction(Effect.gen(function*() {
-      for (const statement of migration.statements) {
-        yield* sql.unsafe(statement)
-      }
-      yield* sql.unsafe(
-        `INSERT INTO ${set.ledger} (id, name, applied_at) VALUES (?, ?, ?)`,
-        [migration.id, migration.name, at]
-      )
-    }))
+    yield* sql.withTransaction(
+      Effect.gen(function* () {
+        for (const statement of migration.statements) {
+          yield* sql.unsafe(statement)
+        }
+        yield* sql.unsafe(`INSERT INTO ${set.ledger} (id, name, applied_at) VALUES (?, ?, ?)`, [
+          migration.id,
+          migration.name,
+          at
+        ])
+      })
+    )
   }
   return pending
 })

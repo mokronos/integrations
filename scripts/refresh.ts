@@ -3,11 +3,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import type { ChildProcessSpawner } from "effect/process"
 import { FetchHttpClient, type HttpClient } from "effect/http"
 import { defaultGatewayPort, integrationsHome, readGatewayConfig } from "@integragents/client"
-import {
-  installLocal,
-  operatorProgram,
-  parseInstallOptions
-} from "../apps/cli/install-local.ts"
+import { installLocal, operatorProgram, parseInstallOptions } from "../apps/cli/install-local.ts"
 import {
   installService,
   serviceIsRegistered,
@@ -17,10 +13,9 @@ import {
   stopService
 } from "../apps/cli/src/service.ts"
 
-const run = <A, E>(effect: Effect.Effect<A, E, ChildProcessSpawner.ChildProcessSpawner | HttpClient.HttpClient>): Promise<A> =>
-  Effect.runPromise(effect.pipe(
-    Effect.provide(Layer.merge(FetchHttpClient.layer, BunServices.layer))
-  ))
+const run = <A, E>(
+  effect: Effect.Effect<A, E, ChildProcessSpawner.ChildProcessSpawner | HttpClient.HttpClient>
+): Promise<A> => Effect.runPromise(effect.pipe(Effect.provide(Layer.merge(FetchHttpClient.layer, BunServices.layer))))
 
 const refresh = async (): Promise<void> => {
   await installLocal(await parseInstallOptions([]))

@@ -14,32 +14,35 @@ const services = Layer.mergeAll(testServices, FetchHttpClient.layer, BunServices
  * `stopGateway` reads the home directory from the environment, so each test
  * points it at its own and puts the previous value back afterwards.
  */
-const temporaryHome = Effect.fnUntraced(function*() {
+const temporaryHome = Effect.fnUntraced(function* () {
   const directory = yield* temporaryDirectory("integrations-stop-")
   const previous = process.env["INTEGRATIONS_HOME"]
   yield* Effect.addFinalizer(() =>
     Effect.sync(() => {
       if (previous === undefined) delete process.env["INTEGRATIONS_HOME"]
       else process.env["INTEGRATIONS_HOME"] = previous
-    }))
+    })
+  )
   process.env["INTEGRATIONS_HOME"] = directory
   return directory
 })
 
-const writeConfig = Effect.fnUntraced(function*(
+const writeConfig = Effect.fnUntraced(function* (
   home: string,
   config: { readonly port: number; readonly pid?: number }
 ) {
   const fs = yield* FileSystem.FileSystem
-  yield* Effect.orDie(fs.writeFileString(
-    gatewayConfigPath(home),
-    JSON.stringify({
-      port: config.port,
-      url: `http://127.0.0.1:${config.port}`,
-      apiKey: "igk_test",
-      ...whenPresent("pid", config.pid)
-    })
-  ))
+  yield* Effect.orDie(
+    fs.writeFileString(
+      gatewayConfigPath(home),
+      JSON.stringify({
+        port: config.port,
+        url: `http://127.0.0.1:${config.port}`,
+        apiKey: "igk_test",
+        ...whenPresent("pid", config.pid)
+      })
+    )
+  )
 })
 
 /** A port nothing is listening on any more. */
@@ -58,8 +61,7 @@ const impostor = (home: string) =>
       const script = path.join(home, "impostor.ts")
       await Bun.write(
         script,
-        `const listener = Bun.serve({ port: 0, fetch: () => new Response("ok") })\n` +
-          `console.log(listener.port)\n`
+        `const listener = Bun.serve({ port: 0, fetch: () => new Response("ok") })\n` + `console.log(listener.port)\n`
       )
       const child = Bun.spawn([process.execPath, script], { stdout: "pipe", stderr: "ignore" })
       const reader = child.stdout.getReader()
@@ -72,15 +74,16 @@ const impostor = (home: string) =>
 
 describe("stopGateway", () => {
   it.live("reports nothing to stop when the recorded port is closed", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const home = yield* temporaryHome()
       yield* writeConfig(home, { port: yield* closedPort })
 
       expect(yield* stopGateway()).toBeUndefined()
-    }).pipe(Effect.provide(services)))
+    }).pipe(Effect.provide(services))
+  )
 
   it.live("refuses to signal a process whose command line is not a gateway", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const home = yield* temporaryHome()
       const other = yield* impostor(home)
       yield* writeConfig(home, { port: other.port, pid: other.pid })
@@ -88,8 +91,8 @@ describe("stopGateway", () => {
       const outcome = yield* Effect.result(stopGateway())
 
       expect(outcome._tag).toBe("Failure")
-      expect(outcome._tag === "Failure" ? outcome.failure.message : "")
-        .toContain(`Refusing to stop pid ${other.pid}`)
+      expect(outcome._tag === "Failure" ? outcome.failure.message : "").toContain(`Refusing to stop pid ${other.pid}`)
       expect((yield* HttpClient.get(`http://127.0.0.1:${other.port}`)).status).toBe(200)
-    }).pipe(Effect.provide(services)))
+    }).pipe(Effect.provide(services))
+  )
 })

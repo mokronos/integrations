@@ -19,35 +19,28 @@ const isAddressForm = (
   source: IntegrationNodeSource
 ): source is Extract<IntegrationNodeSource, { readonly address: string }> => "address" in source
 
-const liveFindings = Effect.fn("IntegrationValidation.liveFindings")(function*(
+const liveFindings = Effect.fn("IntegrationValidation.liveFindings")(function* (
   source: IntegrationNodeSource,
   host: Integrations["Service"]
 ) {
   if (isAddressForm(source)) {
-    const tool = (yield* host.listTools()).find(
-      (candidate) => candidate.address === source.address
-    )
+    const tool = (yield* host.listTools()).find((candidate) => candidate.address === source.address)
     return tool === undefined
       ? [finding("error", "catalog", `Tool not found: ${source.address}`)]
       : [finding("info", "catalog", `${tool.name} is available`)]
   }
-  const matches = (yield* host.toolSummaries({ integration: IntegrationSlug.make(source.integration) }))
-    .filter((candidate) => candidate.name === source.tool)
+  const matches = (yield* host.toolSummaries({ integration: IntegrationSlug.make(source.integration) })).filter(
+    (candidate) => candidate.name === source.tool
+  )
   if (matches.length === 0) {
-    return [finding(
-      "error",
-      "catalog",
-      `${source.integration}.${source.tool} is not available on this machine`
-    )]
+    return [finding("error", "catalog", `${source.integration}.${source.tool} is not available on this machine`)]
   }
-  return [finding(
-    "info",
-    "catalog",
-    `${source.tool} is available on ${matches.map((match) => match.connection).join(", ")}`
-  )]
+  return [
+    finding("info", "catalog", `${source.tool} is available on ${matches.map((match) => match.connection).join(", ")}`)
+  ]
 })
 
-export const validateIntegrationNode = Effect.fn("IntegrationValidation.validate")(function*(
+export const validateIntegrationNode = Effect.fn("IntegrationValidation.validate")(function* (
   config: typeof Schema.Json.Type,
   options: { readonly live?: boolean } = {}
 ): Effect.fn.Return<IntegrationValidationReport, StorageError, Integrations> {
@@ -56,11 +49,7 @@ export const validateIntegrationNode = Effect.fn("IntegrationValidation.validate
   if (decoded._tag === "Failure") {
     return {
       ok: false,
-      findings: [finding(
-        "error",
-        "structural",
-        `invalid integration node: ${String(decoded.failure)}`
-      )]
+      findings: [finding("error", "structural", `invalid integration node: ${String(decoded.failure)}`)]
     } satisfies IntegrationValidationReport
   }
 
@@ -69,13 +58,11 @@ export const validateIntegrationNode = Effect.fn("IntegrationValidation.validate
     finding(
       "info",
       "structural",
-      isAddressForm(node.source)
-        ? "Tool address is valid"
-        : "Integration reference is valid"
+      isAddressForm(node.source) ? "Tool address is valid" : "Integration reference is valid"
     )
   ]
   if (options.live === true) {
-    findings.push(...yield* liveFindings(node.source, host))
+    findings.push(...(yield* liveFindings(node.source, host)))
   }
   return {
     ok: !findings.some((entry) => entry.severity === "error"),

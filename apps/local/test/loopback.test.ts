@@ -1,9 +1,5 @@
 import { describe, expect, test } from "@effect/vitest"
-import {
-  isLoopbackAddress,
-  isLoopbackHostHeader,
-  mayBorrowLocalCredential
-} from "../index.ts"
+import { isLoopbackAddress, isLoopbackHostHeader, mayBorrowLocalCredential } from "../index.ts"
 import type { LoopbackBootstrap } from "../index.ts"
 
 const bootstrap = (overrides: Partial<LoopbackBootstrap> = {}): LoopbackBootstrap => ({
@@ -53,18 +49,14 @@ describe("isLoopbackHostHeader", () => {
 
 describe("mayBorrowLocalCredential", () => {
   test("a same-origin request from the control plane may borrow", () => {
-    expect(mayBorrowLocalCredential(
-      request({ host: "127.0.0.1:4788", origin: "http://127.0.0.1:4788" }),
-      bootstrap()
-    )).toBe(true)
+    expect(
+      mayBorrowLocalCredential(request({ host: "127.0.0.1:4788", origin: "http://127.0.0.1:4788" }), bootstrap())
+    ).toBe(true)
   })
 
   test("localhost and [::1] are the same origin as far as the browser is concerned", () => {
     for (const origin of ["http://localhost:4788", "http://[::1]:4788"]) {
-      expect(mayBorrowLocalCredential(
-        request({ host: "localhost:4788", origin }),
-        bootstrap()
-      )).toBe(true)
+      expect(mayBorrowLocalCredential(request({ host: "localhost:4788", origin }), bootstrap())).toBe(true)
     }
   })
 
@@ -81,52 +73,46 @@ describe("mayBorrowLocalCredential", () => {
 
   test("a cross-site page may not, whatever it claims", () => {
     for (const site of ["cross-site", "same-site", "none"]) {
-      expect(mayBorrowLocalCredential(
-        request({ host: "127.0.0.1:4788", "sec-fetch-site": site }),
-        bootstrap()
-      )).toBe(false)
+      expect(mayBorrowLocalCredential(request({ host: "127.0.0.1:4788", "sec-fetch-site": site }), bootstrap())).toBe(
+        false
+      )
     }
   })
 
   test("a page on any other site may not, however local it looks", () => {
-    for (const origin of [
-      "https://evil.example.com",
-      "http://127.0.0.1:5173",
-      "http://localhost:3000",
-      "null"
-    ]) {
-      expect(mayBorrowLocalCredential(
-        request({ host: "127.0.0.1:4788", origin }),
-        bootstrap()
-      )).toBe(false)
+    for (const origin of ["https://evil.example.com", "http://127.0.0.1:5173", "http://localhost:3000", "null"]) {
+      expect(mayBorrowLocalCredential(request({ host: "127.0.0.1:4788", origin }), bootstrap())).toBe(false)
     }
   })
 
   test("a rebound hostname may not, even though the socket is loopback", () => {
-    expect(mayBorrowLocalCredential(
-      request({ host: "totally-legit.example.com:4788" }),
-      bootstrap()
-    )).toBe(false)
+    expect(mayBorrowLocalCredential(request({ host: "totally-legit.example.com:4788" }), bootstrap())).toBe(false)
   })
 
   test("a remote peer may not", () => {
-    expect(mayBorrowLocalCredential(
-      request({ host: "127.0.0.1:4788", origin: "http://127.0.0.1:4788" }),
-      bootstrap({ remoteAddress: "10.1.2.3" })
-    )).toBe(false)
+    expect(
+      mayBorrowLocalCredential(
+        request({ host: "127.0.0.1:4788", origin: "http://127.0.0.1:4788" }),
+        bootstrap({ remoteAddress: "10.1.2.3" })
+      )
+    ).toBe(false)
   })
 
   test("nobody may, once the gateway is bound off loopback", () => {
-    expect(mayBorrowLocalCredential(
-      request({ host: "127.0.0.1:4788", origin: "http://127.0.0.1:4788" }),
-      bootstrap({ boundToLoopback: false })
-    )).toBe(false)
+    expect(
+      mayBorrowLocalCredential(
+        request({ host: "127.0.0.1:4788", origin: "http://127.0.0.1:4788" }),
+        bootstrap({ boundToLoopback: false })
+      )
+    ).toBe(false)
   })
 
   test("the port has to match: another local server is another origin", () => {
-    expect(mayBorrowLocalCredential(
-      request({ host: "127.0.0.1:4788", origin: "http://127.0.0.1:4788" }),
-      bootstrap({ port: 9999 })
-    )).toBe(false)
+    expect(
+      mayBorrowLocalCredential(
+        request({ host: "127.0.0.1:4788", origin: "http://127.0.0.1:4788" }),
+        bootstrap({ port: 9999 })
+      )
+    ).toBe(false)
   })
 })

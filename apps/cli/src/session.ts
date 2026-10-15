@@ -27,8 +27,7 @@ const OperatorSessionJson = Schema.fromJsonString(OperatorSession)
 const decodeOperatorSession = Schema.decodeUnknownSync(OperatorSessionJson)
 const encodeOperatorSession = Schema.encodeSync(OperatorSessionJson)
 
-export const operatorSessionPath = (): string =>
-  path.join(integrationsHome(), "operator-session.json")
+export const operatorSessionPath = (): string => path.join(integrationsHome(), "operator-session.json")
 
 const configuredUrl = optionalText("INTEGRATIONS_URL").pipe(
   Config.map(Option.map((value) => value.replace(/\/+$/, "")))
@@ -39,23 +38,21 @@ const attempt = <A>(work: () => Promise<A>): Effect.Effect<A, IntegrationsCliErr
     try: work,
     // oxlint-disable-next-line anti-slop/no-unknown-parameters
     catch: (cause: unknown) =>
-      cause instanceof IntegrationsCliError
-        ? cause
-        : cliError(cause instanceof Error ? cause.message : String(cause))
+      cause instanceof IntegrationsCliError ? cause : cliError(cause instanceof Error ? cause.message : String(cause))
   })
 
-export const resolveGatewayUrl = Effect.fn("Session.resolveGatewayUrl")(function*(): Effect.fn
-  .Return<string, IntegrationsCliError> {
+export const resolveGatewayUrl = Effect.fn("Session.resolveGatewayUrl")(function* (): Effect.fn.Return<
+  string,
+  IntegrationsCliError
+> {
   const explicit = yield* Effect.orDie(configuredUrl)
   if (Option.isSome(explicit)) return explicit.value
   const config = yield* attempt(() => readGatewayConfig(integrationsHome()))
   if (config !== undefined) return config.url.replace(/\/+$/, "")
-  return yield* cliError(
-    "No gateway found. Set INTEGRATIONS_URL, or start the local gateway with `ii serve`."
-  )
+  return yield* cliError("No gateway found. Set INTEGRATIONS_URL, or start the local gateway with `ii serve`.")
 })
 
-export const readOperatorSession = Effect.fn("Session.read")(function*(): Effect.fn.Return<
+export const readOperatorSession = Effect.fn("Session.read")(function* (): Effect.fn.Return<
   OperatorSession | undefined,
   IntegrationsCliError
 > {
@@ -66,9 +63,7 @@ export const readOperatorSession = Effect.fn("Session.read")(function*(): Effect
     try: () => decodeOperatorSession(source),
     // oxlint-disable-next-line anti-slop/no-unknown-parameters
     catch: (cause: unknown) =>
-      cliError(
-        `The saved ii session is invalid: ${cause instanceof Error ? cause.message : String(cause)}`
-      )
+      cliError(`The saved ii session is invalid: ${cause instanceof Error ? cause.message : String(cause)}`)
   })
 })
 
@@ -97,22 +92,18 @@ const messageFrom = (payload: typeof Schema.Json.Type, fallback: string): string
   return fallback
 }
 
-const responseJson = Effect.fn("Session.responseJson")((
-  response: HttpClientResponse.HttpClientResponse
-) =>
+const responseJson = Effect.fn("Session.responseJson")((response: HttpClientResponse.HttpClientResponse) =>
   response.text.pipe(
     Effect.mapError((cause) => cliError(cause.message)),
     Effect.flatMap((source) =>
       source.trim().length === 0
         ? Effect.succeed<typeof Schema.Json.Type>({})
-        : decodeJsonText(source).pipe(
-          Effect.mapError((cause) => cliError(cause.message))
-        )
+        : decodeJsonText(source).pipe(Effect.mapError((cause) => cliError(cause.message)))
     )
   )
 )
 
-const gatewayCall = Effect.fn("Session.call")(function*(
+const gatewayCall = Effect.fn("Session.call")(function* (
   method: HttpMethod.HttpMethod,
   url: string,
   options: {
@@ -126,9 +117,7 @@ const gatewayCall = Effect.fn("Session.call")(function*(
 > {
   const request = HttpClientRequest.make(method)(url, { headers: options.headers ?? {} })
   const response = yield* HttpClient.execute(
-    options.body === undefined
-      ? request
-      : HttpClientRequest.setBody(request, HttpBody.jsonUnsafe(options.body))
+    options.body === undefined ? request : HttpClientRequest.setBody(request, HttpBody.jsonUnsafe(options.body))
   ).pipe(Effect.mapError((cause) => cliError(cause.message)))
   return { response, payload: yield* responseJson(response) }
 })
@@ -156,14 +145,10 @@ const decodeLoginStart = Schema.decodeUnknownEffect(CliLoginStart)
 const decodeLoginPoll = Schema.decodeUnknownEffect(CliLoginPoll)
 const decodeSession = Schema.decodeUnknownEffect(OperatorSession)
 
-const decoded = <A>(
-  effect: Effect.Effect<A, Schema.SchemaError>
-): Effect.Effect<A, IntegrationsCliError> =>
+const decoded = <A>(effect: Effect.Effect<A, Schema.SchemaError>): Effect.Effect<A, IntegrationsCliError> =>
   Effect.mapError(effect, (cause) => cliError(cause.message))
 
-const sessionToken = (
-  response: HttpClientResponse.HttpClientResponse
-): Effect.Effect<string, IntegrationsCliError> => {
+const sessionToken = (response: HttpClientResponse.HttpClientResponse): Effect.Effect<string, IntegrationsCliError> => {
   const match = /(?:^|;\s*)integrations_session=([^;]+)/.exec(response.headers["set-cookie"] ?? "")
   return match?.[1] === undefined
     ? Effect.fail(cliError("The gateway accepted the login but did not return a session"))
@@ -176,7 +161,7 @@ const verifyGateway = (url: string): Effect.Effect<void, IntegrationsCliError, H
     Effect.asVoid
   )
 
-export const loginOperator = Effect.fn("Session.login")(function*(input: {
+export const loginOperator = Effect.fn("Session.login")(function* (input: {
   readonly email: string
   readonly password: string
 }): Effect.fn.Return<OperatorSession, IntegrationsCliError, HttpClient.HttpClient> {
@@ -188,20 +173,24 @@ export const loginOperator = Effect.fn("Session.login")(function*(input: {
   if (!isOk(response)) {
     return yield* cliError(messageFrom(payload, `Login failed with ${response.status}`))
   }
-  const session = yield* decoded(decodeSession({
-    url,
-    token: yield* sessionToken(response),
-    email: input.email
-  }))
+  const session = yield* decoded(
+    decodeSession({
+      url,
+      token: yield* sessionToken(response),
+      email: input.email
+    })
+  )
   yield* writeOperatorSession(session)
   return session
 })
 
-export const loginOperatorInBrowser = Effect.fn("Session.loginInBrowser")(function*(options: {
-  readonly noOpen?: boolean
-  readonly timeoutSeconds?: number
-  readonly onAuthorization?: (url: string) => Promise<void>
-} = {}): Effect.fn.Return<
+export const loginOperatorInBrowser = Effect.fn("Session.loginInBrowser")(function* (
+  options: {
+    readonly noOpen?: boolean
+    readonly timeoutSeconds?: number
+    readonly onAuthorization?: (url: string) => Promise<void>
+  } = {}
+): Effect.fn.Return<
   OperatorSession,
   IntegrationsCliError,
   ChildProcessSpawner.ChildProcessSpawner | HttpClient.HttpClient
@@ -210,9 +199,7 @@ export const loginOperatorInBrowser = Effect.fn("Session.loginInBrowser")(functi
   yield* verifyGateway(url)
   const started = yield* gatewayCall("POST", `${url}/v1/auth/cli/start`)
   if (!isOk(started.response)) {
-    return yield* cliError(
-      messageFrom(started.payload, `Browser login failed with ${started.response.status}`)
-    )
+    return yield* cliError(messageFrom(started.payload, `Browser login failed with ${started.response.status}`))
   }
   const start = yield* decoded(decodeLoginStart(started.payload))
   if (options.onAuthorization !== undefined) {
@@ -226,15 +213,10 @@ export const loginOperatorInBrowser = Effect.fn("Session.loginInBrowser")(functi
     DateTime.distance(yield* DateTime.now, DateTime.makeUnsafe(start.expiresAt)),
     Duration.seconds(options.timeoutSeconds ?? 300)
   )
-  const settled = yield* Effect.gen(function*() {
-    const polled = yield* gatewayCall(
-      "GET",
-      `${url}/v1/auth/cli/${encodeURIComponent(start.requestId)}`
-    )
+  const settled = yield* Effect.gen(function* () {
+    const polled = yield* gatewayCall("GET", `${url}/v1/auth/cli/${encodeURIComponent(start.requestId)}`)
     if (!isOk(polled.response)) {
-      return yield* cliError(
-        messageFrom(polled.payload, `Browser login failed with ${polled.response.status}`)
-      )
+      return yield* cliError(messageFrom(polled.payload, `Browser login failed with ${polled.response.status}`))
     }
     const poll = yield* decoded(decodeLoginPoll(polled.payload))
     if (poll.status !== "authenticated") return undefined
@@ -253,7 +235,7 @@ export const loginOperatorInBrowser = Effect.fn("Session.loginInBrowser")(functi
   return settled
 })
 
-export const signupOperator = Effect.fn("Session.signup")(function*(input: {
+export const signupOperator = Effect.fn("Session.signup")(function* (input: {
   readonly email: string
   readonly password: string
   readonly tenantName?: string
@@ -266,11 +248,13 @@ export const signupOperator = Effect.fn("Session.signup")(function*(input: {
   if (!isOk(response)) {
     return yield* cliError(messageFrom(payload, `Signup failed with ${response.status}`))
   }
-  const session = yield* decoded(decodeSession({
-    url,
-    token: yield* sessionToken(response),
-    email: input.email
-  }))
+  const session = yield* decoded(
+    decodeSession({
+      url,
+      token: yield* sessionToken(response),
+      email: input.email
+    })
+  )
   yield* writeOperatorSession(session)
   return session
 })
@@ -284,81 +268,80 @@ export interface ControlPlaneClient {
   ) => Effect.Effect<typeof Schema.Json.Type, IntegrationsCliError, HttpClient.HttpClient>
 }
 
-const controlPlaneRequest = (
-  url: string,
-  headers: Record<string, string>
-): ControlPlaneClient["request"] =>
-  Effect.fn("Session.controlPlaneRequest")(function*(method, route, body) {
+const controlPlaneRequest = (url: string, headers: Record<string, string>): ControlPlaneClient["request"] =>
+  Effect.fn("Session.controlPlaneRequest")(function* (method, route, body) {
     const { response, payload } = yield* gatewayCall(method, `${url}${route}`, {
       headers,
       ...whenPresentMap("body", body, (present) => present)
     })
     if (!isOk(response)) {
-      return yield* cliError(
-        messageFrom(payload, `${method} ${route} failed with ${response.status}`)
-      )
+      return yield* cliError(messageFrom(payload, `${method} ${route} failed with ${response.status}`))
     }
     return payload
   })
 
-export const connectToControlPlane = Effect.fn("Session.connectToControlPlane")(
-  function*(): Effect.fn.Return<ControlPlaneClient, IntegrationsCliError, HttpClient.HttpClient> {
-    const session = yield* readOperatorSession()
-    if (session === undefined) {
-      const connection = yield* attempt(() => resolveOperatorConnection())
-      if (connection === undefined) {
-        return yield* cliError(
-          "No operator credential found. Sign in with `ii login`, or set INTEGRATIONS_URL and INTEGRATIONS_ADMIN_API_KEY."
-        )
-      }
-      yield* verifyGateway(connection.url)
-      return {
-        url: connection.url,
-        request: controlPlaneRequest(connection.url, {
-          authorization: `Bearer ${connection.apiKey}`
-        })
-      }
-    }
-    const selectedUrl = yield* resolveGatewayUrl()
-    if (selectedUrl !== session.url) {
+export const connectToControlPlane = Effect.fn("Session.connectToControlPlane")(function* (): Effect.fn.Return<
+  ControlPlaneClient,
+  IntegrationsCliError,
+  HttpClient.HttpClient
+> {
+  const session = yield* readOperatorSession()
+  if (session === undefined) {
+    const connection = yield* attempt(() => resolveOperatorConnection())
+    if (connection === undefined) {
       return yield* cliError(
-        `The saved session belongs to ${session.url}, but the selected gateway is ${selectedUrl}. Run \`ii login\` again.`
+        "No operator credential found. Sign in with `ii login`, or set INTEGRATIONS_URL and INTEGRATIONS_ADMIN_API_KEY."
       )
     }
-    yield* verifyGateway(session.url)
+    yield* verifyGateway(connection.url)
     return {
-      url: session.url,
-      request: controlPlaneRequest(session.url, {
-        cookie: `integrations_session=${session.token}`,
-        origin: session.url
+      url: connection.url,
+      request: controlPlaneRequest(connection.url, {
+        authorization: `Bearer ${connection.apiKey}`
       })
     }
   }
-)
+  const selectedUrl = yield* resolveGatewayUrl()
+  if (selectedUrl !== session.url) {
+    return yield* cliError(
+      `The saved session belongs to ${session.url}, but the selected gateway is ${selectedUrl}. Run \`ii login\` again.`
+    )
+  }
+  yield* verifyGateway(session.url)
+  return {
+    url: session.url,
+    request: controlPlaneRequest(session.url, {
+      cookie: `integrations_session=${session.token}`,
+      origin: session.url
+    })
+  }
+})
 
-export const connectToOperatorGateway = Effect.fn("Session.connectToOperatorGateway")(
-  function*(): Effect.fn.Return<GatewayClient, IntegrationsCliError, HttpClient.HttpClient> {
-    const session = yield* readOperatorSession()
-    if (session === undefined) {
-      const connection = yield* attempt(() => resolveOperatorConnection())
-      if (connection === undefined) {
-        return yield* cliError(
-          "No operator credential found. Sign in with `ii login`, or set INTEGRATIONS_URL and INTEGRATIONS_ADMIN_API_KEY."
-        )
-      }
-      return yield* makeGatewayClient(connection)
-    }
-    const selectedUrl = yield* resolveGatewayUrl()
-    if (selectedUrl !== session.url) {
+export const connectToOperatorGateway = Effect.fn("Session.connectToOperatorGateway")(function* (): Effect.fn.Return<
+  GatewayClient,
+  IntegrationsCliError,
+  HttpClient.HttpClient
+> {
+  const session = yield* readOperatorSession()
+  if (session === undefined) {
+    const connection = yield* attempt(() => resolveOperatorConnection())
+    if (connection === undefined) {
       return yield* cliError(
-        `The saved session belongs to ${session.url}, but the selected gateway is ${selectedUrl}. Run \`ii login\` again.`
+        "No operator credential found. Sign in with `ii login`, or set INTEGRATIONS_URL and INTEGRATIONS_ADMIN_API_KEY."
       )
     }
-    return yield* makeGatewayClient({ url: session.url, sessionToken: session.token })
+    return yield* makeGatewayClient(connection)
   }
-)
+  const selectedUrl = yield* resolveGatewayUrl()
+  if (selectedUrl !== session.url) {
+    return yield* cliError(
+      `The saved session belongs to ${session.url}, but the selected gateway is ${selectedUrl}. Run \`ii login\` again.`
+    )
+  }
+  return yield* makeGatewayClient({ url: session.url, sessionToken: session.token })
+})
 
-export const logoutOperator = Effect.fn("Session.logout")(function*(): Effect.fn.Return<
+export const logoutOperator = Effect.fn("Session.logout")(function* (): Effect.fn.Return<
   void,
   IntegrationsCliError,
   HttpClient.HttpClient

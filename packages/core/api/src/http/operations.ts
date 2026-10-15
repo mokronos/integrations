@@ -56,7 +56,7 @@ export const invokeDependencies: Effect.Effect<
   InvokeDependencies,
   never,
   GatewayStoreService | Integrations | OAuthFlowSessions | GatewayConfig | ErrorCapture
-> = Effect.gen(function*() {
+> = Effect.gen(function* () {
   const store = yield* GatewayStoreService
   const integrations = yield* Integrations
   const oauth = yield* OAuthFlowSessions
@@ -72,10 +72,13 @@ export const invokeDependencies: Effect.Effect<
         ? undefined
         : `${origin.replace(/\/+$/, "")}/approvals?approval=${encodeURIComponent(approvalId)}`
     },
-    onApprovalCreated: () => capture(deliverDueApprovalNotifications({
-      store,
-      ...whenPresentMap("dashboardUrl", config.dashboardUrl?.(), (url) => url)
-    }))
+    onApprovalCreated: () =>
+      capture(
+        deliverDueApprovalNotifications({
+          store,
+          ...whenPresentMap("dashboardUrl", config.dashboardUrl?.(), (url) => url)
+        })
+      )
   }
 })
 
@@ -96,7 +99,7 @@ const selectAuthMethod = (
 }
 
 /** Registers an integration. One that needs no credential is connected already, and joins the profiles that take new tools. */
-export const discoverIntegration = Effect.fn("Gateway.discover")(function*(
+export const discoverIntegration = Effect.fn("Gateway.discover")(function* (
   tenantId: TenantId,
   url: string,
   options: { readonly connection?: string; readonly slug?: string; readonly name?: string }
@@ -106,21 +109,24 @@ export const discoverIntegration = Effect.fn("Gateway.discover")(function*(
   const connection = ConnectionName.make(options.connection ?? "default")
   const before = yield* capture(integrations.listConnections())
   const discovery = yield* provisionIntegration(url, options)
-  const existed = before.some((entry) =>
-    entry.owner === "org" && entry.integration === discovery.integration.slug && entry.name === connection)
+  const existed = before.some(
+    (entry) => entry.owner === "org" && entry.integration === discovery.integration.slug && entry.name === connection
+  )
   if (discovery.tools.length > 0 && !existed) {
-    yield* capture(includeConnectionTools({
-      store,
-      integrations,
-      tenantId,
-      integration: discovery.integration.slug,
-      connection
-    }))
+    yield* capture(
+      includeConnectionTools({
+        store,
+        integrations,
+        tenantId,
+        integration: discovery.integration.slug,
+        connection
+      })
+    )
   }
   return discovery
 })
 
-const orgConnectionExists = Effect.fn("Gateway.orgConnectionExists")(function*(
+const orgConnectionExists = Effect.fn("Gateway.orgConnectionExists")(function* (
   integration: IntegrationSlug,
   name: ConnectionName
 ) {
@@ -129,7 +135,7 @@ const orgConnectionExists = Effect.fn("Gateway.orgConnectionExists")(function*(
   return held.some((entry) => entry.name === name)
 })
 
-export const connectWithCredentials = Effect.fn("Gateway.connect")(function*(
+export const connectWithCredentials = Effect.fn("Gateway.connect")(function* (
   tenantId: TenantId,
   body: {
     readonly integration: string
@@ -148,9 +154,9 @@ export const connectWithCredentials = Effect.fn("Gateway.connect")(function*(
   const method = selectAuthMethod(integration.authMethods, body.template)
   if (method === undefined) {
     return yield* badRequest(
-      `No auth template named "${body.template}" for ${integration.slug}. Available: ${
-        integration.authMethods.map((candidate) => candidate.template).join(", ")
-      }`
+      `No auth template named "${body.template}" for ${integration.slug}. Available: ${integration.authMethods
+        .map((candidate) => candidate.template)
+        .join(", ")}`
     )
   }
   if (method.kind === "oauth") {
@@ -160,25 +166,29 @@ export const connectWithCredentials = Effect.fn("Gateway.connect")(function*(
   const names = Object.keys(values)
   const name = ConnectionName.make(body.connection ?? "default")
   const fresh = body.subject === undefined && !(yield* orgConnectionExists(slug, name))
-  const connection = yield* capture(integrations.createConnection({
-    owner: body.subject === undefined ? "org" : userOwner(body.subject),
-    integration: slug,
-    name,
-    template: AuthTemplateSlug.make(method.template),
-    ...(names.length === 0
-      ? { value: "" }
-      : names.length === 1 && values["token"] !== undefined
-        ? { value: values["token"] }
-        : { values })
-  }))
+  const connection = yield* capture(
+    integrations.createConnection({
+      owner: body.subject === undefined ? "org" : userOwner(body.subject),
+      integration: slug,
+      name,
+      template: AuthTemplateSlug.make(method.template),
+      ...(names.length === 0
+        ? { value: "" }
+        : names.length === 1 && values["token"] !== undefined
+          ? { value: values["token"] }
+          : { values })
+    })
+  )
   if (fresh) {
-    yield* capture(includeConnectionTools({ store, integrations, tenantId, integration: slug, connection: connection.name }))
+    yield* capture(
+      includeConnectionTools({ store, integrations, tenantId, integration: slug, connection: connection.name })
+    )
   }
   const tools = yield* capture(integrations.toolSummaries({ integration: slug, connection: connection.name }))
   return { connection, tools }
 })
 
-export const startOAuthConnection = Effect.fn("Gateway.startOAuth")(function*(
+export const startOAuthConnection = Effect.fn("Gateway.startOAuth")(function* (
   tenantId: TenantId,
   body: {
     readonly integration: string
@@ -205,26 +215,28 @@ export const startOAuthConnection = Effect.fn("Gateway.startOAuth")(function*(
     return yield* badRequest(`${integration.slug} has no OAuth auth method`)
   }
   const connection = ConnectionName.make(body.connection ?? "default")
-  return yield* oauth.start({
-    integration: integration.slug,
-    connection,
-    authMethod: method,
-    bindingTenant: tenantId,
-    newConnection: body.subject === undefined && !(yield* orgConnectionExists(integration.slug, connection)),
-    ...whenPresent("subject", body.subject),
-    ...whenPresentMap("clientId", body.clientId, (id) => id),
-    ...whenPresentMap("clientSecret", body.clientSecret, (secret) => secret),
-    ...whenPresentMap(
-      "timeoutMs",
-      body.timeoutSeconds === undefined ? undefined : Math.max(1, body.timeoutSeconds) * 1000,
-      (ms) => ms
+  return yield* oauth
+    .start({
+      integration: integration.slug,
+      connection,
+      authMethod: method,
+      bindingTenant: tenantId,
+      newConnection: body.subject === undefined && !(yield* orgConnectionExists(integration.slug, connection)),
+      ...whenPresent("subject", body.subject),
+      ...whenPresentMap("clientId", body.clientId, (id) => id),
+      ...whenPresentMap("clientSecret", body.clientSecret, (secret) => secret),
+      ...whenPresentMap(
+        "timeoutMs",
+        body.timeoutSeconds === undefined ? undefined : Math.max(1, body.timeoutSeconds) * 1000,
+        (ms) => ms
+      )
+    })
+    .pipe(
+      Effect.mapError((failure) => badRequest(`${body.integration} could not start an OAuth flow: ${failure.message}`))
     )
-  }).pipe(Effect.mapError((failure) =>
-    badRequest(`${body.integration} could not start an OAuth flow: ${failure.message}`)
-  ))
 })
 
-export const removeConnectionByName = Effect.fn("Gateway.removeConnection")(function*(
+export const removeConnectionByName = Effect.fn("Gateway.removeConnection")(function* (
   tenantId: TenantId,
   integration: string,
   requested: string
@@ -232,28 +244,35 @@ export const removeConnectionByName = Effect.fn("Gateway.removeConnection")(func
   const store = yield* GatewayStoreService
   const integrations = yield* Integrations
   const connections = yield* capture(integrations.listConnections())
-  const match = connections.find((connection) =>
-    connection.integration === integration &&
-    (connection.name === requested || normalizeName(connection.name) === normalizeName(requested))
+  const match = connections.find(
+    (connection) =>
+      connection.integration === integration &&
+      (connection.name === requested || normalizeName(connection.name) === normalizeName(requested))
   )
   if (match === undefined) {
     const known = connections
       .filter((connection) => connection.integration === integration)
       .map((connection) => connection.name)
-    return yield* notFound(known.length === 0
-      ? `${integration} has no connections`
-      : `${integration} has no connection ${requested}. Known: ${known.join(", ")}`)
+    return yield* notFound(
+      known.length === 0
+        ? `${integration} has no connections`
+        : `${integration} has no connection ${requested}. Known: ${known.join(", ")}`
+    )
   }
-  yield* capture(integrations.removeConnection({
-    owner: match.owner,
-    integration: match.integration,
-    name: match.name
-  }))
-  yield* capture(forgetConnection({
-    store,
-    tenantId,
-    connection: connectionRefOf(match.owner, match.integration, match.name)
-  }))
+  yield* capture(
+    integrations.removeConnection({
+      owner: match.owner,
+      integration: match.integration,
+      name: match.name
+    })
+  )
+  yield* capture(
+    forgetConnection({
+      store,
+      tenantId,
+      connection: connectionRefOf(match.owner, match.integration, match.name)
+    })
+  )
   return { removed: true as const, integration, connection: match.name }
 })
 
@@ -267,7 +286,7 @@ const GatewayNodeSource = Schema.Struct({
 
 type Finding = { readonly severity: string; readonly check: string; readonly message: string }
 
-const validateGatewayNode = Effect.fn("Gateway.validateGatewayNode")(function*(
+const validateGatewayNode = Effect.fn("Gateway.validateGatewayNode")(function* (
   profileId: ProfileId | undefined,
   source: { readonly alias: string; readonly tool: string },
   live: boolean
@@ -280,16 +299,16 @@ const validateGatewayNode = Effect.fn("Gateway.validateGatewayNode")(function*(
     aliasIsWellFormed
       ? { severity: "info", check: "structural", message: "Gateway integration reference is valid" }
       : {
-        severity: "error",
-        check: "structural",
-        message: `Alias "${source.alias}" must be lowercase letters, digits, and underscores`
-      }
+          severity: "error",
+          check: "structural",
+          message: `Alias "${source.alias}" must be lowercase letters, digits, and underscores`
+        }
   )
 
   if (aliasIsWellFormed && live) {
     const profileTools = profileId === undefined ? [] : yield* capture(store.listProfileTools(profileId))
-    const accessTool = profileTools.find((tool) =>
-      tool.tool === source.tool && aliasForConnection(tool.connection) === source.alias
+    const accessTool = profileTools.find(
+      (tool) => tool.tool === source.tool && aliasForConnection(tool.connection) === source.alias
     )
     if (profileId === undefined) {
       findings.push({
@@ -315,10 +334,10 @@ const validateGatewayNode = Effect.fn("Gateway.validateGatewayNode")(function*(
         tools.some((candidate) => candidate.address === address)
           ? { severity: "info", check: "catalog", message: `${source.tool} is available` }
           : {
-            severity: "error",
-            check: "catalog",
-            message: `${source.tool} is bound but no longer in the catalog: ${address}`
-          }
+              severity: "error",
+              check: "catalog",
+              message: `${source.tool} is bound but no longer in the catalog: ${address}`
+            }
       )
     }
   }
@@ -326,7 +345,7 @@ const validateGatewayNode = Effect.fn("Gateway.validateGatewayNode")(function*(
   return { ok: !findings.some((finding) => finding.severity === "error"), findings }
 })
 
-export const validateReference = Effect.fn("Gateway.validate")(function*(
+export const validateReference = Effect.fn("Gateway.validate")(function* (
   profileId: ProfileId | undefined,
   node: Json,
   live: boolean
@@ -339,7 +358,7 @@ export const validateReference = Effect.fn("Gateway.validate")(function*(
 })
 
 /** A frozen call as its proposer may read it; other profiles' approvals do not exist for this one. */
-export const findProfileApproval = Effect.fn("Gateway.findProfileApproval")(function*(
+export const findProfileApproval = Effect.fn("Gateway.findProfileApproval")(function* (
   profile: Profile,
   id: ApprovalId
 ) {

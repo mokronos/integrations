@@ -94,21 +94,45 @@ describe("i and ii CLI help", () => {
       expect(operator.stdout.includes(`  ${command}`)).toBe(true)
     }
     for (const command of [
-      "profiles", "profile", "profile-tools", "profile-tool", "key", "keys", "revoke", "approvals",
-      "approve", "deny", "audit", "drift", "maintenance", "login", "signup",
-      "logout", "whoami", "account", "serve", "dashboard", "install", "uninstall"
+      "profiles",
+      "profile",
+      "profile-tools",
+      "profile-tool",
+      "key",
+      "keys",
+      "revoke",
+      "approvals",
+      "approve",
+      "deny",
+      "audit",
+      "drift",
+      "maintenance",
+      "login",
+      "signup",
+      "logout",
+      "whoami",
+      "account",
+      "serve",
+      "health",
+      "dashboard",
+      "install",
+      "uninstall"
     ]) {
       expect(hasCommand(operator.stdout, command)).toBe(true)
     }
   }, 30_000)
 
   test("every listing command windows with --limit and --offset", () => {
-    for (
-      const command of [
-        "integrations", "tools", "connections", "profiles", "profile-tools",
-        "keys", "audit", "approvals"
-      ]
-    ) {
+    for (const command of [
+      "integrations",
+      "tools",
+      "connections",
+      "profiles",
+      "profile-tools",
+      "keys",
+      "audit",
+      "approvals"
+    ]) {
       const help = runOperator([command, "--help"])
       expect(help.exitCode).toBe(0)
       expect(help.stdout).toContain("--limit")
@@ -123,5 +147,4 @@ describe("i and ii CLI help", () => {
     expect(result.exitCode).toBe(1)
     expect(result.stderr).toContain("No integrations service found")
   })
-
 })

@@ -93,16 +93,30 @@ directory and its backups. Put the gateway behind a TLS-terminating reverse
 proxy; `INTEGRATIONS_PUBLIC_URL` is the URL users and OAuth providers reach it
 at.
 
+### Outbound requests
+
+The gateway only fetches public HTTPS destinations on a user's behalf (OAuth
+discovery and tokens, MCP servers, OpenAPI specs and calls, approval webhooks),
+plus plain HTTP to loopback. Private, link-local and internal addresses are
+refused, including names that resolve to them and redirects that lead to them.
+To reach an internal service, list its exact origin, comma-separated, in
+`INTEGRATIONS_URL_ALLOWED_ORIGINS` (for example `http://nas.lan:8080`). Set
+`INTEGRATIONS_URL_ALLOW_LOOPBACK_HTTP=false` to refuse loopback too.
+
 ### Docker
 
 ```bash
 cd docker
 cp .env.example .env    # set INTEGRATIONS_MASTER_KEY and INTEGRATIONS_PUBLIC_URL
-docker compose up -d    # --build to build this checkout instead of pulling
+docker compose up -d
 ```
 
+To build this checkout instead of pulling, run
+`BUN_VERSION=$(cat ../.bun-version) docker compose up -d --build`.
+
 The image is `ghcr.io/mokronos/integrations` (`latest`, `nightly`, or a
-version). State lives in the `/data` volume. Probe `GET /v1/health`.
+version). State lives in the `/data` volume. Probe `GET /v1/health`, or run
+`ii health [--url <gateway>]`, which the image uses as its `HEALTHCHECK`.
 
 ### Binary
 
@@ -138,19 +152,19 @@ trust.
 
 ## Surfaces
 
-| Path | Purpose |
-| --- | --- |
-| `packages/core/gateway/` | Gateway domain, persistence, policy, and execution |
-| `packages/core/api/` | Typed HTTP API, handlers, and server assembly |
-| `apps/local/` | Local Bun host and service lifecycle |
-| `apps/cli/` | `i` delegated client CLI and `ii` operator CLI |
-| `apps/ts/` | `@integragents/client`, the thin TypeScript gateway client |
-| `apps/web/` | Browser control plane |
-| `apps/host-cloudflare/` | Experimental Cloudflare host: a Worker and a SQLite Durable Object, provisioned with Alchemy |
-| `apps/platform-demo/` | An application embedding the gateway core in-process, on its own database |
-| `packages/integrations/` | The integration host: MCP and OpenAPI catalog, connections, tools |
-| `packages/contracts/` | Shared vocabulary and wire contracts |
-| `packages/observability/` | Trace file, console logs, and OTLP export for every process |
+| Path                      | Purpose                                                                                      |
+| ------------------------- | -------------------------------------------------------------------------------------------- |
+| `packages/core/gateway/`  | Gateway domain, persistence, policy, and execution                                           |
+| `packages/core/api/`      | Typed HTTP API, handlers, and server assembly                                                |
+| `apps/local/`             | Local Bun host and service lifecycle                                                         |
+| `apps/cli/`               | `i` delegated client CLI and `ii` operator CLI                                               |
+| `apps/ts/`                | `@integragents/client`, the thin TypeScript gateway client                                   |
+| `apps/web/`               | Browser control plane                                                                        |
+| `apps/host-cloudflare/`   | Experimental Cloudflare host: a Worker and a SQLite Durable Object, provisioned with Alchemy |
+| `apps/platform-demo/`     | An application embedding the gateway core in-process, on its own database                    |
+| `packages/integrations/`  | The integration host: MCP and OpenAPI catalog, connections, tools                            |
+| `packages/contracts/`     | Shared vocabulary and wire contracts                                                         |
+| `packages/observability/` | Trace file, console logs, and OTLP export for every process                                  |
 
 `VISION.md` records product direction.
 
@@ -160,11 +174,13 @@ trust.
 git clone https://github.com/mokronos/integrations.git
 cd integrations
 bun install
-bun run typecheck
-bun test
+bun run check          # format check, lint, typecheck, test boundary
+bun run test
 bun run build
 bun run build:control-plane
 ```
+
+`bun run format` applies the formatter (`.oxfmtrc.json`).
 
 Run the CLIs from source with:
 
@@ -192,6 +208,13 @@ That reinstalls the `i` and `ii` shims, stops the gateway that is running —
 service unit or a `serve` started by hand — and starts one from these sources on
 the same port. A gateway keeps the modules Bun loaded at startup, so one left
 running across a change serves the older wire shape to newly started clients.
+
+### Secrets from 1Password
+
+Optional; a plain `.env` keeps working. Copy `.env.local.op.example` or
+`.env.deploy.op.example` without the `.example` suffix, point the `op://`
+references at your vault, and prefix a command with `bun run with:local` or
+`bun run with:deploy`, which run it under `op run`.
 
 ### Debugging
 

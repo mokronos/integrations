@@ -6,10 +6,7 @@ import { captureOpenApiTools } from "../../../src/catalog/capture.ts"
 import { compileSpec } from "../../../src/openapi/compile.ts"
 import { OpenApiInvoker } from "../../../src/openapi/invoke.ts"
 import { BlobStore } from "../../../src/storage/blobs.ts"
-import {
-  referenceOpenApiDocument,
-  referenceOpenApiServer
-} from "../support/reference-openapi.ts"
+import { referenceOpenApiDocument, referenceOpenApiServer } from "../support/reference-openapi.ts"
 
 const services = OpenApiInvoker.layer.pipe(
   Layer.provide(Layer.mergeAll(FetchHttpClient.layer, BlobStore.temporaryLayer))
@@ -17,14 +14,18 @@ const services = OpenApiInvoker.layer.pipe(
 
 describe("Effect OpenAPI reference server", () => {
   it.live("compiles and invokes the Effect-defined contract", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const baseUrl = yield* referenceOpenApiServer
       const compiled = yield* compileSpec("effect-reference", referenceOpenApiDocument)
-      const tools = yield* captureOpenApiTools({
-        owner: "org",
-        integration: IntegrationSlug.make("effect-reference"),
-        connection: ConnectionName.make("default")
-      }, compiled, 0)
+      const tools = yield* captureOpenApiTools(
+        {
+          owner: "org",
+          integration: IntegrationSlug.make("effect-reference"),
+          connection: ConnectionName.make("default")
+        },
+        compiled,
+        0
+      )
       const echo = tools.find((tool) => tool.name === "reference.echo")
       if (echo === undefined || echo.call.kind !== "http") {
         return yield* Effect.die(new Error("Effect OpenAPI document has no echo operation"))
@@ -32,6 +33,7 @@ describe("Effect OpenAPI reference server", () => {
 
       const invoker = yield* OpenApiInvoker
       const result = yield* invoker.call({
+        integration: "Reference",
         call: echo.call,
         tool: echo.name,
         server: baseUrl,
@@ -50,5 +52,6 @@ describe("Effect OpenAPI reference server", () => {
         trace: "trace-42",
         message: "hello"
       })
-    }).pipe(Effect.provide(services)))
+    }).pipe(Effect.provide(services))
+  )
 })

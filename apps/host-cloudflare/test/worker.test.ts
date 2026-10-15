@@ -34,7 +34,7 @@ const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest(
 
 test(
   "an operator signs up, creates a profile, and an app's key moves a blob larger than one upload part",
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const { url } = yield* stack
     const call = (path: string, init?: RequestInit) => Effect.promise(() => fetch(`${url}${path}`, init))
 
@@ -45,18 +45,30 @@ test(
     })
     expect(signup.status).toBe(201)
     yield* decode(Signup, signup)
-    const session = { cookie: signup.headers.getSetCookie().map((cookie) => cookie.split(";")[0]).join("; "), origin: url }
+    const session = {
+      cookie: signup.headers
+        .getSetCookie()
+        .map((cookie) => cookie.split(";")[0])
+        .join("; "),
+      origin: url
+    }
 
-    const profile = yield* decode(Created, yield* call("/v1/profiles", {
-      method: "POST",
-      headers: { ...session, "content-type": "application/json" },
-      body: JSON.stringify({ name: "worker-test" })
-    }))
-    const key = yield* decode(Key, yield* call(`/v1/profiles/${profile.id}/keys`, {
-      method: "POST",
-      headers: { ...session, "content-type": "application/json" },
-      body: JSON.stringify({ name: "worker-test app" })
-    }))
+    const profile = yield* decode(
+      Created,
+      yield* call("/v1/profiles", {
+        method: "POST",
+        headers: { ...session, "content-type": "application/json" },
+        body: JSON.stringify({ name: "worker-test" })
+      })
+    )
+    const key = yield* decode(
+      Key,
+      yield* call(`/v1/profiles/${profile.id}/keys`, {
+        method: "POST",
+        headers: { ...session, "content-type": "application/json" },
+        body: JSON.stringify({ name: "worker-test app" })
+      })
+    )
     const bearer = { authorization: `Bearer ${key.secret}` }
 
     const body = new Uint8Array(9 * 1024 * 1024).map((_, index) => index % 251)
@@ -79,7 +91,7 @@ test(
 
 test(
   "MCP clients discover the authorization server while dashboard routes stay with the dashboard",
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const { url } = yield* stack
     const metadata = yield* Effect.promise(() => fetch(`${url}/.well-known/oauth-authorization-server`))
     expect((yield* decode(Metadata, metadata)).token_endpoint).toBe(`${url}/oauth/token`)
@@ -87,7 +99,7 @@ test(
     const consent = yield* Effect.promise(() =>
       fetch(`${url}/oauth/consent?request=x`, { headers: { accept: "text/html", "sec-fetch-mode": "navigate" } })
     )
-    expect(yield* Effect.promise(() => consent.text())).toContain("<div id=\"root\">")
+    expect(yield* Effect.promise(() => consent.text())).toContain('<div id="root">')
   }),
   { timeout: 30_000 }
 )

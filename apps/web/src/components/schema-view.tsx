@@ -52,14 +52,11 @@ function SchemaRow({
   const body = (
     <>
       <ItemMedia className="mt-0.5 size-4 self-start">
-        {expandable
-          ? (
-            <ChevronRight
-              aria-hidden
-              className={cn("size-3.5 transition-transform", open && "rotate-90")}
-            />
-          )
-          : <span aria-hidden className="bg-muted-foreground/40 size-1 rounded-full" />}
+        {expandable ? (
+          <ChevronRight aria-hidden className={cn("size-3.5 transition-transform", open && "rotate-90")} />
+        ) : (
+          <span aria-hidden className="bg-muted-foreground/40 size-1 rounded-full" />
+        )}
       </ItemMedia>
       <ItemContent>
         <ItemTitle className="flex-wrap gap-x-2 gap-y-0.5">
@@ -67,56 +64,43 @@ function SchemaRow({
           <span className={cn("font-mono text-xs font-normal", typeColor[typeKind(schema)])}>
             {typeLabel(schema, root)}
           </span>
-          {showRequired
-            ? (
-              <span
-                className={cn(
-                  "text-xs font-normal",
-                  required ? "text-primary" : "text-muted-foreground"
-                )}
-              >
-                {required ? "required" : "optional"}
-              </span>
-            )
-            : null}
-          {schema.default === undefined
-            ? null
-            : (
-              <span className="text-syntax-literal font-mono text-xs font-normal">
-                = {valueLabel(schema.default)}
-              </span>
-            )}
+          {showRequired ? (
+            <span className={cn("text-xs font-normal", required ? "text-primary" : "text-muted-foreground")}>
+              {required ? "required" : "optional"}
+            </span>
+          ) : null}
+          {schema.default === undefined ? null : (
+            <span className="text-syntax-literal font-mono text-xs font-normal">= {valueLabel(schema.default)}</span>
+          )}
         </ItemTitle>
-        {description === undefined
-          ? null
-          : <ItemDescription className="whitespace-pre-wrap">{description}</ItemDescription>}
+        {description === undefined ? null : (
+          <ItemDescription className="whitespace-pre-wrap">{description}</ItemDescription>
+        )}
       </ItemContent>
     </>
   )
 
   return (
     <li className="min-w-0">
-      {expandable
-        ? (
-          <Item
-            size="sm"
-            render={
-              <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} />
-            }
-            className="cursor-pointer select-none hover:bg-muted"
-          >
-            {body}
-          </Item>
-        )
-        : <Item size="sm" className="items-start">{body}</Item>}
+      {expandable ? (
+        <Item
+          size="sm"
+          render={<button type="button" aria-expanded={open} onClick={() => setOpen(!open)} />}
+          className="cursor-pointer select-none hover:bg-muted"
+        >
+          {body}
+        </Item>
+      ) : (
+        <Item size="sm" className="items-start">
+          {body}
+        </Item>
+      )}
 
-      {open && expandable
-        ? (
-          <div className="border-border/60 ml-4 border-l pl-1">
-            <SchemaChildren schema={schema} root={root} depth={depth + 1} />
-          </div>
-        )
-        : null}
+      {open && expandable ? (
+        <div className="border-border/60 ml-4 border-l pl-1">
+          <SchemaChildren schema={schema} root={root} depth={depth + 1} />
+        </div>
+      ) : null}
     </li>
   )
 }
@@ -152,28 +136,14 @@ function SchemaChildren({
     case "items":
       return (
         <ul className="min-w-0">
-          <SchemaRow
-            name="items"
-            schema={children.schema}
-            root={root}
-            required
-            depth={depth}
-            showRequired={false}
-          />
+          <SchemaRow name="items" schema={children.schema} root={root} required depth={depth} showRequired={false} />
         </ul>
       )
 
     case "values":
       return (
         <ul className="min-w-0">
-          <SchemaRow
-            name="[key]"
-            schema={children.schema}
-            root={root}
-            required
-            depth={depth}
-            showRequired={false}
-          />
+          <SchemaRow name="[key]" schema={children.schema} root={root} required depth={depth} showRequired={false} />
         </ul>
       )
 
@@ -204,7 +174,11 @@ function SchemaChildren({
   }
 }
 
-function SchemaPanel({ label, summary, children }: {
+function SchemaPanel({
+  label,
+  summary,
+  children
+}: {
   readonly label: string
   readonly summary?: string
   readonly children: React.ReactNode
@@ -249,9 +223,13 @@ export function SchemaView({
   const fields = fieldCount(root)
   return (
     <SchemaPanel label={label} summary={fields === 0 ? typeLabel(root, root) : pluralise(fields, "field")}>
-      {fields === 0
-        ? <p className="text-muted-foreground px-3 py-2.5 text-sm">{root.description ?? "No fields."}</p>
-        : <div className="p-1"><SchemaChildren schema={root} root={root} depth={0} /></div>}
+      {fields === 0 ? (
+        <p className="text-muted-foreground px-3 py-2.5 text-sm">{root.description ?? "No fields."}</p>
+      ) : (
+        <div className="p-1">
+          <SchemaChildren schema={root} root={root} depth={0} />
+        </div>
+      )}
       {raw(true)}
     </SchemaPanel>
   )

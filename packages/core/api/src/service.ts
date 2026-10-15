@@ -19,8 +19,8 @@ import type { Encryption, GatewayCoreServices, GatewayStore } from "@integragent
 import type { GoogleIdentityOAuth } from "@integragents/gateway-core"
 import { whenPresent } from "@integragents/contracts"
 import { webCryptoLayer } from "@integragents/contracts"
-import { BlobStore, Integrations } from "@integragents/host"
-import type { StorageError } from "@integragents/host"
+import { BlobStore, Egress, Integrations } from "@integragents/host"
+import type { Connect, StorageError, UrlPolicy } from "@integragents/host"
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
 import { Context, Crypto, Effect, Exit, Layer, ManagedRuntime, Option, Scope } from "effect"
 import type { HttpClient } from "effect/http"
@@ -48,13 +48,16 @@ export interface GatewayService {
   readonly handle: (request: Request, context?: GatewayRequestContext) => Promise<Response>
   /** The gateway's tracer and loggers, for work a host runs outside a request. */
   readonly telemetry: Layer.Layer<never>
+  /** Outbound HTTP under the gateway's URL policy, for work a host runs outside a request. */
+  readonly egress: Layer.Layer<Egress | HttpClient.HttpClient>
   /** Writes out buffered spans and logs; a host that may be frozen between requests awaits it. */
   flushTelemetry(): Promise<void>
   close(): Promise<void>
 }
 
 export interface GatewayServiceOptions {
-  readonly httpClient: Layer.Layer<HttpClient.HttpClient>
+  /** How this platform opens outbound connections under the gateway's URL policy. */
+  readonly connect: (policy: UrlPolicy) => Connect
   /** The database. Defaults to the SQLite file under `home`. */
   readonly sqlClient?: Layer.Layer<SqlClient.SqlClient>
   /** The master key. Defaults to the environment's, then the key file under `home`. */
@@ -85,23 +88,23 @@ interface GatewayCore {
   readonly store: GatewayStore
   readonly handlerOptions: GatewayHandlerOptions
   readonly telemetry: Telemetry
+  readonly egress: Layer.Layer<Egress | HttpClient.HttpClient>
   readonly disposeCore: () => Promise<void>
 }
 
-const signupOpen = (
-  store: GatewayStore,
-  explicitlyAllowed: boolean
-): Effect.Effect<boolean, GatewayStoreError> =>
+const signupOpen = (store: GatewayStore, explicitlyAllowed: boolean): Effect.Effect<boolean, GatewayStoreError> =>
   explicitlyAllowed ? Effect.succeed(true) : store.countLogins().pipe(Effect.map((count) => count === 0))
 
 const startTelemetry = async (traceFile: string | undefined) => {
   const scope = await Effect.runPromise(Scope.make())
-  const telemetry = await Effect.runPromise(makeTelemetry({
-    serviceName: "integrations-gateway",
-    serviceVersion: gatewayVersion,
-    console: "leveled",
-    traceFile
-  }).pipe(Scope.provide(scope), Effect.provide(BunFileSystem.layer)))
+  const telemetry = await Effect.runPromise(
+    makeTelemetry({
+      serviceName: "integrations-gateway",
+      serviceVersion: gatewayVersion,
+      console: "leveled",
+      traceFile
+    }).pipe(Scope.provide(scope), Effect.provide(BunFileSystem.layer))
+  )
   return { telemetry, stop: () => Effect.runPromise(Scope.close(scope, Exit.void)) }
 }
 
@@ -122,18 +125,18 @@ const buildCore = async (options: GatewayServiceOptions): Promise<GatewayCore> =
   }
 }
 
-const buildCoreWith = async (
-  options: GatewayServiceOptions,
-  telemetry: Telemetry
-): Promise<GatewayCore> => {
+const buildCoreWith = async (options: GatewayServiceOptions, telemetry: Telemetry): Promise<GatewayCore> => {
   const environment = await Effect.runPromise(gatewayEnvironment)
   const home = options.home ?? integrationsHome()
-  const encryption = options.encryption ?? await resolveEncryption({
-    ...whenPresent("envValue", Option.getOrUndefined(environment.masterKey)),
-    ...whenPresent("keyFile", options.masterKeyFile === false ? undefined : `${home}/gateway.key`)
-  })
+  const encryption =
+    options.encryption ??
+    (await resolveEncryption({
+      ...whenPresent("envValue", Option.getOrUndefined(environment.masterKey)),
+      ...whenPresent("keyFile", options.masterKeyFile === false ? undefined : `${home}/gateway.key`)
+    }))
   const resolvePublicUrl = (): string | undefined =>
     options.publicUrl ?? Option.getOrUndefined(environment.publicUrl) ?? options.localCallbackOrigin
+  const egress = Egress.layer(environment.urlPolicy, options.connect(environment.urlPolicy))
 
   const runtime = ManagedRuntime.make(
     gatewayCoreLayer({
@@ -143,11 +146,9 @@ const buildCoreWith = async (
       authorizeLocally: authorizeInBrowser,
       ...whenPresent("migrate", options.migrate),
       ...whenPresent("maintenance", options.maintenance)
-    }).pipe(Layer.provide(Layer.mergeAll(
-      options.sqlClient ?? libsqlLayer(`${home}/gateway.sqlite`),
-      options.httpClient,
-      telemetry.layer
-    )))
+    }).pipe(
+      Layer.provide(Layer.mergeAll(options.sqlClient ?? libsqlLayer(`${home}/gateway.sqlite`), egress, telemetry.layer))
+    )
   )
   let services: Context.Context<GatewayCoreServices>
   try {
@@ -158,17 +159,16 @@ const buildCoreWith = async (
   }
   const store = Context.get(services, GatewayStoreService)
 
-  const googleClientId = options.googleIdentity?.clientId ??
-    Option.getOrUndefined(environment.googleClientId)
-  const googleClientSecret = options.googleIdentity?.clientSecret ??
-    Option.getOrUndefined(environment.googleClientSecret)
+  const googleClientId = options.googleIdentity?.clientId ?? Option.getOrUndefined(environment.googleClientId)
+  const googleClientSecret =
+    options.googleIdentity?.clientSecret ?? Option.getOrUndefined(environment.googleClientSecret)
   const googleIdentity: GoogleIdentityOAuth | undefined =
     googleClientId === undefined || googleClientSecret === undefined
       ? undefined
       : { clientId: googleClientId, clientSecret: googleClientSecret, publicUrlOf: resolvePublicUrl }
 
-  const perMinute = options.rateLimitPerMinute ??
-    Option.getOrElse(environment.rateLimitPerMinute, () => defaultRateLimitPerMinute)
+  const perMinute =
+    options.rateLimitPerMinute ?? Option.getOrElse(environment.rateLimitPerMinute, () => defaultRateLimitPerMinute)
   const rateLimits: RateLimits = {
     principalPerMinute: perMinute,
     addressPerMinute: Math.max(20, Math.floor(perMinute / 5))
@@ -183,13 +183,14 @@ const buildCoreWith = async (
     services,
     store,
     telemetry,
+    egress,
     disposeCore: () => runtime.dispose(),
     handlerOptions: {
       store,
       integrationServices: services,
       oauth: Context.get(services, OAuthFlowSessions),
       events: Context.get(services, GatewayEvents),
-      httpClient: options.httpClient,
+      httpClient: egress,
       retentionDays: options.retentionDays ?? defaultArgumentRetentionDays,
       oauthCallbackUrl: withOrigin("/v1/oauth/callback"),
       mcpUrl: withOrigin("/mcp"),
@@ -202,14 +203,12 @@ const buildCoreWith = async (
         secureCookies: options.secureCookies ?? false,
         ...whenPresent("google", googleIdentity)
       },
-      ...whenPresent("registryUrl", options.registryUrl)
+      ...whenPresent("registryUrl", options.registryUrl ?? Option.getOrUndefined(environment.registryUrl))
     }
   }
 }
 
-export const createGatewayService = async (
-  options: GatewayServiceOptions
-): Promise<GatewayService> => {
+export const createGatewayService = async (options: GatewayServiceOptions): Promise<GatewayService> => {
   const core = await buildCore(options)
   const handle = createGatewayHandler(core.handlerOptions)
 
@@ -220,6 +219,7 @@ export const createGatewayService = async (
     blobs: Context.get(core.services, BlobStore),
     handle: (request, context) => handle.handle(request, context),
     telemetry: core.telemetry.layer,
+    egress: core.egress,
     flushTelemetry: () => Effect.runPromise(core.telemetry.flush),
     close: async () => {
       if (closed) return
@@ -231,7 +231,7 @@ export const createGatewayService = async (
 }
 
 export interface ServeOptions {
-  readonly httpClient: Layer.Layer<HttpClient.HttpClient>
+  readonly connect: (policy: UrlPolicy) => Connect
   readonly encryption?: Encryption
   readonly port?: number
   readonly hostname?: string
@@ -261,21 +261,19 @@ export const serveGateway = async (options: ServeOptions): Promise<RunningGatewa
     masterKeyFile: boundToLoopback,
     ...whenPresent(
       "localCallbackOrigin",
-      boundToLoopback && requestedPort !== 0
-        ? `http://${hostname}:${requestedPort}`
-        : undefined
+      boundToLoopback && requestedPort !== 0 ? `http://${hostname}:${requestedPort}` : undefined
     )
   })
 
   try {
-    const web = options.web === false
-      ? undefined
-      : await Effect.runPromise(createWebAssets({
-        ...whenPresent(
-          "directories",
-          options.webDirectory === undefined ? undefined : [options.webDirectory]
-        )
-      }))
+    const web =
+      options.web === false
+        ? undefined
+        : await Effect.runPromise(
+            createWebAssets({
+              ...whenPresent("directories", options.webDirectory === undefined ? undefined : [options.webDirectory])
+            })
+          )
 
     let localSecret: string | undefined
 
@@ -293,6 +291,7 @@ export const serveGateway = async (options: ServeOptions): Promise<RunningGatewa
       blobs: Context.get(core.services, BlobStore),
       handle: (request, context) => handle.handle(request, context),
       telemetry: core.telemetry.layer,
+      egress: core.egress,
       flushTelemetry: () => Effect.runPromise(core.telemetry.flush),
       close: async () => {
         if (stopped) return
@@ -308,32 +307,28 @@ export const serveGateway = async (options: ServeOptions): Promise<RunningGatewa
       port: requestedPort,
       fetch: async (request, running) => {
         const remoteAddress = running.requestIP(request)?.address
-        const borrow = localSecret !== undefined && mayBorrowLocalCredential(request, {
-          boundToLoopback,
-          port: Number(running.port),
-          remoteAddress
-        })
+        const borrow =
+          localSecret !== undefined &&
+          mayBorrowLocalCredential(request, {
+            boundToLoopback,
+            port: Number(running.port),
+            remoteAddress
+          })
         const requestContext: GatewayRequestContext = {
           ...whenPresent("remoteAddress", remoteAddress),
-          ...whenPresent(
-            "localSecret",
-            borrow && localSecret !== undefined ? localSecret : undefined
-          )
+          ...whenPresent("localSecret", borrow && localSecret !== undefined ? localSecret : undefined)
         }
         return await service.handle(request, requestContext)
       }
     })
 
     const boundPort = Number(server.port)
-    localSecret = await Effect.runPromise(Effect.provide(
-      ensureLocalCredential(
-        core.store,
-        Context.get(core.services, Integrations),
-        core.home,
-        boundPort
-      ),
-      webCryptoLayer
-    ))
+    localSecret = await Effect.runPromise(
+      Effect.provide(
+        ensureLocalCredential(core.store, Context.get(core.services, Integrations), core.home, boundPort),
+        webCryptoLayer
+      )
+    )
 
     return {
       port: boundPort,
@@ -348,25 +343,26 @@ export const serveGateway = async (options: ServeOptions): Promise<RunningGatewa
   }
 }
 
-export const ensureLocalCredential = Effect.fn("Gateway.ensureLocalCredential")(function*(
+export const ensureLocalCredential = Effect.fn("Gateway.ensureLocalCredential")(function* (
   store: GatewayStore,
   integrations: Integrations["Service"],
   home: string,
   port: number
 ): Effect.fn.Return<string, GatewayStoreError | StorageError, Crypto.Crypto> {
   const credentialFor = (name: string, capabilities: ReadonlyArray<"provision_connections" | "administer_gateway">) =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const existing = yield* store.findProfileByName(defaultTenantId, name)
-      const profile = existing === undefined
-        ? yield* store.createProfile({
-          id: yield* newProfileId,
-          tenantId: defaultTenantId,
-          name,
-          capabilities,
-          includeNewTools: true,
-          tools: yield* catalogProfileTools(integrations)
-        })
-        : yield* store.updateProfileSettings(defaultTenantId, existing.id, { ...existing, capabilities })
+      const profile =
+        existing === undefined
+          ? yield* store.createProfile({
+              id: yield* newProfileId,
+              tenantId: defaultTenantId,
+              name,
+              capabilities,
+              includeNewTools: true,
+              tools: yield* catalogProfileTools(integrations)
+            })
+          : yield* store.updateProfileSettings(defaultTenantId, existing.id, { ...existing, capabilities })
       for (const key of yield* store.listApiKeys(profile.id)) {
         if (key.revokedAt === null) yield* store.revokeApiKey(key.id)
       }
@@ -376,17 +372,21 @@ export const ensureLocalCredential = Effect.fn("Gateway.ensureLocalCredential")(
     })
   const operatorSecret = yield* credentialFor(localProfileName, ["provision_connections", "administer_gateway"])
   const agentSecret = yield* credentialFor(localAgentProfileName, ["provision_connections"])
-  yield* Effect.promise(() => writeGatewayConfig(home, {
-    port,
-    url: `http://127.0.0.1:${port}`,
-    apiKey: agentSecret,
-    pid: process.pid
-  }))
-  yield* Effect.promise(() => writeOperatorGatewayConfig(home, {
-    port,
-    url: `http://127.0.0.1:${port}`,
-    apiKey: operatorSecret,
-    pid: process.pid
-  }))
+  yield* Effect.promise(() =>
+    writeGatewayConfig(home, {
+      port,
+      url: `http://127.0.0.1:${port}`,
+      apiKey: agentSecret,
+      pid: process.pid
+    })
+  )
+  yield* Effect.promise(() =>
+    writeOperatorGatewayConfig(home, {
+      port,
+      url: `http://127.0.0.1:${port}`,
+      apiKey: operatorSecret,
+      pid: process.pid
+    })
+  )
   return operatorSecret
 })

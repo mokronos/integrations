@@ -29,9 +29,9 @@ const authorize = (options: GatewayClientOptions) =>
   "apiKey" in options
     ? HttpClientRequest.setHeader("authorization", `Bearer ${options.apiKey}`)
     : HttpClientRequest.setHeaders({
-      cookie: `integrations_session=${options.sessionToken}`,
-      origin: options.url
-    })
+        cookie: `integrations_session=${options.sessionToken}`,
+        origin: options.url
+      })
 
 export class GatewayProtocolError extends Error {
   readonly expected: number
@@ -49,45 +49,35 @@ export class GatewayProtocolError extends Error {
   }
 }
 
-export class GatewayUnavailableError extends Schema.TaggedError<GatewayUnavailableError>()(
-  "GatewayUnavailableError",
-  {
-    url: Schema.String,
-    message: Schema.String
-  }
-) {}
+export class GatewayUnavailableError extends Schema.TaggedError<GatewayUnavailableError>()("GatewayUnavailableError", {
+  url: Schema.String,
+  message: Schema.String
+}) {}
 
 const decodeGatewayMetadata = Schema.decodeUnknownEffect(GatewayMetadata)
 
-export const readGatewayMetadata = Effect.fn("GatewayClient.readMetadata")(function*(
+export const readGatewayMetadata = Effect.fn("GatewayClient.readMetadata")(function* (
   url: string
-): Effect.fn.Return<
-  GatewayMetadata,
-  GatewayProtocolError | GatewayUnavailableError,
-  HttpClient.HttpClient
-> {
+): Effect.fn.Return<GatewayMetadata, GatewayProtocolError | GatewayUnavailableError, HttpClient.HttpClient> {
   const base = url.replace(/\/+$/, "")
   const response = yield* HttpClient.get(`${base}/v1/metadata`).pipe(
-    Effect.mapError((cause) =>
-      new GatewayUnavailableError({
-        url: base,
-        message: `Gateway at ${base} is unavailable: ${cause.message}. Retry the same command once the gateway is running.`
-      })
+    Effect.mapError(
+      (cause) =>
+        new GatewayUnavailableError({
+          url: base,
+          message: `Gateway at ${base} is unavailable: ${cause.message}. Retry the same command once the gateway is running.`
+        })
     )
   )
   if (response.status < 200 || response.status >= 300) {
-    return yield* Effect.fail(
-      new GatewayProtocolError(undefined, `metadata returned HTTP ${response.status}`)
-    )
+    return yield* Effect.fail(new GatewayProtocolError(undefined, `metadata returned HTTP ${response.status}`))
   }
   const metadata = yield* response.json.pipe(
     Effect.flatMap(decodeGatewayMetadata),
     Effect.mapError(() => new GatewayProtocolError(undefined, "gateway metadata is malformed"))
   )
   if (metadata.protocolVersion !== gatewayProtocolVersion) {
-    return yield* Effect.fail(
-      new GatewayProtocolError(metadata.protocolVersion, `gateway ${metadata.gatewayVersion}`)
-    )
+    return yield* Effect.fail(new GatewayProtocolError(metadata.protocolVersion, `gateway ${metadata.gatewayVersion}`))
   }
   return metadata
 })
@@ -119,14 +109,11 @@ const makeEndpoints = (
 
 export interface GatewayClient extends GatewayEndpoints {
   readonly url: string
-  readonly metadata: Effect.Effect<
-    GatewayMetadata,
-    GatewayProtocolError | GatewayUnavailableError
-  >
+  readonly metadata: Effect.Effect<GatewayMetadata, GatewayProtocolError | GatewayUnavailableError>
   readonly health: Effect.Effect<boolean>
 }
 
-export const makeGatewayClient = Effect.fn("GatewayClient.make")(function*(
+export const makeGatewayClient = Effect.fn("GatewayClient.make")(function* (
   options: GatewayClientOptions
 ): Effect.fn.Return<GatewayClient, never, HttpClient.HttpClient> {
   const http = yield* HttpClient.HttpClient

@@ -20,7 +20,16 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import * as gateway from "@/lib/gateway"
 import { apiKeyPlaceholder } from "@/lib/mcp"
-import { keys, useIntegrations, useGatewayUrl, useInvalidate, useMcpUrl, useMutation, useProfiles, useQuery } from "@/lib/queries"
+import {
+  keys,
+  useIntegrations,
+  useGatewayUrl,
+  useInvalidate,
+  useMcpUrl,
+  useMutation,
+  useProfiles,
+  useQuery
+} from "@/lib/queries"
 import type { Connection, IntegrationOverview } from "@integragents/contracts"
 
 const Step = Schema.Literals(["connect", "access", "agent", "verify"])
@@ -45,7 +54,8 @@ export function OnboardingRoute() {
   const stepIndex = steps.findIndex((entry) => entry.id === step)
   const selected = integrations.data?.find((integration) => integration.slug === params.get("integration"))
   const connection = selected?.connections.find((entry) => entry.address === params.get("connection"))
-  const usable = (profiles.data ?? []).map((entry) => entry.profile)
+  const usable = (profiles.data ?? [])
+    .map((entry) => entry.profile)
     .filter((entry) => entry.revokedAt === null && !entry.capabilities.includes("administer_gateway"))
   const profile = usable.find((entry) => entry.id === params.get("profile"))
   const [existingProfile, setExistingProfile] = useState("")
@@ -86,77 +96,323 @@ export function OnboardingRoute() {
     enabled: step === "verify" && profile !== undefined
   })
 
-  return <div className="mx-auto w-full max-w-3xl space-y-8 px-4 py-4 sm:px-6 sm:py-10">
-    <div className="flex items-center justify-between gap-4">
-      <span className="text-muted-foreground text-sm font-medium">Getting started</span>
-      <Button variant="ghost" size="sm" onClick={finish}>Set up later</Button>
-    </div>
-    <ol aria-label="Setup progress" className="grid grid-cols-4 gap-2">
-      {steps.map((entry, index) => <li key={entry.id} aria-current={step === entry.id ? "step" : undefined} className="space-y-2">
-        <div className={`h-1 rounded-full ${index <= stepIndex ? "bg-primary" : "bg-muted"}`} />
-        <span className={`flex items-center gap-1.5 text-xs sm:text-sm ${step === entry.id ? "font-medium" : "text-muted-foreground"}`}>
-          {index < stepIndex ? <Check className="size-3 shrink-0" /> : <span>{index + 1}.</span>}{entry.title}
-        </span>
-      </li>)}
-    </ol>
-
-    {step === "connect" ? <>
-      <div className="space-y-3">
-        <div className="bg-primary/10 text-primary flex size-12 items-center justify-center rounded-2xl"><Plug className="size-6" /></div>
-        <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Your accounts. Your agent. Your rules.</h1>
-        <p className="text-muted-foreground max-w-xl text-base leading-relaxed">Start with one service. You’ll choose what your agent can do and which calls need your approval. The gateway holds the service’s credentials.</p>
+  return (
+    <div className="mx-auto w-full max-w-3xl space-y-8 px-4 py-4 sm:px-6 sm:py-10">
+      <div className="flex items-center justify-between gap-4">
+        <span className="text-muted-foreground text-sm font-medium">Getting started</span>
+        <Button variant="ghost" size="sm" onClick={finish}>
+          Set up later
+        </Button>
       </div>
-      <Card>
-        <CardHeader><CardTitle>Connect your first service</CardTitle><CardDescription>Find a service, or paste the URL of an MCP server or OpenAPI document you already use.</CardDescription></CardHeader>
-        <CardContent className="space-y-5">
-          <div className="flex flex-wrap gap-2">
-            <AddIntegrationDialog onInstalled={(slug) => go("connect", { integration: slug })} />
+      <ol aria-label="Setup progress" className="grid grid-cols-4 gap-2">
+        {steps.map((entry, index) => (
+          <li key={entry.id} aria-current={step === entry.id ? "step" : undefined} className="space-y-2">
+            <div className={`h-1 rounded-full ${index <= stepIndex ? "bg-primary" : "bg-muted"}`} />
+            <span
+              className={`flex items-center gap-1.5 text-xs sm:text-sm ${step === entry.id ? "font-medium" : "text-muted-foreground"}`}
+            >
+              {index < stepIndex ? <Check className="size-3 shrink-0" /> : <span>{index + 1}.</span>}
+              {entry.title}
+            </span>
+          </li>
+        ))}
+      </ol>
+
+      {step === "connect" ? (
+        <>
+          <div className="space-y-3">
+            <div className="bg-primary/10 text-primary flex size-12 items-center justify-center rounded-2xl">
+              <Plug className="size-6" />
+            </div>
+            <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+              Your accounts. Your agent. Your rules.
+            </h1>
+            <p className="text-muted-foreground max-w-xl text-base leading-relaxed">
+              Start with one service. You’ll choose what your agent can do and which calls need your approval. The
+              gateway holds the service’s credentials.
+            </p>
           </div>
-          <QueryError error={integrations.error} />
-          {integrations.isPending ? <LoadingRows rows={2} /> : integrations.data?.map((integration) => <div key={integration.slug} className={`space-y-3 rounded-xl border p-4 ${selected?.slug === integration.slug ? "border-primary/50 bg-primary/5" : ""}`}>
-            <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-medium">{integration.name}</p><p className="text-muted-foreground text-sm">{integration.connections.length} connected accounts</p></div><ConnectDialog integration={integration} /></div>
-            {integration.toolError ? <p role="alert" className="text-destructive text-sm">{integration.toolError}</p> : null}
-            {integration.connections.filter((entry) => entry.owner === "org").map((entry) => <button key={entry.address} type="button" disabled={entry.status !== "connected"} onClick={() => go("access", { integration: integration.slug, connection: entry.address })} className="hover:bg-accent focus-visible:ring-ring flex w-full items-center justify-between gap-3 rounded-lg border px-4 py-3 text-left text-sm outline-none focus-visible:ring-2 disabled:opacity-50">
-              <span><span className="font-medium">{entry.identityLabel ?? entry.name}</span><span className="text-muted-foreground ml-2">{entry.status === "connected" ? "Connected" : "Reconnect to continue"}</span></span><ArrowRight className="size-4" />
-            </button>)}
-          </div>)}
-        </CardContent>
-      </Card>
-      {usable.length > 0 ? <div className="space-y-2 rounded-xl border border-dashed p-4">
-        <Label htmlFor="existing-profile">Already have a profile? Continue with it.</Label>
-        <div className="flex flex-wrap gap-2"><select id="existing-profile" value={existingProfile} onChange={(event) => setExistingProfile(event.target.value)} className="bg-background min-w-0 flex-1 rounded-md border px-3 py-2 text-sm"><option value="">Choose a profile</option>{usable.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select><Button variant="outline" disabled={!existingProfile} onClick={() => { issue.reset(); verify.reset(); go("agent", { profile: existingProfile }) }}>Use profile</Button></div>
-      </div> : null}
-      <QueryError error={profiles.error} />
-    </> : null}
+          <Card>
+            <CardHeader>
+              <CardTitle>Connect your first service</CardTitle>
+              <CardDescription>
+                Find a service, or paste the URL of an MCP server or OpenAPI document you already use.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <div className="flex flex-wrap gap-2">
+                <AddIntegrationDialog onInstalled={(slug) => go("connect", { integration: slug })} />
+              </div>
+              <QueryError error={integrations.error} />
+              {integrations.isPending ? (
+                <LoadingRows rows={2} />
+              ) : (
+                integrations.data?.map((integration) => (
+                  <div
+                    key={integration.slug}
+                    className={`space-y-3 rounded-xl border p-4 ${selected?.slug === integration.slug ? "border-primary/50 bg-primary/5" : ""}`}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="font-medium">{integration.name}</p>
+                        <p className="text-muted-foreground text-sm">
+                          {integration.connections.length} connected accounts
+                        </p>
+                      </div>
+                      <ConnectDialog integration={integration} />
+                    </div>
+                    {integration.toolError ? (
+                      <p role="alert" className="text-destructive text-sm">
+                        {integration.toolError}
+                      </p>
+                    ) : null}
+                    {integration.connections
+                      .filter((entry) => entry.owner === "org")
+                      .map((entry) => (
+                        <button
+                          key={entry.address}
+                          type="button"
+                          disabled={entry.status !== "connected"}
+                          onClick={() => go("access", { integration: integration.slug, connection: entry.address })}
+                          className="hover:bg-accent focus-visible:ring-ring flex w-full items-center justify-between gap-3 rounded-lg border px-4 py-3 text-left text-sm outline-none focus-visible:ring-2 disabled:opacity-50"
+                        >
+                          <span>
+                            <span className="font-medium">{entry.identityLabel ?? entry.name}</span>
+                            <span className="text-muted-foreground ml-2">
+                              {entry.status === "connected" ? "Connected" : "Reconnect to continue"}
+                            </span>
+                          </span>
+                          <ArrowRight className="size-4" />
+                        </button>
+                      ))}
+                  </div>
+                ))
+              )}
+            </CardContent>
+          </Card>
+          {usable.length > 0 ? (
+            <div className="space-y-2 rounded-xl border border-dashed p-4">
+              <Label htmlFor="existing-profile">Already have a profile? Continue with it.</Label>
+              <div className="flex flex-wrap gap-2">
+                <select
+                  id="existing-profile"
+                  value={existingProfile}
+                  onChange={(event) => setExistingProfile(event.target.value)}
+                  className="bg-background min-w-0 flex-1 rounded-md border px-3 py-2 text-sm"
+                >
+                  <option value="">Choose a profile</option>
+                  {usable.map((entry) => (
+                    <option key={entry.id} value={entry.id}>
+                      {entry.name}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  variant="outline"
+                  disabled={!existingProfile}
+                  onClick={() => {
+                    issue.reset()
+                    verify.reset()
+                    go("agent", { profile: existingProfile })
+                  }}
+                >
+                  Use profile
+                </Button>
+              </div>
+            </div>
+          ) : null}
+          <QueryError error={profiles.error} />
+        </>
+      ) : null}
 
-    {step === "access" ? selected !== undefined && connection !== undefined ? <AccessStep key={connection.address} integration={selected} connection={connection} onBack={() => go("connect")} onCreated={(id) => go("agent", { profile: id })} /> : <Card><CardContent className="space-y-4 py-6"><p>Choose a connected account to set up access.</p><Button onClick={() => go("connect")}>Choose a service</Button></CardContent></Card> : null}
+      {step === "access" ? (
+        selected !== undefined && connection !== undefined ? (
+          <AccessStep
+            key={connection.address}
+            integration={selected}
+            connection={connection}
+            onBack={() => go("connect")}
+            onCreated={(id) => go("agent", { profile: id })}
+          />
+        ) : (
+          <Card>
+            <CardContent className="space-y-4 py-6">
+              <p>Choose a connected account to set up access.</p>
+              <Button onClick={() => go("connect")}>Choose a service</Button>
+            </CardContent>
+          </Card>
+        )
+      ) : null}
 
-    {step === "agent" || step === "verify" ? (profiles.isPending || (profiles.isFetching && profile === undefined)) ? <LoadingRows /> : profile === undefined ? <Card><CardContent className="space-y-4 py-6"><p>This profile is no longer available. Choose one to continue.</p><Button onClick={() => go("connect")}>Choose a profile</Button></CardContent></Card> : <>
-      <div className="space-y-2"><h1 className="text-3xl font-semibold tracking-tight">{step === "agent" ? "Give your agent its own key." : "Make your first connection."}</h1><p className="text-muted-foreground">{step === "agent" ? `Give the app you use a key for ${profile.name}. It can only use the tools you chose.` : "Verify the key, then ask your agent to use a connected tool."}</p></div>
-      {step === "agent" ? <Card><CardContent className="space-y-5 py-6">
-        <div className="space-y-3"><div><p className="flex items-center gap-2 font-medium"><KeyRound className="size-4" />API key</p><p className="text-muted-foreground mt-1 text-sm">Shown once. Copy your configuration before leaving this page.</p></div>
-          <div className="flex flex-wrap items-end gap-2"><div className="min-w-0 flex-1 space-y-1.5"><Label htmlFor="onboarding-app-name">Which app is this key for?</Label><Input id="onboarding-app-name" value={appName} onChange={(event) => setAppName(event.target.value)} placeholder="e.g. Claude Code" disabled={secret !== undefined} /></div><Button onClick={() => issue.mutate(profile.id)} disabled={issue.isPending || secret !== undefined || appName.trim().length === 0}>{issue.isPending ? "Issuing key…" : secret === undefined ? "Issue a key" : "Key issued"}</Button></div>
-        </div>
-        <QueryError error={issue.error} />
-        {secret !== undefined ? <CopyField value={secret} label="Client key" /> : null}
-        <QueryError error={gatewayUrl.error ?? mcpUrl.error} />
-        {gatewayUrl.data !== undefined && mcpUrl.data !== undefined
-          ? <ConnectTabs profileName={profile.name} gatewayUrl={gatewayUrl.data} mcpUrl={mcpUrl.data} apiKey={secret ?? apiKeyPlaceholder} />
-          : <p className="text-sm">The gateway needs a reachable public URL before it can provide a configuration.</p>}
-        <div className="flex justify-between"><Button variant="ghost" onClick={() => go("connect")}><ArrowLeft className="size-4" />Back</Button><Button disabled={secret === undefined} onClick={() => go("verify")}>Test the connection<ArrowRight className="size-4" /></Button></div>
-      </CardContent></Card> : <>
-        <Card><CardContent className="space-y-5 py-6">
-          <div className="space-y-2"><p className="font-medium">1. Verify your agent’s access</p><p className="text-muted-foreground text-sm">Check that its key can list the tools you enabled.</p><Button variant="outline" disabled={verify.isPending || secret === undefined} onClick={() => verify.mutate()}>{verify.isPending ? "Checking…" : "Verify access"}</Button>{secret === undefined ? <Button variant="link" onClick={() => go("agent")}>Return to issue a key</Button> : null}<QueryError error={verify.error} />{verify.isSuccess ? <p role="status" className="flex items-center gap-2 text-sm"><CheckCircle2 className="size-4 text-primary" />Connected. {verify.data.tools.length} tools available through this key.</p> : null}</div>
-          <div className="space-y-3 border-t pt-5"><p className="font-medium">2. Ask your agent to try a tool</p><CopyField value="List the tools available through my integrations gateway. Pick a read-only tool, explain what it will read, and call it. If approval is required, show me the approval link and wait for my decision." label="First task" multiline /><p className="text-muted-foreground text-sm">For an action that changes something, ask your agent to prepare the call. Review its exact arguments in <Link to="/approvals" target="_blank" className="text-foreground underline">Approvals</Link> before allowing it to run.</p></div>
-          <div className="space-y-2 border-t pt-5"><p className="font-medium">Activity from {profile.name}</p><QueryError error={activity.error} />{activity.data?.records.length ? activity.data.records.map((record) => <div key={record.id} className="flex items-center justify-between gap-3 text-sm"><code className="min-w-0 truncate">{record.tool ?? "Access check"}</code><AuditOutcomeBadge outcome={record.outcome} /></div>) : <p className="text-muted-foreground text-sm">Waiting for your first call. This updates automatically.</p>}</div>
-        </CardContent></Card>
-        <div className="flex justify-between"><Button variant="ghost" onClick={() => go("agent")}><ArrowLeft className="size-4" />Configuration</Button><Button onClick={finish}>Open dashboard<ArrowRight className="size-4" /></Button></div>
-      </>}
-    </> : null}
-  </div>
+      {step === "agent" || step === "verify" ? (
+        profiles.isPending || (profiles.isFetching && profile === undefined) ? (
+          <LoadingRows />
+        ) : profile === undefined ? (
+          <Card>
+            <CardContent className="space-y-4 py-6">
+              <p>This profile is no longer available. Choose one to continue.</p>
+              <Button onClick={() => go("connect")}>Choose a profile</Button>
+            </CardContent>
+          </Card>
+        ) : (
+          <>
+            <div className="space-y-2">
+              <h1 className="text-3xl font-semibold tracking-tight">
+                {step === "agent" ? "Give your agent its own key." : "Make your first connection."}
+              </h1>
+              <p className="text-muted-foreground">
+                {step === "agent"
+                  ? `Give the app you use a key for ${profile.name}. It can only use the tools you chose.`
+                  : "Verify the key, then ask your agent to use a connected tool."}
+              </p>
+            </div>
+            {step === "agent" ? (
+              <Card>
+                <CardContent className="space-y-5 py-6">
+                  <div className="space-y-3">
+                    <div>
+                      <p className="flex items-center gap-2 font-medium">
+                        <KeyRound className="size-4" />
+                        API key
+                      </p>
+                      <p className="text-muted-foreground mt-1 text-sm">
+                        Shown once. Copy your configuration before leaving this page.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-end gap-2">
+                      <div className="min-w-0 flex-1 space-y-1.5">
+                        <Label htmlFor="onboarding-app-name">Which app is this key for?</Label>
+                        <Input
+                          id="onboarding-app-name"
+                          value={appName}
+                          onChange={(event) => setAppName(event.target.value)}
+                          placeholder="e.g. Claude Code"
+                          disabled={secret !== undefined}
+                        />
+                      </div>
+                      <Button
+                        onClick={() => issue.mutate(profile.id)}
+                        disabled={issue.isPending || secret !== undefined || appName.trim().length === 0}
+                      >
+                        {issue.isPending ? "Issuing key…" : secret === undefined ? "Issue a key" : "Key issued"}
+                      </Button>
+                    </div>
+                  </div>
+                  <QueryError error={issue.error} />
+                  {secret !== undefined ? <CopyField value={secret} label="Client key" /> : null}
+                  <QueryError error={gatewayUrl.error ?? mcpUrl.error} />
+                  {gatewayUrl.data !== undefined && mcpUrl.data !== undefined ? (
+                    <ConnectTabs
+                      profileName={profile.name}
+                      gatewayUrl={gatewayUrl.data}
+                      mcpUrl={mcpUrl.data}
+                      apiKey={secret ?? apiKeyPlaceholder}
+                    />
+                  ) : (
+                    <p className="text-sm">
+                      The gateway needs a reachable public URL before it can provide a configuration.
+                    </p>
+                  )}
+                  <div className="flex justify-between">
+                    <Button variant="ghost" onClick={() => go("connect")}>
+                      <ArrowLeft className="size-4" />
+                      Back
+                    </Button>
+                    <Button disabled={secret === undefined} onClick={() => go("verify")}>
+                      Test the connection
+                      <ArrowRight className="size-4" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <>
+                <Card>
+                  <CardContent className="space-y-5 py-6">
+                    <div className="space-y-2">
+                      <p className="font-medium">1. Verify your agent’s access</p>
+                      <p className="text-muted-foreground text-sm">
+                        Check that its key can list the tools you enabled.
+                      </p>
+                      <Button
+                        variant="outline"
+                        disabled={verify.isPending || secret === undefined}
+                        onClick={() => verify.mutate()}
+                      >
+                        {verify.isPending ? "Checking…" : "Verify access"}
+                      </Button>
+                      {secret === undefined ? (
+                        <Button variant="link" onClick={() => go("agent")}>
+                          Return to issue a key
+                        </Button>
+                      ) : null}
+                      <QueryError error={verify.error} />
+                      {verify.isSuccess ? (
+                        <p role="status" className="flex items-center gap-2 text-sm">
+                          <CheckCircle2 className="size-4 text-primary" />
+                          Connected. {verify.data.tools.length} tools available through this key.
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="space-y-3 border-t pt-5">
+                      <p className="font-medium">2. Ask your agent to try a tool</p>
+                      <CopyField
+                        value="List the tools available through my integrations gateway. Pick a read-only tool, explain what it will read, and call it. If approval is required, show me the approval link and wait for my decision."
+                        label="First task"
+                        multiline
+                      />
+                      <p className="text-muted-foreground text-sm">
+                        For an action that changes something, ask your agent to prepare the call. Review its exact
+                        arguments in{" "}
+                        <Link to="/approvals" target="_blank" className="text-foreground underline">
+                          Approvals
+                        </Link>{" "}
+                        before allowing it to run.
+                      </p>
+                    </div>
+                    <div className="space-y-2 border-t pt-5">
+                      <p className="font-medium">Activity from {profile.name}</p>
+                      <QueryError error={activity.error} />
+                      {activity.data?.records.length ? (
+                        activity.data.records.map((record) => (
+                          <div key={record.id} className="flex items-center justify-between gap-3 text-sm">
+                            <code className="min-w-0 truncate">{record.tool ?? "Access check"}</code>
+                            <AuditOutcomeBadge outcome={record.outcome} />
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-muted-foreground text-sm">
+                          Waiting for your first call. This updates automatically.
+                        </p>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+                <div className="flex justify-between">
+                  <Button variant="ghost" onClick={() => go("agent")}>
+                    <ArrowLeft className="size-4" />
+                    Configuration
+                  </Button>
+                  <Button onClick={finish}>
+                    Open dashboard
+                    <ArrowRight className="size-4" />
+                  </Button>
+                </div>
+              </>
+            )}
+          </>
+        )
+      ) : null}
+    </div>
+  )
 }
 
-function AccessStep({ integration, connection, onBack, onCreated }: {
+function AccessStep({
+  integration,
+  connection,
+  onBack,
+  onCreated
+}: {
   readonly integration: IntegrationOverview
   readonly connection: Connection
   readonly onBack: () => void
@@ -167,32 +423,150 @@ function AccessStep({ integration, connection, onBack, onCreated }: {
   const [filter, setFilter] = useState("")
   const [enabled, setEnabled] = useState<ReadonlySet<string>>(new Set())
   const [reviewAll, setReviewAll] = useState(false)
-  const tools = integration.tools.filter((tool) => tool.owner === connection.owner && tool.connection === connection.name)
+  const tools = integration.tools.filter(
+    (tool) => tool.owner === connection.owner && tool.connection === connection.name
+  )
   const selected = tools.filter((tool) => enabled.has(tool.name))
   const create = useMutation({
-    mutationFn: () => gateway.createProfile({
-      name: name.trim(),
-      tools: selected.map((tool) => ({
-        connection: { owner: "org", integration: IntegrationSlug.make(integration.slug), name: ConnectionName.make(connection.name) },
-        tool: ToolName.make(tool.name),
-        decision: reviewAll ? "require_approval" : tool.defaultDecision
-      }))
-    }),
+    mutationFn: () =>
+      gateway.createProfile({
+        name: name.trim(),
+        tools: selected.map((tool) => ({
+          connection: {
+            owner: "org",
+            integration: IntegrationSlug.make(integration.slug),
+            name: ConnectionName.make(connection.name)
+          },
+          tool: ToolName.make(tool.name),
+          decision: reviewAll ? "require_approval" : tool.defaultDecision
+        }))
+      }),
     onSuccess: (profile) => {
       invalidate(keys.profiles, keys.overview)
       onCreated(profile.id)
     }
   })
-  return <>
-    <div className="space-y-2"><h1 className="text-3xl font-semibold tracking-tight">Give it just the access it needs.</h1><p className="text-muted-foreground">Choose tools on {integration.name} · {connection.identityLabel ?? connection.name}. You can change these choices later.</p></div>
-    <Card><CardContent className="space-y-5 py-6">
-      <div className="space-y-2"><Label htmlFor="onboarding-profile-name">Name this profile</Label><Input id="onboarding-profile-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Research assistant" disabled={create.isPending} /><p className="text-muted-foreground text-xs">Every app you trust the same way can share it, each with its own key.</p></div>
-      <div className="space-y-3"><div className="flex flex-wrap items-center justify-between gap-2"><Label htmlFor="onboarding-tool-filter">Tools it may use</Label><span className="text-muted-foreground text-xs">{selected.length} selected</span></div><Input id="onboarding-tool-filter" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Find a tool…" /><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" disabled={create.isPending} onClick={() => setEnabled(new Set(tools.filter((tool) => tool.defaultDecision === "allow").map((tool) => tool.name)))}>Select read-only tools</Button><Button variant="ghost" size="sm" disabled={create.isPending} onClick={() => setEnabled(new Set())}>Clear selection</Button></div>
-        <div className="max-h-72 divide-y overflow-y-auto rounded-lg border">{tools.filter((tool) => `${tool.name} ${tool.description}`.toLowerCase().includes(filter.toLowerCase())).map((tool) => <label key={tool.name} className="hover:bg-accent/40 flex cursor-pointer items-start gap-3 p-3"><input type="checkbox" checked={enabled.has(tool.name)} disabled={create.isPending} onChange={(event) => setEnabled((current) => { const next = new Set(current); if (event.target.checked) next.add(tool.name); else next.delete(tool.name); return next })} className="accent-primary mt-1 size-4 shrink-0" /><span className="min-w-0 flex-1"><span className="break-all font-mono text-xs">{tool.name}</span><span className="text-muted-foreground mt-1 block line-clamp-2 text-xs">{tool.description}</span></span><Badge variant="secondary">{reviewAll || tool.defaultDecision === "require_approval" ? "Approval" : "Read-only"}</Badge></label>)}{tools.length === 0 ? <p className="text-muted-foreground p-4 text-sm">No tools are available. Reconnect the service to continue.</p> : null}</div>
+  return (
+    <>
+      <div className="space-y-2">
+        <h1 className="text-3xl font-semibold tracking-tight">Give it just the access it needs.</h1>
+        <p className="text-muted-foreground">
+          Choose tools on {integration.name} · {connection.identityLabel ?? connection.name}. You can change these
+          choices later.
+        </p>
       </div>
-      <div className="bg-muted/40 space-y-3 rounded-xl p-4"><p className="flex items-center gap-2 text-sm font-medium"><ShieldCheck className="size-4" />You stay in control</p><p className="text-muted-foreground text-sm">Read-only tools can run directly. Other tools require your approval for each call. Its apps cannot manage the gateway or approve their own requests.</p><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={reviewAll} disabled={create.isPending} onChange={(event) => setReviewAll(event.target.checked)} className="accent-primary size-4" />Ask me before every call, including reads</label></div>
-      <QueryError error={create.error} />
-      <div className="flex justify-between gap-3"><Button variant="ghost" onClick={onBack} disabled={create.isPending}><ArrowLeft className="size-4" />Back</Button><Button disabled={!name.trim() || selected.length === 0 || create.isPending} onClick={() => create.mutate()}>{create.isPending ? "Creating profile…" : "Create profile"}<ArrowRight className="size-4" /></Button></div>
-    </CardContent></Card>
-  </>
+      <Card>
+        <CardContent className="space-y-5 py-6">
+          <div className="space-y-2">
+            <Label htmlFor="onboarding-profile-name">Name this profile</Label>
+            <Input
+              id="onboarding-profile-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="e.g. Research assistant"
+              disabled={create.isPending}
+            />
+            <p className="text-muted-foreground text-xs">
+              Every app you trust the same way can share it, each with its own key.
+            </p>
+          </div>
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Label htmlFor="onboarding-tool-filter">Tools it may use</Label>
+              <span className="text-muted-foreground text-xs">{selected.length} selected</span>
+            </div>
+            <Input
+              id="onboarding-tool-filter"
+              value={filter}
+              onChange={(event) => setFilter(event.target.value)}
+              placeholder="Find a tool…"
+            />
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={create.isPending}
+                onClick={() =>
+                  setEnabled(new Set(tools.filter((tool) => tool.defaultDecision === "allow").map((tool) => tool.name)))
+                }
+              >
+                Select read-only tools
+              </Button>
+              <Button variant="ghost" size="sm" disabled={create.isPending} onClick={() => setEnabled(new Set())}>
+                Clear selection
+              </Button>
+            </div>
+            <div className="max-h-72 divide-y overflow-y-auto rounded-lg border">
+              {tools
+                .filter((tool) => `${tool.name} ${tool.description}`.toLowerCase().includes(filter.toLowerCase()))
+                .map((tool) => (
+                  <label key={tool.name} className="hover:bg-accent/40 flex cursor-pointer items-start gap-3 p-3">
+                    <input
+                      type="checkbox"
+                      checked={enabled.has(tool.name)}
+                      disabled={create.isPending}
+                      onChange={(event) =>
+                        setEnabled((current) => {
+                          const next = new Set(current)
+                          if (event.target.checked) next.add(tool.name)
+                          else next.delete(tool.name)
+                          return next
+                        })
+                      }
+                      className="accent-primary mt-1 size-4 shrink-0"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="break-all font-mono text-xs">{tool.name}</span>
+                      <span className="text-muted-foreground mt-1 block line-clamp-2 text-xs">{tool.description}</span>
+                    </span>
+                    <Badge variant="secondary">
+                      {reviewAll || tool.defaultDecision === "require_approval" ? "Approval" : "Read-only"}
+                    </Badge>
+                  </label>
+                ))}
+              {tools.length === 0 ? (
+                <p className="text-muted-foreground p-4 text-sm">
+                  No tools are available. Reconnect the service to continue.
+                </p>
+              ) : null}
+            </div>
+          </div>
+          <div className="bg-muted/40 space-y-3 rounded-xl p-4">
+            <p className="flex items-center gap-2 text-sm font-medium">
+              <ShieldCheck className="size-4" />
+              You stay in control
+            </p>
+            <p className="text-muted-foreground text-sm">
+              Read-only tools can run directly. Other tools require your approval for each call. Its apps cannot manage
+              the gateway or approve their own requests.
+            </p>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={reviewAll}
+                disabled={create.isPending}
+                onChange={(event) => setReviewAll(event.target.checked)}
+                className="accent-primary size-4"
+              />
+              Ask me before every call, including reads
+            </label>
+          </div>
+          <QueryError error={create.error} />
+          <div className="flex justify-between gap-3">
+            <Button variant="ghost" onClick={onBack} disabled={create.isPending}>
+              <ArrowLeft className="size-4" />
+              Back
+            </Button>
+            <Button
+              disabled={!name.trim() || selected.length === 0 || create.isPending}
+              onClick={() => create.mutate()}
+            >
+              {create.isPending ? "Creating profile…" : "Create profile"}
+              <ArrowRight className="size-4" />
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </>
+  )
 }

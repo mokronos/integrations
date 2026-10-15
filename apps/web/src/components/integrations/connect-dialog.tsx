@@ -1,5 +1,5 @@
-import { whenPresent, type AuthMethod, type IntegrationOverview } from "@integragents/contracts"
-import { Check } from "lucide-react"
+import { whenPresent, type AuthMethod, type Connection, type IntegrationOverview } from "@integragents/contracts"
+import { Check, KeyRound, RotateCw } from "lucide-react"
 import { useEffect, useState } from "react"
 
 import { AuthMethodDetails } from "@/components/integrations/auth-method-details"
@@ -22,10 +22,13 @@ import { keys, useInvalidate, useMutation, useOAuthCallbackUrl, useOAuthSession 
 import { AwaitingAuthorization, OAuthClientFields } from "./oauth-flow"
 import { OAuthSetupPanel } from "./oauth-setup-panel"
 
-const needsClientMessage = "This provider needs an OAuth application of its own. Fill in the client ID and secret above, then authorize again."
+const needsClientMessage =
+  "This provider needs an OAuth application of its own. Fill in the client ID and secret above, then authorize again."
 
 const credentialNames = (method: AuthMethod): ReadonlyArray<string> => [
-  ...new Set((method.placements ?? []).flatMap((placement) => placement.variable === undefined ? [] : [placement.variable]))
+  ...new Set(
+    (method.placements ?? []).flatMap((placement) => (placement.variable === undefined ? [] : [placement.variable]))
+  )
 ]
 
 const credentialLabel = (method: AuthMethod): string => {
@@ -40,9 +43,7 @@ export function ConnectDialog({ integration }: { readonly integration: Integrati
   const [open, setOpen] = useState(false)
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button size="sm" />}>
-        Connect
-      </DialogTrigger>
+      <DialogTrigger render={<Button size="sm" />}>Connect</DialogTrigger>
       <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-xl">
         <ConnectFlow integration={integration} onDone={() => setOpen(false)} />
       </DialogContent>
@@ -50,7 +51,99 @@ export function ConnectDialog({ integration }: { readonly integration: Integrati
   )
 }
 
-function ConnectFlow({ integration, onDone }: { readonly integration: IntegrationOverview; readonly onDone: () => void }) {
+export const reauthorizationMethod = (
+  integration: IntegrationOverview,
+  connection: Connection
+): AuthMethod | undefined =>
+  connection.owner === "org" && connection.status === "reauthorization_required"
+    ? integration.authMethods.find((method) => method.kind === "oauth" && method.template === connection.template)
+    : undefined
+
+export function ReauthorizeDialog({
+  integration,
+  connection,
+  method
+}: {
+  readonly integration: IntegrationOverview
+  readonly connection: Connection
+  readonly method: AuthMethod
+}) {
+  const [open, setOpen] = useState(false)
+  const invalidate = useInvalidate()
+  const oauth = useOAuthConnect(integration, connection.name, method)
+
+  useEffect(() => {
+    if (oauth.connected) invalidate(keys.integrations, keys.connections)
+  }, [oauth.connected, invalidate])
+
+  const changeOpen = (next: boolean) => {
+    setOpen(next)
+    if (!next) oauth.reset()
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={changeOpen}>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => {
+          setOpen(true)
+          oauth.start()
+        }}
+      >
+        <RotateCw />
+        Reauthorize
+      </Button>
+      <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>
+            {oauth.connected ? `${integration.name} reauthorized` : `Reauthorize ${connection.name}`}
+          </DialogTitle>
+          <DialogDescription>
+            {oauth.connected
+              ? "The connection has a fresh token and its tools work again."
+              : `Sign in to ${integration.name} again to renew this connection's token.`}
+          </DialogDescription>
+        </DialogHeader>
+        {oauth.connected ? (
+          <Alert>
+            <Check />
+            <AlertTitle>Connection ready</AlertTitle>
+            <AlertDescription>OAuth authorization completed successfully.</AlertDescription>
+          </Alert>
+        ) : (
+          <div className="space-y-4">
+            {oauth.fields}
+            {oauth.failure === undefined ? null : (
+              <OperationError title={oauth.failure.title} step={oauth.failure.step} error={oauth.failure.error} />
+            )}
+          </div>
+        )}
+        <DialogFooter>
+          {oauth.connected ? (
+            <Button onClick={() => changeOpen(false)}>Done</Button>
+          ) : (
+            <Button onClick={oauth.start} disabled={oauth.starting || oauth.waiting}>
+              {oauth.waiting
+                ? "Waiting for authorization…"
+                : oauth.starting
+                  ? "Preparing OAuth…"
+                  : "Authorize with provider"}
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function ConnectFlow({
+  integration,
+  onDone
+}: {
+  readonly integration: IntegrationOverview
+  readonly onDone: () => void
+}) {
   const [name, setName] = useState("default")
   const [template, setTemplate] = useState(integration.authMethods[0]?.template)
   const method = integration.authMethods.find((candidate) => candidate.template === template)
@@ -59,12 +152,13 @@ function ConnectFlow({ integration, onDone }: { readonly integration: Integratio
   const invalidate = useInvalidate()
   const [values, setValues] = useState<Readonly<Record<string, string>>>({})
   const connect = useMutation({
-    mutationFn: (method: AuthMethod) => gateway.createConnection({
-      integration: integration.slug,
-      connection,
-      template: method.template,
-      ...whenPresent("values", method.kind === "none" ? undefined : values)
-    })
+    mutationFn: (method: AuthMethod) =>
+      gateway.createConnection({
+        integration: integration.slug,
+        connection,
+        template: method.template,
+        ...whenPresent("values", method.kind === "none" ? undefined : values)
+      })
   })
 
   const oauth = useOAuthConnect(integration, connection, method)
@@ -92,70 +186,92 @@ function ConnectFlow({ integration, onDone }: { readonly integration: Integratio
         </DialogDescription>
       </DialogHeader>
 
-      {connected
-        ? (
-          <Alert>
-            <Check />
-            <AlertTitle>Connection ready</AlertTitle>
-            <AlertDescription>
-              {connect.data === undefined
-                ? "OAuth authorization completed successfully."
-                : `${connect.data.tools.length} ${connect.data.tools.length === 1 ? "tool is" : "tools are"} available through ${connection}.`}
-            </AlertDescription>
-          </Alert>
-        )
-        : (
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="connect-name">Connection name</Label>
-              <Input id="connect-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="default" disabled={oauth.waiting} />
-              <p className="text-muted-foreground text-xs">Use a distinct name for each account, such as work or personal.</p>
-            </div>
-
-            <div className="space-y-2" role="radiogroup" aria-label="Authentication method">
-              <Label>Authentication method</Label>
-              {integration.authMethods.map((candidate) => (
-                <AuthMethodDetails
-                  key={candidate.id}
-                  method={candidate}
-                  selected={candidate.template === template}
-                  onSelect={oauth.waiting ? undefined : selectMethod}
-                />
-              ))}
-            </div>
-
-            {method === undefined
-              ? <OperationError title="Authentication unavailable" step="Selecting an authentication method" error={new Error("This integration has no usable authentication option.")} />
-              : method.kind === "oauth"
-                ? oauth.fields
-                : <CredentialFields method={method} values={values} onChange={setValues} />}
-
-            {connect.error === null ? null : (
-              <OperationError title="Connection failed" step="Saving the credential and verifying the endpoint" error={connect.error} />
-            )}
-            {oauth.failure === undefined ? null : (
-              <OperationError title={oauth.failure.title} step={oauth.failure.step} error={oauth.failure.error} />
-            )}
+      {connected ? (
+        <Alert>
+          <Check />
+          <AlertTitle>Connection ready</AlertTitle>
+          <AlertDescription>
+            {connect.data === undefined
+              ? "OAuth authorization completed successfully."
+              : `${connect.data.tools.length} ${connect.data.tools.length === 1 ? "tool is" : "tools are"} available through ${connection}.`}
+          </AlertDescription>
+        </Alert>
+      ) : (
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="connect-name">Connection name</Label>
+            <Input
+              id="connect-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="default"
+              disabled={oauth.waiting}
+            />
+            <p className="text-muted-foreground text-xs">
+              Use a distinct name for each account, such as work or personal.
+            </p>
           </div>
-        )}
+
+          <div className="space-y-2" role="radiogroup" aria-label="Authentication method">
+            <Label>Authentication method</Label>
+            {integration.authMethods.map((candidate) => (
+              <AuthMethodDetails
+                key={candidate.id}
+                method={candidate}
+                selected={candidate.template === template}
+                onSelect={oauth.waiting ? undefined : selectMethod}
+              />
+            ))}
+          </div>
+
+          {method === undefined ? (
+            <OperationError
+              title="Authentication unavailable"
+              step="Selecting an authentication method"
+              error={new Error("This integration has no usable authentication option.")}
+            />
+          ) : method.kind === "oauth" ? (
+            oauth.fields
+          ) : (
+            <CredentialFields method={method} values={values} onChange={setValues} />
+          )}
+
+          {connect.error === null ? null : (
+            <OperationError
+              title="Connection failed"
+              step="Saving the credential and verifying the endpoint"
+              error={connect.error}
+            />
+          )}
+          {oauth.failure === undefined ? null : (
+            <OperationError title={oauth.failure.title} step={oauth.failure.step} error={oauth.failure.error} />
+          )}
+        </div>
+      )}
 
       <DialogFooter>
-        {connected
-          ? <Button onClick={onDone}>Done</Button>
-          : method?.kind === "oauth"
-            ? (
-              <Button onClick={oauth.start} disabled={oauth.starting || oauth.waiting || connection.length === 0}>
-                {oauth.waiting ? "Waiting for authorization…" : oauth.starting ? "Preparing OAuth…" : "Authorize with provider"}
-              </Button>
-            )
-            : (
-              <Button
-                onClick={() => { if (method !== undefined) connect.mutate(method) }}
-                disabled={connect.isPending || connection.length === 0 || method === undefined || !hasCredential(method, values)}
-              >
-                {connect.isPending ? "Saving and verifying…" : "Connect and verify"}
-              </Button>
-            )}
+        {connected ? (
+          <Button onClick={onDone}>Done</Button>
+        ) : method?.kind === "oauth" ? (
+          <Button onClick={oauth.start} disabled={oauth.starting || oauth.waiting || connection.length === 0}>
+            {oauth.waiting
+              ? "Waiting for authorization…"
+              : oauth.starting
+                ? "Preparing OAuth…"
+                : "Authorize with provider"}
+          </Button>
+        ) : (
+          <Button
+            onClick={() => {
+              if (method !== undefined) connect.mutate(method)
+            }}
+            disabled={
+              connect.isPending || connection.length === 0 || method === undefined || !hasCredential(method, values)
+            }
+          >
+            {connect.isPending ? "Saving and verifying…" : "Connect and verify"}
+          </Button>
+        )}
       </DialogFooter>
     </>
   )
@@ -169,7 +285,11 @@ const credentialKeys = (method: AuthMethod): ReadonlyArray<string> => {
 const hasCredential = (method: AuthMethod, values: Readonly<Record<string, string>>): boolean =>
   method.kind === "none" || credentialKeys(method).every((key) => (values[key] ?? "").trim().length > 0)
 
-function CredentialFields({ method, values, onChange }: {
+function CredentialFields({
+  method,
+  values,
+  onChange
+}: {
   readonly method: AuthMethod
   readonly values: Readonly<Record<string, string>>
   readonly onChange: (values: Readonly<Record<string, string>>) => void
@@ -211,16 +331,20 @@ function useOAuthConnect(integration: IntegrationOverview, connection: string, m
   const { data: callbackUrl } = useOAuthCallbackUrl()
   const [clientId, setClientId] = useState("")
   const [clientSecret, setClientSecret] = useState("")
+  const [replaceSavedClient, setReplaceSavedClient] = useState(false)
   const [popupBlocked, setPopupBlocked] = useState(false)
+  const savedClientId = integration.savedOAuthClientId
+  const enteringClient = savedClientId === undefined || replaceSavedClient
 
   const start = useMutation({
-    mutationFn: (method: AuthMethod) => gateway.startOAuth({
-      integration: integration.slug,
-      connection,
-      template: method.template,
-      ...whenPresent("clientId", clientId.trim() || undefined),
-      ...whenPresent("clientSecret", clientSecret || undefined)
-    }),
+    mutationFn: (method: AuthMethod) =>
+      gateway.startOAuth({
+        integration: integration.slug,
+        connection,
+        template: method.template,
+        ...whenPresent("clientId", enteringClient ? clientId.trim() || undefined : undefined),
+        ...whenPresent("clientSecret", enteringClient ? clientSecret || undefined : undefined)
+      }),
     onSuccess: (started) => {
       if (started.state.status !== "pending") return
       setPopupBlocked(window.open(started.state.authorizationUrl, "_blank", "noopener") === null)
@@ -231,11 +355,22 @@ function useOAuthConnect(integration: IntegrationOverview, connection: string, m
   const waiting = state?.status === "pending"
 
   const failure = ((): OAuthFailure | undefined => {
-    if (start.error !== null) return { title: "OAuth could not start", step: "Preparing authorization with the gateway", error: start.error }
-    const step = session.data === undefined ? "Preparing authorization with the provider" : "Provider authorization and token exchange"
-    if (state?.status === "failed") return { title: "OAuth authorization has a problem", step, error: new Error(state.message) }
-    if (state?.status === "needs-client") return { title: "OAuth authorization has a problem", step, error: new Error(needsClientMessage) }
-    if (session.error !== null) return { title: "OAuth authorization has a problem", step: "Checking OAuth status with the gateway", error: session.error }
+    if (start.error !== null)
+      return { title: "OAuth could not start", step: "Preparing authorization with the gateway", error: start.error }
+    const step =
+      session.data === undefined
+        ? "Preparing authorization with the provider"
+        : "Provider authorization and token exchange"
+    if (state?.status === "failed")
+      return { title: "OAuth authorization has a problem", step, error: new Error(state.message) }
+    if (state?.status === "needs-client")
+      return { title: "OAuth authorization has a problem", step, error: new Error(needsClientMessage) }
+    if (session.error !== null)
+      return {
+        title: "OAuth authorization has a problem",
+        step: "Checking OAuth status with the gateway",
+        error: session.error
+      }
     if (waiting && popupBlocked) {
       return {
         title: "OAuth authorization has a problem",
@@ -246,17 +381,18 @@ function useOAuthConnect(integration: IntegrationOverview, connection: string, m
     return undefined
   })()
 
-  const fields = method === undefined ? null : (
-    <div className="space-y-3">
-      {method.oauth?.supportsDynamicRegistration === true
-        ? (
+  const fields =
+    method === undefined ? null : (
+      <div className="space-y-3">
+        {method.oauth?.supportsDynamicRegistration === true ? (
           <Alert>
             <Check />
             <AlertTitle>Automatic client registration supported</AlertTitle>
-            <AlertDescription>The gateway will register itself with the provider before opening authorization.</AlertDescription>
+            <AlertDescription>
+              The gateway will register itself with the provider before opening authorization.
+            </AlertDescription>
           </Alert>
-        )
-        : (
+        ) : enteringClient ? (
           <div className="grid gap-3 rounded-lg border p-3 sm:grid-cols-2">
             <OAuthSetupPanel method={method} callbackUrl={callbackUrl} />
             <OAuthClientFields
@@ -267,13 +403,44 @@ function useOAuthConnect(integration: IntegrationOverview, connection: string, m
               onClientSecretChange={setClientSecret}
               disabled={waiting}
             />
+            {savedClientId === undefined ? null : (
+              <Button
+                variant="link"
+                size="sm"
+                className="w-fit px-0 sm:col-span-2"
+                onClick={() => setReplaceSavedClient(false)}
+                disabled={waiting}
+              >
+                Keep the saved client
+              </Button>
+            )}
           </div>
+        ) : (
+          <Alert>
+            <KeyRound />
+            <AlertTitle>Using saved OAuth client</AlertTitle>
+            <AlertDescription className="space-y-1">
+              <p className="break-all font-mono text-xs">{savedClientId}</p>
+              <Button
+                variant="link"
+                size="sm"
+                className="h-auto px-0"
+                onClick={() => setReplaceSavedClient(true)}
+                disabled={waiting}
+              >
+                Use a different client
+              </Button>
+            </AlertDescription>
+          </Alert>
         )}
-      {state?.status === "pending"
-        ? <AwaitingAuthorization description="Complete the provider page. The dashboard is checking the gateway for the result." authorizationUrl={state.authorizationUrl} />
-        : null}
-    </div>
-  )
+        {state?.status === "pending" ? (
+          <AwaitingAuthorization
+            description="Complete the provider page. The dashboard is checking the gateway for the result."
+            authorizationUrl={state.authorizationUrl}
+          />
+        ) : null}
+      </div>
+    )
 
   return {
     fields,
@@ -281,7 +448,9 @@ function useOAuthConnect(integration: IntegrationOverview, connection: string, m
     waiting,
     connected: state?.status === "connected",
     starting: start.isPending,
-    start: () => { if (method !== undefined) start.mutate(method) },
+    start: () => {
+      if (method !== undefined) start.mutate(method)
+    },
     reset: () => {
       start.reset()
       setPopupBlocked(false)

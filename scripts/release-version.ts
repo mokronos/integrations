@@ -138,7 +138,8 @@ export const nightlyMetadata = (
   sha: string
 ): Effect.Effect<ReleaseMetadata, InvalidReleaseVersionError> => {
   const version = `${baseVersion}-nightly.${date}.${runNumber}`
-  const wellFormed = semverPattern.test(baseVersion) &&
+  const wellFormed =
+    semverPattern.test(baseVersion) &&
     nightlyDatePattern.test(date) &&
     commitShaPattern.test(sha) &&
     Number.isInteger(runNumber) &&
@@ -200,13 +201,10 @@ export const renderReleaseDependencies = (
   source: string,
   versions: ReadonlyMap<string, string>
 ): Effect.Effect<string, UnresolvedWorkspaceDependencyError> => {
-  const rendered = source.replace(
-    workspaceDependencyPattern,
-    (entry: string, name: string) => {
-      const version = versions.get(name)
-      return version === undefined ? entry : `"${name}": "^${version}"`
-    }
-  )
+  const rendered = source.replace(workspaceDependencyPattern, (entry: string, name: string) => {
+    const version = versions.get(name)
+    return version === undefined ? entry : `"${name}": "^${version}"`
+  })
   const unresolved = rendered.match(/"[^"]+": "workspace:[^"]*"/)
   return unresolved === null
     ? Effect.succeed(rendered)
@@ -244,27 +242,31 @@ const emit = (metadata: ReleaseMetadata): Effect.Effect<void> =>
     writeFileSync(outputPath, `${lines.join("\n")}\n`, { flag: "a" })
   })
 
-const resolveCommand = Command.make("resolve", {
-  channel: Flag.Literals("channel", ["stable", "nightly"]),
-  version: Flag.optional(Flag.String("version")),
-  date: Flag.optional(Flag.String("date")),
-  runNumber: Flag.optional(Flag.Int("run-number")),
-  sha: Flag.optional(Flag.String("sha"))
-}, (flags) =>
-  Effect.gen(function*() {
-    if (flags.channel === "stable") {
-      const raw = yield* requireFlag(flags.version, "stable", "version")
-      return yield* emit(yield* stableMetadata(raw))
-    }
-    const baseVersion = yield* nextPatchVersion(decodePackageJson(read("package.json")).version)
-    const date = yield* requireFlag(flags.date, "nightly", "date")
-    const runNumber = yield* requireFlag(flags.runNumber, "nightly", "run-number")
-    const sha = yield* requireFlag(flags.sha, "nightly", "sha")
-    return yield* emit(yield* nightlyMetadata(baseVersion, date, runNumber, sha))
-  }))
+const resolveCommand = Command.make(
+  "resolve",
+  {
+    channel: Flag.Literals("channel", ["stable", "nightly"]),
+    version: Flag.optional(Flag.String("version")),
+    date: Flag.optional(Flag.String("date")),
+    runNumber: Flag.optional(Flag.Int("run-number")),
+    sha: Flag.optional(Flag.String("sha"))
+  },
+  (flags) =>
+    Effect.gen(function* () {
+      if (flags.channel === "stable") {
+        const raw = yield* requireFlag(flags.version, "stable", "version")
+        return yield* emit(yield* stableMetadata(raw))
+      }
+      const baseVersion = yield* nextPatchVersion(decodePackageJson(read("package.json")).version)
+      const date = yield* requireFlag(flags.date, "nightly", "date")
+      const runNumber = yield* requireFlag(flags.runNumber, "nightly", "run-number")
+      const sha = yield* requireFlag(flags.sha, "nightly", "sha")
+      return yield* emit(yield* nightlyMetadata(baseVersion, date, runNumber, sha))
+    })
+)
 
 const applyCommand = Command.make("apply", { version: Flag.String("version") }, (flags) =>
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const version = flags.version.replace(/^v/, "")
     if (!releaseVersionPattern.test(version)) return yield* new InvalidReleaseVersionError({ version: flags.version })
     for (const file of releasePackageFiles) {
@@ -272,10 +274,11 @@ const applyCommand = Command.make("apply", { version: Flag.String("version") }, 
     }
     write(gatewayVersionFile, yield* renderGatewayVersion(read(gatewayVersionFile), version))
     yield* Effect.log(`stamped ${version} across ${releasePackageFiles.length} manifest(s)`)
-  }))
+  })
+)
 
 const verifyCommand = Command.make("verify", { version: Flag.String("version") }, (flags) =>
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const version = flags.version.replace(/^v/, "")
     for (const file of releasePackageFiles) {
       const actual = decodePackageJson(read(file)).version
@@ -290,25 +293,30 @@ const verifyCommand = Command.make("verify", { version: Flag.String("version") }
       })
     }
     yield* Effect.log(`verified ${version} across ${releasePackageFiles.length} manifest(s)`)
-  }))
+  })
+)
 
 const linkCommand = Command.make("link", {}, () =>
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const files = publishablePackageDirectories.map((directory) => `${directory}/package.json`)
-    const versions = new Map(files.map((file) => {
-      const manifest = decodePackageJson(read(file))
-      return [manifest.name, manifest.version] as const
-    }))
+    const versions = new Map(
+      files.map((file) => {
+        const manifest = decodePackageJson(read(file))
+        return [manifest.name, manifest.version] as const
+      })
+    )
     for (const file of files) {
       write(file, yield* renderReleaseDependencies(file, read(file), versions))
     }
     yield* Effect.log(`linked ${versions.size} package(s) by published range`)
-  }))
+  })
+)
 
 const packagesCommand = Command.make("packages", {}, () =>
   Effect.sync(() => {
     for (const directory of publishablePackageDirectories) console.log(directory)
-  }))
+  })
+)
 
 const command = Command.make("release-version").pipe(
   Command.withSubcommands([resolveCommand, applyCommand, verifyCommand, linkCommand, packagesCommand])

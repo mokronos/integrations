@@ -3,5 +3,4 @@ import { integrationsHome, traceFilePath } from "@integragents/contracts/gateway
 
 export { integrationsHome, traceFilePath }
 
-export const gatewayDatabasePath = (home: string): string =>
-  path.join(home, "gateway.sqlite")
+export const gatewayDatabasePath = (home: string): string => path.join(home, "gateway.sqlite")

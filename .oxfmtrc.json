@@ -1,0 +1,16 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "semi": false,
+  "trailingComma": "none",
+  "printWidth": 120,
+  "sortPackageJson": false,
+  "ignorePatterns": [
+    ".reference/**",
+    "bun.lock",
+    "**/*.gen.ts",
+    "**/db/migrations/**",
+    "**/drizzle/**",
+    "**/test/conformance/fixtures/**",
+    "tools/oxlint/anti-slop/**"
+  ]
+}

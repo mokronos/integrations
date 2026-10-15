@@ -48,26 +48,27 @@ export const decodeJsonSchema = (
   definitions?: { readonly [key: string]: Schema.Json }
 ): Option.Option<JsonSchemaNode> => {
   if (schema === undefined || schema === null) return Option.none()
-  return decodeNode(schema).pipe(Option.map((decoded) =>
-    definitions === undefined ? decoded : {
-      ...decoded,
-      $defs: {
-        ...Option.getOrElse(decodeDefinitions(definitions), () => ({})),
-        ...decoded.$defs
-      }
-    }
-  ))
+  return decodeNode(schema).pipe(
+    Option.map((decoded) =>
+      definitions === undefined
+        ? decoded
+        : {
+            ...decoded,
+            $defs: {
+              ...Option.getOrElse(decodeDefinitions(definitions), () => ({})),
+              ...decoded.$defs
+            }
+          }
+    )
+  )
 }
 
-const isNode = (
-  value: JsonSchemaNode | ReadonlyArray<JsonSchemaNode>
-): value is JsonSchemaNode => !Array.isArray(value)
+const isNode = (value: JsonSchemaNode | ReadonlyArray<JsonSchemaNode>): value is JsonSchemaNode => !Array.isArray(value)
 
 const itemsOf = (schema: JsonSchemaNode): JsonSchemaNode | undefined =>
   schema.items !== undefined && isNode(schema.items) ? schema.items : undefined
 
-const definitionName = (ref: string): string | undefined =>
-  /^#\/\$defs\/(.+)$/.exec(ref)?.[1]
+const definitionName = (ref: string): string | undefined => /^#\/\$defs\/(.+)$/.exec(ref)?.[1]
 
 const dereference = (ref: string, root: JsonSchemaNode): JsonSchemaNode | undefined => {
   const name = definitionName(ref)
@@ -77,21 +78,22 @@ const dereference = (ref: string, root: JsonSchemaNode): JsonSchemaNode | undefi
 export const resolve = (schema: JsonSchemaNode, root: JsonSchemaNode): JsonSchemaNode => {
   const referenced = schema.$ref === undefined ? undefined : dereference(schema.$ref, root)
   const target = referenced ?? schema
-  const single = target.oneOf?.length === 1
-    ? target.oneOf[0]
-    : target.anyOf?.length === 1 ? target.anyOf[0] : undefined
+  const single = target.oneOf?.length === 1 ? target.oneOf[0] : target.anyOf?.length === 1 ? target.anyOf[0] : undefined
   return single === undefined ? target : resolve(single, root)
 }
 
 const composed = (parts: ReadonlyArray<JsonSchemaNode>, root: JsonSchemaNode): JsonSchemaNode =>
-  parts.reduce<JsonSchemaNode>((accumulated, part) => {
-    const resolved = resolve(part, root)
-    return {
-      type: "object",
-      properties: { ...accumulated.properties, ...resolved.properties },
-      required: [...accumulated.required ?? [], ...resolved.required ?? []]
-    }
-  }, { type: "object" })
+  parts.reduce<JsonSchemaNode>(
+    (accumulated, part) => {
+      const resolved = resolve(part, root)
+      return {
+        type: "object",
+        properties: { ...accumulated.properties, ...resolved.properties },
+        required: [...(accumulated.required ?? []), ...(resolved.required ?? [])]
+      }
+    },
+    { type: "object" }
+  )
 
 export const valueLabel = (value: Schema.Json): string => {
   const text = JSON.stringify(value) ?? String(value)
@@ -99,28 +101,24 @@ export const valueLabel = (value: Schema.Json): string => {
 }
 
 const typeNames = (schema: JsonSchemaNode): ReadonlyArray<string> =>
-  schema.type === undefined
-    ? []
-    : Predicate.isString(schema.type) ? [schema.type] : schema.type
+  schema.type === undefined ? [] : Predicate.isString(schema.type) ? [schema.type] : schema.type
 
 const unionLabel = (variants: ReadonlyArray<JsonSchemaNode>, root: JsonSchemaNode): string => {
   const labels = variants.slice(0, 3).map((variant) => typeLabel(variant, root))
-  return [...labels, ...variants.length > 3 ? ["…"] : []].join(" | ")
+  return [...labels, ...(variants.length > 3 ? ["…"] : [])].join(" | ")
 }
 
 export const typeLabel = (schema: JsonSchemaNode, root: JsonSchemaNode): string => {
   if (schema.$ref !== undefined) return definitionName(schema.$ref) ?? "$ref"
   if (schema.const !== undefined) return valueLabel(schema.const)
   if (schema.enum !== undefined) {
-    return schema.enum.length <= 3
-      ? schema.enum.map(valueLabel).join(" | ")
-      : `enum (${schema.enum.length})`
+    return schema.enum.length <= 3 ? schema.enum.map(valueLabel).join(" | ") : `enum (${schema.enum.length})`
   }
   if (schema.oneOf !== undefined) return unionLabel(schema.oneOf, root)
   if (schema.anyOf !== undefined) return unionLabel(schema.anyOf, root)
   if (schema.allOf !== undefined) {
     const named = schema.allOf.find((part) => part.$ref !== undefined)?.$ref
-    return named === undefined ? "object" : definitionName(named) ?? "object"
+    return named === undefined ? "object" : (definitionName(named) ?? "object")
   }
 
   const names = typeNames(schema)
@@ -130,9 +128,7 @@ export const typeLabel = (schema: JsonSchemaNode, root: JsonSchemaNode): string 
   }
   if (names.includes("object")) {
     const values = schema.additionalProperties
-    return values === undefined || Predicate.isBoolean(values)
-      ? "object"
-      : `record<string, ${typeLabel(values, root)}>`
+    return values === undefined || Predicate.isBoolean(values) ? "object" : `record<string, ${typeLabel(values, root)}>`
   }
   const only = names[0]
   if (names.length === 1 && only !== undefined) {
@@ -151,13 +147,18 @@ export const typeKind = (schema: JsonSchemaNode): TypeKind => {
   const names = typeNames(schema)
   if (names.length !== 1) return "other"
   switch (names[0]) {
-    case "string": return "string"
+    case "string":
+      return "string"
     case "number":
-    case "integer": return "number"
-    case "boolean": return "boolean"
+    case "integer":
+      return "number"
+    case "boolean":
+      return "boolean"
     case "object":
-    case "array": return "structure"
-    default: return "other"
+    case "array":
+      return "structure"
+    default:
+      return "other"
   }
 }
 
@@ -171,10 +172,10 @@ export type SchemaChildren =
   | { readonly kind: "properties"; readonly properties: ReadonlyArray<SchemaProperty> }
   | { readonly kind: "items"; readonly schema: JsonSchemaNode }
   | {
-    readonly kind: "variants"
-    readonly keyword: "oneOf" | "anyOf"
-    readonly variants: ReadonlyArray<JsonSchemaNode>
-  }
+      readonly kind: "variants"
+      readonly keyword: "oneOf" | "anyOf"
+      readonly variants: ReadonlyArray<JsonSchemaNode>
+    }
   | { readonly kind: "values"; readonly schema: JsonSchemaNode }
   | { readonly kind: "none" }
 
@@ -186,9 +187,7 @@ const propertiesOf = (schema: JsonSchemaNode): ReadonlyArray<SchemaProperty> => 
   return Object.entries(schema.properties ?? {})
     .map(([name, property]) => ({ name, schema: property, required: required.has(name) }))
     .toSorted((left, right) =>
-      left.required === right.required
-        ? left.name.localeCompare(right.name)
-        : left.required ? -1 : 1
+      left.required === right.required ? left.name.localeCompare(right.name) : left.required ? -1 : 1
     )
 }
 

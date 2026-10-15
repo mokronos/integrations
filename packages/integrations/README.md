@@ -6,25 +6,25 @@ vocabulary come from `@integragents/contracts`.
 
 ## Layout
 
-| Directory | Holds |
-| --- | --- |
-| `storage/` | The two swappable seams: `Database` (rows) and `CredentialStore` (sealed secrets) |
-| `catalog/` | What is installed — the row store, auth-method derivation, package-internal ids |
-| `mcp/` | The MCP client, and reading its result envelope |
-| `openapi/` | Compiling a document, building a request, invoking, Google Discovery, the spec cache |
-| `oauth/` | Discovery, registration, PKCE, refresh |
-| `integrations.ts` | The one service where both halves meet: `Integrations` |
-| `runtime.ts` | Layer composition |
+| Directory         | Holds                                                                                |
+| ----------------- | ------------------------------------------------------------------------------------ |
+| `storage/`        | The two swappable seams: `Database` (rows) and `CredentialStore` (sealed secrets)    |
+| `catalog/`        | What is installed — the row store, auth-method derivation, package-internal ids      |
+| `mcp/`            | The MCP client, and reading its result envelope                                      |
+| `openapi/`        | Compiling a document, building a request, invoking, Google Discovery, the spec cache |
+| `oauth/`          | Discovery, registration, PKCE, refresh                                               |
+| `integrations.ts` | The one service where both halves meet: `Integrations`                               |
+| `runtime.ts`      | Layer composition                                                                    |
 
 ## What it is built on
 
-| Library | Does |
-| --- | --- |
+| Library                        | Does                                                                                                                                       |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `@modelcontextprotocol/client` | MCP transports and framing, plus the OAuth 2.1 flow primitives — which serve OpenAPI connections too, so there is one OAuth implementation |
-| `oas` | Projects an OpenAPI operation's parameters and responses into JSON Schema |
-| `oas-normalize` | Parses, upconverts Swagger 2.0, and bundles a document |
-| `@effect/sql-libsql` | The SQLite driver behind the local host's `SqlClient` |
-| `drizzle-orm` | Declares the tables; `drizzle-kit` turns them into the embedded migrations |
+| `oas`                          | Projects an OpenAPI operation's parameters and responses into JSON Schema                                                                  |
+| `oas-normalize`                | Parses, upconverts Swagger 2.0, and bundles a document                                                                                     |
+| `@effect/sql-libsql`           | The SQLite driver behind the local host's `SqlClient`                                                                                      |
+| `drizzle-orm`                  | Declares the tables; `drizzle-kit` turns them into the embedded migrations                                                                 |
 
 Request building, the Google Discovery converter, persistence and credential
 sealing are ours.

@@ -9,20 +9,34 @@ const pattern = argumentPattern([
 describe("argument patterns", () => {
   it("pins what the calls share and leaves what differs open", () => {
     expect(pattern).toEqual({
-      pinned: [{ path: ["subject"], value: "Launch" }, { path: ["options", "html"], value: true }],
+      pinned: [
+        { path: ["subject"], value: "Launch" },
+        { path: ["options", "html"], value: true }
+      ],
       free: [["to"]]
     })
   })
 
   it("matches a new value in an open field, in any key order", () => {
-    expect(matchesPattern(pattern, { options: { html: true }, subject: "Launch", to: ["c@example.com", "d@example.com"] })).toBe(true)
+    expect(
+      matchesPattern(pattern, { options: { html: true }, subject: "Launch", to: ["c@example.com", "d@example.com"] })
+    ).toBe(true)
   })
 
   it("refuses a changed pinned value, a missing one, or a field it never saw", () => {
     expect(matchesPattern(pattern, { to: ["c@example.com"], subject: "Other", options: { html: true } })).toBe(false)
     expect(matchesPattern(pattern, { to: ["c@example.com"], options: { html: true } })).toBe(false)
-    expect(matchesPattern(pattern, { to: ["c@example.com"], subject: "Launch", options: { html: true }, bcc: "x@example.com" })).toBe(false)
-    expect(matchesPattern(pattern, { to: ["c@example.com"], subject: "Launch", options: { html: true, tracking: true } })).toBe(false)
+    expect(
+      matchesPattern(pattern, {
+        to: ["c@example.com"],
+        subject: "Launch",
+        options: { html: true },
+        bcc: "x@example.com"
+      })
+    ).toBe(false)
+    expect(
+      matchesPattern(pattern, { to: ["c@example.com"], subject: "Launch", options: { html: true, tracking: true } })
+    ).toBe(false)
   })
 
   it("rejects patterns that open everything or pin inside an open field", () => {

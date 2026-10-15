@@ -8,12 +8,7 @@ import { main as agentMain } from "./agent.ts"
 import { main as operatorMain } from "./main.ts"
 
 const webDirectory = async (): Promise<string> => {
-  const directory = path.join(
-    integrationsHome(),
-    "runtime",
-    packageMetadata.version,
-    "web"
-  )
+  const directory = path.join(integrationsHome(), "runtime", packageMetadata.version, "web")
   const marker = path.join(directory, ".complete")
   if (await Bun.file(marker).exists()) return directory
 

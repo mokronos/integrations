@@ -42,35 +42,39 @@ const reaped = (pid: number) =>
       } catch {
         // already gone, which is what the test wanted anyway
       }
-    }))
+    })
+  )
 
 describe("integrations serve --detach", () => {
-  it.live("returns a usable gateway that outlives the launching process", () =>
-    Effect.gen(function*() {
-      const home = yield* temporaryDirectory("integrations-detach-")
-      const port = yield* freePort
+  it.live(
+    "returns a usable gateway that outlives the launching process",
+    () =>
+      Effect.gen(function* () {
+        const home = yield* temporaryDirectory("integrations-detach-")
+        const port = yield* freePort
 
-      const detached = yield* run(["serve", "--detach", "--port", String(port)], home)
-      expect(`detach exit ${detached.exitCode}: ${detached.stderr}`).toBe("detach exit 0: ")
-      const pid = Number(/\(pid (\d+)\)/.exec(detached.stdout)?.[1])
-      expect(Number.isInteger(pid)).toBe(true)
-      yield* reaped(pid)
-      expect(detached.stdout).toContain(`http://127.0.0.1:${port}`)
+        const detached = yield* run(["serve", "--detach", "--port", String(port)], home)
+        expect(`detach exit ${detached.exitCode}: ${detached.stderr}`).toBe("detach exit 0: ")
+        const pid = Number(/\(pid (\d+)\)/.exec(detached.stdout)?.[1])
+        expect(Number.isInteger(pid)).toBe(true)
+        yield* reaped(pid)
+        expect(detached.stdout).toContain(`http://127.0.0.1:${port}`)
 
-      const listed = yield* run(["integrations"], home)
-      expect(`integrations exit ${listed.exitCode}: ${listed.stderr}`)
-        .toBe("integrations exit 0: ")
-      expect(JSON.parse(listed.stdout)).toMatchObject({ integrations: [] })
+        const listed = yield* run(["integrations"], home)
+        expect(`integrations exit ${listed.exitCode}: ${listed.stderr}`).toBe("integrations exit 0: ")
+        expect(JSON.parse(listed.stdout)).toMatchObject({ integrations: [] })
 
-      const second = yield* run(["serve", "--detach", "--port", String(port)], home)
-      expect(second.exitCode).toBe(1)
-      expect(second.stderr).toContain("already listening")
+        const second = yield* run(["serve", "--detach", "--port", String(port)], home)
+        expect(second.exitCode).toBe(1)
+        expect(second.stderr).toContain("already listening")
 
-      yield* Effect.sync(() => process.kill(pid, "SIGTERM"))
-      const closed = yield* Effect.retry(
-        Effect.flip(HttpClient.get(`http://127.0.0.1:${port}`)),
-        { schedule: Schedule.spaced("50 millis"), times: 40 }
-      ).pipe(Effect.option)
-      expect(closed._tag).toBe("Some")
-    }).pipe(Effect.provide(services)), 40_000)
+        yield* Effect.sync(() => process.kill(pid, "SIGTERM"))
+        const closed = yield* Effect.retry(Effect.flip(HttpClient.get(`http://127.0.0.1:${port}`)), {
+          schedule: Schedule.spaced("50 millis"),
+          times: 40
+        }).pipe(Effect.option)
+        expect(closed._tag).toBe("Some")
+      }).pipe(Effect.provide(services)),
+    40_000
+  )
 })

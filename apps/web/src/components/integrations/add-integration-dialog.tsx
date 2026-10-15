@@ -34,10 +34,11 @@ type KindFilter = IntegrationSearchKind | typeof ALL_KINDS
 const decodeKindFilter = Schema.decodeUnknownSync(Schema.Union([IntegrationSearchKind, Schema.Literal(ALL_KINDS)]))
 
 const installableSurfaces = (result: IntegrationSearchMatch, kind: KindFilter) =>
-  result.surfaces.filter((surface) =>
-    surface.url !== undefined
-    && (surface.type === "mcp" || surface.type === "openapi")
-    && (kind === ALL_KINDS || surface.type === kind)
+  result.surfaces.filter(
+    (surface) =>
+      surface.url !== undefined &&
+      (surface.type === "mcp" || surface.type === "openapi") &&
+      (kind === ALL_KINDS || surface.type === kind)
   )
 
 /** Text that is a URL installs directly instead of searching. */
@@ -68,9 +69,10 @@ function RegistryCard({
   const surfaces = installableSurfaces(result, kind)
   const kinds = [...new Set(surfaces.map((surface) => surface.type))]
   const labels = result.domain.split(".")
-  const name = result.name === result.domain && labels.length === 2
-    ? labels[0]?.replace(/^./, (first) => first.toUpperCase()) ?? result.name
-    : result.name
+  const name =
+    result.name === result.domain && labels.length === 2
+      ? (labels[0]?.replace(/^./, (first) => first.toUpperCase()) ?? result.name)
+      : result.name
 
   return (
     <article className="flex min-h-56 min-w-0 flex-col rounded-xl border bg-card p-4">
@@ -79,13 +81,21 @@ function RegistryCard({
           <IntegrationIcon host={result.domain} size={28} />
         </div>
         <div className="min-w-0 flex-1">
-          <h3 className="truncate font-medium" title={result.name}>{name}</h3>
-          <p className="text-muted-foreground truncate text-xs" title={result.domain}>{result.domain}</p>
+          <h3 className="truncate font-medium" title={result.name}>
+            {name}
+          </h3>
+          <p className="text-muted-foreground truncate text-xs" title={result.domain}>
+            {result.domain}
+          </p>
         </div>
       </div>
       <p className="text-muted-foreground mt-3 line-clamp-2 min-h-10 text-sm">{result.description}</p>
       <div className="mt-3 flex flex-wrap gap-1.5">
-        {kinds.map((value) => <Badge key={value} variant="outline">{value === "mcp" ? "MCP" : "OpenAPI"}</Badge>)}
+        {kinds.map((value) => (
+          <Badge key={value} variant="outline">
+            {value === "mcp" ? "MCP" : "OpenAPI"}
+          </Badge>
+        ))}
       </div>
       <div className="mt-auto flex flex-wrap gap-2 pt-4">
         {surfaces.map((surface) => (
@@ -111,7 +121,10 @@ function RegistrySkeleton() {
     <div key={index} className="flex min-h-56 flex-col rounded-xl border p-4" aria-hidden>
       <div className="flex items-center gap-3">
         <Skeleton className="size-10 shrink-0" />
-        <div className="flex-1 space-y-2"><Skeleton className="h-4 w-2/3" /><Skeleton className="h-3 w-1/2" /></div>
+        <div className="flex-1 space-y-2">
+          <Skeleton className="h-4 w-2/3" />
+          <Skeleton className="h-3 w-1/2" />
+        </div>
       </div>
       <Skeleton className="mt-4 h-4 w-full" />
       <Skeleton className="mt-2 h-4 w-4/5" />
@@ -120,7 +133,10 @@ function RegistrySkeleton() {
   ))
 }
 
-export function AddIntegrationDialog({ onInstalled, variant = "default" }: {
+export function AddIntegrationDialog({
+  onInstalled,
+  variant = "default"
+}: {
   readonly onInstalled?: (slug: string) => void
   readonly variant?: "default" | "outline"
 }) {
@@ -147,19 +163,20 @@ export function AddIntegrationDialog({ onInstalled, variant = "default" }: {
   })
   const search = useQuery({
     queryKey: ["registry", "search", searchTerm, kind],
-    queryFn: () => gateway.searchRegistry({
-      query: searchTerm,
-      ...whenPresent("kind", kind === ALL_KINDS ? undefined : kind),
-      limit: 100
-    }),
+    queryFn: () =>
+      gateway.searchRegistry({
+        query: searchTerm,
+        ...whenPresent("kind", kind === ALL_KINDS ? undefined : kind),
+        limit: 100
+      }),
     enabled: open && searchTerm.length > 0,
     staleTime: 5 * 60_000
   })
 
   const results = useMemo(() => {
-    const local = (browse.data?.results ?? []).filter((result) =>
-      installableSurfaces(result, kind).length > 0
-      && (trimmedQuery.length === 0 || matches(result, trimmedQuery))
+    const local = (browse.data?.results ?? []).filter(
+      (result) =>
+        installableSurfaces(result, kind).length > 0 && (trimmedQuery.length === 0 || matches(result, trimmedQuery))
     )
     if (trimmedQuery.length === 0 || searchTerm !== trimmedQuery || search.data === undefined) return local
     const found = search.data.results.filter((result) => installableSurfaces(result, kind).length > 0)
@@ -186,8 +203,11 @@ export function AddIntegrationDialog({ onInstalled, variant = "default" }: {
     onSettled: () => setInstalling(undefined)
   })
 
-  const loading = browse.isPending && trimmedQuery.length === 0
-    || trimmedQuery.length > 0 && results.length === 0 && (browse.isPending || search.isPending || searchTerm !== trimmedQuery)
+  const loading =
+    (browse.isPending && trimmedQuery.length === 0) ||
+    (trimmedQuery.length > 0 &&
+      results.length === 0 &&
+      (browse.isPending || search.isPending || searchTerm !== trimmedQuery))
   const error = trimmedQuery.length === 0 ? browse.error : searchTerm === trimmedQuery ? search.error : null
 
   return (
@@ -213,7 +233,12 @@ export function AddIntegrationDialog({ onInstalled, variant = "default" }: {
               placeholder="Search services, or paste an MCP / OpenAPI URL…"
             />
             {query.length > 0 ? (
-              <button type="button" onClick={() => setQuery("")} aria-label="Clear search" className="text-muted-foreground hover:text-foreground absolute right-2 top-1/2 -translate-y-1/2 p-1">
+              <button
+                type="button"
+                onClick={() => setQuery("")}
+                aria-label="Clear search"
+                className="text-muted-foreground hover:text-foreground absolute right-2 top-1/2 -translate-y-1/2 p-1"
+              >
                 <X className="size-4" />
               </button>
             ) : null}
@@ -225,14 +250,24 @@ export function AddIntegrationDialog({ onInstalled, variant = "default" }: {
             items={kindOptions}
           />
         </div>
-        {error === null ? null : <OperationError title="Registry search failed" step="Loading integrations.sh" error={error} />}
-        {install.error === null ? null : <OperationError title="Installation failed" step="Inspecting and installing the selected endpoint" error={install.error} />}
+        {error === null ? null : (
+          <OperationError title="Registry search failed" step="Loading integrations.sh" error={error} />
+        )}
+        {install.error === null ? null : (
+          <OperationError
+            title="Installation failed"
+            step="Inspecting and installing the selected endpoint"
+            error={install.error}
+          />
+        )}
         {directUrl === undefined ? null : (
           <div className="flex shrink-0 flex-wrap items-center gap-3 rounded-xl border p-4">
             <Link2 className="text-muted-foreground size-5 shrink-0" />
             <div className="min-w-0 flex-1">
               <p className="font-medium">Add from URL</p>
-              <p className="text-muted-foreground truncate text-xs" title={directUrl}>{directUrl}</p>
+              <p className="text-muted-foreground truncate text-xs" title={directUrl}>
+                {directUrl}
+              </p>
             </div>
             <Button onClick={() => install.mutate(directUrl)} disabled={installing !== undefined}>
               {installing === directUrl ? "Inspecting…" : "Add"}
@@ -240,18 +275,32 @@ export function AddIntegrationDialog({ onInstalled, variant = "default" }: {
           </div>
         )}
         <p className="text-muted-foreground shrink-0 text-xs" aria-live="polite">
-          {loading ? "Loading integrations…" : `Showing ${results.length} ${results.length === 1 ? "integration" : "integrations"}${trimmedQuery.length === 0 ? " · Search to find more" : ""}`}
+          {loading
+            ? "Loading integrations…"
+            : `Showing ${results.length} ${results.length === 1 ? "integration" : "integrations"}${trimmedQuery.length === 0 ? " · Search to find more" : ""}`}
         </p>
         <div className="min-h-0 flex-1 overflow-y-auto pr-1">
           {loading || results.length > 0 ? (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {loading ? <RegistrySkeleton /> : results.map((result) => (
-                <RegistryCard key={result.domain} result={result} kind={kind} installing={installing} install={(url) => install.mutate(url)} />
-              ))}
+              {loading ? (
+                <RegistrySkeleton />
+              ) : (
+                results.map((result) => (
+                  <RegistryCard
+                    key={result.domain}
+                    result={result}
+                    kind={kind}
+                    installing={installing}
+                    install={(url) => install.mutate(url)}
+                  />
+                ))
+              )}
             </div>
           ) : (
             <div className="text-muted-foreground flex min-h-56 items-center justify-center rounded-xl border border-dashed px-4 text-center text-sm">
-              {error === null ? "No matching integrations. Try another search or type." : "Could not load integrations. Try again shortly."}
+              {error === null
+                ? "No matching integrations. Try another search or type."
+                : "Could not load integrations. Try again shortly."}
             </div>
           )}
         </div>

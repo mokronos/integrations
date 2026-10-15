@@ -54,9 +54,7 @@ describe("payload sealing", () => {
 
   it("refuses a sealed value whose ciphertext was altered", () => {
     const [version, ivText, tagText, data] = encryption.seal(secretText).split("$")
-    if (
-      version !== "enc.v1" || ivText === undefined || tagText === undefined || data === undefined
-    ) {
+    if (version !== "enc.v1" || ivText === undefined || tagText === undefined || data === undefined) {
       throw new Error("test produced a malformed envelope")
     }
     const bytes = decodeBase64Field("ciphertext", data)
@@ -81,21 +79,23 @@ describe("payload sealing", () => {
 
 describe("master key resolution", () => {
   it.effect("uses an environment key of exactly 32 bytes", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const key = Base64Url.encode(randomBytes(32))
       const encryption = yield* resolve({ envValue: key })
       expect(encryption.open(encryption.seal("round trip"))).toBe("round trip")
-    }))
+    })
+  )
 
   it.effect("rejects an environment key of the wrong length", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const outcome = yield* Effect.result(resolve({ envValue: "tooshort" }))
       expect(outcome._tag).toBe("Failure")
       expect(outcome._tag === "Failure" ? outcome.failure.message : "").toContain("32 bytes")
-    }))
+    })
+  )
 
   it.effect("mints a private keyfile when only a path is given", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const directory = yield* temporaryDirectory("gateway-crypto-")
       const keyFile = path.join(directory, "nested", "gateway.key")
 
@@ -104,10 +104,11 @@ describe("master key resolution", () => {
       const info = statSync(keyFile)
       expect(info.mode & 0o777).toBe(0o600)
       expect(info.size).toBe(32)
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("reuses an existing keyfile across starts", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const directory = yield* temporaryDirectory("gateway-crypto-")
       const keyFile = path.join(directory, "gateway.key")
 
@@ -115,10 +116,11 @@ describe("master key resolution", () => {
       const second = yield* resolve({ keyFile })
 
       expect(second.open(first.seal("persist"))).toBe("persist")
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("the environment wins over an existing keyfile", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const directory = yield* temporaryDirectory("gateway-crypto-")
       const keyFile = path.join(directory, "gateway.key")
       yield* resolve({ keyFile })
@@ -127,11 +129,11 @@ describe("master key resolution", () => {
       const encryption = yield* resolve({ envValue: environmentKey, keyFile })
       const sealed = encryption.seal("decides")
 
-      expect(createEncryption(decodeBase64UrlField("key", environmentKey)).open(sealed))
-        .toBe("decides")
+      expect(createEncryption(decodeBase64UrlField("key", environmentKey)).open(sealed)).toBe("decides")
       const fromFile = createEncryption(readFileSync(keyFile))
       expect(() => fromFile.open(sealed)).toThrow()
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 })
 
 describe("the encrypted store", () => {
@@ -142,7 +144,7 @@ describe("the encrypted store", () => {
   }
 
   /** A store whose rows can also be read raw, to see what actually landed. */
-  const encryptedStore = Effect.fnUntraced(function*() {
+  const encryptedStore = Effect.fnUntraced(function* () {
     const directory = yield* temporaryDirectory("gateway-crypto-")
     const databasePath = path.join(directory, "gateway.sqlite")
     const store = yield* openStore(directory)
@@ -166,7 +168,8 @@ describe("the encrypted store", () => {
         name: "agent",
         capabilities: ["provision_connections"],
         tools: [{ connection, tool: ToolName.make("sendEmail"), decision: "require_approval" }]
-      }))
+      })
+    )
 
   const noCaller = {
     apiKeyId: null,
@@ -177,7 +180,7 @@ describe("the encrypted store", () => {
   }
 
   it.effect("stores frozen-call arguments sealed, yet retries still meet them", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const { column, store } = yield* encryptedStore()
       const profile = yield* seedProfile(store)
       const argumentsValue = { to: "customer@example.com", subject: "Private" }
@@ -207,10 +210,11 @@ describe("the encrypted store", () => {
       })
       expect(metAgain?.id).toBe(approval.id)
       expect(metAgain?.arguments).toEqual(argumentsValue)
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("seals a settled result while reading it back intact", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const { column, store } = yield* encryptedStore()
       const profile = yield* seedProfile(store)
       const id = yield* newApprovalId
@@ -239,12 +243,12 @@ describe("the encrypted store", () => {
       expect(stored).toContain("enc.v1$")
       expect(stored).not.toContain("secret-message-id")
 
-      expect((yield* store.getApproval(defaultTenantId, id))?.result)
-        .toEqual({ messageId: "secret-message-id" })
-    }).pipe(Effect.provide(testServices)))
+      expect((yield* store.getApproval(defaultTenantId, id))?.result).toEqual({ messageId: "secret-message-id" })
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("seals audit arguments at rest", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const { column, store } = yield* encryptedStore()
       const id = yield* newAuditId
       yield* store.recordAudit({
@@ -268,10 +272,11 @@ describe("the encrypted store", () => {
       const stored = yield* column("gateway_audit_arguments", "arguments", "audit_id", id)
       expect(stored).toContain("enc.v1$")
       expect(stored).not.toContain("personal data")
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 
   it.effect("still matches pre-encryption rows written in plaintext", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const { raw, store } = yield* encryptedStore()
       const profile = yield* seedProfile(store)
       const expiresAt = (yield* Clock.currentTimeMillis) + 60_000
@@ -301,5 +306,6 @@ describe("the encrypted store", () => {
       })
       expect(metAgain?.id).toBe("legacy-approval")
       expect(metAgain?.arguments).toEqual({ to: "old@example.com" })
-    }).pipe(Effect.provide(testServices)))
+    }).pipe(Effect.provide(testServices))
+  )
 })

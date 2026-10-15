@@ -1,8 +1,23 @@
 import type { GatewayClient } from "@integragents/client"
 import type { HttpClient } from "effect/http"
 import { Effect } from "effect"
-import { approvalCommand, approvalsCommand, approveCommand, auditCommand, denyCommand, driftCommand, maintenanceCommand } from "./commands/approvals-audit.ts"
-import { discoverCommand, integrationsCommand, renameCommand, schemaCommand, searchCommand, toolsCommand } from "./commands/catalog.ts"
+import {
+  approvalCommand,
+  approvalsCommand,
+  approveCommand,
+  auditCommand,
+  denyCommand,
+  driftCommand,
+  maintenanceCommand
+} from "./commands/approvals-audit.ts"
+import {
+  discoverCommand,
+  integrationsCommand,
+  renameCommand,
+  schemaCommand,
+  searchCommand,
+  toolsCommand
+} from "./commands/catalog.ts"
 import { connectCommand, connectionsCommand, disconnectCommand } from "./commands/connections.ts"
 import {
   keyCommand,
@@ -15,11 +30,7 @@ import {
 } from "./commands/delegation.ts"
 import { clientExecuteCommand, operatorExecuteCommand, validateCommand } from "./commands/invocation.ts"
 import type { IntegrationsCliError } from "./connection.ts"
-import {
-  cliError,
-  connectToGateway,
-  describeError
-} from "./connection.ts"
+import { cliError, connectToGateway, describeError } from "./connection.ts"
 import { connectToOperatorGateway } from "./session.ts"
 
 const gatewayTask = <A, E, R>(

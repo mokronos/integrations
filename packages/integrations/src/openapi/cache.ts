@@ -3,7 +3,8 @@ import { HttpClient, HttpClientResponse } from "effect/http"
 import { CatalogStore } from "../catalog/store.ts"
 import type { IntegrationRecord } from "../catalog/store.ts"
 import { describeCause, SpecError } from "../errors.ts"
-import { convertGoogleDiscovery, isGoogleDiscoveryUrl } from "./google-discovery.ts"
+import { refusedDestination } from "../unreachable.ts"
+import { convertGoogleDiscovery, googleDiscoveryFetchUrl, isGoogleDiscoveryUrl } from "./google-discovery.ts"
 import { compileSpec } from "./compile.ts"
 import type { CompiledSpec } from "./compile.ts"
 
@@ -17,56 +18,64 @@ export class SpecCache extends Context.Service<
     readonly compileUrl: (url: string) => Effect.Effect<CompiledSpec, SpecError>
   }
 >()("@integragents/host/SpecCache") {
-  static readonly layer: Layer.Layer<
-    SpecCache,
-    never,
-    CatalogStore | HttpClient.HttpClient
-  > = Layer.effect(
+  static readonly layer: Layer.Layer<SpecCache, never, CatalogStore | HttpClient.HttpClient> = Layer.effect(
     SpecCache,
     Effect.gen(function* () {
       const store = yield* CatalogStore
       const client = yield* HttpClient.HttpClient
 
       const fetchText = Effect.fn("SpecCache.fetchText")((url: string) =>
-        client.get(url, {
-          headers: { accept: "application/json, application/yaml, text/yaml, */*" }
-        }).pipe(
-          Effect.flatMap(HttpClientResponse.filterStatusOk),
-          Effect.flatMap((response) => response.text),
-          Effect.mapError((cause) => new SpecError({
-            source: url,
-            detail: describeCause(cause),
-            cause
-          }))
-        )
+        client
+          .get(url, {
+            headers: { accept: "application/json, application/yaml, text/yaml, */*" }
+          })
+          .pipe(
+            Effect.flatMap(HttpClientResponse.filterStatusOk),
+            Effect.flatMap((response) => response.text),
+            Effect.mapError(
+              (cause) =>
+                new SpecError({
+                  source: url,
+                  detail: Option.match(refusedDestination(cause), {
+                    onSome: (refused) => refused.message,
+                    onNone: () => describeCause(cause)
+                  }),
+                  cause
+                })
+            )
+          )
       )
 
       const toOpenApi = (source: string, text: string) =>
-        isGoogleDiscoveryUrl(source)
-          ? convertGoogleDiscovery(source, text)
-          : Effect.succeed(text)
+        isGoogleDiscoveryUrl(source) ? convertGoogleDiscovery(source, text) : Effect.succeed(text)
 
       /** Reads the stored document if we have one, otherwise fetches and stores it. */
       const textOf = Effect.fn("SpecCache.textOf")(function* (source: string) {
         const stored = yield* store.findSpecDocument(source).pipe(
-          Effect.mapError((cause) =>
-            new SpecError({
-              source,
-              detail: "Could not read the cached document",
-              cause
-            })
+          Effect.mapError(
+            (cause) =>
+              new SpecError({
+                source,
+                detail: "Could not read the cached document",
+                cause
+              })
           )
         )
         return yield* Option.match(stored, {
-          onNone: () => fetchText(source).pipe(
-            Effect.tap((fetched) =>
-              store.putSpecDocument(source, fetched).pipe(Effect.catch((failure) =>
-                Effect.logWarning(
-                  `Could not cache the specification for ${source}: ${failure.message}`
-                ).pipe(Effect.annotateLogs({ source, operation: "SpecCache.putSpecDocument" }))
-              ))
-            )
-          ),
+          onNone: () =>
+            fetchText(googleDiscoveryFetchUrl(source)).pipe(
+              Effect.tap((fetched) =>
+                store
+                  .putSpecDocument(source, fetched)
+                  .pipe(
+                    Effect.catch((failure) =>
+                      Effect.logWarning(`Could not cache the specification for ${source}: ${failure.message}`).pipe(
+                        Effect.annotateLogs({ source, operation: "SpecCache.putSpecDocument" })
+                      )
+                    )
+                  )
+              )
+            ),
           onSome: Effect.succeed
         })
       })
@@ -86,9 +95,7 @@ export class SpecCache extends Context.Service<
        * share the one in-flight lookup.
        */
       const get = (source: string) =>
-        Cache.get(compiled, source).pipe(
-          Effect.tapError(() => Cache.invalidate(compiled, source))
-        )
+        Cache.get(compiled, source).pipe(Effect.tapError(() => Cache.invalidate(compiled, source)))
 
       const load = Effect.fn("SpecCache.load")(function* (record: IntegrationRecord) {
         const source = record.specSource

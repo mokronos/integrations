@@ -1,18 +1,16 @@
 import { Effect, Predicate, Schema } from "effect"
 import { FetchHttpClient, HttpBody, HttpClient, HttpClientRequest } from "effect/http"
-import {
-  gatewayProtocolVersion,
-  makeGatewayClient,
-  readGatewayMetadata
-} from "@integragents/client"
+import { gatewayProtocolVersion, makeGatewayClient, readGatewayMetadata } from "@integragents/client"
 
-const RemoteUrl = Schema.String.pipe(Schema.refine((value): value is string => {
-  try {
-    return new URL(value).protocol === "https:"
-  } catch {
-    return false
-  }
-}))
+const RemoteUrl = Schema.String.pipe(
+  Schema.refine((value): value is string => {
+    try {
+      return new URL(value).protocol === "https:"
+    } catch {
+      return false
+    }
+  })
+)
 const ProfileCreated = Schema.Struct({ id: Schema.String })
 const KeyCreated = Schema.Struct({ secret: Schema.String })
 const RemoteAcceptanceResult = Schema.Struct({
@@ -26,18 +24,14 @@ const RemoteAcceptanceResult = Schema.Struct({
 const encodeResult = Schema.encodeSync(Schema.fromJsonString(RemoteAcceptanceResult))
 const decodeJsonText = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))
 
-const gatewayUrl = Schema.decodeUnknownSync(RemoteUrl)(
-  process.env["INTEGRATIONS_STAGING_URL"]
-).replace(/\/+$/, "")
+const gatewayUrl = Schema.decodeUnknownSync(RemoteUrl)(process.env["INTEGRATIONS_STAGING_URL"]).replace(/\/+$/, "")
 const password = `staging-${crypto.randomUUID()}-${crypto.randomUUID()}`
 const email = `acceptance-${crypto.randomUUID()}@example.com`
 
 const errorMessage = (body: Schema.Json, fallback: string): string =>
-  Predicate.isObject(body) && Predicate.isString(body["error"])
-    ? body["error"]
-    : fallback
+  Predicate.isObject(body) && Predicate.isString(body["error"]) ? body["error"] : fallback
 
-const post = Effect.fn("acceptance.post")(function*(
+const post = Effect.fn("acceptance.post")(function* (
   route: string,
   options: { readonly body?: Schema.Json; readonly headers?: Record<string, string> } = {}
 ) {
@@ -45,39 +39,31 @@ const post = Effect.fn("acceptance.post")(function*(
     headers: options.headers ?? {}
   })
   const response = yield* HttpClient.execute(
-    options.body === undefined
-      ? request
-      : HttpClientRequest.setBody(request, HttpBody.jsonUnsafe(options.body))
+    options.body === undefined ? request : HttpClientRequest.setBody(request, HttpBody.jsonUnsafe(options.body))
   )
   const text = yield* response.text
-  const payload = text.trim().length === 0
-    ? {}
-    : yield* decodeJsonText(text)
+  const payload = text.trim().length === 0 ? {} : yield* decodeJsonText(text)
   return { response, payload }
 })
 
 const operatorRequest = (cookie: string) =>
-  Effect.fn("acceptance.operatorRequest")(function*(route: string, body: Schema.Json) {
+  Effect.fn("acceptance.operatorRequest")(function* (route: string, body: Schema.Json) {
     const { response, payload } = yield* post(route, {
       body,
       headers: { cookie, origin: gatewayUrl }
     })
     if (response.status < 200 || response.status >= 300) {
-      return yield* Effect.die(
-        new Error(errorMessage(payload, `${route} failed with ${response.status}`))
-      )
+      return yield* Effect.die(new Error(errorMessage(payload, `${route} failed with ${response.status}`)))
     }
     return payload
   })
 
-const program = Effect.gen(function*() {
+const program = Effect.gen(function* () {
   const signup = yield* post("/v1/auth/signup", {
     body: { email, password, tenantName: "Remote acceptance" }
   })
   if (signup.response.status < 200 || signup.response.status >= 300) {
-    return yield* Effect.die(
-      new Error(errorMessage(signup.payload, `Signup failed with ${signup.response.status}`))
-    )
+    return yield* Effect.die(new Error(errorMessage(signup.payload, `Signup failed with ${signup.response.status}`)))
   }
   const setCookie = signup.response.headers["set-cookie"] ?? ""
   if (!setCookie.includes("Secure")) {
@@ -86,12 +72,10 @@ const program = Effect.gen(function*() {
   const cookie = setCookie.split(";", 1)[0] ?? ""
   const request = operatorRequest(cookie)
 
-  return yield* Effect.gen(function*() {
+  return yield* Effect.gen(function* () {
     const metadata = yield* readGatewayMetadata(gatewayUrl)
     if (metadata.protocolVersion !== gatewayProtocolVersion) {
-      return yield* Effect.die(
-        new Error("The staging gateway protocol changed during acceptance")
-      )
+      return yield* Effect.die(new Error("The staging gateway protocol changed during acceptance"))
     }
 
     const profile = Schema.decodeUnknownSync(ProfileCreated)(
@@ -112,9 +96,7 @@ const program = Effect.gen(function*() {
       headers: { authorization: `Bearer ${key.secret}` }
     })
     if (administrative.status !== 403) {
-      return yield* Effect.die(
-        new Error(`Delegated key reached administration with HTTP ${administrative.status}`)
-      )
+      return yield* Effect.die(new Error(`Delegated key reached administration with HTTP ${administrative.status}`))
     }
 
     const discovery = yield* delegated.provisioning.discover({
@@ -124,9 +106,7 @@ const program = Effect.gen(function*() {
       payload: { integration: discovery.integration.slug }
     })
     if (oauth.state.status !== "pending") {
-      return yield* Effect.die(
-        new Error(`Linear OAuth did not return a pending authorization: ${oauth.state.status}`)
-      )
+      return yield* Effect.die(new Error(`Linear OAuth did not return a pending authorization: ${oauth.state.status}`))
     }
     const oauthProvider = new URL(oauth.state.authorizationUrl).hostname
     if (oauthProvider !== "linear.app" && !oauthProvider.endsWith(".linear.app")) {
@@ -141,12 +121,8 @@ const program = Effect.gen(function*() {
       oauthProvider,
       oauthCallbackUrl: `${gatewayUrl}/v1/oauth/callback`
     } satisfies typeof RemoteAcceptanceResult.Type
-  }).pipe(
-    Effect.ensuring(Effect.ignore(request("/v1/auth/account/delete", { password })))
-  )
+  }).pipe(Effect.ensuring(Effect.ignore(request("/v1/auth/account/delete", { password }))))
 })
 
-const result = await Effect.runPromise(
-  program.pipe(Effect.orDie, Effect.provide(FetchHttpClient.layer))
-)
+const result = await Effect.runPromise(program.pipe(Effect.orDie, Effect.provide(FetchHttpClient.layer)))
 process.stdout.write(`${encodeResult(result)}\n`)

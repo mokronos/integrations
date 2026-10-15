@@ -47,43 +47,43 @@ export const readSessionCookieValue = (header: string | undefined): Option.Optio
   return Option.none()
 }
 
-const sessionCookieOptions = (options: {
-  readonly maxAgeSeconds: number
-  readonly secure: boolean
-}) => ({
-  path: "/",
-  httpOnly: true,
-  sameSite: "lax",
-  secure: options.secure,
-  maxAge: Duration.seconds(options.maxAgeSeconds)
-} as const)
+const sessionCookieOptions = (options: { readonly maxAgeSeconds: number; readonly secure: boolean }) =>
+  ({
+    path: "/",
+    httpOnly: true,
+    sameSite: "lax",
+    secure: options.secure,
+    maxAge: Duration.seconds(options.maxAgeSeconds)
+  }) as const
 
-export const setSessionCookie = (token: string, options: {
-  readonly maxAgeSeconds: number
+export const setSessionCookie = (
+  token: string,
+  options: {
+    readonly maxAgeSeconds: number
+    readonly secure: boolean
+  }
+): Effect.Effect<void, never, HttpServerRequest.HttpServerRequest> =>
+  HttpEffect.appendPreResponseHandler((_request, response) =>
+    Effect.succeed(
+      HttpServerResponse.setCookieUnsafe(response, sessionCookieName, token, sessionCookieOptions(options))
+    )
+  )
+
+export const clearSessionCookie = (options: {
   readonly secure: boolean
 }): Effect.Effect<void, never, HttpServerRequest.HttpServerRequest> =>
   HttpEffect.appendPreResponseHandler((_request, response) =>
-    Effect.succeed(HttpServerResponse.setCookieUnsafe(
-      response,
-      sessionCookieName,
-      token,
-      sessionCookieOptions(options)
-    )))
+    Effect.succeed(
+      HttpServerResponse.setCookieUnsafe(
+        response,
+        sessionCookieName,
+        "",
+        sessionCookieOptions({ maxAgeSeconds: 0, secure: options.secure })
+      )
+    )
+  )
 
-export const clearSessionCookie = (
-  options: { readonly secure: boolean }
-): Effect.Effect<void, never, HttpServerRequest.HttpServerRequest> =>
-  HttpEffect.appendPreResponseHandler((_request, response) =>
-    Effect.succeed(HttpServerResponse.setCookieUnsafe(
-      response,
-      sessionCookieName,
-      "",
-      sessionCookieOptions({ maxAgeSeconds: 0, secure: options.secure })
-    )))
-
-const presentedSecret = (
-  headers: Readonly<Record<string, string>>
-): Option.Option<string> => {
+const presentedSecret = (headers: Readonly<Record<string, string>>): Option.Option<string> => {
   const authorization = headers["authorization"]
   if (authorization !== undefined) {
     const match = /^Bearer\s+(.+)$/i.exec(authorization.trim())
@@ -99,13 +99,10 @@ const sameOrigin = (headers: Readonly<Record<string, string>>): boolean => {
   const origin = headers["origin"]
   const host = headers["host"]
   if (origin === undefined || host === undefined) return false
-  return Option.match(
-    Option.liftThrowable(() => new URL(origin).host)(),
-    {
-      onNone: () => false,
-      onSome: (originHost) => originHost === host.trim().toLowerCase()
-    }
-  )
+  return Option.match(Option.liftThrowable(() => new URL(origin).host)(), {
+    onNone: () => false,
+    onSome: (originHost) => originHost === host.trim().toLowerCase()
+  })
 }
 
 export interface RequestContext {
@@ -113,10 +110,9 @@ export interface RequestContext {
   readonly remoteAddress?: string
 }
 
-export const CurrentRequestContext = Context.Reference<RequestContext>(
-  "@integragents/gateway-api/RequestContext",
-  { defaultValue: (): RequestContext => ({}) }
-)
+export const CurrentRequestContext = Context.Reference<RequestContext>("@integragents/gateway-api/RequestContext", {
+  defaultValue: (): RequestContext => ({})
+})
 
 export interface RateLimits {
   readonly addressPerMinute: number
@@ -131,25 +127,29 @@ interface ResolvedAuthority {
   readonly store: GatewayStore
 }
 
-const resolvePrincipal = Effect.fn("Authority.resolvePrincipal")(function*(
+const resolvePrincipal = Effect.fn("Authority.resolvePrincipal")(function* (
   options: ResolvedAuthority,
   headers: Readonly<Record<string, string>>,
   context: RequestContext
 ) {
   const secret = presentedSecret(headers)
   if (Option.isSome(secret)) {
-    const authentication = yield* capture(authenticateKey(options.store, secret.value)
-    )
+    const authentication = yield* capture(authenticateKey(options.store, secret.value))
     if (authentication.status !== "authenticated") {
       return yield* refusedOf(authentication.status)
     }
-    return { kind: "key", profile: authentication.profile, key: authentication.key, secret: secret.value } satisfies Principal
+    return {
+      kind: "key",
+      profile: authentication.profile,
+      key: authentication.key,
+      secret: secret.value
+    } satisfies Principal
   }
 
   const token = readSessionCookieValue(headers["cookie"])
   if (Option.isSome(token)) {
     const session = yield* capture(
-      options.store.findLiveSession(SessionTokenHash.make((yield* hashSessionToken(token.value))))
+      options.store.findLiveSession(SessionTokenHash.make(yield* hashSessionToken(token.value)))
     )
     if (session === undefined) return { kind: "anonymous" } satisfies Principal
     return {
@@ -163,8 +163,7 @@ const resolvePrincipal = Effect.fn("Authority.resolvePrincipal")(function*(
 
   const localSecret = context.localSecret
   if (localSecret !== undefined) {
-    const authentication = yield* capture(authenticateKey(options.store, localSecret)
-    )
+    const authentication = yield* capture(authenticateKey(options.store, localSecret))
     if (authentication.status === "authenticated") {
       return { kind: "local", profile: authentication.profile, key: authentication.key } satisfies Principal
     }
@@ -173,7 +172,7 @@ const resolvePrincipal = Effect.fn("Authority.resolvePrincipal")(function*(
   return { kind: "anonymous" } satisfies Principal
 })
 
-const admit = Effect.fn("Authority.admit")(function*(
+const admit = Effect.fn("Authority.admit")(function* (
   options: ResolvedAuthority,
   caller: Principal,
   access: Access,
@@ -201,8 +200,7 @@ const admit = Effect.fn("Authority.admit")(function*(
 
   const capability = requiredCapability(access)
   if (capability === undefined) return
-  const authorization = yield* capture(authorizeProfileCapability(options.store, caller.secret, capability)
-  )
+  const authorization = yield* capture(authorizeProfileCapability(options.store, caller.secret, capability))
   if (authorization.status !== "authorized") {
     return yield* refusedOf(authorization.status)
   }
@@ -214,7 +212,12 @@ const callerAttributes = (caller: Principal) => {
       return { "caller.kind": caller.kind, "tenant.id": caller.tenantId }
     case "key":
     case "local":
-      return { "caller.kind": caller.kind, "profile.id": caller.profile.id, "api_key.id": caller.key.id, "tenant.id": caller.profile.tenantId }
+      return {
+        "caller.kind": caller.kind,
+        "profile.id": caller.profile.id,
+        "api_key.id": caller.key.id,
+        "tenant.id": caller.profile.tenantId
+      }
     case "anonymous":
       return { "caller.kind": caller.kind }
   }
@@ -238,9 +241,9 @@ const refusalOf = (
   error: RateLimiter.RateLimiterError
 ): Effect.Effect<Option.Option<HttpServerResponse.HttpServerResponse>> =>
   error.reason._tag === "RateLimitExceeded"
-    ? Effect.succeed(Option.some(rateLimitedResponse(
-      Math.max(1, Math.ceil(Duration.toMillis(error.reason.retryAfter) / 1_000))
-    )))
+    ? Effect.succeed(
+        Option.some(rateLimitedResponse(Math.max(1, Math.ceil(Duration.toMillis(error.reason.retryAfter) / 1_000))))
+      )
     : Effect.die(error)
 
 /**
@@ -248,35 +251,29 @@ const refusalOf = (
  * session cookie, or the local host's borrowed credential. A host with its
  * own identity provides another `Authority` in its place.
  */
-export const authorityLayer = (
-  options: AuthorityOptions = {}
-): Layer.Layer<Authority, never, GatewayStoreService> =>
+export const authorityLayer = (options: AuthorityOptions = {}): Layer.Layer<Authority, never, GatewayStoreService> =>
   Layer.effect(
     Authority,
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const store = yield* GatewayStoreService
       const resolved: ResolvedAuthority = { store }
       const limits = options.rateLimits
       const crypto = yield* Crypto.Crypto
       const limiter = yield* RateLimiter.RateLimiter
       const meter = (key: string, limit: number) =>
-        limiter.consume({ key, limit, window: rateLimitWindow }).pipe(
-          Effect.as(Option.none<HttpServerResponse.HttpServerResponse>()),
-          Effect.catch(refusalOf)
-        )
+        limiter
+          .consume({ key, limit, window: rateLimitWindow })
+          .pipe(Effect.as(Option.none<HttpServerResponse.HttpServerResponse>()), Effect.catch(refusalOf))
 
       return (httpEffect, { endpoint }) =>
-        Effect.gen(function*() {
+        Effect.gen(function* () {
           const request = yield* HttpServerRequest.HttpServerRequest
           const context = yield* CurrentRequestContext
           const headers = request.headers
           const unmetered = Context.get(endpoint.annotations, Unmetered)
 
           if (!unmetered && limits !== undefined) {
-            const refused = yield* meter(
-              `addr:${context.remoteAddress ?? "unknown"}`,
-              limits.addressPerMinute
-            )
+            const refused = yield* meter(`addr:${context.remoteAddress ?? "unknown"}`, limits.addressPerMinute)
             if (Option.isSome(refused)) return refused.value
           }
 
@@ -294,11 +291,7 @@ export const authorityLayer = (
           }
 
           if (!unmetered) {
-            const access = Context.getOrElse(
-              endpoint.annotations,
-              RequiredAccess,
-              () => RequiredAccess.defaultValue()
-            )
+            const access = Context.getOrElse(endpoint.annotations, RequiredAccess, () => RequiredAccess.defaultValue())
             yield* admit(resolved, caller, access, request.method, headers)
           }
 

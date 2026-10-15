@@ -23,17 +23,19 @@ const services = Layer.mergeAll(FetchHttpClient.layer)
 
 remoteDescribe("current production OpenAPI specifications", () => {
   for (const specification of specifications) {
-    it.live(`compiles the latest ${specification.name} document`, () =>
-      Effect.gen(function*() {
-        const response = yield* HttpClient.get(specification.url)
-        expect(response.status).toBe(200)
+    it.live(
+      `compiles the latest ${specification.name} document`,
+      () =>
+        Effect.gen(function* () {
+          const response = yield* HttpClient.get(specification.url)
+          expect(response.status).toBe(200)
 
-        const compiled = yield* compileSpec(specification.url, yield* response.text)
+          const compiled = yield* compileSpec(specification.url, yield* response.text)
 
-        expect(compiled.operations.length)
-          .toBeGreaterThanOrEqual(specification.minimumOperations)
-        expect(new Set(compiled.operations.map((operation) => operation.name)).size)
-          .toBe(compiled.operations.length)
-      }).pipe(Effect.provide(services)), 120_000)
+          expect(compiled.operations.length).toBeGreaterThanOrEqual(specification.minimumOperations)
+          expect(new Set(compiled.operations.map((operation) => operation.name)).size).toBe(compiled.operations.length)
+        }).pipe(Effect.provide(services)),
+      120_000
+    )
   }
 })

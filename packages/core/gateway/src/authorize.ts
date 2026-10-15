@@ -38,11 +38,11 @@ export const KeyAuthentication = Schema.Union([
 ])
 export type KeyAuthentication = typeof KeyAuthentication.Type
 
-export const authenticateKey = Effect.fn("Authorization.authenticateKey")(function*(
+export const authenticateKey = Effect.fn("Authorization.authenticateKey")(function* (
   store: GatewayStore,
   secret: string
 ): Effect.fn.Return<KeyAuthentication, GatewayStoreError, Crypto.Crypto> {
-  const resolved = yield* store.findApiKeyByHash((yield* hashApiKey(secret)))
+  const resolved = yield* store.findApiKeyByHash(yield* hashApiKey(secret))
   if (resolved === undefined) {
     return { status: "unknown-key", message: "This API key is not known to the server" }
   }
@@ -59,7 +59,7 @@ export const authenticateKey = Effect.fn("Authorization.authenticateKey")(functi
   return { status: "authenticated", profile, key: resolved.key } satisfies AuthenticatedProfile
 })
 
-export const authorizeInvocation = Effect.fn("Authorization.authorizeInvocation")(function*(
+export const authorizeInvocation = Effect.fn("Authorization.authorizeInvocation")(function* (
   store: GatewayStore,
   input: {
     readonly secret: string
@@ -81,7 +81,7 @@ export const authorizeInvocation = Effect.fn("Authorization.authorizeInvocation"
  * subject. It resolves to the connection of the subject the call names, so the
  * same tool serves every user and no user reaches another's credential.
  */
-export const authorizeProfileInvocation = Effect.fn("Authorization.authorizeProfileInvocation")(function*(
+export const authorizeProfileInvocation = Effect.fn("Authorization.authorizeProfileInvocation")(function* (
   store: GatewayStore,
   profile: Profile,
   input: {
@@ -93,8 +93,9 @@ export const authorizeProfileInvocation = Effect.fn("Authorization.authorizeProf
   if (profile.revokedAt !== null) {
     return { status: "profile-revoked", message: "The profile this credential belongs to was revoked" }
   }
-  const profileTool = (yield* store.listProfileTools(profile.id)).find((candidate) =>
-    candidate.tool === input.tool && aliasForConnection(candidate.connection) === input.alias)
+  const profileTool = (yield* store.listProfileTools(profile.id)).find(
+    (candidate) => candidate.tool === input.tool && aliasForConnection(candidate.connection) === input.alias
+  )
   if (profileTool === undefined) {
     return {
       status: "not-authorized",
@@ -150,20 +151,22 @@ export const CapabilityAuthorization = Schema.Union([
 ])
 export type CapabilityAuthorization = typeof CapabilityAuthorization.Type
 
-export const authorizeProfileCapability = Effect.fn("Authorization.authorizeProfileCapability")(
-  function*(
-    store: GatewayStore,
-    secret: string,
-    capability: ProfileCapability
-  ): Effect.fn.Return<CapabilityAuthorization, GatewayStoreError, Crypto.Crypto> {
-    const authentication = yield* authenticateKey(store, secret)
-    if (authentication.status !== "authenticated") return authentication
-    if (!profileHasCapability(authentication.profile, capability)) {
-      return {
-        status: "not-permitted",
-        message: "This credential does not hold the required permission"
-      }
+export const authorizeProfileCapability = Effect.fn("Authorization.authorizeProfileCapability")(function* (
+  store: GatewayStore,
+  secret: string,
+  capability: ProfileCapability
+): Effect.fn.Return<CapabilityAuthorization, GatewayStoreError, Crypto.Crypto> {
+  const authentication = yield* authenticateKey(store, secret)
+  if (authentication.status !== "authenticated") return authentication
+  if (!profileHasCapability(authentication.profile, capability)) {
+    return {
+      status: "not-permitted",
+      message: "This credential does not hold the required permission"
     }
-    return { status: "authorized", profile: authentication.profile, key: authentication.key } satisfies CapabilityAuthorized
   }
-)
+  return {
+    status: "authorized",
+    profile: authentication.profile,
+    key: authentication.key
+  } satisfies CapabilityAuthorized
+})

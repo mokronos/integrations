@@ -18,18 +18,31 @@ export function OperationError({
       <AlertCircle />
       <AlertTitle>{title}</AlertTitle>
       <AlertDescription className="space-y-1">
-        <p><span className="font-medium">Stopped at:</span> {step}</p>
+        <p>
+          <span className="font-medium">Stopped at:</span> {step}
+        </p>
         <p>{error.message}</p>
         {gatewayError === undefined ? null : (
           <dl className="mt-2 grid gap-x-3 gap-y-0.5 font-mono text-xs sm:grid-cols-[auto_1fr]">
             {gatewayError.method === undefined ? null : (
-              <><dt>Request</dt><dd className="break-all">{gatewayError.method} {gatewayError.path}</dd></>
+              <>
+                <dt>Request</dt>
+                <dd className="break-all">
+                  {gatewayError.method} {gatewayError.path}
+                </dd>
+              </>
             )}
             {gatewayError.status === undefined ? null : (
-              <><dt>Status</dt><dd>{gatewayError.status}</dd></>
+              <>
+                <dt>Status</dt>
+                <dd>{gatewayError.status}</dd>
+              </>
             )}
             {gatewayError.traceId === undefined ? null : (
-              <><dt>Trace ID</dt><dd className="break-all">{gatewayError.traceId}</dd></>
+              <>
+                <dt>Trace ID</dt>
+                <dd className="break-all">{gatewayError.traceId}</dd>
+              </>
             )}
           </dl>
         )}

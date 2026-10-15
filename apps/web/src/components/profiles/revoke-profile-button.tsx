@@ -5,7 +5,10 @@ import { ConfirmButton } from "@/components/ui/confirm-button"
 import * as gateway from "@/lib/gateway"
 import { keys, useInvalidate, useMutation } from "@/lib/queries"
 
-export function RevokeProfileButton({ profile, onRevoked }: {
+export function RevokeProfileButton({
+  profile,
+  onRevoked
+}: {
   readonly profile: Profile
   readonly onRevoked?: () => void
 }) {
@@ -15,9 +18,10 @@ export function RevokeProfileButton({ profile, onRevoked }: {
     onSuccess: (result) => {
       invalidate(keys.profiles, ["approvals"], keys.overview)
       toast.success(`${profile.name} revoked`, {
-        description: result.cancelledApprovals === 0
-          ? undefined
-          : `${result.cancelledApprovals} pending approval${result.cancelledApprovals === 1 ? "" : "s"} cancelled.`
+        description:
+          result.cancelledApprovals === 0
+            ? undefined
+            : `${result.cancelledApprovals} pending approval${result.cancelledApprovals === 1 ? "" : "s"} cancelled.`
       })
       onRevoked?.()
     },

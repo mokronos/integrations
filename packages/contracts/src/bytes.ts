@@ -26,13 +26,7 @@ export const concatBytes = (parts: ReadonlyArray<Uint8Array>): Uint8Array => {
  * part of.
  */
 export const decodeBase64Field = (field: string, encoded: string): Uint8Array =>
-  Result.getOrThrowWith(
-    Base64.decode(encoded),
-    () => new Error(`The ${field} is not valid base64`)
-  )
+  Result.getOrThrowWith(Base64.decode(encoded), () => new Error(`The ${field} is not valid base64`))
 
 export const decodeBase64UrlField = (field: string, encoded: string): Uint8Array =>
-  Result.getOrThrowWith(
-    Base64Url.decode(encoded),
-    () => new Error(`The ${field} is not valid base64url`)
-  )
+  Result.getOrThrowWith(Base64Url.decode(encoded), () => new Error(`The ${field} is not valid base64url`))

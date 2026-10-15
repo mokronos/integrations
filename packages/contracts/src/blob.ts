@@ -49,39 +49,35 @@ export const defaultMaxUploadBytes = 128 * 1024 * 1024
 
 export const isTextualContentType = (contentType: string): boolean => {
   const kind = contentType.split(";")[0]?.trim().toLowerCase() ?? ""
-  return kind.startsWith("text/") ||
+  return (
+    kind.startsWith("text/") ||
     kind === "application/json" ||
     kind === "application/x-ndjson" ||
     kind === "application/ndjson" ||
     kind === "application/xml" ||
     /^application\/[\w.+-]+\+(?:json|xml)$/.test(kind)
+  )
 }
 
 export const describeBytes = (bytes: number): string =>
   bytes < 1024
     ? `${bytes} B`
     : bytes < 1024 * 1024
-    ? `${(bytes / 1024).toFixed(1)} KB`
-    : `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+      ? `${(bytes / 1024).toFixed(1)} KB`
+      : `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 
 export const binaryNote = (contentType: string): string =>
   `${contentType} is binary and cannot be carried in JSON without corrupting it. ` +
   `The full response was written to disk; read it from "path".`
 
-export const oversizeNote = (
-  contentType: string,
-  bytes: number,
-  limit: number
-): string =>
+export const oversizeNote = (contentType: string, bytes: number, limit: number): string =>
   `${describeBytes(bytes)} of ${contentType} exceeds the ${describeBytes(limit)} inline limit. ` +
   `The full response was written to disk; read it from "path". ` +
   `Filter it with jq or similar rather than reading the whole file into context.`
 
 const filenamePattern = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i
 
-export const filenameFromDisposition = (
-  disposition: string | undefined
-): string | undefined => {
+export const filenameFromDisposition = (disposition: string | undefined): string | undefined => {
   if (disposition === undefined) return undefined
   const matched = filenamePattern.exec(disposition)?.[1]
   if (matched === undefined) return undefined

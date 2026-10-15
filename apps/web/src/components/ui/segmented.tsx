@@ -1,7 +1,14 @@
 import { cn } from "@/lib/utils"
 
 /** A row of mutually exclusive choices, all visible at once. */
-export function Segmented<Value extends string>({ value, options, onChange, label, disabled = false, className }: {
+export function Segmented<Value extends string>({
+  value,
+  options,
+  onChange,
+  label,
+  disabled = false,
+  className
+}: {
   readonly value: Value | undefined
   readonly options: ReadonlyArray<{ readonly value: Value; readonly label: string; readonly title?: string }>
   readonly onChange: (value: Value) => void
@@ -10,7 +17,11 @@ export function Segmented<Value extends string>({ value, options, onChange, labe
   readonly className?: string
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className={cn("bg-muted inline-flex shrink-0 rounded-md p-0.5", className)}>
+    <div
+      role="radiogroup"
+      aria-label={label}
+      className={cn("bg-muted inline-flex shrink-0 rounded-md p-0.5", className)}
+    >
       {options.map((option) => (
         <button
           key={option.value}
