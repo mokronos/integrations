@@ -934,7 +934,8 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function* 
           const placeholders = ids.map(() => "?").join(", ")
           const rows = yield* all(
             // A group's delivery names its oldest call that still waits: the
-            // first one, unless a reviewer or a human already decided it.
+            // first one, unless a reviewer or a human already decided it. A
+            // group decided since the claim has nothing left to announce.
             `SELECT delivery.*, destination.name AS destination_name, destination.url,
                 destination.signing_secret, approval.id AS waiting_id, approval.tenant_id, approval.group_id,
                 approval.profile_id, profile.name AS profile_name, approval.alias, approval.tool, approval.expires_at
@@ -943,12 +944,12 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function* 
            JOIN gateway_pending_approval AS approval ON approval.group_id = delivery.approval_id
            JOIN gateway_profile AS profile ON profile.id = approval.profile_id
           WHERE delivery.id IN (${placeholders})
-            AND approval.id = COALESCE((
+            AND approval.id = (
               SELECT member.id FROM gateway_pending_approval AS member
-               WHERE member.group_id = delivery.approval_id AND member.status = 'pending'
+               WHERE member.group_id = delivery.approval_id AND member.status = 'pending' AND member.expires_at > ?
                ORDER BY member.created_at LIMIT 1
-            ), delivery.approval_id)`,
-            ids
+            )`,
+            [...ids, millis(at)]
           )
           return rows.map((row) => ({
             ...toApprovalDeliveryAttempt(row),
