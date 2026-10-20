@@ -74,6 +74,11 @@ have to be rewritten around polling. Once its calls are approved, run it
 again unchanged: an identical call returns the stored result of its approved
 call instead of running it twice.
 
+To make a call safe to retry, or to make the same call twice on purpose, give
+each call its own `--idempotency-key` (for example `<run-id>/<step>`). Running
+the command again with the same key returns that call's outcome or its pending
+approval instead of running it again; a new key is a new call.
+
 If a command says the gateway is unavailable, retry that exact command once.
 If it still fails, report that the gateway is down; do not reinterpret it as a
 protocol mismatch or inspect the CLI source code.
