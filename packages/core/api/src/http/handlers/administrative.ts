@@ -216,6 +216,9 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
                 body.includeNewTools ?? source?.includeNewTools,
                 (include) => include
               ),
+              approvalExpiryMinutes:
+                body.approvalExpiryMinutes === undefined ? source?.approvalExpiryMinutes : body.approvalExpiryMinutes,
+              ...whenPresentMap("subjects", body.subjects ?? source?.subjects, (subjects) => subjects),
               ...whenPresentMap(
                 "destinationIds",
                 source === undefined ? undefined : yield* capture(store.listProfileApprovalDestinationIds(source.id)),
@@ -237,7 +240,17 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
         Effect.gen(function* () {
           const tenantId = yield* requireTenant
           const profile = yield* liveProfile(tenantId, request.params["id"])
-          return yield* capture(store.updateProfileSettings(tenantId, profile.id, request.payload))
+          const settings = request.payload
+          return yield* capture(
+            store.updateProfileSettings(tenantId, profile.id, {
+              ...settings,
+              approvalExpiryMinutes:
+                settings.approvalExpiryMinutes === undefined
+                  ? profile.approvalExpiryMinutes
+                  : settings.approvalExpiryMinutes,
+              subjects: settings.subjects ?? profile.subjects
+            })
+          )
         })
       )
       .handle("profileTools", (request) =>

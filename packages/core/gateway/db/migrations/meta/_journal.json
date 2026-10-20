@@ -120,6 +120,13 @@
       "when": 1792496129784,
       "tag": "0016_keep_who_an_approval_acts_for",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1792496518008,
+      "tag": "0017_set_approval_expiry_and_subjects_per_profile",
+      "breakpoints": true
     }
   ]
 }

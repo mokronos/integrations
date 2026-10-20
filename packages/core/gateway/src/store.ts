@@ -14,6 +14,7 @@ import {
   ApprovalDestinationId,
   ApprovalId,
   ProfileId,
+  defaultApprovalExpiryMinutes,
   defaultApprovalGroupWindowMinutes,
   defaultApprovalMethod,
   defaultLocalSubjectId,
@@ -32,12 +33,15 @@ import type {
   ConnectionRef,
   PendingApproval,
   Profile,
+  ProfileSubjects,
   ProfileToolInput
 } from "./domain.ts"
 import { applyIntegrationMigrations, isSealed } from "@integragents/host"
 import { applyGatewayMigrations } from "./migrate.ts"
 
 import {
+  expiryDate,
+  expiryMillis,
   millis,
   toApprovalRule,
   toApiKey,
@@ -108,6 +112,9 @@ const bootstrapDefaultTenant = Effect.fn("GatewayStore.bootstrap")(function* (sq
     timestamp
   ])
 })
+
+const subjectsColumn = (subjects: ProfileSubjects): string | null =>
+  subjects === "any" ? null : JSON.stringify(subjects)
 
 const routeArgs = (connection: ConnectionRef): ReadonlyArray<InValue> => [
   connection.owner,
@@ -628,8 +635,8 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function* 
             {
               sql: `INSERT INTO gateway_profile
                   (id, tenant_id, name, capabilities, approval_method, mcp_surface, approval_group_window_minutes,
-                   include_new_tools, created_at, revoked_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+                   include_new_tools, approval_expiry_minutes, subjects, created_at, revoked_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
               args: [
                 input.id,
                 input.tenantId,
@@ -639,6 +646,8 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function* 
                 input.mcpSurface ?? "tools",
                 input.approvalGroupWindowMinutes ?? defaultApprovalGroupWindowMinutes,
                 input.includeNewTools === true ? 1 : 0,
+                input.approvalExpiryMinutes === undefined ? defaultApprovalExpiryMinutes : input.approvalExpiryMinutes,
+                subjectsColumn(input.subjects ?? "any"),
                 yield* now
               ]
             },
@@ -715,7 +724,8 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function* 
         Effect.gen(function* () {
           yield* run(
             `UPDATE gateway_profile
-            SET capabilities = ?, approval_method = ?, mcp_surface = ?, approval_group_window_minutes = ?, include_new_tools = ?
+            SET capabilities = ?, approval_method = ?, mcp_surface = ?, approval_group_window_minutes = ?, include_new_tools = ?,
+                approval_expiry_minutes = ?, subjects = ?
           WHERE tenant_id = ? AND id = ? AND revoked_at IS NULL`,
             [
               JSON.stringify(settings.capabilities),
@@ -723,6 +733,8 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function* 
               settings.mcpSurface,
               settings.approvalGroupWindowMinutes,
               settings.includeNewTools ? 1 : 0,
+              settings.approvalExpiryMinutes,
+              subjectsColumn(settings.subjects),
               tenantId,
               id
             ]
@@ -895,7 +907,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function* 
             profileName: String(row["profile_name"]),
             alias: Alias.make(String(row["alias"])),
             tool: ToolName.make(String(row["tool"])),
-            expiresAt: new Date(Number(row["expires_at"])),
+            expiresAt: expiryDate(Number(row["expires_at"])),
             url: String(row["url"]),
             signingSecret: encryption.open(String(row["signing_secret"]))
           }))
@@ -1432,7 +1444,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function* 
                 createdAt - input.groupWindowMinutes * 60_000,
                 input.id,
                 createdAt,
-                millis(input.expiresAt),
+                expiryMillis(input.expiresAt),
                 ...match.args
               ]
             },

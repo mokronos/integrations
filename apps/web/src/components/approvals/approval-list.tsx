@@ -152,7 +152,7 @@ function ApprovalCard({
   const [expired, setExpired] = useState(false)
 
   useEffect(() => {
-    if (approval.status !== "pending") return
+    if (approval.status !== "pending" || approval.expiresAt === null) return
     const remaining = approval.expiresAt.getTime() - Date.now()
     const timer = window.setTimeout(() => setExpired(true), Math.max(0, remaining))
     return () => window.clearTimeout(timer)
@@ -180,7 +180,12 @@ function ApprovalCard({
               expired && approval.status === "pending" ? "text-destructive text-xs" : "text-muted-foreground text-xs"
             }
           >
-            · {approval.status === "pending" ? until(approval.expiresAt) : when(approval.expiresAt)}
+            ·{" "}
+            {approval.expiresAt === null
+              ? "waits until decided"
+              : approval.status === "pending"
+                ? until(approval.expiresAt)
+                : when(approval.expiresAt)}
           </span>
           <Origin profileId={approval.profileId} caller={approval.caller} />
         </div>
@@ -248,14 +253,18 @@ function ApprovalGroupCard({
   const [excluded, setExcluded] = useState<ReadonlySet<ApprovalId>>(new Set())
   const { shared, varying } = splitArguments(approvals.map((approval) => approval.arguments))
   const decidable = approvals.filter(
-    (approval) => approval.status === "pending" && approval.expiresAt.getTime() > Date.now()
+    (approval) =>
+      approval.status === "pending" && (approval.expiresAt === null || approval.expiresAt.getTime() > Date.now())
   )
   const chosen = decidable.filter((approval) => !excluded.has(approval.id)).map((approval) => approval.id)
   const counts = ApprovalStatus.literals
     .map((status) => [status, approvals.filter((approval) => approval.status === status).length] as const)
     .filter(([, count]) => count > 0)
   const earliestExpiry = decidable.reduce<Date | undefined>(
-    (earliest, approval) => (earliest === undefined || approval.expiresAt < earliest ? approval.expiresAt : earliest),
+    (earliest, approval) =>
+      approval.expiresAt !== null && (earliest === undefined || approval.expiresAt < earliest)
+        ? approval.expiresAt
+        : earliest,
     undefined
   )
   const showOutcome = approvals.some((approval) => approval.result !== null || approval.error !== null)

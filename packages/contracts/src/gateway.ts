@@ -113,6 +113,15 @@ export const ApprovalGroupWindowMinutes = Schema.Int.check(Schema.isBetween({ mi
 export type ApprovalGroupWindowMinutes = typeof ApprovalGroupWindowMinutes.Type
 export const defaultApprovalGroupWindowMinutes = 30
 
+/** How long a call waits for a decision before it expires, at most a year. A profile with none waits until someone decides. */
+export const ApprovalExpiryMinutes = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 525_600 }))
+export type ApprovalExpiryMinutes = typeof ApprovalExpiryMinutes.Type
+export const defaultApprovalExpiryMinutes = 1440
+
+/** Who a profile may act for: anyone the invocation names, or only these people. */
+export const ProfileSubjects = Schema.Union([Schema.Literal("any"), Schema.Array(SubjectId)])
+export type ProfileSubjects = typeof ProfileSubjects.Type
+
 /**
  * What a set of AI apps may do through the gateway: its tools, how each is
  * decided, and how approvals reach a human. Every app connects with its own
@@ -128,6 +137,10 @@ export const Profile = Schema.Struct({
   approvalGroupWindowMinutes: ApprovalGroupWindowMinutes,
   /** Tools of newly connected services are enabled with their default decision. */
   includeNewTools: Schema.Boolean,
+  /** Minutes a call waits for a decision; null waits until someone decides. */
+  approvalExpiryMinutes: Schema.NullOr(ApprovalExpiryMinutes),
+  /** An invocation naming anyone else is refused. */
+  subjects: ProfileSubjects,
   createdAt: Schema.Date,
   revokedAt: Schema.NullOr(Schema.Date)
 })
@@ -199,7 +212,8 @@ export const PendingApproval = Schema.Struct({
   arguments: Schema.Json,
   status: ApprovalStatus,
   createdAt: Schema.Date,
-  expiresAt: Schema.Date,
+  /** Null when the profile lets calls wait until someone decides. */
+  expiresAt: Schema.NullOr(Schema.Date),
   decidedAt: Schema.NullOr(Schema.Date),
   decidedBy: Schema.NullOr(Schema.String),
   result: Schema.NullOr(Schema.Json),
@@ -250,7 +264,8 @@ export type InvocationSucceeded = typeof InvocationSucceeded.Type
 export const InvocationPending = Schema.Struct({
   status: Schema.Literal("pending"),
   approvalId: ApprovalId,
-  expiresAt: Schema.Date,
+  /** Null when the call waits until someone decides. */
+  expiresAt: Schema.NullOr(Schema.Date),
   approvalUrl: Schema.optional(Schema.String)
 })
 export type InvocationPending = typeof InvocationPending.Type

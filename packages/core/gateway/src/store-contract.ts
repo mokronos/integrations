@@ -5,6 +5,7 @@ import type {
   ApiKey,
   ApiKeyHash,
   ApiKeyId,
+  ApprovalExpiryMinutes,
   ApprovalGroupWindowMinutes,
   ApprovalMethod,
   ApprovalDeliveryAttempt,
@@ -35,6 +36,7 @@ import type {
   Profile,
   ProfileCapability,
   ProfileId,
+  ProfileSubjects,
   ProfileTool,
   ProfileToolInput,
   SessionTokenHash,
@@ -91,6 +93,9 @@ export interface CreateProfileInput {
   readonly mcpSurface?: McpSurface
   readonly approvalGroupWindowMinutes?: ApprovalGroupWindowMinutes
   readonly includeNewTools?: boolean
+  /** A day when absent; null lets calls wait until someone decides. */
+  readonly approvalExpiryMinutes?: ApprovalExpiryMinutes | null | undefined
+  readonly subjects?: ProfileSubjects
   readonly tools: ReadonlyArray<ProfileToolInput>
   readonly destinationIds?: ReadonlyArray<ApprovalDestinationId>
 }
@@ -101,6 +106,8 @@ export interface ProfileSettings {
   readonly mcpSurface: McpSurface
   readonly approvalGroupWindowMinutes: ApprovalGroupWindowMinutes
   readonly includeNewTools: boolean
+  readonly approvalExpiryMinutes: ApprovalExpiryMinutes | null
+  readonly subjects: ProfileSubjects
 }
 
 export interface CreateApprovalInput {
@@ -113,7 +120,8 @@ export interface CreateApprovalInput {
   /** Who the call acts for; nobody when absent. */
   readonly subject?: SubjectId | null
   readonly arguments: typeof Schema.Json.Type
-  readonly expiresAt: Date
+  /** Null waits until someone decides. */
+  readonly expiresAt: Date | null
   /** Joins the newest open group for this tool whose first call is younger than this. */
   readonly groupWindowMinutes: ApprovalGroupWindowMinutes
 }
@@ -125,7 +133,7 @@ export interface ApprovalDeliveryJob extends ApprovalDeliveryAttempt {
   readonly profileName: string
   readonly alias: Alias
   readonly tool: ToolName
-  readonly expiresAt: Date
+  readonly expiresAt: Date | null
   readonly url: string
   readonly signingSecret: string
 }

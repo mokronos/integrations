@@ -60,6 +60,10 @@ export const gatewayProfile = sqliteTable(
     mcpSurface: text("mcp_surface").notNull().default("tools"),
     approvalGroupWindowMinutes: integer("approval_group_window_minutes").notNull().default(30),
     includeNewTools: integer("include_new_tools").notNull().default(0),
+    /** Null lets calls wait until someone decides. */
+    approvalExpiryMinutes: integer("approval_expiry_minutes").default(1440),
+    /** A JSON array of the subjects the profile may act for; null for anyone. */
+    subjects: text("subjects"),
     createdAt: createdAt(),
     revokedAt: integer("revoked_at")
   },
