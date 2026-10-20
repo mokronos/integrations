@@ -107,6 +107,12 @@ const optionalNumber = (row: SqlRow, column: string): number | undefined => {
   return Predicate.isNumber(value) ? value : undefined
 }
 
+/** A 0/1 column that rows written before it existed leave empty. */
+const optionalFlag = (row: SqlRow, column: string): boolean | undefined => {
+  const value = optionalNumber(row, column)
+  return value === undefined ? undefined : value === 1
+}
+
 const decodeJsonArray = <A>(schema: Schema.Codec<A>) => {
   const decode = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(schema)))
   return (raw: string, column: string): Effect.Effect<ReadonlyArray<A>, StorageError> =>
@@ -201,6 +207,7 @@ const decodeToolRow = (row: SqlRow) =>
       })
     const inputSchema = yield* optionalJson("input_schema")
     const outputSchema = yield* optionalJson("output_schema")
+    const readOnly = number(row, "read_only") === 1
     return yield* Schema.decodeUnknownEffect(Tool)({
       address: text(row, "address"),
       owner: text(row, "owner"),
@@ -208,7 +215,9 @@ const decodeToolRow = (row: SqlRow) =>
       connection: text(row, "connection"),
       name: text(row, "name"),
       description: text(row, "description"),
-      readOnly: number(row, "read_only") === 1,
+      readOnly,
+      destructive: optionalFlag(row, "destructive") ?? !readOnly,
+      idempotent: optionalFlag(row, "idempotent") ?? readOnly,
       ...whenPresent("inputSchema", inputSchema),
       ...whenPresent("outputSchema", outputSchema),
       call,
@@ -599,8 +608,8 @@ export class CatalogStore extends Context.Service<
             ...tools.map((tool) => ({
               sql: `INSERT INTO tool
                     (address, owner, integration, connection, name, description,
-                     read_only, input_schema, output_schema, call, captured_at)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                     read_only, destructive, idempotent, input_schema, output_schema, call, captured_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               params: [
                 tool.address,
                 tool.owner,
@@ -609,6 +618,8 @@ export class CatalogStore extends Context.Service<
                 tool.name,
                 tool.description,
                 tool.readOnly ? 1 : 0,
+                tool.destructive ? 1 : 0,
+                tool.idempotent ? 1 : 0,
                 nullable(tool.inputSchema === undefined ? undefined : JSON.stringify(tool.inputSchema)),
                 nullable(tool.outputSchema === undefined ? undefined : JSON.stringify(tool.outputSchema)),
                 JSON.stringify(tool.call),

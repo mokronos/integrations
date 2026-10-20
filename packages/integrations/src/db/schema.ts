@@ -55,6 +55,10 @@ export const tool = sqliteTable(
     name: text("name").notNull(),
     description: text("description").notNull().default(""),
     readOnly: integer("read_only").notNull().default(0),
+    /** Null on rows captured before the hint was kept; read as "not read-only". */
+    destructive: integer("destructive"),
+    /** Null on rows captured before the hint was kept; read as "read-only". */
+    idempotent: integer("idempotent"),
     inputSchema: text("input_schema"),
     outputSchema: text("output_schema"),
     call: text("call").notNull(),

@@ -50,6 +50,9 @@ const integrationsWithTools = (
         owner: "org",
         connection: ConnectionName.make("default"),
         defaultDecision: "require_approval",
+        readOnly: false,
+        destructive: true,
+        idempotent: false,
         inputSchema: tool.input
       }))
     )

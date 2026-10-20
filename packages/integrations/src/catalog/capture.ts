@@ -27,6 +27,8 @@ const record = (
     readonly name: string
     readonly description: string
     readonly readOnly: boolean
+    readonly destructive: boolean
+    readonly idempotent: boolean
     readonly inputSchema?: typeof Schema.Json.Type
     readonly outputSchema?: typeof Schema.Json.Type
     readonly call: ToolCall
@@ -45,6 +47,8 @@ const record = (
     name: tool.name,
     description: tool.description,
     readOnly: tool.readOnly,
+    destructive: tool.destructive,
+    idempotent: tool.idempotent,
     ...whenPresent("inputSchema", tool.inputSchema),
     ...whenPresent("outputSchema", tool.outputSchema),
     call: tool.call,
@@ -56,11 +60,15 @@ export const captureMcpTools = (
   definitions: ReadonlyArray<McpToolDefinition>,
   capturedAt: number
 ): Effect.Effect<ReadonlyArray<IntegrationTool>, StorageError> =>
-  Effect.forEach(definitions, (definition) =>
-    record(target, capturedAt, {
+  Effect.forEach(definitions, (definition) => {
+    const readOnly = definition.annotations?.readOnlyHint === true
+    // MCP's own defaults: a tool that writes may destroy, and is not safe to repeat, unless it says otherwise.
+    return record(target, capturedAt, {
       name: definition.name,
       description: definition.description ?? definition.title ?? "",
-      readOnly: definition.annotations?.readOnlyHint === true,
+      readOnly,
+      destructive: !readOnly && definition.annotations?.destructiveHint !== false,
+      idempotent: readOnly || definition.annotations?.idempotentHint === true,
       ...whenPresent("inputSchema", definition.inputSchema),
       ...whenPresent(
         "outputSchema",
@@ -68,7 +76,9 @@ export const captureMcpTools = (
       ),
       call: { kind: "mcp", tool: definition.name }
     })
-  )
+  })
+
+const idempotentMethods = new Set(["put", "delete"])
 
 export const captureOpenApiTools = (
   target: CaptureTarget,
@@ -80,6 +90,9 @@ export const captureOpenApiTools = (
       name: operation.name,
       description: Option.getOrElse(operation.summary, () => Option.getOrElse(operation.description, () => "")),
       readOnly: operation.readOnly,
+      // HTTP says what repeating a method does; it says nothing about what a write destroys, so every write may.
+      destructive: !operation.readOnly,
+      idempotent: operation.readOnly || idempotentMethods.has(operation.method),
       inputSchema: operation.inputSchema,
       ...whenPresent("outputSchema", Option.getOrUndefined(operation.outputSchema)),
       call: {

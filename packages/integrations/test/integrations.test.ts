@@ -36,6 +36,7 @@ const stubMcp = (
   options: {
     readonly readOnly?: boolean
     readonly omitReadOnlyHint?: boolean
+    readonly writeNoteHints?: { readonly destructiveHint?: boolean; readonly idempotentHint?: boolean }
     readonly onCall?: (tool: string, credential: Option.Option<string>) => void
     readonly onList?: () => void
   } = {}
@@ -79,7 +80,7 @@ const stubMcp = (
               name: "write_note",
               description: "Add a note.",
               inputSchema: { type: "object", properties: { body: { type: "string" } } },
-              annotations: { readOnlyHint: false }
+              annotations: { readOnlyHint: false, ...options.writeNoteHints }
             }
           ]
         })
@@ -661,6 +662,41 @@ describe("tools", () => {
       expect(decisions).toEqual({
         search_notes: "allow",
         write_note: "require_approval"
+      })
+    }).pipe(Effect.provide(testIntegrations()))
+  )
+
+  it.effect("keeps a tool's destructive and idempotent hints next to read-only", () =>
+    Effect.gen(function* () {
+      const hints = yield* withIntegrations(
+        Effect.gen(function* () {
+          const host = yield* Integrations
+          yield* install()
+          const tools = yield* host.toolSummaries({ integration: notes })
+          return Object.fromEntries(
+            tools.map((tool) => [
+              tool.name,
+              { readOnly: tool.readOnly, destructive: tool.destructive, idempotent: tool.idempotent }
+            ])
+          )
+        }),
+        stubMcp({ writeNoteHints: { destructiveHint: false, idempotentHint: true } })
+      )
+      expect(hints).toEqual({
+        search_notes: { readOnly: true, destructive: false, idempotent: true },
+        write_note: { readOnly: false, destructive: false, idempotent: true }
+      })
+    })
+  )
+
+  it.effect("assumes a tool that only says it writes may destroy and is not safe to repeat", () =>
+    Effect.gen(function* () {
+      const host = yield* Integrations
+      yield* install()
+      const tool = yield* host.describeTool({ integration: notes, name: "write_note" })
+      expect({ destructive: tool.destructive, idempotent: tool.idempotent }).toEqual({
+        destructive: true,
+        idempotent: false
       })
     }).pipe(Effect.provide(testIntegrations()))
   )

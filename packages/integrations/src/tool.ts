@@ -46,6 +46,8 @@ export const Tool = Schema.Struct({
   name: Schema.String,
   description: Schema.String,
   readOnly: Schema.Boolean,
+  destructive: Schema.Boolean,
+  idempotent: Schema.Boolean,
   inputSchema: Schema.optional(Schema.Json),
   outputSchema: Schema.optional(Schema.Json),
   call: ToolCall,
