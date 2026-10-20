@@ -31,7 +31,7 @@ import type { ErrorSink } from "./observability.ts"
 import type { GatewaySettings, SignInPolicy } from "./services.ts"
 import { defaultMaxUploadBytes, NonNegativeIntFromString, whenPresent } from "@integragents/contracts"
 import type { IntegrationServices } from "@integragents/host"
-import { GatewayEvents, GatewayStoreService, OAuthFlowSessions } from "@integragents/gateway-core"
+import { ApprovalReviewer, GatewayEvents, GatewayStoreService, OAuthFlowSessions } from "@integragents/gateway-core"
 import type { EventBus } from "@integragents/gateway-core"
 import type { GatewayCoreServices } from "@integragents/gateway-core"
 import { webCryptoLayer } from "@integragents/contracts"
@@ -51,12 +51,15 @@ export const gatewayServicesContext = (input: {
   readonly integrationServices: Context.Context<IntegrationServices>
   readonly oauth: OAuthSessions
   readonly events: EventBus
-}): Context.Context<GatewayCoreServices> =>
-  input.integrationServices.pipe(
+  readonly reviewer?: ApprovalReviewer["Service"]
+}): Context.Context<GatewayCoreServices> => {
+  const services = input.integrationServices.pipe(
     Context.add(GatewayStoreService, input.store),
     Context.add(OAuthFlowSessions, input.oauth),
     Context.add(GatewayEvents, input.events)
   )
+  return input.reviewer === undefined ? services : Context.add(services, ApprovalReviewer, input.reviewer)
+}
 
 export interface GatewayHandlerOptions extends GatewaySettings {
   readonly store: GatewayStore
@@ -65,6 +68,8 @@ export interface GatewayHandlerOptions extends GatewaySettings {
   readonly oauth: OAuthSessions
   /** Where the store's writes are announced; `/v1/events` streams them. */
   readonly events: EventBus
+  /** Judges new calls that ask on `/v1/execute` and MCP before a human is notified. */
+  readonly reviewer?: ApprovalReviewer["Service"]
   /** Who is calling. Defaults to the gateway's own keys, sessions, and local credential. */
   readonly authority?: Layer.Layer<Authority, never, GatewayStoreService>
   readonly sessions?: SignInPolicy

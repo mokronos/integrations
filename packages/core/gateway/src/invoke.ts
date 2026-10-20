@@ -5,11 +5,10 @@ import {
   matchesPattern,
   whenPresent
 } from "@integragents/contracts"
-import type { InputAnswer, InputResponses, InvocationOutcome, ToolSummary } from "@integragents/contracts"
+import type { InputResponses, InvocationOutcome, ToolSummary } from "@integragents/contracts"
 import { Crypto, DateTime, Duration, Effect, Option, Schema } from "effect"
 import type { HttpClient } from "effect/http"
-import { relayableInput, unrelayableInputMessage } from "@integragents/host"
-import type { Integrations, ToolCallContext } from "@integragents/host"
+import type { Integrations } from "@integragents/host"
 import { ToolAddress } from "@integragents/contracts"
 import type { OAuthSessions } from "./oauth-sessions.ts"
 import { invalidArguments } from "./arguments.ts"
@@ -19,13 +18,13 @@ import { aliasForConnection, defaultTenantId, keyOrigin, sameConnectionRef, unat
 import type {
   Alias,
   ApprovalId,
-  AuditApproval,
   Authorized,
   CallOrigin,
   ConnectionName,
   Authorization,
   ConnectionRef,
   IntegrationSlug,
+  PendingApproval,
   Profile,
   ProfileId,
   SubjectId,
@@ -34,15 +33,15 @@ import type {
   ToolName
 } from "./domain.ts"
 import { approvalOutcome } from "./approval-decisions.ts"
-import { openRound, sealRound } from "./input-rounds.ts"
-import type { RoundApproval } from "./input-rounds.ts"
+import { approveApproval, denyApproval } from "./approvals.ts"
+import { auditFor, boundToolAddress, executeAuthorized } from "./execute.ts"
+import { openRound } from "./input-rounds.ts"
 import { newApprovalId, newAuditId } from "./keys.ts"
-import type { GatewayStore, GatewayStoreError, RecordAuditInput } from "./store.ts"
+import { consultReviewer, reviewerIdentity } from "./reviewer.ts"
+import type { ApprovalReviewer, ApprovalReviewRequest } from "./reviewer.ts"
+import type { GatewayStore, GatewayStoreError } from "./store.ts"
 
 type Json = typeof Schema.Json.Type
-
-export const boundToolAddress = (connection: ConnectionRef, tool: ToolName): ToolAddress =>
-  ToolAddress.make(`tools.${connection.integration}.${connectionOwner(connection)}.${connection.name}.${tool}`)
 
 export interface InvokeDependencies {
   readonly store: GatewayStore
@@ -57,6 +56,8 @@ export interface InvokeDependencies {
     readonly expiresAt: Date | null
     readonly approvalUrl?: string
   }) => Effect.Effect<void, never, HttpClient.HttpClient>
+  /** Consulted on every new call that asks, before a human is notified. See `ApprovalReviewer`. */
+  readonly reviewer?: ApprovalReviewer["Service"]
 }
 
 /**
@@ -71,36 +72,6 @@ export interface Interaction {
 
 const noInteraction: Interaction = { relay: false }
 
-const auditFor = (
-  authorization: Extract<Authorization, { status: "authorized" }>,
-  outcome: RecordAuditInput["outcome"],
-  message: string | null,
-  argumentsValue: Json,
-  retentionDays: number,
-  origin: CallOrigin,
-  approval?: AuditApproval
-): Effect.Effect<RecordAuditInput, never, Crypto.Crypto> =>
-  Effect.all([newAuditId, DateTime.now]).pipe(
-    Effect.map(([id, at]): RecordAuditInput => ({
-      tenantId: authorization.profile.tenantId,
-      id,
-      profileId: authorization.profile.id,
-      caller: origin.caller,
-      authorizedBySubjectId: origin.authorizedBy,
-      alias: authorization.alias,
-      tool: authorization.profileTool.tool,
-      connection: authorization.connection,
-      decision: authorization.decision,
-      ...whenPresent("approval", approval),
-      outcome,
-      message,
-      arguments: {
-        value: argumentsValue,
-        expiresAt: DateTime.toDateUtc(DateTime.addDuration(at, Duration.days(retentionDays)))
-      }
-    }))
-  )
-
 /** When a call frozen now stops waiting, by its profile's setting; never for a profile that waits until someone decides. */
 const approvalExpiry = (profile: Profile): Effect.Effect<Date | null> =>
   profile.approvalExpiryMinutes === null
@@ -109,6 +80,33 @@ const approvalExpiry = (profile: Profile): Effect.Effect<Date | null> =>
         DateTime.toDateUtc(DateTime.addDuration(now, Duration.minutes(profile.approvalExpiryMinutes ?? 0)))
       )
 
+/** The frozen call, and what the catalog knows of its tool, for a reviewer to judge. */
+const reviewRequest = Effect.fn("Invocation.reviewRequest")(function* (
+  integrations: Integrations["Service"],
+  authorization: Authorized,
+  approval: PendingApproval
+) {
+  const described = yield* integrations
+    .describeTool(boundToolAddress(authorization.connection, authorization.profileTool.tool))
+    .pipe(Effect.option)
+  const tool = Option.getOrUndefined(described)
+  return {
+    tenantId: authorization.profile.tenantId,
+    approval,
+    profile: authorization.profile,
+    connection: authorization.connection,
+    tool: {
+      alias: authorization.alias,
+      name: authorization.profileTool.tool,
+      ...whenPresent("description", tool?.description),
+      ...whenPresent("inputSchema", tool?.inputSchema),
+      ...whenPresent("readOnly", tool?.readOnly),
+      ...whenPresent("destructive", tool?.destructive),
+      ...whenPresent("idempotent", tool?.idempotent)
+    }
+  } satisfies ApprovalReviewRequest
+})
+
 const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function* (
   dependencies: {
     readonly store: GatewayStore
@@ -116,6 +114,7 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function* (
     readonly retentionDays: number
     readonly approvalUrlOf?: InvokeDependencies["approvalUrlOf"]
     readonly onApprovalCreated?: InvokeDependencies["onApprovalCreated"]
+    readonly reviewer?: InvokeDependencies["reviewer"]
   },
   authorization: Extract<Authorization, { status: "authorized" }>,
   argumentsValue: Json,
@@ -196,9 +195,61 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function* (
     expiresAt: yield* approvalExpiry(authorization.profile)
   })
   if (approval.id !== id) return pending(approval.id, approval.expiresAt)
+  const reviewer = dependencies.reviewer
+  const review =
+    reviewer === undefined
+      ? undefined
+      : {
+          by: reviewerIdentity(reviewer),
+          verdict: yield* consultReviewer(
+            reviewer,
+            yield* reviewRequest(dependencies.integrations, authorization, approval)
+          )
+        }
+  const escalation =
+    review?.verdict.verdict === "escalate"
+      ? `; ${review.by} left it to a human${review.verdict.reason === undefined ? "" : `: ${review.verdict.reason}`}`
+      : ""
   yield* store.recordAudit(
-    yield* auditFor(authorization, "pending", `approval ${approval.id}`, argumentsValue, retentionDays, origin)
+    yield* auditFor(
+      authorization,
+      "pending",
+      `approval ${approval.id}${escalation}`,
+      argumentsValue,
+      retentionDays,
+      origin
+    )
   )
+  const tenantId = authorization.profile.tenantId
+  const decision = { tenantId, id: approval.id, decidedBy: review?.by ?? null }
+  /** Another decision got there first; the call is whatever that made of it. */
+  const raced = () => Effect.succeed(pending(approval.id, approval.expiresAt))
+  if (review?.verdict.verdict === "approve") {
+    const decided = yield* approveApproval(
+      { store, integrations: dependencies.integrations, retentionDays },
+      { ...decision, ...whenPresent("reason", review.verdict.reason) },
+      "approved",
+      relay
+    ).pipe(
+      Effect.map(({ outcome }): InvocationOutcome => outcome),
+      Effect.catchTags({ ApprovalNotFound: raced, ApprovalConflict: raced, ApprovalArgumentsInvalid: raced })
+    )
+    if (decided.status === "succeeded" || decided.status === "failed")
+      yield* store.collectApproval(tenantId, approval.id)
+    return decided
+  }
+  if (review?.verdict.verdict === "deny") {
+    const denied = yield* denyApproval(store, { ...decision, ...whenPresent("reason", review.verdict.reason) }).pipe(
+      Effect.map(({ approval: settled }) => approvalOutcome(settled)),
+      Effect.catchTags({ ApprovalNotFound: raced, ApprovalConflict: raced })
+    )
+    if (denied === undefined || denied.status !== "denied") return denied ?? pending(approval.id, approval.expiresAt)
+    yield* store.recordAudit(
+      yield* auditFor(authorization, "denied", denied.reason, argumentsValue, retentionDays, origin)
+    )
+    yield* store.collectApproval(tenantId, approval.id)
+    return denied
+  }
   const outcome = pending(approval.id, approval.expiresAt)
   if (dependencies.onApprovalCreated !== undefined) {
     yield* dependencies.onApprovalCreated({
@@ -277,7 +328,8 @@ const settle = Effect.fn("Invocation.settle")(
           integrations,
           retentionDays,
           ...whenPresent("approvalUrlOf", dependencies.approvalUrlOf),
-          ...whenPresent("onApprovalCreated", dependencies.onApprovalCreated)
+          ...whenPresent("onApprovalCreated", dependencies.onApprovalCreated),
+          ...whenPresent("reviewer", dependencies.reviewer)
         },
         authorization,
         input.arguments,
@@ -467,74 +519,6 @@ export const invokeAsProfile = Effect.fn("Invocation.invokeAsProfile")(function*
     ...input,
     profileId: input.profile.id
   })
-})
-
-/** How a call came to run, and the round it continues. */
-export interface ExecutionRound {
-  /** How the call that asked got its approval; nothing for a call that runs directly. */
-  readonly approved?: RoundApproval
-  /** The approval it ran under, which a host tool is told about. */
-  readonly approvalId?: ApprovalId
-  /** Whether a round of input the tool asks for goes back to the caller. */
-  readonly relay?: boolean
-  readonly upstream?: InputAnswer
-}
-
-export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(function* (
-  dependencies: {
-    readonly store: GatewayStore
-    readonly integrations: Integrations["Service"]
-    readonly retentionDays: number
-  },
-  authorization: Extract<Authorization, { status: "authorized" }>,
-  argumentsValue: Json,
-  origin: CallOrigin,
-  round: ExecutionRound = {}
-): Effect.fn.Return<
-  Extract<InvocationOutcome, { status: "succeeded" | "failed" | "input-required" }>,
-  GatewayStoreError,
-  Crypto.Crypto
-> {
-  const address = boundToolAddress(authorization.connection, authorization.profileTool.tool)
-  const approved = round.approved
-  const record = (outcome: "succeeded" | "failed", message: string | null) =>
-    Effect.flatMap(
-      auditFor(authorization, outcome, message, argumentsValue, dependencies.retentionDays, origin, approved?.approval),
-      dependencies.store.recordAudit
-    )
-  const context: ToolCallContext = {
-    tenantId: authorization.profile.tenantId,
-    profileId: authorization.profile.id,
-    ...whenPresent("subject", authorization.subject),
-    ...whenPresent("approvalId", round.approvalId)
-  }
-  const invocation = yield* Effect.result(
-    dependencies.integrations.execute(address, argumentsValue, round.upstream, context)
-  )
-  if (invocation._tag === "Failure") {
-    yield* record("failed", invocation.failure.message)
-    return { status: "failed", message: invocation.failure.message }
-  }
-  const execution = invocation.success
-  if (execution.kind === "complete") {
-    yield* record("succeeded", approved?.message ?? null)
-    return { status: "succeeded", result: execution.result }
-  }
-  const { inputRequests, requestState } = execution.round
-  if (round.relay !== true || !relayableInput(inputRequests)) {
-    const message = unrelayableInputMessage(inputRequests)
-    yield* record("failed", message)
-    return { status: "failed", message }
-  }
-  return {
-    status: "input-required",
-    inputRequests,
-    requestState: yield* sealRound(
-      dependencies.store,
-      { profileId: authorization.profile.id, tool: address, arguments: argumentsValue },
-      { approval: approved ?? null, upstream: requestState }
-    )
-  }
 })
 
 export type EffectiveTool = {
