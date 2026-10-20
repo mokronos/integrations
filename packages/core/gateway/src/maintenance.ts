@@ -19,9 +19,15 @@ export interface MaintenanceOptions {
   readonly executionLease?: Duration.Input
 }
 
+/** How long the outcome of a call made with an idempotency key answers its repeats. */
+const invocationKeyRetention = Duration.days(30)
+
 export type MaintenanceResult = {
   readonly expiredApprovals: number
   readonly interruptedApprovals: number
+  /** Keyed calls that never recorded an outcome, settled as unknown. */
+  readonly interruptedInvocations: number
+  readonly expiredInvocationKeys: number
   readonly expiredAuditArguments: number
   readonly deletedSessions: number
   readonly expiredIdentityFlows: number
@@ -74,6 +80,13 @@ export const runMaintenance = Effect.fn("Maintenance.run")(function* (
   return {
     expiredApprovals: (yield* store.expireApprovals(at)).length,
     interruptedApprovals: yield* settleInterrupted(store, new Date(at.getTime() - lease)),
+    interruptedInvocations: yield* store.settleInterruptedInvocationKeys(new Date(at.getTime() - lease), {
+      status: "failed",
+      message: interruptedExecutionMessage
+    }),
+    expiredInvocationKeys: yield* store.expireInvocationKeys(
+      new Date(at.getTime() - Duration.toMillis(invocationKeyRetention))
+    ),
     expiredAuditArguments: yield* store.expireAuditArguments(at),
     deletedSessions: yield* store.deleteExpiredSessions(at),
     expiredIdentityFlows: yield* store.deleteExpiredIdentityFlows(at),

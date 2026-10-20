@@ -296,6 +296,8 @@ export const gatewayPendingApproval = sqliteTable(
     argumentsLookup: text("arguments_lookup"),
     /** What the approver ran instead of the frozen arguments, sealed like them. */
     editedArguments: text("edited_arguments"),
+    /** The caller's key; a keyed call never shares its approval with another call. */
+    idempotencyKey: text("idempotency_key"),
     groupId: text("group_id"),
     status: text("status").notNull(),
     createdAt: createdAt(),
@@ -366,6 +368,37 @@ export const gatewayApprovalDelivery = sqliteTable(
   (table) => [
     uniqueIndex("gateway_approval_delivery_once").on(table.approvalId, table.destinationId),
     index("gateway_approval_delivery_due").on(table.status, table.nextAttemptAt)
+  ]
+)
+
+/**
+ * What a call made with an idempotency key came to, so a repeat of it gets
+ * the same answer instead of running again: `running` until it settles,
+ * `pending` while its approval waits, `settled` with its outcome.
+ */
+export const gatewayInvocationKey = sqliteTable(
+  "gateway_invocation_key",
+  {
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => gatewayTenant.id, { onDelete: "cascade" }),
+    profileId: text("profile_id")
+      .notNull()
+      .references(() => gatewayProfile.id, { onDelete: "cascade" }),
+    idempotencyKey: text("idempotency_key").notNull(),
+    /** A keyed digest of the alias, tool, subject and arguments, so a reused key for another call is told apart. */
+    fingerprint: text("fingerprint").notNull(),
+    alias: text("alias").notNull(),
+    tool: text("tool").notNull(),
+    status: text("status").notNull(),
+    approvalId: text("approval_id"),
+    outcome: text("outcome"),
+    createdAt: createdAt(),
+    settledAt: integer("settled_at")
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.profileId, table.idempotencyKey] }),
+    index("gateway_invocation_key_sweep").on(table.status, table.createdAt)
   ]
 )
 

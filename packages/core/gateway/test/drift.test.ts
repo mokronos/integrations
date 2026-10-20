@@ -256,6 +256,8 @@ describe("gateway maintenance", () => {
       expect(yield* maintain(gateway)).toEqual({
         expiredApprovals: 0,
         interruptedApprovals: 0,
+        interruptedInvocations: 0,
+        expiredInvocationKeys: 0,
         expiredAuditArguments: 0,
         deletedSessions: 0,
         expiredIdentityFlows: 0,

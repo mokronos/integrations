@@ -21,6 +21,7 @@ import {
   ApiKeyView,
   ConnectionRef,
   GatewayEvent,
+  IdempotencyKey,
   Profile,
   ProfileCapability,
   ProfileId,
@@ -79,7 +80,13 @@ const ExecuteBody = Schema.Struct({
   tool: Schema.String,
   arguments: Schema.optional(Json),
   /** Who the agent acts for. Required by delegated tools, ignored by the rest. */
-  subject: Schema.optional(SubjectId)
+  subject: Schema.optional(SubjectId),
+  /**
+   * The caller's name for this call, the same on every retry: a repeat gets
+   * the first call's outcome, or waits on its approval, instead of running
+   * again, and is refused when it names another tool or other arguments.
+   */
+  idempotencyKey: Schema.optional(IdempotencyKey)
 })
 
 /** Settings left out keep their current value. */
@@ -256,6 +263,8 @@ const DriftReport = Schema.Struct({
 const MaintenanceReport = Schema.Struct({
   expiredApprovals: Schema.Number,
   interruptedApprovals: Schema.Number,
+  interruptedInvocations: Schema.Number,
+  expiredInvocationKeys: Schema.Number,
   expiredAuditArguments: Schema.Number,
   deletedSessions: Schema.Number,
   expiredIdentityFlows: Schema.Number,

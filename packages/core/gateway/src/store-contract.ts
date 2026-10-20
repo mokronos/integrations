@@ -1,5 +1,6 @@
 import { Effect, Option, Schema } from "effect"
-import type { NonNegativeInt, PositiveInt } from "@integragents/contracts"
+import { InvocationDenied, InvocationFailed, InvocationSucceeded } from "@integragents/contracts"
+import type { IdempotencyKey, NonNegativeInt, PositiveInt } from "@integragents/contracts"
 import type {
   Alias,
   ApiKey,
@@ -119,6 +120,8 @@ export interface CreateApprovalInput {
   readonly tool: ToolName
   /** Who the call acts for; nobody when absent. */
   readonly subject?: SubjectId | null
+  /** A keyed call gets its own approval, never one an identical call already waits on. */
+  readonly idempotencyKey?: IdempotencyKey
   readonly arguments: typeof Schema.Json.Type
   /** Null waits until someone decides. */
   readonly expiresAt: Date | null
@@ -136,6 +139,31 @@ export interface ApprovalDeliveryJob extends ApprovalDeliveryAttempt {
   readonly expiresAt: Date | null
   readonly url: string
   readonly signingSecret: string
+}
+
+/** What a keyed call is remembered with once it settles: it ran, failed, or was refused. */
+export const RememberedOutcome = Schema.Union([InvocationSucceeded, InvocationFailed, InvocationDenied])
+export type RememberedOutcome = typeof RememberedOutcome.Type
+
+/** What a call made with an idempotency key has come to so far. */
+export interface InvocationKeyRecord {
+  readonly key: IdempotencyKey
+  readonly alias: Alias
+  readonly tool: ToolName
+  /** Whether the repeat names the same alias, tool, subject and arguments as the call that took the key. */
+  readonly sameCall: boolean
+  readonly status: "running" | "pending" | "settled"
+  readonly approvalId: ApprovalId | null
+  readonly outcome: RememberedOutcome | null
+  readonly createdAt: Date
+}
+
+/** A call as its idempotency key binds it. */
+export interface KeyedCall {
+  readonly alias: Alias
+  readonly tool: ToolName
+  readonly subject: SubjectId | null
+  readonly arguments: typeof Schema.Json.Type
 }
 
 /** A call that just reached a decision, with the tenant it belongs to. */
@@ -457,6 +485,38 @@ export interface GatewayStore {
     error: string
   ): Effect.Effect<ReadonlyArray<SettledApproval>, GatewayStoreError>
   cancelApprovalsForProfile(profileId: ProfileId): Effect.Effect<ReadonlyArray<SettledApproval>, GatewayStoreError>
+
+  /**
+   * Takes an idempotency key for a call, as `running`. Answers nothing when
+   * the key was free, or what the call that took it first has come to.
+   */
+  claimInvocationKey(input: {
+    readonly tenantId: TenantId
+    readonly profileId: ProfileId
+    readonly key: IdempotencyKey
+    readonly call: KeyedCall
+  }): Effect.Effect<InvocationKeyRecord | undefined, GatewayStoreError>
+  /** Moves a key on from `from`: to `pending` on an approval, or to `settled` with an outcome. */
+  settleInvocationKey(input: {
+    readonly tenantId: TenantId
+    readonly profileId: ProfileId
+    readonly key: IdempotencyKey
+    readonly from: "running" | "pending"
+    readonly to: { readonly approvalId: ApprovalId } | { readonly outcome: RememberedOutcome }
+  }): Effect.Effect<boolean, GatewayStoreError>
+  /** Frees a key that is still `running`, for a call that ended without anything worth remembering. */
+  releaseInvocationKey(input: {
+    readonly tenantId: TenantId
+    readonly profileId: ProfileId
+    readonly key: IdempotencyKey
+  }): Effect.Effect<void, GatewayStoreError>
+  /** Settles keys still `running` since `claimedBefore` with `outcome`; answers how many. */
+  settleInterruptedInvocationKeys(
+    claimedBefore: Date,
+    outcome: RememberedOutcome
+  ): Effect.Effect<number, GatewayStoreError>
+  /** Forgets keys settled at or before `settledBefore`; answers how many. */
+  expireInvocationKeys(settledBefore: Date): Effect.Effect<number, GatewayStoreError>
 
   recordAudit(input: RecordAuditInput): Effect.Effect<void, GatewayStoreError>
   listAudit(tenantId: TenantId, options: AuditQuery): Effect.Effect<ReadonlyArray<AuditRecord>, GatewayStoreError>

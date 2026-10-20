@@ -27,6 +27,16 @@ export const OAuthApplicationId = Schema.String.pipe(Schema.brand("OAuthApplicat
 export type OAuthApplicationId = typeof OAuthApplicationId.Type
 export const OAuthGrantId = Schema.String.pipe(Schema.brand("OAuthGrantId"))
 export type OAuthGrantId = typeof OAuthGrantId.Type
+/**
+ * The caller's name for one call, the same on every retry of it, such as a
+ * harness's run and tool-call ids. Printable ASCII, at most 255 characters.
+ */
+export const IdempotencyKey = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(255),
+  Schema.isPattern(/^[\x21-\x7e]+$/)
+).pipe(Schema.brand("IdempotencyKey"))
+export type IdempotencyKey = typeof IdempotencyKey.Type
 
 /**
  * A connection as policy names it. A user-owned reference without a subject is
@@ -212,6 +222,8 @@ export const PendingApproval = Schema.Struct({
   arguments: Schema.Json,
   /** What the approver ran instead of `arguments`, when they edited the call. */
   editedArguments: Schema.NullOr(Schema.Json),
+  /** The caller's key for the call; a keyed call is never merged with another one. */
+  idempotencyKey: Schema.NullOr(IdempotencyKey),
   status: ApprovalStatus,
   createdAt: Schema.Date,
   /** Null when the profile lets calls wait until someone decides. */

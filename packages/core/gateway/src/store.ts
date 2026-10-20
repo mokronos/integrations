@@ -41,9 +41,11 @@ import { applyIntegrationMigrations, isSealed } from "@integragents/host"
 import { applyGatewayMigrations } from "./migrate.ts"
 
 import {
+  encodeRememberedOutcome,
   expiryDate,
   expiryMillis,
   millis,
+  toInvocationKeyRecord,
   toApprovalRule,
   toApiKey,
   toApproval,
@@ -257,7 +259,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function* 
   const approvalMatch = (input: Parameters<GatewayStore["findUncollectedApproval"]>[0]) => {
     const canonical = canonicalJson(input.arguments)
     return {
-      sql: `tenant_id = ? AND profile_id = ? AND alias = ? AND tool = ? AND subject IS ?
+      sql: `tenant_id = ? AND profile_id = ? AND alias = ? AND tool = ? AND subject IS ? AND idempotency_key IS NULL
         AND ((arguments_lookup IS NOT NULL AND arguments_lookup = ?)
           OR (arguments_lookup IS NULL AND arguments = ?)) AND collected_at IS NULL`,
       args: [
@@ -1529,21 +1531,23 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function* 
         "createApproval",
         Effect.gen(function* () {
           const match = approvalMatch(input)
+          const keyed = input.idempotencyKey !== undefined
           const canonical = canonicalJson(input.arguments)
           const createdAt = yield* now
           yield* batch([
             {
               sql: `INSERT INTO gateway_pending_approval
            (id, tenant_id, profile_id, api_key_id, oauth_grant_id, oauth_application_id, credential_name, agent,
-            alias, tool, subject, arguments, arguments_lookup, group_id, status, created_at, expires_at, decided_at, decided_by, result, error, collected_at)
-         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((
+            alias, tool, subject, idempotency_key, arguments, arguments_lookup, group_id, status, created_at, expires_at,
+            decided_at, decided_by, result, error, collected_at)
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((
              SELECT member.group_id FROM gateway_pending_approval AS member
                JOIN gateway_pending_approval AS lead ON lead.id = member.group_id
               WHERE member.tenant_id = ? AND member.profile_id = ? AND member.alias = ? AND member.tool = ?
                 AND member.status = 'pending' AND member.expires_at > ? AND lead.created_at > ?
               ORDER BY lead.created_at DESC LIMIT 1
            ), ?), 'pending', ?, ?, NULL, NULL, NULL, NULL, NULL
-          WHERE NOT EXISTS (SELECT 1 FROM gateway_pending_approval WHERE ${match.sql})`,
+          ${keyed ? "" : `WHERE NOT EXISTS (SELECT 1 FROM gateway_pending_approval WHERE ${match.sql})`}`,
               args: [
                 input.id,
                 input.tenantId,
@@ -1552,6 +1556,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function* 
                 input.alias,
                 input.tool,
                 input.subject ?? null,
+                input.idempotencyKey ?? null,
                 sealText(canonical),
                 encryption.lookup(canonical),
                 input.tenantId,
@@ -1563,7 +1568,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function* 
                 input.id,
                 createdAt,
                 expiryMillis(input.expiresAt),
-                ...match.args
+                ...(keyed ? [] : match.args)
               ]
             },
             {
@@ -1577,7 +1582,8 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function* 
               args: [input.id, createdAt, input.profileId, input.id]
             }
           ])
-          const approval = yield* findUncollectedApproval(input)
+          const row = keyed ? yield* one("SELECT * FROM gateway_pending_approval WHERE id = ?", [input.id]) : undefined
+          const approval = row === undefined ? yield* findUncollectedApproval(input) : openApproval(row)
           if (approval === undefined) return yield* Effect.die(new Error(`Failed to store approval ${input.id}`))
           return approval
         })
@@ -1707,6 +1713,97 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function* 
             [yield* now, profileId]
           )
         })
+      ),
+
+    claimInvocationKey: (input) =>
+      operation(
+        "claimInvocationKey",
+        Effect.gen(function* () {
+          const fingerprint = encryption.lookup(
+            canonicalJson({
+              alias: input.call.alias,
+              tool: input.call.tool,
+              subject: input.call.subject,
+              arguments: input.call.arguments
+            })
+          )
+          const taken = yield* changed(
+            `INSERT INTO gateway_invocation_key
+               (tenant_id, profile_id, idempotency_key, fingerprint, alias, tool, status, approval_id, outcome,
+                created_at, settled_at)
+             VALUES (?, ?, ?, ?, ?, ?, 'running', NULL, NULL, ?, NULL)
+             ON CONFLICT DO NOTHING
+             RETURNING idempotency_key`,
+            [input.tenantId, input.profileId, input.key, fingerprint, input.call.alias, input.call.tool, yield* now]
+          )
+          if (taken === 1) return undefined
+          const row = yield* one(
+            "SELECT * FROM gateway_invocation_key WHERE tenant_id = ? AND profile_id = ? AND idempotency_key = ?",
+            [input.tenantId, input.profileId, input.key]
+          )
+          if (row === undefined) return yield* Effect.die(new Error(`Lost idempotency key ${input.key}`))
+          return toInvocationKeyRecord(row, fingerprint, encryption.open)
+        })
+      ),
+
+    settleInvocationKey: (input) =>
+      operation(
+        "settleInvocationKey",
+        Effect.gen(function* () {
+          const to = input.to
+          const settled = "outcome" in to
+          return (
+            (yield* changed(
+              `UPDATE gateway_invocation_key
+                  SET status = ?, approval_id = COALESCE(?, approval_id), outcome = ?, settled_at = ?
+                WHERE tenant_id = ? AND profile_id = ? AND idempotency_key = ? AND status = ?
+                RETURNING idempotency_key`,
+              [
+                settled ? "settled" : "pending",
+                settled ? null : to.approvalId,
+                settled ? sealText(encodeRememberedOutcome(to.outcome)) : null,
+                settled ? yield* now : null,
+                input.tenantId,
+                input.profileId,
+                input.key,
+                input.from
+              ]
+            )) === 1
+          )
+        })
+      ),
+
+    releaseInvocationKey: (input) =>
+      operation(
+        "releaseInvocationKey",
+        run(
+          `DELETE FROM gateway_invocation_key
+            WHERE tenant_id = ? AND profile_id = ? AND idempotency_key = ? AND status = 'running'`,
+          [input.tenantId, input.profileId, input.key]
+        )
+      ),
+
+    settleInterruptedInvocationKeys: (claimedBefore, outcome) =>
+      operation(
+        "settleInterruptedInvocationKeys",
+        Effect.gen(function* () {
+          return yield* changed(
+            `UPDATE gateway_invocation_key SET status = 'settled', outcome = ?, settled_at = ?
+              WHERE status = 'running' AND created_at <= ?
+              RETURNING idempotency_key`,
+            [sealText(encodeRememberedOutcome(outcome)), yield* now, millis(claimedBefore)]
+          )
+        })
+      ),
+
+    expireInvocationKeys: (settledBefore) =>
+      operation(
+        "expireInvocationKeys",
+        changed(
+          `DELETE FROM gateway_invocation_key WHERE status = 'settled' AND settled_at <= ?
+            RETURNING idempotency_key`,
+          [millis(settledBefore)]
+        )
       ),
 
     recordAudit: (input) =>

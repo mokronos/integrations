@@ -40,7 +40,8 @@ export const DelegatedLayer = HttpApiBuilder.group(GatewayApi, "delegated", (han
               alias: request.payload.alias,
               tool: ToolName.make(request.payload.tool),
               arguments: request.payload.arguments ?? {},
-              ...whenPresent("subject", request.payload.subject)
+              ...whenPresent("subject", request.payload.subject),
+              ...whenPresent("idempotencyKey", request.payload.idempotencyKey)
             })
           )
         })

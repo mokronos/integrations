@@ -820,6 +820,29 @@ describe("gateway http surface", () => {
     }).pipe(Effect.provide(testServices))
   )
 
+  it.effect("answers a retried call with the outcome its idempotency key already got", () =>
+    Effect.gen(function* () {
+      const { call, calls } = yield* setup()
+      const send = (to: string) =>
+        call("POST", "/v1/execute", {
+          body: {
+            alias: "user___sebastian___gmail___work",
+            tool: "sendEmail",
+            arguments: { to },
+            idempotencyKey: "run-1/call-3"
+          }
+        })
+
+      const first = yield* send("a@b.c")
+      const retry = yield* send("a@b.c")
+      const reused = yield* send("x@y.z")
+
+      expect([first.status, retry.status, retry.body]).toEqual([200, 200, first.body])
+      expect([reused.status, String(reused.body["message"])]).toEqual([400, expect.stringContaining("run-1/call-3")])
+      expect(calls).toHaveLength(1)
+    }).pipe(Effect.provide(testServices))
+  )
+
   it.effect("refuses an unauthorized tool without calling the vendor", () =>
     Effect.gen(function* () {
       const { call, calls } = yield* setup()

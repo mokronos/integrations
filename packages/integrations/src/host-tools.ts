@@ -2,6 +2,7 @@ import { Context, Effect, Layer, Schema } from "effect"
 import {
   ApprovalId,
   ConnectionName,
+  IdempotencyKey,
   IntegrationSlug,
   ProfileId,
   SubjectId,
@@ -55,7 +56,7 @@ export interface ToolCallContext {
   /** The approval a human or reviewer gave before the call ran. */
   readonly approvalId?: ApprovalId
   /** The caller's key for this call, stable across its retries. */
-  readonly idempotencyKey?: string
+  readonly idempotencyKey?: IdempotencyKey
 }
 
 export interface HostToolInvocation {

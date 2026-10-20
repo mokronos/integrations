@@ -5,7 +5,7 @@ import {
   matchesPattern,
   whenPresent
 } from "@integragents/contracts"
-import type { InputResponses, InvocationOutcome, ToolSummary } from "@integragents/contracts"
+import type { IdempotencyKey, InputResponses, InvocationOutcome, ToolSummary } from "@integragents/contracts"
 import { Crypto, DateTime, Duration, Effect, Option, Schema } from "effect"
 import type { HttpClient } from "effect/http"
 import type { Integrations } from "@integragents/host"
@@ -40,6 +40,7 @@ import { newApprovalId, newAuditId } from "./keys.ts"
 import { consultReviewer, reviewerIdentity } from "./reviewer.ts"
 import type { ApprovalReviewer, ApprovalReviewRequest } from "./reviewer.ts"
 import type { GatewayStore, GatewayStoreError } from "./store.ts"
+import type { InvocationKeyRecord } from "./store-contract.ts"
 
 type Json = typeof Schema.Json.Type
 
@@ -107,6 +108,17 @@ const reviewRequest = Effect.fn("Invocation.reviewRequest")(function* (
   } satisfies ApprovalReviewRequest
 })
 
+/** A call waiting on a human, with the link to decide it when the profile hands one out. */
+const pendingOutcome = (
+  dependencies: { readonly approvalUrlOf?: InvokeDependencies["approvalUrlOf"] },
+  profile: Profile,
+  approvalId: ApprovalId,
+  expiresAt: Date | null
+): InvocationOutcome => {
+  const approvalUrl = profile.approvalMethod !== "none" ? dependencies.approvalUrlOf?.(approvalId) : undefined
+  return { status: "pending", approvalId, expiresAt, ...whenPresent("approvalUrl", approvalUrl) }
+}
+
 const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function* (
   dependencies: {
     readonly store: GatewayStore
@@ -119,27 +131,24 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function* (
   authorization: Extract<Authorization, { status: "authorized" }>,
   argumentsValue: Json,
   origin: CallOrigin,
-  relay: boolean
+  relay: boolean,
+  /** A keyed call is never merged with an identical one; its key, not its arguments, finds its approval. */
+  idempotencyKey: IdempotencyKey | undefined
 ): Effect.fn.Return<InvocationOutcome, GatewayStoreError, Crypto.Crypto | HttpClient.HttpClient> {
   const { store, retentionDays } = dependencies
-  const pending = (approvalId: ApprovalId, expiresAt: Date | null): InvocationOutcome => {
-    const approvalUrl =
-      authorization.profile.approvalMethod !== "none" ? dependencies.approvalUrlOf?.(approvalId) : undefined
-    return {
-      status: "pending",
-      approvalId,
-      expiresAt,
-      ...whenPresent("approvalUrl", approvalUrl)
-    }
-  }
-  const existing = yield* store.findUncollectedApproval({
-    tenantId: authorization.profile.tenantId,
-    profileId: authorization.profile.id,
-    alias: authorization.alias,
-    tool: authorization.profileTool.tool,
-    subject: authorization.subject,
-    arguments: argumentsValue
-  })
+  const pending = (approvalId: ApprovalId, expiresAt: Date | null): InvocationOutcome =>
+    pendingOutcome(dependencies, authorization.profile, approvalId, expiresAt)
+  const existing =
+    idempotencyKey !== undefined
+      ? undefined
+      : yield* store.findUncollectedApproval({
+          tenantId: authorization.profile.tenantId,
+          profileId: authorization.profile.id,
+          alias: authorization.alias,
+          tool: authorization.profileTool.tool,
+          subject: authorization.subject,
+          arguments: argumentsValue
+        })
 
   if (existing !== undefined && (existing.status === "pending" || existing.status === "executing")) {
     return pending(existing.id, existing.expiresAt)
@@ -177,7 +186,11 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function* (
       authorization,
       argumentsValue,
       origin,
-      { approved: { approval: "saved_approval", message: `saved approval ${rule.id}` }, relay }
+      {
+        approved: { approval: "saved_approval", message: `saved approval ${rule.id}` },
+        relay,
+        ...whenPresent("idempotencyKey", idempotencyKey)
+      }
     )
   }
 
@@ -190,6 +203,7 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function* (
     alias: authorization.alias,
     tool: authorization.profileTool.tool,
     subject: authorization.subject,
+    ...whenPresent("idempotencyKey", idempotencyKey),
     arguments: argumentsValue,
     groupWindowMinutes: authorization.profile.approvalGroupWindowMinutes,
     expiresAt: yield* approvalExpiry(authorization.profile)
@@ -274,6 +288,7 @@ const settle = Effect.fn("Invocation.settle")(
       readonly origin: CallOrigin
       readonly profileId: ProfileId | null
       readonly interaction?: Interaction
+      readonly idempotencyKey?: IdempotencyKey
     }
   ): Effect.fn.Return<InvocationOutcome, GatewayStoreError, Crypto.Crypto | HttpClient.HttpClient> {
     const { store, integrations } = dependencies
@@ -321,35 +336,143 @@ const settle = Effect.fn("Invocation.settle")(
     const missing = yield* missingUserConnection(dependencies, authorization)
     if (missing !== undefined) return missing
 
-    if (authorization.decision === "require_approval") {
-      return yield* freezeOrCollect(
-        {
-          store,
-          integrations,
-          retentionDays,
-          ...whenPresent("approvalUrlOf", dependencies.approvalUrlOf),
-          ...whenPresent("onApprovalCreated", dependencies.onApprovalCreated),
-          ...whenPresent("reviewer", dependencies.reviewer)
-        },
+    const decide = (idempotencyKey: IdempotencyKey | undefined) =>
+      authorization.decision === "require_approval"
+        ? freezeOrCollect(
+            {
+              store,
+              integrations,
+              retentionDays,
+              ...whenPresent("approvalUrlOf", dependencies.approvalUrlOf),
+              ...whenPresent("onApprovalCreated", dependencies.onApprovalCreated),
+              ...whenPresent("reviewer", dependencies.reviewer)
+            },
+            authorization,
+            input.arguments,
+            input.origin,
+            interaction.relay,
+            idempotencyKey
+          )
+        : executeAuthorized({ store, integrations, retentionDays }, authorization, input.arguments, input.origin, {
+            relay: interaction.relay,
+            ...whenPresent("idempotencyKey", idempotencyKey)
+          })
+
+    const key = input.idempotencyKey
+    if (key === undefined) return yield* decide(undefined)
+    yield* Effect.annotateCurrentSpan("invocation.idempotency_key", key)
+    const keyed = { tenantId: authorization.profile.tenantId, profileId: authorization.profile.id, key }
+    const earlier = yield* store.claimInvocationKey({
+      ...keyed,
+      call: {
+        alias: authorization.alias,
+        tool: authorization.profileTool.tool,
+        subject: authorization.subject,
+        arguments: input.arguments
+      }
+    })
+    if (earlier !== undefined) {
+      return yield* replayKeyed(
+        { store, retentionDays, ...whenPresent("approvalUrlOf", dependencies.approvalUrlOf) },
         authorization,
-        input.arguments,
-        input.origin,
-        interaction.relay
+        earlier,
+        { arguments: input.arguments, origin: input.origin }
       )
     }
-
-    return yield* executeAuthorized(
-      { store, integrations, retentionDays },
-      authorization,
-      input.arguments,
-      input.origin,
-      {
-        relay: interaction.relay
-      }
-    )
+    const outcome = yield* decide(key)
+    yield* rememberKeyed(store, keyed, outcome)
+    return outcome
   },
   Effect.tap((outcome) => Effect.annotateCurrentSpan("invocation.outcome", outcome.status))
 )
+
+/**
+ * What a keyed call is remembered as. A call that waits is remembered by its
+ * approval, one that ran or was refused by its outcome; a round of input is
+ * not worth remembering, so its key is freed for the call to be made again.
+ */
+const rememberKeyed = Effect.fn("Invocation.rememberKeyed")(function* (
+  store: GatewayStore,
+  keyed: { readonly tenantId: TenantId; readonly profileId: ProfileId; readonly key: IdempotencyKey },
+  outcome: InvocationOutcome
+) {
+  switch (outcome.status) {
+    case "pending":
+      yield* store.settleInvocationKey({ ...keyed, from: "running", to: { approvalId: outcome.approvalId } })
+      return
+    case "succeeded":
+    case "failed":
+    case "denied":
+      yield* store.settleInvocationKey({ ...keyed, from: "running", to: { outcome } })
+      return
+    case "invalid":
+    case "authorization-required":
+    case "input-required":
+      yield* store.releaseInvocationKey(keyed)
+      return
+  }
+})
+
+/**
+ * A repeat of a keyed call: the same answer the first one got, never a second
+ * run. A call still waiting answers with its approval; once that is decided,
+ * the first repeat collects the outcome and every later one gets it again.
+ */
+const replayKeyed = Effect.fn("Invocation.replayKeyed")(function* (
+  dependencies: {
+    readonly store: GatewayStore
+    readonly retentionDays: number
+    readonly approvalUrlOf?: InvokeDependencies["approvalUrlOf"]
+  },
+  authorization: Authorized,
+  earlier: InvocationKeyRecord,
+  input: { readonly arguments: Json; readonly origin: CallOrigin }
+): Effect.fn.Return<InvocationOutcome, GatewayStoreError, Crypto.Crypto> {
+  const { store } = dependencies
+  if (!earlier.sameCall) {
+    return roundRefused(
+      `Idempotency key ${earlier.key} was first used for ${earlier.alias}.${earlier.tool} with other arguments. ` +
+        "Use a new key for a different call."
+    )
+  }
+  if (earlier.status === "settled" && earlier.outcome !== null) return earlier.outcome
+  if (earlier.status === "running" || earlier.approvalId === null) {
+    return {
+      status: "failed",
+      message:
+        `The call made with idempotency key ${earlier.key} has not recorded an outcome: it is still running, ` +
+        "or it was interrupted. It was not run again."
+    }
+  }
+  const tenantId = authorization.profile.tenantId
+  const approval = yield* store.getApproval(tenantId, earlier.approvalId)
+  if (approval === undefined) {
+    return { status: "failed", message: `Approval ${earlier.approvalId} of this call no longer exists` }
+  }
+  const outcome = approvalOutcome(approval)
+  if (outcome === undefined) return pendingOutcome(dependencies, authorization.profile, approval.id, approval.expiresAt)
+  const collected = yield* store.settleInvocationKey({
+    tenantId,
+    profileId: authorization.profile.id,
+    key: earlier.key,
+    from: "pending",
+    to: { outcome }
+  })
+  if (collected) {
+    yield* store.collectApproval(tenantId, approval.id)
+    yield* store.recordAudit(
+      yield* auditFor(
+        authorization,
+        outcome.status,
+        outcome.status === "denied" ? outcome.reason : `result of approval ${approval.id} collected`,
+        input.arguments,
+        dependencies.retentionDays,
+        input.origin
+      )
+    )
+  }
+  return outcome
+})
 
 const roundRefused = (message: string): InvocationOutcome => ({ status: "invalid", message, issues: [] })
 
@@ -480,6 +603,7 @@ export const invokeThroughGateway = Effect.fn("Invocation.invokeThroughGateway")
     readonly tool: ToolName
     readonly arguments: Json
     readonly subject?: SubjectId
+    readonly idempotencyKey?: IdempotencyKey
   }
 ): Effect.fn.Return<InvocationOutcome, GatewayStoreError, Crypto.Crypto | HttpClient.HttpClient> {
   const authentication = yield* authenticateKey(dependencies.store, input.secret)
@@ -512,6 +636,13 @@ export const invokeAsProfile = Effect.fn("Invocation.invokeAsProfile")(function*
     readonly arguments: Json
     readonly subject?: SubjectId
     readonly interaction?: Interaction
+    /**
+     * Names the call across its retries: a repeat gets the first call's
+     * outcome, or waits on its approval, instead of running again, and is
+     * refused when it names another tool or other arguments. Ignored when
+     * `interaction` answers a round of input.
+     */
+    readonly idempotencyKey?: IdempotencyKey
   }
 ): Effect.fn.Return<InvocationOutcome, GatewayStoreError, Crypto.Crypto | HttpClient.HttpClient> {
   const authorization = yield* authorizeProfileInvocation(dependencies.store, input.profile, input)
