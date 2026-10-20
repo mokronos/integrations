@@ -7,6 +7,7 @@ import { AuditRecord, PendingApproval, PositiveInt } from "@integragents/contrac
 import {
   Alias,
   ConnectionName,
+  ApprovalWebhookEvent,
   deliverDueApprovalNotifications,
   defaultTenantId,
   generateApiKey,
@@ -24,6 +25,8 @@ import type { Caller, ConnectionRef, GatewayStore } from "../src/index.ts"
 import { generateLoginHandoff } from "../src/keys.ts"
 import { openStore, temporaryDirectory, testServices } from "./fixtures.ts"
 import { toApproval, toAuditRecord } from "../src/store-rows.ts"
+
+const decodeWebhookEvent = Schema.decodeUnknownSync(Schema.fromJsonString(ApprovalWebhookEvent))
 
 /** The nested path proves the store creates the directory it was pointed at. */
 const store = Effect.flatMap(temporaryDirectory("gateway-store-"), (directory) =>
@@ -275,6 +278,94 @@ describe("gateway store", () => {
     }).pipe(Effect.provide(testServices))
   )
 
+  it.effect("tells each destination when a call was decided, signed and without its arguments or result", () =>
+    Effect.gen(function* () {
+      const gateway = yield* store
+      const profile = yield* seedProfile(gateway)
+      const destination = yield* gateway.createApprovalDestination({
+        id: yield* newApprovalDestinationId,
+        tenantId: defaultTenantId,
+        name: "phone",
+        url: "https://notify.example/approvals",
+        signingSecret: "igs_secret"
+      })
+      yield* gateway.replaceProfileApprovalDestinations(defaultTenantId, profile.id, [destination.id])
+      const freeze = Effect.fnUntraced(function* (to: string) {
+        return yield* gateway.createApproval({
+          id: yield* newApprovalId,
+          tenantId: defaultTenantId,
+          profileId: profile.id,
+          caller: noCaller,
+          alias: Alias.make("mail"),
+          tool: ToolName.make("sendEmail"),
+          arguments: { to },
+          groupWindowMinutes: 0,
+          expiresAt: yield* notYet
+        })
+      })
+      const approved = yield* freeze("ann@example.com")
+      const denied = yield* freeze("ben@example.com")
+      yield* gateway.claimApproval({ tenantId: defaultTenantId, id: approved.id, decidedBy: "ann" })
+      yield* gateway.settleApproval({
+        tenantId: defaultTenantId,
+        id: approved.id,
+        status: "approved",
+        decidedBy: "ann",
+        result: { secret: "the result" },
+        error: null
+      })
+      yield* gateway.settleApproval({
+        tenantId: defaultTenantId,
+        id: denied.id,
+        status: "denied",
+        decidedBy: "ben",
+        result: null,
+        error: null
+      })
+
+      const posted: Array<{ readonly event: string | null; readonly signature: string | null; readonly body: string }> =
+        []
+      const httpClient = FetchHttpClient.layer.pipe(
+        Layer.provide(
+          Layer.succeed(
+            FetchHttpClient.Fetch,
+            Object.assign(
+              async (_url: RequestInfo | URL, init?: RequestInit) => {
+                const headers = new Headers(init?.headers)
+                posted.push({
+                  event: headers.get("x-integrations-event"),
+                  signature: headers.get("x-integrations-signature"),
+                  body: String(init?.body)
+                })
+                return new Response(null, { status: 204 })
+              },
+              { preconnect: globalThis.fetch.preconnect }
+            )
+          )
+        )
+      )
+      const deliver = deliverDueApprovalNotifications({ store: gateway }).pipe(Effect.provide(httpClient))
+      yield* deliver
+      yield* deliver
+
+      const decided = posted.filter((entry) => entry.event === "approval.decided")
+      const bodies = decided.map((entry) => decodeWebhookEvent(entry.body))
+      expect(
+        bodies.map((body) =>
+          body.event === "approval.decided" ? [body.approvalId, body.status, body.outcome, body.decidedBy] : []
+        )
+      ).toEqual(
+        expect.arrayContaining([
+          [approved.id, "approved", "succeeded", "ann"],
+          [denied.id, "denied", "denied", "ben"]
+        ])
+      )
+      expect(decided).toHaveLength(2)
+      expect(decided.every((entry) => entry.signature?.startsWith("v1=") === true)).toBe(true)
+      expect(decided.map((entry) => entry.body).join("")).not.toMatch(/the result|ann@example|ben@example/)
+    }).pipe(Effect.provide(testServices))
+  )
+
   it.effect("groups calls to one tool within the profile's window and notifies once per group", () =>
     Effect.gen(function* () {
       const gateway = yield* store
@@ -442,7 +533,7 @@ describe("gateway store", () => {
         expiresAt: yield* notYet
       })
 
-      const cancelled = yield* gateway.cancelApprovalsForProfile(profile.id)
+      const cancelled = (yield* gateway.cancelApprovalsForProfile(profile.id)).length
 
       expect(cancelled).toBe(1)
       const after = yield* gateway.getApproval(defaultTenantId, approval.id)

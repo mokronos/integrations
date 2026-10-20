@@ -256,7 +256,8 @@ export type GatewayResource = typeof GatewayResource.Type
 export const GatewayEvent = Schema.Union([
   Schema.TaggedStruct("Connected", {}),
   Schema.TaggedStruct("Heartbeat", {}),
-  Schema.TaggedStruct("Changed", { resource: GatewayResource })
+  /** `ids` names the records that changed when they are known, such as the approvals a decision touched. */
+  Schema.TaggedStruct("Changed", { resource: GatewayResource, ids: Schema.optional(Schema.Array(Schema.String)) })
 ])
 export type GatewayEvent = typeof GatewayEvent.Type
 export const InvocationSucceeded = Schema.Struct({ status: Schema.Literal("succeeded"), result: Schema.Json })

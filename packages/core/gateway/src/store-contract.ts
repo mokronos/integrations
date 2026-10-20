@@ -138,6 +138,32 @@ export interface ApprovalDeliveryJob extends ApprovalDeliveryAttempt {
   readonly signingSecret: string
 }
 
+/** A call that just reached a decision, with the tenant it belongs to. */
+export interface SettledApproval {
+  readonly tenantId: TenantId
+  readonly approval: PendingApproval
+}
+
+/** An `approval.decided` notification due at one destination. */
+export interface ApprovalDecisionDeliveryJob {
+  readonly id: ApprovalDeliveryId
+  readonly approvalId: ApprovalId
+  readonly attempts: number
+  readonly createdAt: Date
+  readonly tenantId: TenantId
+  readonly groupId: ApprovalId
+  readonly profileId: ProfileId
+  readonly profileName: string
+  readonly alias: Alias
+  readonly tool: ToolName
+  readonly status: "approved" | "denied" | "expired"
+  readonly failed: boolean
+  readonly decidedBy: string | null
+  readonly decidedAt: Date | null
+  readonly url: string
+  readonly signingSecret: string
+}
+
 export interface AuditQuery {
   readonly limit?: PositiveInt
   readonly offset?: NonNegativeInt
@@ -303,6 +329,16 @@ export interface GatewayStore {
     readonly nextAttemptAt: Date | null
     readonly error: string | null
   }): Effect.Effect<void, GatewayStoreError>
+  claimDueApprovalDecisionDeliveries(
+    now: Date,
+    limit: number
+  ): Effect.Effect<ReadonlyArray<ApprovalDecisionDeliveryJob>, GatewayStoreError>
+  settleApprovalDecisionDelivery(input: {
+    readonly id: ApprovalDeliveryId
+    readonly status: "delivered" | "retrying" | "failed"
+    readonly nextAttemptAt: Date | null
+    readonly error: string | null
+  }): Effect.Effect<void, GatewayStoreError>
 
   addApiKey(input: {
     readonly id: ApiKeyId
@@ -408,7 +444,8 @@ export interface GatewayStore {
     readonly result: typeof Schema.Json.Type | null
     readonly error: string | null
   }): Effect.Effect<boolean, GatewayStoreError>
-  cancelApprovalsForProfile(profileId: ProfileId): Effect.Effect<number, GatewayStoreError>
+  /** Denies what a revoked profile left waiting, and answers what it denied. */
+  cancelApprovalsForProfile(profileId: ProfileId): Effect.Effect<ReadonlyArray<SettledApproval>, GatewayStoreError>
 
   recordAudit(input: RecordAuditInput): Effect.Effect<void, GatewayStoreError>
   listAudit(tenantId: TenantId, options: AuditQuery): Effect.Effect<ReadonlyArray<AuditRecord>, GatewayStoreError>
@@ -432,7 +469,8 @@ export interface GatewayStore {
     }>
   ): Effect.Effect<void, GatewayStoreError>
 
-  expireApprovals(now: Date): Effect.Effect<number, GatewayStoreError>
+  /** Expires every call still waiting at `now`, and answers what it expired. */
+  expireApprovals(now: Date): Effect.Effect<ReadonlyArray<SettledApproval>, GatewayStoreError>
 
   close(): Effect.Effect<void, GatewayStoreError>
 }
