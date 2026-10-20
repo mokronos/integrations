@@ -1,4 +1,4 @@
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Layer, Option } from "effect"
 import type { Duration } from "effect"
 import { HttpClient } from "effect/http"
 import { SqlClient } from "effect/sql"
@@ -16,6 +16,7 @@ import type { LocalAuthorizer, OAuthOperations } from "./oauth.ts"
 import { GatewayEvents, publishingIntegrations, publishingStore } from "./events.ts"
 import { notifyingDecisions } from "./approval-decisions.ts"
 import { ApprovalReviewer } from "./reviewer.ts"
+import type { InvokeDependencies } from "./invoke.ts"
 import type { OnApprovalDecided } from "./approval-decisions.ts"
 import { GatewayStoreError, GatewayStoreService } from "./store.ts"
 
@@ -159,6 +160,25 @@ const maintenanceLayer = (
       )
     })
   )
+
+/**
+ * What `invokeAsProfile` needs, read from the services `gatewayCoreLayer`
+ * provides, including the reviewer it was given. A host passes the rest of
+ * `InvokeDependencies` here rather than assembling the whole by hand.
+ */
+export const coreInvokeDependencies = (
+  options: Omit<InvokeDependencies, "store" | "integrations" | "oauth" | "reviewer"> = {}
+): Effect.Effect<InvokeDependencies, never, GatewayStoreService | Integrations | OAuthFlowSessions> =>
+  Effect.gen(function* () {
+    const reviewer = yield* Effect.serviceOption(ApprovalReviewer)
+    return {
+      ...options,
+      store: yield* GatewayStoreService,
+      integrations: yield* Integrations,
+      oauth: yield* OAuthFlowSessions,
+      ...whenPresent("reviewer", Option.getOrUndefined(reviewer))
+    }
+  })
 
 /**
  * Everything the gateway is, short of a transport: the store, the integration

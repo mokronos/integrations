@@ -304,8 +304,9 @@ uses these parts of the embedding API. All of them come from
   handler, arguments, and the call's tenant, profile, subject, approval and
   idempotency key. Profiles, decisions, approvals and audit treat them like
   any other tool.
-- **A reviewer.** The `ApprovalReviewer` service, passed as `reviewer` in
-  `InvokeDependencies`, to `gatewayCoreLayer`, or to the HTTP handler, is asked
+- **A reviewer.** The `ApprovalReviewer` service, passed to `gatewayCoreLayer`
+  (where `coreInvokeDependencies()` picks it up), as `reviewer` in
+  `InvokeDependencies`, or to the HTTP handler, is asked
   about every new call that asks: `approve` runs it at once, `deny` refuses it,
   both recorded as decided by `reviewer:<name>`; `escalate`, or a failing
   reviewer, leaves it to a human.
@@ -328,20 +329,18 @@ const core = gatewayCoreLayer({
   onApprovalDecided: (decided) => resumeAgentWaitingOn(decided.approvalId, decided.outcome)
 })
 
-const outcome =
-  yield *
-  invokeAsProfile(
-    { store, integrations, oauth },
-    {
-      profile,
-      origin,
-      alias,
-      tool,
-      arguments: input,
-      subject,
-      idempotencyKey: IdempotencyKey.make(`${runId}/${callId}`)
-    }
-  )
+// A program running on `core`; the dependencies carry the reviewer given above.
+const invoke = Effect.gen(function* () {
+  return yield* invokeAsProfile(yield* coreInvokeDependencies(), {
+    profile,
+    origin,
+    alias,
+    tool,
+    arguments: input,
+    subject,
+    idempotencyKey: IdempotencyKey.make(`${runId}/${callId}`)
+  })
+})
 ```
 
 ## Delegated access
