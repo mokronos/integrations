@@ -8,6 +8,13 @@
       "when": 1791119940431,
       "tag": "0000_platform_baseline",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1792499227062,
+      "tag": "0001_gateway_and_host_tables_catch_up",
+      "breakpoints": true
     }
   ]
 }

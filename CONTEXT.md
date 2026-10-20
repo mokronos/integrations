@@ -47,3 +47,15 @@ _Avoid_: Effective tools
 **Effective tool**:
 A catalogued tool a profile enables, with its decision.
 _Avoid_: Catalog tool
+
+**Host integration**:
+An integration whose tools the application embedding the gateway runs itself, registered by that application rather than discovered from a URL. Its tools are profile tools like any other.
+_Avoid_: Local tool, custom tool
+
+**Reviewer**:
+A program the embedding application provides that judges a call that asks before any human does: it approves, denies, or leaves the call to a human. Its decisions are recorded as `reviewer:<name>`.
+_Avoid_: Auto-approver, policy
+
+**Idempotency key**:
+The caller's name for one call, the same on every retry of it. A repeat with the key gets the first call's outcome or its pending approval instead of running again.
+_Avoid_: Request id, dedupe key

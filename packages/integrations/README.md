@@ -1,7 +1,7 @@
 # @integragents/host
 
-One catalog of MCP endpoints and OpenAPI documents, the connections that
-authorize them, and one way to call a tool. Wire contracts and the shared
+One catalog of MCP endpoints, OpenAPI documents and host integrations, the
+connections that authorize them, and one way to call a tool. Wire contracts and the shared
 vocabulary come from `@integragents/contracts`.
 
 ## Layout
@@ -41,3 +41,21 @@ host's master key, so a database dump is not a secret spill.
 Blobs (binary or oversized response bodies, and uploaded files) go to the
 `BlobStore` the host picks: `BlobStore.fileLayer` keeps them on disk,
 `BlobStore.sqlLayer` in the `blob` and `blob_chunk` tables of the same database.
+
+## Host integrations
+
+An embedding host can put tools it runs itself, such as running a command in a
+user's sandbox, into the same catalog. `Integrations.registerHostIntegration`
+takes a `HostIntegrationDefinition` (slug, name, tools with their input schema,
+hints and `handler`) and catalogs it on one org connection with no credential;
+registering again replaces the tools. Calling one goes to the `HostTools`
+service the host provides, through `integrationLayer({ hostTools })`, with the
+handler, the arguments and the `ToolCallContext` the caller passed to
+`execute`. Without an executor the call fails with `HostToolError`.
+
+## Tool hints
+
+Every tool carries `readOnly`, `destructive` and `idempotent`. MCP tools take
+them from their annotations with MCP's defaults (a tool that writes may destroy
+and is not safe to repeat); OpenAPI operations from their HTTP method; host
+tools from their definition.

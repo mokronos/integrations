@@ -263,6 +263,87 @@ copy of each. Pass `publicUrlOf` and serve `GET /v1/oauth/callback` yourself;
 without a public URL, OAuth needs the loopback authorizer that only the Bun
 host in `@integragents/gateway-api` provides.
 
+### Hosts that run agents durably
+
+An application that runs agents on a durable harness, re-running a tool call
+after a crash, pausing while an approval is pending, and resuming days later,
+uses these parts of the embedding API. All of them come from
+`@integragents/gateway-core` unless noted.
+
+- **Idempotency keys.** `invokeAsProfile(dependencies, { ..., idempotencyKey })`
+  (and `idempotencyKey` on `POST /v1/execute`, `i execute --idempotency-key`)
+  names one call across its retries. The gateway keeps its outcome per tenant,
+  profile and key: a repeat gets the stored outcome, or the same pending
+  approval and then its decision, and never runs again. A repeat that names
+  another tool or other arguments is refused as `invalid`. A keyed call gets
+  its own approval, so two deliberate identical calls stay distinct; calls
+  without a key are still deduplicated by their arguments. A key whose first
+  call never recorded an outcome answers `failed` rather than running again.
+- **Hearing about decisions.** `gatewayCoreLayer({ onApprovalDecided })` is told
+  of every call that stops waiting, however it was decided: approved in the
+  dashboard, over the API or in an MCP client, saved as always approve, denied,
+  expired, cancelled with its profile, decided by a reviewer, or settled after
+  an interrupted execution. It carries the tenant, profile, approval id, status,
+  who decided, and the outcome a caller would collect. Profiles' webhook
+  destinations get the same moment as a signed `approval.decided` event. The
+  event bus and `/v1/events` name the approval ids that changed. The hook runs
+  after the decision is stored, so a host that must not miss one also reads
+  `store.listApprovals` when it starts.
+- **Interrupted executions.** An approved call whose execution outlives
+  `executionLease` (an hour by default) without recording a result is settled
+  by maintenance as failed with an unknown outcome. It is never run again.
+- **Approval expiry and subjects per profile.** A profile's
+  `approvalExpiryMinutes` sets how long its calls wait; `null` waits until
+  someone decides. `subjects: "any" | SubjectId[]` limits whom it may act for;
+  an invocation naming anyone else is denied and audited.
+- **Host tools.** `registerHostIntegration({ store, integrations, definition })`
+  catalogs tools the host runs itself (name, description, input schema,
+  `readOnly`/`destructive`/`idempotent` hints, a `handler`), on one org
+  connection that holds no credential. `gatewayCoreLayer({ hostTools })` takes
+  the executor (`HostTools` from `@integragents/host`), which receives the
+  handler, arguments, and the call's tenant, profile, subject, approval and
+  idempotency key. Profiles, decisions, approvals and audit treat them like
+  any other tool.
+- **A reviewer.** The `ApprovalReviewer` service, passed as `reviewer` in
+  `InvokeDependencies`, to `gatewayCoreLayer`, or to the HTTP handler, is asked
+  about every new call that asks: `approve` runs it at once, `deny` refuses it,
+  both recorded as decided by `reviewer:<name>`; `escalate`, or a failing
+  reviewer, leaves it to a human.
+- **Editing before approving.** `approveApproval(dependencies, { tenantId, id,
+  decidedBy, arguments })` (and `POST /v1/approvals/:id/approve` with
+  `{ "arguments": … }`, `ii approve --arguments`) runs replacement arguments
+  once they pass the tool's input schema; the approval keeps both.
+- **Tool hints.** `listEffectiveTools` reports `readOnly`, `destructive` and
+  `idempotent` for each tool, from MCP annotations, the HTTP method of an
+  OpenAPI operation, or a host tool's definition. Read-only tools default to
+  running without asking.
+
+```ts
+const core = gatewayCoreLayer({
+  encryption,
+  blobs: BlobStore.sqlLayer,
+  migrate: false,
+  hostTools: { execute: (call) => runInSandbox(call.handler, call.arguments, call.context.subject) },
+  reviewer: { name: "policy", review: (request) => judge(request) },
+  onApprovalDecided: (decided) => resumeAgentWaitingOn(decided.approvalId, decided.outcome)
+})
+
+const outcome =
+  yield *
+  invokeAsProfile(
+    { store, integrations, oauth },
+    {
+      profile,
+      origin,
+      alias,
+      tool,
+      arguments: input,
+      subject,
+      idempotencyKey: IdempotencyKey.make(`${runId}/${callId}`)
+    }
+  )
+```
+
 ## Delegated access
 
 A tool can act for the person the agent is serving rather than for the
