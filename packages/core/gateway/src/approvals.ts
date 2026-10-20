@@ -177,7 +177,12 @@ export const approveApproval = Effect.fn("Approvals.approve")(function* (
       authorization,
       edited ?? frozen.arguments,
       { caller: frozen.caller, authorizedBy: null },
-      { approved: { approval, message }, approvalId: id, relay }
+      {
+        approved: { approval, message },
+        approvalId: id,
+        relay,
+        ...whenPresent("idempotencyKey", frozen.idempotencyKey)
+      }
     )
     yield* store.settleApproval({
       tenantId,

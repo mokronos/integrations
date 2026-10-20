@@ -1,7 +1,7 @@
 import { relayableInput, unrelayableInputMessage } from "@integragents/host"
 import type { Integrations, ToolCallContext } from "@integragents/host"
 import { connectionOwner, ToolAddress, whenPresent } from "@integragents/contracts"
-import type { InputAnswer, InvocationOutcome } from "@integragents/contracts"
+import type { IdempotencyKey, InputAnswer, InvocationOutcome } from "@integragents/contracts"
 import { Crypto, DateTime, Duration, Effect, Schema } from "effect"
 import type { ApprovalId, AuditApproval, Authorization, CallOrigin, ConnectionRef, ToolName } from "./domain.ts"
 import { sealRound } from "./input-rounds.ts"
@@ -50,6 +50,8 @@ export interface ExecutionRound {
   readonly approved?: RoundApproval
   /** The approval it ran under, which a host tool is told about. */
   readonly approvalId?: ApprovalId
+  /** The caller's key for the call, which a host tool is told about. */
+  readonly idempotencyKey?: IdempotencyKey
   /** Whether a round of input the tool asks for goes back to the caller. */
   readonly relay?: boolean
   readonly upstream?: InputAnswer
@@ -81,7 +83,8 @@ export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(funct
     tenantId: authorization.profile.tenantId,
     profileId: authorization.profile.id,
     ...whenPresent("subject", authorization.subject),
-    ...whenPresent("approvalId", round.approvalId)
+    ...whenPresent("approvalId", round.approvalId),
+    ...whenPresent("idempotencyKey", round.idempotencyKey)
   }
   const invocation = yield* Effect.result(
     dependencies.integrations.execute(address, argumentsValue, round.upstream, context)

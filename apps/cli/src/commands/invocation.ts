@@ -2,7 +2,14 @@ import type { GatewayClient } from "@integragents/client"
 import type { HttpClient } from "effect/http"
 import { Effect, Option, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/cli"
-import { Alias, InvocationOutcome, SubjectId, whenPresentMap } from "@integragents/contracts"
+import {
+  Alias,
+  IdempotencyKey,
+  InvocationOutcome,
+  SubjectId,
+  whenPresent,
+  whenPresentMap
+} from "@integragents/contracts"
 import type { IntegrationsCliError } from "../connection.ts"
 import { cliError, connectToGateway, describeError } from "../connection.ts"
 import { jsonOutput, writeStdoutLine } from "../output.ts"
@@ -77,6 +84,15 @@ const subjectFlag = () =>
     Flag.withDescription("The user this call acts for; delegated tools require it")
   )
 
+const idempotencyKeyFlag = () =>
+  Flag.String("idempotency-key").pipe(
+    Flag.withSchema(IdempotencyKey),
+    Flag.optional,
+    Flag.withDescription(
+      "Your name for this call, the same on every retry: a retry gets the first call's outcome instead of running again"
+    )
+  )
+
 const reportOutcome = (outcome: InvocationOutcome, verbose: boolean): Effect.Effect<void, IntegrationsCliError> =>
   writeStdoutLine(jsonOutput(encodeOutcome(outcome), verbose)).pipe(
     Effect.flatMap(() =>
@@ -105,10 +121,11 @@ export const operatorExecuteCommand = Command.make(
     third: Argument.String("json").pipe(Argument.optional, Argument.withDescription("Arguments as JSON (default: {})")),
     file: Flag.String("file").pipe(Flag.optional, Flag.withDescription("Read the JSON input from a file")),
     subject: subjectFlag(),
+    idempotencyKey: idempotencyKeyFlag(),
     out: outFlag(),
     verbose: verboseFlag()
   },
-  ({ target, second, third, file, subject, out, verbose }) =>
+  ({ target, second, third, file, subject, idempotencyKey, out, verbose }) =>
     gatewayTask((client) =>
       Effect.gen(function* () {
         const payload = yield* resolveFileArguments(
@@ -120,7 +137,8 @@ export const operatorExecuteCommand = Command.make(
             alias: Alias.make(target),
             tool: second,
             arguments: payload,
-            ...whenPresentMap("subject", Option.getOrUndefined(subject), SubjectId.make)
+            ...whenPresentMap("subject", Option.getOrUndefined(subject), SubjectId.make),
+            ...whenPresent("idempotencyKey", Option.getOrUndefined(idempotencyKey))
           }
         })
         return yield* settleOutcome(client, outcome, Option.getOrUndefined(out))
@@ -136,10 +154,11 @@ export const clientExecuteCommand = Command.make(
     json: Argument.String("json").pipe(Argument.optional, Argument.withDescription("Arguments as JSON (default: {})")),
     file: Flag.String("file").pipe(Flag.optional, Flag.withDescription("Read the JSON input from a file")),
     subject: subjectFlag(),
+    idempotencyKey: idempotencyKeyFlag(),
     out: outFlag(),
     verbose: verboseFlag()
   },
-  ({ alias, tool, json, file, subject, out, verbose }) =>
+  ({ alias, tool, json, file, subject, idempotencyKey, out, verbose }) =>
     gatewayTask((client) =>
       Effect.gen(function* () {
         const arguments_ = yield* resolveFileArguments(
@@ -151,7 +170,8 @@ export const clientExecuteCommand = Command.make(
             alias: Alias.make(alias),
             tool,
             arguments: arguments_,
-            ...whenPresentMap("subject", Option.getOrUndefined(subject), SubjectId.make)
+            ...whenPresentMap("subject", Option.getOrUndefined(subject), SubjectId.make),
+            ...whenPresent("idempotencyKey", Option.getOrUndefined(idempotencyKey))
           }
         })
         return yield* settleOutcome(client, outcome, Option.getOrUndefined(out))

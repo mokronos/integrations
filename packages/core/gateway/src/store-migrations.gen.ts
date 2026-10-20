@@ -247,5 +247,14 @@ export const gatewayMigrations: ReadonlyArray<Migration> = [
     statements: [
       "ALTER TABLE `gateway_pending_approval` ADD `edited_arguments` text;"
     ]
+  },
+  {
+    id: 21,
+    name: "0021_remember_keyed_invocations",
+    statements: [
+      "CREATE TABLE `gateway_invocation_key` (\n\t`tenant_id` text NOT NULL,\n\t`profile_id` text NOT NULL,\n\t`idempotency_key` text NOT NULL,\n\t`fingerprint` text NOT NULL,\n\t`alias` text NOT NULL,\n\t`tool` text NOT NULL,\n\t`status` text NOT NULL,\n\t`approval_id` text,\n\t`outcome` text,\n\t`created_at` integer NOT NULL,\n\t`settled_at` integer,\n\tPRIMARY KEY(`tenant_id`, `profile_id`, `idempotency_key`),\n\tFOREIGN KEY (`tenant_id`) REFERENCES `gateway_tenant`(`id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`profile_id`) REFERENCES `gateway_profile`(`id`) ON UPDATE no action ON DELETE cascade\n);",
+      "CREATE INDEX `gateway_invocation_key_sweep` ON `gateway_invocation_key` (`status`,`created_at`);",
+      "ALTER TABLE `gateway_pending_approval` ADD `idempotency_key` text;"
+    ]
   }
 ]

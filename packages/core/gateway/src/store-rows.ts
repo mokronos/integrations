@@ -13,8 +13,10 @@ import {
   ApprovalId,
   ApprovalRuleId,
   ArgumentPattern,
+  Alias,
   AuditApproval,
   AuditId,
+  IdempotencyKey,
   ConnectionName,
   IntegrationSlug,
   ProfileCapability,
@@ -48,7 +50,8 @@ import type {
   ToolSnapshot
 } from "./domain.ts"
 import { PasswordHash } from "./passwords.ts"
-import type { IdentityOAuthStateRecord, LoginRecord } from "./store-contract.ts"
+import { RememberedOutcome } from "./store-contract.ts"
+import type { IdentityOAuthStateRecord, InvocationKeyRecord, LoginRecord } from "./store-contract.ts"
 import { OAuthSecretHash, OAuthTokenKind } from "./mcp-oauth.ts"
 import type {
   OAuthApplication,
@@ -254,6 +257,7 @@ const ApprovalRow = Schema.Struct({
   subject: NullableString,
   arguments: Schema.String,
   edited_arguments: NullableString,
+  idempotency_key: NullableString,
   status: ApprovalStatus,
   created_at: Schema.Number,
   expires_at: Schema.Number,
@@ -354,6 +358,7 @@ const approvalColumns = [
   "subject",
   "arguments",
   "edited_arguments",
+  "idempotency_key",
   "status",
   "created_at",
   "expires_at",
@@ -842,6 +847,7 @@ export const toApproval = (row: Row, open: (text: string) => string = identity):
     subject: decoded.subject === null ? null : SubjectId.make(decoded.subject),
     arguments: parseJsonColumn(open(decoded.arguments)),
     editedArguments: decoded.edited_arguments === null ? null : parseJsonColumn(open(decoded.edited_arguments)),
+    idempotencyKey: decoded.idempotency_key === null ? null : IdempotencyKey.make(decoded.idempotency_key),
     status: decoded.status,
     createdAt: date(decoded.created_at),
     expiresAt: expiryDate(decoded.expires_at),
@@ -854,6 +860,40 @@ export const toApproval = (row: Row, open: (text: string) => string = identity):
 }
 
 const identity = (text: string): string => text
+
+const InvocationKeyRow = Schema.Struct({
+  idempotency_key: Schema.String,
+  fingerprint: Schema.String,
+  alias: Schema.String,
+  tool: Schema.String,
+  status: Schema.Literals(["running", "pending", "settled"]),
+  approval_id: NullableString,
+  outcome: NullableString,
+  created_at: Schema.Number
+})
+const decodeInvocationKeyRow = rowDecoder("gateway_invocation_key", InvocationKeyRow)
+const decodeRememberedOutcome = jsonDecoder("gateway_invocation_key.outcome", Schema.fromJsonString(RememberedOutcome))
+export const encodeRememberedOutcome = Schema.encodeSync(Schema.fromJsonString(RememberedOutcome))
+
+export const toInvocationKeyRecord = (
+  row: Row,
+  fingerprint: string,
+  open: (text: string) => string
+): InvocationKeyRecord => {
+  const decoded = decodeInvocationKeyRow(
+    pick(row, ["idempotency_key", "fingerprint", "alias", "tool", "status", "approval_id", "outcome", "created_at"])
+  )
+  return {
+    key: IdempotencyKey.make(decoded.idempotency_key),
+    alias: Alias.make(decoded.alias),
+    tool: ToolName.make(decoded.tool),
+    sameCall: decoded.fingerprint === fingerprint,
+    status: decoded.status,
+    approvalId: decoded.approval_id === null ? null : ApprovalId.make(decoded.approval_id),
+    outcome: decoded.outcome === null ? null : decodeRememberedOutcome(open(decoded.outcome)),
+    createdAt: date(decoded.created_at)
+  }
+}
 
 export const toAuditRecord = (row: Row): AuditRecord => {
   const decoded = decodeAuditRow(pick(row, auditColumns))

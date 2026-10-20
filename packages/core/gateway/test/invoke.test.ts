@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Clock, Effect, Layer } from "effect"
 import { TestClock } from "effect/testing"
-import { whenPresent } from "@integragents/contracts"
+import { IdempotencyKey, whenPresent, whenPresentMap } from "@integragents/contracts"
 import {
   HostTools,
   Integrations,
@@ -121,7 +121,10 @@ const harness = Effect.fnUntraced(function* (
   })
   const dependencies = { store, integrations, retentionDays: 30 }
   const notified: Array<ApprovalId> = []
-  const invoke = (command: string, extra: { readonly subject?: typeof alice; readonly profile?: Profile } = {}) =>
+  const invoke = (
+    command: string,
+    extra: { readonly subject?: typeof alice; readonly profile?: Profile; readonly key?: string } = {}
+  ) =>
     invokeAsProfile(
       {
         ...dependencies,
@@ -137,7 +140,8 @@ const harness = Effect.fnUntraced(function* (
         alias,
         tool: runCommand,
         arguments: { command },
-        ...whenPresent("subject", extra.subject)
+        ...whenPresent("subject", extra.subject),
+        ...whenPresentMap("idempotencyKey", extra.key, IdempotencyKey.make)
       }
     )
   return { store, integrations, profile, dependencies, invoke, decided, notified }
@@ -556,6 +560,86 @@ describe("a reviewer the host provides", () => {
           `approval ${escalated.status === "pending" ? escalated.approvalId : ""}; reviewer:policy-bot left it to a human: touches production`
         ]
       ])
+    }).pipe(Effect.provide(hostLayer(seen)))
+  })
+})
+
+describe("an idempotency key", () => {
+  it.effect("answers a repeat with what the first call got, without running it again", () => {
+    const seen: Array<HostToolInvocation> = []
+    return Effect.gen(function* () {
+      const { invoke, store } = yield* harness()
+
+      const first = yield* invoke("date", { key: "turn-7/call-1" })
+      const repeat = yield* invoke("date", { key: "turn-7/call-1" })
+      const other = yield* invoke("date", { key: "turn-7/call-2" })
+      const reused = yield* invoke("rm -rf /", { key: "turn-7/call-1" })
+
+      expect(repeat).toEqual(first)
+      expect(other.status).toBe("succeeded")
+      expect(seen.map((call) => call.context.idempotencyKey)).toEqual(["turn-7/call-1", "turn-7/call-2"])
+      expect(reused.status === "invalid" ? reused.message : reused.status).toContain("turn-7/call-1")
+      expect((yield* auditOf(store)).filter(([outcome]) => outcome === "succeeded")).toHaveLength(2)
+    }).pipe(Effect.provide(hostLayer(seen)))
+  })
+
+  it.effect("keeps two deliberate identical calls apart and answers each repeat from its own approval", () => {
+    const seen: Array<HostToolInvocation> = []
+    return Effect.gen(function* () {
+      const { invoke, dependencies, store } = yield* harness({ decision: "require_approval" })
+
+      const first = yield* invoke("deploy", { key: "a" })
+      const second = yield* invoke("deploy", { key: "b" })
+      const unkeyed = yield* invoke("deploy")
+      const waiting = yield* invoke("deploy", { key: "a" })
+      if (first.status !== "pending" || second.status !== "pending" || unkeyed.status !== "pending") {
+        return yield* Effect.die("expected pending")
+      }
+      expect(new Set([first.approvalId, second.approvalId, unkeyed.approvalId]).size).toBe(3)
+      expect(waiting).toEqual(first)
+      expect((yield* store.getApproval(defaultTenantId, first.approvalId))?.idempotencyKey).toBe("a")
+
+      yield* approveApproval(dependencies, { tenantId: defaultTenantId, id: first.approvalId, decidedBy: "ann" })
+      yield* denyApproval(store, { tenantId: defaultTenantId, id: second.approvalId, decidedBy: "ann" })
+      const collected = yield* invoke("deploy", { key: "a" })
+      const again = yield* invoke("deploy", { key: "a" })
+      const refused = yield* invoke("deploy", { key: "b" })
+      const unkeyedAgain = yield* invoke("deploy")
+
+      expect(collected).toEqual({ status: "succeeded", result: { exitCode: 0, ran: { command: "deploy" } } })
+      expect(again).toEqual(collected)
+      expect(refused.status).toBe("denied")
+      expect(unkeyedAgain).toEqual(unkeyed)
+      expect(seen.map((call) => [call.context.approvalId, call.context.idempotencyKey])).toEqual([
+        [first.approvalId, "a"]
+      ])
+      expect(
+        (yield* auditOf(store)).filter(([, , message]) => String(message).startsWith("result of approval"))
+      ).toHaveLength(1)
+    }).pipe(Effect.provide(hostLayer(seen)))
+  })
+
+  it.effect("does not run a call again whose first run was interrupted, and maintenance settles it", () => {
+    const seen: Array<HostToolInvocation> = []
+    return Effect.gen(function* () {
+      const { invoke, store, profile } = yield* harness()
+      // A gateway that stopped mid-call leaves the key claimed with no outcome.
+      yield* store.claimInvocationKey({
+        tenantId: defaultTenantId,
+        profileId: profile.id,
+        key: IdempotencyKey.make("crashed"),
+        call: { alias, tool: runCommand, subject: null, arguments: { command: "migrate" } }
+      })
+
+      const retried = yield* invoke("migrate", { key: "crashed" })
+      yield* TestClock.adjust("2 hours")
+      const report = yield* runMaintenance(store, unusedBlobs)
+      const afterSweep = yield* invoke("migrate", { key: "crashed" })
+
+      expect(retried.status === "failed" ? retried.message : retried.status).toContain("not run again")
+      expect(report.interruptedInvocations).toBe(1)
+      expect(afterSweep.status === "failed" ? afterSweep.message : afterSweep.status).toContain("outcome unknown")
+      expect(seen).toEqual([])
     }).pipe(Effect.provide(hostLayer(seen)))
   })
 })
