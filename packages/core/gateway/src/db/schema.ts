@@ -301,6 +301,7 @@ export const gatewayPendingApproval = sqliteTable(
     groupId: text("group_id"),
     status: text("status").notNull(),
     createdAt: createdAt(),
+    /** A call that waits until someone decides stores `neverExpires`, so expiry sweeps never reach it. */
     expiresAt: integer("expires_at").notNull(),
     decidedAt: integer("decided_at"),
     decidedBy: text("decided_by"),

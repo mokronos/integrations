@@ -175,18 +175,20 @@ function ApprovalCard({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-muted-foreground text-xs">asked {when(approval.createdAt)}</span>
-          <span
-            className={
-              expired && approval.status === "pending" ? "text-destructive text-xs" : "text-muted-foreground text-xs"
-            }
-          >
-            ·{" "}
-            {approval.expiresAt === null
-              ? "waits until decided"
-              : approval.status === "pending"
-                ? until(approval.expiresAt)
-                : when(approval.expiresAt)}
-          </span>
+          {approval.status === "pending" || approval.expiresAt !== null ? (
+            <span
+              className={
+                expired && approval.status === "pending" ? "text-destructive text-xs" : "text-muted-foreground text-xs"
+              }
+            >
+              ·{" "}
+              {approval.expiresAt === null
+                ? "waits until decided"
+                : approval.status === "pending"
+                  ? until(approval.expiresAt)
+                  : when(approval.expiresAt)}
+            </span>
+          ) : null}
           <Origin profileId={approval.profileId} caller={approval.caller} />
         </div>
 

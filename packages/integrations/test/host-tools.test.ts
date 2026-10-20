@@ -190,3 +190,21 @@ describe("host integrations", () => {
     }).pipe(Effect.provide(catalog))
   )
 })
+
+describe("removing a host integration's connection", () => {
+  it.effect("takes its tools with it, so none of them can run any more", () => {
+    const seen: Array<HostToolInvocation> = []
+    return Effect.gen(function* () {
+      const host = yield* Integrations
+      const [tool] = yield* host.registerHostIntegration(definition)
+      if (tool === undefined) return yield* Effect.die("no tool registered")
+
+      yield* host.removeConnection({ owner: "org", integration: sandbox, name: ConnectionName.make("default") })
+      const ran = yield* Effect.result(host.execute(tool.address, { command: "ls" }))
+
+      expect(yield* host.toolSummaries({ integration: sandbox })).toEqual([])
+      expect(Result.isFailure(ran) ? ran.failure._tag : "ran").toBe("ToolNotFoundError")
+      expect(seen).toEqual([])
+    }).pipe(Effect.provide(withExecutor(seen)))
+  })
+})

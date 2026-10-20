@@ -377,6 +377,7 @@ export class CatalogStore extends Context.Service<
 
       const removeIntegration = Effect.fn("CatalogStore.removeIntegration")((slug: IntegrationSlug) =>
         database.batch([
+          { sql: "DELETE FROM tool WHERE integration = ?", params: [slug] },
           { sql: "DELETE FROM connection WHERE integration = ?", params: [slug] },
           { sql: "DELETE FROM oauth_client WHERE integration = ?", params: [slug] },
           { sql: "DELETE FROM integration WHERE slug = ?", params: [slug] }
@@ -439,16 +440,23 @@ export class CatalogStore extends Context.Service<
         })
       )
 
+      /** A connection's tools leave with it, so none of them can be found or run any more. */
       const removeConnection = Effect.fn("CatalogStore.removeConnection")(
         (reference: {
           readonly owner: ConnectionOwner
           readonly integration: IntegrationSlug
           readonly name: ConnectionName
         }) =>
-          write({
-            sql: "DELETE FROM connection WHERE owner = ? AND integration = ? AND name = ?",
-            params: [reference.owner, reference.integration, reference.name]
-          })
+          database.batch([
+            {
+              sql: "DELETE FROM tool WHERE owner = ? AND integration = ? AND connection = ?",
+              params: [reference.owner, reference.integration, reference.name]
+            },
+            {
+              sql: "DELETE FROM connection WHERE owner = ? AND integration = ? AND name = ?",
+              params: [reference.owner, reference.integration, reference.name]
+            }
+          ])
       )
 
       const connectionKey = (reference: ConnectionReference): Array<SqlValue> => [

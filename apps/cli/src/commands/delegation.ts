@@ -117,6 +117,10 @@ export const profileCommand = Command.make(
       Flag.withDescription("Allow this profile to administer profiles, keys, approvals, and audit")
     ),
     approvalExpiry: Flag.String("approval-expiry").pipe(
+      Flag.filter(
+        (value) => value === "never" || /^[1-9][0-9]*$/.test(value),
+        (value) => `--approval-expiry takes a whole number of minutes or never, not ${value}`
+      ),
       Flag.optional,
       Flag.withDescription("Minutes a call waits for a decision before it expires, or never (default 1440)")
     ),

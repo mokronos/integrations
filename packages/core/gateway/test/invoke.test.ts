@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Clock, Effect, Layer } from "effect"
+import { Clock, Effect, Fiber, Layer } from "effect"
 import { TestClock } from "effect/testing"
 import { IdempotencyKey, whenPresent, whenPresentMap } from "@integragents/contracts"
 import {
@@ -531,6 +531,23 @@ describe("a reviewer the host provides", () => {
       expect((yield* auditOf(store)).filter(([outcome]) => outcome === "denied")).toEqual([
         ["denied", null, expect.stringContaining("denied by reviewer:policy-bot: wipes the disk")]
       ])
+    }).pipe(Effect.provide(hostLayer(seen)))
+  })
+
+  it.effect("leaves a call to a human when the reviewer does not answer in time", () => {
+    const seen: Array<HostToolInvocation> = []
+    return Effect.gen(function* () {
+      const { invoke, decided, notified } = yield* harness({
+        decision: "require_approval",
+        reviewer: { name: "stuck", timeout: "10 seconds", review: () => Effect.never }
+      })
+
+      const running = yield* Effect.forkChild(invoke("deploy"))
+      yield* TestClock.adjust("10 seconds")
+      const outcome = yield* Fiber.join(running)
+
+      expect(outcome.status).toBe("pending")
+      expect([notified.length, decided, seen]).toEqual([1, [], []])
     }).pipe(Effect.provide(hostLayer(seen)))
   })
 
