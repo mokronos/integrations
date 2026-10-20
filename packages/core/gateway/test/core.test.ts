@@ -7,6 +7,7 @@ import {
   aliasForConnection,
   approveApproval,
   ConnectionName,
+  coreInvokeDependencies,
   defaultTenantId,
   gatewayCoreLayer,
   GatewayStoreService,
@@ -28,7 +29,7 @@ const runCommand = ToolName.make("run_command")
 const connection = { owner: "org" as const, integration: sandbox, name: ConnectionName.make("default") }
 
 /** The gateway core as an embedding host opens it: its own database, its executor, its hooks. */
-const embedded = (options: Pick<GatewayCoreOptions, "hostTools" | "onApprovalDecided">) =>
+const embedded = (options: Pick<GatewayCoreOptions, "hostTools" | "onApprovalDecided" | "reviewer">) =>
   Layer.unwrap(
     Effect.map(temporaryDirectory("gateway-core-"), (directory) =>
       gatewayCoreLayer({
@@ -102,6 +103,54 @@ describe("an embedding host", () => {
             Effect.sync(() => {
               decided.push(event)
             })
+        })
+      )
+    )
+  })
+
+  it.effect("has the reviewer it gave the core layer judge the calls it makes", () => {
+    const seen: Array<HostToolInvocation> = []
+    return Effect.gen(function* () {
+      const store = yield* GatewayStoreService
+      const integrations = yield* Integrations
+      yield* registerHostIntegration({
+        store,
+        integrations,
+        definition: {
+          slug: sandbox,
+          name: "Sandbox",
+          tools: [{ name: runCommand, description: "Run a shell command" }]
+        }
+      })
+      const profile = yield* store.createProfile({
+        id: yield* newProfileId,
+        tenantId: defaultTenantId,
+        name: "vm-agent",
+        capabilities: [],
+        tools: [{ connection, tool: runCommand, decision: "require_approval" }]
+      })
+
+      const outcome = yield* invokeAsProfile(yield* coreInvokeDependencies(), {
+        profile,
+        origin: unattributedOrigin,
+        alias: aliasForConnection(connection),
+        tool: runCommand,
+        arguments: { command: "shutdown now" }
+      })
+
+      expect(outcome.status === "denied" ? outcome.reason : outcome.status).toContain("reviewer:guard")
+      expect(seen).toEqual([])
+    }).pipe(
+      Effect.provide(
+        embedded({
+          hostTools: {
+            execute: (invocation) =>
+              Effect.sync((): Json => {
+                seen.push(invocation)
+                return null
+              })
+          },
+          reviewer: { name: "guard", review: () => Effect.succeed({ verdict: "deny", reason: "no shutdowns" }) }
         })
       )
     )
