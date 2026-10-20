@@ -13,7 +13,7 @@ import {
 } from "./domain.ts"
 import type { AuditApproval, Authorized, ConnectionRef, PendingApproval } from "./domain.ts"
 import { invalidArguments } from "./arguments.ts"
-import { boundToolAddress, executeAuthorized } from "./invoke.ts"
+import { boundToolAddress, executeAuthorized } from "./execute.ts"
 import { newApprovalRuleId } from "./keys.ts"
 import type { GatewayStore, GatewayStoreError } from "./store.ts"
 
@@ -97,10 +97,20 @@ const pendingApproval = Effect.fn("Approvals.pending")(function* (
 
 export const denyApproval = Effect.fn("Approvals.deny")(function* (
   store: GatewayStore,
-  input: typeof ApprovalDecision.Type
+  input: typeof ApprovalDecision.Type & {
+    /** Why, told to the caller and kept on the approval. */
+    readonly reason?: string
+  }
 ) {
   yield* pendingApproval(store, input)
-  const settled = yield* store.settleApproval({ ...input, status: "denied", result: null, error: null })
+  const settled = yield* store.settleApproval({
+    tenantId: input.tenantId,
+    id: input.id,
+    decidedBy: input.decidedBy,
+    status: "denied",
+    result: null,
+    error: input.reason ?? null
+  })
   if (!settled) return yield* new ApprovalConflict({ message: `Approval ${input.id} has already been decided` })
   const approval = yield* store.getApproval(input.tenantId, input.id)
   if (approval === undefined) return yield* new ApprovalNotFound({ id: input.id })
@@ -116,6 +126,8 @@ export const approveApproval = Effect.fn("Approvals.approve")(function* (
   input: typeof ApprovalDecision.Type & {
     /** Runs instead of the frozen arguments, once they pass the tool's input schema. Both are kept. */
     readonly arguments?: Json
+    /** Why, recorded with the decision in the audit trail. */
+    readonly reason?: string
   },
   approval: Extract<AuditApproval, "approved" | "approved_always"> = "approved",
   relay = false
@@ -156,7 +168,10 @@ export const approveApproval = Effect.fn("Approvals.approve")(function* (
     })
     if (!claimed) return yield* new ApprovalConflict({ message: `Approval ${id} was decided or expired` })
     const message =
-      decidedBy === null ? null : `approved by ${decidedBy}${edited === undefined ? "" : " with edited arguments"}`
+      decidedBy === null
+        ? null
+        : `approved by ${decidedBy}${edited === undefined ? "" : " with edited arguments"}` +
+          (input.reason === undefined ? "" : `: ${input.reason}`)
     const outcome = yield* executeAuthorized(
       dependencies,
       authorization,

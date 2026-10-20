@@ -16,6 +16,7 @@ import type { ApprovalId, Json, Profile, ProfileId, SubjectId, TenantId } from "
 import { AuthTemplateSlug, Integrations, provisionIntegration, validateIntegrationNode } from "@integragents/host"
 import type { IntegrationServices } from "@integragents/host"
 import {
+  ApprovalReviewer,
   boundToolAddress,
   deliverDueApprovalNotifications,
   forgetConnection,
@@ -61,10 +62,12 @@ export const invokeDependencies: Effect.Effect<
   const integrations = yield* Integrations
   const oauth = yield* OAuthFlowSessions
   const config = yield* GatewayConfig
+  const reviewer = yield* Effect.serviceOption(ApprovalReviewer)
   return {
     store,
     integrations,
     oauth,
+    ...whenPresent("reviewer", Option.getOrUndefined(reviewer)),
     argumentRetentionDays: config.retentionDays,
     approvalUrlOf: (approvalId) => {
       const origin = config.dashboardUrl?.()

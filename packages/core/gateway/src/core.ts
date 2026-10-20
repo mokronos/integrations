@@ -15,6 +15,7 @@ import type { OAuthSessions } from "./oauth-sessions.ts"
 import type { LocalAuthorizer, OAuthOperations } from "./oauth.ts"
 import { GatewayEvents, publishingIntegrations, publishingStore } from "./events.ts"
 import { notifyingDecisions } from "./approval-decisions.ts"
+import { ApprovalReviewer } from "./reviewer.ts"
 import type { OnApprovalDecided } from "./approval-decisions.ts"
 import { GatewayStoreError, GatewayStoreService } from "./store.ts"
 
@@ -42,6 +43,11 @@ export interface GatewayCoreOptions {
   readonly executionLease?: Duration.Input
   /** Told of every decided call, however it was decided. See `OnApprovalDecided`. */
   readonly onApprovalDecided?: OnApprovalDecided
+  /**
+   * Judges new calls that ask before a human is notified; provided as the
+   * `ApprovalReviewer` service, which the HTTP and MCP surfaces consult.
+   */
+  readonly reviewer?: ApprovalReviewer["Service"]
 }
 
 const oauthSessionsLayer = (
@@ -182,6 +188,7 @@ export const gatewayCoreLayer = (
   return Layer.mergeAll(
     oauthSessionsLayer(options),
     reconcileOnStart,
-    options.maintenance === false ? Layer.empty : maintenanceLayer(options)
+    options.maintenance === false ? Layer.empty : maintenanceLayer(options),
+    options.reviewer === undefined ? Layer.empty : Layer.succeed(ApprovalReviewer, options.reviewer)
   ).pipe(Layer.provideMerge(base))
 }

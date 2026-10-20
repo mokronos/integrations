@@ -30,6 +30,10 @@ import {
 } from "../src/index.ts"
 import type {
   ApprovalDecided,
+  ApprovalId,
+  ApprovalReviewer,
+  ApprovalReviewRequest,
+  ReviewVerdict,
   ConnectionRef,
   CreateProfileInput,
   GatewayStore,
@@ -93,7 +97,11 @@ const unusedBlobs: BlobStore["Service"] = {
 }
 
 const harness = Effect.fnUntraced(function* (
-  options: { readonly decision?: ToolDecision; readonly profile?: Partial<CreateProfileInput> } = {}
+  options: {
+    readonly decision?: ToolDecision
+    readonly profile?: Partial<CreateProfileInput>
+    readonly reviewer?: ApprovalReviewer["Service"]
+  } = {}
 ) {
   const decided: Array<ApprovalDecided> = []
   const store = notifyingDecisions(yield* gatewayStore("gateway-invoke-"), (event) =>
@@ -112,16 +120,27 @@ const harness = Effect.fnUntraced(function* (
     ...options.profile
   })
   const dependencies = { store, integrations, retentionDays: 30 }
+  const notified: Array<ApprovalId> = []
   const invoke = (command: string, extra: { readonly subject?: typeof alice; readonly profile?: Profile } = {}) =>
-    invokeAsProfile(dependencies, {
-      profile: extra.profile ?? profile,
-      origin: unattributedOrigin,
-      alias,
-      tool: runCommand,
-      arguments: { command },
-      ...whenPresent("subject", extra.subject)
-    })
-  return { store, integrations, profile, dependencies, invoke, decided }
+    invokeAsProfile(
+      {
+        ...dependencies,
+        ...whenPresent("reviewer", options.reviewer),
+        onApprovalCreated: (created) =>
+          Effect.sync(() => {
+            notified.push(created.approvalId)
+          })
+      },
+      {
+        profile: extra.profile ?? profile,
+        origin: unattributedOrigin,
+        alias,
+        tool: runCommand,
+        arguments: { command },
+        ...whenPresent("subject", extra.subject)
+      }
+    )
+  return { store, integrations, profile, dependencies, invoke, decided, notified }
 })
 
 /** Records written in the same millisecond have no order between them, so only what was recorded is compared. */
@@ -448,6 +467,95 @@ describe("approving with edited arguments", () => {
       ])
       const collected = yield* invoke("rm -rf /")
       expect(collected.status).toBe("succeeded")
+    }).pipe(Effect.provide(hostLayer(seen)))
+  })
+})
+
+describe("a reviewer the host provides", () => {
+  const reviewing = (
+    verdict: (request: ApprovalReviewRequest) => ReviewVerdict,
+    asked: Array<ApprovalReviewRequest>
+  ) => ({
+    name: "policy-bot",
+    review: (request: ApprovalReviewRequest) =>
+      Effect.sync(() => {
+        asked.push(request)
+        return verdict(request)
+      })
+  })
+
+  it.effect("approves a call at once, so it runs without a human and is recorded as the reviewer's", () => {
+    const seen: Array<HostToolInvocation> = []
+    const asked: Array<ApprovalReviewRequest> = []
+    return Effect.gen(function* () {
+      const { store, invoke, decided, notified } = yield* harness({
+        decision: "require_approval",
+        reviewer: reviewing(() => ({ verdict: "approve", reason: "read-only listing" }), asked)
+      })
+
+      const outcome = yield* invoke("ls")
+
+      expect(outcome).toEqual({ status: "succeeded", result: { exitCode: 0, ran: { command: "ls" } } })
+      expect(seen).toHaveLength(1)
+      expect(notified).toEqual([])
+      expect(asked.map((request) => [request.tool.name, request.tool.destructive, request.approval.arguments])).toEqual(
+        [[runCommand, true, { command: "ls" }]]
+      )
+      expect(decided.map((event) => [event.status, event.decidedBy])).toEqual([["approved", "reviewer:policy-bot"]])
+      expect((yield* auditOf(store)).filter(([outcome]) => outcome === "succeeded")).toEqual([
+        ["succeeded", "approved", "approved by reviewer:policy-bot: read-only listing"]
+      ])
+    }).pipe(Effect.provide(hostLayer(seen)))
+  })
+
+  it.effect("denies a call, so it never runs and the caller hears why", () => {
+    const seen: Array<HostToolInvocation> = []
+    const asked: Array<ApprovalReviewRequest> = []
+    return Effect.gen(function* () {
+      const { store, invoke, decided, notified } = yield* harness({
+        decision: "require_approval",
+        reviewer: reviewing(() => ({ verdict: "deny", reason: "wipes the disk" }), asked)
+      })
+
+      const outcome = yield* invoke("rm -rf /")
+
+      expect(outcome.status === "denied" ? outcome.reason : outcome.status).toMatch(
+        /was denied by reviewer:policy-bot: wipes the disk$/
+      )
+      expect([seen, notified]).toEqual([[], []])
+      expect(decided.map((event) => [event.status, event.decidedBy])).toEqual([["denied", "reviewer:policy-bot"]])
+      expect((yield* auditOf(store)).filter(([outcome]) => outcome === "denied")).toEqual([
+        ["denied", null, expect.stringContaining("denied by reviewer:policy-bot: wipes the disk")]
+      ])
+    }).pipe(Effect.provide(hostLayer(seen)))
+  })
+
+  it.effect("leaves a call to a human when it escalates, or when it fails", () => {
+    const seen: Array<HostToolInvocation> = []
+    const asked: Array<ApprovalReviewRequest> = []
+    return Effect.gen(function* () {
+      const escalating = yield* harness({
+        decision: "require_approval",
+        reviewer: reviewing(() => ({ verdict: "escalate", reason: "touches production" }), asked)
+      })
+      const failing = yield* harness({
+        decision: "require_approval",
+        reviewer: { name: "flaky", review: () => Effect.die("the model is down") }
+      })
+
+      const escalated = yield* escalating.invoke("deploy")
+      const unreviewed = yield* failing.invoke("deploy")
+
+      expect([escalated.status, unreviewed.status]).toEqual(["pending", "pending"])
+      expect([escalating.notified.length, failing.notified.length]).toEqual([1, 1])
+      expect([escalating.decided, failing.decided, seen]).toEqual([[], [], []])
+      expect(yield* auditOf(escalating.store)).toEqual([
+        [
+          "pending",
+          null,
+          `approval ${escalated.status === "pending" ? escalated.approvalId : ""}; reviewer:policy-bot left it to a human: touches production`
+        ]
+      ])
     }).pipe(Effect.provide(hostLayer(seen)))
   })
 })

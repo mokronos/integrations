@@ -3,7 +3,7 @@ import { Clock, Effect, Fiber, Option, Schema } from "effect"
 import { FetchHttpClient } from "effect/http"
 import { delegationTemplateOf, ToolAddress, whenPresent } from "@integragents/contracts"
 import { makeGatewayEvents, publishingStore } from "@integragents/gateway-core"
-import type { OAuthSessions } from "@integragents/gateway-core"
+import type { ApprovalReviewer, OAuthSessions } from "@integragents/gateway-core"
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client"
 import type { Connection, ConnectionOwner, Tool } from "@integragents/contracts"
 import { InvocationError } from "@integragents/host"
@@ -183,6 +183,7 @@ const setup = Effect.fnUntraced(function* (
     readonly template?: boolean
     readonly oauthStart?: OAuthSessions["start"]
     readonly oauthIntegrations?: ReadonlyArray<string>
+    readonly reviewer?: ApprovalReviewer["Service"]
   } = {}
 ) {
   const sql = yield* openDatabase(yield* temporaryDirectory("gateway-http-"))
@@ -213,6 +214,7 @@ const setup = Effect.fnUntraced(function* (
     store,
     integrationServices: stub.integrationServices,
     retentionDays: 30,
+    ...whenPresent("reviewer", options.reviewer),
     oauth: {
       start: options.oauthStart ?? (() => Effect.die(new Error("not used"))),
       provideClient: () => Effect.sync((): undefined => undefined),
@@ -1294,6 +1296,37 @@ describe("gateway approval settlement", () => {
       expect(approved.status).toBe(403)
       expect(denied.status).toBe(403)
       expect(calls).toHaveLength(0)
+    }).pipe(Effect.provide(testServices))
+  )
+
+  it.effect("a reviewer the host provides decides a call on /v1/execute before a human is asked", () =>
+    Effect.gen(function* () {
+      const { call, calls } = yield* setup({
+        decision: "require_approval",
+        reviewer: {
+          name: "policy-bot",
+          review: (request) =>
+            Effect.succeed(
+              JSON.stringify(request.approval.arguments).includes("everyone")
+                ? { verdict: "deny" as const, reason: "no mass mail" }
+                : { verdict: "approve" as const }
+            )
+        }
+      })
+      const send = (to: string) =>
+        call("POST", "/v1/execute", {
+          body: { alias: "user___sebastian___gmail___work", tool: "sendEmail", arguments: { to } }
+        })
+
+      const denied = yield* send("everyone@b.c")
+      const approved = yield* send("a@b.c")
+
+      expect([denied.status, String(denied.body["reason"])]).toEqual([
+        403,
+        expect.stringContaining("denied by reviewer:policy-bot: no mass mail")
+      ])
+      expect([approved.status, approved.body["status"]]).toEqual([200, "succeeded"])
+      expect(calls.map((entry) => entry.input)).toEqual([{ to: "a@b.c" }])
     }).pipe(Effect.provide(testServices))
   )
 
