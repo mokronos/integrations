@@ -95,6 +95,8 @@ export const notifyingDecisions = (store: GatewayStore, onApprovalDecided: OnApp
           : Effect.void
       ),
     expireApprovals: (now) => Effect.tap(store.expireApprovals(now), tell),
+    settleInterruptedApprovals: (claimedBefore, error) =>
+      Effect.tap(store.settleInterruptedApprovals(claimedBefore, error), tell),
     cancelApprovalsForProfile: (profileId) => Effect.tap(store.cancelApprovalsForProfile(profileId), tell)
   }
 }

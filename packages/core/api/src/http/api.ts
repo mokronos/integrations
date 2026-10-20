@@ -255,6 +255,7 @@ const DriftReport = Schema.Struct({
 
 const MaintenanceReport = Schema.Struct({
   expiredApprovals: Schema.Number,
+  interruptedApprovals: Schema.Number,
   expiredAuditArguments: Schema.Number,
   deletedSessions: Schema.Number,
   expiredIdentityFlows: Schema.Number,

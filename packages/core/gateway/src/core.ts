@@ -1,7 +1,8 @@
 import { Context, Effect, Layer } from "effect"
+import type { Duration } from "effect"
 import { HttpClient } from "effect/http"
 import { SqlClient } from "effect/sql"
-import { whenPresent } from "@integragents/contracts"
+import { webCryptoLayer, whenPresent } from "@integragents/contracts"
 import { BlobStore, integrationLayer, Integrations } from "@integragents/host"
 import type { Egress, HostTools, IntegrationServices, StorageError } from "@integragents/host"
 import { deliverDueApprovalNotifications } from "./approval-delivery.ts"
@@ -37,6 +38,8 @@ export interface GatewayCoreOptions {
   readonly maintenance?: boolean
   /** Runs the tools of integrations the host registers with `registerHostIntegration`. */
   readonly hostTools?: HostTools["Service"]
+  /** How long an approved call may run before maintenance settles it as interrupted; an hour when absent. */
+  readonly executionLease?: Duration.Input
   /** Told of every decided call, however it was decided. See `OnApprovalDecided`. */
   readonly onApprovalDecided?: OnApprovalDecided
 }
@@ -133,18 +136,20 @@ const reconcileOnStart: Layer.Layer<never, GatewayStoreError | StorageError, Gat
   )
 
 const maintenanceLayer = (
-  publicUrlOf: (() => string | undefined) | undefined
+  options: Pick<GatewayCoreOptions, "publicUrlOf" | "executionLease">
 ): Layer.Layer<never, never, GatewayStoreService | BlobStore | HttpClient.HttpClient> =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const store = yield* GatewayStoreService
       const blobs = yield* BlobStore
+      const publicUrlOf = options.publicUrlOf
       yield* Effect.forkScoped(
         maintenanceLoop(store, blobs, {
+          ...whenPresent("executionLease", options.executionLease),
           afterSweep: Effect.suspend(() =>
             deliverDueApprovalNotifications({ store, ...whenPresent("dashboardUrl", publicUrlOf?.()) })
           )
-        })
+        }).pipe(Effect.provide(webCryptoLayer))
       )
     })
   )
@@ -177,6 +182,6 @@ export const gatewayCoreLayer = (
   return Layer.mergeAll(
     oauthSessionsLayer(options),
     reconcileOnStart,
-    options.maintenance === false ? Layer.empty : maintenanceLayer(options.publicUrlOf)
+    options.maintenance === false ? Layer.empty : maintenanceLayer(options)
   ).pipe(Layer.provideMerge(base))
 }

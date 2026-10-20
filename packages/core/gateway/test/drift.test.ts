@@ -255,6 +255,7 @@ describe("gateway maintenance", () => {
       const gateway = yield* store
       expect(yield* maintain(gateway)).toEqual({
         expiredApprovals: 0,
+        interruptedApprovals: 0,
         expiredAuditArguments: 0,
         deletedSessions: 0,
         expiredIdentityFlows: 0,

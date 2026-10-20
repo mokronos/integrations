@@ -10,7 +10,7 @@ import {
   stubbedLayer,
   unavailableHttpClientLayer
 } from "@integragents/host"
-import type { HostIntegrationDefinition, HostToolInvocation } from "@integragents/host"
+import type { BlobStore, HostIntegrationDefinition, HostToolInvocation } from "@integragents/host"
 import {
   aliasForConnection,
   approveApproval,
@@ -23,6 +23,7 @@ import {
   newProfileId,
   notifyingDecisions,
   registerHostIntegration,
+  runMaintenance,
   SubjectId,
   ToolName,
   unattributedOrigin
@@ -81,6 +82,15 @@ const hostLayer = (seen: Array<HostToolInvocation>) =>
     unavailableHttpClientLayer,
     testServices
   )
+
+const unusedBlobs: BlobStore["Service"] = {
+  write: () => Effect.die("unused"),
+  readAll: () => Effect.die("unused"),
+  readPrefix: () => Effect.die("unused"),
+  open: () => Effect.die("unused"),
+  discard: () => Effect.die("unused"),
+  expire: () => Effect.succeed(0)
+}
 
 const harness = Effect.fnUntraced(function* (
   options: { readonly decision?: ToolDecision; readonly profile?: Partial<CreateProfileInput> } = {}
@@ -375,6 +385,37 @@ describe("telling the host a call was decided", () => {
 
       expect(outcome.status).toBe("succeeded")
       expect((yield* store.getApproval(defaultTenantId, pending.approvalId))?.status).toBe("approved")
+    }).pipe(Effect.provide(hostLayer(seen)))
+  })
+})
+
+describe("a call whose execution was interrupted", () => {
+  it.effect("is settled as unknown once its claim outlives the lease, never run again, and reported", () => {
+    const seen: Array<HostToolInvocation> = []
+    return Effect.gen(function* () {
+      const { store, invoke, decided } = yield* harness({ decision: "require_approval" })
+      const crashed = yield* invoke("migrate the database")
+      const running = yield* invoke("long backup")
+      if (crashed.status !== "pending" || running.status !== "pending") return yield* Effect.die("expected pending")
+      // The process that claimed this one stopped before it recorded what happened.
+      yield* store.claimApproval({ tenantId: defaultTenantId, id: crashed.approvalId, decidedBy: "ann" })
+      yield* TestClock.adjust("50 minutes")
+      yield* store.claimApproval({ tenantId: defaultTenantId, id: running.approvalId, decidedBy: "ann" })
+      yield* TestClock.adjust("20 minutes")
+
+      const report = yield* runMaintenance(store, unusedBlobs, undefined, { executionLease: "1 hour" })
+
+      expect(report.interruptedApprovals).toBe(1)
+      const settled = yield* store.getApproval(defaultTenantId, crashed.approvalId)
+      expect([settled?.status, settled?.error]).toEqual(["approved", expect.stringContaining("outcome unknown")])
+      expect((yield* store.getApproval(defaultTenantId, running.approvalId))?.status).toBe("executing")
+      expect(decided.map((event) => [event.approvalId, event.outcome.status])).toEqual([[crashed.approvalId, "failed"]])
+      expect((yield* auditOf(store)).filter(([outcome]) => outcome === "failed")).toEqual([
+        ["failed", "approved", expect.stringContaining("outcome unknown")]
+      ])
+      const retried = yield* invoke("migrate the database")
+      expect(retried.status === "failed" ? retried.message : retried.status).toContain("outcome unknown")
+      expect(seen).toEqual([])
     }).pipe(Effect.provide(hostLayer(seen)))
   })
 })

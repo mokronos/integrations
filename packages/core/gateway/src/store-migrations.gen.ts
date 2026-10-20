@@ -233,5 +233,12 @@ export const gatewayMigrations: ReadonlyArray<Migration> = [
       "CREATE UNIQUE INDEX `gateway_approval_decision_delivery_once` ON `gateway_approval_decision_delivery` (`approval_id`,`destination_id`);",
       "CREATE INDEX `gateway_approval_decision_delivery_due` ON `gateway_approval_decision_delivery` (`status`,`next_attempt_at`);"
     ]
+  },
+  {
+    id: 19,
+    name: "0019_date_each_execution_claim",
+    statements: [
+      "ALTER TABLE `gateway_pending_approval` ADD `claimed_at` integer;"
+    ]
   }
 ]
