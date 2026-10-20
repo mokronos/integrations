@@ -1639,10 +1639,18 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function* 
           return (
             (yield* changed(
               `UPDATE gateway_pending_approval
-            SET status = 'executing', decided_at = ?, decided_by = ?, claimed_at = ?
+            SET status = 'executing', decided_at = ?, decided_by = ?, claimed_at = ?, edited_arguments = ?
           WHERE tenant_id = ? AND id = ? AND status = 'pending' AND expires_at > ?
           RETURNING id`,
-              [at, input.decidedBy, at, input.tenantId, input.id, at]
+              [
+                at,
+                input.decidedBy,
+                at,
+                input.editedArguments === undefined ? null : sealText(canonicalJson(input.editedArguments)),
+                input.tenantId,
+                input.id,
+                at
+              ]
             )) === 1
           )
         })

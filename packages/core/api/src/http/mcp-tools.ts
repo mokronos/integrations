@@ -185,7 +185,8 @@ const decideInClient = (
     ).pipe(
       Effect.catchTags({
         ApprovalNotFound: () => Effect.succeed(undefined),
-        ApprovalConflict: () => Effect.succeed(undefined)
+        ApprovalConflict: () => Effect.succeed(undefined),
+        ApprovalArgumentsInvalid: () => Effect.succeed(undefined)
       })
     )
   })

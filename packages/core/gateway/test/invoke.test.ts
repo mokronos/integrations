@@ -419,3 +419,35 @@ describe("a call whose execution was interrupted", () => {
     }).pipe(Effect.provide(hostLayer(seen)))
   })
 })
+
+describe("approving with edited arguments", () => {
+  it.effect("runs the edited call, checked against the tool's schema, and keeps both versions", () => {
+    const seen: Array<HostToolInvocation> = []
+    return Effect.gen(function* () {
+      const { store, dependencies, invoke, decided } = yield* harness({ decision: "require_approval" })
+      const pending = yield* invoke("rm -rf /")
+      if (pending.status !== "pending") return yield* Effect.die("expected pending")
+      const decision = { tenantId: defaultTenantId, id: pending.approvalId, decidedBy: "ann" }
+
+      const refused = yield* Effect.flip(approveApproval(dependencies, { ...decision, arguments: { command: 42 } }))
+      const { approval, outcome } = yield* approveApproval(dependencies, {
+        ...decision,
+        arguments: { command: "rm -rf ./build" }
+      })
+
+      expect(refused._tag).toBe("ApprovalArgumentsInvalid")
+      expect(seen.map((call) => call.arguments)).toEqual([{ command: "rm -rf ./build" }])
+      expect(outcome).toEqual({ status: "succeeded", result: { exitCode: 0, ran: { command: "rm -rf ./build" } } })
+      expect([approval.arguments, approval.editedArguments]).toEqual([
+        { command: "rm -rf /" },
+        { command: "rm -rf ./build" }
+      ])
+      expect(decided.map((event) => event.approval.editedArguments)).toEqual([{ command: "rm -rf ./build" }])
+      expect((yield* auditOf(store)).filter(([outcome]) => outcome === "succeeded")).toEqual([
+        ["succeeded", "approved", "approved by ann with edited arguments"]
+      ])
+      const collected = yield* invoke("rm -rf /")
+      expect(collected.status).toBe("succeeded")
+    }).pipe(Effect.provide(hostLayer(seen)))
+  })
+})

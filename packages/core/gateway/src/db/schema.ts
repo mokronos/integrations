@@ -294,6 +294,8 @@ export const gatewayPendingApproval = sqliteTable(
     subject: text("subject"),
     arguments: text("arguments").notNull(),
     argumentsLookup: text("arguments_lookup"),
+    /** What the approver ran instead of the frozen arguments, sealed like them. */
+    editedArguments: text("edited_arguments"),
     groupId: text("group_id"),
     status: text("status").notNull(),
     createdAt: createdAt(),

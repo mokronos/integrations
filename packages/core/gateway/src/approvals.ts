@@ -1,6 +1,7 @@
-import { Clock, Effect, Schema } from "effect"
+import { Clock, Effect, Option, Schema } from "effect"
 import type { Integrations } from "@integragents/host"
-import { argumentPattern, whenPresent } from "@integragents/contracts"
+import { argumentPattern, InvocationIssue, whenPresent } from "@integragents/contracts"
+import type { Json } from "@integragents/contracts"
 import {
   aliasForConnection,
   ApprovalId,
@@ -11,7 +12,8 @@ import {
   TenantId
 } from "./domain.ts"
 import type { AuditApproval, Authorized, ConnectionRef, PendingApproval } from "./domain.ts"
-import { executeAuthorized } from "./invoke.ts"
+import { invalidArguments } from "./arguments.ts"
+import { boundToolAddress, executeAuthorized } from "./invoke.ts"
 import { newApprovalRuleId } from "./keys.ts"
 import type { GatewayStore, GatewayStoreError } from "./store.ts"
 
@@ -22,6 +24,12 @@ export class ApprovalNotFound extends Schema.TaggedError<ApprovalNotFound>()("Ap
 export class ApprovalConflict extends Schema.TaggedError<ApprovalConflict>()("ApprovalConflict", {
   message: Schema.String
 }) {}
+
+/** The approver's replacement arguments do not fit the tool's input schema; nothing was decided. */
+export class ApprovalArgumentsInvalid extends Schema.TaggedError<ApprovalArgumentsInvalid>()(
+  "ApprovalArgumentsInvalid",
+  { message: Schema.String, issues: Schema.Array(InvocationIssue) }
+) {}
 
 const ApprovalDecision = Schema.Struct({
   tenantId: TenantId,
@@ -105,7 +113,10 @@ export const approveApproval = Effect.fn("Approvals.approve")(function* (
     readonly integrations: Integrations["Service"]
     readonly retentionDays: number
   },
-  input: typeof ApprovalDecision.Type,
+  input: typeof ApprovalDecision.Type & {
+    /** Runs instead of the frozen arguments, once they pass the tool's input schema. Both are kept. */
+    readonly arguments?: Json
+  },
   approval: Extract<AuditApproval, "approved" | "approved_always"> = "approved",
   relay = false
 ) {
@@ -125,15 +136,33 @@ export const approveApproval = Effect.fn("Approvals.approve")(function* (
     return yield* new ApprovalConflict({ message: `Approval ${id} is no longer authorized` })
   }
 
+  const edited = input.arguments
+  if (edited !== undefined) {
+    const described = yield* dependencies.integrations
+      .describeTool(boundToolAddress(authorization.connection, authorization.profileTool.tool))
+      .pipe(Effect.option)
+    const invalid = Option.isSome(described)
+      ? invalidArguments(described.value.inputSchema, edited, authorization.profileTool.tool)
+      : undefined
+    if (invalid !== undefined) return yield* new ApprovalArgumentsInvalid(invalid)
+  }
+
   return yield* Effect.gen(function* () {
-    const claimed = yield* store.claimApproval({ tenantId, id, decidedBy })
+    const claimed = yield* store.claimApproval({
+      tenantId,
+      id,
+      decidedBy,
+      ...whenPresent("editedArguments", edited)
+    })
     if (!claimed) return yield* new ApprovalConflict({ message: `Approval ${id} was decided or expired` })
+    const message =
+      decidedBy === null ? null : `approved by ${decidedBy}${edited === undefined ? "" : " with edited arguments"}`
     const outcome = yield* executeAuthorized(
       dependencies,
       authorization,
-      frozen.arguments,
+      edited ?? frozen.arguments,
       { caller: frozen.caller, authorizedBy: null },
-      { approved: { approval, message: decidedBy === null ? null : `approved by ${decidedBy}` }, approvalId: id, relay }
+      { approved: { approval, message }, approvalId: id, relay }
     )
     yield* store.settleApproval({
       tenantId,
@@ -257,6 +286,8 @@ export const decideApprovals = Effect.fn("Approvals.decideMany")(function* (
           ApprovalNotFound: (): Effect.Effect<DecidedApproval> =>
             Effect.succeed({ id, status: "refused", error: `Unknown approval ${id}` }),
           ApprovalConflict: ({ message }): Effect.Effect<DecidedApproval> =>
+            Effect.succeed({ id, status: "refused", error: message }),
+          ApprovalArgumentsInvalid: ({ message }): Effect.Effect<DecidedApproval> =>
             Effect.succeed({ id, status: "refused", error: message })
         })
       )

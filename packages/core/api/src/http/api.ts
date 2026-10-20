@@ -720,6 +720,8 @@ const AdministrativeGroup = HttpApiGroup.make("administrative")
   .add(
     HttpApiEndpoint.post("approve", "/v1/approvals/:id/approve", {
       params: { id: ApprovalId },
+      /** `arguments` runs instead of the frozen ones, once they pass the tool's input schema. */
+      payload: Schema.Struct({ arguments: Schema.optional(Json) }),
       success: Schema.Struct({
         approval: PendingApproval,
         outcome: SettledOutcome
