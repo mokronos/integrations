@@ -69,5 +69,13 @@ export const integrationMigrations: ReadonlyArray<Migration> = [
       "ALTER TABLE `oauth_client` ADD `secret_expires_at` integer;",
       "ALTER TABLE `oauth_flow` ADD `nonce` text;"
     ]
+  },
+  {
+    id: 7,
+    name: "0007_majestic_mandroid",
+    statements: [
+      "ALTER TABLE `tool` ADD `destructive` integer;",
+      "ALTER TABLE `tool` ADD `idempotent` integer;"
+    ]
   }
 ]

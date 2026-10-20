@@ -5,7 +5,7 @@ import {
   matchesPattern,
   whenPresent
 } from "@integragents/contracts"
-import type { InputAnswer, InputResponses, InvocationOutcome } from "@integragents/contracts"
+import type { InputAnswer, InputResponses, InvocationOutcome, ToolSummary } from "@integragents/contracts"
 import { Crypto, DateTime, Duration, Effect, Option, Schema } from "effect"
 import type { HttpClient } from "effect/http"
 import { relayableInput, unrelayableInputMessage } from "@integragents/host"
@@ -522,37 +522,80 @@ export type EffectiveTool = {
   readonly decision: ToolDecision
   /** The tool runs on the calling user's own connection; invocations must name a subject. */
   readonly delegated: boolean
+  /** What the tool's source says about it; absent when the catalog no longer holds the tool. */
+  readonly readOnly?: boolean
+  readonly destructive?: boolean
+  readonly idempotent?: boolean
   readonly description?: string
   readonly inputSchema?: Json
   readonly outputSchema?: Json
 }
 
+type ToolHints = Pick<ToolSummary, "readOnly" | "destructive" | "idempotent">
+
+/** A template names no connection of its own, so any user's connection of that name speaks for its tools. */
+const hintKey = (integration: string, owner: string, connection: string, tool: string): string =>
+  [integration, owner, connection, tool].join("\u0000")
+
+const hintKeyOf = (connection: ConnectionRef, tool: ToolName): string =>
+  hintKey(
+    connection.integration,
+    isDelegationTemplate(connection) ? "user" : connectionOwner(connection),
+    connection.name,
+    tool
+  )
+
+/**
+ * A profile's tools with their decisions. Given the integration host, each one
+ * also carries what its source says about it, and its schemas when asked for.
+ */
 export const listEffectiveTools = Effect.fn("Invocation.listEffectiveTools")(function* (
   store: GatewayStore,
   profileId: ProfileId,
   options: {
     readonly schemas?: boolean
-    readonly integrations?: Integrations["Service"]
+    readonly integrations?: Pick<Integrations["Service"], "toolSummaries" | "listConnections" | "describeTool">
     readonly integration?: IntegrationSlug
     readonly connection?: ConnectionName
   } = {}
 ): Effect.fn.Return<ReadonlyArray<EffectiveTool>, GatewayStoreError> {
-  const base = (yield* store.listProfileTools(profileId))
-    .filter(
-      (profileTool) =>
-        (options.integration === undefined || profileTool.connection.integration === options.integration) &&
-        (options.connection === undefined || profileTool.connection.name === options.connection)
-    )
-    .map((profileTool) => ({
+  const enabled = (yield* store.listProfileTools(profileId)).filter(
+    (profileTool) =>
+      (options.integration === undefined || profileTool.connection.integration === options.integration) &&
+      (options.connection === undefined || profileTool.connection.name === options.connection)
+  )
+  const host = options.integrations
+  const hints = new Map<string, ToolHints>()
+  if (host !== undefined) {
+    const summaries = yield* host
+      .toolSummaries(whenPresent("integration", options.integration))
+      .pipe(
+        Effect.catch((failure) =>
+          Effect.logWarning(`No tool hints: ${failure.message}`).pipe(Effect.as<ReadonlyArray<ToolSummary>>([]))
+        )
+      )
+    for (const summary of summaries) {
+      const hinted = { readOnly: summary.readOnly, destructive: summary.destructive, idempotent: summary.idempotent }
+      hints.set(hintKey(summary.integration, summary.owner, summary.connection, summary.name), hinted)
+      if (summary.owner !== "org")
+        hints.set(hintKey(summary.integration, "user", summary.connection, summary.name), hinted)
+    }
+  }
+  const base = enabled.map((profileTool): EffectiveTool => {
+    const hinted = hints.get(hintKeyOf(profileTool.connection, profileTool.tool))
+    return {
       alias: aliasForConnection(profileTool.connection),
       tool: profileTool.tool,
       connection: profileTool.connection,
       decision: profileTool.decision,
-      delegated: isDelegationTemplate(profileTool.connection)
-    }))
-  if (options.schemas !== true || options.integrations === undefined) return base
+      delegated: isDelegationTemplate(profileTool.connection),
+      ...whenPresent("readOnly", hinted?.readOnly),
+      ...whenPresent("destructive", hinted?.destructive),
+      ...whenPresent("idempotent", hinted?.idempotent)
+    }
+  })
+  if (options.schemas !== true || host === undefined) return base
 
-  const host = options.integrations
   /** A template names no connection of its own; any held connection of the integration describes the tool. */
   const addressOf = (entry: { readonly connection: ConnectionRef; readonly tool: ToolName }) =>
     isDelegationTemplate(entry.connection)
@@ -568,7 +611,7 @@ export const listEffectiveTools = Effect.fn("Invocation.listEffectiveTools")(fun
           Effect.catch(() => Effect.succeed(Option.none<ToolAddress>()))
         )
       : Effect.succeed(Option.some(boundToolAddress(entry.connection, entry.tool)))
-  const describe = (entry: (typeof base)[number], address: ToolAddress) =>
+  const describe = (entry: EffectiveTool, address: ToolAddress) =>
     host.describeTool(address).pipe(
       Effect.map((described) => ({
         ...entry,

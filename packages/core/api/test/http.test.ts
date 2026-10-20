@@ -61,7 +61,10 @@ const stubTool = (tool: {
   integration: IntegrationSlug.make("gmail"),
   owner: tool.owner ?? "user:sebastian",
   connection: ConnectionName.make("work"),
-  defaultDecision: tool.defaultDecision ?? "require_approval"
+  defaultDecision: tool.defaultDecision ?? "require_approval",
+  readOnly: tool.defaultDecision === "allow",
+  destructive: tool.defaultDecision !== "allow",
+  idempotent: tool.defaultDecision === "allow"
 })
 
 const stubIntegrations = (
@@ -420,6 +423,21 @@ describe("gateway http surface", () => {
     }).pipe(Effect.provide(testServices))
   )
 
+  it.effect("tells an MCP client what the tool's source says about it", () =>
+    Effect.gen(function* () {
+      const { handle, key } = yield* setup({
+        tools: [{ address: "tools.gmail.user:sebastian.work.sendEmail", name: "sendEmail" }]
+      })
+      const client = yield* mcpClient(handle, key.secret)
+
+      const listed = yield* Effect.promise(() => client.listTools())
+
+      expect(
+        listed.tools.find((tool) => tool.name === "user___sebastian___gmail___work__sendEmail")?.annotations
+      ).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: false })
+    }).pipe(Effect.provide(testServices))
+  )
+
   it.effect("attributes an MCP call to the key it arrived with and the app that says it made it", () =>
     Effect.gen(function* () {
       const { handle, key, store, profile } = yield* setup()
@@ -709,7 +727,10 @@ describe("gateway http surface", () => {
           tool: "sendEmail",
           connection: { owner: "user", integration: "gmail", name: "work" },
           decision: "allow",
-          delegated: true
+          delegated: true,
+          readOnly: false,
+          destructive: true,
+          idempotent: false
         }
       ])
 

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { ToolAddress } from "@integragents/contracts"
-import type { Integrations } from "@integragents/host"
+import { ToolNotFoundError } from "@integragents/host"
+import type { Integrations, ToolTarget } from "@integragents/host"
 import {
   Alias,
   ConnectionName,
@@ -34,7 +35,10 @@ const summary = (
   integration: IntegrationSlug.make(integration),
   owner: "org" as const,
   connection: ConnectionName.make(name),
-  defaultDecision
+  defaultDecision,
+  readOnly: defaultDecision === "allow",
+  destructive: defaultDecision !== "allow",
+  idempotent: defaultDecision === "allow"
 })
 
 const catalog = (tools: ReadonlyArray<ReturnType<typeof summary>>) =>
@@ -190,6 +194,46 @@ describe("profiles", () => {
           decision: "require_approval",
           delegated: true
         }
+      ])
+    }).pipe(Effect.provide(testServices))
+  )
+
+  it.effect("tells which enabled tools only read, may destroy, or are safe to repeat", () =>
+    Effect.gen(function* () {
+      const gateway = yield* store
+      const template = {
+        owner: "user" as const,
+        integration: IntegrationSlug.make("mail"),
+        name: ConnectionName.make("own")
+      }
+      const profile = yield* createProfile(gateway, "agent", {
+        tools: [
+          { connection: connection("mail", "primary"), tool: ToolName.make("readEmail"), decision: "allow" },
+          { connection: template, tool: ToolName.make("archive"), decision: "require_approval" },
+          { connection: connection("mail", "primary"), tool: ToolName.make("vanished"), decision: "allow" }
+        ]
+      })
+      const host = {
+        toolSummaries: () =>
+          Effect.succeed([
+            summary("mail", "primary", "readEmail", "allow"),
+            { ...summary("mail", "own", "archive", "require_approval"), owner: "user:alice" as const, idempotent: true }
+          ]),
+        listConnections: () => Effect.succeed([]),
+        describeTool: (target: ToolAddress | ToolTarget) => Effect.fail(new ToolNotFoundError({ tool: String(target) }))
+      }
+
+      const hints = (yield* listEffectiveTools(gateway, profile.id, { integrations: host })).map((tool) => ({
+        tool: tool.tool,
+        readOnly: tool.readOnly,
+        destructive: tool.destructive,
+        idempotent: tool.idempotent
+      }))
+
+      expect(hints).toEqual([
+        { tool: "archive", readOnly: false, destructive: true, idempotent: true },
+        { tool: "readEmail", readOnly: true, destructive: false, idempotent: true },
+        { tool: "vanished", readOnly: undefined, destructive: undefined, idempotent: undefined }
       ])
     }).pipe(Effect.provide(testServices))
   )

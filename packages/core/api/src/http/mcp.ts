@@ -28,7 +28,7 @@ import {
   listEffectiveTools,
   oauthOrigin
 } from "@integragents/gateway-core"
-import type { ApiKey, GatewayStore, Interaction, OAuthActor } from "@integragents/gateway-core"
+import type { ApiKey, EffectiveTool, GatewayStore, Interaction, OAuthActor } from "@integragents/gateway-core"
 import { Context, Effect, Layer, ManagedRuntime, Option, Predicate, Schema } from "effect"
 import { Headers, HttpTraceContext } from "effect/http"
 import type { HttpClient } from "effect/http"
@@ -328,6 +328,12 @@ const registerAgentTool = (server: McpServer, runtime: McpRuntime, principal: Mc
   )
 }
 
+/** What the tool's source said about it, passed on to the agent in MCP's own terms. */
+const hintsOf = (tool: EffectiveTool) =>
+  tool.readOnly === undefined || tool.destructive === undefined || tool.idempotent === undefined
+    ? undefined
+    : { readOnlyHint: tool.readOnly, destructiveHint: tool.destructive, idempotentHint: tool.idempotent }
+
 const effectiveToolsOf = (profile: Profile) =>
   Effect.gen(function* () {
     const store = yield* GatewayStoreService
@@ -368,6 +374,7 @@ const serverFor = async (
       {
         title: `${tool.connection.integration} / ${tool.connection.name} / ${tool.tool}`,
         ...whenPresent("description", describeEffectiveTool(tool)),
+        ...whenPresent("annotations", hintsOf(tool)),
         inputSchema: fromJsonSchema<Record<string, Json>>(inputSchema)
       },
       async (arguments_, context) => {

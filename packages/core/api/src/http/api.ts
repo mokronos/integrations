@@ -197,6 +197,9 @@ const EffectiveTool = Schema.Struct({
   connection: ConnectionRef,
   decision: ToolDecision,
   delegated: Schema.Boolean,
+  readOnly: Schema.optional(Schema.Boolean),
+  destructive: Schema.optional(Schema.Boolean),
+  idempotent: Schema.optional(Schema.Boolean),
   description: Schema.optional(Schema.String),
   inputSchema: Schema.optional(Json),
   outputSchema: Schema.optional(Json)

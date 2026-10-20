@@ -145,7 +145,10 @@ const toToolSummary = (record: IntegrationTool): Effect.Effect<ToolSummary, Stor
     integration: record.integration,
     owner: record.owner,
     connection: record.connection,
-    defaultDecision: defaultDecision(record.readOnly)
+    defaultDecision: defaultDecision(record.readOnly),
+    readOnly: record.readOnly,
+    destructive: record.destructive,
+    idempotent: record.idempotent
   }).pipe(Effect.mapError((cause) => new StorageError({ message: `Could not describe tool ${record.name}`, cause })))
 
 const toTool = (record: IntegrationTool): Effect.Effect<Tool, StorageError> =>
