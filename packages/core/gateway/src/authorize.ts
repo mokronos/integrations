@@ -124,7 +124,7 @@ export const authorizeProfileInvocation = Effect.fn("Authorization.authorizeProf
     profileTool,
     alias: input.alias,
     connection,
-    subject: connectionSubject(connection) ?? null,
+    subject: connectionSubject(connection) ?? input.subject ?? null,
     decision: profileTool.decision
   } satisfies Authorized
 })

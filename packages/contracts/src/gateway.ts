@@ -194,6 +194,8 @@ export const PendingApproval = Schema.Struct({
   caller: Caller,
   alias: Schema.String,
   tool: ToolName,
+  /** Who the call acts for, when the invocation named someone. */
+  subject: Schema.NullOr(SubjectId),
   arguments: Schema.Json,
   status: ApprovalStatus,
   createdAt: Schema.Date,

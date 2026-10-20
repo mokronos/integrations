@@ -1,9 +1,10 @@
-import type { Integrations, StorageError } from "@integragents/host"
+import type { HostIntegrationDefinition, IntegrationFailure, Integrations, StorageError } from "@integragents/host"
+import type { Tool } from "@integragents/contracts"
 import { Effect } from "effect"
 import {
+  ConnectionName,
   connectionRefKey,
   sameConnectionRef,
-  type ConnectionName,
   type ConnectionRef,
   type IntegrationSlug,
   type ProfileToolInput,
@@ -114,4 +115,36 @@ export const forgetConnection = Effect.fn("Profiles.forgetConnection")(function*
   yield* rewriteProfiles(input.store, input.tenantId, (tools) =>
     tools.filter((tool) => !sameConnectionRef(tool.connection, input.connection))
   )
+})
+
+/**
+ * Catalogs a host integration, as a host does on every start. The first time
+ * its connection appears, its tools join every profile that takes new tools,
+ * with the decision their hints suggest; later registrations leave profiles
+ * as their administrators left them.
+ */
+export const registerHostIntegration = Effect.fn("Profiles.registerHostIntegration")(function* (input: {
+  readonly store: GatewayStore
+  readonly integrations: Pick<Integrations["Service"], "registerHostIntegration" | "listConnections" | "toolSummaries">
+  readonly definition: HostIntegrationDefinition
+}): Effect.fn.Return<ReadonlyArray<Tool>, GatewayStoreError | IntegrationFailure> {
+  const { store, integrations, definition } = input
+  const connection = definition.connection ?? ConnectionName.make("default")
+  const held = yield* integrations.listConnections({ integration: definition.slug, owner: "org" })
+  const tools = yield* integrations.registerHostIntegration(definition)
+  if (held.some((entry) => entry.name === connection)) return tools
+  const tenants = yield* store.listTenants()
+  yield* Effect.forEach(
+    tenants,
+    (tenant) =>
+      includeConnectionTools({
+        store,
+        integrations,
+        tenantId: tenant.id,
+        integration: definition.slug,
+        connection
+      }),
+    { discard: true }
+  )
+  return tools
 })

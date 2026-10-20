@@ -1,6 +1,6 @@
 import { Clock, Context, Effect, Layer, Option, Predicate, Schema } from "effect"
 import { findAuthMethod, mcpAuthMethods, openApiAuthMethods } from "./catalog/auth-methods.ts"
-import { captureMcpTools, captureOpenApiTools } from "./catalog/capture.ts"
+import { captureHostTools, captureMcpTools, captureOpenApiTools } from "./catalog/capture.ts"
 import { CatalogStore } from "./catalog/store.ts"
 import type { ConnectionRecord, IntegrationRecord } from "./catalog/store.ts"
 import type { Tool as IntegrationTool } from "./tool.ts"
@@ -17,7 +17,7 @@ import {
   ToolNotFoundError
 } from "./errors.ts"
 import { gatewayOAuthClientSlug, OAuthClientSlug } from "./catalog/ids.ts"
-import { connectionAddress, ConnectionName, IntegrationSlug } from "@integragents/contracts"
+import { connectionAddress, ConnectionName, IntegrationSlug, ToolName } from "@integragents/contracts"
 import type { InputAnswer, InputRound, McpProbe } from "@integragents/contracts"
 import { AuthTemplateSlug } from "./catalog/ids.ts"
 import { McpClient } from "./mcp/client.ts"
@@ -31,6 +31,8 @@ import { Connection, Integration, ConnectionOwner, Tool, ToolAddress, ToolSummar
 import { SpecCache } from "./openapi/cache.ts"
 import { normalizeToolResult } from "./mcp/result.ts"
 import { declinedInputNote } from "./mcp/unrelayable-input.ts"
+import { HostToolError, HostTools } from "./host-tools.ts"
+import type { HostIntegrationDefinition, ToolCallContext } from "./host-tools.ts"
 
 type Json = typeof Schema.Json.Type
 
@@ -49,6 +51,7 @@ export type IntegrationFailure =
   | McpError
   | OAuthError
   | InvalidInputError
+  | HostToolError
 
 /** A tool call's outcome: its result, or a round of input the tool needs first. */
 export type ToolExecution =
@@ -98,7 +101,8 @@ const toIntegration = (record: IntegrationRecord): Effect.Effect<Integration, St
     description: record.description,
     kind: record.kind,
     canRemove: true,
-    canRefresh: true,
+    // The host re-registers its own integrations; there is nothing to refresh from.
+    canRefresh: record.kind !== "host",
     authMethods: record.authMethods,
     ...whenPresent("displayUrl", record.displayUrl ?? record.endpoint ?? record.specSource)
   }).pipe(
@@ -160,6 +164,10 @@ const toTool = (record: IntegrationTool): Effect.Effect<Tool, StorageError> =>
     }).pipe(Effect.mapError((cause) => new StorageError({ message: `Could not describe tool ${record.name}`, cause })))
   )
 
+const hostAuthMethod = { id: "none", label: "Run by the host", kind: "none", template: "none" } as const
+
+const defaultHostConnection = ConnectionName.make("default")
+
 const defaultDecision = (readOnly: boolean): "allow" | "require_approval" => (readOnly ? "allow" : "require_approval")
 
 export class Integrations extends Context.Service<
@@ -191,14 +199,27 @@ export class Integrations extends Context.Service<
     /** Rebuilds every OpenAPI connection's stored tools from its specification with the current compiler. */
     readonly recompileOpenApiTools: () => Effect.Effect<void, StorageError>
 
+    /**
+     * Catalogs, or re-catalogs, an integration whose tools the embedding host
+     * executes through `HostTools`. Hosts call it on every start; tools no
+     * longer in the definition leave the catalog.
+     */
+    readonly registerHostIntegration: (
+      definition: HostIntegrationDefinition
+    ) => Effect.Effect<ReadonlyArray<Tool>, IntegrationFailure>
+
     readonly toolSummaries: (filter?: ToolFilter) => Effect.Effect<ReadonlyArray<ToolSummary>, StorageError>
     readonly listTools: (filter?: ToolFilter) => Effect.Effect<ReadonlyArray<Tool>, StorageError>
     readonly describeTool: (target: ToolAddress | ToolTarget) => Effect.Effect<Tool, StorageError | ToolNotFoundError>
-    /** One round of a call; `answer` continues a round an earlier call ended with. */
+    /**
+     * One round of a call; `answer` continues a round an earlier call ended
+     * with. `context` says who the call is made for, which host tools receive.
+     */
     readonly execute: (
       address: ToolAddress,
       input: Json,
-      answer?: InputAnswer
+      answer?: InputAnswer,
+      context?: ToolCallContext
     ) => Effect.Effect<ToolExecution, IntegrationFailure>
   }
 >()("@integragents/host/Integrations") {
@@ -215,6 +236,7 @@ export class Integrations extends Context.Service<
       const oauth = yield* OAuthFlows
       const invoker = yield* OpenApiInvoker
       const specs = yield* SpecCache
+      const hostTools = yield* Effect.serviceOption(HostTools)
 
       const requireIntegration = Effect.fn("Integrations.requireIntegration")(function* (slug: IntegrationSlug) {
         const found = yield* store.findIntegration(slug)
@@ -348,6 +370,14 @@ export class Integrations extends Context.Service<
           connection: connection.name
         }
 
+        // A host integration's tools come from its registration, not from a server to ask.
+        if (integration.kind === "host") {
+          return yield* store.listTools({
+            integration: integration.slug,
+            owner: connection.owner,
+            connection: connection.name
+          })
+        }
         const captured =
           integration.kind === "mcp"
             ? yield* captureMcpTools(target, yield* listMcpTools(integration, credential), capturedAt)
@@ -429,20 +459,39 @@ export class Integrations extends Context.Service<
       const execute = Effect.fn("Integrations.execute")(function* (
         address: ToolAddress,
         input: Json,
-        answer?: InputAnswer
+        answer?: InputAnswer,
+        context: ToolCallContext = {}
       ): Effect.fn.Return<ToolExecution, IntegrationFailure> {
         const found = yield* store.findTool(address)
         if (Option.isNone(found)) {
           return yield* new ToolNotFoundError({ tool: address })
         }
         const tool = found.value
+        const call = tool.call
+        if (call.kind === "host") {
+          if (Option.isNone(hostTools)) {
+            return yield* new HostToolError({
+              handler: call.handler,
+              detail: `${tool.integration} is run by its host, and no executor for host tools is installed`
+            })
+          }
+          const result = yield* hostTools.value.execute({
+            address,
+            integration: tool.integration,
+            connection: tool.connection,
+            tool: ToolName.make(tool.name),
+            handler: call.handler,
+            arguments: input,
+            context
+          })
+          return { kind: "complete", result }
+        }
         const integration = yield* requireIntegration(tool.integration)
         const connection = yield* requireConnection({
           owner: tool.owner,
           integration: tool.integration,
           name: tool.connection
         })
-        const call = tool.call
         const run = (credential: Option.Option<ResolvedCredential>) =>
           Effect.gen(function* (): Effect.fn.Return<ToolExecution, IntegrationFailure> {
             if (call.kind === "mcp") {
@@ -551,6 +600,12 @@ export class Integrations extends Context.Service<
 
       const createConnection = Effect.fn("Integrations.createConnection")(function* (options: CreateConnectionOptions) {
         const integration = yield* requireIntegration(options.integration)
+        if (integration.kind === "host") {
+          return yield* new InvalidInputError({
+            field: "integration",
+            detail: `${integration.slug} is run by its host, which registers its connection itself`
+          })
+        }
         const method = findAuthMethod(integration.authMethods, options.template)
         if (Option.isNone(method)) {
           return yield* new InvalidInputError({
@@ -582,6 +637,52 @@ export class Integrations extends Context.Service<
         yield* store.putConnection(record)
         yield* captureConnection(integration, record)
         return yield* toConnection(record)
+      })
+
+      const registerHostIntegration = Effect.fn("Integrations.registerHostIntegration")(function* (
+        definition: HostIntegrationDefinition
+      ) {
+        const names = definition.tools.map((tool) => tool.name)
+        const repeated = names.filter((name, index) => names.indexOf(name) !== index)
+        if (repeated.length > 0) {
+          return yield* new InvalidInputError({
+            field: "tools",
+            detail: `${definition.slug} names ${[...new Set(repeated)].join(", ")} more than once`
+          })
+        }
+        const existing = yield* store.findIntegration(definition.slug)
+        if (Option.isSome(existing) && existing.value.kind !== "host") {
+          return yield* new InvalidInputError({
+            field: "slug",
+            detail: `${definition.slug} is already an ${existing.value.kind} integration`
+          })
+        }
+        const now = yield* Clock.currentTimeMillis
+        const name = definition.connection ?? defaultHostConnection
+        const held = yield* store.listConnections({ integration: definition.slug, owner: "org", name })
+        yield* store.putIntegration({
+          slug: definition.slug,
+          name: definition.name,
+          description: definition.description ?? "",
+          kind: "host",
+          authMethods: [hostAuthMethod],
+          createdAt: Option.match(existing, { onNone: () => now, onSome: (record) => record.createdAt })
+        })
+        yield* store.putConnection({
+          owner: "org",
+          integration: definition.slug,
+          name,
+          template: AuthTemplateSlug.make(hostAuthMethod.template),
+          provider: "host",
+          createdAt: held[0]?.createdAt ?? now
+        })
+        const captured = yield* captureHostTools(
+          { owner: "org", integration: definition.slug, connection: name },
+          definition.tools,
+          now
+        )
+        yield* store.replaceTools({ owner: "org", integration: definition.slug, name }, captured)
+        return yield* Effect.forEach(captured, toTool)
       })
 
       const refreshConnection = Effect.fn("Integrations.refreshConnection")(function* (reference: {
@@ -705,6 +806,7 @@ export class Integrations extends Context.Service<
         removeConnection,
         refreshConnection,
         recompileOpenApiTools,
+        registerHostIntegration,
         toolSummaries,
         listTools,
         describeTool,

@@ -3,7 +3,7 @@ import type { HttpClient } from "effect/http"
 import { SqlClient } from "effect/sql"
 import { whenPresent } from "@integragents/contracts"
 import { BlobStore, integrationLayer, Integrations } from "@integragents/host"
-import type { Egress, IntegrationServices, StorageError } from "@integragents/host"
+import type { Egress, HostTools, IntegrationServices, StorageError } from "@integragents/host"
 import { deliverDueApprovalNotifications } from "./approval-delivery.ts"
 import { includeConnectionTools, pruneProfileTools } from "./profiles.ts"
 import { ConnectionName, IntegrationSlug } from "./domain.ts"
@@ -33,6 +33,8 @@ export interface GatewayCoreOptions {
   readonly migrate?: boolean
   /** Sweep expired approvals and deliver notifications on a timer. Off when the host schedules it. */
   readonly maintenance?: boolean
+  /** Runs the tools of integrations the host registers with `registerHostIntegration`. */
+  readonly hostTools?: HostTools["Service"]
 }
 
 const oauthSessionsLayer = (
@@ -139,7 +141,11 @@ export const gatewayCoreLayer = (
     Layer.provide(
       Layer.mergeAll(
         GatewayStoreService.layer({ encryption: options.encryption, ...whenPresent("migrate", options.migrate) }),
-        integrationLayer({ encryption: options.encryption, blobs: options.blobs }),
+        integrationLayer({
+          encryption: options.encryption,
+          blobs: options.blobs,
+          ...whenPresent("hostTools", options.hostTools)
+        }),
         GatewayEvents.layer
       )
     )

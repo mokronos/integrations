@@ -19,6 +19,7 @@ export const asApiFailure = <A, E, R>(
         "McpError",
         "OAuthError",
         "InvalidInputError",
+        "HostToolError",
         "DetectionError",
         "OAuthFlowError"
       ],

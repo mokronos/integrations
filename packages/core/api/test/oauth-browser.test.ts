@@ -86,6 +86,7 @@ const catalogStore: CatalogStore["Service"] = {
 const integrations: Integrations["Service"] = {
   refreshConnection: () => Effect.succeed([]),
   recompileOpenApiTools: () => Effect.void,
+  registerHostIntegration: notUsed("Integrations.registerHostIntegration"),
   listIntegrations: notUsed("Integrations.listIntegrations"),
   findIntegration: notUsed("Integrations.findIntegration"),
   addMcp: notUsed("Integrations.addMcp"),

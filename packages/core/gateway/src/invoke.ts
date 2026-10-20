@@ -9,7 +9,7 @@ import type { InputAnswer, InputResponses, InvocationOutcome, ToolSummary } from
 import { Crypto, DateTime, Duration, Effect, Option, Schema } from "effect"
 import type { HttpClient } from "effect/http"
 import { relayableInput, unrelayableInputMessage } from "@integragents/host"
-import type { Integrations } from "@integragents/host"
+import type { Integrations, ToolCallContext } from "@integragents/host"
 import { ToolAddress } from "@integragents/contracts"
 import type { OAuthSessions } from "./oauth-sessions.ts"
 import { invalidArguments } from "./arguments.ts"
@@ -131,6 +131,7 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function* (
     profileId: authorization.profile.id,
     alias: authorization.alias,
     tool: authorization.profileTool.tool,
+    subject: authorization.subject,
     arguments: argumentsValue
   })
 
@@ -175,8 +176,7 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function* (
       authorization,
       argumentsValue,
       origin,
-      { approval: "saved_approval", message: `saved approval ${rule.id}` },
-      { relay }
+      { approved: { approval: "saved_approval", message: `saved approval ${rule.id}` }, relay }
     )
   }
 
@@ -188,6 +188,7 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function* (
     caller: origin.caller,
     alias: authorization.alias,
     tool: authorization.profileTool.tool,
+    subject: authorization.subject,
     arguments: argumentsValue,
     groupWindowMinutes: authorization.profile.approvalGroupWindowMinutes,
     expiresAt: DateTime.toDateUtc(DateTime.addDuration(yield* DateTime.now, Duration.hours(dependencies.expiryHours)))
@@ -290,8 +291,9 @@ const settle = Effect.fn("Invocation.settle")(
       authorization,
       input.arguments,
       input.origin,
-      undefined,
-      { relay: interaction.relay }
+      {
+        relay: interaction.relay
+      }
     )
   },
   Effect.tap((outcome) => Effect.annotateCurrentSpan("invocation.outcome", outcome.status))
@@ -330,7 +332,8 @@ const continueRound = Effect.fn("Invocation.continueRound")(function* (
   if (approved === null && authorization.decision === "require_approval") {
     return roundRefused("This tool needs approval now. Call it again without requestState.")
   }
-  return yield* executeAuthorized(dependencies, authorization, input.arguments, input.origin, approved ?? undefined, {
+  return yield* executeAuthorized(dependencies, authorization, input.arguments, input.origin, {
+    ...whenPresent("approved", approved),
     relay: input.relay,
     upstream: {
       inputResponses: input.answer.inputResponses,
@@ -466,6 +469,17 @@ export const invokeAsProfile = Effect.fn("Invocation.invokeAsProfile")(function*
   })
 })
 
+/** How a call came to run, and the round it continues. */
+export interface ExecutionRound {
+  /** How the call that asked got its approval; nothing for a call that runs directly. */
+  readonly approved?: RoundApproval
+  /** The approval it ran under, which a host tool is told about. */
+  readonly approvalId?: ApprovalId
+  /** Whether a round of input the tool asks for goes back to the caller. */
+  readonly relay?: boolean
+  readonly upstream?: InputAnswer
+}
+
 export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(function* (
   dependencies: {
     readonly store: GatewayStore
@@ -475,20 +489,28 @@ export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(funct
   authorization: Extract<Authorization, { status: "authorized" }>,
   argumentsValue: Json,
   origin: CallOrigin,
-  approved?: RoundApproval,
-  round: { readonly relay: boolean; readonly upstream?: InputAnswer } = { relay: false }
+  round: ExecutionRound = {}
 ): Effect.fn.Return<
   Extract<InvocationOutcome, { status: "succeeded" | "failed" | "input-required" }>,
   GatewayStoreError,
   Crypto.Crypto
 > {
   const address = boundToolAddress(authorization.connection, authorization.profileTool.tool)
+  const approved = round.approved
   const record = (outcome: "succeeded" | "failed", message: string | null) =>
     Effect.flatMap(
       auditFor(authorization, outcome, message, argumentsValue, dependencies.retentionDays, origin, approved?.approval),
       dependencies.store.recordAudit
     )
-  const invocation = yield* Effect.result(dependencies.integrations.execute(address, argumentsValue, round.upstream))
+  const context: ToolCallContext = {
+    tenantId: authorization.profile.tenantId,
+    profileId: authorization.profile.id,
+    ...whenPresent("subject", authorization.subject),
+    ...whenPresent("approvalId", round.approvalId)
+  }
+  const invocation = yield* Effect.result(
+    dependencies.integrations.execute(address, argumentsValue, round.upstream, context)
+  )
   if (invocation._tag === "Failure") {
     yield* record("failed", invocation.failure.message)
     return { status: "failed", message: invocation.failure.message }
@@ -499,7 +521,7 @@ export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(funct
     return { status: "succeeded", result: execution.result }
   }
   const { inputRequests, requestState } = execution.round
-  if (!round.relay || !relayableInput(inputRequests)) {
+  if (round.relay !== true || !relayableInput(inputRequests)) {
     const message = unrelayableInputMessage(inputRequests)
     yield* record("failed", message)
     return { status: "failed", message }

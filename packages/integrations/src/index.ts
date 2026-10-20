@@ -8,6 +8,8 @@ export type {
   ToolFilter,
   ToolTarget
 } from "./integrations.ts"
+export { HostIntegrationDefinition, HostToolDefinition, HostToolError, HostTools } from "./host-tools.ts"
+export type { HostToolInvocation, ToolCallContext } from "./host-tools.ts"
 export { CatalogStore, ClientAuthMethod } from "./catalog/store.ts"
 export type { ConnectionRecord, IntegrationRecord, OAuthClientRecord, OAuthFlowRecord } from "./catalog/store.ts"
 export { McpClient } from "./mcp/client.ts"
