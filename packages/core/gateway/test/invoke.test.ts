@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Layer } from "effect"
+import { Clock, Effect, Layer } from "effect"
 import { whenPresent } from "@integragents/contracts"
 import {
   HostTools,
@@ -187,6 +187,80 @@ describe("host tools through the gateway", () => {
       )
       expect(ids[0]).not.toEqual(ids[1])
       expect(ids[2]).toEqual(ids[0])
+    }).pipe(Effect.provide(hostLayer(seen)))
+  })
+})
+
+describe("what a profile may do", () => {
+  it.effect("acts only for the subjects the profile names, and records the refusal", () => {
+    const seen: Array<HostToolInvocation> = []
+    return Effect.gen(function* () {
+      const { store, invoke } = yield* harness({ profile: { subjects: [alice] } })
+
+      const forBob = yield* invoke("whoami", { subject: bob })
+      const forAlice = yield* invoke("whoami", { subject: alice })
+      const forNobody = yield* invoke("whoami")
+
+      expect([forBob.status, forAlice.status, forNobody.status]).toEqual(["denied", "succeeded", "succeeded"])
+      expect(forBob.status === "denied" ? forBob.reason : "").toContain("bob")
+      expect(seen.map((call) => call.context.subject)).toEqual([alice, undefined])
+      expect((yield* auditOf(store)).filter(([outcome]) => outcome === "denied")).toEqual([
+        ["denied", null, expect.stringContaining("bob")]
+      ])
+    }).pipe(Effect.provide(hostLayer(seen)))
+  })
+
+  it.effect("acts for anyone unless the profile says otherwise, and the setting can change", () => {
+    const seen: Array<HostToolInvocation> = []
+    return Effect.gen(function* () {
+      const { store, profile, invoke } = yield* harness()
+      expect(profile.subjects).toBe("any")
+
+      const updated = yield* store.updateProfileSettings(defaultTenantId, profile.id, {
+        capabilities: profile.capabilities,
+        approvalMethod: profile.approvalMethod,
+        mcpSurface: profile.mcpSurface,
+        approvalGroupWindowMinutes: profile.approvalGroupWindowMinutes,
+        includeNewTools: profile.includeNewTools,
+        approvalExpiryMinutes: profile.approvalExpiryMinutes,
+        subjects: [bob]
+      })
+
+      expect(updated.subjects).toEqual([bob])
+      expect((yield* invoke("whoami", { subject: alice, profile: updated })).status).toBe("denied")
+    }).pipe(Effect.provide(hostLayer(seen)))
+  })
+
+  it.effect("holds a call as long as its profile says, or until someone decides", () => {
+    const seen: Array<HostToolInvocation> = []
+    return Effect.gen(function* () {
+      const brief = yield* harness({ decision: "require_approval", profile: { approvalExpiryMinutes: 5 } })
+      const patient = yield* harness({ decision: "require_approval", profile: { approvalExpiryMinutes: null } })
+      expect(brief.profile.approvalExpiryMinutes).toBe(5)
+      expect(patient.profile.approvalExpiryMinutes).toBeNull()
+
+      const before = yield* Clock.currentTimeMillis
+      const short = yield* brief.invoke("deploy")
+      const forever = yield* patient.invoke("deploy")
+      if (short.status !== "pending" || forever.status !== "pending") return yield* Effect.die("expected pending")
+
+      expect((short.expiresAt?.getTime() ?? 0) - before).toBeGreaterThanOrEqual(5 * 60_000 - 1_000)
+      expect((short.expiresAt?.getTime() ?? 0) - before).toBeLessThanOrEqual(5 * 60_000 + 1_000)
+      expect(forever.expiresAt).toBeNull()
+
+      const yearsLater = new Date(before + 10 * 365 * 24 * 60 * 60_000)
+      yield* brief.store.expireApprovals(yearsLater)
+      yield* patient.store.expireApprovals(yearsLater)
+      expect((yield* brief.store.getApproval(defaultTenantId, short.approvalId))?.status).toBe("expired")
+      const waiting = yield* patient.store.getApproval(defaultTenantId, forever.approvalId)
+      expect([waiting?.status, waiting?.expiresAt]).toEqual(["pending", null])
+
+      const { outcome } = yield* approveApproval(patient.dependencies, {
+        tenantId: defaultTenantId,
+        id: forever.approvalId,
+        decidedBy: "operator"
+      })
+      expect(outcome.status).toBe("succeeded")
     }).pipe(Effect.provide(hostLayer(seen)))
   })
 })

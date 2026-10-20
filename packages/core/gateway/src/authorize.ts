@@ -93,6 +93,14 @@ export const authorizeProfileInvocation = Effect.fn("Authorization.authorizeProf
   if (profile.revokedAt !== null) {
     return { status: "profile-revoked", message: "The profile this credential belongs to was revoked" }
   }
+  if (input.subject !== undefined && profile.subjects !== "any" && !profile.subjects.includes(input.subject)) {
+    return {
+      status: "not-authorized",
+      alias: input.alias,
+      tool: input.tool,
+      message: `This profile may not act for ${input.subject}`
+    }
+  }
   const profileTool = (yield* store.listProfileTools(profile.id)).find(
     (candidate) => candidate.tool === input.tool && aliasForConnection(candidate.connection) === input.alias
   )

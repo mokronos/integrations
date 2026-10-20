@@ -1,6 +1,6 @@
 import type { HttpClient } from "effect/http"
 import { Effect, Option, Schema } from "effect"
-import { whenPresent } from "@integragents/contracts"
+import { whenPresent, whenPresentMap } from "@integragents/contracts"
 import { Argument, Command, Flag } from "effect/cli"
 import type { IntegrationsCliError } from "../connection.ts"
 import { cliError, describeError } from "../connection.ts"
@@ -115,9 +115,17 @@ export const profileCommand = Command.make(
     administer: Flag.Boolean("administer").pipe(
       Flag.withDefault(false),
       Flag.withDescription("Allow this profile to administer profiles, keys, approvals, and audit")
+    ),
+    approvalExpiry: Flag.String("approval-expiry").pipe(
+      Flag.optional,
+      Flag.withDescription("Minutes a call waits for a decision before it expires, or never (default 1440)")
+    ),
+    subjects: Flag.String("subject").pipe(
+      Flag.atLeast(0),
+      Flag.withDescription("Only act for this subject; repeat for several (default: anyone)")
     )
   },
-  ({ name, copyFrom, includeNewTools, provision, administer }) => {
+  ({ name, copyFrom, includeNewTools, provision, administer, approvalExpiry, subjects }) => {
     const capabilities = [
       ...(provision ? ["provision_connections"] : []),
       ...(administer ? ["administer_gateway"] : [])
@@ -126,7 +134,11 @@ export const profileCommand = Command.make(
       name,
       ...whenPresent("copyFrom", Option.getOrUndefined(copyFrom)),
       ...whenPresent("includeNewTools", includeNewTools || undefined),
-      ...whenPresent("capabilities", capabilities.length === 0 ? undefined : capabilities)
+      ...whenPresent("capabilities", capabilities.length === 0 ? undefined : capabilities),
+      ...whenPresentMap("approvalExpiryMinutes", Option.getOrUndefined(approvalExpiry), (value) =>
+        value === "never" ? null : Number(value)
+      ),
+      ...whenPresent("subjects", subjects.length === 0 ? undefined : subjects)
     }
     return controlPlaneTask((client) => client.request("POST", "/v1/profiles", body)).pipe(
       Effect.flatMap((result) => {

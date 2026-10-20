@@ -73,7 +73,7 @@ const pendingApproval = Effect.fn("Approvals.pending")(function* (
     return yield* new ApprovalConflict({ message: `Approval ${id} is already ${approval.status}` })
   }
   const now = yield* Clock.currentTimeMillis
-  if (approval.expiresAt.getTime() <= now) {
+  if (approval.expiresAt !== null && approval.expiresAt.getTime() <= now) {
     yield* store.settleApproval({
       tenantId,
       id,

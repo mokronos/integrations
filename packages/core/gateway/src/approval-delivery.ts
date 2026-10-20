@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
 import { DateTime, Duration, Effect, Random, Schema } from "effect"
 import { FetchHttpClient, HttpBody, HttpClient, HttpClientResponse } from "effect/http"
-import { utf8Bytes, whenPresent } from "@integragents/contracts"
+import { utf8Bytes, whenPresent, whenPresentMap } from "@integragents/contracts"
 import type { GatewayStore } from "./store-contract.ts"
 
 export const ApprovalNotification = Schema.Struct({
@@ -13,7 +13,8 @@ export const ApprovalNotification = Schema.Struct({
   profileName: Schema.String,
   alias: Schema.String,
   tool: Schema.String,
-  expiresAt: Schema.String,
+  /** Absent when the call waits until someone decides. */
+  expiresAt: Schema.optional(Schema.String),
   approvalUrl: Schema.optional(Schema.String)
 })
 export type ApprovalNotification = typeof ApprovalNotification.Type
@@ -79,7 +80,7 @@ export const deliverDueApprovalNotifications = Effect.fn("Approval.deliverDueNot
           profileName: job.profileName,
           alias: job.alias,
           tool: job.tool,
-          expiresAt: job.expiresAt.toISOString(),
+          ...whenPresentMap("expiresAt", job.expiresAt, (at) => at.toISOString()),
           ...whenPresent("approvalUrl", approvalUrl)
         }
         const body = JSON.stringify(notification)
@@ -115,7 +116,7 @@ export const deliverDueApprovalNotifications = Effect.fn("Approval.deliverDueNot
               Effect.gen(function* () {
                 const attempts = job.attempts + 1
                 const next = new Date(at.getTime() + Duration.toMillis(yield* backoffAfter(attempts)))
-                const terminal = attempts >= deliveryAttemptLimit || next >= job.expiresAt
+                const terminal = attempts >= deliveryAttemptLimit || (job.expiresAt !== null && next >= job.expiresAt)
                 return yield* input.store.settleApprovalDelivery({
                   id: job.id,
                   status: terminal ? "failed" : "retrying",

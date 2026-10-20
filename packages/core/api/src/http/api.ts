@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/http-api"
 import {
+  ApprovalExpiryMinutes,
   ApprovalGroupWindowMinutes,
   ApprovalMethod,
   ApprovalRule,
@@ -23,6 +24,7 @@ import {
   Profile,
   ProfileCapability,
   ProfileId,
+  ProfileSubjects,
   ProfileTool,
   ProfileToolInput,
   ToolDecision,
@@ -80,12 +82,16 @@ const ExecuteBody = Schema.Struct({
   subject: Schema.optional(SubjectId)
 })
 
+/** Settings left out keep their current value. */
 const ProfileSettingsBody = Schema.Struct({
   capabilities: Schema.Array(ProfileCapability),
   approvalMethod: ApprovalMethod,
   mcpSurface: McpSurface,
   approvalGroupWindowMinutes: ApprovalGroupWindowMinutes,
-  includeNewTools: Schema.Boolean
+  includeNewTools: Schema.Boolean,
+  /** Null lets calls wait until someone decides. */
+  approvalExpiryMinutes: Schema.optional(Schema.NullOr(ApprovalExpiryMinutes)),
+  subjects: Schema.optional(ProfileSubjects)
 })
 
 /** Starts empty, from the tools given, or as an independent copy of another profile. */
@@ -97,7 +103,9 @@ const CreateProfileBody = Schema.Struct({
   approvalMethod: Schema.optional(ApprovalMethod),
   mcpSurface: Schema.optional(McpSurface),
   approvalGroupWindowMinutes: Schema.optional(ApprovalGroupWindowMinutes),
-  includeNewTools: Schema.optional(Schema.Boolean)
+  includeNewTools: Schema.optional(Schema.Boolean),
+  approvalExpiryMinutes: Schema.optional(Schema.NullOr(ApprovalExpiryMinutes)),
+  subjects: Schema.optional(ProfileSubjects)
 })
 
 const CreateApprovalDestinationBody = Schema.Struct({

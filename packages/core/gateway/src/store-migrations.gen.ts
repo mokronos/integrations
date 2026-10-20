@@ -216,5 +216,13 @@ export const gatewayMigrations: ReadonlyArray<Migration> = [
     statements: [
       "ALTER TABLE `gateway_pending_approval` ADD `subject` text;"
     ]
+  },
+  {
+    id: 17,
+    name: "0017_set_approval_expiry_and_subjects_per_profile",
+    statements: [
+      "ALTER TABLE `gateway_profile` ADD `approval_expiry_minutes` integer DEFAULT 1440;",
+      "ALTER TABLE `gateway_profile` ADD `subjects` text;"
+    ]
   }
 ]

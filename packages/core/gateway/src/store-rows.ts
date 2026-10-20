@@ -5,6 +5,7 @@ import {
   ApiKeyHash,
   ApiKeyId,
   ApprovalDeliveryId,
+  ApprovalExpiryMinutes,
   ApprovalGroupWindowMinutes,
   ApprovalMethod,
   McpSurface,
@@ -74,6 +75,8 @@ const ProfileRow = Schema.Struct({
   approval_method: ApprovalMethod,
   approval_group_window_minutes: ApprovalGroupWindowMinutes,
   include_new_tools: Schema.Number,
+  approval_expiry_minutes: Schema.NullOr(ApprovalExpiryMinutes),
+  subjects: NullableString,
   created_at: Schema.Number,
   revoked_at: NullableNumber
 })
@@ -317,6 +320,8 @@ const profileColumns = [
   "mcp_surface",
   "approval_group_window_minutes",
   "include_new_tools",
+  "approval_expiry_minutes",
+  "subjects",
   "created_at",
   "revoked_at"
 ]
@@ -423,6 +428,7 @@ const decodeAuditRow = rowDecoder("gateway_audit", AuditRow)
 const decodeSnapshotRow = rowDecoder("gateway_tool_snapshot", SnapshotRow)
 const decodeJsonText = jsonDecoder("json column", Schema.fromJsonString(Schema.Json))
 const decodePattern = jsonDecoder("gateway_approval_rule.pattern", Schema.fromJsonString(ArgumentPattern))
+const decodeSubjects = jsonDecoder("gateway_profile.subjects", Schema.fromJsonString(Schema.Array(SubjectId)))
 const decodeCapabilities = jsonDecoder(
   "gateway_profile.capabilities",
   Schema.fromJsonString(Schema.Array(ProfileCapability))
@@ -433,6 +439,17 @@ const parseJsonColumn = (value: string): typeof Schema.Json.Type => decodeJsonTe
 const date = (value: number): Date => new Date(value)
 const nullableDate = (value: number | null): Date | null => (value === null ? null : new Date(value))
 export const millis = (value: Date): number => value.getTime()
+
+/**
+ * The expiry a call that waits until someone decides is stored with: the
+ * latest instant a Date can hold, so `expires_at > now` stays true without
+ * the column admitting a null an older gateway would not expect.
+ */
+export const neverExpires = 8_640_000_000_000_000
+
+export const expiryMillis = (value: Date | null): number => (value === null ? neverExpires : value.getTime())
+
+export const expiryDate = (value: number): Date | null => (value >= neverExpires ? null : new Date(value))
 
 export const toProfile = (row: Row): Profile => {
   const decoded = decodeProfileRow(pick(row, profileColumns))
@@ -445,6 +462,8 @@ export const toProfile = (row: Row): Profile => {
     mcpSurface: decoded.mcp_surface,
     approvalGroupWindowMinutes: decoded.approval_group_window_minutes,
     includeNewTools: decoded.include_new_tools === 1,
+    approvalExpiryMinutes: decoded.approval_expiry_minutes,
+    subjects: decoded.subjects === null ? "any" : decodeSubjects(decoded.subjects),
     createdAt: date(decoded.created_at),
     revokedAt: nullableDate(decoded.revoked_at)
   }
@@ -822,7 +841,7 @@ export const toApproval = (row: Row, open: (text: string) => string = identity):
     arguments: parseJsonColumn(open(decoded.arguments)),
     status: decoded.status,
     createdAt: date(decoded.created_at),
-    expiresAt: date(decoded.expires_at),
+    expiresAt: expiryDate(decoded.expires_at),
     decidedAt: nullableDate(decoded.decided_at),
     decidedBy: decoded.decided_by,
     result: decoded.result === null ? null : parseJsonColumn(open(decoded.result)),

@@ -13,5 +13,3 @@ export {
 } from "@integragents/contracts/gateway-config"
 
 export const defaultArgumentRetentionDays = 30
-
-export const defaultApprovalExpiryHours = 24

@@ -997,6 +997,42 @@ describe("gateway http surface", () => {
     }).pipe(Effect.provide(testServices))
   )
 
+  it.effect("sets how long calls wait and who a profile acts for, keeping both when a client leaves them out", () =>
+    Effect.gen(function* () {
+      const { call } = yield* setup({ capabilities: ["provision_connections", "administer_gateway"] })
+      const created = yield* call("POST", "/v1/profiles", {
+        body: { name: "vm-bot", approvalExpiryMinutes: null, subjects: ["alice"] }
+      })
+      expect(created.status).toBe(201)
+      expect([created.body["approvalExpiryMinutes"], created.body["subjects"]]).toEqual([null, ["alice"]])
+      const id = String(created.body["id"])
+
+      const untouched = yield* call("POST", `/v1/profiles/${id}/settings`, {
+        body: {
+          capabilities: [],
+          approvalMethod: "link",
+          mcpSurface: "tools",
+          approvalGroupWindowMinutes: 0,
+          includeNewTools: false
+        }
+      })
+      const changed = yield* call("POST", `/v1/profiles/${id}/settings`, {
+        body: {
+          capabilities: [],
+          approvalMethod: "link",
+          mcpSurface: "tools",
+          approvalGroupWindowMinutes: 0,
+          includeNewTools: false,
+          approvalExpiryMinutes: 60,
+          subjects: "any"
+        }
+      })
+
+      expect([untouched.body["approvalExpiryMinutes"], untouched.body["subjects"]]).toEqual([null, ["alice"]])
+      expect([changed.body["approvalExpiryMinutes"], changed.body["subjects"]]).toEqual([60, "any"])
+    }).pipe(Effect.provide(testServices))
+  )
+
   it.effect("copies a profile into one that changes independently of its source", () =>
     Effect.gen(function* () {
       const { call, store, profile } = yield* setup({

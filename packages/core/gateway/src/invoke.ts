@@ -14,7 +14,7 @@ import { ToolAddress } from "@integragents/contracts"
 import type { OAuthSessions } from "./oauth-sessions.ts"
 import { invalidArguments } from "./arguments.ts"
 import { authenticateKey, authorizeProfileInvocation } from "./authorize.ts"
-import { defaultApprovalExpiryHours, defaultArgumentRetentionDays } from "./config.ts"
+import { defaultArgumentRetentionDays } from "./config.ts"
 import { aliasForConnection, defaultTenantId, keyOrigin, sameConnectionRef, unattributedOrigin } from "./domain.ts"
 import type {
   Alias,
@@ -49,12 +49,11 @@ export interface InvokeDependencies {
   /** Starts the flow a delegated tool needs when its user has not connected yet. */
   readonly oauth?: OAuthSessions
   readonly argumentRetentionDays?: number
-  readonly approvalExpiryHours?: number
   readonly approvalUrlOf?: (approvalId: ApprovalId) => string | undefined
   readonly onApprovalCreated?: (input: {
     readonly authorization: Extract<Authorization, { status: "authorized" }>
     readonly approvalId: ApprovalId
-    readonly expiresAt: Date
+    readonly expiresAt: Date | null
     readonly approvalUrl?: string
   }) => Effect.Effect<void, never, HttpClient.HttpClient>
 }
@@ -101,12 +100,19 @@ const auditFor = (
     }))
   )
 
+/** When a call frozen now stops waiting, by its profile's setting; never for a profile that waits until someone decides. */
+const approvalExpiry = (profile: Profile): Effect.Effect<Date | null> =>
+  profile.approvalExpiryMinutes === null
+    ? Effect.succeed(null)
+    : Effect.map(DateTime.now, (now) =>
+        DateTime.toDateUtc(DateTime.addDuration(now, Duration.minutes(profile.approvalExpiryMinutes ?? 0)))
+      )
+
 const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function* (
   dependencies: {
     readonly store: GatewayStore
     readonly integrations: Integrations["Service"]
     readonly retentionDays: number
-    readonly expiryHours: number
     readonly approvalUrlOf?: InvokeDependencies["approvalUrlOf"]
     readonly onApprovalCreated?: InvokeDependencies["onApprovalCreated"]
   },
@@ -116,7 +122,7 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function* (
   relay: boolean
 ): Effect.fn.Return<InvocationOutcome, GatewayStoreError, Crypto.Crypto | HttpClient.HttpClient> {
   const { store, retentionDays } = dependencies
-  const pending = (approvalId: ApprovalId, expiresAt: Date): InvocationOutcome => {
+  const pending = (approvalId: ApprovalId, expiresAt: Date | null): InvocationOutcome => {
     const approvalUrl =
       authorization.profile.approvalMethod !== "none" ? dependencies.approvalUrlOf?.(approvalId) : undefined
     return {
@@ -191,7 +197,7 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function* (
     subject: authorization.subject,
     arguments: argumentsValue,
     groupWindowMinutes: authorization.profile.approvalGroupWindowMinutes,
-    expiresAt: DateTime.toDateUtc(DateTime.addDuration(yield* DateTime.now, Duration.hours(dependencies.expiryHours)))
+    expiresAt: yield* approvalExpiry(authorization.profile)
   })
   if (approval.id !== id) return pending(approval.id, approval.expiresAt)
   yield* store.recordAudit(
@@ -234,7 +240,6 @@ const settle = Effect.fn("Invocation.settle")(
       })
     }
     const retentionDays = dependencies.argumentRetentionDays ?? defaultArgumentRetentionDays
-    const expiryHours = dependencies.approvalExpiryHours ?? defaultApprovalExpiryHours
 
     if (authorization.status !== "authorized") {
       const reason = authorization.message
@@ -275,7 +280,6 @@ const settle = Effect.fn("Invocation.settle")(
           store,
           integrations,
           retentionDays,
-          expiryHours,
           ...whenPresent("approvalUrlOf", dependencies.approvalUrlOf),
           ...whenPresent("onApprovalCreated", dependencies.onApprovalCreated)
         },

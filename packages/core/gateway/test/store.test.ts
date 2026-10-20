@@ -195,7 +195,9 @@ describe("gateway store", () => {
         approvalMethod: "none",
         mcpSurface: "discovery",
         approvalGroupWindowMinutes: 15,
-        includeNewTools: true
+        includeNewTools: true,
+        approvalExpiryMinutes: null,
+        subjects: [SubjectId.make("alice")]
       })
 
       expect(updated.capabilities).toEqual(["administer_gateway"])
@@ -203,6 +205,8 @@ describe("gateway store", () => {
       expect(updated.mcpSurface).toBe("discovery")
       expect(updated.approvalGroupWindowMinutes).toBe(15)
       expect(updated.includeNewTools).toBe(true)
+      expect(updated.approvalExpiryMinutes).toBeNull()
+      expect(updated.subjects).toEqual(["alice"])
     }).pipe(Effect.provide(testServices))
   )
 
