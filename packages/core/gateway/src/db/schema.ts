@@ -300,6 +300,8 @@ export const gatewayPendingApproval = sqliteTable(
     expiresAt: integer("expires_at").notNull(),
     decidedAt: integer("decided_at"),
     decidedBy: text("decided_by"),
+    /** When an approved call's execution started; a claim older than the lease was interrupted. */
+    claimedAt: integer("claimed_at"),
     result: text("result"),
     error: text("error"),
     collectedAt: integer("collected_at")

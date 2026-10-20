@@ -1639,10 +1639,10 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function* 
           return (
             (yield* changed(
               `UPDATE gateway_pending_approval
-            SET status = 'executing', decided_at = ?, decided_by = ?
+            SET status = 'executing', decided_at = ?, decided_by = ?, claimed_at = ?
           WHERE tenant_id = ? AND id = ? AND status = 'pending' AND expires_at > ?
           RETURNING id`,
-              [at, input.decidedBy, input.tenantId, input.id, at]
+              [at, input.decidedBy, at, input.tenantId, input.id, at]
             )) === 1
           )
         })
@@ -1669,6 +1669,21 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function* 
             ]
           )
           return settled.length === 1
+        })
+      ),
+
+    settleInterruptedApprovals: (claimedBefore, error) =>
+      operation(
+        "settleInterruptedApprovals",
+        Effect.gen(function* () {
+          // Claims from before claimed_at was kept are dated by decided_at, which the claim set too.
+          return yield* settledRows(
+            `UPDATE gateway_pending_approval
+              SET status = 'approved', decided_at = ?, error = ?
+            WHERE status = 'executing' AND COALESCE(claimed_at, decided_at) <= ?
+            RETURNING *`,
+            [yield* now, error, millis(claimedBefore)]
+          )
         })
       ),
 

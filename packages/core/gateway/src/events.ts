@@ -106,6 +106,8 @@ export const publishingStore = (store: GatewayStore, events: EventBus): GatewayS
     settleApproval: (input) => touched(store.settleApproval(input), input.tenantId, input.id),
     cancelApprovalsForProfile: (profileId) => settled(store.cancelApprovalsForProfile(profileId)),
     expireApprovals: (now) => settled(store.expireApprovals(now)),
+    settleInterruptedApprovals: (claimedBefore, error) =>
+      settled(store.settleInterruptedApprovals(claimedBefore, error)),
     recordAudit: (input) => after(store.recordAudit(input), input.tenantId, "audit"),
     expireAuditArguments: (now) => after(store.expireAuditArguments(now), undefined, "audit")
   }
