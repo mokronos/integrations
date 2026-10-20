@@ -933,18 +933,26 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function* 
           if (ids.length === 0) return []
           const placeholders = ids.map(() => "?").join(", ")
           const rows = yield* all(
+            // A group's delivery names its oldest call that still waits: the
+            // first one, unless a reviewer or a human already decided it.
             `SELECT delivery.*, destination.name AS destination_name, destination.url,
-                destination.signing_secret, approval.tenant_id, approval.group_id, approval.profile_id,
-                profile.name AS profile_name, approval.alias, approval.tool, approval.expires_at
+                destination.signing_secret, approval.id AS waiting_id, approval.tenant_id, approval.group_id,
+                approval.profile_id, profile.name AS profile_name, approval.alias, approval.tool, approval.expires_at
            FROM gateway_approval_delivery AS delivery
            JOIN gateway_approval_destination AS destination ON destination.id = delivery.destination_id
-           JOIN gateway_pending_approval AS approval ON approval.id = delivery.approval_id
+           JOIN gateway_pending_approval AS approval ON approval.group_id = delivery.approval_id
            JOIN gateway_profile AS profile ON profile.id = approval.profile_id
-          WHERE delivery.id IN (${placeholders})`,
+          WHERE delivery.id IN (${placeholders})
+            AND approval.id = COALESCE((
+              SELECT member.id FROM gateway_pending_approval AS member
+               WHERE member.group_id = delivery.approval_id AND member.status = 'pending'
+               ORDER BY member.created_at LIMIT 1
+            ), delivery.approval_id)`,
             ids
           )
           return rows.map((row) => ({
             ...toApprovalDeliveryAttempt(row),
+            approvalId: ApprovalId.make(String(row["waiting_id"])),
             tenantId: TenantId.make(String(row["tenant_id"])),
             groupId: ApprovalId.make(String(row["group_id"])),
             profileId: ProfileId.make(String(row["profile_id"])),

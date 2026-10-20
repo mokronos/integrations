@@ -474,7 +474,6 @@ export interface GatewayStore {
     readonly result: typeof Schema.Json.Type | null
     readonly error: string | null
   }): Effect.Effect<boolean, GatewayStoreError>
-  /** Denies what a revoked profile left waiting, and answers what it denied. */
   /**
    * Settles every execution claimed at or before `claimedBefore` that never
    * recorded an outcome: approved, with an error saying the outcome is
@@ -484,6 +483,7 @@ export interface GatewayStore {
     claimedBefore: Date,
     error: string
   ): Effect.Effect<ReadonlyArray<SettledApproval>, GatewayStoreError>
+  /** Denies what a revoked profile left waiting, and answers what it denied. */
   cancelApprovalsForProfile(profileId: ProfileId): Effect.Effect<ReadonlyArray<SettledApproval>, GatewayStoreError>
 
   /**

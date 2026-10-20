@@ -425,6 +425,48 @@ describe("gateway store", () => {
     }).pipe(Effect.provide(testServices))
   )
 
+  it.effect("names the call that still waits when a group's first call was already decided", () =>
+    Effect.gen(function* () {
+      const gateway = yield* store
+      const profile = yield* seedProfile(gateway)
+      const destination = yield* gateway.createApprovalDestination({
+        id: yield* newApprovalDestinationId,
+        tenantId: defaultTenantId,
+        name: "phone",
+        url: "https://notify.example/approvals",
+        signingSecret: "igs_secret"
+      })
+      yield* gateway.replaceProfileApprovalDestinations(defaultTenantId, profile.id, [destination.id])
+      const freeze = Effect.fnUntraced(function* (to: string) {
+        return yield* gateway.createApproval({
+          id: yield* newApprovalId,
+          tenantId: defaultTenantId,
+          profileId: profile.id,
+          caller: noCaller,
+          alias: Alias.make("mail"),
+          tool: ToolName.make("sendEmail"),
+          arguments: { to, subject: "Launch" },
+          groupWindowMinutes: 30,
+          expiresAt: new Date((yield* Clock.currentTimeMillis) + 86_400_000)
+        })
+      })
+      const first = yield* freeze("a@example.com")
+      const second = yield* freeze("b@example.com")
+      yield* gateway.settleApproval({
+        tenantId: defaultTenantId,
+        id: first.id,
+        status: "denied",
+        decidedBy: "reviewer:policy-bot",
+        result: null,
+        error: null
+      })
+
+      const jobs = yield* gateway.claimDueApprovalDeliveries(new Date(yield* Clock.currentTimeMillis), 10)
+
+      expect(jobs.map((job) => [job.approvalId, job.groupId])).toEqual([[second.id, first.id]])
+    }).pipe(Effect.provide(testServices))
+  )
+
   it.effect("completes and consumes login handoffs and OAuth state once", () =>
     Effect.gen(function* () {
       const gateway = yield* store
