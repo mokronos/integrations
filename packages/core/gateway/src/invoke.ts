@@ -33,6 +33,7 @@ import type {
   ToolDecision,
   ToolName
 } from "./domain.ts"
+import { approvalOutcome } from "./approval-decisions.ts"
 import { openRound, sealRound } from "./input-rounds.ts"
 import type { RoundApproval } from "./input-rounds.ts"
 import { newApprovalId, newAuditId } from "./keys.ts"
@@ -145,28 +146,23 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function* (
     return pending(existing.id, existing.expiresAt)
   }
 
-  if (existing !== undefined && (yield* store.collectApproval(authorization.profile.tenantId, existing.id))) {
-    if (existing.status === "approved") {
-      yield* store.recordAudit(
-        yield* auditFor(
-          authorization,
-          existing.error === null ? "succeeded" : "failed",
-          `result of approval ${existing.id} collected`,
-          argumentsValue,
-          retentionDays,
-          origin
-        )
+  const collected = existing === undefined ? undefined : approvalOutcome(existing)
+  if (
+    existing !== undefined &&
+    collected !== undefined &&
+    (yield* store.collectApproval(authorization.profile.tenantId, existing.id))
+  ) {
+    yield* store.recordAudit(
+      yield* auditFor(
+        authorization,
+        collected.status,
+        collected.status === "denied" ? collected.reason : `result of approval ${existing.id} collected`,
+        argumentsValue,
+        retentionDays,
+        origin
       )
-      return existing.error === null
-        ? { status: "succeeded", result: existing.result }
-        : { status: "failed", message: existing.error }
-    }
-    const reason =
-      existing.status === "expired"
-        ? `approval ${existing.id} expired before a decision was recorded`
-        : `approval ${existing.id} was denied${existing.decidedBy === null ? "" : ` by ${existing.decidedBy}`}`
-    yield* store.recordAudit(yield* auditFor(authorization, "denied", reason, argumentsValue, retentionDays, origin))
-    return { status: "denied", reason }
+    )
+    return collected
   }
 
   const rule = (yield* store.listApprovalRules(authorization.profile.id)).find(

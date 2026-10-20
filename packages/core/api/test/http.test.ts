@@ -1106,10 +1106,10 @@ describe("gateway http surface", () => {
         }).pipe(Effect.timeout("5 seconds"))
 
       yield* readUntil(`"_tag":"Connected"`)
-      yield* call("POST", "/v1/execute", {
+      const frozen = yield* call("POST", "/v1/execute", {
         body: { alias: "user___sebastian___gmail___work", tool: "sendEmail", arguments: { to: "a@b.c" } }
       })
-      yield* readUntil(`"resource":"approvals"`)
+      yield* readUntil(`"resource":"approvals","ids":["${String(frozen.body["approvalId"])}"]`)
       yield* readUntil(`"resource":"audit"`)
       yield* Effect.promise(() => reader.cancel())
     }).pipe(Effect.provide(testServices))
@@ -1236,7 +1236,7 @@ describe("gateway approval settlement", () => {
       // A cutoff well past the freeze: an executing call is not pending, so
       // maintenance leaves it alone rather than expiring it mid-flight.
       const wellPast = new Date((yield* Clock.currentTimeMillis) + 86_400_000)
-      expect(yield* store.expireApprovals(wellPast)).toBe(0)
+      expect(yield* store.expireApprovals(wellPast)).toEqual([])
       expect(calls).toHaveLength(1)
 
       release.resolve()

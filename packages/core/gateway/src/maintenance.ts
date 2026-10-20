@@ -20,7 +20,7 @@ export const runMaintenance = Effect.fn("Maintenance.run")(function* (
 ): Effect.fn.Return<MaintenanceResult, GatewayStoreError | StorageError> {
   const at = cutoff ?? new Date(yield* Clock.currentTimeMillis)
   return {
-    expiredApprovals: yield* store.expireApprovals(at),
+    expiredApprovals: (yield* store.expireApprovals(at)).length,
     expiredAuditArguments: yield* store.expireAuditArguments(at),
     deletedSessions: yield* store.deleteExpiredSessions(at),
     expiredIdentityFlows: yield* store.deleteExpiredIdentityFlows(at),

@@ -365,6 +365,30 @@ export const gatewayApprovalDelivery = sqliteTable(
   ]
 )
 
+/** One `approval.decided` notification to one destination, for a call that was approved, denied, or expired. */
+export const gatewayApprovalDecisionDelivery = sqliteTable(
+  "gateway_approval_decision_delivery",
+  {
+    id: text("id").primaryKey(),
+    approvalId: text("approval_id")
+      .notNull()
+      .references(() => gatewayPendingApproval.id, { onDelete: "cascade" }),
+    destinationId: text("destination_id")
+      .notNull()
+      .references(() => gatewayApprovalDestination.id),
+    status: text("status").notNull(),
+    attempts: integer("attempts").notNull(),
+    nextAttemptAt: integer("next_attempt_at"),
+    deliveredAt: integer("delivered_at"),
+    lastError: text("last_error"),
+    createdAt: createdAt()
+  },
+  (table) => [
+    uniqueIndex("gateway_approval_decision_delivery_once").on(table.approvalId, table.destinationId),
+    index("gateway_approval_decision_delivery_due").on(table.status, table.nextAttemptAt)
+  ]
+)
+
 export const gatewayAudit = sqliteTable("gateway_audit", {
   id: text("id").primaryKey(),
   tenantId: text("tenant_id")

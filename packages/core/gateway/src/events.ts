@@ -2,18 +2,24 @@ import { Context, Effect, Layer, PubSub, Stream } from "effect"
 import type { Scope } from "effect"
 import type { Integrations } from "@integragents/host"
 import type { GatewayResource, TenantId } from "./domain.ts"
-import type { GatewayStore } from "./store-contract.ts"
+import { whenPresent } from "@integragents/contracts"
+import type { GatewayStore, SettledApproval } from "./store-contract.ts"
+
+/** What changed, and when known, which of its records: approval ids for `approvals`. */
+export interface GatewayResourceChange {
+  readonly resource: GatewayResource
+  readonly ids?: ReadonlyArray<string>
+}
 
 /** A change nobody can attribute to one tenant reaches every tenant. */
-export interface GatewayChange {
+export interface GatewayChange extends GatewayResourceChange {
   readonly tenantId: TenantId | undefined
-  readonly resource: GatewayResource
 }
 
 export interface EventBus {
   readonly publish: (change: GatewayChange) => Effect.Effect<void>
   /** Subscribes now: everything published after this returns reaches the stream. */
-  readonly subscribe: (tenantId: TenantId) => Effect.Effect<Stream.Stream<GatewayResource>, never, Scope.Scope>
+  readonly subscribe: (tenantId: TenantId) => Effect.Effect<Stream.Stream<GatewayResourceChange>, never, Scope.Scope>
 }
 
 export const makeGatewayEvents: Effect.Effect<EventBus> = Effect.map(PubSub.unbounded<GatewayChange>(), (pubsub) => ({
@@ -22,7 +28,10 @@ export const makeGatewayEvents: Effect.Effect<EventBus> = Effect.map(PubSub.unbo
     Effect.map(PubSub.subscribe(pubsub), (subscription) =>
       Stream.fromSubscription(subscription).pipe(
         Stream.filter((change) => change.tenantId === undefined || change.tenantId === tenantId),
-        Stream.map((change) => change.resource)
+        Stream.map((change): GatewayResourceChange => ({
+          resource: change.resource,
+          ...whenPresent("ids", change.ids)
+        }))
       )
     )
 }))
@@ -48,6 +57,24 @@ export const publishingStore = (store: GatewayStore, events: EventBus): GatewayS
         ? Effect.forEach(resources, (resource) => events.publish({ tenantId, resource }), { discard: true })
         : Effect.void
     )
+  /** An approval write, announced with the approval it touched. */
+  const touched = <A, E>(effect: Effect.Effect<A, E>, tenantId: TenantId, id: string): Effect.Effect<A, E> =>
+    Effect.tap(effect, (result) =>
+      changedSomething(result) ? events.publish({ tenantId, resource: "approvals", ids: [id] }) : Effect.void
+    )
+  /** Approvals a sweep decided, announced per tenant with their ids. */
+  const settled = <E>(
+    effect: Effect.Effect<ReadonlyArray<SettledApproval>, E>
+  ): Effect.Effect<ReadonlyArray<SettledApproval>, E> =>
+    Effect.tap(effect, (approvals) => {
+      const byTenant = new Map<TenantId, Array<string>>()
+      for (const { tenantId, approval } of approvals) {
+        byTenant.set(tenantId, [...(byTenant.get(tenantId) ?? []), approval.id])
+      }
+      return Effect.forEach(byTenant, ([tenantId, ids]) => events.publish({ tenantId, resource: "approvals", ids }), {
+        discard: true
+      })
+    })
   return {
     ...store,
     createProfile: (input) => after(store.createProfile(input), input.tenantId, "profiles"),
@@ -70,12 +97,15 @@ export const publishingStore = (store: GatewayStore, events: EventBus): GatewayS
     createApprovalRule: (input) => after(store.createApprovalRule(input), undefined, "profiles"),
     updateApprovalRule: (id, pattern) => after(store.updateApprovalRule(id, pattern), undefined, "profiles"),
     deleteApprovalRule: (id) => after(store.deleteApprovalRule(id), undefined, "profiles"),
-    createApproval: (input) => after(store.createApproval(input), input.tenantId, "approvals"),
-    collectApproval: (tenantId, id) => after(store.collectApproval(tenantId, id), tenantId, "approvals"),
-    claimApproval: (input) => after(store.claimApproval(input), input.tenantId, "approvals"),
-    settleApproval: (input) => after(store.settleApproval(input), input.tenantId, "approvals"),
-    cancelApprovalsForProfile: (profileId) => after(store.cancelApprovalsForProfile(profileId), undefined, "approvals"),
-    expireApprovals: (now) => after(store.expireApprovals(now), undefined, "approvals"),
+    createApproval: (input) =>
+      Effect.tap(store.createApproval(input), (approval) =>
+        events.publish({ tenantId: input.tenantId, resource: "approvals", ids: [approval.id] })
+      ),
+    collectApproval: (tenantId, id) => touched(store.collectApproval(tenantId, id), tenantId, id),
+    claimApproval: (input) => touched(store.claimApproval(input), input.tenantId, input.id),
+    settleApproval: (input) => touched(store.settleApproval(input), input.tenantId, input.id),
+    cancelApprovalsForProfile: (profileId) => settled(store.cancelApprovalsForProfile(profileId)),
+    expireApprovals: (now) => settled(store.expireApprovals(now)),
     recordAudit: (input) => after(store.recordAudit(input), input.tenantId, "audit"),
     expireAuditArguments: (now) => after(store.expireAuditArguments(now), undefined, "audit")
   }

@@ -224,5 +224,14 @@ export const gatewayMigrations: ReadonlyArray<Migration> = [
       "ALTER TABLE `gateway_profile` ADD `approval_expiry_minutes` integer DEFAULT 1440;",
       "ALTER TABLE `gateway_profile` ADD `subjects` text;"
     ]
+  },
+  {
+    id: 18,
+    name: "0018_notify_destinations_of_decided_calls",
+    statements: [
+      "CREATE TABLE `gateway_approval_decision_delivery` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`approval_id` text NOT NULL,\n\t`destination_id` text NOT NULL,\n\t`status` text NOT NULL,\n\t`attempts` integer NOT NULL,\n\t`next_attempt_at` integer,\n\t`delivered_at` integer,\n\t`last_error` text,\n\t`created_at` integer NOT NULL,\n\tFOREIGN KEY (`approval_id`) REFERENCES `gateway_pending_approval`(`id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`destination_id`) REFERENCES `gateway_approval_destination`(`id`) ON UPDATE no action ON DELETE no action\n);",
+      "CREATE UNIQUE INDEX `gateway_approval_decision_delivery_once` ON `gateway_approval_decision_delivery` (`approval_id`,`destination_id`);",
+      "CREATE INDEX `gateway_approval_decision_delivery_due` ON `gateway_approval_decision_delivery` (`status`,`next_attempt_at`);"
+    ]
   }
 ]

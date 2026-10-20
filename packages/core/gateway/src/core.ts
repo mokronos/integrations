@@ -1,5 +1,5 @@
 import { Context, Effect, Layer } from "effect"
-import type { HttpClient } from "effect/http"
+import { HttpClient } from "effect/http"
 import { SqlClient } from "effect/sql"
 import { whenPresent } from "@integragents/contracts"
 import { BlobStore, integrationLayer, Integrations } from "@integragents/host"
@@ -13,6 +13,8 @@ import { createOAuthSessions, OAuthSessionError, sqlOAuthSessionStore } from "./
 import type { OAuthSessions } from "./oauth-sessions.ts"
 import type { LocalAuthorizer, OAuthOperations } from "./oauth.ts"
 import { GatewayEvents, publishingIntegrations, publishingStore } from "./events.ts"
+import { notifyingDecisions } from "./approval-decisions.ts"
+import type { OnApprovalDecided } from "./approval-decisions.ts"
 import { GatewayStoreError, GatewayStoreService } from "./store.ts"
 
 export class OAuthFlowSessions extends Context.Service<OAuthFlowSessions, OAuthSessions>()(
@@ -35,6 +37,8 @@ export interface GatewayCoreOptions {
   readonly maintenance?: boolean
   /** Runs the tools of integrations the host registers with `registerHostIntegration`. */
   readonly hostTools?: HostTools["Service"]
+  /** Told of every decided call, however it was decided. See `OnApprovalDecided`. */
+  readonly onApprovalDecided?: OnApprovalDecided
 }
 
 const oauthSessionsLayer = (
@@ -82,18 +86,38 @@ const oauthSessionsLayer = (
     })
   )
 
-/** Every write the store and the integration host commit is announced on the gateway's event bus. */
-const publishing = Layer.effectContext(
-  Effect.gen(function* () {
-    const events = yield* GatewayEvents
-    const raw = yield* Effect.context<GatewayStoreService | IntegrationServices>()
-    return raw.pipe(
-      Context.add(GatewayStoreService, publishingStore(Context.get(raw, GatewayStoreService), events)),
-      Context.add(Integrations, publishingIntegrations(Context.get(raw, Integrations), events)),
-      Context.add(GatewayEvents, events)
-    )
-  })
-)
+/**
+ * Every write the store and the integration host commit is announced on the
+ * gateway's event bus. Every decided call sends its `approval.decided`
+ * notifications right away, rather than at the next maintenance sweep, and
+ * reaches the host's hook.
+ */
+const publishing = (options: Pick<GatewayCoreOptions, "publicUrlOf" | "onApprovalDecided">) =>
+  Layer.effectContext(
+    Effect.gen(function* () {
+      const events = yield* GatewayEvents
+      const raw = yield* Effect.context<GatewayStoreService | IntegrationServices | HttpClient.HttpClient>()
+      const scope = yield* Effect.scope
+      const published = publishingStore(Context.get(raw, GatewayStoreService), events)
+      const deliver = Effect.suspend(() =>
+        deliverDueApprovalNotifications({
+          store: published,
+          ...whenPresent("dashboardUrl", options.publicUrlOf?.())
+        })
+      ).pipe(
+        Effect.provideService(HttpClient.HttpClient, Context.get(raw, HttpClient.HttpClient)),
+        Effect.catchCause((cause) => Effect.logWarning("approval.decided delivery failed", cause))
+      )
+      const store = notifyingDecisions(published, (decided) =>
+        Effect.andThen(Effect.forkIn(deliver, scope), options.onApprovalDecided?.(decided) ?? Effect.void)
+      )
+      return raw.pipe(
+        Context.add(GatewayStoreService, store),
+        Context.add(Integrations, publishingIntegrations(Context.get(raw, Integrations), events)),
+        Context.add(GatewayEvents, events)
+      )
+    })
+  )
 
 const reconcileOnStart: Layer.Layer<never, GatewayStoreError | StorageError, GatewayStoreService | Integrations> =
   Layer.effectDiscard(
@@ -137,7 +161,7 @@ export const gatewayCoreLayer = (
   GatewayStoreError | StorageError,
   SqlClient.SqlClient | HttpClient.HttpClient | Egress
 > => {
-  const base = publishing.pipe(
+  const base = publishing(options).pipe(
     Layer.provide(
       Layer.mergeAll(
         GatewayStoreService.layer({ encryption: options.encryption, ...whenPresent("migrate", options.migrate) }),

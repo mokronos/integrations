@@ -35,6 +35,7 @@ import {
 import { runMaintenance } from "@integragents/gateway-core"
 import { deliverDueApprovalNotifications } from "@integragents/gateway-core"
 import { GatewayEvents, GatewayStoreService } from "@integragents/gateway-core"
+import type { GatewayResource, GatewayResourceChange } from "@integragents/gateway-core"
 import { ApiBadRequest, ApiNotFound, GatewayApi } from "../api.ts"
 import { decidedBy, requireTenant } from "../authority.ts"
 import { GatewayConfig } from "../services.ts"
@@ -45,6 +46,22 @@ const heartbeatInterval = Duration.seconds(5)
 
 /** One invocation writes an approval, an audit record, and a delivery within milliseconds; the dashboard reloads once. */
 const burstWindow = Duration.millis(100)
+
+/**
+ * One change per resource in a burst, naming every record the burst named.
+ * A change that named none means the whole resource, so the merged one does too.
+ */
+const coalesce = (burst: Iterable<GatewayResourceChange>): ReadonlyArray<GatewayResourceChange> => {
+  const merged = new Map<GatewayResource, ReadonlySet<string> | undefined>()
+  for (const change of burst) {
+    const known = merged.has(change.resource) ? merged.get(change.resource) : new Set<string>()
+    merged.set(
+      change.resource,
+      known === undefined || change.ids === undefined ? undefined : new Set([...known, ...change.ids])
+    )
+  }
+  return [...merged].map(([resource, ids]) => ({ resource, ...whenPresentMap("ids", ids, (set) => [...set]) }))
+}
 
 export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrative", (handlers) =>
   Effect.gen(function* () {
@@ -114,8 +131,8 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
                 Stream.merge(
                   changes.pipe(
                     Stream.groupedWithin(64, burstWindow),
-                    Stream.flatMap((burst) => Stream.fromIterable(new Set(burst))),
-                    Stream.map((resource) => ({ _tag: "Changed" as const, resource }))
+                    Stream.flatMap((burst) => Stream.fromIterable(coalesce(burst))),
+                    Stream.map((change) => ({ _tag: "Changed" as const, ...change }))
                   ),
                   Stream.map(Stream.tick(heartbeatInterval), () => ({ _tag: "Heartbeat" as const }))
                 )
@@ -396,7 +413,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           const profile = yield* requireProfile(tenantId, request.params["id"])
           yield* capture(store.revokeProfile(tenantId, profile.id))
           const cancelled = yield* capture(store.cancelApprovalsForProfile(profile.id))
-          return { revoked: true as const, cancelledApprovals: cancelled }
+          return { revoked: true as const, cancelledApprovals: cancelled.length }
         })
       )
       .handle("listApprovals", (request) =>

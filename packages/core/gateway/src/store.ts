@@ -11,6 +11,7 @@ import {
   Alias,
   canonicalJson,
   connectionSubject,
+  ApprovalDeliveryId,
   ApprovalDestinationId,
   ApprovalId,
   ProfileId,
@@ -67,6 +68,9 @@ import {
 } from "./store-rows.ts"
 export {
   GatewayStoreError,
+  type ApprovalDecisionDeliveryJob,
+  type ApprovalDeliveryJob,
+  type SettledApproval,
   type AuditQuery,
   type CreateApprovalInput,
   type CreateProfileInput,
@@ -81,9 +85,11 @@ export {
 } from "./store-contract.ts"
 import {
   GatewayStoreError,
+  type ApprovalDecisionDeliveryJob,
   type GatewayStoreFailureKind,
   type AuditQuery,
-  type GatewayStore
+  type GatewayStore,
+  type SettledApproval
 } from "./store-contract.ts"
 
 export interface GatewayStoreOptions {
@@ -265,6 +271,39 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function* 
       ]
     }
   }
+
+  /** Queues an `approval.decided` notification to each destination of each decided call's profile. */
+  const queueDecisionDeliveries = (ids: ReadonlyArray<string>, at: number) =>
+    ids.length === 0
+      ? Effect.void
+      : run(
+          `INSERT INTO gateway_approval_decision_delivery
+             (id, approval_id, destination_id, status, attempts, next_attempt_at, delivered_at, last_error, created_at)
+           SELECT lower(hex(randomblob(16))), approval.id, assignment.destination_id, 'pending', 0, ?, NULL, NULL, ?
+             FROM gateway_pending_approval AS approval
+             JOIN gateway_profile_approval_destination AS assignment ON assignment.profile_id = approval.profile_id
+             JOIN gateway_approval_destination AS destination ON destination.id = assignment.destination_id
+            WHERE approval.id IN (${ids.map(() => "?").join(", ")}) AND destination.deleted_at IS NULL
+              AND approval.status IN ('approved', 'denied', 'expired')
+           ON CONFLICT DO NOTHING`,
+          [at, at, ...ids]
+        )
+
+  /** Rows an UPDATE … RETURNING * settled, with their notifications queued in the same transaction. */
+  const settledRows = (query: string, args: ReadonlyArray<InValue>) =>
+    sql.withTransaction(
+      Effect.gen(function* () {
+        const rows = yield* all(query, args)
+        yield* queueDecisionDeliveries(
+          rows.map((row) => String(row["id"])),
+          yield* now
+        )
+        return rows.map((row): SettledApproval => ({
+          tenantId: TenantId.make(String(row["tenant_id"])),
+          approval: openApproval(row)
+        }))
+      })
+    )
 
   const findUncollectedApproval = (input: Parameters<GatewayStore["findUncollectedApproval"]>[0]) =>
     Effect.gen(function* () {
@@ -914,6 +953,85 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function* 
         })
       ),
 
+    claimDueApprovalDecisionDeliveries: (at, limit) =>
+      operation(
+        "claimDueApprovalDecisionDeliveries",
+        Effect.gen(function* () {
+          const claimed = yield* all(
+            `UPDATE gateway_approval_decision_delivery
+                 SET next_attempt_at = ?
+               WHERE id IN (
+                 SELECT id FROM gateway_approval_decision_delivery
+                  WHERE status IN ('pending', 'retrying') AND next_attempt_at <= ?
+                  ORDER BY next_attempt_at LIMIT ?
+               ) AND next_attempt_at <= ?
+               RETURNING id`,
+            [millis(new Date(at.getTime() + 60_000)), millis(at), limit, millis(at)]
+          )
+          const ids = claimed.map((row) => String(row["id"]))
+          if (ids.length === 0) return []
+          const rows = yield* all(
+            `SELECT delivery.id, delivery.approval_id, delivery.attempts, delivery.created_at,
+                destination.url, destination.signing_secret, approval.tenant_id, approval.group_id,
+                approval.profile_id, profile.name AS profile_name, approval.alias, approval.tool,
+                approval.status, approval.error, approval.decided_by, approval.decided_at
+           FROM gateway_approval_decision_delivery AS delivery
+           JOIN gateway_approval_destination AS destination ON destination.id = delivery.destination_id
+           JOIN gateway_pending_approval AS approval ON approval.id = delivery.approval_id
+           JOIN gateway_profile AS profile ON profile.id = approval.profile_id
+          WHERE delivery.id IN (${ids.map(() => "?").join(", ")})`,
+            ids
+          )
+          return rows.flatMap((row): ReadonlyArray<ApprovalDecisionDeliveryJob> => {
+            const status = row["status"]
+            if (status !== "approved" && status !== "denied" && status !== "expired") return []
+            const decidedAt = row["decided_at"]
+            return [
+              {
+                id: ApprovalDeliveryId.make(String(row["id"])),
+                approvalId: ApprovalId.make(String(row["approval_id"])),
+                attempts: Number(row["attempts"]),
+                createdAt: new Date(Number(row["created_at"])),
+                tenantId: TenantId.make(String(row["tenant_id"])),
+                groupId: ApprovalId.make(String(row["group_id"] ?? row["approval_id"])),
+                profileId: ProfileId.make(String(row["profile_id"])),
+                profileName: String(row["profile_name"]),
+                alias: Alias.make(String(row["alias"])),
+                tool: ToolName.make(String(row["tool"])),
+                status,
+                failed: row["error"] !== null,
+                decidedBy: row["decided_by"] === null ? null : String(row["decided_by"]),
+                decidedAt: decidedAt === null ? null : new Date(Number(decidedAt)),
+                url: String(row["url"]),
+                signingSecret: encryption.open(String(row["signing_secret"]))
+              }
+            ]
+          })
+        })
+      ),
+
+    settleApprovalDecisionDelivery: (input) =>
+      operation(
+        "settleApprovalDecisionDelivery",
+        Effect.gen(function* () {
+          yield* run(
+            `UPDATE gateway_approval_decision_delivery
+              SET status = ?, attempts = attempts + 1, next_attempt_at = ?,
+                  delivered_at = CASE WHEN ? = 'delivered' THEN ? ELSE delivered_at END,
+                  last_error = ?
+            WHERE id = ?`,
+            [
+              input.status,
+              input.nextAttemptAt === null ? null : millis(input.nextAttemptAt),
+              input.status,
+              yield* now,
+              input.error,
+              input.id
+            ]
+          )
+        })
+      ),
+
     settleApprovalDelivery: (input) =>
       operation(
         "settleApprovalDelivery",
@@ -1534,24 +1652,23 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function* 
       operation(
         "settleApproval",
         Effect.gen(function* () {
-          return (
-            (yield* changed(
-              `UPDATE gateway_pending_approval
+          const settled = yield* settledRows(
+            `UPDATE gateway_pending_approval
             SET status = ?, decided_at = ?, decided_by = ?, result = ?, error = ?
           WHERE tenant_id = ? AND id = ? AND status = ?
-          RETURNING id`,
-              [
-                input.status,
-                yield* now,
-                input.decidedBy,
-                input.result === null ? null : sealText(JSON.stringify(input.result)),
-                input.error,
-                input.tenantId,
-                input.id,
-                input.status === "approved" ? "executing" : "pending"
-              ]
-            )) === 1
+          RETURNING *`,
+            [
+              input.status,
+              yield* now,
+              input.decidedBy,
+              input.result === null ? null : sealText(JSON.stringify(input.result)),
+              input.error,
+              input.tenantId,
+              input.id,
+              input.status === "approved" ? "executing" : "pending"
+            ]
           )
+          return settled.length === 1
         })
       ),
 
@@ -1559,11 +1676,11 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function* 
       operation(
         "cancelApprovalsForProfile",
         Effect.gen(function* () {
-          return yield* changed(
+          return yield* settledRows(
             `UPDATE gateway_pending_approval
               SET status = 'denied', decided_at = ?, decided_by = 'profile-revoked'
             WHERE profile_id = ? AND status = 'pending'
-            RETURNING id`,
+            RETURNING *`,
             [yield* now, profileId]
           )
         })
@@ -1695,12 +1812,12 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function* 
       operation(
         "expireApprovals",
         Effect.gen(function* () {
-          return yield* changed(
+          return yield* settledRows(
             `UPDATE gateway_pending_approval
               SET status = 'expired', decided_at = ?,
                   error = 'expired before a decision was recorded'
             WHERE status = 'pending' AND expires_at <= ?
-            RETURNING id`,
+            RETURNING *`,
             [yield* now, millis(at)]
           )
         })

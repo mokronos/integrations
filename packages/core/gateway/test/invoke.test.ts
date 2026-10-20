@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Clock, Effect, Layer } from "effect"
+import { TestClock } from "effect/testing"
 import { whenPresent } from "@integragents/contracts"
 import {
   HostTools,
@@ -14,16 +15,26 @@ import {
   aliasForConnection,
   approveApproval,
   ConnectionName,
+  decideWaitingApproval,
+  denyApproval,
   defaultTenantId,
   IntegrationSlug,
   invokeAsProfile,
   newProfileId,
+  notifyingDecisions,
   registerHostIntegration,
   SubjectId,
   ToolName,
   unattributedOrigin
 } from "../src/index.ts"
-import type { ConnectionRef, CreateProfileInput, GatewayStore, Profile, ToolDecision } from "../src/index.ts"
+import type {
+  ApprovalDecided,
+  ConnectionRef,
+  CreateProfileInput,
+  GatewayStore,
+  Profile,
+  ToolDecision
+} from "../src/index.ts"
 import { gatewayStore, testServices } from "./fixtures.ts"
 
 type Json = typeof import("effect").Schema.Json.Type
@@ -74,7 +85,12 @@ const hostLayer = (seen: Array<HostToolInvocation>) =>
 const harness = Effect.fnUntraced(function* (
   options: { readonly decision?: ToolDecision; readonly profile?: Partial<CreateProfileInput> } = {}
 ) {
-  const store = yield* gatewayStore("gateway-invoke-")
+  const decided: Array<ApprovalDecided> = []
+  const store = notifyingDecisions(yield* gatewayStore("gateway-invoke-"), (event) =>
+    Effect.sync(() => {
+      decided.push(event)
+    })
+  )
   const integrations = yield* Integrations
   yield* integrations.registerHostIntegration(definition)
   const profile = yield* store.createProfile({
@@ -95,7 +111,7 @@ const harness = Effect.fnUntraced(function* (
       arguments: { command },
       ...whenPresent("subject", extra.subject)
     })
-  return { store, integrations, profile, dependencies, invoke }
+  return { store, integrations, profile, dependencies, invoke, decided }
 })
 
 /** Records written in the same millisecond have no order between them, so only what was recorded is compared. */
@@ -261,6 +277,104 @@ describe("what a profile may do", () => {
         decidedBy: "operator"
       })
       expect(outcome.status).toBe("succeeded")
+    }).pipe(Effect.provide(hostLayer(seen)))
+  })
+})
+
+describe("telling the host a call was decided", () => {
+  const summary = (decided: ReadonlyArray<ApprovalDecided>) =>
+    decided.map((event) => [event.status, event.decidedBy, event.outcome])
+
+  it.effect("on approval, with the result, and on denial, with who denied it", () => {
+    const seen: Array<HostToolInvocation> = []
+    return Effect.gen(function* () {
+      const { profile, dependencies, invoke, decided, store } = yield* harness({ decision: "require_approval" })
+      const first = yield* invoke("make")
+      const second = yield* invoke("make clean")
+      if (first.status !== "pending" || second.status !== "pending") return yield* Effect.die("expected pending")
+
+      yield* approveApproval(dependencies, { tenantId: defaultTenantId, id: first.approvalId, decidedBy: "ann" })
+      yield* denyApproval(store, { tenantId: defaultTenantId, id: second.approvalId, decidedBy: "ben" })
+
+      expect(summary(decided)).toEqual([
+        ["approved", "ann", { status: "succeeded", result: { exitCode: 0, ran: { command: "make" } } }],
+        ["denied", "ben", { status: "denied", reason: `approval ${second.approvalId} was denied by ben` }]
+      ])
+      expect(decided.map((event) => [event.tenantId, event.profileId, event.approvalId])).toEqual([
+        [defaultTenantId, profile.id, first.approvalId],
+        [defaultTenantId, profile.id, second.approvalId]
+      ])
+    }).pipe(Effect.provide(hostLayer(seen)))
+  })
+
+  it.effect("when a call expires, whether a sweep or a late decision finds it", () => {
+    const seen: Array<HostToolInvocation> = []
+    return Effect.gen(function* () {
+      const { dependencies, invoke, decided, store } = yield* harness({
+        decision: "require_approval",
+        profile: { approvalExpiryMinutes: 1 }
+      })
+      const swept = yield* invoke("sleep 1")
+      yield* TestClock.adjust("30 seconds")
+      const late = yield* invoke("sleep 2")
+      if (swept.status !== "pending" || late.status !== "pending") return yield* Effect.die("expected pending")
+
+      yield* store.expireApprovals(swept.expiresAt ?? new Date())
+      yield* TestClock.adjust("2 minutes")
+      const refused = yield* Effect.flip(
+        approveApproval(dependencies, { tenantId: defaultTenantId, id: late.approvalId, decidedBy: "ann" })
+      )
+
+      expect(refused._tag).toBe("ApprovalConflict")
+      expect(summary(decided).map(([status]) => status)).toEqual(["expired", "expired"])
+      expect(decided.map((event) => event.approvalId).toSorted()).toEqual(
+        [swept.approvalId, late.approvalId].toSorted()
+      )
+    }).pipe(Effect.provide(hostLayer(seen)))
+  })
+
+  it.effect("when its profile is revoked, and when a human approves and saves the approval", () => {
+    const seen: Array<HostToolInvocation> = []
+    return Effect.gen(function* () {
+      const { profile, dependencies, invoke, decided, store } = yield* harness({ decision: "require_approval" })
+      const remembered = yield* invoke("ls")
+      if (remembered.status !== "pending") return yield* Effect.die("expected pending")
+      yield* decideWaitingApproval(dependencies, {
+        tenantId: defaultTenantId,
+        id: remembered.approvalId,
+        verdict: "approve",
+        decidedBy: "ann (in-client approval)",
+        remember: true,
+        relay: false
+      })
+      const cancelled = yield* invoke("rm -rf /")
+      if (cancelled.status !== "pending") return yield* Effect.die("expected pending")
+
+      yield* store.revokeProfile(defaultTenantId, profile.id)
+      yield* store.cancelApprovalsForProfile(profile.id)
+
+      expect(summary(decided).map(([status, by]) => [status, by])).toEqual([
+        ["approved", "ann (in-client approval)"],
+        ["denied", "profile-revoked"]
+      ])
+    }).pipe(Effect.provide(hostLayer(seen)))
+  })
+
+  it.effect("a failing hook neither undoes nor fails the decision", () => {
+    const seen: Array<HostToolInvocation> = []
+    return Effect.gen(function* () {
+      const { dependencies, invoke, store } = yield* harness({ decision: "require_approval" })
+      const loud = notifyingDecisions(store, () => Effect.die("the host fell over"))
+      const pending = yield* invoke("make")
+      if (pending.status !== "pending") return yield* Effect.die("expected pending")
+
+      const { outcome } = yield* approveApproval(
+        { ...dependencies, store: loud },
+        { tenantId: defaultTenantId, id: pending.approvalId, decidedBy: "ann" }
+      )
+
+      expect(outcome.status).toBe("succeeded")
+      expect((yield* store.getApproval(defaultTenantId, pending.approvalId))?.status).toBe("approved")
     }).pipe(Effect.provide(hostLayer(seen)))
   })
 })

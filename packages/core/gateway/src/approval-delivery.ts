@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto"
 import { DateTime, Duration, Effect, Random, Schema } from "effect"
 import { FetchHttpClient, HttpBody, HttpClient, HttpClientResponse } from "effect/http"
 import { utf8Bytes, whenPresent, whenPresentMap } from "@integragents/contracts"
+import type { ApprovalDeliveryId } from "./domain.ts"
 import type { GatewayStore } from "./store-contract.ts"
 
 export const ApprovalNotification = Schema.Struct({
@@ -18,6 +19,33 @@ export const ApprovalNotification = Schema.Struct({
   approvalUrl: Schema.optional(Schema.String)
 })
 export type ApprovalNotification = typeof ApprovalNotification.Type
+
+/**
+ * A call stopped waiting. Like `approval.pending` it carries what a reviewer
+ * needs to find the call, never its arguments or result; read those through
+ * the API with a credential that may see them.
+ */
+export const ApprovalDecidedNotification = Schema.Struct({
+  version: Schema.Literal(1),
+  event: Schema.Literal("approval.decided"),
+  approvalId: Schema.String,
+  groupId: Schema.String,
+  profileId: Schema.String,
+  profileName: Schema.String,
+  alias: Schema.String,
+  tool: Schema.String,
+  status: Schema.Literals(["approved", "denied", "expired"]),
+  /** What came of it: the approved call ran and succeeded or failed, or it never ran. */
+  outcome: Schema.Literals(["succeeded", "failed", "denied", "expired"]),
+  decidedBy: Schema.NullOr(Schema.String),
+  decidedAt: Schema.optional(Schema.String),
+  approvalUrl: Schema.optional(Schema.String)
+})
+export type ApprovalDecidedNotification = typeof ApprovalDecidedNotification.Type
+
+/** Every body a destination may receive, told apart by `event` and the `x-integrations-event` header. */
+export const ApprovalWebhookEvent = Schema.Union([ApprovalNotification, ApprovalDecidedNotification])
+export type ApprovalWebhookEvent = typeof ApprovalWebhookEvent.Type
 
 export const approvalWebhookSignature = (secret: string, timestamp: string, body: string): string =>
   `v1=${createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex")}`
@@ -54,6 +82,20 @@ const backoffAfter = (attempt: number): Effect.Effect<Duration.Duration> =>
     Duration.times(Duration.times(deliveryBackoffBase, 2 ** attempt), 0.8 + random * 0.4)
   )
 
+/** A decided call's notification stops being retried a day after the decision. */
+const decidedNotificationLifetime = Duration.days(1)
+
+const approvalLink = (dashboardUrl: string | undefined, approvalId: string): string | undefined =>
+  dashboardUrl === undefined
+    ? undefined
+    : `${dashboardUrl.replace(/\/+$/, "")}/approvals?approval=${encodeURIComponent(approvalId)}`
+
+/**
+ * Sends the webhook notifications that are due: `approval.pending` for calls
+ * that wait for a human, and `approval.decided` for calls that were approved,
+ * denied, or expired. Each is signed with its destination's secret and retried
+ * with backoff from the state the store keeps.
+ */
 export const deliverDueApprovalNotifications = Effect.fn("Approval.deliverDueNotifications")(function* (input: {
   readonly store: GatewayStore
   readonly dashboardUrl?: string
@@ -61,17 +103,73 @@ export const deliverDueApprovalNotifications = Effect.fn("Approval.deliverDueNot
   readonly now?: Date
 }) {
   const at = input.now ?? (yield* DateTime.nowAsDate)
-  const jobs = yield* input.store.claimDueApprovalDeliveries(at, input.limit ?? 25)
+  const limit = input.limit ?? 25
   const client = yield* HttpClient.HttpClient
+  const timestamp = Math.floor(at.getTime() / 1_000).toString()
+
+  const post = (
+    job: { readonly id: string; readonly url: string; readonly signingSecret: string },
+    notification: ApprovalWebhookEvent
+  ) => {
+    const body = JSON.stringify(notification)
+    return client
+      .post(job.url, {
+        headers: {
+          "idempotency-key": job.id,
+          "x-integrations-delivery": job.id,
+          "x-integrations-event": notification.event,
+          "x-integrations-timestamp": timestamp,
+          "x-integrations-signature": approvalWebhookSignature(job.signingSecret, timestamp, body)
+        },
+        body: HttpBody.text(body, "application/json")
+      })
+      .pipe(
+        Effect.provideService(FetchHttpClient.RequestInit, { redirect: "error" }),
+        Effect.timeout(5_000),
+        Effect.flatMap(HttpClientResponse.filterStatusOk),
+        Effect.asVoid,
+        Effect.mapError((cause) => new ApprovalWebhookError({ message: cause.message }))
+      )
+  }
+
+  /** Settles one attempt: delivered, or retried later until it runs out of attempts or time. */
+  const attempt = <E>(
+    job: { readonly id: ApprovalDeliveryId; readonly attempts: number },
+    delivery: Effect.Effect<void, ApprovalWebhookError>,
+    giveUpAt: Date | null,
+    settle: (outcome: {
+      readonly id: ApprovalDeliveryId
+      readonly status: "delivered" | "retrying" | "failed"
+      readonly nextAttemptAt: Date | null
+      readonly error: string | null
+    }) => Effect.Effect<void, E>
+  ) =>
+    delivery.pipe(
+      Effect.matchEffect({
+        onSuccess: () => settle({ id: job.id, status: "delivered", nextAttemptAt: null, error: null }),
+        onFailure: (error) =>
+          Effect.gen(function* () {
+            const attempts = job.attempts + 1
+            const next = new Date(at.getTime() + Duration.toMillis(yield* backoffAfter(attempts)))
+            const terminal = attempts >= deliveryAttemptLimit || (giveUpAt !== null && next >= giveUpAt)
+            return yield* settle({
+              id: job.id,
+              status: terminal ? "failed" : "retrying",
+              nextAttemptAt: terminal ? null : next,
+              error: error.message
+            })
+          })
+      })
+    )
+
+  const pending = yield* input.store.claimDueApprovalDeliveries(at, limit)
   yield* Effect.forEach(
-    jobs,
-    (job) =>
-      Effect.gen(function* () {
-        const approvalUrl =
-          input.dashboardUrl === undefined
-            ? undefined
-            : `${input.dashboardUrl.replace(/\/+$/, "")}/approvals?approval=${encodeURIComponent(job.approvalId)}`
-        const notification: ApprovalNotification = {
+    pending,
+    (job) => {
+      const approvalUrl = approvalLink(input.dashboardUrl, job.approvalId)
+      return attempt(
+        job,
+        post(job, {
           version: 1,
           event: "approval.pending",
           approvalId: job.approvalId,
@@ -80,53 +178,49 @@ export const deliverDueApprovalNotifications = Effect.fn("Approval.deliverDueNot
           profileName: job.profileName,
           alias: job.alias,
           tool: job.tool,
-          ...whenPresentMap("expiresAt", job.expiresAt, (at) => at.toISOString()),
+          ...whenPresentMap("expiresAt", job.expiresAt, (expiresAt) => expiresAt.toISOString()),
           ...whenPresent("approvalUrl", approvalUrl)
-        }
-        const body = JSON.stringify(notification)
-        const timestamp = Math.floor(at.getTime() / 1_000).toString()
-        const delivery = client
-          .post(job.url, {
-            headers: {
-              "idempotency-key": job.id,
-              "x-integrations-delivery": job.id,
-              "x-integrations-event": "approval.pending",
-              "x-integrations-timestamp": timestamp,
-              "x-integrations-signature": approvalWebhookSignature(job.signingSecret, timestamp, body)
-            },
-            body: HttpBody.text(body, "application/json")
-          })
-          .pipe(
-            Effect.provideService(FetchHttpClient.RequestInit, { redirect: "error" }),
-            Effect.timeout(5_000),
-            Effect.flatMap(HttpClientResponse.filterStatusOk),
-            Effect.asVoid,
-            Effect.mapError((cause) => new ApprovalWebhookError({ message: cause.message }))
-          )
-        yield* delivery.pipe(
-          Effect.matchEffect({
-            onSuccess: () =>
-              input.store.settleApprovalDelivery({
-                id: job.id,
-                status: "delivered",
-                nextAttemptAt: null,
-                error: null
-              }),
-            onFailure: (error) =>
-              Effect.gen(function* () {
-                const attempts = job.attempts + 1
-                const next = new Date(at.getTime() + Duration.toMillis(yield* backoffAfter(attempts)))
-                const terminal = attempts >= deliveryAttemptLimit || (job.expiresAt !== null && next >= job.expiresAt)
-                return yield* input.store.settleApprovalDelivery({
-                  id: job.id,
-                  status: terminal ? "failed" : "retrying",
-                  nextAttemptAt: terminal ? null : next,
-                  error: error.message
-                })
-              })
-          })
-        )
-      }),
+        }),
+        job.expiresAt,
+        input.store.settleApprovalDelivery
+      )
+    },
+    { concurrency: 5, discard: true }
+  )
+
+  const decided = yield* input.store.claimDueApprovalDecisionDeliveries(at, limit)
+  yield* Effect.forEach(
+    decided,
+    (job) => {
+      const approvalUrl = approvalLink(input.dashboardUrl, job.approvalId)
+      return attempt(
+        job,
+        post(job, {
+          version: 1,
+          event: "approval.decided",
+          approvalId: job.approvalId,
+          groupId: job.groupId,
+          profileId: job.profileId,
+          profileName: job.profileName,
+          alias: job.alias,
+          tool: job.tool,
+          status: job.status,
+          outcome:
+            job.status === "approved"
+              ? job.failed
+                ? "failed"
+                : "succeeded"
+              : job.status === "denied"
+                ? "denied"
+                : "expired",
+          decidedBy: job.decidedBy,
+          ...whenPresentMap("decidedAt", job.decidedAt, (decidedAt) => decidedAt.toISOString()),
+          ...whenPresent("approvalUrl", approvalUrl)
+        }),
+        new Date(job.createdAt.getTime() + Duration.toMillis(decidedNotificationLifetime)),
+        input.store.settleApprovalDecisionDelivery
+      )
+    },
     { concurrency: 5, discard: true }
   )
 })
