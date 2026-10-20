@@ -210,6 +210,8 @@ export const PendingApproval = Schema.Struct({
   /** Who the call acts for, when the invocation named someone. */
   subject: Schema.NullOr(SubjectId),
   arguments: Schema.Json,
+  /** What the approver ran instead of `arguments`, when they edited the call. */
+  editedArguments: Schema.NullOr(Schema.Json),
   status: ApprovalStatus,
   createdAt: Schema.Date,
   /** Null when the profile lets calls wait until someone decides. */

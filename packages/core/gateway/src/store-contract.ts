@@ -435,6 +435,8 @@ export interface GatewayStore {
     readonly tenantId: TenantId
     readonly id: ApprovalId
     readonly decidedBy: string | null
+    /** What runs instead of the frozen arguments, kept next to them. */
+    readonly editedArguments?: typeof Schema.Json.Type
   }): Effect.Effect<boolean, GatewayStoreError>
   settleApproval(input: {
     readonly tenantId: TenantId

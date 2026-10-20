@@ -436,11 +436,23 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           return yield* capture(
             approveApproval(
               { store, integrations, retentionDays: config.retentionDays },
-              { tenantId: yield* requireTenant, id: request.params["id"], decidedBy: yield* decidedBy }
+              {
+                tenantId: yield* requireTenant,
+                id: request.params["id"],
+                decidedBy: yield* decidedBy,
+                ...whenPresentMap("arguments", request.payload.arguments, (edited) => edited)
+              }
             )
           ).pipe(
             Effect.catchTag("ApprovalNotFound", ({ id }) => new ApiNotFound({ error: `Unknown approval ${id}` })),
-            Effect.catchTag("ApprovalConflict", ({ message }) => new ApiBadRequest({ error: message }))
+            Effect.catchTag("ApprovalConflict", ({ message }) => new ApiBadRequest({ error: message })),
+            Effect.catchTag(
+              "ApprovalArgumentsInvalid",
+              ({ message, issues }) =>
+                new ApiBadRequest({
+                  error: [message, ...issues.map((issue) => `${issue.path}: ${issue.message}`)].join("; ")
+                })
+            )
           )
         })
       )

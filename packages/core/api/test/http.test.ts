@@ -1297,6 +1297,36 @@ describe("gateway approval settlement", () => {
     }).pipe(Effect.provide(testServices))
   )
 
+  it.effect("an approver may run the call with edited arguments the tool's schema accepts", () =>
+    Effect.gen(function* () {
+      const { call, calls } = yield* setup({
+        decision: "require_approval",
+        capabilities: ["provision_connections", "administer_gateway"]
+      })
+      const frozen = yield* call("POST", "/v1/execute", {
+        body: { alias: "user___sebastian___gmail___work", tool: "sendEmail", arguments: { to: "everyone@b.c" } }
+      })
+      const approvalId = String(frozen.body["approvalId"])
+
+      const refused = yield* call("POST", `/v1/approvals/${approvalId}/approve`, {
+        body: { arguments: { cc: "a@b.c" } },
+        local: true
+      })
+      const approved = yield* call("POST", `/v1/approvals/${approvalId}/approve`, {
+        body: { arguments: { to: "a@b.c" } },
+        local: true
+      })
+
+      expect([refused.status, String(refused.body["error"])]).toEqual([400, expect.stringContaining("to")])
+      expect(approved.status).toBe(200)
+      expect(calls.map((entry) => entry.input)).toEqual([{ to: "a@b.c" }])
+      expect(approved.body["approval"]).toMatchObject({
+        arguments: { to: "everyone@b.c" },
+        editedArguments: { to: "a@b.c" }
+      })
+    }).pipe(Effect.provide(testServices))
+  )
+
   it.effect("the gateway performs the call itself once approved", () =>
     Effect.gen(function* () {
       const { call, calls } = yield* setup({

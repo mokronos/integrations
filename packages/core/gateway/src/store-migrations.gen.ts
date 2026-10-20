@@ -240,5 +240,12 @@ export const gatewayMigrations: ReadonlyArray<Migration> = [
     statements: [
       "ALTER TABLE `gateway_pending_approval` ADD `claimed_at` integer;"
     ]
+  },
+  {
+    id: 20,
+    name: "0020_keep_arguments_an_approver_edited",
+    statements: [
+      "ALTER TABLE `gateway_pending_approval` ADD `edited_arguments` text;"
+    ]
   }
 ]

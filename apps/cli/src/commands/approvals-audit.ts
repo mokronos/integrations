@@ -125,20 +125,33 @@ export const approvalCommand = Command.make(
     )
 ).pipe(Command.withDescription("Read one frozen invocation, as the caller that proposed it"))
 
+const decodeEditedArguments = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))
+
 export const approveCommand = Command.make(
   "approve",
   {
     id: Argument.String("approval-id"),
+    arguments: Flag.String("arguments").pipe(
+      Flag.optional,
+      Flag.withDescription("Run with these JSON arguments instead of the frozen ones; both are kept")
+    ),
     verbose: verboseFlag()
   },
-  ({ id, verbose }) =>
-    controlPlaneTask((client) => client.request("POST", `/v1/approvals/${encodeURIComponent(id)}/approve`, {})).pipe(
-      Effect.flatMap((result) => {
-        const body = record(result)
-        return writeStdoutLine(jsonOutput(body, verbose))
-      })
-    )
-).pipe(Command.withDescription("Approve a frozen invocation; the gateway then performs it"))
+  ({ id, arguments: edited, verbose }) =>
+    Effect.gen(function* () {
+      const body = Option.isNone(edited)
+        ? {}
+        : {
+            arguments: yield* decodeEditedArguments(edited.value).pipe(
+              Effect.mapError((cause) => cliError(`--arguments is not valid JSON: ${cause.message}`))
+            )
+          }
+      const result = yield* controlPlaneTask((client) =>
+        client.request("POST", `/v1/approvals/${encodeURIComponent(id)}/approve`, body)
+      )
+      return yield* writeStdoutLine(jsonOutput(record(result), verbose))
+    })
+).pipe(Command.withDescription("Approve a frozen invocation; the gateway then performs it, with --arguments if given"))
 
 export const denyCommand = Command.make(
   "deny",
