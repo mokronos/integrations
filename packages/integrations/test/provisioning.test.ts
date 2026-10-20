@@ -44,6 +44,7 @@ const integrationsWith = (options: {
   const dies = (member: string) => () => Effect.die(new Error(`${member} is not used by these tests`))
   return Context.make(Integrations, {
     listIntegrations: dies("listIntegrations"),
+    registerHostIntegration: dies("registerHostIntegration"),
     findIntegration: (slug) => {
       if (options.existing !== undefined && options.existing.slug === slug) {
         return Effect.succeed(Option.some(options.existing))

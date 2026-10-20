@@ -24,6 +24,7 @@ export const stubIntegrations = (overrides: Partial<Integrations["Service"]> = {
   removeConnection: dies("removeConnection"),
   refreshConnection: dies("refreshConnection"),
   recompileOpenApiTools: () => Effect.void,
+  registerHostIntegration: dies("registerHostIntegration"),
   toolSummaries: () => Effect.succeed([]),
   listTools: () => Effect.succeed([]),
   describeTool: (target) => Effect.fail(new ToolNotFoundError({ tool: String(target) })),

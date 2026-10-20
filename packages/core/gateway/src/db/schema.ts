@@ -286,6 +286,8 @@ export const gatewayPendingApproval = sqliteTable(
     agent: text("agent"),
     alias: text("alias").notNull(),
     tool: text("tool").notNull(),
+    /** Who the call acts for, so a delegated or host tool runs for the same person once approved. */
+    subject: text("subject"),
     arguments: text("arguments").notNull(),
     argumentsLookup: text("arguments_lookup"),
     groupId: text("group_id"),

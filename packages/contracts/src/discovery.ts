@@ -3,7 +3,8 @@ import { Schema } from "effect"
 import { AuthMethod, Integration, McpProbe } from "./integration.ts"
 import { Tool } from "./tool.ts"
 
-export const IntegrationKind = Schema.Literals(["mcp", "openapi"])
+/** Where an integration's tools come from: an MCP server, an OpenAPI document, or the embedding host itself. */
+export const IntegrationKind = Schema.Literals(["mcp", "openapi", "host"])
 export type IntegrationKind = typeof IntegrationKind.Type
 
 export const EndpointClassification = Schema.Union([

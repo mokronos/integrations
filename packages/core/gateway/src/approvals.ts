@@ -7,9 +7,10 @@ import {
   type ApprovalVerdict,
   type DecidedApproval,
   connectionSubject,
+  isDelegationTemplate,
   TenantId
 } from "./domain.ts"
-import type { AuditApproval, Authorized, PendingApproval } from "./domain.ts"
+import type { AuditApproval, Authorized, ConnectionRef, PendingApproval } from "./domain.ts"
 import { executeAuthorized } from "./invoke.ts"
 import { newApprovalRuleId } from "./keys.ts"
 import type { GatewayStore, GatewayStoreError } from "./store.ts"
@@ -40,13 +41,23 @@ const frozenAuthorization = Effect.fn("Approvals.frozenAuthorization")(function*
     (candidate) => candidate.tool === approval.tool && aliasForConnection(candidate.connection) === approval.alias
   )
   if (profileTool === undefined) return undefined
+  // A delegated tool was frozen for the person the call named, and runs on their connection.
+  const connection: ConnectionRef =
+    isDelegationTemplate(profileTool.connection) && approval.subject !== null
+      ? {
+          owner: "user",
+          subject: approval.subject,
+          integration: profileTool.connection.integration,
+          name: profileTool.connection.name
+        }
+      : profileTool.connection
   return {
     status: "authorized",
     profile,
     profileTool,
     alias: aliasForConnection(profileTool.connection),
-    connection: profileTool.connection,
-    subject: connectionSubject(profileTool.connection) ?? null,
+    connection,
+    subject: connectionSubject(connection) ?? approval.subject,
     decision: profileTool.decision
   }
 })
@@ -122,8 +133,7 @@ export const approveApproval = Effect.fn("Approvals.approve")(function* (
       authorization,
       frozen.arguments,
       { caller: frozen.caller, authorizedBy: null },
-      { approval, message: decidedBy === null ? null : `approved by ${decidedBy}` },
-      { relay }
+      { approved: { approval, message: decidedBy === null ? null : `approved by ${decidedBy}` }, approvalId: id, relay }
     )
     yield* store.settleApproval({
       tenantId,

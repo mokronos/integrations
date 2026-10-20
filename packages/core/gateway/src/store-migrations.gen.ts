@@ -209,5 +209,12 @@ export const gatewayMigrations: ReadonlyArray<Migration> = [
     statements: [
       "ALTER TABLE `gateway_audit` ADD `approval` text;"
     ]
+  },
+  {
+    id: 16,
+    name: "0016_keep_who_an_approval_acts_for",
+    statements: [
+      "ALTER TABLE `gateway_pending_approval` ADD `subject` text;"
+    ]
   }
 ]

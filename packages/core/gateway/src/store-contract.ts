@@ -110,6 +110,8 @@ export interface CreateApprovalInput {
   readonly caller: Caller
   readonly alias: Alias
   readonly tool: ToolName
+  /** Who the call acts for; nobody when absent. */
+  readonly subject?: SubjectId | null
   readonly arguments: typeof Schema.Json.Type
   readonly expiresAt: Date
   /** Joins the newest open group for this tool whose first call is younger than this. */
@@ -382,7 +384,7 @@ export interface GatewayStore {
     status?: ApprovalStatus
   ): Effect.Effect<ReadonlyArray<PendingApproval>, GatewayStoreError>
   findUncollectedApproval(
-    input: Pick<CreateApprovalInput, "tenantId" | "profileId" | "alias" | "tool" | "arguments">
+    input: Pick<CreateApprovalInput, "tenantId" | "profileId" | "alias" | "tool" | "subject" | "arguments">
   ): Effect.Effect<PendingApproval | undefined, GatewayStoreError>
   collectApproval(tenantId: TenantId, id: ApprovalId): Effect.Effect<boolean, GatewayStoreError>
   claimApproval(input: {

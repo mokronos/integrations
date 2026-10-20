@@ -35,7 +35,11 @@ export const HttpCall = Schema.Struct({
 })
 export type HttpCall = typeof HttpCall.Type
 
-export const ToolCall = Schema.Union([McpCall, HttpCall])
+/** A tool the embedding host runs itself; `handler` is what its executor dispatches on. */
+export const HostCall = Schema.Struct({ kind: Schema.Literal("host"), handler: Schema.String })
+export type HostCall = typeof HostCall.Type
+
+export const ToolCall = Schema.Union([McpCall, HttpCall, HostCall])
 export type ToolCall = typeof ToolCall.Type
 
 export const Tool = Schema.Struct({

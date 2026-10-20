@@ -15,6 +15,7 @@ import { Database } from "./storage/database.ts"
 import type { Encryption } from "./storage/encryption.ts"
 import { applyMigrations } from "./storage/migrate.ts"
 import { integrationMigrations } from "./storage/migrations.gen.ts"
+import { HostTools } from "./host-tools.ts"
 import { Integrations } from "./integrations.ts"
 import { McpClient } from "./mcp/client.ts"
 import { OAuthFlows } from "./oauth/flows.ts"
@@ -60,6 +61,8 @@ export const applyIntegrationMigrations = (sql: SqlClient.SqlClient) => applyMig
 export interface IntegrationLayerOptions {
   readonly encryption: Encryption
   readonly blobs: Layer.Layer<BlobStore, never, SqlClient.SqlClient>
+  /** Runs the tools of host integrations; without it they fail when called. */
+  readonly hostTools?: HostTools["Service"]
 }
 
 /**
@@ -72,7 +75,13 @@ export const integrationLayer = (
   capabilitiesLayer.pipe(
     Layer.provideMerge(clientsLayer),
     Layer.provideMerge(options.blobs),
-    Layer.provide(Layer.mergeAll(Database.layer, CredentialStore.sqlLayer(options.encryption)))
+    Layer.provide(
+      Layer.mergeAll(
+        Database.layer,
+        CredentialStore.sqlLayer(options.encryption),
+        options.hostTools === undefined ? Layer.empty : HostTools.layer(options.hostTools)
+      )
+    )
   )
 
 /**

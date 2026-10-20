@@ -244,10 +244,18 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function* 
   const approvalMatch = (input: Parameters<GatewayStore["findUncollectedApproval"]>[0]) => {
     const canonical = canonicalJson(input.arguments)
     return {
-      sql: `tenant_id = ? AND profile_id = ? AND alias = ? AND tool = ?
+      sql: `tenant_id = ? AND profile_id = ? AND alias = ? AND tool = ? AND subject IS ?
         AND ((arguments_lookup IS NOT NULL AND arguments_lookup = ?)
           OR (arguments_lookup IS NULL AND arguments = ?)) AND collected_at IS NULL`,
-      args: [input.tenantId, input.profileId, input.alias, input.tool, encryption.lookup(canonical), canonical]
+      args: [
+        input.tenantId,
+        input.profileId,
+        input.alias,
+        input.tool,
+        input.subject ?? null,
+        encryption.lookup(canonical),
+        canonical
+      ]
     }
   }
 
@@ -1397,8 +1405,8 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function* 
             {
               sql: `INSERT INTO gateway_pending_approval
            (id, tenant_id, profile_id, api_key_id, oauth_grant_id, oauth_application_id, credential_name, agent,
-            alias, tool, arguments, arguments_lookup, group_id, status, created_at, expires_at, decided_at, decided_by, result, error, collected_at)
-         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((
+            alias, tool, subject, arguments, arguments_lookup, group_id, status, created_at, expires_at, decided_at, decided_by, result, error, collected_at)
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((
              SELECT member.group_id FROM gateway_pending_approval AS member
                JOIN gateway_pending_approval AS lead ON lead.id = member.group_id
               WHERE member.tenant_id = ? AND member.profile_id = ? AND member.alias = ? AND member.tool = ?
@@ -1413,6 +1421,7 @@ const createGatewayStoreDriver = Effect.fn("GatewayStore.openDriver")(function* 
                 ...callerArgs(input.caller),
                 input.alias,
                 input.tool,
+                input.subject ?? null,
                 sealText(canonical),
                 encryption.lookup(canonical),
                 input.tenantId,

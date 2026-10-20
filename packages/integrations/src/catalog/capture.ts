@@ -10,6 +10,7 @@ import {
 import { StorageError } from "../errors.ts"
 import type { McpToolDefinition } from "../mcp/client.ts"
 import { normalizeOutputSchema } from "../mcp/result.ts"
+import type { HostToolDefinition } from "../host-tools.ts"
 import type { CompiledSpec } from "../openapi/compile.ts"
 import { Tool } from "../tool.ts"
 import type { Tool as IntegrationTool, ToolCall } from "../tool.ts"
@@ -79,6 +80,25 @@ export const captureMcpTools = (
   })
 
 const idempotentMethods = new Set(["put", "delete"])
+
+export const captureHostTools = (
+  target: CaptureTarget,
+  definitions: ReadonlyArray<HostToolDefinition>,
+  capturedAt: number
+): Effect.Effect<ReadonlyArray<IntegrationTool>, StorageError> =>
+  Effect.forEach(definitions, (definition) => {
+    const readOnly = definition.readOnly === true
+    return record(target, capturedAt, {
+      name: definition.name,
+      description: definition.description,
+      readOnly,
+      destructive: definition.destructive ?? !readOnly,
+      idempotent: definition.idempotent ?? readOnly,
+      ...whenPresent("inputSchema", definition.inputSchema),
+      ...whenPresent("outputSchema", definition.outputSchema),
+      call: { kind: "host", handler: definition.handler ?? definition.name }
+    })
+  })
 
 export const captureOpenApiTools = (
   target: CaptureTarget,
