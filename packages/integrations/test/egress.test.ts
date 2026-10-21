@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto"
 import { createServer as createHttpServer } from "node:http"
 import type { Server as HttpServer } from "node:http"
 import { createServer as createTcpServer } from "node:net"
@@ -159,6 +160,31 @@ describe("native connect", () => {
           status: 201,
           echo: { method: "POST", host: `service.test:${server.port}`, length: "7", body: '{"q":1}' }
         })
+      })
+    )
+  )
+
+  it.live("fails a compressed answer the connection cuts off instead of leaving it pending", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const whole = gzipSync(randomBytes(64 * 1024))
+        const server = yield* listening(
+          createHttpServer((_request, response) => {
+            response.writeHead(200, { "content-encoding": "gzip", "content-length": String(whole.byteLength) })
+            response.write(whole.subarray(0, 100), () => response.socket?.destroy())
+          })
+        )
+        const outcome = yield* Effect.tryPromise(async () => {
+          const response = await nativeConnect(defaultUrlPolicy, toLoopback)(
+            new URL(`http://service.test:${server.port}/`),
+            {}
+          )
+          return response.text()
+        }).pipe(
+          Effect.match({ onFailure: () => "failed", onSuccess: () => "succeeded" }),
+          Effect.timeoutOrElse({ duration: "2 seconds", orElse: () => Effect.succeed("pending") })
+        )
+        expect(outcome).toBe("failed")
       })
     )
   )
