@@ -5,6 +5,7 @@ import type { IncomingMessage } from "node:http"
 import { Agent as HttpsAgent, request as httpsRequest } from "node:https"
 import { isIP } from "node:net"
 import type { LookupFunction } from "node:net"
+import { pipeline } from "node:stream"
 import type { Readable } from "node:stream"
 import { createBrotliDecompress, createGunzip, createInflate } from "node:zlib"
 import { DestinationRefused } from "./egress.ts"
@@ -50,23 +51,38 @@ const decoders = {
 const isDecodable = (encoding: string): encoding is keyof typeof decoders => encoding in decoders
 
 /** A web stream over a Node one, read only as fast as the consumer pulls. */
-const webStream = (source: Readable): ReadableStream<Uint8Array> =>
-  new ReadableStream<Uint8Array>({
+const webStream = (source: Readable): ReadableStream<Uint8Array> => {
+  let settled = false
+  return new ReadableStream<Uint8Array>({
     start: (controller) => {
       source.on("data", (chunk: Buffer) => {
         controller.enqueue(new Uint8Array(chunk))
         if ((controller.desiredSize ?? 0) <= 0) source.pause()
       })
-      source.on("end", () => controller.close())
-      source.on("error", (error) => controller.error(error))
+      source.on("end", () => {
+        settled = true
+        controller.close()
+      })
+      source.on("error", (error) => {
+        settled = true
+        controller.error(error)
+      })
+      // Destroyed without an error, the stream neither ends nor fails; the answer was cut off all the same.
+      source.on("close", () => {
+        if (settled) return
+        settled = true
+        controller.error(new Error("The connection closed before the answer ended"))
+      })
     },
     pull: () => {
       source.resume()
     },
     cancel: () => {
+      settled = true
       source.destroy()
     }
   })
+}
 
 const toResponse = (incoming: IncomingMessage, method: string): Response => {
   const headers = new Headers()
@@ -84,7 +100,8 @@ const toResponse = (incoming: IncomingMessage, method: string): Response => {
   if (!isDecodable(encoding)) return new Response(webStream(incoming), init)
   headers.delete("content-encoding")
   headers.delete("content-length")
-  return new Response(webStream(incoming.pipe(decoders[encoding]())), init)
+  // A pipeline fails the decoder when the connection fails, and destroys the connection when the reader cancels.
+  return new Response(webStream(pipeline(incoming, decoders[encoding](), () => undefined)), init)
 }
 
 /**
