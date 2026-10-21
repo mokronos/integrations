@@ -36,7 +36,22 @@ const asOpenApi = (url: string): Effect.Effect<EndpointClassification, Detection
     return classified
   }).pipe(Effect.mapError((cause) => new DetectionError({ url, detail: cause.detail })))
 
+/** Only http(s) URLs are probed; `host/path` or `host:port/path` is a URL with its scheme left out. */
+const isHttpUrl = (url: string): boolean => {
+  const protocol = URL.parse(url)?.protocol
+  return protocol === "http:" || protocol === "https:"
+}
+
 export const classify = Effect.fn("Discovery.classify")(function* (url: string) {
+  if (!isHttpUrl(url)) {
+    return yield* new DetectionError({
+      url,
+      detail: url.includes("://")
+        ? "it is not an http:// or https:// URL"
+        : `it has no http:// or https:// scheme; did you mean https://${url}?`
+    })
+  }
+
   const mcp = yield* Effect.result(asMcp(url))
   if (Result.isSuccess(mcp)) return mcp.success
 
