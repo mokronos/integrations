@@ -1,7 +1,6 @@
 import { Effect, Option, Schema } from "effect"
 import { InvocationError } from "../errors.ts"
-
-type Json = typeof Schema.Json.Type
+import type { Json } from "@integragents/contracts"
 
 const McpEnvelope = Schema.Struct({
   structuredContent: Schema.optional(Schema.Json),

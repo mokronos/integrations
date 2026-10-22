@@ -1,4 +1,4 @@
-import { Effect, Option, Predicate, Schema } from "effect"
+import { Effect, Option, Predicate } from "effect"
 import { ToolName, whenPresent } from "@integragents/contracts"
 import type {
   ConnectionName,
@@ -6,6 +6,7 @@ import type {
   InputAnswer,
   InputRound,
   IntegrationSlug,
+  Json,
   ToolAddress
 } from "@integragents/contracts"
 import { CatalogStore } from "../catalog/store.ts"
@@ -20,8 +21,6 @@ import type { ResolvedCredential } from "../openapi/invoke.ts"
 import { mcpCredential, requireMcpServer } from "./access.ts"
 import type { ConnectionAccess, IntegrationFailure } from "./access.ts"
 import { toTool, toToolSummary } from "./views.ts"
-
-type Json = typeof Schema.Json.Type
 
 /** A tool call's outcome: its result, or a round of input the tool needs first. */
 export type ToolExecution =

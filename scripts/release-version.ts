@@ -3,6 +3,7 @@ import path from "node:path"
 import { Data, Effect, Option, Schema } from "effect"
 import { Command, Flag } from "effect/cli"
 import * as BunServices from "@effect/platform-bun/BunServices"
+import packageMetadata from "../package.json" with { type: "json" }
 
 const repositoryRoot = path.resolve(import.meta.dirname, "..")
 
@@ -23,7 +24,7 @@ export const releasePackageFiles = [
 ] as const
 
 /** The version constant the gateway reports over the wire. */
-export const gatewayVersionFile = "packages/gateway-api/src/version.ts"
+export const gatewayVersionFile = "packages/contracts/src/version.ts"
 
 /**
  * The packages published to the registry, in dependency order. Every
@@ -321,7 +322,7 @@ const command = Command.make("release-version").pipe(
 )
 
 if (import.meta.main) {
-  Command.runWith(command, { version: "0.2.0" })(process.argv.slice(2)).pipe(
+  Command.runWith(command, { version: packageMetadata.version })(process.argv.slice(2)).pipe(
     Effect.provide(BunServices.layer),
     Effect.runPromise
   )

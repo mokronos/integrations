@@ -10,8 +10,7 @@ import {
   ToolAddress,
   ToolName
 } from "@integragents/contracts"
-
-type Json = typeof Schema.Json.Type
+import type { Json } from "@integragents/contracts"
 
 /** One tool the embedding host runs itself, described the way a catalog describes any other tool. */
 export const HostToolDefinition = Schema.Struct({

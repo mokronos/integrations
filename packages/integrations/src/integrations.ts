@@ -1,5 +1,5 @@
 import { Context, Effect, Layer } from "effect"
-import type { Option, Schema } from "effect"
+import type { Option } from "effect"
 import type {
   Connection,
   ConnectionName,
@@ -7,6 +7,7 @@ import type {
   InputAnswer,
   Integration,
   IntegrationSlug,
+  Json,
   Tool,
   ToolAddress,
   ToolSummary
@@ -32,8 +33,6 @@ export type { IntegrationFailure } from "./integrations/access.ts"
 export type { CreateConnectionOptions } from "./integrations/connection-methods.ts"
 export type { AddMcpOptions, AddOpenApiOptions } from "./integrations/integration-methods.ts"
 export type { ToolExecution, ToolFilter, ToolTarget } from "./integrations/tool-methods.ts"
-
-type Json = typeof Schema.Json.Type
 
 export class Integrations extends Context.Service<
   Integrations,

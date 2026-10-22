@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Layer, Schema } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/http"
-import { GatewayMetadata } from "@integragents/contracts"
+import { GatewayMetadata, gatewayVersion } from "@integragents/contracts"
 import {
   gatewayConfigPath,
   operatorGatewayConfigPath,
@@ -11,7 +11,7 @@ import {
   resolveOperatorConnection
 } from "@integragents/contracts/gateway-config"
 import { defaultTenantId, generateApiKey, newProfileId } from "@integragents/gateway-core"
-import { gatewayVersion, localAgentProfileName, localProfileName, serveGateway } from "../src/index.ts"
+import { localAgentProfileName, localProfileName, serveGateway } from "../src/index.ts"
 import { nativeConnect } from "@integragents/integrations/native-egress"
 import { temporaryDirectory, testServices } from "./fixtures.ts"
 

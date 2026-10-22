@@ -1,5 +1,12 @@
 import { extractWWWAuthenticateParams } from "@modelcontextprotocol/client"
-import { isJsonObject, parseJsonString, whenPresent, whenPresentFields, whenPresentMap } from "@integragents/contracts"
+import {
+  gatewayVersion,
+  isJsonObject,
+  parseJsonString,
+  whenPresent,
+  whenPresentFields,
+  whenPresentMap
+} from "@integragents/contracts"
 import type { Json, JsonObject } from "@integragents/contracts"
 import { tracedFetch } from "@integragents/observability"
 import { Context, Effect, Layer, Option, Schema } from "effect"
@@ -364,7 +371,7 @@ const makeProtocol = (egress: { readonly policy: UrlPolicy; readonly fetch: Fetc
           params: {
             protocolVersion: "2025-11-25",
             capabilities: {},
-            clientInfo: { name: gatewayUserAgent, version: "1.0.0" }
+            clientInfo: { name: gatewayUserAgent, version: gatewayVersion }
           }
         })
       })

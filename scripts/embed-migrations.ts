@@ -3,6 +3,7 @@ import path from "node:path"
 import { Effect, Schema } from "effect"
 import { Command, Flag } from "effect/cli"
 import * as BunServices from "@effect/platform-bun/BunServices"
+import packageMetadata from "../package.json" with { type: "json" }
 
 const Journal = Schema.Struct({
   entries: Schema.Array(Schema.Struct({ idx: Schema.Int, tag: Schema.String }))
@@ -78,7 +79,7 @@ const command = Command.make(
     })
 )
 
-Command.runWith(command, { version: "0.2.0" })(process.argv.slice(2)).pipe(
+Command.runWith(command, { version: packageMetadata.version })(process.argv.slice(2)).pipe(
   Effect.provide(BunServices.layer),
   Effect.runPromise
 )

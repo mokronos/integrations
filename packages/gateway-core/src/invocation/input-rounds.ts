@@ -2,8 +2,7 @@ import { AuditApproval, canonicalJson, ProfileId, ToolAddress, whenPresent } fro
 import { Clock, Crypto, Duration, Effect, Option, Schema } from "effect"
 import { sha256Hex } from "../keys.ts"
 import type { SealedStateStore } from "../store/index.ts"
-
-type Json = typeof Schema.Json.Type
+import type { Json } from "@integragents/contracts"
 
 /** Long enough for a human to answer the form a round puts to them. */
 const roundLifetime = Duration.minutes(30)

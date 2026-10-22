@@ -1,6 +1,6 @@
 import { connectionOwner, isDelegationTemplate, matchesPattern, whenPresent } from "@integragents/contracts"
-import type { IdempotencyKey, InputResponses, InvocationOutcome } from "@integragents/contracts"
-import { Crypto, DateTime, Duration, Effect, Option, Schema } from "effect"
+import type { IdempotencyKey, InputResponses, InvocationOutcome, Json } from "@integragents/contracts"
+import { Crypto, DateTime, Duration, Effect, Option } from "effect"
 import type { HttpClient } from "effect/http"
 import type { Integrations } from "@integragents/integrations"
 import type { OAuthSessions } from "../connection-oauth/sessions.ts"
@@ -37,8 +37,6 @@ import type {
   ProfileStore,
   SealedStateStore
 } from "../store/index.ts"
-
-type Json = typeof Schema.Json.Type
 
 export interface InvokeDependencies {
   readonly store: ApprovalStore & AuditStore & InvocationKeyStore & ProfileStore & SealedStateStore

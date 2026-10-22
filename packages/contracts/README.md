@@ -15,7 +15,7 @@ decode a gateway response without acquiring the host's dependency graph.
 | `overview.ts`            | The dashboard aggregates                                                                       |
 | `discovery.ts`           | What classifying an endpoint returns, and what `integrations validate` accepts                 |
 | `registry.ts`            | integrations.sh search shapes                                                                  |
-| `version.ts`             | The negotiated protocol version                                                                |
+| `version.ts`             | The negotiated protocol version and the gateway release version                                |
 | `json.ts`, `optional.ts` | The helpers every boundary uses                                                                |
 
 ## Why the vocabulary lives here

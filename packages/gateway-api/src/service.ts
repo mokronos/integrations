@@ -35,7 +35,7 @@ import { createWebAssets } from "./web-assets.ts"
 import { defaultRateLimitPerMinute, gatewayEnvironment } from "./config.ts"
 import { makeTelemetry } from "@integragents/observability"
 import type { Telemetry } from "@integragents/observability"
-import { gatewayVersion } from "./version.ts"
+import { gatewayVersion } from "@integragents/contracts"
 
 export const localProfileName = "local"
 export const localAgentProfileName = "local-agent"

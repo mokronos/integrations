@@ -1,15 +1,13 @@
 import { relayableInput, unrelayableInputMessage } from "@integragents/integrations"
 import type { Integrations, ToolCallContext } from "@integragents/integrations"
 import { connectionOwner, ToolAddress, whenPresent } from "@integragents/contracts"
-import type { IdempotencyKey, InputAnswer, InvocationOutcome } from "@integragents/contracts"
-import { Crypto, DateTime, Duration, Effect, Schema } from "effect"
+import type { IdempotencyKey, InputAnswer, InvocationOutcome, Json } from "@integragents/contracts"
+import { Crypto, DateTime, Duration, Effect } from "effect"
 import type { ApprovalId, AuditApproval, Authorization, CallOrigin, ConnectionRef, ToolName } from "../domain.ts"
 import { sealRound } from "./input-rounds.ts"
 import type { RoundApproval } from "./input-rounds.ts"
 import { newAuditId } from "../keys.ts"
 import type { AuditStore, GatewayStoreError, RecordAuditInput, SealedStateStore } from "../store/index.ts"
-
-type Json = typeof Schema.Json.Type
 
 export const boundToolAddress = (connection: ConnectionRef, tool: ToolName): ToolAddress =>
   ToolAddress.make(`tools.${connection.integration}.${connectionOwner(connection)}.${connection.name}.${tool}`)

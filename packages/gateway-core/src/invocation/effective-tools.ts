@@ -1,6 +1,6 @@
 import { connectionOwner, connectionRefOf, isDelegationTemplate, whenPresent } from "@integragents/contracts"
-import type { ToolAddress, ToolSummary } from "@integragents/contracts"
-import { Effect, Option, Schema } from "effect"
+import type { Json, ToolAddress, ToolSummary } from "@integragents/contracts"
+import { Effect, Option } from "effect"
 import type { Integrations } from "@integragents/integrations"
 import { aliasForConnection } from "../domain.ts"
 import type {
@@ -14,8 +14,6 @@ import type {
 } from "../domain.ts"
 import type { GatewayStoreError, ProfileStore } from "../store/index.ts"
 import { boundToolAddress } from "./execute.ts"
-
-type Json = typeof Schema.Json.Type
 
 export type EffectiveTool = {
   readonly alias: Alias

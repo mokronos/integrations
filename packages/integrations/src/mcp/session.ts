@@ -17,14 +17,14 @@ import { McpError } from "../errors.ts"
 import type { McpFailureReason } from "../errors.ts"
 import { DestinationRefused, gatewayUserAgent } from "../egress/egress.ts"
 import { hostOf, refusedDestination, transportCode } from "../unreachable.ts"
-import { whenPresent } from "@integragents/contracts"
+import { gatewayVersion, whenPresent } from "@integragents/contracts"
 import type { McpEra } from "@integragents/contracts"
 import { legacyElicitationAnswer } from "./unrelayable-input.ts"
 import { tracedFetch } from "@integragents/observability"
 
 export const PROTOCOL_VERSION = "2026-07-28"
 
-const clientInfo = { name: "@integragents/integrations", version: "0.2.0" } as const
+const clientInfo = { name: gatewayUserAgent, version: gatewayVersion }
 
 export const requestMeta = {
   "io.modelcontextprotocol/protocolVersion": PROTOCOL_VERSION,

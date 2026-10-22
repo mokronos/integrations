@@ -11,6 +11,7 @@ import type { InputRequest, ServerContext } from "@modelcontextprotocol/server"
 import {
   Alias,
   asJson,
+  gatewayVersion,
   InputResponses,
   isJsonObject,
   objectEntries,
@@ -40,7 +41,6 @@ import type { GatewayOperationServices } from "./operations.ts"
 import { GatewayConfig } from "./services.ts"
 import { OAuthFlowSessions } from "@integragents/gateway-core"
 import type { GatewaySettings } from "./services.ts"
-import { gatewayVersion } from "../version.ts"
 
 /**
  * MCP is a second surface over the same gateway, not a second gateway: its
