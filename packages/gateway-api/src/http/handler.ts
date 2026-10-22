@@ -39,7 +39,7 @@ import type { GatewayStore } from "@integragents/gateway-core"
 import type { OAuthSessions } from "@integragents/gateway-core"
 import type { WebAssets } from "../web-assets.ts"
 import { createMcpGatewayHandler } from "./mcp.ts"
-import { createMcpOAuthHandler, mcpOAuthPaths } from "./mcp-oauth.ts"
+import { createMcpOAuthHandler, mcpOAuthPaths } from "./authorization-server.ts"
 
 export interface GatewayRequestContext {
   readonly localSecret?: string

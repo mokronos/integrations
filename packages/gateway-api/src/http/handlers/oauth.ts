@@ -10,7 +10,7 @@ import {
 } from "@integragents/gateway-core"
 import { ApiBadRequest, ApiGone, ApiNotFound, GatewayApi } from "../api.ts"
 import { Forbidden, Identity } from "../authority.ts"
-import { mcpOAuthIssuer } from "../mcp-oauth.ts"
+import { mcpOAuthIssuer } from "../authorization-server.ts"
 import { capture } from "../observability.ts"
 import { GatewayConfig } from "../services.ts"
 

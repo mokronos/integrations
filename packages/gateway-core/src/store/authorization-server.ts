@@ -9,7 +9,7 @@ import {
   defaultLocalSubjectId
 } from "../domain.ts"
 import type { OAuthGrantView, Profile } from "../domain.ts"
-import { OAuthSecretHash, OAuthTokenKind } from "../mcp-oauth.ts"
+import { OAuthSecretHash, OAuthTokenKind } from "../authorization-server.ts"
 import type {
   OAuthActor,
   OAuthApplication,
@@ -17,7 +17,7 @@ import type {
   OAuthAuthorizationRequest,
   OAuthGrant,
   OAuthToken
-} from "../mcp-oauth.ts"
+} from "../authorization-server.ts"
 import { JsonText, millis, Millis, NullableMillis } from "./columns.ts"
 import { requireProfile } from "./profiles.ts"
 import { now, operation, stored, StoreSql } from "./sql.ts"

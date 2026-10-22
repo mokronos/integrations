@@ -1,5 +1,5 @@
 import { describe, expect, test } from "@effect/vitest"
-import { approvalWebhookSignature, verifyApprovalWebhookSignature } from "../src/approval-delivery.ts"
+import { approvalWebhookSignature, verifyApprovalWebhookSignature } from "../src/approvals/webhooks.ts"
 
 describe("approval delivery", () => {
   test("signs the timestamp and exact request body", () => {

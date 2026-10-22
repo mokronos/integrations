@@ -1,6 +1,6 @@
 import { Context, type Duration, Effect, Schema } from "effect"
 import type { Json } from "@integragents/contracts"
-import type { Alias, ConnectionRef, PendingApproval, Profile, TenantId, ToolName } from "./domain.ts"
+import type { Alias, ConnectionRef, PendingApproval, Profile, TenantId, ToolName } from "../domain.ts"
 
 /**
  * What a reviewer makes of a call that asks: run it now, refuse it, or leave

@@ -10,12 +10,12 @@ import {
   connectionSubject,
   isDelegationTemplate,
   TenantId
-} from "./domain.ts"
-import type { AuditApproval, Authorized, ConnectionRef, PendingApproval } from "./domain.ts"
-import { invalidArguments } from "./arguments.ts"
-import { boundToolAddress, executeAuthorized } from "./execute.ts"
-import { newApprovalRuleId } from "./keys.ts"
-import type { ApprovalStore, AuditStore, GatewayStoreError, ProfileStore, SealedStateStore } from "./store/index.ts"
+} from "../domain.ts"
+import type { AuditApproval, Authorized, ConnectionRef, PendingApproval } from "../domain.ts"
+import { invalidArguments } from "../invocation/arguments.ts"
+import { boundToolAddress, executeAuthorized } from "../invocation/execute.ts"
+import { newApprovalRuleId } from "../keys.ts"
+import type { ApprovalStore, AuditStore, GatewayStoreError, ProfileStore, SealedStateStore } from "../store/index.ts"
 
 export class ApprovalNotFound extends Schema.TaggedError<ApprovalNotFound>()("ApprovalNotFound", {
   id: ApprovalId

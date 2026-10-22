@@ -1,7 +1,7 @@
 import { AuditApproval, canonicalJson, ProfileId, ToolAddress, whenPresent } from "@integragents/contracts"
 import { Clock, Crypto, Duration, Effect, Option, Schema } from "effect"
-import { sha256Hex } from "./keys.ts"
-import type { SealedStateStore } from "./store/index.ts"
+import { sha256Hex } from "../keys.ts"
+import type { SealedStateStore } from "../store/index.ts"
 
 type Json = typeof Schema.Json.Type
 

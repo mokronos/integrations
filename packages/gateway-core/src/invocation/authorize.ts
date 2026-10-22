@@ -8,7 +8,7 @@ import {
   isDelegationTemplate,
   Profile,
   profileHasCapability
-} from "./domain.ts"
+} from "../domain.ts"
 import type {
   Alias,
   Authorization,
@@ -17,11 +17,11 @@ import type {
   ProfileCapability,
   SubjectId,
   ToolName
-} from "./domain.ts"
-import { hashApiKey } from "./keys.ts"
+} from "../domain.ts"
+import { hashApiKey } from "../keys.ts"
 import { Crypto, Effect, Schema } from "effect"
-import type { ProfileStore } from "./store/index.ts"
-import type { GatewayStoreError } from "./store/index.ts"
+import type { ProfileStore } from "../store/index.ts"
+import type { GatewayStoreError } from "../store/index.ts"
 
 export const AuthenticatedProfile = Schema.Struct({
   status: Schema.Literal("authenticated"),

@@ -58,7 +58,7 @@ import {
   ApiKeyId
 } from "@integragents/contracts"
 import type { Caller } from "@integragents/contracts"
-import type { OAuthActor } from "./mcp-oauth.ts"
+import type { OAuthActor } from "./authorization-server.ts"
 export const ApiKeyHash = Schema.String.pipe(Schema.brand("ApiKeyHash"))
 export type ApiKeyHash = typeof ApiKeyHash.Type
 export const ApiKey = Schema.Struct({

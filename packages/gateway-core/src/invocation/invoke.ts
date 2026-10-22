@@ -10,11 +10,11 @@ import { Crypto, DateTime, Duration, Effect, Option, Schema } from "effect"
 import type { HttpClient } from "effect/http"
 import type { Integrations } from "@integragents/integrations"
 import { ToolAddress } from "@integragents/contracts"
-import type { OAuthSessions } from "./oauth-sessions.ts"
+import type { OAuthSessions } from "../connection-oauth/sessions.ts"
 import { invalidArguments } from "./arguments.ts"
 import { authenticateKey, authorizeProfileInvocation } from "./authorize.ts"
-import { defaultArgumentRetentionDays } from "./config.ts"
-import { aliasForConnection, defaultTenantId, keyOrigin, sameConnectionRef, unattributedOrigin } from "./domain.ts"
+import { defaultArgumentRetentionDays } from "../config.ts"
+import { aliasForConnection, defaultTenantId, keyOrigin, sameConnectionRef, unattributedOrigin } from "../domain.ts"
 import type {
   Alias,
   ApprovalId,
@@ -31,14 +31,14 @@ import type {
   TenantId,
   ToolDecision,
   ToolName
-} from "./domain.ts"
-import { approvalOutcome } from "./approval-decisions.ts"
-import { approveApproval, denyApproval } from "./approvals.ts"
+} from "../domain.ts"
+import { approvalOutcome } from "../approvals/decided.ts"
+import { approveApproval, denyApproval } from "../approvals/decide.ts"
 import { auditFor, boundToolAddress, executeAuthorized } from "./execute.ts"
 import { openRound } from "./input-rounds.ts"
-import { newApprovalId, newAuditId } from "./keys.ts"
-import { consultReviewer, reviewerIdentity } from "./reviewer.ts"
-import type { ApprovalReviewer, ApprovalReviewRequest } from "./reviewer.ts"
+import { newApprovalId, newAuditId } from "../keys.ts"
+import { consultReviewer, reviewerIdentity } from "../approvals/reviewer.ts"
+import type { ApprovalReviewer, ApprovalReviewRequest } from "../approvals/reviewer.ts"
 import type {
   ApprovalStore,
   AuditStore,
@@ -47,7 +47,7 @@ import type {
   InvocationKeyStore,
   ProfileStore,
   SealedStateStore
-} from "./store/index.ts"
+} from "../store/index.ts"
 
 type Json = typeof Schema.Json.Type
 

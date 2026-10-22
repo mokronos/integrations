@@ -17,7 +17,7 @@ import type { OAuthSetup } from "@integragents/integrations"
 import { createOAuthSessions, OAuthFlowError } from "@integragents/gateway-core"
 import type { OAuthOperations } from "@integragents/gateway-core"
 import { testServices } from "./fixtures.ts"
-import { authorizeInBrowser } from "../src/oauth-browser.ts"
+import { authorizeInBrowser } from "../src/connection-oauth-browser.ts"
 
 const services = Layer.merge(testServices, FetchHttpClient.layer)
 

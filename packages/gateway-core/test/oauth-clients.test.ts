@@ -8,7 +8,7 @@ import type {
   FakeAuthorizationServer,
   FakeAuthorizationServerOptions
 } from "@integragents/integrations/test-oauth-server"
-import { prepareFlow } from "../src/oauth.ts"
+import { prepareFlow } from "../src/connection-oauth/flows.ts"
 import { testEncryption } from "./fixtures.ts"
 
 const services = integrationLayer({ encryption: testEncryption, blobs: BlobStore.sqlLayer }).pipe(

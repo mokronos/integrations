@@ -67,9 +67,9 @@ export {
   registerOAuthClient,
   saveOAuthClient,
   startOAuthFlow
-} from "./oauth-connect.ts"
+} from "./oauth/connect.ts"
 export type { ConnectionGrant, OAuthMethodSettings, OAuthSetup } from "./oauth/flows.ts"
-export type { StartedOAuthFlow } from "./oauth-connect.ts"
+export type { StartedOAuthFlow } from "./oauth/connect.ts"
 
 export {
   ConnectionNotFoundError,

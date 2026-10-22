@@ -4,8 +4,8 @@ import { Clock, Context, Deferred, Effect, Exit, Schema, Scope } from "effect"
 import type { SqlClient } from "effect/sql"
 import { webCrypto } from "@integragents/contracts"
 import { completeOAuthFlow } from "@integragents/integrations"
-import { OAuthFlowError, startRemoteAuthorization } from "./oauth.ts"
-import type { LocalAuthorizer, OAuthOperations } from "./oauth.ts"
+import { OAuthFlowError, startRemoteAuthorization } from "./flows.ts"
+import type { LocalAuthorizer, OAuthOperations } from "./flows.ts"
 
 /**
  * Everything needed to run the authorization again, minus the OAuth client

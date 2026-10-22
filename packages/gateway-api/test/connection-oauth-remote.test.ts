@@ -18,7 +18,7 @@ import type { OAuthClientRecord } from "@integragents/integrations"
 import type { OAuthOperations } from "@integragents/gateway-core"
 import type { Connection } from "@integragents/contracts"
 import { createGatewayHandler, createOAuthSessions } from "./gateway.ts"
-import { authorizeInBrowser } from "../src/oauth-browser.ts"
+import { authorizeInBrowser } from "../src/connection-oauth-browser.ts"
 
 const oauthMethod = {
   id: "google-oauth",

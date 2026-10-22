@@ -13,8 +13,8 @@ import {
 } from "@integragents/integrations"
 import type { CatalogStore, Integrations, OAuthFlows, OAuthSetup } from "@integragents/integrations"
 import { AuthMethod, Connection, ConnectionOwner, webCrypto, whenPresent } from "@integragents/contracts"
-import { sha256Hex } from "./keys.ts"
-import { oauthSetupGuidance } from "./oauth-guidance.ts"
+import { sha256Hex } from "../keys.ts"
+import { oauthSetupGuidance } from "./guidance.ts"
 
 export class OAuthFlowError extends Schema.TaggedError<OAuthFlowError>()("OAuthFlowError", {
   stage: Schema.Literals([

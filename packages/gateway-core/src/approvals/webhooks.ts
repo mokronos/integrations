@@ -2,8 +2,8 @@ import { createHmac, timingSafeEqual } from "node:crypto"
 import { DateTime, Duration, Effect, Random, Schema } from "effect"
 import { FetchHttpClient, HttpBody, HttpClient, HttpClientResponse } from "effect/http"
 import { utf8Bytes, whenPresent, whenPresentMap } from "@integragents/contracts"
-import type { ApprovalDeliveryId } from "./domain.ts"
-import type { ApprovalDeliveryStore } from "./store/index.ts"
+import type { ApprovalDeliveryId } from "../domain.ts"
+import type { ApprovalDeliveryStore } from "../store/index.ts"
 
 export const ApprovalNotification = Schema.Struct({
   version: Schema.Literal(1),

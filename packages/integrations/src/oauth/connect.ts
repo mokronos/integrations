@@ -7,13 +7,13 @@ import {
   IntegrationSlug,
   type ConnectionOwner
 } from "@integragents/contracts"
-import { AuthTemplateSlug, OAuthClientSlug } from "./catalog/ids.ts"
-import { CatalogStore } from "./catalog/store.ts"
-import type { ClientAuthMethod } from "./catalog/store.ts"
-import { InvalidInputError, type StorageError, type OAuthError } from "./errors.ts"
-import { Integrations } from "./integrations.ts"
-import { OAuthFlows } from "./oauth/flows.ts"
-import type { OAuthMethodSettings, OAuthSetup } from "./oauth/flows.ts"
+import { AuthTemplateSlug, OAuthClientSlug } from "../catalog/ids.ts"
+import { CatalogStore } from "../catalog/store.ts"
+import type { ClientAuthMethod } from "../catalog/store.ts"
+import { InvalidInputError, type StorageError, type OAuthError } from "../errors.ts"
+import { Integrations } from "../integrations.ts"
+import { OAuthFlows } from "./flows.ts"
+import type { OAuthMethodSettings, OAuthSetup } from "./flows.ts"
 
 const decodeId = <A, I>(
   schema: Schema.Codec<A, I, never, never>,

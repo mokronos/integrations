@@ -2,8 +2,8 @@ import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:cry
 import { Crypto, Effect, Schema } from "effect"
 import { Base64 } from "effect/encoding"
 import { decodeBase64Field } from "@integragents/contracts"
-import { sessionSecret, sha256Hex } from "./keys.ts"
-import { SessionTokenHash } from "./domain.ts"
+import { sessionSecret, sha256Hex } from "../keys.ts"
+import { SessionTokenHash } from "../domain.ts"
 
 export class PasswordError extends Schema.TaggedError<PasswordError>()("PasswordError", {
   operation: Schema.String,
