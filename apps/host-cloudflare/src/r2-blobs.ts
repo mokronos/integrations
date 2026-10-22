@@ -4,7 +4,7 @@ import { RuntimeContext } from "alchemy"
 import { Effect, Layer, Stream } from "effect"
 import { Hex } from "effect/encoding"
 import { BlobId } from "@integragents/contracts"
-import { BlobStore, StorageError } from "@integragents/host"
+import { BlobStore, StorageError } from "@integragents/integrations"
 
 export const Blobs = Cloudflare.R2.Bucket("Blobs")
 

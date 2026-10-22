@@ -32,11 +32,14 @@
     "src",
     "!src/standalone.ts",
     "!src/embedded-web.d.ts",
+    "web",
     "README.md"
   ],
   "scripts": {
     "test:remote": "bun run test/remote.acceptance.ts",
-    "typecheck": "tsc -p ../../../tsconfig.json --noEmit"
+    "typecheck": "tsc -p ../../tsconfig.json --noEmit",
+    "build": "bun run --cwd ../web build && rm -rf web && cp -R ../web/dist web",
+    "prepack": "bun run build"
   },
   "dependencies": {
     "@effect/platform-bun": "catalog:",
@@ -44,9 +47,8 @@
     "@integragents/contracts": "workspace:^",
     "@integragents/gateway-api": "workspace:^",
     "@integragents/gateway-core": "workspace:^",
-    "@integragents/local": "workspace:^",
     "@integragents/client": "workspace:^",
-    "@integragents/host": "workspace:^",
+    "@integragents/integrations": "workspace:^",
     "@integragents/observability": "workspace:^",
     "effect": "catalog:"
   }

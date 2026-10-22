@@ -18,7 +18,7 @@
     "@integragents/contracts": "workspace:^",
     "@integragents/gateway-api": "workspace:^",
     "@integragents/gateway-core": "workspace:^",
-    "@integragents/host": "workspace:^",
+    "@integragents/integrations": "workspace:^",
     "alchemy": "catalog:",
     "effect": "catalog:"
   },

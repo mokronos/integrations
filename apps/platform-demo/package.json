@@ -17,7 +17,7 @@
     "@effect/sql-libsql": "catalog:",
     "@integragents/contracts": "workspace:^",
     "@integragents/gateway-core": "workspace:^",
-    "@integragents/host": "workspace:^",
+    "@integragents/integrations": "workspace:^",
     "@libsql/client": "catalog:",
     "drizzle-orm": "catalog:",
     "effect": "catalog:"

@@ -7,5 +7,5 @@
 **/tsconfig.tsbuildinfo
 .git
 .reference
-apps/local/web
+apps/cli/web
 apps/platform-demo/data

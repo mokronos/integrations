@@ -33,3 +33,20 @@ bun add -g @integragents/cli
 ```
 
 Run `i --help` or `ii --help` for the full command surface.
+
+## The local gateway
+
+`ii serve` runs the gateway and serves the browser control plane at the root of
+the same port. It keeps the integration catalog, sealed credentials and the
+gateway's own store (`gateway.sqlite`) in `INTEGRATIONS_HOME`, falling back to
+`~/.integrations`.
+
+`bun run build` builds the dashboard into this package's `web/` directory, so
+the published package contains the complete local product; set
+`INTEGRATIONS_WEB_DIR` to serve another build. `bun run refresh` at the
+repository root builds that same artifact before restarting the local gateway.
+
+Requests from the dashboard carry no API key.
+`packages/gateway-api/src/http/loopback.ts` decides when such a request may
+borrow the local operator profile's key, and documents what that defends
+against and what it does not.

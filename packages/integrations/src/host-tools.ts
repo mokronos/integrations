@@ -85,6 +85,6 @@ export class HostTools extends Context.Service<
   {
     readonly execute: (invocation: HostToolInvocation) => Effect.Effect<Json, HostToolError>
   }
->()("@integragents/host/HostTools") {
+>()("@integragents/integrations/HostTools") {
   static readonly layer = (executor: HostTools["Service"]): Layer.Layer<HostTools> => Layer.succeed(HostTools, executor)
 }

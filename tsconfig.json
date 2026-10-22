@@ -53,7 +53,7 @@
   // under this repo's stricter options. Oxlint ignores it too.
   "exclude": [
     "**/dist",
-    "apps/local/web",
+    "apps/cli/web",
     "node_modules",
     "**/.tmp/**",
     "apps/web",

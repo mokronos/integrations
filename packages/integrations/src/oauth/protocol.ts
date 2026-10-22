@@ -699,7 +699,9 @@ const makeProtocol = (egress: { readonly policy: UrlPolicy; readonly fetch: Fetc
 export type Protocol = ReturnType<typeof makeProtocol>
 
 /** The OAuth wire protocol over this process's egress. */
-export class OAuthProtocol extends Context.Service<OAuthProtocol, Protocol>()("@integragents/host/OAuthProtocol") {
+export class OAuthProtocol extends Context.Service<OAuthProtocol, Protocol>()(
+  "@integragents/integrations/OAuthProtocol"
+) {
   static readonly layer: Layer.Layer<OAuthProtocol, never, Egress> = Layer.effect(
     OAuthProtocol,
     Effect.gen(function* () {

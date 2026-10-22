@@ -16,7 +16,7 @@ const dashboard = Effect.suspend(() =>
     cwd: fileURLToPath(new URL("../../web", import.meta.url)),
     command: "bun run --cwd ../.. build:control-plane",
     outdir: "dist",
-    memo: { include: ["**/*", "../../packages/*/src/**", "../../packages/core/*/src/**"], lockfile: true }
+    memo: { include: ["**/*", "../../packages/*/src/**"], lockfile: true }
   })
 )
 

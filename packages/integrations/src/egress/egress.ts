@@ -94,11 +94,11 @@ export class Egress extends Context.Service<
     readonly policy: UrlPolicy
     readonly fetch: FetchLike
   }
->()("@integragents/host/Egress") {
+>()("@integragents/integrations/Egress") {
   /**
    * The egress service and an `HttpClient` that goes through it. `connect`
    * is the platform's: `platformConnect` on Workers, the address-checking one
-   * from `@integragents/host/native-egress` where a resolver is available.
+   * from `@integragents/integrations/native-egress` where a resolver is available.
    */
   static readonly layer = (
     policy: UrlPolicy,

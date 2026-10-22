@@ -56,7 +56,7 @@ export class BlobStore extends Context.Service<
     /** Deletes every blob stored before the cutoff and returns how many went. */
     readonly expire: (before: Date) => Effect.Effect<number, StorageError>
   }
->()("@integragents/host/BlobStore") {
+>()("@integragents/integrations/BlobStore") {
   static readonly fileLayer = (directory: string): Layer.Layer<BlobStore> =>
     Layer.effect(
       BlobStore,

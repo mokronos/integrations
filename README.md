@@ -154,17 +154,19 @@ trust.
 
 | Path                      | Purpose                                                                                      |
 | ------------------------- | -------------------------------------------------------------------------------------------- |
-| `packages/core/gateway/`  | Gateway domain, persistence, policy, and execution                                           |
-| `packages/core/api/`      | Typed HTTP API, handlers, and server assembly                                                |
-| `apps/local/`             | Local Bun host and service lifecycle                                                         |
-| `apps/cli/`               | `i` delegated client CLI and `ii` operator CLI                                               |
-| `apps/ts/`                | `@integragents/client`, the thin TypeScript gateway client                                   |
+| `packages/gateway-core/`  | Gateway domain, persistence, policy, and execution                                           |
+| `packages/gateway-api/`   | Typed HTTP API, handlers, and server assembly                                                |
+| `packages/integrations/`  | MCP and OpenAPI catalog, connections, and tool invocation                                    |
+| `packages/contracts/`     | Shared vocabulary and wire contracts                                                         |
+| `packages/observability/` | Trace file, console logs, and OTLP export for every process                                  |
+| `apps/cli/`               | `i`, the agent CLI, and `ii`, the operator CLI that also runs the local gateway              |
+| `apps/ts/`                | `@integragents/client`: what `i` does, for scripts an agent writes                           |
 | `apps/web/`               | Browser control plane                                                                        |
 | `apps/host-cloudflare/`   | Experimental Cloudflare host: a Worker and a SQLite Durable Object, provisioned with Alchemy |
 | `apps/platform-demo/`     | An application embedding the gateway core in-process, on its own database                    |
-| `packages/integrations/`  | The integration host: MCP and OpenAPI catalog, connections, tools                            |
-| `packages/contracts/`     | Shared vocabulary and wire contracts                                                         |
-| `packages/observability/` | Trace file, console logs, and OTLP export for every process                                  |
+
+`packages/` holds the libraries the gateway is built from; `apps/` holds what
+runs against it or hosts it.
 
 `VISION.md` records product direction.
 
@@ -227,8 +229,8 @@ record shape, queries, and OTLP export.
 ## Packages
 
 The packages are published to npm under the `@integragents` scope:
-`contracts`, `observability`, `host`, `gateway-core`, `gateway-api`, `client`,
-`local` and `cli`. One release publishes all of them under the same version, so
+`contracts`, `observability`, `integrations`, `gateway-core`, `gateway-api`,
+`client` and `cli`. One release publishes all of them under the same version, so
 they are installed as a set.
 
 ```bash
@@ -256,7 +258,7 @@ trusts the tables are there. `apps/platform-demo/` is the smallest working
 example.
 
 The packages to embed are `@integragents/contracts`,
-`@integragents/host` and `@integragents/gateway-core`. They
+`@integragents/integrations` and `@integragents/gateway-core`. They
 run on Node or Bun and declare `effect`, `@effect/sql-libsql`, `drizzle-orm`
 and `@libsql/client` as peer dependencies, so the application holds the one
 copy of each. Pass `publicUrlOf` and serve `GET /v1/oauth/callback` yourself;
@@ -300,7 +302,7 @@ uses these parts of the embedding API. All of them come from
   catalogs tools the host runs itself (name, description, input schema,
   `readOnly`/`destructive`/`idempotent` hints, a `handler`), on one org
   connection that holds no credential. `gatewayCoreLayer({ hostTools })` takes
-  the executor (`HostTools` from `@integragents/host`), which receives the
+  the executor (`HostTools` from `@integragents/integrations`), which receives the
   handler, arguments, and the call's tenant, profile, subject, approval and
   idempotency key. Profiles, decisions, approvals and audit treat them like
   any other tool.
@@ -362,9 +364,21 @@ ever finish that person's connection, never someone else's.
 
 ## Clients
 
-The TypeScript client communicates only with the versioned gateway HTTP API.
-Applications such as [`wf`](https://github.com/mokronos/wf) consume the client
-without importing gateway or integrations implementation.
+The gateway's clients are for agents and the people supervising them, not a
+developer SDK:
+
+- `i` is how an agent discovers, connects, inspects and calls integrations from
+  a shell.
+- `@integragents/client` (`apps/ts/`) is the same surface for JavaScript and
+  TypeScript: an agent writes a script against it when one command at a time is
+  not enough, for example to chain calls or reshape their results. Tools that
+  agents run, such as [`wf`](https://github.com/mokronos/wf), use it the same
+  way. It speaks only the versioned HTTP API and holds no integration logic.
+- `ii` is the operator's superset of `i`: dashboard actions, login and account
+  commands, and the local gateway's lifecycle.
+
+An application that wants the gateway inside its own process embeds
+`gateway-core` instead; see [Embedding](#embedding).
 
 MCP clients connect to the Streamable HTTP endpoint at `/mcp` and send their
 gateway API key as a bearer token, or authorize through MCP OAuth and pick a

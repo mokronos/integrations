@@ -133,7 +133,7 @@ export class OAuthFlows extends Context.Service<
       options?: { readonly renew?: boolean }
     ) => Effect.Effect<Option.Option<OAuthAccess>, OAuthError | StorageError>
   }
->()("@integragents/host/OAuthFlows") {
+>()("@integragents/integrations/OAuthFlows") {
   static readonly layer: Layer.Layer<OAuthFlows, never, CatalogStore | CredentialStore | Egress> = Layer.effect(
     OAuthFlows,
     Effect.gen(function* () {

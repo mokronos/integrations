@@ -222,7 +222,7 @@ export class Integrations extends Context.Service<
       context?: ToolCallContext
     ) => Effect.Effect<ToolExecution, IntegrationFailure>
   }
->()("@integragents/host/Integrations") {
+>()("@integragents/integrations/Integrations") {
   static readonly layer: Layer.Layer<
     Integrations,
     never,

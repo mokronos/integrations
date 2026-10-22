@@ -54,7 +54,7 @@ export class CredentialStore extends Context.Service<
       value: Option.Option<string>
     ) => Effect.Effect<boolean, StorageError>
   }
->()("@integragents/host/CredentialStore") {
+>()("@integragents/integrations/CredentialStore") {
   /** Credentials sealed at rest in the `credential` table of the host's `SqlClient`. */
   static readonly sqlLayer = (encryption: Encryption): Layer.Layer<CredentialStore, never, SqlClient.SqlClient> =>
     Layer.effect(

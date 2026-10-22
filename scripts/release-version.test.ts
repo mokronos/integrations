@@ -161,7 +161,7 @@ describe("release surface", () => {
 describe("renderReleaseDependencies", () => {
   const versions = new Map([
     ["@integragents/contracts", "0.3.1-nightly.20260921.4"],
-    ["@integragents/host", "0.3.1-nightly.20260921.4"]
+    ["@integragents/integrations", "0.3.1-nightly.20260921.4"]
   ])
 
   const manifest = `{
@@ -169,7 +169,7 @@ describe("renderReleaseDependencies", () => {
   "dependencies": {
     "@cfworker/json-schema": "^4.1.1",
     "@integragents/contracts": "workspace:^",
-    "@integragents/host": "workspace:*"
+    "@integragents/integrations": "workspace:*"
   },
   "peerDependencies": {
     "effect": "catalog:"
@@ -179,9 +179,9 @@ describe("renderReleaseDependencies", () => {
 
   it.effect("pins every workspace dependency to the published range", () =>
     Effect.gen(function* () {
-      const linked = yield* renderReleaseDependencies("packages/core/gateway/package.json", manifest, versions)
+      const linked = yield* renderReleaseDependencies("packages/gateway-core/package.json", manifest, versions)
       assert.include(linked, `"@integragents/contracts": "^0.3.1-nightly.20260921.4"`)
-      assert.include(linked, `"@integragents/host": "^0.3.1-nightly.20260921.4"`)
+      assert.include(linked, `"@integragents/integrations": "^0.3.1-nightly.20260921.4"`)
       assert.include(linked, `"@cfworker/json-schema": "^4.1.1"`)
       assert.include(linked, `"effect": "catalog:"`)
     })

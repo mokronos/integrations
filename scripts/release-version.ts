@@ -16,15 +16,14 @@ export const releasePackageFiles = [
   "packages/integrations/package.json",
   "packages/contracts/package.json",
   "packages/observability/package.json",
-  "packages/core/gateway/package.json",
-  "packages/core/api/package.json",
+  "packages/gateway-core/package.json",
+  "packages/gateway-api/package.json",
   "apps/ts/package.json",
-  "apps/local/package.json",
   "apps/cli/package.json"
 ] as const
 
 /** The version constant the gateway reports over the wire. */
-export const gatewayVersionFile = "packages/core/api/src/version.ts"
+export const gatewayVersionFile = "packages/gateway-api/src/version.ts"
 
 /**
  * The packages published to the registry, in dependency order. Every
@@ -35,10 +34,9 @@ export const publishablePackageDirectories = [
   "packages/contracts",
   "packages/observability",
   "packages/integrations",
-  "packages/core/gateway",
-  "packages/core/api",
+  "packages/gateway-core",
+  "packages/gateway-api",
   "apps/ts",
-  "apps/local",
   "apps/cli"
 ] as const
 

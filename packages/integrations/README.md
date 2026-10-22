@@ -1,4 +1,4 @@
-# @integragents/host
+# @integragents/integrations
 
 One catalog of MCP endpoints, OpenAPI documents and host integrations, the
 connections that authorize them, and one way to call a tool. Wire contracts and the shared

@@ -310,7 +310,7 @@ export class CatalogStore extends Context.Service<
     readonly findSpecDocument: (source: string) => Effect.Effect<Option.Option<string>, StorageError>
     readonly putSpecDocument: (source: string, content: string) => Effect.Effect<void, StorageError>
   }
->()("@integragents/host/CatalogStore") {
+>()("@integragents/integrations/CatalogStore") {
   static readonly layer: Layer.Layer<CatalogStore, never, Database> = Layer.effect(
     CatalogStore,
     Effect.gen(function* () {

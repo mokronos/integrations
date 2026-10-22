@@ -36,8 +36,7 @@
         "@integragents/contracts": "workspace:^",
         "@integragents/gateway-api": "workspace:^",
         "@integragents/gateway-core": "workspace:^",
-        "@integragents/host": "workspace:^",
-        "@integragents/local": "workspace:^",
+        "@integragents/integrations": "workspace:^",
         "@integragents/observability": "workspace:^",
         "effect": "catalog:",
       },
@@ -51,7 +50,7 @@
         "@integragents/contracts": "workspace:^",
         "@integragents/gateway-api": "workspace:^",
         "@integragents/gateway-core": "workspace:^",
-        "@integragents/host": "workspace:^",
+        "@integragents/integrations": "workspace:^",
         "alchemy": "catalog:",
         "effect": "catalog:",
       },
@@ -80,29 +79,15 @@
         "vite": "catalog:",
       },
     },
-    "apps/local": {
-      "name": "@integragents/local",
-      "version": "0.3.1",
-      "dependencies": {
-        "@integragents/client": "workspace:^",
-        "@integragents/contracts": "workspace:^",
-        "@integragents/gateway-api": "workspace:^",
-        "@integragents/gateway-core": "workspace:^",
-        "effect": "catalog:",
-      },
-      "devDependencies": {
-        "@integragents/host": "workspace:^",
-      },
-    },
     "apps/platform-demo": {
       "name": "@integragents/platform-demo",
       "version": "0.2.0",
       "dependencies": {
         "@effect/platform-bun": "catalog:",
         "@effect/sql-libsql": "catalog:",
-        "@integragents/contracts": "workspace:*",
-        "@integragents/gateway-core": "workspace:*",
-        "@integragents/host": "workspace:*",
+        "@integragents/contracts": "workspace:^",
+        "@integragents/gateway-core": "workspace:^",
+        "@integragents/integrations": "workspace:^",
         "@libsql/client": "catalog:",
         "drizzle-orm": "catalog:",
         "effect": "catalog:",
@@ -126,10 +111,10 @@
       "dependencies": {
         "@base-ui/react": "catalog:",
         "@fontsource-variable/geist": "catalog:",
-        "@integragents/client": "workspace:*",
-        "@integragents/contracts": "workspace:*",
-        "@integragents/gateway-api": "workspace:*",
-        "@integragents/gateway-core": "workspace:*",
+        "@integragents/client": "workspace:^",
+        "@integragents/contracts": "workspace:^",
+        "@integragents/gateway-api": "workspace:^",
+        "@integragents/gateway-core": "workspace:^",
         "@tailwindcss/vite": "catalog:",
         "@tanstack/react-query": "catalog:",
         "@vitejs/plugin-react": "catalog:",
@@ -161,7 +146,7 @@
         "effect": "catalog:",
       },
     },
-    "packages/core/api": {
+    "packages/gateway-api": {
       "name": "@integragents/gateway-api",
       "version": "0.3.1",
       "dependencies": {
@@ -169,7 +154,7 @@
         "@effect/platform-node-shared": "catalog:",
         "@integragents/contracts": "workspace:^",
         "@integragents/gateway-core": "workspace:^",
-        "@integragents/host": "workspace:^",
+        "@integragents/integrations": "workspace:^",
         "@integragents/observability": "workspace:^",
         "@modelcontextprotocol/server": "^2.0.0",
       },
@@ -180,13 +165,13 @@
         "effect": "catalog:",
       },
     },
-    "packages/core/gateway": {
+    "packages/gateway-core": {
       "name": "@integragents/gateway-core",
       "version": "0.3.1",
       "dependencies": {
         "@cfworker/json-schema": "catalog:",
         "@integragents/contracts": "workspace:^",
-        "@integragents/host": "workspace:^",
+        "@integragents/integrations": "workspace:^",
       },
       "devDependencies": {
         "drizzle-kit": "catalog:",
@@ -199,7 +184,7 @@
       },
     },
     "packages/integrations": {
-      "name": "@integragents/host",
+      "name": "@integragents/integrations",
       "version": "0.3.1",
       "dependencies": {
         "@integragents/contracts": "workspace:^",
@@ -517,15 +502,13 @@
 
     "@integragents/contracts": ["@integragents/contracts@workspace:packages/contracts"],
 
-    "@integragents/gateway-api": ["@integragents/gateway-api@workspace:packages/core/api"],
+    "@integragents/gateway-api": ["@integragents/gateway-api@workspace:packages/gateway-api"],
 
-    "@integragents/gateway-core": ["@integragents/gateway-core@workspace:packages/core/gateway"],
-
-    "@integragents/host": ["@integragents/host@workspace:packages/integrations"],
+    "@integragents/gateway-core": ["@integragents/gateway-core@workspace:packages/gateway-core"],
 
     "@integragents/host-cloudflare": ["@integragents/host-cloudflare@workspace:apps/host-cloudflare"],
 
-    "@integragents/local": ["@integragents/local@workspace:apps/local"],
+    "@integragents/integrations": ["@integragents/integrations@workspace:packages/integrations"],
 
     "@integragents/observability": ["@integragents/observability@workspace:packages/observability"],
 

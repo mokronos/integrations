@@ -30,7 +30,7 @@ import { tracedFetch } from "@integragents/observability"
 
 const PROTOCOL_VERSION = "2026-07-28"
 
-const clientInfo = { name: "@integragents/host", version: "0.2.0" } as const
+const clientInfo = { name: "@integragents/integrations", version: "0.2.0" } as const
 
 const requestMeta = {
   "io.modelcontextprotocol/protocolVersion": PROTOCOL_VERSION,
@@ -590,7 +590,7 @@ export class McpClient extends Context.Service<
       answer?: InputAnswer
     ) => Effect.Effect<McpCallResult, McpError>
   }
->()("@integragents/host/McpClient") {
+>()("@integragents/integrations/McpClient") {
   static readonly layer: Layer.Layer<McpClient, never, Egress | HttpClient.HttpClient> = Layer.effect(
     McpClient,
     Effect.gen(function* () {

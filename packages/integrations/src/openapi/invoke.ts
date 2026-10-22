@@ -129,7 +129,7 @@ export class OpenApiInvoker extends Context.Service<
   {
     readonly call: (call: OpenApiCall) => Effect.Effect<Json, InvocationError | SpecError | StorageError>
   }
->()("@integragents/host/OpenApiInvoker") {
+>()("@integragents/integrations/OpenApiInvoker") {
   static readonly layer: Layer.Layer<OpenApiInvoker, never, HttpClient.HttpClient | BlobStore> = Layer.effect(
     OpenApiInvoker,
     Effect.gen(function* () {

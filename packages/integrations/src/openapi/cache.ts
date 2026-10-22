@@ -17,7 +17,7 @@ export class SpecCache extends Context.Service<
     readonly load: (record: IntegrationRecord) => Effect.Effect<CompiledSpec, SpecError>
     readonly compileUrl: (url: string) => Effect.Effect<CompiledSpec, SpecError>
   }
->()("@integragents/host/SpecCache") {
+>()("@integragents/integrations/SpecCache") {
   static readonly layer: Layer.Layer<SpecCache, never, CatalogStore | HttpClient.HttpClient> = Layer.effect(
     SpecCache,
     Effect.gen(function* () {

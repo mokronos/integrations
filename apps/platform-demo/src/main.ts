@@ -27,8 +27,8 @@ import {
 } from "@integragents/gateway-core"
 import type { GatewayCoreServices } from "@integragents/gateway-core"
 import { ConnectionName, IntegrationSlug } from "@integragents/contracts"
-import { AuthTemplateSlug, BlobStore, defaultUrlPolicy, Egress, Integrations } from "@integragents/host"
-import { nativeConnect } from "@integragents/host/native-egress"
+import { AuthTemplateSlug, BlobStore, defaultUrlPolicy, Egress, Integrations } from "@integragents/integrations"
+import { nativeConnect } from "@integragents/integrations/native-egress"
 import { page } from "./page.ts"
 import type { AgentView, PageModel } from "./page.ts"
 

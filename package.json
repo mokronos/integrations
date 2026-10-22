@@ -5,8 +5,7 @@
   "version": "0.3.1",
   "workspaces": [
     "apps/*",
-    "packages/*",
-    "packages/*/*"
+    "packages/*"
   ],
   "catalog": {
     "@base-ui/react": "^1.8.0",
@@ -61,7 +60,7 @@
   "scripts": {
     "build:observability": "bun run --cwd packages/observability build",
     "build:client": "bun run --cwd apps/ts build",
-    "build:gateway": "bun run build:contracts && bun run build:observability && bun run build:host && bun run build:gateway-core && bun run build:gateway-api && bun run build:client && bun run --cwd apps/local build",
+    "build:gateway": "bun run build:contracts && bun run build:observability && bun run build:integrations && bun run build:gateway-core && bun run build:gateway-api && bun run build:client && bun run --cwd apps/cli build",
     "build": "bun run build:gateway",
     "dev:control-plane": "bun run --cwd apps/web dev",
     "build:control-plane": "bun run build && bun run --cwd apps/web build",
@@ -73,7 +72,7 @@
     "install:local": "bun run apps/cli/install-local.ts",
     "release:build": "bun run scripts/build-release.ts",
     "refresh": "bun run build:gateway && bun run scripts/refresh.ts",
-    "db:generate": "bun run --cwd packages/core/gateway db:generate",
+    "db:generate": "bun run --cwd packages/gateway-core db:generate",
     "db:reset": "bun run scripts/db-reset.ts",
     "with:local": "op run --env-file=.env.local.op --",
     "with:deploy": "op run --env-file=.env.deploy.op --",
@@ -87,9 +86,9 @@
     "test": "bun --bun run vitest run",
     "verify": "bun run check && bun run test && bun run build:control-plane",
     "build:contracts": "bun run --cwd packages/contracts build",
-    "build:host": "bun run --cwd packages/integrations build",
-    "build:gateway-core": "bun run --cwd packages/core/gateway build",
-    "build:gateway-api": "bun run --cwd packages/core/api build",
+    "build:integrations": "bun run --cwd packages/integrations build",
+    "build:gateway-core": "bun run --cwd packages/gateway-core build",
+    "build:gateway-api": "bun run --cwd packages/gateway-api build",
     "test:watch": "bun --bun run vitest"
   },
   "dependencies": {

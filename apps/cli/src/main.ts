@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import path from "node:path"
 import { BunHttpClient } from "@effect/platform-bun"
 import { Data, Effect, Layer, Option } from "effect"
 import { Command, Flag } from "effect/cli"
@@ -26,10 +27,17 @@ const loopbackWarning = (host: string): void => {
   }
 }
 
+const bundledWebDirectory = path.join(import.meta.dirname, "..", "web")
+
 const runForeground = async (port: number, host: string): Promise<void> => {
-  const { serveGateway } = await import("@integragents/local")
-  const { nativeConnect } = await import("@integragents/host/native-egress")
-  const running = await serveGateway({ port, hostname: host, connect: nativeConnect })
+  const { serveGateway } = await import("@integragents/gateway-api")
+  const { nativeConnect } = await import("@integragents/integrations/native-egress")
+  const running = await serveGateway({
+    port,
+    hostname: host,
+    connect: nativeConnect,
+    webDirectory: process.env["INTEGRATIONS_WEB_DIR"] ?? bundledWebDirectory
+  })
   await Effect.runPromise(writeStdoutLine(`integrations gateway listening at ${running.url}`))
   loopbackWarning(host)
   await new Promise<void>((resolve) => {
