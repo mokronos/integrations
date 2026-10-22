@@ -3,7 +3,7 @@ import type { Scope } from "effect"
 import type { Integrations } from "@integragents/host"
 import type { GatewayResource, TenantId } from "./domain.ts"
 import { whenPresent } from "@integragents/contracts"
-import type { GatewayStore, SettledApproval } from "./store-contract.ts"
+import type { GatewayStore, SettledApproval } from "./store/index.ts"
 
 /** What changed, and when known, which of its records: approval ids for `approvals`. */
 export interface GatewayResourceChange {

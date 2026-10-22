@@ -3,7 +3,7 @@ import type { Crypto } from "effect"
 import type { BlobStore, StorageError } from "@integragents/host"
 import { Alias } from "./domain.ts"
 import { newAuditId } from "./keys.ts"
-import type { GatewayStore, GatewayStoreError } from "./store.ts"
+import type { GatewayStore, GatewayStoreError } from "./store/index.ts"
 
 const blobRetention = Duration.days(7)
 

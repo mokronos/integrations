@@ -18,7 +18,7 @@ import { notifyingDecisions } from "./approval-decisions.ts"
 import { ApprovalReviewer } from "./reviewer.ts"
 import type { InvokeDependencies } from "./invoke.ts"
 import type { OnApprovalDecided } from "./approval-decisions.ts"
-import { GatewayStoreError, GatewayStoreService } from "./store.ts"
+import { GatewayStoreError, GatewayStoreService } from "./store/index.ts"
 
 export class OAuthFlowSessions extends Context.Service<OAuthFlowSessions, OAuthSessions>()(
   "@integragents/gateway-core/OAuthFlowSessions"

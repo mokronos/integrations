@@ -7,7 +7,7 @@ import type { ApprovalId, AuditApproval, Authorization, CallOrigin, ConnectionRe
 import { sealRound } from "./input-rounds.ts"
 import type { RoundApproval } from "./input-rounds.ts"
 import { newAuditId } from "./keys.ts"
-import type { GatewayStore, GatewayStoreError, RecordAuditInput } from "./store.ts"
+import type { AuditStore, GatewayStoreError, RecordAuditInput, SealedStateStore } from "./store/index.ts"
 
 type Json = typeof Schema.Json.Type
 
@@ -59,7 +59,7 @@ export interface ExecutionRound {
 
 export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(function* (
   dependencies: {
-    readonly store: GatewayStore
+    readonly store: AuditStore & SealedStateStore
     readonly integrations: Integrations["Service"]
     readonly retentionDays: number
   },

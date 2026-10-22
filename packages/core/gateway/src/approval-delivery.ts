@@ -3,7 +3,7 @@ import { DateTime, Duration, Effect, Random, Schema } from "effect"
 import { FetchHttpClient, HttpBody, HttpClient, HttpClientResponse } from "effect/http"
 import { utf8Bytes, whenPresent, whenPresentMap } from "@integragents/contracts"
 import type { ApprovalDeliveryId } from "./domain.ts"
-import type { GatewayStore } from "./store-contract.ts"
+import type { ApprovalDeliveryStore } from "./store/index.ts"
 
 export const ApprovalNotification = Schema.Struct({
   version: Schema.Literal(1),
@@ -97,7 +97,7 @@ const approvalLink = (dashboardUrl: string | undefined, approvalId: string): str
  * with backoff from the state the store keeps.
  */
 export const deliverDueApprovalNotifications = Effect.fn("Approval.deliverDueNotifications")(function* (input: {
-  readonly store: GatewayStore
+  readonly store: ApprovalDeliveryStore
   readonly dashboardUrl?: string
   readonly limit?: number
   readonly now?: Date

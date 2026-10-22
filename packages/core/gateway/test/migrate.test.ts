@@ -6,7 +6,7 @@ import { SqlClient } from "effect/sql"
 import { applyMigrations, integrationMigrationSet } from "@integragents/host"
 import type { MigrationSet } from "@integragents/host"
 import { applyGatewayMigrations, gatewayMigrationSet } from "../src/migrate.ts"
-import { libsqlLayer } from "../src/store.ts"
+import { libsqlLayer } from "../src/store/index.ts"
 import { gatewayMigrations } from "../src/store-migrations.gen.ts"
 import { temporaryDirectory, testServices } from "./fixtures.ts"
 

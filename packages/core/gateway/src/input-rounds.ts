@@ -1,7 +1,7 @@
 import { AuditApproval, canonicalJson, ProfileId, ToolAddress, whenPresent } from "@integragents/contracts"
 import { Clock, Crypto, Duration, Effect, Option, Schema } from "effect"
 import { sha256Hex } from "./keys.ts"
-import type { GatewayStore } from "./store-contract.ts"
+import type { SealedStateStore } from "./store/index.ts"
 
 type Json = typeof Schema.Json.Type
 
@@ -44,7 +44,7 @@ export interface RoundCall {
 const argumentsHash = (value: Json): Effect.Effect<string, never, Crypto.Crypto> => sha256Hex(canonicalJson(value))
 
 export const sealRound = Effect.fn("InputRounds.seal")(function* (
-  store: GatewayStore,
+  store: SealedStateStore,
   call: RoundCall,
   round: { readonly approval: RoundApproval | null; readonly upstream: string | undefined }
 ) {
@@ -61,7 +61,7 @@ export const sealRound = Effect.fn("InputRounds.seal")(function* (
 
 /** A round's state, when this gateway sealed it, it is still good, and it names exactly this call. */
 export const openRound = Effect.fn("InputRounds.open")(function* (
-  store: GatewayStore,
+  store: SealedStateStore,
   token: string,
   call: RoundCall
 ): Effect.fn.Return<Option.Option<RoundState>, never, Crypto.Crypto> {

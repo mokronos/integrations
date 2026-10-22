@@ -20,8 +20,8 @@ import type {
 } from "./domain.ts"
 import { hashApiKey } from "./keys.ts"
 import { Crypto, Effect, Schema } from "effect"
-import type { GatewayStore } from "./store.ts"
-import type { GatewayStoreError } from "./store.ts"
+import type { ProfileStore } from "./store/index.ts"
+import type { GatewayStoreError } from "./store/index.ts"
 
 export const AuthenticatedProfile = Schema.Struct({
   status: Schema.Literal("authenticated"),
@@ -39,7 +39,7 @@ export const KeyAuthentication = Schema.Union([
 export type KeyAuthentication = typeof KeyAuthentication.Type
 
 export const authenticateKey = Effect.fn("Authorization.authenticateKey")(function* (
-  store: GatewayStore,
+  store: ProfileStore,
   secret: string
 ): Effect.fn.Return<KeyAuthentication, GatewayStoreError, Crypto.Crypto> {
   const resolved = yield* store.findApiKeyByHash(yield* hashApiKey(secret))
@@ -60,7 +60,7 @@ export const authenticateKey = Effect.fn("Authorization.authenticateKey")(functi
 })
 
 export const authorizeInvocation = Effect.fn("Authorization.authorizeInvocation")(function* (
-  store: GatewayStore,
+  store: ProfileStore,
   input: {
     readonly secret: string
     readonly alias: Alias
@@ -82,7 +82,7 @@ export const authorizeInvocation = Effect.fn("Authorization.authorizeInvocation"
  * same tool serves every user and no user reaches another's credential.
  */
 export const authorizeProfileInvocation = Effect.fn("Authorization.authorizeProfileInvocation")(function* (
-  store: GatewayStore,
+  store: ProfileStore,
   profile: Profile,
   input: {
     readonly alias: Alias
@@ -160,7 +160,7 @@ export const CapabilityAuthorization = Schema.Union([
 export type CapabilityAuthorization = typeof CapabilityAuthorization.Type
 
 export const authorizeProfileCapability = Effect.fn("Authorization.authorizeProfileCapability")(function* (
-  store: GatewayStore,
+  store: ProfileStore,
   secret: string,
   capability: ProfileCapability
 ): Effect.fn.Return<CapabilityAuthorization, GatewayStoreError, Crypto.Crypto> {

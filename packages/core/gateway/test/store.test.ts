@@ -24,7 +24,8 @@ import {
 import type { Caller, ConnectionRef, GatewayStore } from "../src/index.ts"
 import { generateLoginHandoff } from "../src/keys.ts"
 import { openStore, temporaryDirectory, testServices } from "./fixtures.ts"
-import { toApproval, toAuditRecord } from "../src/store-rows.ts"
+import { approvalOf, ApprovalRow } from "../src/store/approvals.ts"
+import { auditRecordOf, AuditRow } from "../src/store/audit.ts"
 
 const decodeWebhookEvent = Schema.decodeUnknownSync(Schema.fromJsonString(ApprovalWebhookEvent))
 
@@ -66,56 +67,64 @@ const noCaller: Caller = {
 const notYet = Effect.map(Clock.currentTimeMillis, (now) => new Date(now + 60_000))
 
 describe("gateway store", () => {
-  it("reads approved history with its recorded alias", () => {
-    const approval = toApproval({
-      length: 0,
-      id: "approval-1",
-      group_id: null,
-      profile_id: "profile-1",
-      api_key_id: null,
-      oauth_grant_id: null,
-      oauth_application_id: null,
-      credential_name: null,
-      agent: null,
-      alias: "org_google-5fdrive-5fapi_default",
-      tool: "save_file",
-      arguments: "{}",
-      status: "approved",
-      created_at: 1_789_526_960_870,
-      expires_at: 1_789_527_020_870,
-      decided_at: 1_789_526_970_870,
-      decided_by: "operator",
-      result: null,
-      error: null,
-      collected_at: null
-    })
+  it.effect("reads approved history with its recorded alias", () =>
+    Effect.gen(function* () {
+      const row = yield* Schema.decodeUnknownEffect(ApprovalRow)({
+        id: "approval-1",
+        tenant_id: "default",
+        group_id: null,
+        profile_id: "profile-1",
+        api_key_id: null,
+        oauth_grant_id: null,
+        oauth_application_id: null,
+        credential_name: null,
+        agent: null,
+        alias: "org_google-5fdrive-5fapi_default",
+        tool: "save_file",
+        subject: null,
+        arguments: "{}",
+        edited_arguments: null,
+        idempotency_key: null,
+        status: "approved",
+        created_at: 1_789_526_960_870,
+        expires_at: 1_789_527_020_870,
+        decided_at: 1_789_526_970_870,
+        decided_by: "operator",
+        result: null,
+        error: null,
+        collected_at: null
+      })
+      const approval = yield* approvalOf(row, (sealed) => sealed)
 
-    expect(approval.alias).toBe("org_google-5fdrive-5fapi_default")
-    expect(Schema.encodeSync(PendingApproval)(approval).alias).toBe(approval.alias)
-  })
+      expect(approval.alias).toBe("org_google-5fdrive-5fapi_default")
+      expect(Schema.encodeSync(PendingApproval)(approval).alias).toBe(approval.alias)
+    })
+  )
 
   it("reads historical audit aliases without changing their recorded value", () => {
-    const record = toAuditRecord({
-      length: 0,
-      id: "audit-1",
-      profile_id: null,
-      api_key_id: null,
-      oauth_grant_id: null,
-      oauth_application_id: null,
-      credential_name: null,
-      agent: null,
-      authorized_by_subject_id: null,
-      alias: "org_google-5fdrive-5fapi_default",
-      tool: "list_files",
-      owner: "org",
-      subject: null,
-      integration: "google_drive_api",
-      connection_name: "default",
-      decision: "allow",
-      outcome: "succeeded",
-      message: null,
-      created_at: 1_789_526_960_870
-    })
+    const record = auditRecordOf(
+      Schema.decodeUnknownSync(AuditRow)({
+        id: "audit-1",
+        profile_id: null,
+        api_key_id: null,
+        oauth_grant_id: null,
+        oauth_application_id: null,
+        credential_name: null,
+        agent: null,
+        authorized_by_subject_id: null,
+        alias: "org_google-5fdrive-5fapi_default",
+        tool: "list_files",
+        owner: "org",
+        subject: null,
+        integration: "google_drive_api",
+        connection_name: "default",
+        decision: "allow",
+        approval: null,
+        outcome: "succeeded",
+        message: null,
+        created_at: 1_789_526_960_870
+      })
+    )
 
     expect(record.alias).toBe("org_google-5fdrive-5fapi_default")
     expect(Schema.encodeSync(AuditRecord)(record).alias).toBe(record.alias)

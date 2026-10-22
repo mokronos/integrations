@@ -10,7 +10,7 @@ import {
   type ProfileToolInput,
   type TenantId
 } from "./domain.ts"
-import type { GatewayStore, GatewayStoreError } from "./store.ts"
+import type { IdentityStore, ProfileStore, GatewayStoreError } from "./store/index.ts"
 
 type ProfileCatalog = Pick<Integrations["Service"], "toolSummaries">
 
@@ -40,7 +40,7 @@ export const catalogProfileTools = Effect.fn("Profiles.catalogTools")(function* 
 })
 
 const rewriteProfiles = Effect.fn("Profiles.rewrite")(function* (
-  store: GatewayStore,
+  store: IdentityStore & ProfileStore,
   tenantId: TenantId,
   rewrite: (
     tools: ReadonlyArray<ProfileToolInput>,
@@ -73,7 +73,7 @@ const rewriteProfiles = Effect.fn("Profiles.rewrite")(function* (
 
 /** Drops tools on org connections the integration host no longer holds. */
 export const pruneProfileTools = Effect.fn("Profiles.prune")(function* (input: {
-  readonly store: GatewayStore
+  readonly store: IdentityStore & ProfileStore
   readonly integrations: ProfileCatalog
   readonly tenantId: TenantId
 }): Effect.fn.Return<void, GatewayStoreError | StorageError> {
@@ -89,7 +89,7 @@ export const pruneProfileTools = Effect.fn("Profiles.prune")(function* (input: {
  * tools. Tools a vendor adds later do not: those wait for a human.
  */
 export const includeConnectionTools = Effect.fn("Profiles.includeConnection")(function* (input: {
-  readonly store: GatewayStore
+  readonly store: IdentityStore & ProfileStore
   readonly integrations: ProfileCatalog
   readonly tenantId: TenantId
   readonly integration: IntegrationSlug
@@ -108,7 +108,7 @@ export const includeConnectionTools = Effect.fn("Profiles.includeConnection")(fu
 
 /** Drops the tools that named exactly this connection. A user's connection leaving keeps the template. */
 export const forgetConnection = Effect.fn("Profiles.forgetConnection")(function* (input: {
-  readonly store: GatewayStore
+  readonly store: IdentityStore & ProfileStore
   readonly tenantId: TenantId
   readonly connection: ConnectionRef
 }): Effect.fn.Return<void, GatewayStoreError> {
@@ -124,7 +124,7 @@ export const forgetConnection = Effect.fn("Profiles.forgetConnection")(function*
  * as their administrators left them.
  */
 export const registerHostIntegration = Effect.fn("Profiles.registerHostIntegration")(function* (input: {
-  readonly store: GatewayStore
+  readonly store: IdentityStore & ProfileStore
   readonly integrations: Pick<Integrations["Service"], "registerHostIntegration" | "listConnections" | "toolSummaries">
   readonly definition: HostIntegrationDefinition
 }): Effect.fn.Return<ReadonlyArray<Tool>, GatewayStoreError | IntegrationFailure> {

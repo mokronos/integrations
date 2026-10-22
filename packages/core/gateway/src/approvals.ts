@@ -15,7 +15,7 @@ import type { AuditApproval, Authorized, ConnectionRef, PendingApproval } from "
 import { invalidArguments } from "./arguments.ts"
 import { boundToolAddress, executeAuthorized } from "./execute.ts"
 import { newApprovalRuleId } from "./keys.ts"
-import type { GatewayStore, GatewayStoreError } from "./store.ts"
+import type { ApprovalStore, AuditStore, GatewayStoreError, ProfileStore, SealedStateStore } from "./store/index.ts"
 
 export class ApprovalNotFound extends Schema.TaggedError<ApprovalNotFound>()("ApprovalNotFound", {
   id: ApprovalId
@@ -39,7 +39,7 @@ const ApprovalDecision = Schema.Struct({
 
 /** The authority a frozen call was made under, if its profile still enables that tool. */
 const frozenAuthorization = Effect.fn("Approvals.frozenAuthorization")(function* (
-  store: GatewayStore,
+  store: ApprovalStore & AuditStore & ProfileStore & SealedStateStore,
   tenantId: TenantId,
   approval: PendingApproval
 ): Effect.fn.Return<Authorized | undefined, GatewayStoreError> {
@@ -71,7 +71,7 @@ const frozenAuthorization = Effect.fn("Approvals.frozenAuthorization")(function*
 })
 
 const pendingApproval = Effect.fn("Approvals.pending")(function* (
-  store: GatewayStore,
+  store: ApprovalStore & AuditStore & ProfileStore & SealedStateStore,
   input: typeof ApprovalDecision.Type
 ) {
   const { tenantId, id } = input
@@ -96,7 +96,7 @@ const pendingApproval = Effect.fn("Approvals.pending")(function* (
 })
 
 export const denyApproval = Effect.fn("Approvals.deny")(function* (
-  store: GatewayStore,
+  store: ApprovalStore & AuditStore & ProfileStore & SealedStateStore,
   input: typeof ApprovalDecision.Type & {
     /** Why, told to the caller and kept on the approval. */
     readonly reason?: string
@@ -119,7 +119,7 @@ export const denyApproval = Effect.fn("Approvals.deny")(function* (
 
 export const approveApproval = Effect.fn("Approvals.approve")(function* (
   dependencies: {
-    readonly store: GatewayStore
+    readonly store: ApprovalStore & AuditStore & ProfileStore & SealedStateStore
     readonly integrations: Integrations["Service"]
     readonly retentionDays: number
   },
@@ -204,7 +204,7 @@ export const approveApproval = Effect.fn("Approvals.approve")(function* (
  * is pinned, what differs between them is left open.
  */
 const rememberApproval = Effect.fn("Approvals.remember")(function* (
-  store: GatewayStore,
+  store: ApprovalStore & AuditStore & ProfileStore & SealedStateStore,
   input: { readonly tenantId: TenantId; readonly ids: ReadonlyArray<ApprovalId>; readonly decidedBy: string | null }
 ) {
   const approvals: Array<PendingApproval> = []

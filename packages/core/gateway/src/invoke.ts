@@ -39,13 +39,20 @@ import { openRound } from "./input-rounds.ts"
 import { newApprovalId, newAuditId } from "./keys.ts"
 import { consultReviewer, reviewerIdentity } from "./reviewer.ts"
 import type { ApprovalReviewer, ApprovalReviewRequest } from "./reviewer.ts"
-import type { GatewayStore, GatewayStoreError } from "./store.ts"
-import type { InvocationKeyRecord } from "./store-contract.ts"
+import type {
+  ApprovalStore,
+  AuditStore,
+  GatewayStoreError,
+  InvocationKeyRecord,
+  InvocationKeyStore,
+  ProfileStore,
+  SealedStateStore
+} from "./store/index.ts"
 
 type Json = typeof Schema.Json.Type
 
 export interface InvokeDependencies {
-  readonly store: GatewayStore
+  readonly store: ApprovalStore & AuditStore & InvocationKeyStore & ProfileStore & SealedStateStore
   readonly integrations: Integrations["Service"]
   /** Starts the flow a delegated tool needs when its user has not connected yet. */
   readonly oauth?: OAuthSessions
@@ -121,7 +128,7 @@ const pendingOutcome = (
 
 const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function* (
   dependencies: {
-    readonly store: GatewayStore
+    readonly store: ApprovalStore & AuditStore & InvocationKeyStore & ProfileStore & SealedStateStore
     readonly integrations: Integrations["Service"]
     readonly retentionDays: number
     readonly approvalUrlOf?: InvokeDependencies["approvalUrlOf"]
@@ -392,7 +399,7 @@ const settle = Effect.fn("Invocation.settle")(
  * not worth remembering, so its key is freed for the call to be made again.
  */
 const rememberKeyed = Effect.fn("Invocation.rememberKeyed")(function* (
-  store: GatewayStore,
+  store: ApprovalStore & AuditStore & InvocationKeyStore & ProfileStore & SealedStateStore,
   keyed: { readonly tenantId: TenantId; readonly profileId: ProfileId; readonly key: IdempotencyKey },
   outcome: InvocationOutcome
 ) {
@@ -420,7 +427,7 @@ const rememberKeyed = Effect.fn("Invocation.rememberKeyed")(function* (
  */
 const replayKeyed = Effect.fn("Invocation.replayKeyed")(function* (
   dependencies: {
-    readonly store: GatewayStore
+    readonly store: ApprovalStore & AuditStore & InvocationKeyStore & ProfileStore & SealedStateStore
     readonly retentionDays: number
     readonly approvalUrlOf?: InvokeDependencies["approvalUrlOf"]
   },
@@ -483,7 +490,7 @@ const roundRefused = (message: string): InvocationOutcome => ({ status: "invalid
  */
 const continueRound = Effect.fn("Invocation.continueRound")(function* (
   dependencies: {
-    readonly store: GatewayStore
+    readonly store: ApprovalStore & AuditStore & InvocationKeyStore & ProfileStore & SealedStateStore
     readonly integrations: Integrations["Service"]
     readonly retentionDays: number
   },
@@ -687,7 +694,7 @@ const hintKeyOf = (connection: ConnectionRef, tool: ToolName): string =>
  * also carries what its source says about it, and its schemas when asked for.
  */
 export const listEffectiveTools = Effect.fn("Invocation.listEffectiveTools")(function* (
-  store: GatewayStore,
+  store: ApprovalStore & AuditStore & InvocationKeyStore & ProfileStore & SealedStateStore,
   profileId: ProfileId,
   options: {
     readonly schemas?: boolean

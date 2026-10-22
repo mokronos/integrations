@@ -2,7 +2,7 @@ import type { Integrations } from "@integragents/host"
 import { IntegrationSlug, TenantId } from "./domain.ts"
 import type { DriftEntry, ToolSnapshot } from "./domain.ts"
 import { DateTime, Effect, Schema } from "effect"
-import type { GatewayStore, GatewayStoreError } from "./store.ts"
+import type { ToolSnapshotStore, GatewayStoreError } from "./store/index.ts"
 
 const schemaFingerprint = (snapshot: Pick<ToolSnapshot, "inputSchema" | "outputSchema">): string =>
   JSON.stringify([snapshot.inputSchema ?? null, snapshot.outputSchema ?? null])
@@ -68,7 +68,7 @@ export class DriftRefreshError extends Schema.TaggedError<DriftRefreshError>()("
 
 export const refreshIntegrationSnapshot = Effect.fn("Drift.refreshIntegrationSnapshot")(function* (
   dependencies: {
-    readonly store: GatewayStore
+    readonly store: ToolSnapshotStore
     readonly integrations: ToolCatalogReader
   },
   integration: string,

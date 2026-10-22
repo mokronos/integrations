@@ -1,7 +1,7 @@
 import { Effect } from "effect"
 import type { InvocationOutcome } from "@integragents/contracts"
 import type { ApprovalId, PendingApproval, ProfileId, TenantId } from "./domain.ts"
-import type { GatewayStore, SettledApproval } from "./store-contract.ts"
+import type { GatewayStore, SettledApproval } from "./store/index.ts"
 
 /** What a decided call came to: its result, its failure, or why it never ran. */
 export type ApprovalOutcome = Extract<InvocationOutcome, { readonly status: "succeeded" | "failed" | "denied" }>
