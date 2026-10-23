@@ -12,7 +12,7 @@ This project is in an early stage of development.
 
 - Don't create db migrations, if they aren't auto-generated
   - Each package declares its tables once, in Drizzle: the gateway in
-    `packages/core/gateway/src/db/schema.ts`, the integration host in
+    `packages/gateway-core/src/db/schema.ts`, the integrations package in
     `packages/integrations/src/db/schema.ts`. Change it there and run
     `bun run db:generate` in that package, which writes the SQL and embeds it
     for the runtime. Never hand-edit `db/migrations/*.sql` or a `*.gen.ts`.
@@ -24,7 +24,7 @@ Migrations must keep the app online. A gateway applies them when it starts, whil
 
 - **Expand, deploy, contract.** Add the new table or column first, ship the code that uses it, and drop the old one in a later release once no running code reads it. Never drop or rename a required column before its replacement is deployed.
 - **Applied migrations are immutable.** Change the Drizzle schema and generate a new migration; the migrator refuses a renamed or rewritten one.
-- **Migrations run on real data.** Each one must succeed on tables that hold rows and keep those rows; `packages/core/gateway/test/migrate.test.ts` seeds every table before the newest migration and checks the rows survive.
+- **Migrations run on real data.** Each one must succeed on tables that hold rows and keep those rows; `packages/gateway-core/test/migrate.test.ts` seeds every table before the newest migration and checks the rows survive.
 
 ## Type Discipline
 
