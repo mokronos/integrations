@@ -1,12 +1,11 @@
 import { whenPresent, whenPresentMap } from "@integragents/contracts"
-import type { GatewayClient } from "@integragents/client"
-import type { HttpClient } from "effect/http"
 import { Duration, Effect, Option, Schedule, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/cli"
-import type { IntegrationsCliError } from "../connection.ts"
-import { cliError, connectToGateway, describeError, openBrowser } from "../connection.ts"
+import { cliError, openBrowser } from "../connection.ts"
+import { InvalidInput, NotFound } from "@integragents/contracts"
 import type { Page, Window } from "../output.ts"
 import { jsonOutput, page, pageFields, withNext, writeStdoutLine } from "../output.ts"
+import type { GatewayTask } from "../tasks.ts"
 
 const verboseFlag = () =>
   Flag.Boolean("verbose").pipe(
@@ -34,16 +33,6 @@ const window = (limit: Option.Option<number>, offset: Option.Option<number>): Wi
   limit: Option.getOrUndefined(limit),
   offset: Option.getOrUndefined(offset)
 })
-
-const gatewayTask = <A, E, R>(
-  task: (client: GatewayClient) => Effect.Effect<A, E, R>
-): Effect.Effect<A, IntegrationsCliError, R | HttpClient.HttpClient> =>
-  connectToGateway().pipe(
-    Effect.flatMap(task),
-    Effect.mapError((error) => cliError(describeError(error)))
-  )
-
-type GatewayTask = typeof gatewayTask
 
 const JsonObject = Schema.Record(Schema.String, Schema.Json)
 const JsonArray = Schema.Array(Schema.Json)
@@ -142,7 +131,7 @@ export const connectCommand = (runGateway: GatewayTask) =>
             (candidate) => text(candidate["slug"]) === options.integration
           )
           if (integration === undefined) {
-            return yield* cliError(`Unknown integration ${options.integration}. Run: i discover <url>`)
+            return yield* new NotFound({ resource: "integration", id: options.integration })
           }
           const methods = array(integration["authMethods"])
           const template = Option.getOrUndefined(options.template)
@@ -154,13 +143,15 @@ export const connectCommand = (runGateway: GatewayTask) =>
 
           if (oauthMethod !== undefined && credentialsOffered && template === undefined) {
             const alternatives = methods.filter((method) => text(method["kind"]) !== "oauth")
-            return yield* cliError(
-              alternatives.length === 0
-                ? `${options.integration} only supports OAuth, so --credential-env cannot be used. Drop it and authorize in a browser.`
-                : `${options.integration} supports OAuth and ${alternatives
-                    .map((method) => text(method["template"]))
-                    .join(", ")}. Name the one you mean with --template.`
-            )
+            return yield* new InvalidInput({
+              field: alternatives.length === 0 ? "--credential-env" : "--template",
+              problem:
+                alternatives.length === 0
+                  ? `${options.integration} only supports OAuth, so credentials cannot be used; drop them and authorize in a browser`
+                  : `${options.integration} supports OAuth and ${alternatives
+                      .map((method) => text(method["template"]))
+                      .join(", ")}; name the one you mean with --template`
+            })
           }
 
           if (oauthMethod !== undefined) {
@@ -198,11 +189,11 @@ export const connectCommand = (runGateway: GatewayTask) =>
             let announced = authorizationUrl
             const poll = Effect.gen(function* () {
               const session = yield* client.provisioning.oauthSession({ params: { id: sessionId } })
+              if (session.state.status === "failed") {
+                return yield* session.state.error ?? cliError(`Connection failed: ${session.state.message}`)
+              }
               const current = record(session["state"])
               if (text(current["status"]) === "connected") return record(current["connection"])
-              if (text(current["status"]) === "failed") {
-                return yield* cliError(`Connection failed: ${text(current["message"])}`)
-              }
               const url = text(current["authorizationUrl"])
               if (url.length > 0 && url !== announced) {
                 announced = url

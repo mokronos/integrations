@@ -1,15 +1,6 @@
 import { Cause, Context, Effect, Layer, Option, Result, Schema } from "effect"
 import { FileSystem, Path } from "effect"
-import {
-  Etag,
-  HttpClient,
-  HttpEffect,
-  HttpMiddleware,
-  HttpPlatform,
-  HttpRouter,
-  HttpServerRequest,
-  HttpServerResponse
-} from "effect/http"
+import { Etag, HttpClient, HttpEffect, HttpMiddleware, HttpPlatform, HttpRouter, HttpServerRequest } from "effect/http"
 import { HttpApiBuilder } from "effect/http-api"
 import { HttpApiSchemaError } from "effect/http-api/HttpApiError"
 import { GatewayApi } from "./api.ts"
@@ -26,7 +17,8 @@ import {
 } from "./handlers.ts"
 import { ControlPlaneAssets, GatewayConfig, SessionPolicy } from "./services.ts"
 import { ErrorCapture, traceIdFor } from "./observability.ts"
-import { GatewayFailure } from "./identity.ts"
+import { errorResponse } from "./error-response.ts"
+import { GatewayFailure, InvalidInput, PayloadTooLarge } from "@integragents/contracts"
 import type { ErrorSink } from "./observability.ts"
 import type { GatewaySettings, SignInPolicy } from "./services.ts"
 import { defaultMaxUploadBytes, NonNegativeIntFromString, whenPresent } from "@integragents/contracts"
@@ -91,15 +83,26 @@ const bodyLimitLayer = (limits: { readonly request: number; readonly upload: num
         const maxBytes =
           new URL(request.url, "http://localhost").pathname === "/v1/blobs" ? limits.upload : limits.request
         return Option.getOrElse(declared, () => 0) > maxBytes
-          ? Effect.succeed(
-              HttpServerResponse.jsonUnsafe({ error: `Request body exceeds ${maxBytes} bytes` }, { status: 413 })
-            )
+          ? Effect.succeed(errorResponse(new PayloadTooLarge({ limitBytes: maxBytes })))
           : httpEffect
       })
     )
   )
 
-const encodeGatewayFailure = Schema.encodeSync(GatewayFailure)
+const requestPart = (kind: HttpApiSchemaError["kind"]): string => {
+  switch (kind) {
+    case "Params":
+      return "path"
+    case "Headers":
+    case "ResponseHeaders":
+      return "headers"
+    case "Query":
+      return "query"
+    case "Body":
+    case "Payload":
+      return "body"
+  }
+}
 
 const failureLayer = () =>
   HttpRouter.use((router) =>
@@ -113,28 +116,10 @@ const failureLayer = () =>
             Result.isSuccess(defect) && HttpApiSchemaError.is(defect.success) ? defect.success : undefined
           if (schemaError !== undefined) {
             return Effect.succeed(
-              HttpServerResponse.jsonUnsafe(
-                {
-                  error:
-                    schemaError.cause instanceof Error
-                      ? schemaError.cause.message
-                      : "Request body did not match the expected shape"
-                },
-                { status: 400 }
-              )
+              errorResponse(InvalidInput.fromSchemaError(requestPart(schemaError.kind), schemaError.cause))
             )
           }
-          return Effect.map(traceIdFor(cause), (traceId) =>
-            HttpServerResponse.jsonUnsafe(
-              encodeGatewayFailure(
-                new GatewayFailure({
-                  message: "The gateway could not complete this request",
-                  traceId
-                })
-              ),
-              { status: 500 }
-            )
-          )
+          return Effect.map(traceIdFor(cause), (traceId) => errorResponse(new GatewayFailure({ traceId })))
         }
       )
     )

@@ -4,7 +4,7 @@ import type { GatewayClient } from "@integragents/client"
 import { Effect, Schema, Stream } from "effect"
 import { BlobHandle, blobHandleKey, localFileKey, LocalFileRef, type Json } from "@integragents/contracts"
 import { integrationsHome } from "@integragents/contracts/gateway-config"
-import { cliError, describeError, type IntegrationsCliError } from "./connection.ts"
+import { cliError, thrownMessage, type IntegrationsCliError } from "./connection.ts"
 
 const decodeHandle = Schema.decodeUnknownOption(BlobHandle)
 const decodeLocalFile = Schema.decodeUnknownOption(LocalFileRef)
@@ -29,7 +29,7 @@ const uploadFile = Effect.fn("Cli.uploadFile")(function* (client: GatewayClient,
   const bytes = yield* Effect.try({
     try: () => new Uint8Array(readFileSync(resolved)),
     // oxlint-disable-next-line anti-slop/no-unknown-parameters
-    catch: (cause: unknown) => cliError(describeError(cause))
+    catch: (cause: unknown) => cliError(thrownMessage(cause))
   })
   const extension = path.extname(resolved).toLowerCase()
   return yield* client.delegated.uploadBlob({
@@ -59,7 +59,7 @@ export const resolveFileArguments = (
     if (local._tag === "Some") {
       return uploadFile(client, local.value[localFileKey]).pipe(
         Effect.map((uploaded): Json => ({ [blobHandleKey]: uploaded[blobHandleKey] })),
-        Effect.mapError((cause) => cliError(describeError(cause)))
+        Effect.mapError((cause) => cliError(thrownMessage(cause)))
       )
     }
 
@@ -93,7 +93,7 @@ const fetchBlob = Effect.fn("Cli.fetchBlob")(function* (
   yield* Effect.try({
     try: () => mkdirSync(path.dirname(destination), { recursive: true }),
     // oxlint-disable-next-line anti-slop/no-unknown-parameters
-    catch: (cause: unknown) => cliError(describeError(cause))
+    catch: (cause: unknown) => cliError(thrownMessage(cause))
   })
   const file = createWriteStream(destination)
   yield* Stream.runForEach(content, (chunk: Uint8Array) =>
@@ -132,7 +132,7 @@ export const materializeBlobs = (
       const destination = destinationFor(handle.value, out)
       return fetchBlob(client, handle.value, destination).pipe(
         Effect.map((written): Json => ({ ...record.value, path: written })),
-        Effect.mapError((cause) => cliError(describeError(cause)))
+        Effect.mapError((cause) => cliError(thrownMessage(cause)))
       )
     }
 

@@ -1,4 +1,4 @@
-import { Data, Effect, Option, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import {
   Alias,
   ApprovalId,
@@ -6,6 +6,10 @@ import {
   blobHandleKey,
   ConnectionName,
   IntegrationSearchKind,
+  InvalidInput,
+  NotFound,
+  NotImplemented,
+  OAuthSessionView,
   IntegrationSlug,
   InvocationOutcome,
   isJsonObject,
@@ -16,6 +20,7 @@ import {
   whenPresent
 } from "@integragents/contracts"
 import type {
+  GatewayError,
   InputRequests,
   Json,
   JsonEncodable,
@@ -33,6 +38,7 @@ import {
 import type { CallOrigin, Interaction } from "@integragents/gateway-core"
 import { capture } from "./observability.ts"
 import {
+  asCallerFailure,
   connectWithCredentials,
   discoverIntegration,
   findProfileApproval,
@@ -44,13 +50,6 @@ import {
 import type { GatewayOperationServices } from "./operations.ts"
 import { GatewayConfig } from "./services.ts"
 import { OAuthFlowSessions } from "@integragents/gateway-core"
-
-/** A refusal the gateway never saw: the arguments did not survive this surface. */
-export class ToolRefusal extends Data.TaggedError("ToolRefusal")<{
-  readonly message: string
-}> {}
-
-const refuse = (message: string): ToolRefusal => new ToolRefusal({ message })
 
 export type ToolOutput =
   | { readonly kind: "result"; readonly value: JsonEncodable; readonly failed: boolean }
@@ -78,7 +77,7 @@ export interface McpCaller {
   readonly interaction: Interaction
 }
 
-export type ToolRun = Effect.Effect<ToolOutput, Error, GatewayOperationServices>
+export type ToolRun = Effect.Effect<ToolOutput, GatewayError, GatewayOperationServices>
 
 export interface AgentTool {
   readonly name: string
@@ -110,7 +109,7 @@ const agentTool = <S extends Schema.Top & { readonly DecodingServices: never }>(
     inputSchema: jsonSchemaOf(definition.input),
     run: (caller, input) =>
       decode(input).pipe(
-        Effect.mapError((cause) => refuse(`${definition.name}: ${cause.message}`)),
+        Effect.mapError((failure) => InvalidInput.fromSchemaError("arguments", failure)),
         Effect.flatMap((decoded) => definition.run(caller, decoded))
       )
   }
@@ -134,21 +133,25 @@ const mentionsKey = (value: Json, key: string): boolean =>
 /** Printed as it travelled: the decoded outcome carries a Date, JSON does not. */
 const encodeOutcome = Schema.encodeSync(InvocationOutcome)
 
+const encodeSession = Schema.encodeSync(OAuthSessionView)
+
 const blobsUnsupported =
   `This result references gateway blobs (${blobHandleKey}). Downloading them over MCP is not ` +
   `implemented yet; read them from GET /v1/blobs/<id> with this key, or run the same tool through the i CLI.`
 
-const filesUnsupported =
-  `Local file arguments (${localFileKey}) are uploaded by the i CLI before the gateway sees them. ` +
-  `Sending files over MCP is not implemented yet; upload the bytes to POST /v1/blobs with this key ` +
-  `and pass the ${blobHandleKey} handle it returns.`
+const filesUnsupported = new NotImplemented({
+  feature: `Local file arguments (${localFileKey}) over MCP`,
+  alternative: `Upload the bytes to POST /v1/blobs with this key and pass the ${blobHandleKey} handle it returns, or call the tool through the i CLI`
+})
 
 const approvalMessage = (input: { readonly alias: Alias; readonly tool: ToolName; readonly arguments: Json }): string =>
   `Approve ${input.alias}.${input.tool}?\n\n${inline(JSON.stringify(input.arguments), 2_000)}`
 
-const malformedAnswer =
-  "The approval answer carried fields the approval form does not ask for, so nothing was decided. " +
-  "The call is still waiting for a human."
+const malformedAnswer = new InvalidInput({
+  field: "approval answer",
+  problem:
+    "it carried fields the approval form does not ask for, so nothing was decided; the call still waits for a human"
+})
 
 const awaitsApproval =
   "Calls to this tool are held until a human approves them, unless a saved approval covers their arguments."
@@ -166,7 +169,7 @@ export const approvalDescription = (decision: ToolDecision): string | undefined 
 const decideInClient = (
   caller: McpCaller,
   answer: { readonly approvalId: ApprovalId; readonly accepted: boolean; readonly remember: boolean }
-): Effect.Effect<InvocationOutcome | undefined, Error, GatewayOperationServices> =>
+): Effect.Effect<InvocationOutcome | undefined, never, GatewayOperationServices> =>
   Effect.gen(function* () {
     const dependencies = yield* invokeDependencies
     const config = yield* GatewayConfig
@@ -184,9 +187,9 @@ const decideInClient = (
       )
     ).pipe(
       Effect.catchTags({
-        ApprovalNotFound: () => Effect.succeed(undefined),
+        NotFound: () => Effect.succeed(undefined),
         ApprovalConflict: () => Effect.succeed(undefined),
-        ApprovalArgumentsInvalid: () => Effect.succeed(undefined)
+        InvalidInput: () => Effect.succeed(undefined)
       })
     )
   })
@@ -204,7 +207,7 @@ export const invokeTool = (
   }
 ): ToolRun =>
   Effect.gen(function* () {
-    if (mentionsKey(input.arguments, localFileKey)) return yield* refuse(filesUnsupported)
+    if (mentionsKey(input.arguments, localFileKey)) return yield* filesUnsupported
     const dependencies = yield* invokeDependencies
     const invoke = capture(
       invokeAsProfile(dependencies, {
@@ -220,7 +223,7 @@ export const invokeTool = (
     const prompt = caller.approvalPrompt
     const inClient = first.status === "pending" && caller.profile.approvalMethod === "elicitation"
     if (inClient && prompt.kind === "unanswered") return { kind: "ask-approval", message: approvalMessage(input) }
-    if (inClient && prompt.kind === "malformed") return yield* refuse(malformedAnswer)
+    if (inClient && prompt.kind === "malformed") return yield* malformedAnswer
     const answered =
       inClient && prompt.kind === "answered" && prompt.action !== "cancel"
         ? { approvalId: first.approvalId, accepted: prompt.action === "accept", remember: prompt.remember }
@@ -230,6 +233,8 @@ export const invokeTool = (
     if (outcome.status === "input-required") {
       return { kind: "input-required", inputRequests: outcome.inputRequests, requestState: outcome.requestState }
     }
+    if (outcome.status === "invalid") return yield* outcome.error
+    if (outcome.status === "failed" && outcome.error !== undefined) return yield* outcome.error
     const encoded = encodeOutcome(outcome)
     return {
       kind: "result",
@@ -237,7 +242,7 @@ export const invokeTool = (
         outcome.status === "succeeded" && mentionsKey(outcome.result, blobHandleKey)
           ? { ...objectEntries(asJson(encoded)), note: blobsUnsupported }
           : encoded,
-      failed: outcome.status === "denied" || outcome.status === "failed" || outcome.status === "invalid"
+      failed: outcome.status === "denied" || outcome.status === "failed"
     }
   })
 
@@ -257,11 +262,13 @@ const discoverTool = agentTool({
   }),
   run: (caller, input) =>
     Effect.map(
-      discoverIntegration(caller.profile.tenantId, input.url, {
-        ...whenPresent("connection", input.connection),
-        ...whenPresent("slug", input.slug),
-        ...whenPresent("name", input.name)
-      }),
+      asCallerFailure(
+        discoverIntegration(caller.profile.tenantId, input.url, {
+          ...whenPresent("connection", input.connection),
+          ...whenPresent("slug", input.slug),
+          ...whenPresent("name", input.name)
+        })
+      ),
       (discovery) =>
         ok(
           input.verbose === true
@@ -411,7 +418,13 @@ const schemaTool = agentTool({
     Effect.flatMap(effectiveTools(caller, {}), (tools) => {
       const found = tools.find((candidate) => candidate.alias === input.alias && candidate.tool === input.tool)
       return found === undefined
-        ? Effect.fail(refuse(`${input.tool} is not available to this key through ${input.alias}`))
+        ? Effect.fail(
+            new NotFound({
+              resource: "tool",
+              id: `${input.alias}.${input.tool}`,
+              known: tools.filter((candidate) => candidate.alias === input.alias).map((candidate) => candidate.tool)
+            })
+          )
         : Effect.succeed(ok({ ...found, ...whenPresent("approvalDescription", approvalDescription(found.decision)) }))
     })
 })
@@ -438,9 +451,7 @@ const connectTool = agentTool({
     Effect.gen(function* () {
       const integrations = yield* Integrations
       const found = yield* capture(integrations.findIntegration(input.integration))
-      if (Option.isNone(found)) {
-        return yield* refuse(`Unknown integration ${input.integration}. Run discover first.`)
-      }
+      if (Option.isNone(found)) return yield* new NotFound({ resource: "integration", id: input.integration })
       const integration = found.value
       const oauthMethod = integration.authMethods.find(
         (method) => method.kind === "oauth" && (input.template === undefined || method.template === input.template)
@@ -448,37 +459,45 @@ const connectTool = agentTool({
       const credentialsOffered = Object.keys(input.values ?? {}).length > 0
       if (oauthMethod !== undefined && credentialsOffered && input.template === undefined) {
         const alternatives = integration.authMethods.filter((method) => method.kind !== "oauth")
-        return yield* refuse(
-          alternatives.length === 0
-            ? `${input.integration} only supports OAuth, so values cannot be used. Drop them and let a human authorize in a browser.`
-            : `${input.integration} supports OAuth and ${alternatives
-                .map((method) => method.template)
-                .join(", ")}. Name the one you mean with template.`
-        )
+        return yield* new InvalidInput({
+          field: alternatives.length === 0 ? "values" : "template",
+          problem:
+            alternatives.length === 0
+              ? `${input.integration} only supports OAuth, so values cannot be used; drop them and let a human authorize in a browser`
+              : `${input.integration} supports OAuth and ${alternatives
+                  .map((method) => method.template)
+                  .join(", ")}; name the one you mean with template`
+        })
       }
 
       const tenantId = caller.profile.tenantId
       if (oauthMethod !== undefined) {
-        const session = yield* startOAuthConnection(tenantId, {
-          integration: input.integration,
-          ...whenPresent("connection", input.connection),
-          ...whenPresent("template", input.template),
-          ...whenPresent("clientId", input.clientId),
-          ...whenPresent("clientSecret", input.clientSecret),
-          ...whenPresent("timeoutSeconds", input.timeoutSeconds)
-        })
+        const session = yield* asCallerFailure(
+          startOAuthConnection(tenantId, {
+            integration: input.integration,
+            ...whenPresent("connection", input.connection),
+            ...whenPresent("template", input.template),
+            ...whenPresent("clientId", input.clientId),
+            ...whenPresent("clientSecret", input.clientSecret),
+            ...whenPresent("timeoutSeconds", input.timeoutSeconds)
+          }),
+          input.integration
+        )
         return ok({
-          ...session,
+          ...encodeSession(session),
           next: `A human has to finish this in a browser. Poll oauth_status with sessionId ${session.id}.`
         })
       }
 
-      const connected = yield* connectWithCredentials(tenantId, {
-        integration: input.integration,
-        ...whenPresent("connection", input.connection),
-        ...whenPresent("template", input.template),
-        values: input.values ?? {}
-      })
+      const connected = yield* asCallerFailure(
+        connectWithCredentials(tenantId, {
+          integration: input.integration,
+          ...whenPresent("connection", input.connection),
+          ...whenPresent("template", input.template),
+          values: input.values ?? {}
+        }),
+        input.integration
+      )
       return ok(
         input.verbose === true
           ? connected
@@ -502,8 +521,8 @@ const oauthStatusTool = agentTool({
     Effect.gen(function* () {
       const oauth = yield* OAuthFlowSessions
       const session = yield* capture(oauth.get(input.sessionId))
-      if (session === undefined) return yield* refuse("Unknown or expired OAuth session")
-      return ok(session)
+      if (session === undefined) return yield* new NotFound({ resource: "oauth-session", id: input.sessionId })
+      return ok(encodeSession(session))
     })
 })
 
@@ -566,7 +585,7 @@ const validateTool = agentTool({
   }),
   run: (caller, input) => {
     if ((input.address === undefined) === (input.node === undefined)) {
-      return Effect.fail(refuse("Provide exactly one of address or node"))
+      return Effect.fail(new InvalidInput({ field: "address", problem: "pass exactly one of address or node" }))
     }
     const node: Json =
       input.address === undefined ? (input.node ?? null) : { source: { kind: "tool", address: input.address } }
@@ -584,7 +603,7 @@ const approvalTool = agentTool({
   run: (caller, input) =>
     Effect.flatMap(findProfileApproval(caller.profile, input.approvalId), (approval) =>
       approval === undefined
-        ? Effect.fail(refuse(`Unknown approval ${input.approvalId}`))
+        ? Effect.fail(new NotFound({ resource: "approval", id: input.approvalId }))
         : Effect.succeed(ok(approval))
     )
 })

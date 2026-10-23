@@ -1,9 +1,11 @@
-import { Duration, Effect, Fiber, Predicate, Schedule, Schema, Stream } from "effect"
-import { FetchHttpClient, HttpClientError } from "effect/http"
+import { Duration, Effect, Fiber, Schedule, Schema, Stream } from "effect"
+import { FetchHttpClient } from "effect/http"
 import { HttpApiClient } from "effect/http-api"
-import { GatewayApi, GatewayFailure } from "@integragents/gateway-api/definition"
+import { GatewayApi } from "@integragents/gateway-api/definition"
 import {
   Alias,
+  asGatewayError,
+  type GatewayCallFailure,
   NonNegativeInt,
   PositiveInt,
   whenPresent,
@@ -27,67 +29,12 @@ import {
   type ProfileToolInput
 } from "@integragents/contracts"
 
-export class GatewayError extends Error {
-  readonly status: number | undefined
-  readonly method: string | undefined
-  readonly path: string | undefined
-  readonly traceId: string | undefined
-  readonly code: string | undefined
-
-  constructor(options: {
-    readonly message: string
-    readonly code?: string | undefined
-    readonly method?: string | undefined
-    readonly path?: string | undefined
-    readonly status?: number | undefined
-    readonly traceId?: string | undefined
-  }) {
-    super(options.message)
-    this.name = "GatewayError"
-    this.status = options.status
-    this.method = options.method
-    this.path = options.path
-    this.traceId = options.traceId
-    this.code = options.code
-  }
-}
-
-const messageOf = (failure: Error): string =>
-  Predicate.hasProperty(failure, "error") && Predicate.isString(failure.error) && failure.error.length > 0
-    ? failure.error
-    : failure.message
-
-const asGatewayError = (failure: Error): GatewayError => {
-  if (failure instanceof GatewayFailure) {
-    return new GatewayError({
-      message: `${failure.message} (trace ${failure.traceId})`,
-      status: 500,
-      traceId: failure.traceId
-    })
-  }
-  if (HttpClientError.isHttpClientError(failure)) {
-    const response = "response" in failure ? failure.response : undefined
-    return new GatewayError({
-      message: failure.message,
-      method: failure.request.method,
-      path: failure.request.url,
-      ...whenPresent("status", response?.status)
-    })
-  }
-  return new GatewayError({
-    message: messageOf(failure),
-    ...whenPresent(
-      "code",
-      Predicate.hasProperty(failure, "code") && Predicate.isString(failure.code) ? failure.code : undefined
-    )
-  })
-}
-
 const endpoints = Effect.runSync(
   HttpApiClient.make(GatewayApi, { baseUrl: window.location.origin }).pipe(Effect.provide(FetchHttpClient.layer))
 )
 
-const run = <A, E extends Error>(effect: Effect.Effect<A, E>): Promise<A> =>
+/** Runs a call, failing it with the `GatewayError` it came to, whatever the transport did. */
+const run = <A, E extends GatewayCallFailure>(effect: Effect.Effect<A, E>): Promise<A> =>
   Effect.runPromise(
     effect.pipe(
       Effect.provideService(FetchHttpClient.RequestInit, { credentials: "same-origin" }),

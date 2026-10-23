@@ -31,6 +31,7 @@ import {
   useQuery
 } from "@/lib/queries"
 import type { Connection, IntegrationOverview } from "@integragents/contracts"
+import { asGatewayError } from "@integragents/contracts"
 
 const Step = Schema.Literals(["connect", "access", "agent", "verify"])
 type Step = typeof Step.Type
@@ -85,7 +86,8 @@ export function OnboardingRoute() {
         makeGatewayClient({ url: window.location.origin, apiKey: secret }).pipe(
           Effect.flatMap((client) => client.delegated.listTools({ query: { schemas: false } })),
           Effect.provideService(FetchHttpClient.RequestInit, { credentials: "omit" }),
-          Effect.provide(FetchHttpClient.layer)
+          Effect.provide(FetchHttpClient.layer),
+          Effect.mapError(asGatewayError)
         )
       )
     }

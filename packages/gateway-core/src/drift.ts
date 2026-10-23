@@ -1,7 +1,7 @@
-import type { Integrations } from "@integragents/integrations"
+import type { Integrations, StorageError } from "@integragents/integrations"
 import { IntegrationSlug, TenantId } from "./domain.ts"
 import type { DriftEntry, ToolSnapshot } from "./domain.ts"
-import { DateTime, Effect, Schema } from "effect"
+import { DateTime, Effect } from "effect"
 import type { ToolSnapshotStore, GatewayStoreError } from "./store/index.ts"
 
 const schemaFingerprint = (snapshot: Pick<ToolSnapshot, "inputSchema" | "outputSchema">): string =>
@@ -61,11 +61,6 @@ export type DriftReport = {
   readonly tools: number
 }
 
-export class DriftRefreshError extends Schema.TaggedError<DriftRefreshError>()("DriftRefreshError", {
-  integration: Schema.String,
-  cause: Schema.Defect()
-}) {}
-
 export const refreshIntegrationSnapshot = Effect.fn("Drift.refreshIntegrationSnapshot")(function* (
   dependencies: {
     readonly store: ToolSnapshotStore
@@ -73,12 +68,10 @@ export const refreshIntegrationSnapshot = Effect.fn("Drift.refreshIntegrationSna
   },
   integration: string,
   tenantId: TenantId
-): Effect.fn.Return<DriftReport, DriftRefreshError | GatewayStoreError> {
+): Effect.fn.Return<DriftReport, StorageError | GatewayStoreError> {
   const slug = IntegrationSlug.make(integration)
   const checkedAt = yield* DateTime.nowAsDate
-  const tools = yield* dependencies.integrations
-    .listTools({ integration: slug })
-    .pipe(Effect.mapError((cause) => new DriftRefreshError({ integration, cause })))
+  const tools = yield* dependencies.integrations.listTools({ integration: slug })
   const current: ReadonlyArray<ToolSnapshot> = tools.map((tool) => ({
     integration: slug,
     connection: tool.connection,

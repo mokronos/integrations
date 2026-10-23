@@ -1,5 +1,5 @@
 import { Clock, Effect, Option, Schema } from "effect"
-import { whenPresent } from "@integragents/contracts"
+import { InvalidInput, whenPresent } from "@integragents/contracts"
 import {
   Connection,
   connectionAddress,
@@ -10,7 +10,7 @@ import {
 import { AuthTemplateSlug, OAuthClientSlug } from "../catalog/ids.ts"
 import { CatalogStore } from "../catalog/store.ts"
 import type { ClientAuthMethod } from "../catalog/store.ts"
-import { InvalidInputError, type StorageError, type OAuthError } from "../errors.ts"
+import type { OAuthError, StorageError } from "../errors.ts"
 import { Integrations } from "../integrations.ts"
 import { OAuthFlows } from "./flows.ts"
 import type { OAuthMethodSettings, OAuthSetup } from "./flows.ts"
@@ -19,10 +19,10 @@ const decodeId = <A, I>(
   schema: Schema.Codec<A, I, never, never>,
   field: string,
   value: I
-): Effect.Effect<A, InvalidInputError> =>
+): Effect.Effect<A, InvalidInput> =>
   Schema.decodeUnknownEffect(schema)(value).pipe(
     Effect.mapError(
-      (cause) => new InvalidInputError({ field, detail: `${String(value)} is not a valid ${field}: ${cause}` })
+      (cause) => new InvalidInput({ field, problem: `${String(value)} is not a valid ${field}: ${cause}` })
     )
   )
 
@@ -89,7 +89,7 @@ export type StartedOAuthFlow =
 
 export const startOAuthFlow = Effect.fn("OAuthConnect.start")(function* (
   options: StartOAuthFlowOptions
-): Effect.fn.Return<StartedOAuthFlow, OAuthError | StorageError | InvalidInputError, OAuthFlows> {
+): Effect.fn.Return<StartedOAuthFlow, OAuthError | StorageError | InvalidInput, OAuthFlows> {
   const oauth = yield* OAuthFlows
   const client = yield* decodeId(OAuthClientSlug, "client", options.client)
   const integration = yield* decodeId(IntegrationSlug, "integration", options.integration)
@@ -192,9 +192,9 @@ export const completeOAuthFlow = Effect.fn("OAuthConnect.complete")(function* (c
   }).pipe(
     Effect.mapError(
       (cause) =>
-        new InvalidInputError({
+        new InvalidInput({
           field: "connection",
-          detail: `The completed connection could not be described: ${cause}`
+          problem: `The completed connection could not be described: ${cause}`
         })
     )
   )

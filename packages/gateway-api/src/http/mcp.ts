@@ -7,15 +7,20 @@ import {
   inputResponse,
   McpServer
 } from "@modelcontextprotocol/server"
-import type { InputRequest, ServerContext } from "@modelcontextprotocol/server"
+import type { InputRequest, ServerContext, StandardSchemaWithJSON } from "@modelcontextprotocol/server"
 import {
   Alias,
   asJson,
+  describeError,
+  GatewayError,
+  GatewayFailure,
   gatewayVersion,
   InputResponses,
   isJsonObject,
   objectEntries,
+  presentError,
   ToolName,
+  Unauthorized,
   webCryptoLayer,
   whenPresent
 } from "@integragents/contracts"
@@ -30,12 +35,13 @@ import {
   oauthOrigin
 } from "@integragents/gateway-core"
 import type { ApiKey, EffectiveTool, GatewayStore, Interaction, OAuthActor } from "@integragents/gateway-core"
-import { Context, Effect, Layer, ManagedRuntime, Option, Predicate, Schema } from "effect"
+import { Cause, Context, Effect, Layer, ManagedRuntime, Option, Schema } from "effect"
 import { Headers, HttpTraceContext } from "effect/http"
 import type { HttpClient } from "effect/http"
 import { agentTools, approvalDescription, invokeTool } from "./mcp-tools.ts"
 import type { AgentTool, ApprovalPrompt, McpCaller, ToolOutput } from "./mcp-tools.ts"
-import { capture, ErrorCapture } from "./observability.ts"
+import { capture, ErrorCapture, traceIdFor } from "./observability.ts"
+import { refusedKey } from "./identity.ts"
 import type { ErrorSink } from "./observability.ts"
 import type { GatewayOperationServices } from "./operations.ts"
 import { GatewayConfig } from "./services.ts"
@@ -59,14 +65,32 @@ const presentedSecret = (request: Request): string | undefined => {
   return bearer ?? request.headers.get("x-api-key") ?? undefined
 }
 
-const authenticationFailure = (status: "unknown-key" | "key-revoked" | "profile-revoked") =>
-  Response.json(
-    { error: status === "profile-revoked" ? "Profile revoked" : "Invalid API key" },
-    {
-      status: status === "profile-revoked" ? 403 : 401,
-      headers: { "www-authenticate": "Bearer" }
-    }
-  )
+const encodeError = Schema.encodeSync(GatewayError)
+
+const errorResponse = (error: GatewayError, challenge: string) =>
+  Response.json(encodeError(error), {
+    status: presentError(error).status,
+    headers: { "www-authenticate": challenge }
+  })
+
+const decodeArguments = Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.Json))
+
+/**
+ * Advertises `schema` and leaves checking the arguments against it to the
+ * gateway, which reports every failing path rather than the SDK's one line.
+ */
+const checkedByGateway = (schema: Record<string, Json>): StandardSchemaWithJSON<Record<string, Json>> => ({
+  "~standard": {
+    version: 1,
+    vendor: "integrations-gateway",
+    jsonSchema: { input: () => schema, output: () => schema },
+    validate: (value) =>
+      Option.match(decodeArguments(value ?? {}), {
+        onNone: () => ({ issues: [{ message: "Tool arguments must be a JSON object" }] }),
+        onSome: (decoded) => ({ value: decoded })
+      })
+  }
+})
 
 const toolName = (alias: Alias, name: ToolName): string => `${alias}__${name}`
 
@@ -83,15 +107,16 @@ const describeEffectiveTool = (tool: {
       : `${tool.description}\n\n${approval}`
 }
 
-const explains = (failure: Error): failure is Error & { readonly error: string } =>
-  "error" in failure && Predicate.isString(failure.error) && failure.error.length > 0
-
-const describeFailure = (failure: Error): string =>
-  failure.message.length > 0 ? failure.message : explains(failure) ? failure.error : String(failure)
-
 const contentOf = (text: string, isError: boolean) => ({
   content: [{ type: "text" as const, text }],
   isError
+})
+
+/** The error as agents read it, with the same fields in structured form for clients that parse them. */
+const errorResultOf = (error: GatewayError) => ({
+  content: [{ type: "text" as const, text: describeError(error) }],
+  structuredContent: { error: encodeError(error) },
+  isError: true
 })
 
 /** Namespaced, so other input requests can ride along in the same round. */
@@ -237,7 +262,7 @@ const spanOptionsFor = (request: Request | undefined) =>
 const resultOf = (
   runtime: McpRuntime,
   call: { readonly tool: string; readonly caller: McpCaller; readonly request: Request | undefined },
-  effect: Effect.Effect<ToolOutput, Error, GatewayOperationServices>
+  effect: Effect.Effect<ToolOutput, GatewayError, GatewayOperationServices>
 ) =>
   runtime.runPromise(
     effect.pipe(
@@ -248,15 +273,15 @@ const resultOf = (
         )
       ),
       Effect.tapError((failure) =>
-        Effect.logInfo("MCP tool call refused", failure).pipe(
-          Effect.annotateLogs({
-            "error.tag": Predicate.hasProperty(failure, "_tag") ? String(failure._tag) : failure.name
-          })
-        )
+        Effect.logInfo("MCP tool call refused", failure).pipe(Effect.annotateLogs({ "error.tag": failure._tag }))
       ),
-      Effect.match({
-        onSuccess: replyOf,
-        onFailure: (failure: Error) => contentOf(describeFailure(failure), true)
+      Effect.matchCauseEffect({
+        onSuccess: (output) => Effect.succeed(replyOf(output)),
+        onFailure: (cause) =>
+          Option.match(Cause.findErrorOption(cause), {
+            onSome: (failure) => Effect.succeed(errorResultOf(failure)),
+            onNone: () => Effect.map(traceIdFor(cause), (traceId) => errorResultOf(new GatewayFailure({ traceId })))
+          })
       }),
       Effect.withSpan("Mcp.callTool", {
         kind: "server",
@@ -315,7 +340,7 @@ const registerAgentTool = (server: McpServer, runtime: McpRuntime, principal: Mc
     {
       title: tool.title,
       description: tool.description,
-      inputSchema: fromJsonSchema<Record<string, Json>>(tool.inputSchema)
+      inputSchema: checkedByGateway(tool.inputSchema)
     },
     async (arguments_, context) => {
       const caller = callerFor(principal, context)
@@ -375,7 +400,7 @@ const serverFor = async (
         title: `${tool.connection.integration} / ${tool.connection.name} / ${tool.tool}`,
         ...whenPresent("description", describeEffectiveTool(tool)),
         ...whenPresent("annotations", hintsOf(tool)),
-        inputSchema: fromJsonSchema<Record<string, Json>>(inputSchema)
+        inputSchema: checkedByGateway(inputSchema)
       },
       async (arguments_, context) => {
         const caller = callerFor(principal, context)
@@ -446,20 +471,17 @@ export const createMcpGatewayHandler = (options: McpGatewayOptions): McpGatewayH
     handle: async (request) => {
       const secret = presentedSecret(request)
       if (secret === undefined || secret.length === 0) {
-        return Response.json(
-          { error: "An MCP credential is required" },
-          { status: 401, headers: { "www-authenticate": options.oauth?.challenge() ?? "Bearer" } }
-        )
+        return errorResponse(new Unauthorized({ code: "missing-credential" }), options.oauth?.challenge() ?? "Bearer")
       }
       const authentication = await resolve(secret, request)
       if (authentication === undefined) {
-        return Response.json(
-          { error: "Invalid access token" },
-          { status: 401, headers: { "www-authenticate": options.oauth?.challenge("invalid_token") ?? "Bearer" } }
+        return errorResponse(
+          new Unauthorized({ code: "invalid-token" }),
+          options.oauth?.challenge("invalid_token") ?? "Bearer"
         )
       }
       if ("status" in authentication) {
-        return authenticationFailure(authentication.status)
+        return errorResponse(refusedKey(authentication.status), "Bearer")
       }
       return handler.fetch(request, {
         authInfo: {

@@ -3,6 +3,7 @@ import { Integrations, listIntegrationOverviews, searchIntegrations } from "@int
 import { httpsOnlyUrlPolicy, parseDestination } from "@integragents/integrations"
 import type { IntegrationServices } from "@integragents/integrations"
 import { Effect, Option } from "effect"
+import { NotFound, NotImplemented } from "@integragents/contracts"
 import { HttpServerRequest, HttpServerResponse } from "effect/http"
 import { HttpApiBuilder } from "effect/http-api"
 import { ConnectionName } from "@integragents/contracts"
@@ -13,45 +14,20 @@ import {
   oauthBrowserPage,
   GatewayStoreService
 } from "@integragents/gateway-core"
-import { ApiBadRequest, ApiNotFound, GatewayApi } from "../api.ts"
+import { GatewayApi } from "../api.ts"
 import { Identity, requireTenant } from "../authority.ts"
 import { GatewayConfig } from "../services.ts"
 import { OAuthFlowSessions } from "@integragents/gateway-core"
 import { capture } from "../observability.ts"
-import { asApiFailure } from "./host-failure.ts"
 import {
+  asCallerFailure,
   connectWithCredentials,
   discoverIntegration,
-  OperationRefused,
   removeConnectionByName,
-  requireSlug as decodeSlug,
+  requireSlug,
   startOAuthConnection,
   validateReference
 } from "../operations.ts"
-
-const refusalAsApiFailure = <A, E, R>(effect: Effect.Effect<A, E | OperationRefused, R>) =>
-  asApiFailure(
-    Effect.catchIf(
-      effect,
-      (failure): failure is OperationRefused => failure instanceof OperationRefused,
-      (refusal) =>
-        Effect.fail(
-          refusal.status === "not-found"
-            ? new ApiNotFound({ error: refusal.message })
-            : new ApiBadRequest({ error: refusal.message })
-        )
-    )
-  )
-
-const requireSlug = (value: string) =>
-  Effect.mapError(decodeSlug(value), (refusal) => new ApiNotFound({ error: refusal.message }))
-
-const refusalAsNotFound = <A, E, R>(effect: Effect.Effect<A, E | OperationRefused, R>) =>
-  Effect.catchIf(
-    effect,
-    (failure): failure is OperationRefused => failure instanceof OperationRefused,
-    (refusal) => Effect.fail(new ApiNotFound({ error: refusal.message }))
-  )
 
 const page = (
   status: number,
@@ -82,7 +58,7 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
       .handle("discover", (request) =>
         Effect.gen(function* () {
           const tenantId = yield* requireTenant
-          return yield* asApiFailure(
+          return yield* asCallerFailure(
             discoverIntegration(tenantId, request.payload.url, {
               ...whenPresent("connection", request.payload.connection),
               ...whenPresent("slug", request.payload.slug),
@@ -95,14 +71,10 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
         Effect.gen(function* () {
           const slug = yield* requireSlug(request.params["slug"])
           const found = yield* capture(integrations.findIntegration(slug))
-          if (Option.isNone(found)) {
-            return yield* new ApiNotFound({ error: `Unknown integration ${slug}` })
-          }
+          if (Option.isNone(found)) return yield* new NotFound({ resource: "integration", id: slug })
           yield* capture(integrations.renameIntegration(slug, request.payload.name))
           const renamed = yield* capture(integrations.findIntegration(slug))
-          if (Option.isNone(renamed)) {
-            return yield* new ApiNotFound({ error: `Unknown integration ${slug}` })
-          }
+          if (Option.isNone(renamed)) return yield* new NotFound({ resource: "integration", id: slug })
           return renamed.value
         })
       )
@@ -115,7 +87,7 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
       .handle("describeTool", (request) =>
         Effect.gen(function* () {
           const slug = yield* requireSlug(request.params["slug"])
-          return yield* asApiFailure(
+          return yield* asCallerFailure(
             integrations.describeTool({
               integration: slug,
               name: request.params["tool"],
@@ -125,7 +97,7 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
         })
       )
       .handle("registrySearch", (request) =>
-        asApiFailure(
+        asCallerFailure(
           searchIntegrations(
             {
               q: request.query["q"],
@@ -149,38 +121,32 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
       .handle("connect", (request) =>
         Effect.gen(function* () {
           const tenantId = yield* requireTenant
-          return yield* refusalAsApiFailure(connectWithCredentials(tenantId, request.payload))
+          return yield* asCallerFailure(connectWithCredentials(tenantId, request.payload), request.payload.integration)
         })
       )
       .handle("startOAuth", (request) =>
         Effect.gen(function* () {
           const tenantId = yield* requireTenant
-          return yield* refusalAsApiFailure(startOAuthConnection(tenantId, request.payload))
+          return yield* asCallerFailure(startOAuthConnection(tenantId, request.payload), request.payload.integration)
         })
       )
       .handle("oauthSession", (request) =>
         Effect.gen(function* () {
           const session = yield* capture(oauth.get(request.params["id"]))
-          if (session === undefined) {
-            return yield* new ApiNotFound({ error: "Unknown or expired OAuth session" })
-          }
+          if (session === undefined) return yield* new NotFound({ resource: "oauth-session", id: request.params["id"] })
           return session
         })
       )
       .handle("provideOAuthClient", (request) =>
         Effect.gen(function* () {
           const secret = request.payload.clientSecret?.trim()
-          const resumed = yield* asApiFailure(
+          const resumed = yield* asCallerFailure(
             oauth.provideClient(request.params["id"], {
               clientId: request.payload.clientId.trim(),
               ...whenPresent("clientSecret", secret === undefined || secret.length === 0 ? undefined : secret)
             })
           )
-          if (resumed === undefined) {
-            return yield* new ApiNotFound({
-              error: "Unknown OAuth session, or it is no longer waiting for an OAuth client"
-            })
-          }
+          if (resumed === undefined) return yield* new NotFound({ resource: "oauth-session", id: request.params["id"] })
           return resumed
         })
       )
@@ -193,8 +159,8 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
               ? undefined
               : parseDestination(`${origin}${clientMetadataPath}`, httpsOnlyUrlPolicy)?.href
           if (clientId === undefined || callback === undefined) {
-            return yield* new ApiNotFound({
-              error: "This gateway has no public HTTPS address to publish client metadata at"
+            return yield* new NotImplemented({
+              feature: "OAuth client metadata (the gateway has no public HTTPS address)"
             })
           }
           return {
@@ -260,9 +226,7 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
           const tenantId = yield* requireTenant
           const slug = yield* requireSlug(request.params["slug"])
           const found = yield* capture(integrations.findIntegration(slug))
-          if (Option.isNone(found)) {
-            return yield* new ApiNotFound({ error: `Unknown integration ${slug}` })
-          }
+          if (Option.isNone(found)) return yield* new NotFound({ resource: "integration", id: slug })
           const connections = yield* capture(integrations.listConnections())
           const owned = connections.filter((connection) => connection.integration === slug)
           yield* Effect.forEach(owned, (connection) =>
@@ -283,9 +247,7 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
       .handle("removeConnection", (request) =>
         Effect.gen(function* () {
           const tenantId = yield* requireTenant
-          return yield* refusalAsNotFound(
-            removeConnectionByName(tenantId, request.params["integration"], request.params["name"])
-          )
+          return yield* removeConnectionByName(tenantId, request.params["integration"], request.params["name"])
         })
       )
   })

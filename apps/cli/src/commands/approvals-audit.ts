@@ -1,15 +1,11 @@
 import { whenPresent } from "@integragents/contracts"
-import type { GatewayClient } from "@integragents/client"
-import type { HttpClient } from "effect/http"
 import { Effect, Option, Predicate, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/cli"
 import { ApprovalId } from "@integragents/gateway-core/domain"
-import type { IntegrationsCliError } from "../connection.ts"
-import { cliError, connectToGateway, describeError } from "../connection.ts"
+import { cliError } from "../connection.ts"
 import type { Page, Window } from "../output.ts"
 import { jsonOutput, page, pageFields, withNext, writeStdoutLine } from "../output.ts"
-import type { ControlPlaneClient } from "../session.ts"
-import { connectToControlPlane } from "../session.ts"
+import { controlPlaneTask, gatewayTask } from "../tasks.ts"
 
 const verboseFlag = () =>
   Flag.Boolean("verbose").pipe(
@@ -31,22 +27,6 @@ const window = (limit: Option.Option<number>, offset: Option.Option<number>): Wi
   limit: Option.getOrUndefined(limit),
   offset: Option.getOrUndefined(offset)
 })
-
-const gatewayTask = <A, E, R>(
-  task: (client: GatewayClient) => Effect.Effect<A, E, R>
-): Effect.Effect<A, IntegrationsCliError, R | HttpClient.HttpClient> =>
-  connectToGateway().pipe(
-    Effect.flatMap(task),
-    Effect.mapError((error) => cliError(describeError(error)))
-  )
-
-const controlPlaneTask = <A, E>(
-  task: (client: ControlPlaneClient) => Effect.Effect<A, E, HttpClient.HttpClient>
-): Effect.Effect<A, IntegrationsCliError, HttpClient.HttpClient> =>
-  connectToControlPlane().pipe(
-    Effect.flatMap(task),
-    Effect.mapError((error) => cliError(describeError(error)))
-  )
 
 const JsonObject = Schema.Record(Schema.String, Schema.Json)
 const JsonArray = Schema.Array(Schema.Json)

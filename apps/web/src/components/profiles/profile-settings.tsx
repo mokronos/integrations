@@ -25,6 +25,8 @@ import {
   useMutation,
   useProfileApprovalDestinations
 } from "@/lib/queries"
+import { toastError } from "@/lib/errors"
+import { ErrorNotice } from "@/components/error-notice"
 
 const decodeGroupWindow = (text: string): ApprovalGroupWindowMinutes | undefined =>
   text.trim() === ""
@@ -112,7 +114,20 @@ function Setting({
 export function ProfileSettings({ profile }: { readonly profile: Profile }) {
   const destinations = useApprovalDestinations()
   const assigned = useProfileApprovalDestinations(profile.id)
-  if (assigned.isPending) return null
+  const failed = assigned.error ?? destinations.error
+  if (failed !== null) {
+    return (
+      <ErrorNotice
+        title="Could not load this profile's settings"
+        error={failed}
+        onRetry={() => {
+          void assigned.refetch()
+          void destinations.refetch()
+        }}
+      />
+    )
+  }
+  if (assigned.isPending || destinations.isPending) return null
   return (
     <SettingsForm
       key={`${profile.id}:${(assigned.data ?? []).join(",")}`}
@@ -161,7 +176,7 @@ function SettingsForm({
       invalidate(keys.profiles, keys.profileApprovalDestinations(profile.id))
       toast.success("Settings saved")
     },
-    onError: (error: Error) => toast.error("Could not save settings", { description: error.message })
+    onError: (error: Error) => toastError("Could not save settings", error)
   })
 
   return (

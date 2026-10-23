@@ -1,3 +1,4 @@
+import { NotFound } from "@integragents/contracts"
 import { Effect, Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/http-api"
 import { ApprovalId, BlobId, BlobUpload, IdempotencyKey, PendingApproval, SubjectId } from "@integragents/contracts"
@@ -16,7 +17,7 @@ import {
 } from "@integragents/contracts"
 import { Authority } from "../middleware.ts"
 import { RequiredAccess } from "../identity.ts"
-import { ApiNotFoundError, EffectiveTool, Json } from "./shared.ts"
+import { EffectiveTool, Json } from "./shared.ts"
 
 const WireAlias = Alias
 
@@ -66,14 +67,14 @@ export const DelegatedGroup = HttpApiGroup.make("delegated")
     HttpApiEndpoint.get("approval", "/v1/approvals/:id", {
       params: { id: ApprovalId },
       success: PendingApproval,
-      error: ApiNotFoundError
+      error: NotFound
     }).annotate(RequiredAccess, "delegated")
   )
   .add(
     HttpApiEndpoint.get("blob", "/v1/blobs/:id", {
       params: { id: BlobId },
       success: HttpApiSchema.StreamUint8Array(),
-      error: ApiNotFoundError
+      error: NotFound
     }).annotate(RequiredAccess, "delegated")
   )
   .add(

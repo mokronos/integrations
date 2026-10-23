@@ -275,7 +275,7 @@ describe("relaying an upstream server's input requests", () => {
           const refused = yield* Effect.promise(() => client.callTool(retry, { allowInputRequired: true }))
           expect(Schema.decodeUnknownSync(ToolText)(refused).isError).toBe(true)
           expect(textOf(Schema.decodeUnknownSync(ToolText)(refused))).toContain(
-            "requestState does not belong to this call"
+            "Invalid requestState: it does not belong to this call"
           )
         }
         expect(upstream.runs).toEqual([{ who: "w" }])

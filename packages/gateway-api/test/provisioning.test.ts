@@ -118,7 +118,7 @@ describe("provisioning surface", () => {
       const response = yield* call("DELETE", "/v1/connections/gmail/personal")
 
       expect(response.status).toBe(404)
-      expect(String(response.body["error"])).toContain("work")
+      expect(response.body).toMatchObject({ _tag: "NotFound", resource: "connection", known: ["work"] })
     }).pipe(Effect.provide(testServices))
   )
 

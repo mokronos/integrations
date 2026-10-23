@@ -105,6 +105,7 @@ export const authorizeInBrowser = Effect.fn("OAuth.authorizeInBrowser")(function
       orElse: () =>
         new OAuthFlowError({
           stage: "timeout",
+          reason: "timeout",
           detail: `OAuth authorization timed out after ${Math.ceil(timeoutMillis / 1000)} seconds`
         })
     })

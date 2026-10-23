@@ -81,7 +81,7 @@ describe("gateway traffic shaping", () => {
       const refused = yield* get("/v1/tools")
       expect(refused.status).toBe(429)
       expect(refused.headers.get("retry-after")).toBe("60")
-      expect((yield* bodyOf(refused))["code"]).toBe("rate-limited")
+      expect(yield* bodyOf(refused)).toMatchObject({ _tag: "RateLimited", retryAfterSeconds: 60 })
     }).pipe(Effect.provide(testServices))
   )
 
@@ -128,7 +128,7 @@ describe("gateway traffic shaping", () => {
       )
 
       expect(response.status).toBe(413)
-      expect(String((yield* bodyOf(response))["error"])).toContain("exceeds")
+      expect((yield* bodyOf(response))["_tag"]).toBe("PayloadTooLarge")
     }).pipe(Effect.provide(testServices))
   )
 })

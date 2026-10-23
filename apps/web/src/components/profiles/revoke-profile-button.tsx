@@ -4,6 +4,7 @@ import type { Profile } from "@integragents/contracts"
 import { ConfirmButton } from "@/components/ui/confirm-button"
 import * as gateway from "@/lib/gateway"
 import { keys, useInvalidate, useMutation } from "@/lib/queries"
+import { toastError } from "@/lib/errors"
 
 export function RevokeProfileButton({
   profile,
@@ -25,7 +26,7 @@ export function RevokeProfileButton({
       })
       onRevoked?.()
     },
-    onError: (error: Error) => toast.error("Could not revoke the profile", { description: error.message })
+    onError: (error: Error) => toastError("Could not revoke the profile", error)
   })
   return (
     <ConfirmButton

@@ -33,15 +33,14 @@ describe("gateway http surface", () => {
       ])
       expect(yield* store.listProfileTools(profile.id)).toHaveLength(1)
       expect(
-        (yield* call("POST", "/v1/profiles", { local: true, body: { name: "New assistant", tools: [selected] } }))
-          .status
-      ).toBe(400)
+        (yield* call("POST", "/v1/profiles", { local: true, body: { name: "New assistant", tools: [selected] } })).body
+      ).toMatchObject({ _tag: "AlreadyExists", resource: "profile" })
       expect(
         (yield* call("POST", "/v1/profiles", {
           local: true,
           body: { name: "Unavailable", tools: [{ ...selected, tool: "missing" }] }
-        })).status
-      ).toBe(400)
+        })).body
+      ).toMatchObject({ _tag: "NotFound", resource: "tool" })
       expect(yield* store.findProfileByName(defaultTenantId, "Unavailable")).toBeUndefined()
     }).pipe(Effect.provide(testServices))
   )
@@ -227,7 +226,12 @@ describe("gateway http surface", () => {
       const reused = yield* send("x@y.z")
 
       expect([first.status, retry.status, retry.body]).toEqual([200, 200, first.body])
-      expect([reused.status, String(reused.body["message"])]).toEqual([400, expect.stringContaining("run-1/call-3")])
+      expect(reused.status).toBe(400)
+      expect(reused.body["error"]).toMatchObject({
+        _tag: "InvalidInput",
+        field: "idempotencyKey",
+        problem: expect.stringContaining("run-1/call-3")
+      })
       expect(calls).toHaveLength(1)
     }).pipe(Effect.provide(testServices))
   )
@@ -270,8 +274,11 @@ describe("gateway http surface", () => {
 
       expect(response.status).toBe(400)
       expect(response.body["status"]).toBe("invalid")
-      expect(response.body["issues"]).toEqual([expect.objectContaining({ path: "to" })])
-      expect(response.body["message"]).toContain("sendEmail")
+      expect(response.body["error"]).toMatchObject({
+        _tag: "InvalidInput",
+        field: "arguments",
+        issues: [expect.objectContaining({ path: "to" })]
+      })
       expect(calls).toHaveLength(0)
       expect(yield* store.listApprovals(defaultTenantId, "pending")).toHaveLength(0)
     }).pipe(Effect.provide(testServices))
@@ -287,6 +294,15 @@ describe("gateway http surface", () => {
 
       expect(response.status).toBe(502)
       expect(response.body["status"]).toBe("failed")
+      expect(response.body["error"]).toMatchObject({
+        _tag: "ToolCallFailed",
+        tool: "sendEmail",
+        reason: "unavailable",
+        upstreamStatus: 500,
+        mayHaveWritten: true,
+        retryable: false,
+        hint: "The call may have taken effect; check before repeating it"
+      })
     }).pipe(Effect.provide(testServices))
   )
 

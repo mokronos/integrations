@@ -144,7 +144,7 @@ describe("failures nobody declared", () => {
 })
 
 describe("failures out at the far end", () => {
-  it.effect("a URL that cannot be read is the caller's 400, not the gateway's 500", () =>
+  it.effect("a URL that cannot be read is the caller's 422 saying it could not be reached, not the gateway's 500", () =>
     Effect.gen(function* () {
       const { call } = yield* setup({ unreachableUrl: true })
 
@@ -154,10 +154,14 @@ describe("failures out at the far end", () => {
         JSON.stringify({ url: "https://127.0.0.1:9/openapi.json" })
       )
 
-      expect(response.status).toBe(400)
+      expect(response.status).toBe(422)
       const body = yield* bodyOf(response)
-      expect(String(body["error"])).toContain("https://127.0.0.1:9/openapi.json")
-      expect(String(body["error"])).toContain("fetch failed")
+      expect(body).toMatchObject({
+        _tag: "DiscoveryFailed",
+        url: "https://127.0.0.1:9/openapi.json",
+        reason: "unreachable"
+      })
+      expect(String(body["openapi"])).toContain("fetch failed")
     }).pipe(Effect.provide(testServices))
   )
 })

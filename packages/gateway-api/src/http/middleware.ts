@@ -1,5 +1,13 @@
 import { HttpApiMiddleware } from "effect/http-api"
-import { ForbiddenError, GatewayFailureError, Identity, RateLimitedError, UnauthorizedError } from "./identity.ts"
+import {
+  Forbidden,
+  GatewayFailure,
+  InvalidInput,
+  PayloadTooLarge,
+  RateLimited,
+  Unauthorized
+} from "@integragents/contracts"
+import { Identity } from "./identity.ts"
 
 /**
  * Who the caller is, resolved once per request. Declared apart from the layer
@@ -12,6 +20,6 @@ export class Authority extends HttpApiMiddleware.Service<
     provides: Identity
   }
 >()("@integragents/gateway-api/Authority", {
-  // Every request passes through here, so this is where a client learns any call can end in a 500.
-  error: [UnauthorizedError, ForbiddenError, RateLimitedError, GatewayFailureError]
+  // Every request passes through here, so this is where a client learns what any call can end in.
+  error: [Unauthorized, Forbidden, RateLimited, GatewayFailure, InvalidInput, PayloadTooLarge]
 }) {}

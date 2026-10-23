@@ -1,6 +1,13 @@
+import { NotFound } from "@integragents/contracts"
 import { Effect, Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/http-api"
-import { OAuthClientSubmission, OAuthSessionView, SubjectId } from "@integragents/contracts"
+import {
+  IntegrationError,
+  NotImplemented,
+  OAuthClientSubmission,
+  OAuthSessionView,
+  SubjectId
+} from "@integragents/contracts"
 import {
   Connection,
   Integration,
@@ -16,7 +23,7 @@ import {
 } from "@integragents/contracts"
 import { Authority } from "../middleware.ts"
 import { RequiredAccess } from "../identity.ts"
-import { ApiBadRequestError, ApiNotFoundError, Json } from "./shared.ts"
+import { Json } from "./shared.ts"
 
 const DiscoverBody = Schema.Struct({
   url: Schema.String,
@@ -84,14 +91,14 @@ export const ProvisioningGroup = HttpApiGroup.make("provisioning")
     HttpApiEndpoint.post("discover", "/v1/integrations/discover", {
       payload: DiscoverBody,
       success: HttpApiSchema.status(201)(IntegrationDiscovery),
-      error: ApiBadRequestError
+      error: IntegrationError.members
     }).annotate(RequiredAccess, "provisioning")
   )
   .add(
     HttpApiEndpoint.get("integrationTools", "/v1/integrations/:slug/tools", {
       params: { slug: Schema.String },
       success: Schema.Struct({ tools: Schema.Array(ToolSummary) }),
-      error: ApiNotFoundError
+      error: NotFound
     }).annotate(RequiredAccess, "provisioning")
   )
   .add(
@@ -99,7 +106,7 @@ export const ProvisioningGroup = HttpApiGroup.make("provisioning")
       params: { slug: Schema.String, tool: Schema.String },
       query: { connection: Schema.optional(Schema.String) },
       success: Tool,
-      error: [ApiNotFoundError, ApiBadRequestError]
+      error: IntegrationError.members
     }).annotate(RequiredAccess, "provisioning")
   )
   .add(
@@ -110,7 +117,7 @@ export const ProvisioningGroup = HttpApiGroup.make("provisioning")
         kind: Schema.optional(IntegrationSearchKind)
       },
       success: IntegrationSearchResponse,
-      error: ApiBadRequestError
+      error: IntegrationError.members
     }).annotate(RequiredAccess, "provisioning")
   )
   .add(
@@ -133,21 +140,21 @@ export const ProvisioningGroup = HttpApiGroup.make("provisioning")
           tools: Schema.Array(ToolSummary)
         })
       ),
-      error: [ApiNotFoundError, ApiBadRequestError]
+      error: IntegrationError.members
     }).annotate(RequiredAccess, "provisioning")
   )
   .add(
     HttpApiEndpoint.post("startOAuth", "/v1/connections/oauth", {
       payload: OAuthStartBody,
       success: HttpApiSchema.status(201)(OAuthSessionView),
-      error: [ApiNotFoundError, ApiBadRequestError]
+      error: IntegrationError.members
     }).annotate(RequiredAccess, "provisioning")
   )
   .add(
     HttpApiEndpoint.get("oauthSession", "/v1/connections/oauth/:id", {
       params: { id: Schema.String },
       success: OAuthSessionView,
-      error: ApiNotFoundError
+      error: NotFound
     }).annotate(RequiredAccess, "provisioning")
   )
   .add(
@@ -155,13 +162,13 @@ export const ProvisioningGroup = HttpApiGroup.make("provisioning")
       params: { id: Schema.String },
       payload: OAuthClientSubmission,
       success: OAuthSessionView,
-      error: [ApiNotFoundError, ApiBadRequestError]
+      error: IntegrationError.members
     }).annotate(RequiredAccess, "provisioning")
   )
   .add(
     HttpApiEndpoint.get("oauthClientMetadata", "/v1/oauth/client-metadata.json", {
       success: OAuthClientMetadataDocument,
-      error: [ApiNotFoundError]
+      error: [NotFound, NotImplemented]
     }).annotate(RequiredAccess, "public")
   )
   .add(
@@ -180,7 +187,7 @@ export const ProvisioningGroup = HttpApiGroup.make("provisioning")
       params: { slug: Schema.String },
       payload: RenameIntegrationBody,
       success: Integration,
-      error: ApiNotFoundError
+      error: NotFound
     }).annotate(RequiredAccess, "administrative")
   )
   .add(
@@ -191,7 +198,7 @@ export const ProvisioningGroup = HttpApiGroup.make("provisioning")
         integration: Schema.String,
         connections: Schema.Array(Schema.String)
       }),
-      error: ApiNotFoundError
+      error: NotFound
     }).annotate(RequiredAccess, "provisioning")
   )
   .add(
@@ -202,7 +209,7 @@ export const ProvisioningGroup = HttpApiGroup.make("provisioning")
         integration: Schema.String,
         connection: Schema.String
       }),
-      error: ApiNotFoundError
+      error: NotFound
     }).annotate(RequiredAccess, "provisioning")
   )
   .middleware(Authority)

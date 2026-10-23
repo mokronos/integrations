@@ -144,7 +144,7 @@ describe("i and ii CLI help", () => {
   test("reports a missing integrations service instead of failing obscurely", () => {
     const result = runAgent(["integrations"])
 
-    expect(result.exitCode).toBe(1)
-    expect(result.stderr).toContain("No integrations service found")
+    expect(result.exitCode).toBe(2)
+    expect(result.stderr).toContain("No integrations gateway configured")
   })
 })

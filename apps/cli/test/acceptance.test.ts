@@ -509,12 +509,12 @@ describe("integrations CLI acceptance", () => {
         }
 
         const escalation = yield* clientCli(["profile", "escalated"], sandbox)
-        expect(escalation.exitCode).toBe(1)
+        expect(escalation.exitCode).toBe(2)
         expect(escalation.stderr).toContain("Unknown subcommand")
 
         const discoverAttempt = yield* clientCli(["discover", vendor.specUrl], sandbox)
-        expect(discoverAttempt.exitCode).toBe(1)
-        expect(discoverAttempt.stderr).toContain("a profile with that capability")
+        expect(discoverAttempt.exitCode).toBe(3)
+        expect(discoverAttempt.stderr).toContain("lacks the provision_connections capability")
 
         const visible = parseOutput(
           ToolsOutput,
@@ -527,8 +527,9 @@ describe("integrations CLI acceptance", () => {
         const visibleSchema = yield* clientCli(["schema", orgAlias(slug, connectionName), "tickets.create"], sandbox)
         expect(visibleSchema.exitCode, visibleSchema.stderr).toBe(0)
         const hiddenSchema = yield* clientCli(["schema", orgAlias(slug, connectionName), "tickets.delete"], sandbox)
-        expect(hiddenSchema.exitCode).toBe(1)
-        expect(hiddenSchema.stderr).toContain("not available to this key")
+        expect(hiddenSchema.exitCode).toBe(2)
+        expect(hiddenSchema.stderr).toContain("Unknown tool")
+        expect(hiddenSchema.stderr).toContain("tickets.create")
 
         const executed = yield* clientCli(
           [
@@ -544,7 +545,7 @@ describe("integrations CLI acceptance", () => {
         expect(vendor.seenKeys()).toEqual(["acceptance-secret"])
 
         const refused = yield* clientCli(["execute", orgAlias(slug, connectionName), "tickets.delete", "{}"], sandbox)
-        expect(refused.exitCode).toBe(1)
+        expect(refused.exitCode).toBe(2)
 
         const audit = parseOutput(AuditOutput, (yield* operator(["audit", "--profile", profile.id])).stdout)
         expect(
@@ -639,7 +640,7 @@ describe("integrations CLI acceptance", () => {
         expect(turnedOff.exitCode, turnedOff.stderr).toBe(0)
 
         const afterOff = yield* execute(key.secret, "Off")
-        expect(afterOff.exitCode).toBe(1)
+        expect(afterOff.exitCode).toBe(2)
         expect(JSON.parse(afterOff.stdout)).toMatchObject({ status: "denied" })
         const fromCopy = yield* execute(copyKey.secret, "Copy")
         expect(fromCopy.exitCode, fromCopy.stderr).toBe(0)
@@ -649,7 +650,7 @@ describe("integrations CLI acceptance", () => {
         expect(revokedKey.exitCode, revokedKey.stderr).toBe(0)
 
         const withRevokedKey = yield* execute(key.secret, "Revoked key")
-        expect(withRevokedKey.exitCode).toBe(1)
+        expect(withRevokedKey.exitCode).toBe(3)
         expect(vendor.invocations()).toBe(0)
       }).pipe(Effect.provide(services)),
     60_000

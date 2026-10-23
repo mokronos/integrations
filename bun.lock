@@ -169,7 +169,6 @@
       "name": "@integragents/gateway-core",
       "version": "0.3.1",
       "dependencies": {
-        "@cfworker/json-schema": "catalog:",
         "@integragents/contracts": "workspace:^",
         "@integragents/integrations": "workspace:^",
       },
@@ -187,6 +186,7 @@
       "name": "@integragents/integrations",
       "version": "0.3.1",
       "dependencies": {
+        "@cfworker/json-schema": "catalog:",
         "@integragents/contracts": "workspace:^",
         "@integragents/observability": "workspace:^",
         "@modelcontextprotocol/client": "2.0.0",

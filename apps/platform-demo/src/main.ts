@@ -248,9 +248,7 @@ const server = Bun.serve({
   fetch: (request) =>
     runtime.runPromise(
       handle(request).pipe(
-        Effect.catchTag("InvalidInputError", (failure) =>
-          Effect.succeed(new Response(failure.message, { status: 400 }))
-        ),
+        Effect.catchTag("InvalidInput", (failure) => Effect.succeed(new Response(failure.message, { status: 400 }))),
         Effect.provide(services),
         Effect.catchCause((cause) => Effect.succeed(new Response(String(cause), { status: 500 })))
       )

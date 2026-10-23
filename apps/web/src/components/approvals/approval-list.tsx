@@ -26,6 +26,7 @@ import {
   type ListedApproval,
   type ProfileId
 } from "@integragents/contracts"
+import { toastError } from "@/lib/errors"
 
 const statusVariant = {
   pending: "default",
@@ -68,7 +69,7 @@ function useDecision(onDecided?: () => void) {
             .join("\n")
         })
     },
-    onError: (error: Error) => toast.error("Could not decide", { description: error.message })
+    onError: (error: Error) => toastError("Could not decide", error)
   })
 }
 

@@ -125,7 +125,7 @@ describe("provisioning a discovered URL", () => {
       expect(Exit.isFailure(exit)).toBe(true)
       if (Exit.isFailure(exit)) {
         const failure = Cause.findError(exit.cause)
-        expect(Result.isSuccess(failure) && failure.success._tag).toBe("InvalidInputError")
+        expect(Result.isSuccess(failure) && failure.success._tag).toBe("InvalidInput")
         expect(Result.isSuccess(failure) && failure.success.message).toContain("https://mail.example.com/mcp")
       }
       expect(added).toEqual([])

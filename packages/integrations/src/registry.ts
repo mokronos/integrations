@@ -1,7 +1,12 @@
 import { Effect, Schema } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/http"
-import { IntegrationSearchQuery, IntegrationSearchResponse, IntegrationSearchSurface } from "@integragents/contracts"
-import { describeCause, InvocationError } from "./errors.ts"
+import {
+  IntegrationSearchQuery,
+  IntegrationSearchResponse,
+  IntegrationSearchSurface,
+  InvalidInput,
+  RegistryUnavailable
+} from "@integragents/contracts"
 import { whenPresent } from "@integragents/contracts"
 
 export {
@@ -49,12 +54,12 @@ const fetchText = Effect.fn("Registry.fetchText")((url: URL) =>
   HttpClient.get(url).pipe(
     Effect.flatMap(HttpClientResponse.filterStatusOk),
     Effect.flatMap((response) => response.text),
-    Effect.mapError(
-      (cause) =>
-        new InvocationError({
-          code: "registry_error",
-          detail: describeCause(cause)
-        })
+    Effect.mapError((failure) =>
+      failure.reason._tag === "StatusCodeError"
+        ? new RegistryUnavailable({ reason: "status", status: failure.reason.response.status })
+        : failure.reason._tag === "TransportError"
+          ? new RegistryUnavailable({ reason: "unreachable" })
+          : new RegistryUnavailable({ reason: "unreadable" })
     )
   )
 )
@@ -64,13 +69,7 @@ export const search = Effect.fn("Registry.search")(function* (
   options: SearchIntegrationsOptions = {}
 ) {
   const decoded = yield* decodeQuery(query).pipe(
-    Effect.mapError(
-      (cause) =>
-        new InvocationError({
-          code: "invalid_query",
-          detail: describeCause(cause)
-        })
-    )
+    Effect.mapError((failure) => InvalidInput.fromSchemaError("query", failure))
   )
   const text = decoded.q.trim()
   const registryUrl = options.registryUrl ?? integrationsRegistryUrl
@@ -82,13 +81,7 @@ export const search = Effect.fn("Registry.search")(function* (
 
   const body = yield* fetchText(url)
   const parsed = yield* decodeSearch(body).pipe(
-    Effect.mapError(
-      (cause) =>
-        new InvocationError({
-          code: "registry_error",
-          detail: `The registry's response was unreadable: ${describeCause(cause)}`
-        })
-    )
+    Effect.mapError(() => new RegistryUnavailable({ reason: "unreadable" }))
   )
 
   const results = parsed.results.flatMap((result) =>

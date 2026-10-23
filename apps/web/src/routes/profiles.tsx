@@ -20,6 +20,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { pluralise, when } from "@/lib/format"
 import * as gateway from "@/lib/gateway"
 import { keys, refetchAll, useInvalidate, useMutation, useProfiles } from "@/lib/queries"
+import { toastError } from "@/lib/errors"
 
 export function ProfilesRoute() {
   const profiles = useProfiles()
@@ -152,7 +153,7 @@ function ProfileTitle({ profile }: { readonly profile: Profile }) {
       invalidate(keys.profiles)
       toast.success(`Now called ${renamed.name}`)
     },
-    onError: (error: Error) => toast.error("Could not rename the profile", { description: error.message })
+    onError: (error: Error) => toastError("Could not rename the profile", error)
   })
   const revoked = profile.revokedAt !== null
   return (

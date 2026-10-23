@@ -138,7 +138,9 @@ describe("host integrations", () => {
 
       const failed = yield* Effect.result(host.execute(tool.address, { command: "ls" }))
 
-      expect(Result.isFailure(failed) ? failed.failure.message : "ran").toBe("vm.exec: the VM is asleep")
+      expect(Result.isFailure(failed) ? failed.failure.message : "ran").toBe(
+        "run_command failed: vm.exec: the VM is asleep"
+      )
     }).pipe(
       Effect.provide(
         catalog.pipe(
@@ -203,7 +205,7 @@ describe("removing a host integration's connection", () => {
       const ran = yield* Effect.result(host.execute(tool.address, { command: "ls" }))
 
       expect(yield* host.toolSummaries({ integration: sandbox })).toEqual([])
-      expect(Result.isFailure(ran) ? ran.failure._tag : "ran").toBe("ToolNotFoundError")
+      expect(Result.isFailure(ran) ? ran.failure._tag : "ran").toBe("NotFound")
       expect(seen).toEqual([])
     }).pipe(Effect.provide(withExecutor(seen)))
   })

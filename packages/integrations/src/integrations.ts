@@ -13,7 +13,8 @@ import type {
   ToolSummary
 } from "@integragents/contracts"
 import { CatalogStore } from "./catalog/store.ts"
-import type { StorageError, ToolNotFoundError } from "./errors.ts"
+import type { StorageError } from "./errors.ts"
+import type { NotFound } from "@integragents/contracts"
 import type { HostIntegrationDefinition, ToolCallContext } from "./host-tools.ts"
 import { McpClient } from "./mcp/client.ts"
 import { OAuthFlows } from "./oauth/flows.ts"
@@ -74,7 +75,7 @@ export class Integrations extends Context.Service<
 
     readonly toolSummaries: (filter?: ToolFilter) => Effect.Effect<ReadonlyArray<ToolSummary>, StorageError>
     readonly listTools: (filter?: ToolFilter) => Effect.Effect<ReadonlyArray<Tool>, StorageError>
-    readonly describeTool: (target: ToolAddress | ToolTarget) => Effect.Effect<Tool, StorageError | ToolNotFoundError>
+    readonly describeTool: (target: ToolAddress | ToolTarget) => Effect.Effect<Tool, StorageError | NotFound>
     /**
      * One round of a call; `answer` continues a round an earlier call ended
      * with. `context` says who the call is made for, which host tools receive.

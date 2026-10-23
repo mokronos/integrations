@@ -1,6 +1,6 @@
 import { Clock, Effect, Option, Schema } from "effect"
 import type { Integrations } from "@integragents/integrations"
-import { argumentPattern, InvocationIssue, whenPresent } from "@integragents/contracts"
+import { ApprovalConflict, argumentPattern, NotFound, whenPresent } from "@integragents/contracts"
 import type { Json } from "@integragents/contracts"
 import {
   aliasForConnection,
@@ -16,20 +16,6 @@ import { invalidArguments } from "../invocation/arguments.ts"
 import { boundToolAddress, executeAuthorized } from "../invocation/execute.ts"
 import { newApprovalRuleId } from "../keys.ts"
 import type { ApprovalStore, AuditStore, GatewayStoreError, ProfileStore, SealedStateStore } from "../store/index.ts"
-
-export class ApprovalNotFound extends Schema.TaggedError<ApprovalNotFound>()("ApprovalNotFound", {
-  id: ApprovalId
-}) {}
-
-export class ApprovalConflict extends Schema.TaggedError<ApprovalConflict>()("ApprovalConflict", {
-  message: Schema.String
-}) {}
-
-/** The approver's replacement arguments do not fit the tool's input schema; nothing was decided. */
-export class ApprovalArgumentsInvalid extends Schema.TaggedError<ApprovalArgumentsInvalid>()(
-  "ApprovalArgumentsInvalid",
-  { message: Schema.String, issues: Schema.Array(InvocationIssue) }
-) {}
 
 const ApprovalDecision = Schema.Struct({
   tenantId: TenantId,
@@ -76,9 +62,9 @@ const pendingApproval = Effect.fn("Approvals.pending")(function* (
 ) {
   const { tenantId, id } = input
   const approval = yield* store.getApproval(tenantId, id)
-  if (approval === undefined) return yield* new ApprovalNotFound({ id })
+  if (approval === undefined) return yield* new NotFound({ resource: "approval", id })
   if (approval.status !== "pending") {
-    return yield* new ApprovalConflict({ message: `Approval ${id} is already ${approval.status}` })
+    return yield* new ApprovalConflict({ approval: id, state: approval.status === "expired" ? "expired" : "decided" })
   }
   const now = yield* Clock.currentTimeMillis
   if (approval.expiresAt !== null && approval.expiresAt.getTime() <= now) {
@@ -90,7 +76,7 @@ const pendingApproval = Effect.fn("Approvals.pending")(function* (
       result: null,
       error: "expired before a decision was recorded"
     })
-    return yield* new ApprovalConflict({ message: `Approval ${id} expired` })
+    return yield* new ApprovalConflict({ approval: id, state: "expired" })
   }
   return approval
 })
@@ -111,9 +97,9 @@ export const denyApproval = Effect.fn("Approvals.deny")(function* (
     result: null,
     error: input.reason ?? null
   })
-  if (!settled) return yield* new ApprovalConflict({ message: `Approval ${input.id} has already been decided` })
+  if (!settled) return yield* new ApprovalConflict({ approval: input.id, state: "decided" })
   const approval = yield* store.getApproval(input.tenantId, input.id)
-  if (approval === undefined) return yield* new ApprovalNotFound({ id: input.id })
+  if (approval === undefined) return yield* new NotFound({ resource: "approval", id: input.id })
   return { approval }
 })
 
@@ -145,7 +131,7 @@ export const approveApproval = Effect.fn("Approvals.approve")(function* (
       result: null,
       error: "the profile was revoked or stopped enabling this tool while the call was frozen"
     })
-    return yield* new ApprovalConflict({ message: `Approval ${id} is no longer authorized` })
+    return yield* new ApprovalConflict({ approval: id, state: "unauthorized" })
   }
 
   const edited = input.arguments
@@ -156,7 +142,7 @@ export const approveApproval = Effect.fn("Approvals.approve")(function* (
     const invalid = Option.isSome(described)
       ? invalidArguments(described.value.inputSchema, edited, authorization.profileTool.tool)
       : undefined
-    if (invalid !== undefined) return yield* new ApprovalArgumentsInvalid(invalid)
+    if (invalid !== undefined) return yield* invalid.error
   }
 
   return yield* Effect.gen(function* () {
@@ -166,7 +152,7 @@ export const approveApproval = Effect.fn("Approvals.approve")(function* (
       decidedBy,
       ...whenPresent("editedArguments", edited)
     })
-    if (!claimed) return yield* new ApprovalConflict({ message: `Approval ${id} was decided or expired` })
+    if (!claimed) return yield* new ApprovalConflict({ approval: id, state: "decided" })
     const message =
       decidedBy === null
         ? null
@@ -194,7 +180,7 @@ export const approveApproval = Effect.fn("Approvals.approve")(function* (
     })
     if (outcome.status === "input-required") yield* store.collectApproval(tenantId, id)
     const settled = yield* store.getApproval(tenantId, id)
-    if (settled === undefined) return yield* new ApprovalNotFound({ id })
+    if (settled === undefined) return yield* new NotFound({ resource: "approval", id })
     return { approval: settled, outcome }
   }).pipe(Effect.uninterruptible)
 })
@@ -213,21 +199,17 @@ const rememberApproval = Effect.fn("Approvals.remember")(function* (
     if (approval?.status === "pending") approvals.push(approval)
   }
   const [first] = approvals
-  if (first === undefined)
-    return yield* new ApprovalConflict({ message: "None of these calls is still waiting for a decision" })
+  if (first === undefined) return yield* new ApprovalConflict({ state: "none-waiting" })
   if (
     approvals.some(
       (approval) =>
         approval.profileId !== first.profileId || approval.alias !== first.alias || approval.tool !== first.tool
     )
   ) {
-    return yield* new ApprovalConflict({
-      message: "A saved approval covers one tool of one profile; these calls span several"
-    })
+    return yield* new ApprovalConflict({ state: "mixed" })
   }
   const authorization = yield* frozenAuthorization(store, input.tenantId, first)
-  if (authorization === undefined)
-    return yield* new ApprovalConflict({ message: `Approval ${first.id} is no longer authorized` })
+  if (authorization === undefined) return yield* new ApprovalConflict({ approval: first.id, state: "unauthorized" })
   return yield* store.createApprovalRule({
     id: yield* newApprovalRuleId,
     profileId: authorization.profile.id,
@@ -303,11 +285,11 @@ export const decideApprovals = Effect.fn("Approvals.decideMany")(function* (
       return decided.pipe(
         Effect.map((approval): DecidedApproval => ({ id, status: "decided", approval })),
         Effect.catchTags({
-          ApprovalNotFound: (): Effect.Effect<DecidedApproval> =>
-            Effect.succeed({ id, status: "refused", error: `Unknown approval ${id}` }),
+          NotFound: ({ message }): Effect.Effect<DecidedApproval> =>
+            Effect.succeed({ id, status: "refused", error: message }),
           ApprovalConflict: ({ message }): Effect.Effect<DecidedApproval> =>
             Effect.succeed({ id, status: "refused", error: message }),
-          ApprovalArgumentsInvalid: ({ message }): Effect.Effect<DecidedApproval> =>
+          InvalidInput: ({ message }): Effect.Effect<DecidedApproval> =>
             Effect.succeed({ id, status: "refused", error: message })
         })
       )

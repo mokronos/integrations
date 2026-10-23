@@ -21,9 +21,9 @@ describe("detecting an integration", () => {
       const failures = yield* Effect.forEach(["tasks.example.com/mcp", "localhost:8080/mcp"], (url) =>
         Effect.flip(classify(url))
       )
-      expect(failures.map((failure) => failure.detail)).toEqual([
-        "it has no http:// or https:// scheme; did you mean https://tasks.example.com/mcp?",
-        "it has no http:// or https:// scheme; did you mean https://localhost:8080/mcp?"
+      expect(failures.map((failure) => [failure.reason, failure.hint])).toEqual([
+        ["no-scheme", "Did you mean https://tasks.example.com/mcp?"],
+        ["no-scheme", "Did you mean https://localhost:8080/mcp?"]
       ])
     }).pipe(Effect.provide(services))
   )

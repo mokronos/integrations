@@ -248,9 +248,9 @@ describe("the catalog", () => {
       const failure = yield* Effect.flip(host.execute(tool?.address ?? ToolAddress.make("missing"), {}))
       const [connection] = yield* host.listConnections()
       expect({
-        failure: failure._tag === "OAuthError" ? failure.reason : failure._tag,
+        failure: failure._tag,
         status: connection?.status
-      }).toEqual({ failure: "reconnect_required", status: "reauthorization_required" })
+      }).toEqual({ failure: "OAuthReconnectRequired", status: "reauthorization_required" })
     }).pipe(Effect.provide(testIntegrations(rejectingMcp)))
   )
 
@@ -397,9 +397,9 @@ describe("the catalog", () => {
       )
       expect(outcome._tag).toBe("Failure")
       if (outcome._tag === "Failure") {
-        expect(outcome.failure._tag).toBe("InvalidInputError")
-        if (outcome.failure._tag === "InvalidInputError") {
-          expect(outcome.failure.detail).toContain("no longer offers")
+        expect(outcome.failure._tag).toBe("InvalidInput")
+        if (outcome.failure._tag === "InvalidInput") {
+          expect(outcome.failure.problem).toContain("no longer offers")
         }
       }
     })
@@ -505,7 +505,7 @@ describe("connections", () => {
       )
       expect(outcome._tag).toBe("Failure")
       if (outcome._tag === "Failure") {
-        expect(outcome.failure._tag).toBe("InvalidInputError")
+        expect(outcome.failure._tag).toBe("InvalidInput")
       }
     })
   )
@@ -743,7 +743,7 @@ describe("tools", () => {
       )
       expect(outcome._tag).toBe("Failure")
       if (outcome._tag === "Failure") {
-        expect(outcome.failure._tag).toBe("ToolNotFoundError")
+        expect(outcome.failure._tag).toBe("NotFound")
       }
     })
   )
@@ -802,7 +802,7 @@ describe("tools", () => {
       )
       expect(outcome._tag).toBe("Failure")
       if (outcome._tag === "Failure") {
-        expect(outcome.failure._tag).toBe("InvocationError")
+        expect(outcome.failure._tag).toBe("ToolCallFailed")
         expect(outcome.failure.message).toContain("the notebook is locked")
         expect(outcome.failure.message).toContain(
           "The server asked for input the gateway cannot relay to this caller: Unlock code?"

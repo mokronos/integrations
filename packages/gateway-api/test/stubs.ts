@@ -1,4 +1,5 @@
 import { Context, Effect, Option } from "effect"
+import { NotFound } from "@integragents/contracts"
 import {
   BlobStore,
   CatalogStore,
@@ -6,8 +7,7 @@ import {
   McpClient,
   OAuthFlows,
   OpenApiInvoker,
-  SpecCache,
-  ToolNotFoundError
+  SpecCache
 } from "@integragents/integrations"
 import type { IntegrationServices } from "@integragents/integrations"
 
@@ -27,7 +27,7 @@ export const stubIntegrations = (overrides: Partial<Integrations["Service"]> = {
   registerHostIntegration: dies("registerHostIntegration"),
   toolSummaries: () => Effect.succeed([]),
   listTools: () => Effect.succeed([]),
-  describeTool: (target) => Effect.fail(new ToolNotFoundError({ tool: String(target) })),
+  describeTool: (target) => Effect.fail(new NotFound({ resource: "tool", id: String(target) })),
   execute: dies("execute"),
   ...overrides
 })

@@ -1,5 +1,6 @@
 import { Effect, Option, Schema } from "effect"
-import { whenPresent } from "@integragents/contracts"
+import { InvalidInput, whenPresent } from "@integragents/contracts"
+import type { DiscoveryFailed } from "@integragents/contracts"
 import { requiresAuthentication } from "./catalog/auth-methods.ts"
 import { classify } from "./classify.ts"
 import type { McpClient } from "./mcp/client.ts"
@@ -8,8 +9,6 @@ import type { SpecCache } from "./openapi/cache.ts"
 type ClassifyServices = McpClient | SpecCache
 import { Integrations } from "./integrations.ts"
 import { AuthTemplateSlug } from "./catalog/ids.ts"
-import { InvalidInputError } from "./errors.ts"
-import type { DetectionError } from "./errors.ts"
 import type { IntegrationFailure } from "./integrations.ts"
 import {
   ConnectionName,
@@ -27,9 +26,9 @@ export const installClassified = Effect.fn("Integrations.install")(function* (
   const decoded = yield* Schema.decodeUnknownEffect(EndpointClassification)(classification).pipe(
     Effect.mapError(
       (cause) =>
-        new InvalidInputError({
+        new InvalidInput({
           field: "classification",
-          detail: `Could not read the endpoint classification: ${String(cause)}`
+          problem: `Could not read the endpoint classification: ${String(cause)}`
         })
     )
   )
@@ -37,9 +36,9 @@ export const installClassified = Effect.fn("Integrations.install")(function* (
   const existing = yield* host.findIntegration(slug)
   if (Option.isSome(existing)) {
     if (existing.value.displayUrl !== undefined && existing.value.displayUrl !== decoded.endpoint) {
-      return yield* new InvalidInputError({
+      return yield* new InvalidInput({
         field: "slug",
-        detail:
+        problem:
           `${decoded.slug} is already installed and points at ${existing.value.displayUrl}. ` +
           `Discover this URL under a different name.`
       })
@@ -55,9 +54,9 @@ export const installClassified = Effect.fn("Integrations.install")(function* (
 
   const installed = yield* host.findIntegration(slug)
   if (Option.isNone(installed)) {
-    return yield* new InvalidInputError({
+    return yield* new InvalidInput({
       field: "slug",
-      detail: `The catalog did not persist integration ${decoded.slug}`
+      problem: `The catalog did not persist integration ${decoded.slug}`
     })
   }
   return installed.value
@@ -95,7 +94,7 @@ const ensureConnection = Effect.fn("Integrations.ensureConnection")(function* (
 export const provisionIntegration = Effect.fn("Integrations.provision")(function* (
   url: string,
   options: DiscoverIntegrationsOptions = {}
-): Effect.fn.Return<IntegrationDiscovery, IntegrationFailure | DetectionError, Integrations | ClassifyServices> {
+): Effect.fn.Return<IntegrationDiscovery, IntegrationFailure | DiscoveryFailed, Integrations | ClassifyServices> {
   const host = yield* Integrations
   const classification = named(yield* classify(url), options)
   const integration = yield* installClassified(classification)

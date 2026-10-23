@@ -1,5 +1,5 @@
 import { buildRequest } from "./request.ts"
-import { Context, Effect, Layer, Option, Stream } from "effect"
+import { Context, Effect, Layer, Option, Schema, Stream } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/http"
 import { describeCause, InvocationError, SpecError, StorageError } from "../errors.ts"
 import { hostOf, refusedDestination, transportCode } from "../unreachable.ts"
@@ -72,16 +72,65 @@ const decodeBody = (contentType: string, body: string): Json => {
   return body
 }
 
+const errorBodyLimit = 600
+const upstreamErrorLimit = 8_000
+
+const bounded = (text: string): string => (text.length > errorBodyLimit ? `${text.slice(0, errorBodyLimit)}…` : text)
+
 const errorDetail = (contentType: string, body: string): string => {
   const trimmed = body.trim()
   if (trimmed.length === 0) return "no response body"
   // An API answering HTML is an API that was never reached, and its error page
   // is worth less to the caller than knowing that is what happened.
-  if (!jsonContentType.test(contentType)) {
+  if (!jsonContentType.test(contentType) && !/^text\/plain\b/i.test(contentType)) {
     const kind = contentType.split(";")[0]?.trim()
     return `answered ${kind === undefined || kind.length === 0 ? "a non-JSON body" : kind}, not an API error`
   }
-  return trimmed.length > 600 ? `${trimmed.slice(0, 600)}…` : trimmed
+  return bounded(trimmed)
+}
+
+/** Where APIs put the sentence that explains an error, in the order they are tried. */
+const explanations: ReadonlyArray<(body: Json) => Option.Option<string>> = [
+  (body) =>
+    Option.map(Schema.decodeUnknownOption(Schema.Struct({ message: Schema.String }))(body), (said) => said.message),
+  (body) =>
+    Option.map(
+      Schema.decodeUnknownOption(Schema.Struct({ error_description: Schema.String }))(body),
+      (said) => said.error_description
+    ),
+  (body) =>
+    Option.map(Schema.decodeUnknownOption(Schema.Struct({ detail: Schema.String }))(body), (said) => said.detail),
+  (body) => Option.map(Schema.decodeUnknownOption(Schema.Struct({ title: Schema.String }))(body), (said) => said.title),
+  (body) => Option.map(Schema.decodeUnknownOption(Schema.Struct({ error: Schema.String }))(body), (said) => said.error),
+  (body) =>
+    Option.map(
+      Schema.decodeUnknownOption(Schema.Struct({ error: Schema.Struct({ message: Schema.String }) }))(body),
+      (said) => said.error.message
+    )
+]
+
+const explanationOf = (body: Json): Option.Option<string> =>
+  Option.firstSomeOf(explanations.map((explain) => explain(body)))
+
+/**
+ * The upstream's own explanation leads, when its body names one; a JSON body
+ * small enough to read whole goes along, so the caller can see every field it rejected.
+ */
+const upstreamFailure = (request: string, status: number, contentType: string, body: string) => {
+  const parsed = jsonContentType.test(contentType) ? parseJsonString(body.trim()) : Option.none()
+  const explained = Option.flatMap(parsed, explanationOf)
+  return new InvocationError({
+    code: "upstream_status",
+    status,
+    detail: `${request}: HTTP ${status}: ${Option.match(explained, {
+      onNone: () => errorDetail(contentType, body),
+      onSome: bounded
+    })}`,
+    ...whenPresent(
+      "upstreamError",
+      Option.getOrUndefined(Option.filter(parsed, () => body.length <= upstreamErrorLimit))
+    )
+  })
 }
 
 export interface OpenApiCall {
@@ -141,14 +190,16 @@ export class OpenApiInvoker extends Context.Service<
           if (split.unknown.length > 0) {
             return yield* new InvocationError({
               code: "unknown_argument",
-              detail: `${call.tool} does not accept: ${split.unknown.join(", ")}`
+              detail: `${call.tool} does not accept: ${split.unknown.join(", ")}`,
+              arguments: split.unknown
             })
           }
           const missing = missingArguments(call.call, split.parameters)
           if (missing.length > 0) {
             return yield* new InvocationError({
               code: "missing_argument",
-              detail: `${call.tool} requires: ${missing.join(", ")}`
+              detail: `${call.tool} requires: ${missing.join(", ")}`,
+              arguments: missing
             })
           }
 
@@ -207,13 +258,9 @@ export class OpenApiInvoker extends Context.Service<
             const body = yield* response.text.pipe(
               Effect.catch((cause) => unreachable(call, built.url, cause, response.status))
             )
-            return yield* new InvocationError({
-              code: `http_${response.status}`,
-              // `built.url` and not the prepared one: a credential can be placed
-              // in the query string, and this text reaches the caller.
-              detail: `${built.method} ${built.url}: ${errorDetail(contentType, body)}`,
-              status: response.status
-            })
+            // `built.url` and not the prepared one: a credential can be placed
+            // in the query string, and this text reaches the caller.
+            return yield* upstreamFailure(`${built.method} ${built.url}`, response.status, contentType, body)
           }
 
           const limit = call.maxInlineBytes ?? defaultMaxInlineBytes

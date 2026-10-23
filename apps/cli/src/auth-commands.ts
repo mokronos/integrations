@@ -1,10 +1,8 @@
-import { Effect, Option, Redacted, Schema } from "effect"
-import type { HttpClient } from "effect/http"
+import { Effect, Option, Redacted } from "effect"
 import { Argument, Command, Flag, Prompt } from "effect/cli"
 import { whenPresent } from "@integragents/contracts"
-import { cliError, describeError, IntegrationsCliError } from "./connection.ts"
+import { cliError, thrownMessage, IntegrationsCliError } from "./connection.ts"
 import { jsonOutput, writeStdoutLine } from "./output.ts"
-import type { ControlPlaneClient } from "./session.ts"
 import {
   connectToControlPlane,
   loginOperator,
@@ -13,6 +11,7 @@ import {
   readOperatorSession,
   signupOperator
 } from "./session.ts"
+import { controlPlaneTask } from "./tasks.ts"
 
 const passwordFlag = () =>
   Flag.Redacted("password").pipe(
@@ -27,14 +26,7 @@ const password = (provided: Option.Option<Redacted.Redacted<string>>, message = 
   })
 
 const authTask = <A, E, R>(task: Effect.Effect<A, E, R>): Effect.Effect<A, IntegrationsCliError, R> =>
-  Effect.mapError(task, (cause) => cliError(describeError(cause)))
-
-const controlPlaneTask = (
-  task: (
-    client: ControlPlaneClient
-  ) => Effect.Effect<typeof Schema.Json.Type, IntegrationsCliError, HttpClient.HttpClient>
-): Effect.Effect<typeof Schema.Json.Type, IntegrationsCliError, HttpClient.HttpClient> =>
-  authTask(Effect.flatMap(connectToControlPlane(), task))
+  Effect.mapError(task, (cause) => cliError(thrownMessage(cause)))
 
 export const loginCommand = Command.make(
   "login",

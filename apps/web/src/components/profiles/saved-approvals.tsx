@@ -32,6 +32,7 @@ import { pinnedObject } from "@/lib/approval-groups"
 import { when } from "@/lib/format"
 import * as gateway from "@/lib/gateway"
 import { keys, useInvalidate, useMutation } from "@/lib/queries"
+import { toastError } from "@/lib/errors"
 
 const pathLabel = (path: ArgumentPath): string => (path.length === 0 ? "arguments" : path.join("."))
 
@@ -158,7 +159,7 @@ function EditRule({ rule, profileId }: { readonly rule: ApprovalRule; readonly p
       setOpen(false)
       toast.success("Saved approval updated")
     },
-    onError: (error: Error) => toast.error("Could not update the saved approval", { description: error.message })
+    onError: (error: Error) => toastError("Could not update the saved approval", error)
   })
   const update = (index: number, change: Partial<Field>) =>
     setFields((current) => current.map((field, at) => (at === index ? { ...field, ...change } : field)))
@@ -237,7 +238,7 @@ export function SavedApproval({ rule, profileId }: { readonly rule: ApprovalRule
       invalidate(keys.approvalRules(profileId))
       toast.success("Saved approval deleted")
     },
-    onError: (error: Error) => toast.error("Could not delete the saved approval", { description: error.message })
+    onError: (error: Error) => toastError("Could not delete the saved approval", error)
   })
   return (
     <div className="space-y-2 rounded-md border p-2">

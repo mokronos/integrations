@@ -29,6 +29,8 @@ const decodeJsonString = Schema.decodeUnknownOption(Schema.fromJsonString(Schema
 
 export const normalizeOutputSchema = (schema: Json): Json => (Option.isSome(decodeEnvelopeSchema(schema)) ? {} : schema)
 
+const errorTextLimit = 2_000
+
 const soleText = (content: ReadonlyArray<Json>): Option.Option<string> => {
   const first = content[0]
   if (content.length !== 1 || first === undefined) return Option.none()
@@ -43,10 +45,17 @@ export const normalizeToolResult = (tool: string, data: Json): Effect.Effect<Jso
   const text = soleText(content)
 
   if (envelope.isError === true) {
+    const said = content.flatMap((item) => Option.toArray(Option.map(decodeText(item), (block) => block.text.trim())))
+    const joined = said.filter((block) => block.length > 0).join("\n")
     return Effect.fail(
       new InvocationError({
         code: "tool_error",
-        detail: Option.getOrElse(text, () => `${tool} reported an error`)
+        detail:
+          joined.length === 0
+            ? `${tool} reported an error`
+            : joined.length > errorTextLimit
+              ? `${joined.slice(0, errorTextLimit)}…`
+              : joined
       })
     )
   }

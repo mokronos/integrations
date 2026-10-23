@@ -2,10 +2,10 @@ import { whenPresent, whenPresentMap } from "@integragents/contracts"
 import { BlobStore, Integrations } from "@integragents/integrations"
 import { Effect, Stream } from "effect"
 import { HttpApiBuilder } from "effect/http-api"
-import { ApprovalId, BlobId, blobHandleKey, ToolName } from "@integragents/contracts"
+import { ApprovalId, BlobId, blobHandleKey, NotFound, ToolName } from "@integragents/contracts"
 import { invokeThroughGateway, listEffectiveTools } from "@integragents/gateway-core"
 import { GatewayStoreService } from "@integragents/gateway-core"
-import { ApiNotFound, GatewayApi } from "../api.ts"
+import { GatewayApi } from "../api.ts"
 import { requireKeyHolder, requireSecret } from "../authority.ts"
 import { capture } from "../observability.ts"
 import { findProfileApproval, invokeDependencies } from "../operations.ts"
@@ -49,9 +49,7 @@ export const DelegatedLayer = HttpApiBuilder.group(GatewayApi, "delegated", (han
       .handle("blob", (request) =>
         Effect.gen(function* () {
           const id = BlobId.make(request.params["id"])
-          const opened = yield* blobs
-            .open(id)
-            .pipe(Effect.mapError(() => new ApiNotFound({ error: `Unknown blob ${id}` })))
+          const opened = yield* blobs.open(id).pipe(Effect.mapError(() => new NotFound({ resource: "blob", id })))
           return opened.content
         })
       )
@@ -79,7 +77,7 @@ export const DelegatedLayer = HttpApiBuilder.group(GatewayApi, "delegated", (han
           const id = ApprovalId.make(request.params["id"])
           const { profile } = yield* requireKeyHolder
           const approval = yield* findProfileApproval(profile, id)
-          if (approval === undefined) return yield* new ApiNotFound({ error: `Unknown approval ${id}` })
+          if (approval === undefined) return yield* new NotFound({ resource: "approval", id })
           return approval
         })
       )

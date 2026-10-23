@@ -1,8 +1,17 @@
 import { Schema } from "effect"
-import { Alias, ApprovalStatus, ConnectionName, ConnectionOwner, IntegrationSlug, ToolName } from "./vocabulary.ts"
+import {
+  Alias,
+  ApprovalStatus,
+  ConnectionName,
+  ConnectionOwner,
+  IntegrationSlug,
+  ProfileCapability,
+  ToolName
+} from "./vocabulary.ts"
 import { OAuthSessionView } from "./oauth.ts"
 import { ArgumentPattern } from "./argument-paths.ts"
 import { InputRequests } from "./input.ts"
+import { GatewayError, InvalidInput } from "./errors.ts"
 
 export const TenantId = Schema.String.pipe(Schema.brand("TenantId"))
 export type TenantId = typeof TenantId.Type
@@ -108,8 +117,6 @@ export const aliasForConnection = (connection: ConnectionRef): Alias =>
     ].join(aliasJoiner)
   )
 
-export const ProfileCapability = Schema.Literals(["provision_connections", "administer_gateway"])
-export type ProfileCapability = typeof ProfileCapability.Type
 export const ApprovalMethod = Schema.Literals(["elicitation", "link", "none"])
 export type ApprovalMethod = typeof ApprovalMethod.Type
 export const McpSurface = Schema.Literals(["tools", "discovery"])
@@ -286,14 +293,14 @@ export const InvocationPending = Schema.Struct({
 export type InvocationPending = typeof InvocationPending.Type
 export const InvocationDenied = Schema.Struct({ status: Schema.Literal("denied"), reason: Schema.String })
 export type InvocationDenied = typeof InvocationDenied.Type
-export const InvocationFailed = Schema.Struct({ status: Schema.Literal("failed"), message: Schema.String })
-export type InvocationFailed = typeof InvocationFailed.Type
-export const InvocationIssue = Schema.Struct({ path: Schema.String, message: Schema.String })
-export const InvocationInvalid = Schema.Struct({
-  status: Schema.Literal("invalid"),
+/** `error` is the failure in full; outcomes remembered before it existed carry only `message`. */
+export const InvocationFailed = Schema.Struct({
+  status: Schema.Literal("failed"),
   message: Schema.String,
-  issues: Schema.Array(InvocationIssue)
+  error: Schema.optional(GatewayError)
 })
+export type InvocationFailed = typeof InvocationFailed.Type
+export const InvocationInvalid = Schema.Struct({ status: Schema.Literal("invalid"), error: InvalidInput })
 export type InvocationInvalid = typeof InvocationInvalid.Type
 /** The tool acts for a user who has not connected yet: the flow is started, bound to them, and waits for their browser. */
 export const InvocationAuthorizationRequired = Schema.Struct({
@@ -396,47 +403,5 @@ export const DriftEntry = Schema.Struct({
   tool: ToolName
 })
 export type DriftEntry = typeof DriftEntry.Type
-
-const unknownKeyMessage = "This API key is not known to the server"
-const keyRevokedMessage = "This API key was revoked"
-const profileRevokedMessage = "The profile this credential belongs to was revoked"
-const notPermittedMessage = "This credential does not hold the required permission"
-const crossSiteMessage = "Cross-site requests are not permitted"
-export const UnknownKey = Schema.Struct({
-  code: Schema.Literal("unknown-key"),
-  message: Schema.Literal(unknownKeyMessage)
-})
-export const KeyRevoked = Schema.Struct({
-  code: Schema.Literal("key-revoked"),
-  message: Schema.Literal(keyRevokedMessage)
-})
-export const ProfileRevoked = Schema.Struct({
-  code: Schema.Literal("profile-revoked"),
-  message: Schema.Literal(profileRevokedMessage)
-})
-export const NotPermitted = Schema.Struct({
-  code: Schema.Literal("not-permitted"),
-  message: Schema.Literal(notPermittedMessage)
-})
-export const CrossSite = Schema.Struct({
-  code: Schema.Literal("cross-site"),
-  message: Schema.Literal(crossSiteMessage)
-})
-export const RefusalReason = Schema.Union([UnknownKey, KeyRevoked, ProfileRevoked, NotPermitted, CrossSite])
-export type RefusalReason = typeof RefusalReason.Type
-export const refusalReason = (code: RefusalReason["code"]): RefusalReason => {
-  switch (code) {
-    case "unknown-key":
-      return { code, message: unknownKeyMessage }
-    case "key-revoked":
-      return { code, message: keyRevokedMessage }
-    case "profile-revoked":
-      return { code, message: profileRevokedMessage }
-    case "not-permitted":
-      return { code, message: notPermittedMessage }
-    case "cross-site":
-      return { code, message: crossSiteMessage }
-  }
-}
 
 export { Alias, ApprovalStatus, ConnectionName, IntegrationSlug, ConnectionOwner, ToolName }

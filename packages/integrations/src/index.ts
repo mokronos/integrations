@@ -1,4 +1,5 @@
 export { Integrations } from "./integrations.ts"
+export { fromInvocationError } from "./integrations/tool-methods.ts"
 export type {
   AddMcpOptions,
   AddOpenApiOptions,
@@ -72,17 +73,13 @@ export type { ConnectionGrant, OAuthMethodSettings, OAuthSetup } from "./oauth/f
 export type { StartedOAuthFlow } from "./oauth/connect.ts"
 
 export {
-  ConnectionNotFoundError,
-  DetectionError,
-  IntegrationNotFoundError,
-  InvalidInputError,
   InvocationError,
+  InvocationFailure,
   McpError,
   McpFailureReason,
   OAuthError,
   SpecError,
-  StorageError,
-  ToolNotFoundError
+  StorageError
 } from "./errors.ts"
 
 export { AuthTemplateSlug, gatewayOAuthClientSlug, OAuthClientSlug, OAuthState } from "./catalog/ids.ts"
@@ -97,6 +94,7 @@ export type { Tool } from "./tool.ts"
 export { buildRequest } from "./openapi/request.ts"
 export { convertGoogleDiscovery, isGoogleDiscoveryUrl } from "./openapi/google-discovery.ts"
 export { normalizeOutputSchema, normalizeToolResult } from "./mcp/result.ts"
+export { jsonSchemaIssues } from "./json-schema.ts"
 
 export { search as searchRegistry, searchIntegrations } from "./registry.ts"
 export type { SearchIntegrationsOptions } from "./registry.ts"

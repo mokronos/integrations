@@ -1,8 +1,14 @@
-import { connectionOwner, isDelegationTemplate, matchesPattern, whenPresent } from "@integragents/contracts"
+import {
+  connectionOwner,
+  InvalidInput,
+  isDelegationTemplate,
+  matchesPattern,
+  whenPresent
+} from "@integragents/contracts"
 import type { IdempotencyKey, InputResponses, InvocationOutcome, Json } from "@integragents/contracts"
 import { Crypto, DateTime, Duration, Effect, Option } from "effect"
 import type { HttpClient } from "effect/http"
-import type { Integrations } from "@integragents/integrations"
+import type { Integrations, StorageError } from "@integragents/integrations"
 import type { OAuthSessions } from "../connection-oauth/sessions.ts"
 import { invalidArguments } from "./arguments.ts"
 import { authenticateKey, authorizeProfileInvocation } from "./authorize.ts"
@@ -128,7 +134,7 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function* (
   relay: boolean,
   /** A keyed call is never merged with an identical one; its key, not its arguments, finds its approval. */
   idempotencyKey: IdempotencyKey | undefined
-): Effect.fn.Return<InvocationOutcome, GatewayStoreError, Crypto.Crypto | HttpClient.HttpClient> {
+): Effect.fn.Return<InvocationOutcome, GatewayStoreError | StorageError, Crypto.Crypto | HttpClient.HttpClient> {
   const { store, retentionDays } = dependencies
   const pending = (approvalId: ApprovalId, expiresAt: Date | null): InvocationOutcome =>
     pendingOutcome(dependencies, authorization.profile, approvalId, expiresAt)
@@ -240,7 +246,7 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function* (
       relay
     ).pipe(
       Effect.map(({ outcome }): InvocationOutcome => outcome),
-      Effect.catchTags({ ApprovalNotFound: raced, ApprovalConflict: raced, ApprovalArgumentsInvalid: raced })
+      Effect.catchTags({ NotFound: raced, ApprovalConflict: raced, InvalidInput: raced })
     )
     if (decided.status === "succeeded" || decided.status === "failed")
       yield* store.collectApproval(tenantId, approval.id)
@@ -249,7 +255,7 @@ const freezeOrCollect = Effect.fn("Invocation.freezeOrCollect")(function* (
   if (review?.verdict.verdict === "deny") {
     const denied = yield* denyApproval(store, { ...decision, ...whenPresent("reason", review.verdict.reason) }).pipe(
       Effect.map(({ approval: settled }) => approvalOutcome(settled)),
-      Effect.catchTags({ ApprovalNotFound: raced, ApprovalConflict: raced })
+      Effect.catchTags({ NotFound: raced, ApprovalConflict: raced })
     )
     if (denied === undefined || denied.status !== "denied") return denied ?? pending(approval.id, approval.expiresAt)
     yield* store.recordAudit(
@@ -284,7 +290,7 @@ const settle = Effect.fn("Invocation.settle")(
       readonly interaction?: Interaction
       readonly idempotencyKey?: IdempotencyKey
     }
-  ): Effect.fn.Return<InvocationOutcome, GatewayStoreError, Crypto.Crypto | HttpClient.HttpClient> {
+  ): Effect.fn.Return<InvocationOutcome, GatewayStoreError | StorageError, Crypto.Crypto | HttpClient.HttpClient> {
     const { store, integrations } = dependencies
     const interaction = input.interaction ?? noInteraction
     yield* Effect.annotateCurrentSpan({ "tool.alias": input.alias, "tool.name": input.tool })
@@ -421,12 +427,12 @@ const replayKeyed = Effect.fn("Invocation.replayKeyed")(function* (
   authorization: Authorized,
   earlier: InvocationKeyRecord,
   input: { readonly arguments: Json; readonly origin: CallOrigin }
-): Effect.fn.Return<InvocationOutcome, GatewayStoreError, Crypto.Crypto> {
+): Effect.fn.Return<InvocationOutcome, GatewayStoreError | StorageError, Crypto.Crypto> {
   const { store } = dependencies
   if (!earlier.sameCall) {
-    return roundRefused(
-      `Idempotency key ${earlier.key} was first used for ${earlier.alias}.${earlier.tool} with other arguments. ` +
-        "Use a new key for a different call."
+    return refused(
+      "idempotencyKey",
+      `${earlier.key} was first used for ${earlier.alias}.${earlier.tool} with other arguments; use a new key for a different call`
     )
   }
   if (earlier.status === "settled" && earlier.outcome !== null) return earlier.outcome
@@ -468,7 +474,10 @@ const replayKeyed = Effect.fn("Invocation.replayKeyed")(function* (
   return outcome
 })
 
-const roundRefused = (message: string): InvocationOutcome => ({ status: "invalid", message, issues: [] })
+const refused = (field: string, problem: string): InvocationOutcome => ({
+  status: "invalid",
+  error: new InvalidInput({ field, problem })
+})
 
 /**
  * The next round of a call that asked for input: the sealed state must name
@@ -488,18 +497,18 @@ const continueRound = Effect.fn("Invocation.continueRound")(function* (
     readonly relay: boolean
     readonly answer: NonNullable<Interaction["answer"]>
   }
-): Effect.fn.Return<InvocationOutcome, GatewayStoreError, Crypto.Crypto> {
+): Effect.fn.Return<InvocationOutcome, GatewayStoreError | StorageError, Crypto.Crypto> {
   const state = yield* openRound(dependencies.store, input.answer.requestState, {
     profileId: authorization.profile.id,
     tool: boundToolAddress(authorization.connection, authorization.profileTool.tool),
     arguments: input.arguments
   })
   if (Option.isNone(state)) {
-    return roundRefused("requestState does not belong to this call or has expired. Call the tool again without it.")
+    return refused("requestState", "it does not belong to this call or has expired; call the tool again without it")
   }
   const approved = state.value.approval
   if (approved === null && authorization.decision === "require_approval") {
-    return roundRefused("This tool needs approval now. Call it again without requestState.")
+    return refused("requestState", "this tool needs approval now; call it again without requestState")
   }
   return yield* executeAuthorized(dependencies, authorization, input.arguments, input.origin, {
     ...whenPresent("approved", approved),
@@ -538,7 +547,7 @@ const checkArguments = Effect.fn("Invocation.checkArguments")(function* (
 const missingUserConnection = Effect.fn("Invocation.missingUserConnection")(function* (
   dependencies: InvokeDependencies,
   authorization: Authorized
-): Effect.fn.Return<InvocationOutcome | undefined, GatewayStoreError> {
+): Effect.fn.Return<InvocationOutcome | undefined, GatewayStoreError | StorageError> {
   const connection = authorization.connection
   if (!isDelegationTemplate(authorization.profileTool.connection)) return undefined
   if (connection.owner !== "user" || connection.subject === undefined) return undefined
@@ -599,7 +608,7 @@ export const invokeThroughGateway = Effect.fn("Invocation.invokeThroughGateway")
     readonly subject?: SubjectId
     readonly idempotencyKey?: IdempotencyKey
   }
-): Effect.fn.Return<InvocationOutcome, GatewayStoreError, Crypto.Crypto | HttpClient.HttpClient> {
+): Effect.fn.Return<InvocationOutcome, GatewayStoreError | StorageError, Crypto.Crypto | HttpClient.HttpClient> {
   const authentication = yield* authenticateKey(dependencies.store, input.secret)
   if (authentication.status !== "authenticated") {
     return yield* settle(dependencies, defaultTenantId, authentication, {
@@ -638,7 +647,7 @@ export const invokeAsProfile = Effect.fn("Invocation.invokeAsProfile")(function*
      */
     readonly idempotencyKey?: IdempotencyKey
   }
-): Effect.fn.Return<InvocationOutcome, GatewayStoreError, Crypto.Crypto | HttpClient.HttpClient> {
+): Effect.fn.Return<InvocationOutcome, GatewayStoreError | StorageError, Crypto.Crypto | HttpClient.HttpClient> {
   const authorization = yield* authorizeProfileInvocation(dependencies.store, input.profile, input)
   return yield* settle(dependencies, input.profile.tenantId, authorization, {
     ...input,

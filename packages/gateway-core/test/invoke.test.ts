@@ -458,7 +458,9 @@ describe("approving with edited arguments", () => {
         arguments: { command: "rm -rf ./build" }
       })
 
-      expect(refused._tag).toBe("ApprovalArgumentsInvalid")
+      expect(refused._tag === "InvalidInput" ? refused.issues?.map((issue) => issue.path) : refused._tag).toEqual([
+        "command"
+      ])
       expect(seen.map((call) => call.arguments)).toEqual([{ command: "rm -rf ./build" }])
       expect(outcome).toEqual({ status: "succeeded", result: { exitCode: 0, ran: { command: "rm -rf ./build" } } })
       expect([approval.arguments, approval.editedArguments]).toEqual([
@@ -595,7 +597,7 @@ describe("an idempotency key", () => {
       expect(repeat).toEqual(first)
       expect(other.status).toBe("succeeded")
       expect(seen.map((call) => call.context.idempotencyKey)).toEqual(["turn-7/call-1", "turn-7/call-2"])
-      expect(reused.status === "invalid" ? reused.message : reused.status).toContain("turn-7/call-1")
+      expect(reused.status === "invalid" ? reused.error.message : reused.status).toContain("turn-7/call-1")
       expect((yield* auditOf(store)).filter(([outcome]) => outcome === "succeeded")).toHaveLength(2)
     }).pipe(Effect.provide(hostLayer(seen)))
   })

@@ -1,11 +1,11 @@
 import { Clock, Effect, Option } from "effect"
-import { ConnectionName, whenPresent } from "@integragents/contracts"
+import { ConnectionName, InvalidInput, whenPresent } from "@integragents/contracts"
 import type { ConnectionOwner, Integration, IntegrationSlug, McpProbe } from "@integragents/contracts"
 import { mcpAuthMethods, openApiAuthMethods } from "../catalog/auth-methods.ts"
 import { captureHostTools } from "../catalog/capture.ts"
 import { AuthTemplateSlug } from "../catalog/ids.ts"
 import { CatalogStore } from "../catalog/store.ts"
-import { InvalidInputError, SpecError, StorageError } from "../errors.ts"
+import { SpecError, StorageError } from "../errors.ts"
 import type { HostIntegrationDefinition } from "../host-tools.ts"
 import { SpecCache } from "../openapi/cache.ts"
 import { resolveServer } from "../openapi/compile.ts"
@@ -94,16 +94,16 @@ export const integrationMethods = (
       const names = definition.tools.map((tool) => tool.name)
       const repeated = names.filter((name, index) => names.indexOf(name) !== index)
       if (repeated.length > 0) {
-        return yield* new InvalidInputError({
+        return yield* new InvalidInput({
           field: "tools",
-          detail: `${definition.slug} names ${[...new Set(repeated)].join(", ")} more than once`
+          problem: `${definition.slug} names ${[...new Set(repeated)].join(", ")} more than once`
         })
       }
       const existing = yield* store.findIntegration(definition.slug)
       if (Option.isSome(existing) && existing.value.kind !== "host") {
-        return yield* new InvalidInputError({
+        return yield* new InvalidInput({
           field: "slug",
-          detail: `${definition.slug} is already an ${existing.value.kind} integration`
+          problem: `${definition.slug} is already an ${existing.value.kind} integration`
         })
       }
       const now = yield* Clock.currentTimeMillis

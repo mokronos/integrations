@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Effect, Option, Ref, Schema } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/http"
 import { HttpApiClient } from "effect/http-api"
 // The definition alone: importing the package index would pull the server
@@ -6,8 +6,11 @@ import { HttpApiClient } from "effect/http-api"
 import { GatewayApi } from "@integragents/gateway-api/definition"
 import {
   Connection,
+  GatewayIncompatible,
   GatewayMetadata,
   gatewayProtocolVersion,
+  GatewayUnavailable,
+  UnexpectedResponse,
   Integration,
   IntegrationDiscovery,
   IntegrationOverview,
@@ -33,51 +36,32 @@ const authorize = (options: GatewayClientOptions) =>
         origin: options.url
       })
 
-export class GatewayProtocolError extends Error {
-  readonly expected: number
-  readonly received: number | undefined
-
-  constructor(received: number | undefined, detail?: string) {
-    const actual = received === undefined ? "missing" : String(received)
-    super(
-      `Incompatible gateway protocol: client requires ${gatewayProtocolVersion}, gateway reported ${actual}` +
-        (detail === undefined ? "" : ` (${detail})`)
-    )
-    this.name = "GatewayProtocolError"
-    this.expected = gatewayProtocolVersion
-    this.received = received
-  }
-}
-
-export class GatewayUnavailableError extends Schema.TaggedError<GatewayUnavailableError>()("GatewayUnavailableError", {
-  url: Schema.String,
-  message: Schema.String
-}) {}
-
 const decodeGatewayMetadata = Schema.decodeUnknownEffect(GatewayMetadata)
 
 export const readGatewayMetadata = Effect.fn("GatewayClient.readMetadata")(function* (
   url: string
-): Effect.fn.Return<GatewayMetadata, GatewayProtocolError | GatewayUnavailableError, HttpClient.HttpClient> {
+): Effect.fn.Return<
+  GatewayMetadata,
+  GatewayIncompatible | GatewayUnavailable | UnexpectedResponse,
+  HttpClient.HttpClient
+> {
   const base = url.replace(/\/+$/, "")
-  const response = yield* HttpClient.get(`${base}/v1/metadata`).pipe(
-    Effect.mapError(
-      (cause) =>
-        new GatewayUnavailableError({
-          url: base,
-          message: `Gateway at ${base} is unavailable: ${cause.message}. Retry the same command once the gateway is running.`
-        })
-    )
+  const metadataUrl = `${base}/v1/metadata`
+  const response = yield* HttpClient.get(metadataUrl).pipe(
+    Effect.mapError((cause) => new GatewayUnavailable({ url: base, detail: cause.message }))
   )
+  if (response.status >= 500) {
+    return yield* new GatewayUnavailable({ url: base, detail: `it answered HTTP ${response.status}` })
+  }
   if (response.status < 200 || response.status >= 300) {
-    return yield* Effect.fail(new GatewayProtocolError(undefined, `metadata returned HTTP ${response.status}`))
+    return yield* new UnexpectedResponse({ method: "GET", url: metadataUrl, status: response.status })
   }
   const metadata = yield* response.json.pipe(
     Effect.flatMap(decodeGatewayMetadata),
-    Effect.mapError(() => new GatewayProtocolError(undefined, "gateway metadata is malformed"))
+    Effect.mapError(() => new UnexpectedResponse({ method: "GET", url: metadataUrl, status: response.status }))
   )
   if (metadata.protocolVersion !== gatewayProtocolVersion) {
-    return yield* Effect.fail(new GatewayProtocolError(metadata.protocolVersion, `gateway ${metadata.gatewayVersion}`))
+    return yield* new GatewayIncompatible({ expected: gatewayProtocolVersion, received: metadata.protocolVersion })
   }
   return metadata
 })
@@ -97,7 +81,7 @@ const makeEndpoints = (
    * is refused before an authenticated request reaches it rather than after.
    * The check is cached, so it costs one request per client, not one per call.
    */
-  compatible: Effect.Effect<unknown, GatewayProtocolError | GatewayUnavailableError>
+  compatible: Effect.Effect<unknown, GatewayIncompatible | GatewayUnavailable | UnexpectedResponse>
 ) =>
   HttpApiClient.makeWith(GatewayApi, {
     baseUrl: options.url.replace(/\/+$/, ""),
@@ -109,7 +93,7 @@ const makeEndpoints = (
 
 export interface GatewayClient extends GatewayEndpoints {
   readonly url: string
-  readonly metadata: Effect.Effect<GatewayMetadata, GatewayProtocolError | GatewayUnavailableError>
+  readonly metadata: Effect.Effect<GatewayMetadata, GatewayIncompatible | GatewayUnavailable | UnexpectedResponse>
   readonly health: Effect.Effect<boolean>
 }
 
@@ -118,10 +102,19 @@ export const makeGatewayClient = Effect.fn("GatewayClient.make")(function* (
 ): Effect.fn.Return<GatewayClient, never, HttpClient.HttpClient> {
   const http = yield* HttpClient.HttpClient
   const base = options.url.replace(/\/+$/, "")
-  // Read once and share: every call checks the gateway speaks our protocol,
-  // and the answer does not change while a client is alive.
-  const metadata = yield* Effect.cached(
-    readGatewayMetadata(base).pipe(Effect.provideService(HttpClient.HttpClient, http))
+  // Every call checks the gateway speaks our protocol. Its answer holds for the
+  // client's life; a gateway that did not answer is asked again next time.
+  const answered = yield* Ref.make(Option.none<Effect.Effect<GatewayMetadata, GatewayIncompatible>>())
+  const metadata = Effect.flatMap(Ref.get(answered), (held) =>
+    Option.isSome(held)
+      ? held.value
+      : readGatewayMetadata(base).pipe(
+          Effect.provideService(HttpClient.HttpClient, http),
+          Effect.tap((read) => Ref.set(answered, Option.some(Effect.succeed(read)))),
+          Effect.tapError((failure) =>
+            failure._tag === "GatewayIncompatible" ? Ref.set(answered, Option.some(Effect.fail(failure))) : Effect.void
+          )
+        )
   )
   const endpoints = yield* makeEndpoints(options, http, metadata)
 

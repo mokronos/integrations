@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label"
 import * as gateway from "@/lib/gateway"
 import { mcpConfiguration } from "@/lib/mcp"
 import { keys, useInvalidate, useMcpUrl, useMutation } from "@/lib/queries"
+import { toastError } from "@/lib/errors"
 
 /** Issues one app its own key, named after the app, so its calls are attributed and it can be cut off alone. */
 export function AddAppButton({
@@ -35,7 +36,7 @@ export function AddAppButton({
   const issue = useMutation({
     mutationFn: () => gateway.issueKey(profile.id, name.trim()),
     onSuccess: () => invalidate(keys.apiKeys(profile.id), keys.profiles, keys.overview),
-    onError: (error: Error) => toast.error("Could not issue a key", { description: error.message })
+    onError: (error: Error) => toastError("Could not issue a key", error)
   })
   const secret = issue.data?.secret
   const changeOpen = (next: boolean) => {

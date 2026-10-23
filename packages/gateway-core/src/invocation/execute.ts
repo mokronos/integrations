@@ -1,5 +1,6 @@
 import { relayableInput, unrelayableInputMessage } from "@integragents/integrations"
-import type { Integrations, ToolCallContext } from "@integragents/integrations"
+import type { Integrations, StorageError, ToolCallContext } from "@integragents/integrations"
+import { toGatewayError } from "../errors.ts"
 import { connectionOwner, ToolAddress, whenPresent } from "@integragents/contracts"
 import type { IdempotencyKey, InputAnswer, InvocationOutcome, Json } from "@integragents/contracts"
 import { Crypto, DateTime, Duration, Effect } from "effect"
@@ -67,7 +68,7 @@ export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(funct
   round: ExecutionRound = {}
 ): Effect.fn.Return<
   Extract<InvocationOutcome, { status: "succeeded" | "failed" | "input-required" }>,
-  GatewayStoreError,
+  GatewayStoreError | StorageError,
   Crypto.Crypto
 > {
   const address = boundToolAddress(authorization.connection, authorization.profileTool.tool)
@@ -88,8 +89,11 @@ export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(funct
     dependencies.integrations.execute(address, argumentsValue, round.upstream, context)
   )
   if (invocation._tag === "Failure") {
-    yield* record("failed", invocation.failure.message)
-    return { status: "failed", message: invocation.failure.message }
+    const failure = invocation.failure
+    if (failure._tag === "StorageError") return yield* failure
+    const error = toGatewayError(failure, authorization.profileTool.tool)
+    yield* record("failed", error.message)
+    return { status: "failed", message: error.message, error }
   }
   const execution = invocation.success
   if (execution.kind === "complete") {
