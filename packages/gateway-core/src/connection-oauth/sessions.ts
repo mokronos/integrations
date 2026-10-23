@@ -4,6 +4,9 @@ import { Clock, Context, Deferred, Effect, Exit, Schema, Scope } from "effect"
 import type { SqlClient } from "effect/sql"
 import { webCrypto } from "@integragents/contracts"
 import { completeOAuthFlow } from "@integragents/integrations"
+import type { StorageError } from "@integragents/integrations"
+import { toGatewayError } from "../errors.ts"
+import type { CallerFailure } from "../errors.ts"
 import { OAuthFlowError, startRemoteAuthorization } from "./flows.ts"
 import type { LocalAuthorizer, OAuthOperations } from "./flows.ts"
 
@@ -41,6 +44,19 @@ export class OAuthSessionError extends Schema.TaggedError<OAuthSessionError>()("
   override get message(): string {
     return `OAuth ${this.operation} failed: ${this.cause instanceof Error ? this.cause.message : String(this.cause)}`
   }
+}
+
+type FlowFailure = CallerFailure | StorageError | OAuthSessionError
+
+/** What a session that ended in `failure` shows; a storage failure goes to the log, not the caller. */
+const failedState = (failure: FlowFailure, integration: string): Effect.Effect<OAuthSessionState> => {
+  if (failure._tag === "StorageError" || failure._tag === "OAuthSessionError") {
+    return Effect.logError("OAuth session failed", failure).pipe(
+      Effect.as({ status: "failed" as const, message: "The gateway could not record the connection" })
+    )
+  }
+  const error = toGatewayError(failure, integration)
+  return Effect.succeed({ status: "failed", message: error.message, error })
 }
 
 export interface OAuthSessionStore {
@@ -308,9 +324,10 @@ export const createOAuthSessions = (
 
     const authorizeLocally = options.authorizeLocally
     if (authorizeLocally === undefined) {
-      return yield* new OAuthSessionError({
-        operation: "start",
-        cause: new Error("OAuth needs a public URL for the provider to redirect to, and none is configured")
+      return yield* new OAuthFlowError({
+        stage: "configure",
+        reason: "unsupported",
+        detail: "OAuth needs a public URL for the provider to redirect to, and none is configured"
       })
     }
     const parent = yield* flowScope
@@ -338,7 +355,7 @@ export const createOAuthSessions = (
               yield* options.onConnected(session)
             }
           }),
-        onFailure: (failure) => finish(id, { status: "failed", message: failure.message })
+        onFailure: (failure) => Effect.flatMap(failedState(failure, input.integration), (state) => finish(id, state))
       }),
       Effect.catch((failure) =>
         Effect.logError(`OAuth session ${id} could not be settled: ${failure.message}`).pipe(
@@ -415,7 +432,7 @@ export const createOAuthSessions = (
           yield* options.onConnected(completed)
         }
       } else {
-        yield* finish(id, { status: "failed", message: result.failure.message })
+        yield* finish(id, yield* failedState(result.failure, session.integration))
       }
       return yield* store.get(id)
     }),

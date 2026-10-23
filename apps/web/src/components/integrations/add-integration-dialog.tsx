@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router"
 import { toast } from "sonner"
 
-import { OperationError } from "@/components/integrations/operation-feedback"
+import { ErrorNotice } from "@/components/error-notice"
 import { IntegrationIcon } from "@/components/integrations/integration-icon"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -251,13 +251,21 @@ export function AddIntegrationDialog({
           />
         </div>
         {error === null ? null : (
-          <OperationError title="Registry search failed" step="Loading integrations.sh" error={error} />
+          <ErrorNotice
+            title="Registry search failed"
+            step="Loading integrations.sh"
+            error={error}
+            onRetry={() => void (trimmedQuery.length === 0 ? browse.refetch() : search.refetch())}
+          />
         )}
         {install.error === null ? null : (
-          <OperationError
+          <ErrorNotice
             title="Installation failed"
             step="Inspecting and installing the selected endpoint"
             error={install.error}
+            onRetry={() => {
+              if (install.variables !== undefined) install.mutate(install.variables)
+            }}
           />
         )}
         {directUrl === undefined ? null : (
@@ -300,7 +308,7 @@ export function AddIntegrationDialog({
             <div className="text-muted-foreground flex min-h-56 items-center justify-center rounded-xl border border-dashed px-4 text-center text-sm">
               {error === null
                 ? "No matching integrations. Try another search or type."
-                : "Could not load integrations. Try again shortly."}
+                : "Could not load integrations. Paste the integration's URL to add it directly."}
             </div>
           )}
         </div>

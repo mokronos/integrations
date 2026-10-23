@@ -34,3 +34,6 @@ export type ParameterLocation = typeof ParameterLocation.Type
 
 export const HttpMethod = Schema.Literals(["get", "put", "post", "delete", "patch", "head", "options", "trace"])
 export type HttpMethod = typeof HttpMethod.Type
+
+export const ProfileCapability = Schema.Literals(["provision_connections", "administer_gateway"])
+export type ProfileCapability = typeof ProfileCapability.Type

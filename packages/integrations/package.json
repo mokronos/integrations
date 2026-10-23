@@ -66,6 +66,7 @@
     "prepack": "bun run build"
   },
   "dependencies": {
+    "@cfworker/json-schema": "catalog:",
     "@modelcontextprotocol/client": "2.0.0",
     "@integragents/contracts": "workspace:^",
     "@integragents/observability": "workspace:^",

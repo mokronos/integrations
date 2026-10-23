@@ -14,7 +14,7 @@ import {
   Unauthorized,
   Unmetered,
   rateLimitedResponse,
-  refusedOf,
+  refusedKey,
   requiredCapability
 } from "./identity.ts"
 import type { Access, Principal } from "./identity.ts"
@@ -30,7 +30,7 @@ export {
   Unauthorized
 } from "./identity.ts"
 import { capture } from "./observability.ts"
-export type { Principal, Refused } from "./identity.ts"
+export type { Principal } from "./identity.ts"
 
 const sessionCookieName = "integrations_session"
 
@@ -136,7 +136,7 @@ const resolvePrincipal = Effect.fn("Authority.resolvePrincipal")(function* (
   if (Option.isSome(secret)) {
     const authentication = yield* capture(authenticateKey(options.store, secret.value))
     if (authentication.status !== "authenticated") {
-      return yield* refusedOf(authentication.status)
+      return yield* refusedKey(authentication.status)
     }
     return {
       kind: "key",
@@ -151,7 +151,7 @@ const resolvePrincipal = Effect.fn("Authority.resolvePrincipal")(function* (
     const session = yield* capture(
       options.store.findLiveSession(SessionTokenHash.make(yield* hashSessionToken(token.value)))
     )
-    if (session === undefined) return { kind: "anonymous" } satisfies Principal
+    if (session === undefined) return { kind: "anonymous", sessionExpired: true } satisfies Principal
     return {
       kind: "session",
       tenantId: session.tenantId,
@@ -180,30 +180,29 @@ const admit = Effect.fn("Authority.admit")(function* (
   headers: Readonly<Record<string, string>>
 ) {
   if (caller.kind === "session" && method !== "GET" && !sameOrigin(headers)) {
-    return yield* Forbidden.of("cross-site")
+    return yield* new Forbidden({ code: "cross-site" })
   }
 
   if (access === "public") return
 
   if (caller.kind === "session" || caller.kind === "local") {
     if (access === "delegated") {
-      return yield* Forbidden.of("not-permitted")
+      return yield* new Forbidden({ code: "not-permitted" })
     }
     return
   }
 
   if (caller.kind === "anonymous") {
-    return yield* Unauthorized.of("unknown-key")
+    return yield* new Unauthorized({ code: caller.sessionExpired === true ? "session-expired" : "missing-credential" })
   }
 
-  if (access === "human") return yield* Forbidden.of("not-permitted")
+  if (access === "human") return yield* new Forbidden({ code: "not-permitted" })
 
   const capability = requiredCapability(access)
   if (capability === undefined) return
   const authorization = yield* capture(authorizeProfileCapability(options.store, caller.secret, capability))
-  if (authorization.status !== "authorized") {
-    return yield* refusedOf(authorization.status)
-  }
+  if (authorization.status === "not-permitted") return yield* new Forbidden({ code: "not-permitted", capability })
+  if (authorization.status !== "authorized") return yield* refusedKey(authorization.status)
 })
 
 const callerAttributes = (caller: Principal) => {

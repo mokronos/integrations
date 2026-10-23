@@ -1,12 +1,11 @@
 import { Clock, Effect, Option } from "effect"
-import { connectionAddress, whenPresent } from "@integragents/contracts"
+import { connectionAddress, InvalidInput, whenPresent } from "@integragents/contracts"
 import type { ConnectionName, ConnectionOwner, IntegrationSlug } from "@integragents/contracts"
 import { findAuthMethod } from "../catalog/auth-methods.ts"
 import { captureMcpTools, captureOpenApiTools } from "../catalog/capture.ts"
 import { AuthTemplateSlug, gatewayOAuthClientSlug, OAuthClientSlug } from "../catalog/ids.ts"
 import { CatalogStore } from "../catalog/store.ts"
 import type { ConnectionRecord, IntegrationRecord } from "../catalog/store.ts"
-import { InvalidInputError } from "../errors.ts"
 import { McpClient } from "../mcp/client.ts"
 import { OAuthFlows } from "../oauth/flows.ts"
 import { SpecCache } from "../openapi/cache.ts"
@@ -115,16 +114,16 @@ export const connectionMethods = (access: ConnectionAccess) =>
     const createConnection = Effect.fn("Integrations.createConnection")(function* (options: CreateConnectionOptions) {
       const integration = yield* requireIntegration(options.integration)
       if (integration.kind === "host") {
-        return yield* new InvalidInputError({
+        return yield* new InvalidInput({
           field: "integration",
-          detail: `${integration.slug} is run by its host, which registers its connection itself`
+          problem: `${integration.slug} is run by its host, which registers its connection itself`
         })
       }
       const method = findAuthMethod(integration.authMethods, options.template)
       if (Option.isNone(method)) {
-        return yield* new InvalidInputError({
+        return yield* new InvalidInput({
           field: "template",
-          detail: `${options.integration} does not offer ${options.template}`
+          problem: `${options.integration} does not offer ${options.template}`
         })
       }
 

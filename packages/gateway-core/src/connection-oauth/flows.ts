@@ -2,6 +2,7 @@ import { Clock, Crypto, Effect, Option, Schema } from "effect"
 import type { Scope } from "effect"
 import {
   completeOAuthFlow,
+  OAuthError,
   discoverOAuth,
   findOAuthClient,
   gatewayOAuthClientSlug,
@@ -12,7 +13,14 @@ import {
   startOAuthFlow
 } from "@integragents/integrations"
 import type { CatalogStore, Integrations, OAuthFlows, OAuthSetup } from "@integragents/integrations"
-import { AuthMethod, Connection, ConnectionOwner, webCrypto, whenPresent } from "@integragents/contracts"
+import {
+  AuthMethod,
+  Connection,
+  ConnectionOwner,
+  OAuthFailureReason,
+  webCrypto,
+  whenPresent
+} from "@integragents/contracts"
 import { sha256Hex } from "../keys.ts"
 import { oauthSetupGuidance } from "./guidance.ts"
 
@@ -27,6 +35,7 @@ export class OAuthFlowError extends Schema.TaggedError<OAuthFlowError>()("OAuthF
     "exchange",
     "timeout"
   ]),
+  reason: OAuthFailureReason,
   detail: Schema.String,
   cause: Schema.optional(Schema.Defect())
 }) {
@@ -34,6 +43,10 @@ export class OAuthFlowError extends Schema.TaggedError<OAuthFlowError>()("OAuthF
     return `OAuth ${this.stage} failed: ${this.detail}`
   }
 }
+
+/** Why a step failed: the provider's answer when it gave one, otherwise the request itself. */
+const reasonOf = (cause: { readonly message: string }): OAuthFailureReason =>
+  cause instanceof OAuthError ? cause.reason : "request"
 
 export const oauthStep = <A, E extends { readonly message: string }, R>(
   stage: OAuthFlowError["stage"],
@@ -45,6 +58,7 @@ export const oauthStep = <A, E extends { readonly message: string }, R>(
     (cause) =>
       new OAuthFlowError({
         stage,
+        reason: reasonOf(cause),
         detail: `${detail}: ${cause.message}`,
         cause
       })
@@ -58,6 +72,7 @@ export const decodeAuthorizationRequest = (
       (cause) =>
         new OAuthFlowError({
           stage: "configure",
+          reason: "unsupported",
           detail: "The authorization request was not in the expected shape",
           cause
         })
@@ -159,6 +174,7 @@ export const prepareFlow = Effect.fn("OAuth.prepareFlow")(function* (
   if (input.authMethod.kind !== "oauth" || input.authMethod.oauth === undefined) {
     return yield* new OAuthFlowError({
       stage: "configure",
+      reason: "unsupported",
       detail: `Auth method ${input.authMethod.id} is not OAuth`
     })
   }
@@ -224,6 +240,7 @@ export const prepareFlow = Effect.fn("OAuth.prepareFlow")(function* (
     if (setup.server.registration_endpoint === undefined) {
       return yield* new OAuthFlowError({
         stage: "client-required",
+        reason: "client_required",
         detail: oauthSetupGuidance({
           integration: input.integration,
           method: input.authMethod,

@@ -1,6 +1,3 @@
-import type { GatewayClient } from "@integragents/client"
-import type { HttpClient } from "effect/http"
-import { Effect } from "effect"
 import {
   approvalCommand,
   approvalsCommand,
@@ -29,25 +26,7 @@ import {
   revokeCommand
 } from "./commands/delegation.ts"
 import { clientExecuteCommand, operatorExecuteCommand, validateCommand } from "./commands/invocation.ts"
-import type { IntegrationsCliError } from "./connection.ts"
-import { cliError, connectToGateway, describeError } from "./connection.ts"
-import { connectToOperatorGateway } from "./session.ts"
-
-const gatewayTask = <A, E, R>(
-  task: (client: GatewayClient) => Effect.Effect<A, E, R>
-): Effect.Effect<A, IntegrationsCliError, R | HttpClient.HttpClient> =>
-  connectToGateway().pipe(
-    Effect.flatMap(task),
-    Effect.mapError((error) => cliError(describeError(error)))
-  )
-
-const operatorGatewayTask = <A, E, R>(
-  task: (client: GatewayClient) => Effect.Effect<A, E, R>
-): Effect.Effect<A, IntegrationsCliError, R | HttpClient.HttpClient> =>
-  connectToOperatorGateway().pipe(
-    Effect.flatMap(task),
-    Effect.mapError((error) => cliError(describeError(error)))
-  )
+import { gatewayTask, operatorGatewayTask } from "./tasks.ts"
 
 export const clientSubcommands = [
   discoverCommand(gatewayTask),

@@ -1,5 +1,6 @@
+import type { GatewayError } from "@integragents/contracts"
+import { exitCodes, ReportedFailure } from "../failure.ts"
 import type { GatewayClient } from "@integragents/client"
-import type { HttpClient } from "effect/http"
 import { Effect, Option, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/cli"
 import {
@@ -11,9 +12,11 @@ import {
   whenPresentMap
 } from "@integragents/contracts"
 import type { IntegrationsCliError } from "../connection.ts"
-import { cliError, connectToGateway, describeError } from "../connection.ts"
+import { cliError, thrownMessage } from "../connection.ts"
 import { jsonOutput, writeStdoutLine } from "../output.ts"
 import { materializeBlobs, resolveFileArguments } from "../blobs.ts"
+import { gatewayTask } from "../tasks.ts"
+import type { GatewayTask } from "../tasks.ts"
 
 const outFlag = () =>
   Flag.String("out").pipe(
@@ -27,16 +30,6 @@ const verboseFlag = () =>
     Flag.withAlias("v"),
     Flag.withDescription("Show complete objects, pretty-printed")
   )
-
-const gatewayTask = <A, E, R>(
-  task: (client: GatewayClient) => Effect.Effect<A, E, R>
-): Effect.Effect<A, IntegrationsCliError, R | HttpClient.HttpClient> =>
-  connectToGateway().pipe(
-    Effect.flatMap(task),
-    Effect.mapError((error) => cliError(describeError(error)))
-  )
-
-type GatewayTask = typeof gatewayTask
 
 const decodeJsonText = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
 
@@ -56,7 +49,7 @@ const readJsonArgument = Effect.fn("Cli.readJsonArgument")(function* (
       : yield* Effect.tryPromise({
           try: () => Bun.file(file).text(),
           // oxlint-disable-next-line anti-slop/no-unknown-parameters
-          catch: (cause: unknown) => cliError(describeError(cause))
+          catch: (cause: unknown) => cliError(thrownMessage(cause))
         })
   return yield* Effect.try({
     try: () => decodeJsonText(source),
@@ -93,25 +86,30 @@ const idempotencyKeyFlag = () =>
     )
   )
 
-const reportOutcome = (outcome: InvocationOutcome, verbose: boolean): Effect.Effect<void, IntegrationsCliError> =>
-  writeStdoutLine(jsonOutput(encodeOutcome(outcome), verbose)).pipe(
-    Effect.flatMap(() =>
-      outcome.status === "succeeded" ||
-      outcome.status === "pending" ||
-      outcome.status === "authorization-required" ||
-      outcome.status === "input-required"
-        ? Effect.void
-        : Effect.fail(
-            cliError(
-              outcome.status === "denied"
-                ? outcome.reason
-                : outcome.status === "invalid"
-                  ? [outcome.message, ...outcome.issues.map((issue) => `  ${issue.path}: ${issue.message}`)].join("\n")
-                  : outcome.message
-            )
-          )
-    )
-  )
+/** A call that ran into a failure fails the command with it; one a human denied is reported, then exits 2. */
+const reportOutcome = (
+  outcome: InvocationOutcome,
+  verbose: boolean
+): Effect.Effect<void, GatewayError | ReportedFailure> => {
+  switch (outcome.status) {
+    case "invalid":
+      return Effect.fail(outcome.error)
+    case "failed":
+      if (outcome.error !== undefined) return Effect.fail(outcome.error)
+      return writeStdoutLine(jsonOutput(encodeOutcome(outcome), verbose)).pipe(
+        Effect.andThen(Effect.fail(new ReportedFailure({ exitCode: exitCodes.internal })))
+      )
+    case "denied":
+      return writeStdoutLine(jsonOutput(encodeOutcome(outcome), verbose)).pipe(
+        Effect.andThen(Effect.fail(new ReportedFailure({ exitCode: exitCodes.input })))
+      )
+    case "succeeded":
+    case "pending":
+    case "authorization-required":
+    case "input-required":
+      return writeStdoutLine(jsonOutput(encodeOutcome(outcome), verbose))
+  }
+}
 
 export const operatorExecuteCommand = Command.make(
   "execute",
@@ -207,7 +205,7 @@ export const validateCommand = (runGateway: GatewayTask) =>
               : yield* Effect.tryPromise({
                   try: () => Bun.file(filePath).text(),
                   // oxlint-disable-next-line anti-slop/no-unknown-parameters
-                  catch: (cause: unknown) => cliError(describeError(cause))
+                  catch: (cause: unknown) => cliError(thrownMessage(cause))
                 })
           return yield* client.provisioning.validate({
             payload: {

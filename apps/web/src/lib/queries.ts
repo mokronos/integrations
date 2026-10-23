@@ -96,10 +96,12 @@ export const useAudit = (input: AuditQuery) =>
 
 export const useOAuthGrants = () => useQuery({ queryKey: keys.oauthGrants, queryFn: gateway.listOAuthGrants })
 
+/** Polled while it waits, so a flow that ends without an event still shows how it ended. */
 export const useOAuthSession = (id: string | undefined) =>
   useQuery({
     queryKey: keys.oauthSession(id),
-    queryFn: id === undefined ? skipToken : () => gateway.getOAuthSession(id)
+    queryFn: id === undefined ? skipToken : () => gateway.getOAuthSession(id),
+    refetchInterval: (query) => (query.state.data?.state.status === "pending" ? 3_000 : false)
   })
 
 const reloadedBy = {

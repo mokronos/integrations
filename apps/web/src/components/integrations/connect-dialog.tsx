@@ -3,7 +3,9 @@ import { Check, KeyRound, RotateCw } from "lucide-react"
 import { useEffect, useState } from "react"
 
 import { AuthMethodDetails } from "@/components/integrations/auth-method-details"
-import { OperationError } from "@/components/integrations/operation-feedback"
+import { ErrorNotice } from "@/components/error-notice"
+import { FieldProblem } from "@/components/field-problem"
+import { fieldError } from "@/lib/errors"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import {
@@ -115,7 +117,7 @@ export function ReauthorizeDialog({
           <div className="space-y-4">
             {oauth.fields}
             {oauth.failure === undefined ? null : (
-              <OperationError title={oauth.failure.title} step={oauth.failure.step} error={oauth.failure.error} />
+              <ErrorNotice title={oauth.failure.title} step={oauth.failure.step} error={oauth.failure.error} />
             )}
           </div>
         )}
@@ -225,7 +227,7 @@ function ConnectFlow({
           </div>
 
           {method === undefined ? (
-            <OperationError
+            <ErrorNotice
               title="Authentication unavailable"
               step="Selecting an authentication method"
               error={new Error("This integration has no usable authentication option.")}
@@ -233,18 +235,26 @@ function ConnectFlow({
           ) : method.kind === "oauth" ? (
             oauth.fields
           ) : (
-            <CredentialFields method={method} values={values} onChange={setValues} />
+            <CredentialFields
+              method={method}
+              values={values}
+              onChange={setValues}
+              problem={fieldError(connect.error, "values") ?? fieldError(connect.error, "template")}
+            />
           )}
 
-          {connect.error === null ? null : (
-            <OperationError
+          {connect.error === null || fieldError(connect.error, "values") !== undefined ? null : (
+            <ErrorNotice
               title="Connection failed"
               step="Saving the credential and verifying the endpoint"
               error={connect.error}
+              onRetry={() => {
+                if (method !== undefined) connect.mutate(method)
+              }}
             />
           )}
           {oauth.failure === undefined ? null : (
-            <OperationError title={oauth.failure.title} step={oauth.failure.step} error={oauth.failure.error} />
+            <ErrorNotice title={oauth.failure.title} step={oauth.failure.step} error={oauth.failure.error} />
           )}
         </div>
       )}
@@ -288,11 +298,13 @@ const hasCredential = (method: AuthMethod, values: Readonly<Record<string, strin
 function CredentialFields({
   method,
   values,
-  onChange
+  onChange,
+  problem
 }: {
   readonly method: AuthMethod
   readonly values: Readonly<Record<string, string>>
   readonly onChange: (values: Readonly<Record<string, string>>) => void
+  readonly problem: string | undefined
 }) {
   if (method.kind === "none") {
     return (
@@ -317,10 +329,12 @@ function CredentialFields({
               value={values[key] ?? ""}
               onChange={(event) => onChange({ ...values, [key]: event.target.value })}
               placeholder={`Paste ${named ? key : label.toLowerCase()}`}
+              aria-invalid={problem !== undefined}
             />
           </div>
         )
       })}
+      <FieldProblem problem={problem} />
     </div>
   )
 }
@@ -346,13 +360,18 @@ function useOAuthConnect(integration: IntegrationOverview, connection: string, m
         ...whenPresent("clientSecret", enteringClient ? clientSecret || undefined : undefined)
       }),
     onSuccess: (started) => {
+      if (started.state.status === "needs-client") setReplaceSavedClient(true)
       if (started.state.status !== "pending") return
-      setPopupBlocked(window.open(started.state.authorizationUrl, "_blank", "noopener") === null)
+      // `noopener` would make `window.open` answer null even when the tab opened.
+      const opened = window.open(started.state.authorizationUrl, "_blank")
+      if (opened !== null) opened.opener = null
+      setPopupBlocked(opened === null)
     }
   })
   const session = useOAuthSession(start.data?.state.status === "pending" ? start.data.id : undefined)
   const state = session.data?.state ?? start.data?.state
   const waiting = state?.status === "pending"
+  const needsClient = state?.status === "needs-client"
 
   const failure = ((): OAuthFailure | undefined => {
     if (start.error !== null)
@@ -362,7 +381,7 @@ function useOAuthConnect(integration: IntegrationOverview, connection: string, m
         ? "Preparing authorization with the provider"
         : "Provider authorization and token exchange"
     if (state?.status === "failed")
-      return { title: "OAuth authorization has a problem", step, error: new Error(state.message) }
+      return { title: "OAuth authorization has a problem", step, error: state.error ?? new Error(state.message) }
     if (state?.status === "needs-client")
       return { title: "OAuth authorization has a problem", step, error: new Error(needsClientMessage) }
     if (session.error !== null)
@@ -384,7 +403,7 @@ function useOAuthConnect(integration: IntegrationOverview, connection: string, m
   const fields =
     method === undefined ? null : (
       <div className="space-y-3">
-        {method.oauth?.supportsDynamicRegistration === true ? (
+        {method.oauth?.supportsDynamicRegistration === true && !needsClient ? (
           <Alert>
             <Check />
             <AlertTitle>Automatic client registration supported</AlertTitle>

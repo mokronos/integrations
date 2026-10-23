@@ -1,4 +1,5 @@
 export * from "./domain.ts"
+export * from "./errors.ts"
 export * from "./config.ts"
 export * from "./keys.ts"
 export * from "./crypto.ts"

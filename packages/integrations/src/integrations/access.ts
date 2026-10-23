@@ -1,21 +1,12 @@
 import { Effect, Option } from "effect"
-import { connectionAddress } from "@integragents/contracts"
+import { connectionAddress, InvalidInput, NotFound } from "@integragents/contracts"
+import type { OAuthReconnectRequired, ToolCallFailed } from "@integragents/contracts"
 import type { ConnectionName, ConnectionOwner, IntegrationSlug } from "@integragents/contracts"
 import { findAuthMethod } from "../catalog/auth-methods.ts"
 import { OAuthClientSlug } from "../catalog/ids.ts"
 import { CatalogStore } from "../catalog/store.ts"
 import type { ConnectionRecord, IntegrationRecord } from "../catalog/store.ts"
-import {
-  ConnectionNotFoundError,
-  IntegrationNotFoundError,
-  InvalidInputError,
-  InvocationError,
-  McpError,
-  OAuthError,
-  SpecError,
-  StorageError,
-  ToolNotFoundError
-} from "../errors.ts"
+import type { InvocationError, McpError, OAuthError, SpecError, StorageError } from "../errors.ts"
 import type { HostToolError } from "../host-tools.ts"
 import type { McpCredential, McpServer } from "../mcp/client.ts"
 import { OAuthFlows } from "../oauth/flows.ts"
@@ -24,21 +15,21 @@ import { connectionCredentialKey, CredentialStore } from "../storage/credentials
 
 export type IntegrationFailure =
   | StorageError
-  | IntegrationNotFoundError
-  | ConnectionNotFoundError
-  | ToolNotFoundError
+  | NotFound
+  | InvalidInput
   | InvocationError
   | SpecError
   | McpError
   | OAuthError
-  | InvalidInputError
   | HostToolError
+  | ToolCallFailed
+  | OAuthReconnectRequired
 
 export const requireMcpServer = Effect.fn("Integrations.requireMcpServer")(function* (integration: IntegrationRecord) {
   if (integration.endpoint === undefined) {
-    return yield* new InvalidInputError({
+    return yield* new InvalidInput({
       field: "integration",
-      detail: `${integration.slug} records no MCP endpoint`
+      problem: `${integration.slug} records no MCP endpoint`
     })
   }
   const server: McpServer = {
@@ -67,7 +58,7 @@ export const connectionAccess = Effect.gen(function* () {
   const requireIntegration = Effect.fn("Integrations.requireIntegration")(function* (slug: IntegrationSlug) {
     const found = yield* store.findIntegration(slug)
     return yield* Option.match(found, {
-      onNone: () => Effect.fail(new IntegrationNotFoundError({ integration: slug })),
+      onNone: () => Effect.fail(new NotFound({ resource: "integration", id: slug })),
       onSome: Effect.succeed
     })
   })
@@ -84,9 +75,11 @@ export const connectionAccess = Effect.gen(function* () {
     })
     const record = found[0]
     if (record === undefined) {
-      return yield* new ConnectionNotFoundError({
-        integration: reference.integration,
-        connection: reference.name
+      const known = yield* store.listConnections({ integration: reference.integration, owner: reference.owner })
+      return yield* new NotFound({
+        resource: "connection",
+        id: `${reference.integration}/${reference.name}`,
+        known: known.map((connection) => connection.name)
       })
     }
     return record
@@ -99,9 +92,9 @@ export const connectionAccess = Effect.gen(function* () {
   ) {
     const method = findAuthMethod(integration.authMethods, connection.template)
     if (Option.isNone(method)) {
-      return yield* new InvalidInputError({
+      return yield* new InvalidInput({
         field: "connection",
-        detail:
+        problem:
           `${connection.integration}/${connection.name} was authorized against the ` +
           `${connection.template} method, which ${connection.integration} no longer offers. ` +
           `Connect it again.`
@@ -121,9 +114,9 @@ export const connectionAccess = Effect.gen(function* () {
       const client = connection.oauthClient
       const clientOwner = connection.oauthClientOwner
       if (client === undefined || clientOwner === undefined) {
-        return yield* new InvalidInputError({
+        return yield* new InvalidInput({
           field: "connection",
-          detail: `${connection.integration}/${connection.name} is an OAuth connection with no client recorded`
+          problem: `${connection.integration}/${connection.name} is an OAuth connection with no client recorded`
         })
       }
       const token = yield* oauth.accessToken(

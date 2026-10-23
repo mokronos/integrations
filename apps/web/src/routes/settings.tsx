@@ -43,6 +43,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { pluralise } from "@/lib/format"
+import { toastError } from "@/lib/errors"
 
 export function SettingsRoute() {
   const session = useSession()
@@ -113,7 +114,7 @@ function CreateDestination() {
   const create = useMutation({
     mutationFn: () => createApprovalDestination({ name: name.trim(), url: url.trim() }),
     onSuccess: () => invalidate(keys.approvalDestinations),
-    onError: (error: Error) => toast.error("Could not add the destination", { description: error.message })
+    onError: (error: Error) => toastError("Could not add the destination", error)
   })
   const changeOpen = (next: boolean) => {
     setOpen(next)
@@ -180,7 +181,7 @@ function DeleteDestination({ id, name }: { readonly id: ApprovalDestinationId; r
       invalidate(keys.approvalDestinations, keys.profiles)
       toast.success(`${name} removed`)
     },
-    onError: (error: Error) => toast.error("Could not remove the destination", { description: error.message })
+    onError: (error: Error) => toastError("Could not remove the destination", error)
   })
   return (
     <ConfirmButton
@@ -241,7 +242,7 @@ function ChangeEmailCard() {
   const save = useMutation({
     mutationFn: () => changeEmail({ email, password }),
     onSuccess: () => navigate(0),
-    onError: (error: Error) => toast.error("Could not change email", { description: error.message })
+    onError: (error: Error) => toastError("Could not change email", error)
   })
 
   return (
@@ -304,7 +305,7 @@ function ChangePasswordCard({ hasPassword }: { readonly hasPassword: boolean }) 
       setNewPassword("")
       if (!hasPassword) navigate(0)
     },
-    onError: (error: Error) => toast.error("Could not change password", { description: error.message })
+    onError: (error: Error) => toastError("Could not change password", error)
   })
 
   return (
@@ -368,7 +369,7 @@ function DeleteAccountCard({ hasPassword }: { readonly hasPassword: boolean }) {
   const remove = useMutation({
     mutationFn: () => deleteAccount({ password }),
     onSuccess: () => navigate(0),
-    onError: (error: Error) => toast.error("Could not delete the account", { description: error.message })
+    onError: (error: Error) => toastError("Could not delete the account", error)
   })
   const busy = remove.isPending || remove.isSuccess
 

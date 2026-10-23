@@ -1,7 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { ToolAddress } from "@integragents/contracts"
-import { ToolNotFoundError } from "@integragents/integrations"
+import { NotFound, ToolAddress } from "@integragents/contracts"
 import type { Integrations, ToolTarget } from "@integragents/integrations"
 import {
   Alias,
@@ -220,7 +219,8 @@ describe("profiles", () => {
             { ...summary("mail", "own", "archive", "require_approval"), owner: "user:alice" as const, idempotent: true }
           ]),
         listConnections: () => Effect.succeed([]),
-        describeTool: (target: ToolAddress | ToolTarget) => Effect.fail(new ToolNotFoundError({ tool: String(target) }))
+        describeTool: (target: ToolAddress | ToolTarget) =>
+          Effect.fail(new NotFound({ resource: "tool", id: String(target) }))
       }
 
       const hints = (yield* listEffectiveTools(gateway, profile.id, { integrations: host })).map((tool) => ({

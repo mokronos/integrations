@@ -1,8 +1,13 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { testServices } from "./fixtures.ts"
 import { defaultTenantId } from "./gateway.ts"
 import { setup, mcpText, mcpClient, mcpJson } from "./http-support.ts"
+
+const decodeStructuredError = Schema.decodeUnknownSync(
+  Schema.Struct({ structuredContent: Schema.Struct({ error: Schema.Json }) })
+)
+const structuredErrorOf = <A>(result: A) => decodeStructuredError(result).structuredContent.error
 
 describe("gateway http surface", () => {
   it.effect("serves each API key's effective tools over MCP", () =>
@@ -152,7 +157,8 @@ describe("gateway http surface", () => {
         })
       )
       expect(refused.isError).toBe(true)
-      expect(mcpText(refused)).toContain("not implemented")
+      expect(mcpText(refused)).toContain("Code: NotImplemented")
+      expect(mcpText(refused)).toContain("POST /v1/blobs")
       expect(calls).toEqual([])
     }).pipe(Effect.provide(testServices))
   )
@@ -265,6 +271,62 @@ describe("gateway http surface", () => {
       )
       expect(response.status).toBe(401)
       expect(response.headers.get("www-authenticate")).toBe("Bearer")
+    }).pipe(Effect.provide(testServices))
+  )
+
+  it.effect("tells an agent a gateway failure by its trace id, not as an unreadable object", () =>
+    Effect.gen(function* () {
+      const { handle, key } = yield* setup({ mcpSurface: "discovery", storageFails: true })
+      const client = yield* mcpClient(handle, key.secret)
+
+      const failed = yield* Effect.promise(() => client.callTool({ name: "connections", arguments: {} }))
+
+      expect(failed.isError).toBe(true)
+      expect(mcpText(failed)).toContain("The gateway could not complete this request")
+      expect(mcpText(failed)).toContain("Code: GatewayFailure (HTTP 500)")
+      expect(structuredErrorOf(failed)).toMatchObject({ _tag: "GatewayFailure", traceId: expect.any(String) })
+    }).pipe(Effect.provide(testServices))
+  )
+
+  it.effect("hands an agent the typed error it can act on, in text and in structured form", () =>
+    Effect.gen(function* () {
+      const { handle, key } = yield* setup({ mcpSurface: "discovery" })
+      const client = yield* mcpClient(handle, key.secret)
+
+      const refused = yield* Effect.promise(() =>
+        client.callTool({ name: "connect", arguments: { integration: "linear" } })
+      )
+
+      expect(refused.isError).toBe(true)
+      expect(mcpText(refused)).toContain("Unknown integration linear")
+      expect(mcpText(refused)).toContain("Next: Search the registry for it, or register it by URL with discover")
+      expect(structuredErrorOf(refused)).toEqual({
+        _tag: "NotFound",
+        resource: "integration",
+        id: "linear",
+        message: "Unknown integration linear",
+        hint: "Search the registry for it, or register it by URL with discover",
+        retryable: false
+      })
+    }).pipe(Effect.provide(testServices))
+  )
+
+  it.effect("reports every argument a tool's schema rejects, by path", () =>
+    Effect.gen(function* () {
+      const { handle, key, calls } = yield* setup()
+      const client = yield* mcpClient(handle, key.secret)
+
+      const refused = yield* Effect.promise(() =>
+        client.callTool({ name: "user___sebastian___gmail___work__sendEmail", arguments: {} })
+      )
+
+      expect(refused.isError).toBe(true)
+      expect(structuredErrorOf(refused)).toMatchObject({
+        _tag: "InvalidInput",
+        field: "arguments",
+        issues: [{ path: "to", message: "is required" }]
+      })
+      expect(calls).toEqual([])
     }).pipe(Effect.provide(testServices))
   )
 })

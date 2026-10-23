@@ -1,4 +1,4 @@
-import { Data, Effect, Option, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import type { Crypto } from "effect"
 import type { HttpClient } from "effect/http"
 import {
@@ -7,28 +7,45 @@ import {
   ConnectionName,
   connectionRefOf,
   IntegrationSlug,
+  InvalidInput,
+  NotFound,
   ToolName,
   userOwner,
   whenPresent,
   whenPresentMap
 } from "@integragents/contracts"
-import type { ApprovalId, Json, Profile, ProfileId, SubjectId, TenantId } from "@integragents/contracts"
+import type {
+  ApprovalId,
+  IntegrationError,
+  Json,
+  Profile,
+  ProfileId,
+  SubjectId,
+  TenantId
+} from "@integragents/contracts"
 import {
   AuthTemplateSlug,
   Integrations,
   provisionIntegration,
   validateIntegrationNode
 } from "@integragents/integrations"
-import type { IntegrationServices } from "@integragents/integrations"
+import type { IntegrationServices, StorageError } from "@integragents/integrations"
 import {
   ApprovalReviewer,
   boundToolAddress,
   deliverDueApprovalNotifications,
   forgetConnection,
   GatewayStoreService,
-  includeConnectionTools
+  includeConnectionTools,
+  toGatewayError
 } from "@integragents/gateway-core"
-import type { InvokeDependencies } from "@integragents/gateway-core"
+import type {
+  CallerFailure,
+  GatewayStoreError,
+  InvokeDependencies,
+  OAuthSessionError,
+  PasswordError
+} from "@integragents/gateway-core"
 import { capture, ErrorCapture } from "./observability.ts"
 import { GatewayConfig } from "./services.ts"
 import { OAuthFlowSessions } from "@integragents/gateway-core"
@@ -43,20 +60,18 @@ export type GatewayOperationServices =
   | Crypto.Crypto
   | HttpClient.HttpClient
 
-/** The caller asked for something the gateway cannot do; HTTP spells the status, MCP the text. */
-export class OperationRefused extends Data.TaggedError("OperationRefused")<{
-  readonly status: "not-found" | "bad-request"
-  readonly message: string
-}> {}
-
-const notFound = (message: string) => new OperationRefused({ status: "not-found", message })
-const badRequest = (message: string) => new OperationRefused({ status: "bad-request", message })
-
-export const requireSlug = (value: string): Effect.Effect<IntegrationSlug, OperationRefused> =>
+export const requireSlug = (value: string): Effect.Effect<IntegrationSlug, NotFound> =>
   Option.match(Schema.decodeUnknownOption(IntegrationSlug)(value), {
-    onNone: () => Effect.fail(notFound(`Unknown integration ${value}`)),
+    onNone: () => Effect.fail(new NotFound({ resource: "integration", id: value })),
     onSome: Effect.succeed
   })
+
+/** What callers receive for a failure of the integrations they asked about; storage failures leave as a trace id. */
+export const asCallerFailure = <A, R>(
+  effect: Effect.Effect<A, CallerFailure | StorageError | OAuthSessionError | GatewayStoreError | PasswordError, R>,
+  integration?: string
+): Effect.Effect<A, IntegrationError, R> =>
+  capture(effect).pipe(Effect.mapError((failure) => toGatewayError(failure, integration)))
 
 export const invokeDependencies: Effect.Effect<
   InvokeDependencies,
@@ -157,21 +172,30 @@ export const connectWithCredentials = Effect.fn("Gateway.connect")(function* (
   const integrations = yield* Integrations
   const slug = yield* requireSlug(body.integration)
   const found = yield* capture(integrations.findIntegration(slug))
-  if (Option.isNone(found)) return yield* notFound(`Unknown integration ${body.integration}`)
+  if (Option.isNone(found)) return yield* new NotFound({ resource: "integration", id: body.integration })
   const integration = found.value
   const method = selectAuthMethod(integration.authMethods, body.template)
   if (method === undefined) {
-    return yield* badRequest(
-      `No auth template named "${body.template}" for ${integration.slug}. Available: ${integration.authMethods
-        .map((candidate) => candidate.template)
-        .join(", ")}`
-    )
+    return yield* new NotFound({
+      resource: "auth-template",
+      id: `${integration.slug}/${body.template}`,
+      known: integration.authMethods.map((candidate) => candidate.template)
+    })
   }
   if (method.kind === "oauth") {
-    return yield* badRequest(`${integration.slug} uses OAuth; start it at POST /v1/connections/oauth`)
+    return yield* new InvalidInput({
+      field: "template",
+      problem: `${method.template} is an OAuth method of ${integration.slug}; start it with the OAuth flow, not with credential values`
+    })
   }
   const values = body.values ?? {}
   const names = Object.keys(values)
+  if (method.kind !== "none" && Object.values(values).every((value) => value.trim().length === 0)) {
+    return yield* new InvalidInput({
+      field: "values",
+      problem: `${integration.slug} needs a credential for ${method.template}; pass it as values.token`
+    })
+  }
   const name = ConnectionName.make(body.connection ?? "default")
   const fresh = body.subject === undefined && !(yield* orgConnectionExists(slug, name))
   const connection = yield* capture(
@@ -212,7 +236,7 @@ export const startOAuthConnection = Effect.fn("Gateway.startOAuth")(function* (
   const oauth = yield* OAuthFlowSessions
   const slug = yield* requireSlug(body.integration)
   const found = yield* capture(integrations.findIntegration(slug))
-  if (Option.isNone(found)) return yield* notFound(`Unknown integration ${body.integration}`)
+  if (Option.isNone(found)) return yield* new NotFound({ resource: "integration", id: body.integration })
   const integration = found.value
   const method = integration.authMethods.find((candidate) =>
     body.template === undefined
@@ -220,7 +244,13 @@ export const startOAuthConnection = Effect.fn("Gateway.startOAuth")(function* (
       : candidate.template === body.template || candidate.id === body.template
   )
   if (method === undefined || method.kind !== "oauth") {
-    return yield* badRequest(`${integration.slug} has no OAuth auth method`)
+    return yield* new NotFound({
+      resource: "auth-template",
+      id: `${integration.slug}/${body.template ?? "oauth"}`,
+      known: integration.authMethods
+        .filter((candidate) => candidate.kind === "oauth")
+        .map((candidate) => candidate.template)
+    })
   }
   const connection = ConnectionName.make(body.connection ?? "default")
   return yield* oauth
@@ -239,9 +269,7 @@ export const startOAuthConnection = Effect.fn("Gateway.startOAuth")(function* (
         (ms) => ms
       )
     })
-    .pipe(
-      Effect.mapError((failure) => badRequest(`${body.integration} could not start an OAuth flow: ${failure.message}`))
-    )
+    .pipe((started) => asCallerFailure(started, integration.slug))
 })
 
 export const removeConnectionByName = Effect.fn("Gateway.removeConnection")(function* (
@@ -261,11 +289,7 @@ export const removeConnectionByName = Effect.fn("Gateway.removeConnection")(func
     const known = connections
       .filter((connection) => connection.integration === integration)
       .map((connection) => connection.name)
-    return yield* notFound(
-      known.length === 0
-        ? `${integration} has no connections`
-        : `${integration} has no connection ${requested}. Known: ${known.join(", ")}`
-    )
+    return yield* new NotFound({ resource: "connection", id: `${integration}/${requested}`, known })
   }
   yield* capture(
     integrations.removeConnection({

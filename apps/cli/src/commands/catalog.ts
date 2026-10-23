@@ -1,13 +1,11 @@
 import { ConnectionName, IntegrationSlug, whenPresent } from "@integragents/contracts"
-import type { GatewayClient } from "@integragents/client"
-import type { HttpClient } from "effect/http"
 import { Effect, Option, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/cli"
 import { PositiveInt } from "@integragents/contracts"
-import type { IntegrationsCliError } from "../connection.ts"
-import { cliError, connectToGateway, describeError } from "../connection.ts"
 import type { Page, Window } from "../output.ts"
 import { inline, jsonOutput, page, pageFields, withNext, writeStdoutLine } from "../output.ts"
+import type { GatewayTask } from "../tasks.ts"
+import { NotFound } from "@integragents/contracts"
 
 const verboseFlag = () =>
   Flag.Boolean("verbose").pipe(
@@ -35,16 +33,6 @@ const window = (limit: Option.Option<number>, offset: Option.Option<number>): Wi
   limit: Option.getOrUndefined(limit),
   offset: Option.getOrUndefined(offset)
 })
-
-const gatewayTask = <A, E, R>(
-  task: (client: GatewayClient) => Effect.Effect<A, E, R>
-): Effect.Effect<A, IntegrationsCliError, R | HttpClient.HttpClient> =>
-  connectToGateway().pipe(
-    Effect.flatMap(task),
-    Effect.mapError((error) => cliError(describeError(error)))
-  )
-
-type GatewayTask = typeof gatewayTask
 
 const JsonObject = Schema.Record(Schema.String, Schema.Json)
 const JsonArray = Schema.Array(Schema.Json)
@@ -295,7 +283,15 @@ export const schemaCommand = (runGateway: GatewayTask) =>
         Effect.flatMap((effective) => {
           const found = effective.tools.find((candidate) => candidate.alias === alias && candidate.tool === tool)
           if (found === undefined) {
-            return Effect.fail(cliError(`${tool} is not available to this key through ${alias}`))
+            return Effect.fail(
+              new NotFound({
+                resource: "tool",
+                id: `${alias}.${tool}`,
+                known: effective.tools
+                  .filter((candidate) => candidate.alias === alias)
+                  .map((candidate) => candidate.tool)
+              })
+            )
           }
           const detail = record(found)
           const core = Object.fromEntries(

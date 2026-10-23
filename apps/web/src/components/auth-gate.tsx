@@ -1,14 +1,17 @@
 import { createContext, useContext, useState, type ReactNode } from "react"
 import { LogIn } from "lucide-react"
-import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { GatewayError, logIn, signUp, type Me } from "@/lib/gateway"
+import { logIn, signUp, type Me } from "@/lib/gateway"
 import { useAuthProviders, useMe, useMutation } from "@/lib/queries"
+import { toastError } from "@/lib/errors"
+import { isGatewayError } from "@integragents/contracts"
+import { FieldProblem } from "@/components/field-problem"
+import { fieldError } from "@/lib/errors"
 
 const SessionContext = createContext<Me | undefined>(undefined)
 
@@ -97,8 +100,8 @@ function AuthCard({ onAuthenticated }: { readonly onAuthenticated: OnAuthenticat
               <TabsContent value="signup">
                 <SignUpForm
                   onAuthenticated={onAuthenticated}
-                  onClosed={() => {
-                    toast.error("Signup is closed on this gateway")
+                  onClosed={(error) => {
+                    toastError("Could not create the account", error)
                     setTab("signin")
                   }}
                 />
@@ -119,8 +122,17 @@ function SignInForm({ onAuthenticated }: { readonly onAuthenticated: OnAuthentic
   const signIn = useMutation({
     mutationFn: () => logIn({ email, password }),
     onSuccess: onAuthenticated,
-    onError: (error: Error) => toast.error("Sign in failed", { description: error.message })
+    onError: (error: Error) => {
+      if (!isGatewayError(error) || (error._tag !== "InvalidCredentials" && error._tag !== "InvalidInput")) {
+        toastError("Sign in failed", error)
+      }
+    }
   })
+  const emailProblem = fieldError(signIn.error, "email")
+  const passwordProblem =
+    signIn.error !== null && isGatewayError(signIn.error) && signIn.error._tag === "InvalidCredentials"
+      ? signIn.error.message
+      : fieldError(signIn.error, "password")
 
   return (
     <form
@@ -138,8 +150,10 @@ function SignInForm({ onAuthenticated }: { readonly onAuthenticated: OnAuthentic
           required
           autoComplete="email"
           value={email}
+          aria-invalid={emailProblem !== undefined}
           onChange={(event) => setEmail(event.target.value)}
         />
+        <FieldProblem problem={emailProblem} />
       </div>
       <div className="grid gap-2">
         <Label htmlFor="signin-password">Password</Label>
@@ -149,8 +163,10 @@ function SignInForm({ onAuthenticated }: { readonly onAuthenticated: OnAuthentic
           required
           autoComplete="current-password"
           value={password}
+          aria-invalid={passwordProblem !== undefined}
           onChange={(event) => setPassword(event.target.value)}
         />
+        <FieldProblem problem={passwordProblem} />
       </div>
       <Button type="submit" disabled={signIn.isPending}>
         {signIn.isPending ? "Signing in…" : "Sign in"}
@@ -164,7 +180,7 @@ function SignUpForm({
   onClosed
 }: {
   readonly onAuthenticated: OnAuthenticated
-  readonly onClosed: () => void
+  readonly onClosed: (error: Error) => void
 }) {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -172,11 +188,19 @@ function SignUpForm({
   const create = useMutation({
     mutationFn: () => signUp({ email, password, tenantName }),
     onSuccess: onAuthenticated,
-    onError: (error: Error) =>
-      error instanceof GatewayError && error.code === "signup-closed"
-        ? onClosed()
-        : toast.error("Could not create the account", { description: error.message })
+    onError: (error: Error) => {
+      if (isGatewayError(error) && error._tag === "SignupClosed") return onClosed(error)
+      if (!isGatewayError(error) || (error._tag !== "AlreadyExists" && error._tag !== "InvalidInput")) {
+        toastError("Could not create the account", error)
+      }
+    }
   })
+  const emailProblem =
+    create.error !== null && isGatewayError(create.error) && create.error._tag === "AlreadyExists"
+      ? `${create.error.message}. ${create.error.hint ?? ""}`.trim()
+      : fieldError(create.error, "email")
+  const passwordProblem = fieldError(create.error, "password")
+  const tenantProblem = fieldError(create.error, "tenantName")
 
   return (
     <form
@@ -194,8 +218,10 @@ function SignUpForm({
           required
           autoComplete="email"
           value={email}
+          aria-invalid={emailProblem !== undefined}
           onChange={(event) => setEmail(event.target.value)}
         />
+        <FieldProblem problem={emailProblem} />
       </div>
       <div className="grid gap-2">
         <Label htmlFor="signup-password">Password</Label>
@@ -206,9 +232,14 @@ function SignUpForm({
           minLength={8}
           autoComplete="new-password"
           value={password}
+          aria-invalid={passwordProblem !== undefined}
           onChange={(event) => setPassword(event.target.value)}
         />
-        <p className="text-muted-foreground text-xs">At least 8 characters.</p>
+        {passwordProblem === undefined ? (
+          <p className="text-muted-foreground text-xs">At least 8 characters.</p>
+        ) : (
+          <FieldProblem problem={passwordProblem} />
+        )}
       </div>
       <div className="grid gap-2">
         <Label htmlFor="signup-tenant">Workspace name</Label>
@@ -217,8 +248,10 @@ function SignUpForm({
           type="text"
           placeholder="Defaults to your email name"
           value={tenantName}
+          aria-invalid={tenantProblem !== undefined}
           onChange={(event) => setTenantName(event.target.value)}
         />
+        <FieldProblem problem={tenantProblem} />
         <p className="text-muted-foreground text-xs">
           The first account claims this gateway — signup closes afterwards.
         </p>

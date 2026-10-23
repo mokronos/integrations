@@ -54,7 +54,6 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@cfworker/json-schema": "catalog:",
     "@integragents/contracts": "workspace:^",
     "@integragents/integrations": "workspace:^"
   },

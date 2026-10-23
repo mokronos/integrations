@@ -85,8 +85,8 @@ describe("gateway approval settlement", () => {
         { concurrency: "unbounded" }
       )
 
-      expect(approve.status).toBe(400)
-      expect(deny.status).toBe(400)
+      expect([approve.status, approve.body["_tag"]]).toEqual([409, "ApprovalConflict"])
+      expect([deny.status, deny.body["_tag"]]).toEqual([409, "ApprovalConflict"])
       expect(retry.body["approvalId"]).toBe(id)
       expect(retry.body["status"]).toBe("pending")
       // A cutoff well past the freeze: an executing call is not pending, so
@@ -123,7 +123,7 @@ describe("gateway approval settlement", () => {
       expect(
         (yield* call("POST", `/v1/approvals/${String(frozen.body["approvalId"])}/approve`, { body: {}, local: true }))
           .status
-      ).toBe(400)
+      ).toBe(409)
       expect((yield* call("POST", "/v1/execute", { body })).body["approvalId"]).toBe(approval.id)
       expect(calls).toHaveLength(0)
     }).pipe(Effect.provide(testServices))
@@ -204,7 +204,8 @@ describe("gateway approval settlement", () => {
         local: true
       })
 
-      expect([refused.status, String(refused.body["error"])]).toEqual([400, expect.stringContaining("to")])
+      expect([refused.status, refused.body["_tag"]]).toEqual([400, "InvalidInput"])
+      expect(refused.body["issues"]).toEqual([expect.objectContaining({ path: "to" })])
       expect(approved.status).toBe(200)
       expect(calls.map((entry) => entry.input)).toEqual([{ to: "a@b.c" }])
       expect(approved.body["approval"]).toMatchObject({
@@ -345,7 +346,12 @@ describe("gateway approval settlement", () => {
       const approvalId = String(frozen.body["approvalId"])
 
       expect((yield* call("POST", `/v1/approvals/${approvalId}/approve`, { body: {}, local: true })).status).toBe(200)
-      expect((yield* call("POST", `/v1/approvals/${approvalId}/approve`, { body: {}, local: true })).status).toBe(400)
+      expect(
+        (yield* call("POST", `/v1/approvals/${approvalId}/approve`, { body: {}, local: true })).body
+      ).toMatchObject({
+        _tag: "ApprovalConflict",
+        state: "decided"
+      })
     }).pipe(Effect.provide(testServices))
   )
 
@@ -361,8 +367,8 @@ describe("gateway approval settlement", () => {
       yield* store.replaceProfileTools(profile.id, [])
       expect(
         (yield* call("POST", `/v1/approvals/${String(stale.body["approvalId"])}/approve`, { body: {}, local: true }))
-          .status
-      ).toBe(400)
+          .body
+      ).toMatchObject({ _tag: "ApprovalConflict", state: "unauthorized" })
       expect(calls).toHaveLength(0)
     }).pipe(Effect.provide(testServices))
   )

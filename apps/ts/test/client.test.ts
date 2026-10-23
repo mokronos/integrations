@@ -1,12 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Result } from "effect"
 import { FetchHttpClient } from "effect/http"
-import {
-  GatewayProtocolError,
-  GatewayUnavailableError,
-  gatewayProtocolVersion,
-  makeGatewayClient
-} from "../src/index.ts"
+import { GatewayIncompatible, GatewayUnavailable, gatewayProtocolVersion, makeGatewayClient } from "../src/index.ts"
 
 const transportOf = (protocolVersion: number | "unavailable") => {
   let metadataRequests = 0
@@ -51,14 +46,17 @@ describe("gateway metadata", () => {
     Effect.gen(function* () {
       const transport = transportOf("unavailable")
 
-      const result = yield* withClient(transport, "https://gateway.example", (client) => Effect.result(client.metadata))
+      const result = yield* withClient(transport, "https://gateway.example", (client) =>
+        Effect.all([Effect.result(client.metadata), Effect.result(client.metadata)])
+      )
 
-      expect(Result.isFailure(result)).toBe(true)
-      const failure = Result.isFailure(result) ? result.failure : undefined
-      expect(failure).toBeInstanceOf(GatewayUnavailableError)
-      expect(String(failure)).toContain("Gateway at https://gateway.example is unavailable")
-      expect(String(failure)).toContain("Retry the same command")
-      expect(transport.metadataRequests()).toBe(1)
+      for (const attempt of result) {
+        expect(Result.isFailure(attempt)).toBe(true)
+        const failure = Result.isFailure(attempt) ? attempt.failure : undefined
+        expect(failure).toBeInstanceOf(GatewayUnavailable)
+        expect(failure?.message).toContain("Gateway at https://gateway.example is unavailable")
+      }
+      expect(transport.metadataRequests()).toBe(2)
       expect(transport.authenticatedRequests()).toHaveLength(0)
     })
   )
@@ -77,8 +75,8 @@ describe("gateway metadata", () => {
       for (const attempt of attempts) {
         expect(Result.isFailure(attempt)).toBe(true)
         const failure = Result.isFailure(attempt) ? attempt.failure : undefined
-        expect(failure).toBeInstanceOf(GatewayProtocolError)
-        expect(String(failure)).toContain(`client requires ${gatewayProtocolVersion}`)
+        expect(failure).toBeInstanceOf(GatewayIncompatible)
+        expect(failure?.message).toContain(`this client requires ${gatewayProtocolVersion}`)
       }
       expect(transport.metadataRequests()).toBe(1)
       expect(transport.authenticatedRequests()).toHaveLength(0)

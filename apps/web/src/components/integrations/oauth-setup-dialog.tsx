@@ -3,7 +3,7 @@ import { Check } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useSearchParams } from "react-router"
 
-import { OperationError } from "@/components/integrations/operation-feedback"
+import { ErrorNotice } from "@/components/error-notice"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import {
@@ -79,11 +79,7 @@ export function OAuthSetupDialog() {
         </DialogHeader>
 
         {session.error !== null ? (
-          <OperationError
-            title="That setup link is not usable"
-            step="Reading the OAuth session"
-            error={session.error}
-          />
+          <ErrorNotice title="That setup link is not usable" step="Reading the OAuth session" error={session.error} />
         ) : state === undefined ? (
           <p className="text-muted-foreground text-sm">Loading the pending connection…</p>
         ) : state.status === "connected" ? (
@@ -95,7 +91,7 @@ export function OAuthSetupDialog() {
             </AlertDescription>
           </Alert>
         ) : state.status === "failed" ? (
-          <OperationError
+          <ErrorNotice
             title="Authorization failed"
             step="Provider authorization and token exchange"
             error={new Error(state.message)}
@@ -116,7 +112,7 @@ export function OAuthSetupDialog() {
               onClientSecretChange={setClientSecret}
             />
             {submit.error === null ? null : (
-              <OperationError
+              <ErrorNotice
                 title="The provider rejected that application"
                 step="Saving the OAuth client and starting authorization"
                 error={submit.error}

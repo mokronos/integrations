@@ -1,9 +1,18 @@
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/http-api"
-import { ProfileCapability, ProfileId, SubjectId } from "@integragents/contracts"
+import {
+  AlreadyExists,
+  InvalidCredentials,
+  LoginHandoffFailed,
+  NotImplemented,
+  PasswordRequired,
+  ProfileCapability,
+  ProfileId,
+  SignupClosed,
+  SubjectId
+} from "@integragents/contracts"
 import { Authority } from "../middleware.ts"
-import { ForbiddenError, RequiredAccess } from "../identity.ts"
-import { ApiBadRequestError } from "./shared.ts"
+import { RequiredAccess } from "../identity.ts"
 
 const Email = Schema.String.check(Schema.isPattern(/^[^\s@]+@[^\s@]+\.[^\s@]+$/))
 
@@ -31,50 +40,6 @@ export const ChangePasswordBody = Schema.Struct({
 export const DeleteAccountBody = Schema.Struct({
   password: Schema.optional(Schema.String)
 })
-
-export class ApiNotImplemented extends Schema.TaggedError<ApiNotImplemented>()("ApiNotImplemented", {
-  error: Schema.String,
-  code: Schema.String
-}) {}
-const ApiNotImplementedError = ApiNotImplemented.pipe(HttpApiSchema.status(501))
-
-export class SignupClosed extends Schema.TaggedError<SignupClosed>()("SignupClosed", {
-  error: Schema.String,
-  code: Schema.Literal("signup-closed")
-}) {}
-const SignupClosedError = SignupClosed.pipe(HttpApiSchema.status(403))
-
-export class InvalidCredentials extends Schema.TaggedError<InvalidCredentials>()("InvalidCredentials", {
-  error: Schema.String,
-  code: Schema.Literal("invalid-credentials")
-}) {}
-const InvalidCredentialsError = InvalidCredentials.pipe(HttpApiSchema.status(401))
-
-export class PasswordRequired extends Schema.TaggedError<PasswordRequired>()("PasswordRequired", {
-  error: Schema.String,
-  code: Schema.Literal("password-required")
-}) {}
-const PasswordRequiredError = PasswordRequired.pipe(HttpApiSchema.status(409))
-
-export class HandoffUnknown extends Schema.TaggedError<HandoffUnknown>()("HandoffUnknown", {
-  error: Schema.String,
-  code: Schema.Literal("login-handoff-unknown")
-}) {}
-const HandoffUnknownError = HandoffUnknown.pipe(HttpApiSchema.status(404))
-
-export class HandoffExpired extends Schema.TaggedError<HandoffExpired>()("HandoffExpired", {
-  error: Schema.String,
-  code: Schema.Literal("login-handoff-expired")
-}) {}
-const HandoffExpiredError = HandoffExpired.pipe(HttpApiSchema.status(410))
-
-export class HandoffCollected extends Schema.TaggedError<HandoffCollected>()("HandoffCollected", {
-  error: Schema.String,
-  code: Schema.Literal("login-handoff-collected")
-}) {}
-const HandoffCollectedError = HandoffCollected.pipe(HttpApiSchema.status(410))
-
-const HandoffRaceError = HandoffCollected.pipe(HttpApiSchema.status(409))
 
 const ProvidersView = Schema.Struct({
   signupOpen: Schema.Boolean,
@@ -142,14 +107,14 @@ export const AuthGroup = HttpApiGroup.make("auth")
   .add(
     HttpApiEndpoint.post("cliStart", "/v1/auth/cli/start", {
       success: HttpApiSchema.status(201)(CliStartView),
-      error: ApiNotImplementedError
+      error: NotImplemented
     }).annotate(RequiredAccess, "public")
   )
   .add(
     HttpApiEndpoint.get("cliPoll", "/v1/auth/cli/:id", {
       params: { id: Schema.String },
       success: CliPollView,
-      error: [HandoffUnknownError, HandoffExpiredError, HandoffCollectedError, HandoffRaceError]
+      error: LoginHandoffFailed
     }).annotate(RequiredAccess, "public")
   )
   .add(
@@ -180,14 +145,14 @@ export const AuthGroup = HttpApiGroup.make("auth")
           email: Schema.String
         })
       ),
-      error: [SignupClosedError, ApiBadRequestError]
+      error: [SignupClosed, AlreadyExists]
     }).annotate(RequiredAccess, "public")
   )
   .add(
     HttpApiEndpoint.post("login", "/v1/auth/login", {
       payload: LoginBody,
       success: Schema.Struct({ email: Schema.String, subjectId: SubjectId }),
-      error: InvalidCredentialsError
+      error: InvalidCredentials
     }).annotate(RequiredAccess, "public")
   )
   .add(
@@ -204,7 +169,7 @@ export const AuthGroup = HttpApiGroup.make("auth")
     HttpApiEndpoint.post("changeEmail", "/v1/auth/email", {
       payload: ChangeEmailBody,
       success: Schema.Struct({ email: Schema.String }),
-      error: [ForbiddenError, ApiBadRequestError, InvalidCredentialsError]
+      error: [AlreadyExists, InvalidCredentials]
     }).annotate(RequiredAccess, "human")
   )
   .add(
@@ -214,14 +179,14 @@ export const AuthGroup = HttpApiGroup.make("auth")
         updated: Schema.Literal(true),
         revokedSessions: Schema.Number
       }),
-      error: [ForbiddenError, InvalidCredentialsError]
+      error: InvalidCredentials
     }).annotate(RequiredAccess, "human")
   )
   .add(
     HttpApiEndpoint.post("deleteAccount", "/v1/auth/account/delete", {
       payload: DeleteAccountBody,
       success: Schema.Struct({ deleted: Schema.Literal(true) }),
-      error: [ForbiddenError, PasswordRequiredError, InvalidCredentialsError]
+      error: [PasswordRequired, InvalidCredentials]
     }).annotate(RequiredAccess, "human")
   )
   .middleware(Authority)

@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label"
 import { Select } from "@/components/ui/select"
 import * as gateway from "@/lib/gateway"
 import { keys, useInvalidate, useMutation, useProfiles } from "@/lib/queries"
+import { toastError } from "@/lib/errors"
 
 const EMPTY = "__empty__"
 
@@ -40,7 +41,7 @@ export function NewProfileDialog() {
       toast.success(`Created ${profile.name}`)
       void navigate(`/profiles/${profile.id}`)
     },
-    onError: (error: Error) => toast.error("Could not create the profile", { description: error.message })
+    onError: (error: Error) => toastError("Could not create the profile", error)
   })
   return (
     <Dialog open={open} onOpenChange={setOpen}>

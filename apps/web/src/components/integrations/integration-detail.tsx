@@ -6,7 +6,7 @@ import { connectionRefOf } from "@integragents/contracts"
 
 import { SchemaView } from "@/components/schema-view"
 import { AuthMethodDetails } from "@/components/integrations/auth-method-details"
-import { OperationError } from "@/components/integrations/operation-feedback"
+import { ErrorNotice } from "@/components/error-notice"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -24,6 +24,7 @@ import { ConnectDialog, ReauthorizeDialog, reauthorizationMethod } from "./conne
 import { ConnectionBadge } from "./connection-badge"
 import { ConnectionIdentity } from "./connection-identity"
 import { IntegrationIcon, integrationHost } from "./integration-icon"
+import { toastError } from "@/lib/errors"
 const isConnected = (integration: IntegrationOverview): boolean =>
   integration.connections.some((connection) => connection.status === "connected")
 
@@ -82,7 +83,7 @@ function RemoveIntegration({ integration }: { readonly integration: IntegrationO
       })
       void navigate("/integrations")
     },
-    onError: (error: Error) => toast.error("Could not remove the integration", { description: error.message })
+    onError: (error: Error) => toastError("Could not remove the integration", error)
   })
 
   return (
@@ -120,7 +121,7 @@ function IntegrationName({ integration }: { readonly integration: IntegrationOve
       invalidate(keys.integrations, keys.overview)
       toast.success(`Now called ${result.name}`)
     },
-    onError: (error: Error) => toast.error("Could not rename it", { description: error.message })
+    onError: (error: Error) => toastError("Could not rename it", error)
   })
   return (
     <CardTitle className="min-w-0 truncate">
@@ -210,7 +211,7 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
         description: changes === 0 ? undefined : "Run `ii drift` for the full report."
       })
     },
-    onError: (error: Error) => toast.error("Could not check for changes", { description: error.message })
+    onError: (error: Error) => toastError("Could not check for changes", error)
   })
 
   const tools = useMemo(() => {
@@ -267,11 +268,7 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
               </ul>
             )}
             {disconnect.error === null ? null : (
-              <OperationError
-                title="Disconnect failed"
-                step="Removing the stored connection"
-                error={disconnect.error}
-              />
+              <ErrorNotice title="Disconnect failed" step="Removing the stored connection" error={disconnect.error} />
             )}
           </div>
 

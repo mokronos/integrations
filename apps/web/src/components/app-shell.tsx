@@ -13,7 +13,6 @@ import {
   Settings,
   Sun
 } from "lucide-react"
-import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -23,6 +22,7 @@ import { logOut } from "@/lib/gateway"
 import { useApprovals, useGatewayEvents } from "@/lib/queries"
 import { cn } from "@/lib/utils"
 import { useSession } from "@/components/auth-gate"
+import { toastError } from "@/lib/errors"
 
 const navigation = [
   { to: "/", label: "Home", icon: House },
@@ -59,7 +59,7 @@ function SignOutButton() {
           .then(() => {
             navigate(0)
           })
-          .catch((error: Error) => toast.error("Could not sign out", { description: error.message }))
+          .catch((error: Error) => toastError("Could not sign out", error))
       }}
     >
       <LogOut className="size-4" />

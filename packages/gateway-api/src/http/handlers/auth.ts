@@ -16,16 +16,14 @@ import { generateSessionToken, hashPassword, verifyPassword } from "@integragent
 import type { GatewayStore, GatewayStoreError, LoginRecord } from "@integragents/gateway-core"
 import { GatewayStoreService } from "@integragents/gateway-core"
 import {
-  ApiBadRequest,
-  ApiNotImplemented,
-  GatewayApi,
-  HandoffCollected,
-  HandoffExpired,
-  HandoffUnknown,
+  AlreadyExists,
   InvalidCredentials,
+  LoginHandoffFailed,
+  NotImplemented,
   PasswordRequired,
   SignupClosed
-} from "../api.ts"
+} from "@integragents/contracts"
+import { GatewayApi } from "../api.ts"
 import { clearSessionCookie, Forbidden, Identity, setSessionCookie } from "../authority.ts"
 import type { SignInPolicy } from "../services.ts"
 import { SessionPolicy } from "../services.ts"
@@ -109,10 +107,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
         Effect.gen(function* () {
           const google = sessions.google
           if (google === undefined) {
-            return yield* new ApiNotImplemented({
-              error: "Browser sign-in is not configured on this gateway",
-              code: "identity-provider-unavailable" as const
-            })
+            return yield* new NotImplemented({ feature: "Browser sign-in" })
           }
           const request = yield* generateLoginHandoff
           const expiresAt = DateTime.toDateUtc(DateTime.addDuration(yield* DateTime.now, handoffTtl))
@@ -132,22 +127,13 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
           const requestHash = yield* hashLoginHandoff(request.params["id"])
           const handoff = yield* capture(store.getLoginHandoff(requestHash))
           if (handoff === undefined) {
-            return yield* new HandoffUnknown({
-              error: "Unknown login handoff",
-              code: "login-handoff-unknown" as const
-            })
+            return yield* new LoginHandoffFailed({ state: "unknown" })
           }
           if (DateTime.isLessThanOrEqualTo(DateTime.fromDateUnsafe(handoff.expiresAt), yield* DateTime.now)) {
-            return yield* new HandoffExpired({
-              error: "Login handoff expired",
-              code: "login-handoff-expired" as const
-            })
+            return yield* new LoginHandoffFailed({ state: "expired" })
           }
           if (handoff.collectedAt !== null) {
-            return yield* new HandoffCollected({
-              error: "Login handoff was already collected",
-              code: "login-handoff-collected" as const
-            })
+            return yield* new LoginHandoffFailed({ state: "collected" })
           }
           const subjectId = handoff.subjectId
           const tenantId = handoff.tenantId
@@ -156,10 +142,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
             return { status: "pending" as const, expiresAt: handoff.expiresAt }
           }
           if (!(yield* capture(store.collectLoginHandoff(requestHash)))) {
-            return yield* new HandoffCollected({
-              error: "Login handoff was collected concurrently",
-              code: "login-handoff-collected" as const
-            })
+            return yield* new LoginHandoffFailed({ state: "collected" })
           }
           const session = yield* issueSession(subjectId, tenantId)
           return {
@@ -256,14 +239,11 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
       .handle("signup", (request) =>
         Effect.gen(function* () {
           if (!(yield* capture(sessions.signupOpen()))) {
-            return yield* new SignupClosed({
-              error: "Signup is closed on this gateway",
-              code: "signup-closed" as const
-            })
+            return yield* new SignupClosed()
           }
           const body = request.payload
           if ((yield* capture(store.findLoginByEmail(body.email))) !== undefined) {
-            return yield* new ApiBadRequest({ error: `An account for ${body.email} already exists` })
+            return yield* new AlreadyExists({ resource: "account", id: body.email })
           }
           const tenant = yield* capture(
             store.createTenant({
@@ -294,10 +274,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
         Effect.gen(function* () {
           const checked = yield* capture(verifyLoginPassword(store, request.payload.email, request.payload.password))
           if (!checked.accepted) {
-            return yield* new InvalidCredentials({
-              error: "Email or password is not correct",
-              code: "invalid-credentials" as const
-            })
+            return yield* new InvalidCredentials()
           }
           const session = yield* issueSession(checked.login.subjectId, checked.login.tenantId)
           yield* startSession(session.token)
@@ -357,7 +334,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
         Effect.gen(function* () {
           const caller = yield* Identity
           if (caller.kind !== "session") {
-            return yield* Forbidden.of("not-permitted")
+            return yield* new Forbidden({ code: "not-permitted" })
           }
           const body = request.payload
           const login = yield* capture(store.findLoginByEmail(caller.email))
@@ -367,13 +344,10 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
             passwordHash !== null &&
             (yield* capture(verifyPassword(body.password, passwordHash)))
           if (!verified || login === undefined) {
-            return yield* new InvalidCredentials({
-              error: "Email or password is not correct",
-              code: "invalid-credentials" as const
-            })
+            return yield* new InvalidCredentials()
           }
           if (body.email !== login.email && (yield* capture(store.findLoginByEmail(body.email))) !== undefined) {
-            return yield* new ApiBadRequest({ error: `An account for ${body.email} already exists` })
+            return yield* new AlreadyExists({ resource: "account", id: body.email })
           }
           yield* capture(store.changeLoginEmail(caller.subjectId, body.email))
           return { email: body.email }
@@ -383,7 +357,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
         Effect.gen(function* () {
           const caller = yield* Identity
           if (caller.kind !== "session") {
-            return yield* Forbidden.of("not-permitted")
+            return yield* new Forbidden({ code: "not-permitted" })
           }
           const body = request.payload
           const login = yield* capture(store.findLoginByEmail(caller.email))
@@ -395,10 +369,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
               ? currentPassword === undefined
               : currentPassword !== undefined && (yield* capture(verifyPassword(currentPassword, passwordHash))))
           if (!accepted || login === undefined) {
-            return yield* new InvalidCredentials({
-              error: "Email or password is not correct",
-              code: "invalid-credentials" as const
-            })
+            return yield* new InvalidCredentials()
           }
           const newPasswordHash = yield* capture(hashPassword(body.newPassword))
           yield* capture(store.changeLoginPassword(caller.subjectId, newPasswordHash))
@@ -410,16 +381,13 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
         Effect.gen(function* () {
           const caller = yield* Identity
           if (caller.kind !== "session") {
-            return yield* Forbidden.of("not-permitted")
+            return yield* new Forbidden({ code: "not-permitted" })
           }
           const body = request.payload
           const login = yield* capture(store.findLoginByEmail(caller.email))
           const passwordHash = login?.passwordHash ?? null
           if (login !== undefined && passwordHash === null) {
-            return yield* new PasswordRequired({
-              error: "Set a password before deleting an OAuth-only account",
-              code: "password-required" as const
-            })
+            return yield* new PasswordRequired()
           }
           const presented = body.password
           const accepted =
@@ -428,10 +396,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
             presented !== undefined &&
             (yield* capture(verifyPassword(presented, passwordHash)))
           if (!accepted) {
-            return yield* new InvalidCredentials({
-              error: "Email or password is not correct",
-              code: "invalid-credentials" as const
-            })
+            return yield* new InvalidCredentials()
           }
           yield* capture(store.deleteSubject(caller.subjectId))
           if ((yield* capture(store.countSubjects(caller.tenantId))) === 0) {

@@ -50,4 +50,24 @@ describe("integration registry", () => {
       }
     })
   )
+
+  it.effect("tells a registry that is down apart from a query it refused", () =>
+    Effect.gen(function* () {
+      const server = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        fetch: () => new Response("upstream down", { status: 503 })
+      })
+      try {
+        const registryUrl = `http://127.0.0.1:${server.port}`
+        const down = yield* Effect.flip(searchIntegrations({ q: "linear", limit: 5 }, { registryUrl }))
+        const malformed = yield* Effect.flip(searchIntegrations({ q: " linear", limit: 5 }, { registryUrl }))
+
+        expect(down).toMatchObject({ _tag: "RegistryUnavailable", reason: "status", status: 503, retryable: true })
+        expect(malformed).toMatchObject({ _tag: "InvalidInput", field: "query", retryable: false })
+      } finally {
+        server.stop()
+      }
+    }).pipe(Effect.provide(FetchHttpClient.layer))
+  )
 })

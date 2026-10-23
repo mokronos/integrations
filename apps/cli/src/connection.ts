@@ -1,8 +1,7 @@
-import { Data, Effect, Predicate } from "effect"
+import { Data, Effect } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import type { HttpClient } from "effect/http"
 import { makeGatewayClient, resolveClientConnection } from "@integragents/client"
-import { Forbidden, GatewayFailure } from "@integragents/gateway-api"
 import type { GatewayClient } from "@integragents/client"
 
 export class IntegrationsCliError extends Data.TaggedError("IntegrationsCliError")<{
@@ -11,26 +10,9 @@ export class IntegrationsCliError extends Data.TaggedError("IntegrationsCliError
 
 export const cliError = (message: string): IntegrationsCliError => new IntegrationsCliError({ message })
 
-// The gateway routes spell their human-readable text `error`, not `message`,
-// so an Error carrying one reads as empty until it is asked for by name.
-const explains = (failure: Error): failure is Error & { readonly error: string } =>
-  "error" in failure && Predicate.isString(failure.error) && failure.error.length > 0
-
+/** The text of a value something threw, which is not always an `Error`. */
 // oxlint-disable-next-line anti-slop/no-unknown-parameters
-export const describeError = (error: unknown): string => {
-  if (error instanceof IntegrationsCliError) return error.message
-  // A capability refusal is the one gateway error worth explaining: the
-  // credential was accepted, it just is not allowed to do this.
-  if (error instanceof Forbidden && error.code === "not-permitted") {
-    return `${error.message} (use a key of a profile with that capability, or a human session)`
-  }
-  if (error instanceof GatewayFailure) {
-    return `${error.message} (trace ${error.traceId})`
-  }
-  if (!(error instanceof Error)) return String(error)
-  if (error.message.length > 0) return error.message
-  return explains(error) ? error.error : String(error)
-}
+export const thrownMessage = (thrown: unknown): string => (thrown instanceof Error ? thrown.message : String(thrown))
 
 export const connectToGateway = Effect.fn("Cli.connectToGateway")(function* (): Effect.fn.Return<
   GatewayClient,
@@ -39,7 +21,9 @@ export const connectToGateway = Effect.fn("Cli.connectToGateway")(function* (): 
 > {
   const connection = yield* Effect.promise(() => resolveClientConnection())
   if (connection === undefined) {
-    return yield* cliError("No integrations service found. Set INTEGRATIONS_URL and INTEGRATIONS_API_KEY.")
+    return yield* cliError(
+      "No integrations gateway configured. Set INTEGRATIONS_URL and INTEGRATIONS_API_KEY, or start the local gateway with `ii serve`."
+    )
   }
   return yield* makeGatewayClient(connection)
 })

@@ -1,13 +1,12 @@
+import type { GatewayError } from "@integragents/contracts"
 import type { HttpClient } from "effect/http"
 import { Effect, Option, Schema } from "effect"
 import { whenPresent, whenPresentMap } from "@integragents/contracts"
 import { Argument, Command, Flag } from "effect/cli"
-import type { IntegrationsCliError } from "../connection.ts"
-import { cliError, describeError } from "../connection.ts"
 import type { Page, Window } from "../output.ts"
 import { jsonOutput, page, pageFields, withNext, writeStdoutLine } from "../output.ts"
 import type { ControlPlaneClient } from "../session.ts"
-import { connectToControlPlane } from "../session.ts"
+import { controlPlaneTask } from "../tasks.ts"
 
 const verboseFlag = () =>
   Flag.Boolean("verbose").pipe(
@@ -29,14 +28,6 @@ const window = (limit: Option.Option<number>, offset: Option.Option<number>): Wi
   limit: Option.getOrUndefined(limit),
   offset: Option.getOrUndefined(offset)
 })
-
-const controlPlaneTask = <A, E>(
-  task: (client: ControlPlaneClient) => Effect.Effect<A, E, HttpClient.HttpClient>
-): Effect.Effect<A, IntegrationsCliError, HttpClient.HttpClient> =>
-  connectToControlPlane().pipe(
-    Effect.flatMap(task),
-    Effect.mapError((error) => cliError(describeError(error)))
-  )
 
 const JsonObject = Schema.Record(Schema.String, Schema.Json)
 const JsonArray = Schema.Array(Schema.Json)
@@ -185,7 +176,7 @@ const targetConnections = Effect.fn("Cli.targetConnections")(function* (
   requested: Option.Option<string>
 ): Effect.fn.Return<
   ReadonlyArray<{ readonly owner: string; readonly name: string }>,
-  IntegrationsCliError,
+  GatewayError,
   HttpClient.HttpClient
 > {
   const explicit = Option.getOrUndefined(requested)

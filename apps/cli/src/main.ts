@@ -12,6 +12,7 @@ import { openBrowser } from "./connection.ts"
 import { writeStdoutLine } from "./output.ts"
 import { installService, serviceLabel, serviceProgram, startDetachedGateway, uninstallService } from "./service.ts"
 import packageMetadata from "../package.json" with { type: "json" }
+import { exitCodeHelp, exitCodes, reportFailure } from "./failure.ts"
 
 class ServeError extends Data.TaggedError("ServeError")<{ readonly message: string }> {}
 
@@ -177,7 +178,9 @@ const uninstallCommand = Command.make(
 ).pipe(Command.withDescription("Stop and deregister the gateway service"))
 
 export const rootCommand = Command.make("ii").pipe(
-  Command.withDescription("Discover, authorize, delegate, and invoke integrations through the gateway"),
+  Command.withDescription(
+    `Discover, authorize, delegate, and invoke integrations through the gateway. ${exitCodeHelp}`
+  ),
   Command.withSubcommands([
     ...operatorClientSubcommands,
     ...controlPlaneSubcommands,
@@ -197,7 +200,7 @@ export const main = async (argv: ReadonlyArray<string>): Promise<void> => {
         error.errors.length === 0
           ? Effect.void
           : Effect.sync(() => {
-              process.exitCode = 1
+              process.exitCode = exitCodes.input
             })
       ),
       commandSpan(argv),
@@ -211,7 +214,6 @@ if (import.meta.main) {
     await main(process.argv.slice(2))
     process.exitCode = process.exitCode ?? 0
   } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error))
-    process.exitCode = 1
+    process.exitCode = reportFailure(error)
   }
 }

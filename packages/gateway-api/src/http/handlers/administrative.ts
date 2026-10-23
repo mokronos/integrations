@@ -1,3 +1,4 @@
+import { AlreadyExists, InvalidInput, NotFound, ProfileRevoked } from "@integragents/contracts"
 import {
   NonNegativeInt,
   patternProblem,
@@ -36,7 +37,7 @@ import { runMaintenance } from "@integragents/gateway-core"
 import { deliverDueApprovalNotifications } from "@integragents/gateway-core"
 import { GatewayEvents, GatewayStoreService } from "@integragents/gateway-core"
 import type { GatewayResource, GatewayResourceChange } from "@integragents/gateway-core"
-import { ApiBadRequest, ApiNotFound, GatewayApi } from "../api.ts"
+import { GatewayApi } from "../api.ts"
 import { decidedBy, requireTenant } from "../authority.ts"
 import { GatewayConfig } from "../services.ts"
 import { capture } from "../observability.ts"
@@ -75,29 +76,28 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
         const tenantId = yield* requireTenant
         const rule = yield* capture(store.findApprovalRule(id))
         const profile = rule === undefined ? undefined : yield* capture(store.findProfileById(tenantId, rule.profileId))
-        if (rule === undefined || profile === undefined)
-          return yield* new ApiNotFound({ error: `Unknown approval rule ${id}` })
+        if (rule === undefined || profile === undefined) return yield* new NotFound({ resource: "approval-rule", id })
         return rule
       })
     const requireProfile = (tenantId: TenantId, id: ProfileId) =>
       Effect.gen(function* () {
         const profile = yield* capture(store.findProfileById(tenantId, id))
-        if (profile === undefined) return yield* new ApiNotFound({ error: `Unknown profile ${id}` })
+        if (profile === undefined) return yield* new NotFound({ resource: "profile", id })
         return profile
       })
     const liveProfile = (tenantId: TenantId, id: ProfileId) =>
       Effect.gen(function* () {
         const profile = yield* requireProfile(tenantId, id)
-        if (profile.revokedAt !== null) return yield* new ApiBadRequest({ error: `Profile ${profile.name} is revoked` })
+        if (profile.revokedAt !== null) return yield* new ProfileRevoked({ profile: profile.name })
         return profile
       })
     const freeName = (tenantId: TenantId, name: string, self?: ProfileId) =>
       Effect.gen(function* () {
         const trimmed = name.trim()
-        if (trimmed.length === 0) return yield* new ApiBadRequest({ error: "A profile needs a name" })
+        if (trimmed.length === 0) return yield* new InvalidInput({ field: "name", problem: "a profile needs a name" })
         const taken = yield* capture(store.findProfileByName(tenantId, trimmed))
         if (taken !== undefined && taken.id !== self) {
-          return yield* new ApiBadRequest({ error: `A profile named ${trimmed} already exists` })
+          return yield* new AlreadyExists({ resource: "profile", id: trimmed })
         }
         return trimmed
       })
@@ -113,8 +113,9 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
         for (const entry of tools) {
           const key = `${connectionRefKey(entry.connection)}\u0000${entry.tool}`
           if (entry.connection.owner === "org" && !catalog.has(key)) {
-            return yield* new ApiBadRequest({
-              error: `${entry.connection.integration}/${entry.connection.name} has no tool ${entry.tool}. Refresh the connections and try again.`
+            return yield* new NotFound({
+              resource: "tool",
+              id: `${entry.connection.integration}/${entry.connection.name}/${entry.tool}`
             })
           }
           routes.set(key, { connection: entry.connection, tool: ToolName.make(entry.tool), decision: entry.decision })
@@ -168,7 +169,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           const tenantId = yield* requireTenant
           const id = request.payload.id ?? (yield* newSubjectId)
           if ((yield* capture(store.findSubjectById(id))) !== undefined) {
-            return yield* new ApiBadRequest({ error: `Subject ${id} already exists` })
+            return yield* new AlreadyExists({ resource: "subject", id })
           }
           return yield* capture(store.createSubject({ id, tenantId }))
         })
@@ -303,7 +304,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
         Effect.gen(function* () {
           const rule = yield* ownedApprovalRule(request.params["id"])
           const problem = patternProblem(request.payload)
-          if (problem !== undefined) return yield* new ApiBadRequest({ error: problem })
+          if (problem !== undefined) return yield* new InvalidInput({ field: "pattern", problem })
           return yield* capture(store.updateApprovalRule(rule.id, request.payload))
         })
       )
@@ -325,8 +326,9 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           const tenantId = yield* requireTenant
           const url = parseDestination(request.payload.url, httpsOnlyUrlPolicy)
           if (url === undefined)
-            return yield* new ApiBadRequest({
-              error: "Webhook URL must be a public HTTPS URL without embedded credentials"
+            return yield* new InvalidInput({
+              field: "url",
+              problem: "a webhook URL must be a public HTTPS URL without embedded credentials"
             })
           const signingSecret = yield* generateApprovalSigningSecret
           const destination = yield* capture(
@@ -362,7 +364,10 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           const available = yield* capture(store.listApprovalDestinations(tenantId))
           const selected = new Set(request.payload.destinationIds)
           if (available.filter((destination) => selected.has(destination.id)).length !== selected.size) {
-            return yield* new ApiBadRequest({ error: "One or more approval destinations do not belong to this tenant" })
+            return yield* new InvalidInput({
+              field: "destinationIds",
+              problem: "one or more approval destinations do not belong to this tenant"
+            })
           }
           return {
             destinationIds: yield* capture(
@@ -377,7 +382,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           const profile = yield* liveProfile(tenantId, request.params["id"])
           const name = request.payload.name.trim()
           if (name.length === 0)
-            return yield* new ApiBadRequest({ error: "Name the key after the app that will use it" })
+            return yield* new InvalidInput({ field: "name", problem: "name the key after the app that will use it" })
           const key = yield* generateApiKey
           yield* capture(store.addApiKey({ id: key.id, profileId: profile.id, name, hash: key.hash }))
           return { id: key.id, profileId: profile.id, name, secret: key.secret }
@@ -443,10 +448,6 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
                 ...whenPresentMap("arguments", request.payload.arguments, (edited) => edited)
               }
             )
-          ).pipe(
-            Effect.catchTag("ApprovalNotFound", ({ id }) => new ApiNotFound({ error: `Unknown approval ${id}` })),
-            Effect.catchTag("ApprovalConflict", ({ message }) => new ApiBadRequest({ error: message })),
-            Effect.catchTag("ApprovalArgumentsInvalid", ({ message }) => new ApiBadRequest({ error: message }))
           )
         })
       )
@@ -463,7 +464,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
                 remember: request.payload.remember ?? false
               }
             )
-          ).pipe(Effect.catchTag("ApprovalConflict", ({ message }) => new ApiBadRequest({ error: message })))
+          )
         })
       )
       .handle("deny", (request) =>
@@ -474,9 +475,6 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
               id: request.params["id"],
               decidedBy: yield* decidedBy
             })
-          ).pipe(
-            Effect.catchTag("ApprovalNotFound", ({ id }) => new ApiNotFound({ error: `Unknown approval ${id}` })),
-            Effect.catchTag("ApprovalConflict", ({ message }) => new ApiBadRequest({ error: message }))
           )
         })
       )
@@ -489,15 +487,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           const reports: Array<DriftReport> = []
           for (const integration of slugs) {
             reports.push(
-              yield* capture(refreshIntegrationSnapshot({ store: store, integrations }, integration, tenantId)).pipe(
-                Effect.catchTag(
-                  "DriftRefreshError",
-                  (failure) =>
-                    new ApiBadRequest({
-                      error: `Could not re-read ${failure.integration}: ${String(failure.cause)}`
-                    })
-                )
-              )
+              yield* capture(refreshIntegrationSnapshot({ store: store, integrations }, integration, tenantId))
             )
           }
           return { reports }

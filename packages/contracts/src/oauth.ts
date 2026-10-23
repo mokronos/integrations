@@ -1,5 +1,6 @@
 import { Schema } from "effect"
 import { Connection } from "./connection.ts"
+import { GatewayError } from "./errors.ts"
 
 export const OAuthStart = Schema.Union([
   Schema.Struct({
@@ -18,7 +19,12 @@ export const OAuthSessionPending = Schema.Struct({ status: Schema.Literal("pendi
 export type OAuthSessionPending = typeof OAuthSessionPending.Type
 export const OAuthSessionConnected = Schema.Struct({ status: Schema.Literal("connected"), connection: Connection })
 export type OAuthSessionConnected = typeof OAuthSessionConnected.Type
-export const OAuthSessionFailed = Schema.Struct({ status: Schema.Literal("failed"), message: Schema.String })
+/** `error` is the failure in full; sessions stored before it existed carry only `message`. */
+export const OAuthSessionFailed = Schema.Struct({
+  status: Schema.Literal("failed"),
+  message: Schema.String,
+  error: Schema.optional(GatewayError)
+})
 export type OAuthSessionFailed = typeof OAuthSessionFailed.Type
 export const OAuthSessionNeedsClient = Schema.Struct({
   status: Schema.Literal("needs-client"),

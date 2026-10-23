@@ -14,6 +14,8 @@ import { when } from "@/lib/format"
 import * as gateway from "@/lib/gateway"
 import { apiKeyPlaceholder } from "@/lib/mcp"
 import { keys, useApiKeys, useGatewayUrl, useInvalidate, useMcpUrl, useMutation, useOAuthGrants } from "@/lib/queries"
+import { toastError } from "@/lib/errors"
+import { ErrorNotice } from "@/components/error-notice"
 
 type AppRow =
   | { readonly kind: "key"; readonly key: ApiKeyView }
@@ -34,7 +36,7 @@ function RevokeApp({ row, profile }: { readonly row: AppRow; readonly profile: P
       invalidate(keys.apiKeys(profile.id), keys.oauthGrants, keys.profiles)
       toast.success(`${name} can no longer call this profile`)
     },
-    onError: (error: Error) => toast.error("Could not revoke access", { description: error.message })
+    onError: (error: Error) => toastError("Could not revoke access", error)
   })
   return (
     <ConfirmButton
@@ -83,7 +85,18 @@ export function ProfileApps({ profile }: { readonly profile: Profile }) {
           </CardAction>
         </CardHeader>
         <CardContent className="p-0">
-          {apiKeys.isPending || grants.isPending ? (
+          {apiKeys.error !== null || grants.error !== null ? (
+            <div className="p-4">
+              <ErrorNotice
+                title="Could not load this profile's apps"
+                error={apiKeys.error ?? grants.error ?? new Error("Loading failed")}
+                onRetry={() => {
+                  void apiKeys.refetch()
+                  void grants.refetch()
+                }}
+              />
+            </div>
+          ) : apiKeys.isPending || grants.isPending ? (
             <div className="p-4">
               <LoadingRows rows={2} />
             </div>
@@ -156,7 +169,16 @@ export function ProfileApps({ profile }: { readonly profile: Profile }) {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {gatewayUrl.isPending || mcpUrl.isPending ? (
+          {gatewayUrl.error !== null || mcpUrl.error !== null ? (
+            <ErrorNotice
+              title="Could not load the gateway's addresses"
+              error={gatewayUrl.error ?? mcpUrl.error ?? new Error("Loading failed")}
+              onRetry={() => {
+                void gatewayUrl.refetch()
+                void mcpUrl.refetch()
+              }}
+            />
+          ) : gatewayUrl.isPending || mcpUrl.isPending ? (
             <LoadingRows rows={2} />
           ) : gatewayUrl.data === undefined || mcpUrl.data === undefined ? (
             <p className="text-muted-foreground text-sm">

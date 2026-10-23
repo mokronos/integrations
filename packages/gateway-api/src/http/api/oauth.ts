@@ -1,19 +1,16 @@
+import { InvalidInput, NotFound, NotImplemented } from "@integragents/contracts"
 import { Schema } from "effect"
-import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/http-api"
+import { HttpApiEndpoint, HttpApiGroup } from "effect/http-api"
 import { OAuthConsentDecision, OAuthConsentView, OAuthGrantId, OAuthGrantView } from "@integragents/contracts"
 import { Authority } from "../middleware.ts"
 import { RequiredAccess } from "../identity.ts"
-import { ApiBadRequestError, ApiNotFoundError } from "./shared.ts"
-
-export class ApiGone extends Schema.TaggedError<ApiGone>()("ApiGone", { error: Schema.String }) {}
-const ApiGoneError = ApiGone.pipe(HttpApiSchema.status(410))
 
 export const OAuthGroup = HttpApiGroup.make("oauth")
   .add(
     HttpApiEndpoint.get("consent", "/v1/oauth/authorization-request", {
       query: { id: Schema.String },
       success: OAuthConsentView,
-      error: [ApiNotFoundError, ApiGoneError]
+      error: [NotFound, NotImplemented]
     }).annotate(RequiredAccess, "human")
   )
   .add(
@@ -21,7 +18,7 @@ export const OAuthGroup = HttpApiGroup.make("oauth")
       query: { id: Schema.String },
       payload: OAuthConsentDecision,
       success: Schema.Struct({ redirect: Schema.String }),
-      error: [ApiNotFoundError, ApiGoneError, ApiBadRequestError]
+      error: [NotFound, NotImplemented, InvalidInput]
     }).annotate(RequiredAccess, "human")
   )
   .add(

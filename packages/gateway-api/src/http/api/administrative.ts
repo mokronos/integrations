@@ -1,3 +1,4 @@
+import { AlreadyExists, ApprovalConflict, InvalidInput, NotFound, ProfileRevoked } from "@integragents/contracts"
 import { Effect, Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/http-api"
 import {
@@ -43,7 +44,7 @@ import {
 } from "@integragents/contracts"
 import { Authority } from "../middleware.ts"
 import { RequiredAccess } from "../identity.ts"
-import { ApiBadRequestError, ApiNotFoundError, EffectiveTool, Json } from "./shared.ts"
+import { EffectiveTool, Json } from "./shared.ts"
 
 /** Settings left out keep their current value. */
 const ProfileSettingsBody = Schema.Struct({
@@ -146,7 +147,7 @@ export const AdministrativeGroup = HttpApiGroup.make("administrative")
     HttpApiEndpoint.post("createSubject", "/v1/subjects", {
       payload: CreateSubjectBody,
       success: HttpApiSchema.status(201)(SubjectView),
-      error: ApiBadRequestError
+      error: AlreadyExists
     }).annotate(RequiredAccess, "administrative")
   )
   .add(
@@ -162,7 +163,7 @@ export const AdministrativeGroup = HttpApiGroup.make("administrative")
     HttpApiEndpoint.post("createProfile", "/v1/profiles", {
       payload: CreateProfileBody,
       success: HttpApiSchema.status(201)(Profile),
-      error: [ApiNotFoundError, ApiBadRequestError]
+      error: [NotFound, InvalidInput, AlreadyExists, ProfileRevoked]
     }).annotate(RequiredAccess, "administrative")
   )
   .add(
@@ -170,7 +171,7 @@ export const AdministrativeGroup = HttpApiGroup.make("administrative")
       params: { id: ProfileId },
       payload: Schema.Struct({ name: Schema.String }),
       success: Profile,
-      error: [ApiNotFoundError, ApiBadRequestError]
+      error: [NotFound, InvalidInput, AlreadyExists, ProfileRevoked]
     }).annotate(RequiredAccess, "administrative")
   )
   .add(
@@ -178,7 +179,7 @@ export const AdministrativeGroup = HttpApiGroup.make("administrative")
       params: { id: ProfileId },
       payload: ProfileSettingsBody,
       success: Profile,
-      error: [ApiNotFoundError, ApiBadRequestError]
+      error: [NotFound, InvalidInput, AlreadyExists, ProfileRevoked]
     }).annotate(RequiredAccess, "administrative")
   )
   .add(
@@ -188,7 +189,7 @@ export const AdministrativeGroup = HttpApiGroup.make("administrative")
         schemas: BooleanFromString.pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed(false)))
       },
       success: Schema.Struct({ tools: Schema.Array(EffectiveTool) }),
-      error: ApiNotFoundError
+      error: NotFound
     }).annotate(RequiredAccess, "administrative")
   )
   .add(
@@ -196,14 +197,14 @@ export const AdministrativeGroup = HttpApiGroup.make("administrative")
       params: { id: ProfileId },
       payload: ReplaceProfileToolsBody,
       success: Schema.Struct({ tools: Schema.Array(ProfileTool) }),
-      error: [ApiNotFoundError, ApiBadRequestError]
+      error: [NotFound, InvalidInput, AlreadyExists, ProfileRevoked]
     }).annotate(RequiredAccess, "administrative")
   )
   .add(
     HttpApiEndpoint.get("listApprovalRules", "/v1/profiles/:id/approval-rules", {
       params: { id: ProfileId },
       success: Schema.Struct({ rules: Schema.Array(ApprovalRule) }),
-      error: ApiNotFoundError
+      error: NotFound
     }).annotate(RequiredAccess, "administrative")
   )
   .add(
@@ -211,14 +212,14 @@ export const AdministrativeGroup = HttpApiGroup.make("administrative")
       params: { id: ApprovalRuleId },
       payload: ArgumentPattern,
       success: ApprovalRule,
-      error: [ApiNotFoundError, ApiBadRequestError]
+      error: [NotFound, InvalidInput]
     }).annotate(RequiredAccess, "administrative")
   )
   .add(
     HttpApiEndpoint.delete("deleteApprovalRule", "/v1/approval-rules/:id", {
       params: { id: ApprovalRuleId },
       success: Schema.Struct({ deleted: Schema.Literal(true) }),
-      error: ApiNotFoundError
+      error: NotFound
     }).annotate(RequiredAccess, "administrative")
   )
   .add(
@@ -232,7 +233,7 @@ export const AdministrativeGroup = HttpApiGroup.make("administrative")
       success: HttpApiSchema.status(201)(
         Schema.Struct({ destination: ApprovalDestination, signingSecret: Schema.String })
       ),
-      error: ApiBadRequestError
+      error: InvalidInput
     }).annotate(RequiredAccess, "administrative")
   )
   .add(
@@ -245,7 +246,7 @@ export const AdministrativeGroup = HttpApiGroup.make("administrative")
     HttpApiEndpoint.get("getProfileApprovalDestinations", "/v1/profiles/:id/approval-destinations", {
       params: { id: ProfileId },
       success: Schema.Struct({ destinationIds: Schema.Array(ApprovalDestinationId) }),
-      error: ApiNotFoundError
+      error: NotFound
     }).annotate(RequiredAccess, "administrative")
   )
   .add(
@@ -253,7 +254,7 @@ export const AdministrativeGroup = HttpApiGroup.make("administrative")
       params: { id: ProfileId },
       payload: ReplaceProfileApprovalDestinationsBody,
       success: Schema.Struct({ destinationIds: Schema.Array(ApprovalDestinationId) }),
-      error: [ApiNotFoundError, ApiBadRequestError]
+      error: [NotFound, InvalidInput, AlreadyExists, ProfileRevoked]
     }).annotate(RequiredAccess, "administrative")
   )
   .add(
@@ -268,14 +269,14 @@ export const AdministrativeGroup = HttpApiGroup.make("administrative")
           secret: Schema.String
         })
       ),
-      error: [ApiNotFoundError, ApiBadRequestError]
+      error: [NotFound, InvalidInput, AlreadyExists, ProfileRevoked]
     }).annotate(RequiredAccess, "administrative")
   )
   .add(
     HttpApiEndpoint.get("listKeys", "/v1/profiles/:id/keys", {
       params: { id: ProfileId },
       success: Schema.Struct({ keys: Schema.Array(ApiKeyView) }),
-      error: ApiNotFoundError
+      error: NotFound
     }).annotate(RequiredAccess, "administrative")
   )
   .add(
@@ -291,7 +292,7 @@ export const AdministrativeGroup = HttpApiGroup.make("administrative")
         revoked: Schema.Literal(true),
         cancelledApprovals: Schema.Number
       }),
-      error: ApiNotFoundError
+      error: NotFound
     }).annotate(RequiredAccess, "administrative")
   )
   .add(
@@ -314,7 +315,7 @@ export const AdministrativeGroup = HttpApiGroup.make("administrative")
         approval: PendingApproval,
         outcome: SettledOutcome
       }),
-      error: [ApiNotFoundError, ApiBadRequestError]
+      error: [NotFound, ApprovalConflict, InvalidInput]
     }).annotate(RequiredAccess, "human")
   )
   .add(
@@ -326,21 +327,21 @@ export const AdministrativeGroup = HttpApiGroup.make("administrative")
         remember: Schema.optional(Schema.Boolean)
       }),
       success: Schema.Struct({ results: Schema.Array(DecidedApproval), rule: Schema.optional(ApprovalRule) }),
-      error: ApiBadRequestError
+      error: ApprovalConflict
     }).annotate(RequiredAccess, "human")
   )
   .add(
     HttpApiEndpoint.post("deny", "/v1/approvals/:id/deny", {
       params: { id: ApprovalId },
       success: Schema.Struct({ approval: PendingApproval }),
-      error: [ApiNotFoundError, ApiBadRequestError]
+      error: [NotFound, ApprovalConflict]
     }).annotate(RequiredAccess, "human")
   )
   .add(
     HttpApiEndpoint.post("refreshDrift", "/v1/drift/refresh", {
       query: { integration: Schema.optional(Schema.String) },
       success: Schema.Struct({ reports: Schema.Array(DriftReport) }),
-      error: ApiBadRequestError
+      error: NotFound
     }).annotate(RequiredAccess, "administrative")
   )
   .add(

@@ -25,6 +25,7 @@ import { pluralise } from "@/lib/format"
 import * as gateway from "@/lib/gateway"
 import { keys, useApprovalRules, useIntegrations, useInvalidate, useMutation, useProfileTools } from "@/lib/queries"
 import { cn } from "@/lib/utils"
+import { toastError } from "@/lib/errors"
 
 type Setting = "off" | ToolDecision
 
@@ -201,7 +202,7 @@ function ToolEditor({
       invalidate(keys.profileTools(profile.id), keys.profiles, keys.overview)
       toast.success("Tools saved")
     },
-    onError: (error: Error) => toast.error("Could not save tools", { description: error.message })
+    onError: (error: Error) => toastError("Could not save tools", error)
   })
 
   if (rows.length === 0) {

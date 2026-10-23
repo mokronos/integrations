@@ -1,14 +1,11 @@
-import type { JsonObject } from "@integragents/contracts"
-import { gatewayProtocolVersion, gatewayVersion } from "@integragents/contracts"
+import { gatewayProtocolVersion, gatewayVersion, MethodNotAllowed, NotFound } from "@integragents/contracts"
+import { errorResponse } from "../error-response.ts"
 import { Effect, Result } from "effect"
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { HttpApiBuilder } from "effect/http-api"
 import type { WebAssets } from "../../web-assets.ts"
 import { GatewayApi } from "../api.ts"
 import { ControlPlaneAssets } from "../services.ts"
-
-const json = (status: number, body: JsonObject): HttpServerResponse.HttpServerResponse =>
-  HttpServerResponse.jsonUnsafe(body, { status })
 
 const withResponseHeader = (name: string, value: string) =>
   HttpEffect.appendPreResponseHandler((_request, response) =>
@@ -63,10 +60,8 @@ const unmatched = (webAssets: WebAssets | undefined) =>
       const asset = yield* Effect.result(webAssets.respond)
       if (Result.isSuccess(asset)) return asset.success
     }
-    if (pathIsKnown(pathname)) {
-      return json(405, { error: `${request.method} is not allowed on ${pathname}` })
-    }
-    return json(404, { error: `No route for ${request.method} ${pathname}` })
+    if (pathIsKnown(pathname)) return errorResponse(new MethodNotAllowed({ method: request.method, path: pathname }))
+    return errorResponse(new NotFound({ resource: "route", id: `${request.method} ${pathname}` }))
   })
 
 export const FallbackLayer = HttpApiBuilder.group(GatewayApi, "fallback", (handlers) =>

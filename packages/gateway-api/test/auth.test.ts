@@ -213,7 +213,7 @@ describe("signup", () => {
       })
 
       expect(response.status).toBe(403)
-      expect(response.body["code"]).toBe("signup-closed")
+      expect(response.body["_tag"]).toBe("SignupClosed")
       const providers = yield* setup_.call("GET", "/v1/auth/providers")
       expect(providers.body["signupOpen"]).toBe(false)
     }).pipe(Effect.provide(testServices))
@@ -226,7 +226,7 @@ describe("signup", () => {
         body: { email: "sebastian@example.com", password: "correct horse battery" }
       })
       expect(response.status).toBe(403)
-      expect(response.body["code"]).toBe("signup-closed")
+      expect(response.body["_tag"]).toBe("SignupClosed")
     }).pipe(Effect.provide(testServices))
   )
 
@@ -236,7 +236,8 @@ describe("signup", () => {
       const short = yield* setup_.call("POST", "/v1/auth/signup", {
         body: { email: "a@example.com", password: "short" }
       })
-      expect(short.status).toBe(400)
+      expect([short.status, short.body["_tag"], short.body["field"]]).toEqual([400, "InvalidInput", "body"])
+      expect(short.body["issues"]).toEqual([expect.objectContaining({ path: "password" })])
       const malformed = yield* setup_.call("POST", "/v1/auth/signup", {
         body: { email: "not-an-email", password: "correct horse battery" }
       })
@@ -251,8 +252,8 @@ describe("signup", () => {
       const second = yield* setup_.call("POST", "/v1/auth/signup", {
         body: { email: first.email, password: "another passphrase here" }
       })
-      expect(second.status).toBe(400)
-      expect(String(second.body["error"])).toContain("already exists")
+      expect(second.status).toBe(409)
+      expect(second.body).toMatchObject({ _tag: "AlreadyExists", resource: "account", id: first.email })
     }).pipe(Effect.provide(testServices))
   )
 })
@@ -286,8 +287,8 @@ describe("login", () => {
 
       expect(wrongPassword.status).toBe(401)
       expect(unknownEmail.status).toBe(401)
-      expect(wrongPassword.body["error"]).toBe(unknownEmail.body["error"])
-      expect(wrongPassword.body["code"]).toBe("invalid-credentials")
+      expect(wrongPassword.body).toEqual(unknownEmail.body)
+      expect(wrongPassword.body["_tag"]).toBe("InvalidCredentials")
     }).pipe(Effect.provide(testServices))
   )
 })
@@ -404,8 +405,7 @@ describe("what a session may do", () => {
 
       const tools = yield* setup_.call("GET", "/v1/tools", { cookie: human.cookie })
       expect(tools.status).toBe(403)
-      expect(tools.body["code"]).toBe("not-permitted")
-      expect(tools.body["message"]).toBe("This credential does not hold the required permission")
+      expect(tools.body).toMatchObject({ _tag: "Forbidden", code: "not-permitted" })
 
       const execute = yield* setup_.call("POST", "/v1/execute", {
         body: { alias: "org___gmail___work", tool: "sendEmail" },
@@ -567,6 +567,26 @@ describe("credential precedence", () => {
     }).pipe(Effect.provide(testServices))
   )
 
+  it.effect("tells a lapsed session apart from no credential at all", () =>
+    Effect.gen(function* () {
+      const setup_ = yield* setup({ signupOpen: true })
+      const human = yield* signupHuman(setup_)
+      yield* setup_.call("POST", "/v1/auth/logout", {
+        cookie: human.cookie,
+        headers: { origin: "http://gateway.test", "sec-fetch-site": "same-origin" }
+      })
+
+      const lapsed = yield* setup_.call("GET", "/v1/profiles", { cookie: human.cookie })
+      const anonymous = yield* setup_.call("GET", "/v1/profiles")
+
+      expect([lapsed.status, lapsed.body]).toEqual([
+        401,
+        expect.objectContaining({ code: "session-expired", hint: "Sign in again" })
+      ])
+      expect([anonymous.status, anonymous.body]).toEqual([401, expect.objectContaining({ code: "missing-credential" })])
+    }).pipe(Effect.provide(testServices))
+  )
+
   it.effect("a refused key is reported even when a valid cookie sits next to it", () =>
     Effect.gen(function* () {
       const setup_ = yield* setup({ signupOpen: true })
@@ -577,8 +597,7 @@ describe("credential precedence", () => {
         headers: { authorization: "Bearer igk_not-a-real-key" }
       })
       expect(response.status).toBe(401)
-      expect(response.body["code"]).toBe("unknown-key")
-      expect(response.body["message"]).toBe("This API key is not known to the server")
+      expect(response.body).toMatchObject({ _tag: "Unauthorized", code: "unknown-key" })
     }).pipe(Effect.provide(testServices))
   )
 })

@@ -1,6 +1,6 @@
 import { chmod, mkdir, rm } from "node:fs/promises"
 import path from "node:path"
-import { Config, DateTime, Duration, Effect, Option, Predicate, Schedule, Schema } from "effect"
+import { Config, DateTime, Duration, Effect, Option, Schedule, Schema } from "effect"
 import { HttpBody, HttpClient, HttpClientRequest } from "effect/http"
 import type { HttpClientResponse, HttpMethod } from "effect/http"
 import {
@@ -14,7 +14,13 @@ import type { GatewayClient } from "@integragents/client"
 import { cliError, IntegrationsCliError } from "./connection.ts"
 import { openBrowser } from "./connection.ts"
 import type { ChildProcessSpawner } from "effect/process"
-import { optionalText, whenPresentMap } from "@integragents/contracts"
+import {
+  GatewayError,
+  GatewayUnavailable,
+  optionalText,
+  UnexpectedResponse,
+  whenPresentMap
+} from "@integragents/contracts"
 
 const OperatorSession = Schema.Struct({
   url: Schema.String,
@@ -82,26 +88,7 @@ export const clearOperatorSession = Effect.fn("Session.clear")(() =>
 
 const decodeJsonText = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))
 
-const messageFrom = (payload: typeof Schema.Json.Type, fallback: string): string => {
-  if (Predicate.isObject(payload)) {
-    const message = payload["message"]
-    if (Predicate.isString(message) && message.length > 0) return message
-    const error = payload["error"]
-    if (Predicate.isString(error) && error.length > 0) return error
-  }
-  return fallback
-}
-
-const responseJson = Effect.fn("Session.responseJson")((response: HttpClientResponse.HttpClientResponse) =>
-  response.text.pipe(
-    Effect.mapError((cause) => cliError(cause.message)),
-    Effect.flatMap((source) =>
-      source.trim().length === 0
-        ? Effect.succeed<typeof Schema.Json.Type>({})
-        : decodeJsonText(source).pipe(Effect.mapError((cause) => cliError(cause.message)))
-    )
-  )
-)
+const decodeGatewayError = Schema.decodeUnknownOption(GatewayError)
 
 const gatewayCall = Effect.fn("Session.call")(function* (
   method: HttpMethod.HttpMethod,
@@ -112,18 +99,22 @@ const gatewayCall = Effect.fn("Session.call")(function* (
   } = {}
 ): Effect.fn.Return<
   { readonly response: HttpClientResponse.HttpClientResponse; readonly payload: typeof Schema.Json.Type },
-  IntegrationsCliError,
+  GatewayError,
   HttpClient.HttpClient
 > {
   const request = HttpClientRequest.make(method)(url, { headers: options.headers ?? {} })
   const response = yield* HttpClient.execute(
     options.body === undefined ? request : HttpClientRequest.setBody(request, HttpBody.jsonUnsafe(options.body))
-  ).pipe(Effect.mapError((cause) => cliError(cause.message)))
-  return { response, payload: yield* responseJson(response) }
+  ).pipe(Effect.mapError((cause) => new GatewayUnavailable({ url: new URL(url).origin, detail: cause.message })))
+  const source = yield* response.text.pipe(
+    Effect.mapError((cause) => new GatewayUnavailable({ url: new URL(url).origin, detail: cause.message }))
+  )
+  const unexpected = new UnexpectedResponse({ method, url, status: response.status })
+  const payload =
+    source.trim().length === 0 ? {} : yield* decodeJsonText(source).pipe(Effect.mapError(() => unexpected))
+  if (response.status >= 200 && response.status < 300) return { response, payload }
+  return yield* Option.getOrElse(decodeGatewayError(payload), (): GatewayError => unexpected)
 })
-
-const isOk = (response: HttpClientResponse.HttpClientResponse): boolean =>
-  response.status >= 200 && response.status < 300
 
 const CliLoginStart = Schema.Struct({
   requestId: Schema.String,
@@ -155,24 +146,16 @@ const sessionToken = (response: HttpClientResponse.HttpClientResponse): Effect.E
     : Effect.succeed(match[1])
 }
 
-const verifyGateway = (url: string): Effect.Effect<void, IntegrationsCliError, HttpClient.HttpClient> =>
-  readGatewayMetadata(url).pipe(
-    Effect.mapError((cause) => cliError(cause.message)),
-    Effect.asVoid
-  )
+const verifyGateway = (url: string): Effect.Effect<void, GatewayError, HttpClient.HttpClient> =>
+  Effect.asVoid(readGatewayMetadata(url))
 
 export const loginOperator = Effect.fn("Session.login")(function* (input: {
   readonly email: string
   readonly password: string
-}): Effect.fn.Return<OperatorSession, IntegrationsCliError, HttpClient.HttpClient> {
+}): Effect.fn.Return<OperatorSession, IntegrationsCliError | GatewayError, HttpClient.HttpClient> {
   const url = yield* resolveGatewayUrl()
   yield* verifyGateway(url)
-  const { response, payload } = yield* gatewayCall("POST", `${url}/v1/auth/login`, {
-    body: input
-  })
-  if (!isOk(response)) {
-    return yield* cliError(messageFrom(payload, `Login failed with ${response.status}`))
-  }
+  const { response } = yield* gatewayCall("POST", `${url}/v1/auth/login`, { body: input })
   const session = yield* decoded(
     decodeSession({
       url,
@@ -192,15 +175,12 @@ export const loginOperatorInBrowser = Effect.fn("Session.loginInBrowser")(functi
   } = {}
 ): Effect.fn.Return<
   OperatorSession,
-  IntegrationsCliError,
+  IntegrationsCliError | GatewayError,
   ChildProcessSpawner.ChildProcessSpawner | HttpClient.HttpClient
 > {
   const url = yield* resolveGatewayUrl()
   yield* verifyGateway(url)
   const started = yield* gatewayCall("POST", `${url}/v1/auth/cli/start`)
-  if (!isOk(started.response)) {
-    return yield* cliError(messageFrom(started.payload, `Browser login failed with ${started.response.status}`))
-  }
   const start = yield* decoded(decodeLoginStart(started.payload))
   if (options.onAuthorization !== undefined) {
     yield* attempt(() => options.onAuthorization!(start.authorizationUrl))
@@ -215,9 +195,6 @@ export const loginOperatorInBrowser = Effect.fn("Session.loginInBrowser")(functi
   )
   const settled = yield* Effect.gen(function* () {
     const polled = yield* gatewayCall("GET", `${url}/v1/auth/cli/${encodeURIComponent(start.requestId)}`)
-    if (!isOk(polled.response)) {
-      return yield* cliError(messageFrom(polled.payload, `Browser login failed with ${polled.response.status}`))
-    }
     const poll = yield* decoded(decodeLoginPoll(polled.payload))
     if (poll.status !== "authenticated") return undefined
     return yield* decoded(decodeSession({ url, token: poll.token, email: poll.email }))
@@ -239,15 +216,10 @@ export const signupOperator = Effect.fn("Session.signup")(function* (input: {
   readonly email: string
   readonly password: string
   readonly tenantName?: string
-}): Effect.fn.Return<OperatorSession, IntegrationsCliError, HttpClient.HttpClient> {
+}): Effect.fn.Return<OperatorSession, IntegrationsCliError | GatewayError, HttpClient.HttpClient> {
   const url = yield* resolveGatewayUrl()
   yield* verifyGateway(url)
-  const { response, payload } = yield* gatewayCall("POST", `${url}/v1/auth/signup`, {
-    body: input
-  })
-  if (!isOk(response)) {
-    return yield* cliError(messageFrom(payload, `Signup failed with ${response.status}`))
-  }
+  const { response } = yield* gatewayCall("POST", `${url}/v1/auth/signup`, { body: input })
   const session = yield* decoded(
     decodeSession({
       url,
@@ -265,24 +237,21 @@ export interface ControlPlaneClient {
     method: "GET" | "POST" | "DELETE",
     route: string,
     body?: typeof Schema.Json.Type
-  ) => Effect.Effect<typeof Schema.Json.Type, IntegrationsCliError, HttpClient.HttpClient>
+  ) => Effect.Effect<typeof Schema.Json.Type, GatewayError, HttpClient.HttpClient>
 }
 
 const controlPlaneRequest = (url: string, headers: Record<string, string>): ControlPlaneClient["request"] =>
   Effect.fn("Session.controlPlaneRequest")(function* (method, route, body) {
-    const { response, payload } = yield* gatewayCall(method, `${url}${route}`, {
+    const { payload } = yield* gatewayCall(method, `${url}${route}`, {
       headers,
       ...whenPresentMap("body", body, (present) => present)
     })
-    if (!isOk(response)) {
-      return yield* cliError(messageFrom(payload, `${method} ${route} failed with ${response.status}`))
-    }
     return payload
   })
 
 export const connectToControlPlane = Effect.fn("Session.connectToControlPlane")(function* (): Effect.fn.Return<
   ControlPlaneClient,
-  IntegrationsCliError,
+  IntegrationsCliError | GatewayError,
   HttpClient.HttpClient
 > {
   const session = yield* readOperatorSession()

@@ -6,7 +6,7 @@ import { makeGatewayEvents, publishingStore } from "@integragents/gateway-core"
 import type { ApprovalReviewer, OAuthSessions } from "@integragents/gateway-core"
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client"
 import type { Connection, ConnectionOwner, Tool } from "@integragents/contracts"
-import { InvocationError } from "@integragents/integrations"
+import { InvocationError, StorageError } from "@integragents/integrations"
 import { stubIntegrationsContext } from "./stubs.ts"
 import { openDatabase, storeOn, temporaryDirectory } from "./fixtures.ts"
 import {
@@ -69,6 +69,8 @@ const stubIntegrations = (
   behaviour: {
     readonly beforeExecute?: () => Promise<void>
     readonly fail?: boolean
+    /** The catalog's storage breaks under every connection listing. */
+    readonly storageFails?: boolean
     readonly connections?: ReadonlyArray<{ readonly integration: string; readonly name: string }>
     /** Integrations known to the catalog that offer OAuth, connected or not. */
     readonly oauthIntegrations?: ReadonlyArray<string>
@@ -94,7 +96,8 @@ const stubIntegrations = (
           behaviour.fail === true
             ? Effect.fail(
                 new InvocationError({
-                  code: "upstream_error",
+                  code: "upstream_status",
+                  status: 500,
                   detail: "vendor exploded"
                 })
               )
@@ -117,7 +120,10 @@ const stubIntegrations = (
           required: ["to"]
         }
       }),
-    listConnections: () => Effect.succeed((behaviour.connections ?? []).map(stubConnection)),
+    listConnections: () =>
+      behaviour.storageFails === true
+        ? Effect.fail(new StorageError({ message: "listConnections" }))
+        : Effect.succeed((behaviour.connections ?? []).map(stubConnection)),
     removeConnection: (reference) =>
       Effect.sync(() => {
         removed.push({ integration: reference.integration, name: reference.name })
@@ -168,6 +174,8 @@ export const setup = Effect.fnUntraced(function* (
     readonly mcpSurface?: "tools" | "discovery"
     readonly beforeExecute?: () => Promise<void>
     readonly fail?: boolean
+    /** The catalog's storage breaks under every connection listing. */
+    readonly storageFails?: boolean
     readonly connections?: ReadonlyArray<{ readonly integration: string; readonly name: string }>
     readonly tools?: ReadonlyArray<{
       readonly address: string
@@ -202,6 +210,7 @@ export const setup = Effect.fnUntraced(function* (
   const stub = stubIntegrations({
     ...whenPresent("beforeExecute", options.beforeExecute),
     ...whenPresent("fail", options.fail),
+    ...whenPresent("storageFails", options.storageFails),
     ...whenPresent("connections", options.connections),
     ...whenPresent("tools", options.tools),
     ...whenPresent("oauthIntegrations", options.oauthIntegrations)
