@@ -20,7 +20,8 @@ const repos: ReadonlyArray<Repo> = [
     name: "executor",
     url: "https://github.com/UsefulSoftwareCo/executor.git",
     branches: [{ name: "executor-v2", branch: "v2" }]
-  }
+  },
+  { name: "t3code", url: "https://github.com/pingdotgg/t3code.git" }
 ]
 
 await mkdir(REFERENCE_DIR, { recursive: true })
