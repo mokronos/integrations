@@ -30,6 +30,21 @@ Migrations must keep the app online. A gateway applies them when it starts, whil
 
 - Never use `any` or `unknown`. Model every compile-time-known shape with Effect Schema (the schema is the single source of truth; derive TS types via `typeof X.Type`), brand identifiers where mix-ups are possible, and parse external/dynamic data at the boundary with `Schema.decodeUnknown*` instead of casting. No `as` casts to silence the compiler.
 
+## Errors
+
+- **One typed error per failure a caller can act on.** Callers receive the
+  classes in `packages/contracts/src/errors.ts`; each carries its HTTP status,
+  structured fields, and `message`/`hint`/`retryable` getters built from those
+  fields only. Never copy `cause.message` into a field; bounded upstream text
+  goes in a named field such as `detail`.
+- **Translate once, at the boundary.** Domain errors map to contract errors in
+  `toGatewayError` (gateway-core). Storage failures go through `capture` and
+  leave as a `GatewayFailure` trace id, never as text.
+- **Surfaces only render.** HTTP encodes the error, MCP uses `describeError`
+  plus `structuredContent`, the CLI uses `reportFailure` (stderr, exit code by
+  category), the dashboard uses `ErrorNotice`/`toastError`. Don't add
+  surface-specific wording for a failure; fix its class instead.
+
 ## Two ways to hurt yourself
 
 1. **Killing by pattern.** Your own shell's argv contains the same paths and ports as the process you mean, so `pkill -f` / `pgrep | kill` can kill you or another gateway on this machine. Stop only a PID you recorded at spawn, or the listener of your port (`ss -ltnpH 'sport = :<port>'`) after checking `/proc/<pid>/cwd` is this checkout.
