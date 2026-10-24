@@ -1,5 +1,13 @@
-import { connectionOwner, connectionRefOf, isDelegationTemplate, whenPresent } from "@integragents/contracts"
-import type { Json, ToolAddress, ToolSummary } from "@integragents/contracts"
+import {
+  connectionOwner,
+  connectionRefOf,
+  connectionResourceUri,
+  declaredUi,
+  isDelegationTemplate,
+  whenPresent,
+  whenPresentMap
+} from "@integragents/contracts"
+import type { Json, SubjectId, ToolAddress, ToolIcon, ToolMeta, ToolSummary, ToolUi } from "@integragents/contracts"
 import { Effect, Option } from "effect"
 import type { Integrations } from "@integragents/integrations"
 import { aliasForConnection } from "../domain.ts"
@@ -26,12 +34,18 @@ export type EffectiveTool = {
   readonly readOnly?: boolean
   readonly destructive?: boolean
   readonly idempotent?: boolean
+  readonly openWorld?: boolean
+  readonly title?: string
   readonly description?: string
   readonly inputSchema?: Json
   readonly outputSchema?: Json
+  readonly icons?: ReadonlyArray<ToolIcon>
+  readonly meta?: ToolMeta
+  /** The MCP App its results render in, its view addressed through the gateway. */
+  readonly ui?: ToolUi
 }
 
-type ToolHints = Pick<ToolSummary, "readOnly" | "destructive" | "idempotent">
+type ToolHints = Pick<ToolSummary, "readOnly" | "destructive" | "idempotent" | "openWorld" | "title">
 
 /** A template names no connection of its own, so any user's connection of that name speaks for its tools. */
 const hintKey = (integration: string, owner: string, connection: string, tool: string): string =>
@@ -49,6 +63,12 @@ const hintKeyOf = (connection: ConnectionRef, tool: ToolName): string =>
  * A profile's tools with their decisions. Given the integration host, each one
  * also carries what its source says about it, and its schemas when asked for.
  */
+/** A delegated tool acts for the credential's own person, so a credential bound to nobody cannot reach one. */
+export const reachableBy =
+  (subject: SubjectId | undefined) =>
+  (tool: EffectiveTool): boolean =>
+    subject !== undefined || !isDelegationTemplate(tool.connection)
+
 export const listEffectiveTools = Effect.fn("Invocation.listEffectiveTools")(function* (
   store: ProfileStore,
   profileId: ProfileId,
@@ -75,7 +95,13 @@ export const listEffectiveTools = Effect.fn("Invocation.listEffectiveTools")(fun
         )
       )
     for (const summary of summaries) {
-      const hinted = { readOnly: summary.readOnly, destructive: summary.destructive, idempotent: summary.idempotent }
+      const hinted: ToolHints = {
+        readOnly: summary.readOnly,
+        destructive: summary.destructive,
+        idempotent: summary.idempotent,
+        openWorld: summary.openWorld,
+        ...whenPresent("title", summary.title)
+      }
       hints.set(hintKey(summary.integration, summary.owner, summary.connection, summary.name), hinted)
       if (summary.owner !== "org")
         hints.set(hintKey(summary.integration, "user", summary.connection, summary.name), hinted)
@@ -91,7 +117,9 @@ export const listEffectiveTools = Effect.fn("Invocation.listEffectiveTools")(fun
       delegated: isDelegationTemplate(profileTool.connection),
       ...whenPresent("readOnly", hinted?.readOnly),
       ...whenPresent("destructive", hinted?.destructive),
-      ...whenPresent("idempotent", hinted?.idempotent)
+      ...whenPresent("idempotent", hinted?.idempotent),
+      ...whenPresent("openWorld", hinted?.openWorld),
+      ...whenPresent("title", hinted?.title)
     }
   })
   if (options.schemas !== true || host === undefined) return base
@@ -115,9 +143,16 @@ export const listEffectiveTools = Effect.fn("Invocation.listEffectiveTools")(fun
     host.describeTool(address).pipe(
       Effect.map((described) => ({
         ...entry,
+        ...whenPresent("title", described.title),
         ...whenPresent("description", described.description),
         ...whenPresent("inputSchema", described.inputSchema),
-        ...whenPresent("outputSchema", described.outputSchema)
+        ...whenPresent("outputSchema", described.outputSchema),
+        ...whenPresent("icons", described.icons),
+        ...whenPresent("meta", described.meta),
+        ...whenPresentMap("ui", declaredUi(described.meta), (ui) => ({
+          ...ui,
+          resourceUri: connectionResourceUri(entry.alias, ui.resourceUri)
+        }))
       })),
       Effect.catch((failure) =>
         Effect.as(

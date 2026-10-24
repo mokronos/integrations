@@ -20,6 +20,7 @@ import type {
 } from "../domain.ts"
 import { hashApiKey } from "../keys.ts"
 import { Crypto, Effect, Schema } from "effect"
+import { whenPresent } from "@integragents/contracts"
 import type { ProfileStore } from "../store/index.ts"
 import type { GatewayStoreError } from "../store/index.ts"
 
@@ -65,12 +66,14 @@ export const authorizeInvocation = Effect.fn("Authorization.authorizeInvocation"
     readonly secret: string
     readonly alias: Alias
     readonly tool: ToolName
-    readonly subject?: SubjectId
   }
 ): Effect.fn.Return<Authorization, GatewayStoreError, Crypto.Crypto> {
   const authentication = yield* authenticateKey(store, input.secret)
   if (authentication.status !== "authenticated") return authentication
-  return yield* authorizeProfileInvocation(store, authentication.profile, input)
+  return yield* authorizeProfileInvocation(store, authentication.profile, {
+    ...input,
+    ...whenPresent("subject", authentication.key.subjectId ?? undefined)
+  })
 })
 
 /**
@@ -120,7 +123,7 @@ export const authorizeProfileInvocation = Effect.fn("Authorization.authorizeProf
         status: "not-authorized",
         alias: input.alias,
         tool: input.tool,
-        message: `${input.alias}.${input.tool} acts on behalf of a user; the invocation must name a subject`
+        message: `${input.alias}.${input.tool} acts for one person, and this credential is not bound to a subject`
       }
     }
     connection = { owner: "user", subject: input.subject, integration: connection.integration, name: connection.name }

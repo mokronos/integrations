@@ -29,6 +29,10 @@ const definition: HostIntegrationDefinition = {
 const unusedMcp = Layer.succeed(McpClient, {
   probe: () => Effect.die("unused"),
   listTools: () => Effect.die("unused"),
+  listResources: () => Effect.die("unused"),
+  readResource: () => Effect.die("unused"),
+  listSkills: () => Effect.die("unused"),
+  getSkill: () => Effect.die("unused"),
   callTool: () => Effect.die("unused")
 })
 
@@ -115,7 +119,7 @@ describe("host integrations", () => {
 
       const execution = yield* host.execute(tool.address, { command: "ls" }, undefined, context)
 
-      expect(execution).toEqual({ kind: "complete", result: { ran: "vm.exec" } })
+      expect(execution).toEqual({ kind: "complete", result: { ran: "vm.exec" }, attachments: [] })
       expect(seen).toEqual([
         {
           address: tool.address,

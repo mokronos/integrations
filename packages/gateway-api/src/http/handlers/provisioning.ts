@@ -111,7 +111,8 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
       .handle("validate", (request) =>
         Effect.gen(function* () {
           const caller = yield* Identity
-          const profileId = caller.kind === "key" || caller.kind === "local" ? caller.profile.id : undefined
+          const profileId =
+            caller.kind === "key" || caller.kind === "local" || caller.kind === "grant" ? caller.profile.id : undefined
           return yield* validateReference(profileId, request.payload.node, request.payload.live ?? true)
         })
       )

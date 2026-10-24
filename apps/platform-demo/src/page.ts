@@ -33,7 +33,7 @@ const toolRow = (tool: EffectiveTool, withSchema: boolean): string => `
 
 const authorizationLink = (outcome: InvocationOutcome): string =>
   outcome.status === "authorization-required" && outcome.session.state.status === "pending"
-    ? `<p>The user <code>${escape(outcome.subject)}</code> has not connected <code>${escape(outcome.integration)}</code> yet.
+    ? `<p>The user <code>${escape(outcome.subject ?? "this user")}</code> has not connected <code>${escape(outcome.integration)}</code> yet.
       <a href="${escape(outcome.session.state.authorizationUrl)}" target="_blank">Authorize</a>, then run the call again.</p>`
     : ""
 

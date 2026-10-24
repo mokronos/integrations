@@ -127,6 +127,10 @@ export const publishingIntegrations = (
     removeIntegration: (slug) => after(integrations.removeIntegration(slug)),
     createConnection: (options) => after(integrations.createConnection(options)),
     removeConnection: (reference) => after(integrations.removeConnection(reference)),
-    refreshConnection: (reference) => after(integrations.refreshConnection(reference))
+    refreshConnection: (reference) => after(integrations.refreshConnection(reference)),
+    refreshDueConnections: () =>
+      Effect.tap(integrations.refreshDueConnections(), (changed) =>
+        changed.length === 0 ? Effect.void : events.publish({ tenantId: undefined, resource: "integrations" })
+      )
   }
 }

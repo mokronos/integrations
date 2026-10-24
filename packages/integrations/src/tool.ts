@@ -5,7 +5,9 @@ import {
   IntegrationSlug,
   ConnectionOwner,
   ParameterLocation,
-  ToolAddress
+  ToolAddress,
+  ToolIcon,
+  ToolMeta
 } from "@integragents/contracts"
 export { HttpMethod, ParameterLocation } from "@integragents/contracts"
 
@@ -48,10 +50,14 @@ export const Tool = Schema.Struct({
   integration: IntegrationSlug,
   connection: ConnectionName,
   name: Schema.String,
+  title: Schema.optional(Schema.String),
   description: Schema.String,
   readOnly: Schema.Boolean,
   destructive: Schema.Boolean,
   idempotent: Schema.Boolean,
+  openWorld: Schema.Boolean,
+  icons: Schema.optional(Schema.Array(ToolIcon)),
+  meta: Schema.optional(ToolMeta),
   inputSchema: Schema.optional(Schema.Json),
   outputSchema: Schema.optional(Schema.Json),
   call: ToolCall,

@@ -296,8 +296,9 @@ uses these parts of the embedding API. All of them come from
   by maintenance as failed with an unknown outcome. It is never run again.
 - **Approval expiry and subjects per profile.** A profile's
   `approvalExpiryMinutes` sets how long its calls wait; `null` waits until
-  someone decides. `subjects: "any" | SubjectId[]` limits whom it may act for;
-  an invocation naming anyone else is denied and audited.
+  someone decides. `subjects: "any" | SubjectId[]` limits whom it may act for:
+  keys are issued and logins approved only for those, and a call for anyone
+  else is denied and audited.
 - **Host tools.** `registerHostIntegration({ store, integrations, definition })`
   catalogs tools the host runs itself (name, description, input schema,
   `readOnly`/`destructive`/`idempotent` hints, a `handler`), on one org
@@ -350,9 +351,14 @@ const invoke = Effect.gen(function* () {
 A tool can act for the person the agent is serving rather than for the
 organisation. The administrator enables it on a delegation template: a
 user-owned connection with no subject, so its alias reads `user___gmail___work`
-rather than naming anyone. Every invocation of such a tool names a subject,
-the gateway's id for that person, which an administrator mirrors from the
-application's own users through `POST /v1/subjects`.
+rather than naming anyone. Such a tool acts for the subject, the gateway's id
+for a person, that the caller's credential belongs to; no call names one. A
+login through `i login` or an MCP client belongs to whoever approved it. An API
+key belongs to the subject it was issued for (`POST /v1/profiles/:id/keys` with
+`subject`), which an administrator mirrors from the application's own users
+through `POST /v1/subjects`. A credential without a subject does not see
+delegated tools. An embedding host that identifies its users itself passes the
+subject to `invokeAsProfile`.
 
 The first call for a subject who has not connected yet does not fail. The
 gateway starts the OAuth flow bound to that subject and answers

@@ -144,17 +144,20 @@ const reconcileOnStart: Layer.Layer<never, GatewayStoreError | StorageError, Gat
 
 const maintenanceLayer = (
   options: Pick<GatewayCoreOptions, "publicUrlOf" | "executionLease">
-): Layer.Layer<never, never, GatewayStoreService | BlobStore | HttpClient.HttpClient> =>
+): Layer.Layer<never, never, GatewayStoreService | BlobStore | Integrations | HttpClient.HttpClient> =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const store = yield* GatewayStoreService
       const blobs = yield* BlobStore
+      const integrations = yield* Integrations
       const publicUrlOf = options.publicUrlOf
       yield* Effect.forkScoped(
         maintenanceLoop(store, blobs, {
           ...whenPresent("executionLease", options.executionLease),
           afterSweep: Effect.suspend(() =>
-            deliverDueApprovalNotifications({ store, ...whenPresent("dashboardUrl", publicUrlOf?.()) })
+            deliverDueApprovalNotifications({ store, ...whenPresent("dashboardUrl", publicUrlOf?.()) }).pipe(
+              Effect.andThen(integrations.refreshDueConnections())
+            )
           )
         }).pipe(Effect.provide(webCryptoLayer))
       )

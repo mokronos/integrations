@@ -23,12 +23,17 @@ export const stubIntegrations = (overrides: Partial<Integrations["Service"]> = {
   listConnections: () => Effect.succeed([]),
   removeConnection: dies("removeConnection"),
   refreshConnection: dies("refreshConnection"),
+  refreshDueConnections: () => Effect.succeed([]),
   recompileOpenApiTools: () => Effect.void,
   registerHostIntegration: dies("registerHostIntegration"),
   toolSummaries: () => Effect.succeed([]),
   listTools: () => Effect.succeed([]),
   describeTool: (target) => Effect.fail(new NotFound({ resource: "tool", id: String(target) })),
   execute: dies("execute"),
+  listResources: () => Effect.succeed([]),
+  readResource: dies("readResource"),
+  listSkills: () => Effect.succeed([]),
+  getSkill: () => Effect.succeed(Option.none()),
   ...overrides
 })
 
@@ -52,6 +57,8 @@ const catalogStore: CatalogStore["Service"] = {
   putConnection: dies("CatalogStore.putConnection"),
   removeConnection: dies("CatalogStore.removeConnection"),
   requireReconnect: dies("CatalogStore.requireReconnect"),
+  scheduleToolRefresh: () => Effect.void,
+  connectionsDueForRefresh: () => Effect.succeed([]),
   listOAuthClients: dies("CatalogStore.listOAuthClients"),
   findOAuthClient: dies("CatalogStore.findOAuthClient"),
   putOAuthClient: dies("CatalogStore.putOAuthClient"),
@@ -78,14 +85,19 @@ export const stubIntegrationsContext = (
   reading: {
     readonly mcp?: Partial<McpClient["Service"]>
     readonly specs?: Partial<SpecCache["Service"]>
+    readonly blobs?: BlobStore["Service"]
   } = {}
 ): Context.Context<IntegrationServices> =>
   Context.empty().pipe(
     Context.add(Integrations, stubIntegrations(overrides)),
-    Context.add(BlobStore, stubBlobStore),
+    Context.add(BlobStore, reading.blobs ?? stubBlobStore),
     Context.add(McpClient, {
       probe: dies("McpClient.probe"),
       listTools: dies("McpClient.listTools"),
+      listResources: dies("McpClient.listResources"),
+      readResource: dies("McpClient.readResource"),
+      listSkills: dies("McpClient.listSkills"),
+      getSkill: dies("McpClient.getSkill"),
       callTool: dies("McpClient.callTool"),
       ...reading.mcp
     }),

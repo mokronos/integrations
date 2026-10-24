@@ -3,6 +3,7 @@ import { Base64Url, Hex } from "effect/encoding"
 import { utf8Bytes } from "@integragents/contracts"
 import {
   ApiKeyHash,
+  AppSessionId,
   ApiKeyId,
   ApprovalId,
   ApprovalDeliveryId,
@@ -99,6 +100,11 @@ export const newApprovalDeliveryId: Effect.Effect<ApprovalDeliveryId, never, Cry
   ApprovalDeliveryId.make
 )
 export const newAuditId: Effect.Effect<AuditId, never, Crypto.Crypto> = Effect.map(uuid, AuditId.make)
+/** Unguessable, since the link a person opens names it. */
+export const newAppSessionId: Effect.Effect<AppSessionId, never, Crypto.Crypto> = Effect.map(
+  prefixedSecret("igapp_"),
+  AppSessionId.make
+)
 export const newTenantId: Effect.Effect<TenantId, never, Crypto.Crypto> = Effect.map(uuid, TenantId.make)
 export const newSubjectId: Effect.Effect<SubjectId, never, Crypto.Crypto> = Effect.map(uuid, SubjectId.make)
 export const newOAuthApplicationId: Effect.Effect<OAuthApplicationId, never, Crypto.Crypto> = Effect.map(
@@ -110,4 +116,14 @@ export const newOAuthRequestId: Effect.Effect<string, never, Crypto.Crypto> = pr
 export const newOAuthAuthorizationCode: Effect.Effect<string, never, Crypto.Crypto> = prefixedSecret("igoc_")
 export const newOAuthAccessToken: Effect.Effect<string, never, Crypto.Crypto> = prefixedSecret("igoa_")
 export const newOAuthRefreshToken: Effect.Effect<string, never, Crypto.Crypto> = prefixedSecret("igorf_")
+export const newOAuthDeviceCode: Effect.Effect<string, never, Crypto.Crypto> = prefixedSecret("igod_")
+
+/** Consonants only, so a code reads aloud cleanly and never spells a word. */
+const userCodeAlphabet = "BCDFGHJKLMNPQRSTVWXZ"
+
+/** Eight letters a person types from one screen into another, as `ABCD-EFGH`. */
+export const newOAuthUserCode: Effect.Effect<string, never, Crypto.Crypto> = Effect.map(randomBytes(8), (bytes) => {
+  const letters = Array.from(bytes, (byte) => userCodeAlphabet[byte % userCodeAlphabet.length]).join("")
+  return `${letters.slice(0, 4)}-${letters.slice(4)}`
+})
 export const newOAuthTokenFamilyId: Effect.Effect<string, never, Crypto.Crypto> = Effect.map(uuid, (value) => value)

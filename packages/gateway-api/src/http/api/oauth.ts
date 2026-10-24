@@ -22,6 +22,21 @@ export const OAuthGroup = HttpApiGroup.make("oauth")
     }).annotate(RequiredAccess, "human")
   )
   .add(
+    HttpApiEndpoint.get("deviceConsent", "/v1/oauth/device-request", {
+      query: { code: Schema.String },
+      success: OAuthConsentView,
+      error: [NotFound, NotImplemented]
+    }).annotate(RequiredAccess, "human")
+  )
+  .add(
+    HttpApiEndpoint.post("decideDeviceConsent", "/v1/oauth/device-request", {
+      query: { code: Schema.String },
+      payload: OAuthConsentDecision,
+      success: Schema.Struct({ approved: Schema.Boolean }),
+      error: [NotFound, NotImplemented, InvalidInput]
+    }).annotate(RequiredAccess, "human")
+  )
+  .add(
     HttpApiEndpoint.get("listGrants", "/v1/oauth/grants", {
       success: Schema.Struct({ grants: Schema.Array(OAuthGrantView) })
     }).annotate(RequiredAccess, "human")

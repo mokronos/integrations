@@ -73,6 +73,8 @@ const AuthenticationOutput = Schema.Struct({
   authenticated: Schema.Boolean,
   email: Schema.optional(Schema.String)
 })
+const LoginPending = Schema.Struct({ status: Schema.Literal("pending"), code: Schema.String, url: Schema.String })
+const LoginDone = Schema.Struct({ status: Schema.Literal("authenticated") })
 const CatalogOutput = Schema.Struct({
   oauthCallbackUrl: Schema.optional(Schema.NullOr(Schema.String))
 })
@@ -188,11 +190,15 @@ const startVendor = Effect.acquireRelease(
 const listening = /listening at (\S+)/
 
 /** `ii serve` in its own process, stopped with the test's scope once it announces its URL. */
-const serveProcess = (args: ReadonlyArray<string>, environment: Readonly<Record<string, string | undefined>>) =>
+const serveProcess = (
+  args: ReadonlyArray<string>,
+  environment: Readonly<Record<string, string | undefined>>,
+  port = 0
+) =>
   Effect.acquireRelease(
     Effect.promise(async () => {
       const subprocess = Bun.spawn({
-        cmd: [process.execPath, "run", operatorCli, "serve", "--port", "0", ...args],
+        cmd: [process.execPath, "run", operatorCli, "serve", "--port", String(port), ...args],
         cwd: repoRoot,
         stdout: "pipe",
         stderr: "pipe",
@@ -219,13 +225,17 @@ const serveProcess = (args: ReadonlyArray<string>, environment: Readonly<Record<
   )
 
 /** A gateway serving on a loopback port, stopped with the test's scope. */
-const startGateway = Effect.fnUntraced(function* (registryUrl?: string) {
+const startGateway = Effect.fnUntraced(function* (registryUrl?: string, port?: number) {
   const home = yield* temporaryDirectory("integrations-acceptance-")
-  const gateway = yield* serveProcess([], {
-    ...process.env,
-    INTEGRATIONS_HOME: home,
-    INTEGRATIONS_REGISTRY_URL: registryUrl
-  })
+  const gateway = yield* serveProcess(
+    [],
+    {
+      ...process.env,
+      INTEGRATIONS_HOME: home,
+      INTEGRATIONS_REGISTRY_URL: registryUrl
+    },
+    port
+  )
   const config = yield* Effect.promise(() => Bun.file(path.join(home, "gateway.json")).text())
   const { apiKey } = parseOutput(ApiKeyConfig, config)
   const operatorConfig = yield* Effect.promise(() => Bun.file(path.join(home, "operator-gateway.json")).text())
@@ -244,6 +254,14 @@ const startGateway = Effect.fnUntraced(function* (registryUrl?: string) {
       NO_COLOR: "1"
     }
   }
+})
+
+/** A port nothing listens on, so a gateway can know its own URL before it starts, as a deployed one does. */
+const freePort = Effect.sync(() => {
+  const probe = Bun.serve({ port: 0, fetch: () => new Response() })
+  const port = probe.port ?? 0
+  probe.stop(true)
+  return port
 })
 
 /** A gateway reachable off loopback, as a deployed one would be. */
@@ -281,6 +299,59 @@ const loginOperator = Effect.fnUntraced(function* (gateway: {
 })
 
 describe("integrations CLI acceptance", () => {
+  it.live(
+    "i logs in with a code a person approves in the dashboard, then calls as that profile",
+    () =>
+      Effect.gen(function* () {
+        const gateway = yield* startGateway(undefined, yield* freePort)
+        yield* loginOperator(gateway)
+        const agent = {
+          ...process.env,
+          INTEGRATIONS_HOME: yield* temporaryDirectory("integrations-device-login-"),
+          INTEGRATIONS_URL: undefined,
+          INTEGRATIONS_API_KEY: undefined,
+          NO_COLOR: "1"
+        }
+        const unconfigured = yield* run(agentCli, ["skills"], agent)
+        expect(unconfigured.stderr).toContain("i login --url")
+
+        const started = yield* run(agentCli, ["login", "--url", gateway.url], agent)
+        expect(started.exitCode, started.stderr).toBe(0)
+        const pending = parseOutput(LoginPending, started.stdout)
+        expect(new URL(pending.url).searchParams.get("user_code")).toBe(pending.code)
+        const stillPending = yield* run(agentCli, ["login"], agent)
+        expect(parseOutput(LoginPending, stillPending.stdout).code).toBe(pending.code)
+
+        const signedIn = yield* HttpClient.execute(
+          HttpClientRequest.setBody(
+            HttpClientRequest.post(`${gateway.url}/v1/auth/login`),
+            HttpBody.jsonUnsafe({ email: "operator@example.com", password: "correct horse battery" })
+          )
+        )
+        const cookie = (signedIn.headers["set-cookie"] ?? "").split(";", 1)[0] ?? ""
+        const profile = parseOutput(
+          IdOutput,
+          (yield* run(operatorCli, ["profile", "sandboxed-agent"], gateway.environment)).stdout
+        )
+        const approved = yield* HttpClient.execute(
+          HttpClientRequest.setBody(
+            HttpClientRequest.post(`${gateway.url}/v1/oauth/device-request?code=${pending.code}`, {
+              headers: { cookie, origin: gateway.url }
+            }),
+            HttpBody.jsonUnsafe({ decision: "approve", profileId: profile.id })
+          )
+        )
+        expect(approved.status).toBe(200)
+
+        const finished = yield* run(agentCli, ["login"], agent)
+        expect(finished.exitCode, finished.stderr).toBe(0)
+        parseOutput(LoginDone, finished.stdout)
+        const skills = yield* run(agentCli, ["skills"], agent)
+        expect(skills.exitCode, skills.stderr).toBe(0)
+      }).pipe(Effect.provide(services)),
+    60_000
+  )
+
   it.live(
     "local ii uses the operator key while i uses the agent key",
     () =>
@@ -416,7 +487,7 @@ describe("integrations CLI acceptance", () => {
         expect(connected.stdout).not.toContain("acceptance-secret")
 
         const tools = yield* integrations(["tools", slug])
-        expect(tools.exitCode, tools.stderr).toBe(0)
+        expect(tools.exitCode, tools.stdout + tools.stderr).toBe(0)
         const toolsOutput = parseOutput(ToolsOutput, tools.stdout)
 
         const listed = parseOutput(ConnectionsOutput, (yield* integrations(["connections"])).stdout)

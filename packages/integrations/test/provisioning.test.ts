@@ -74,7 +74,12 @@ const integrationsWith = (options: {
     toolSummaries: () => Effect.succeed([]),
     listTools: () => Effect.succeed([]),
     describeTool: dies("describeTool"),
-    execute: dies("execute")
+    execute: dies("execute"),
+    listResources: dies("listResources"),
+    readResource: dies("readResource"),
+    listSkills: dies("listSkills"),
+    getSkill: dies("getSkill"),
+    refreshDueConnections: dies("refreshDueConnections")
   })
 }
 

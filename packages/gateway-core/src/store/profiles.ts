@@ -81,6 +81,7 @@ export interface ProfileStore {
     readonly profileId: ProfileId
     readonly name: string
     readonly hash: ApiKeyHash
+    readonly subjectId?: SubjectId
   }): Effect.Effect<ApiKey, GatewayStoreError>
   listApiKeys(profileId: ProfileId): Effect.Effect<ReadonlyArray<ApiKey>, GatewayStoreError>
   findApiKeyByHash(
@@ -148,12 +149,14 @@ const ApiKeyRow = Schema.Struct({
   profileId: ProfileId,
   name: Schema.String,
   hash: ApiKeyHash,
+  subjectId: Schema.NullOr(SubjectId),
   createdAt: Millis,
   lastUsedAt: NullableMillis,
   revokedAt: NullableMillis
 }).pipe(
   Schema.encodeKeys({
     profileId: "profile_id",
+    subjectId: "subject_id",
     createdAt: "created_at",
     lastUsedAt: "last_used_at",
     revokedAt: "revoked_at"
@@ -345,9 +348,9 @@ export class ProfileStoreService extends Context.Service<ProfileStoreService, Pr
             "addApiKey",
             Effect.gen(function* () {
               yield* db.run(
-                `INSERT INTO gateway_api_key (id, profile_id, name, hash, created_at, last_used_at, revoked_at)
-             VALUES (?, ?, ?, ?, ?, NULL, NULL)`,
-                [input.id, input.profileId, input.name, input.hash, yield* now]
+                `INSERT INTO gateway_api_key (id, profile_id, name, hash, subject_id, created_at, last_used_at, revoked_at)
+             VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)`,
+                [input.id, input.profileId, input.name, input.hash, input.subjectId ?? null, yield* now]
               )
               return yield* stored(
                 db.one(ApiKeyRow, "SELECT * FROM gateway_api_key WHERE id = ?", [input.id]),

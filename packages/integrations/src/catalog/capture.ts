@@ -7,6 +7,7 @@ import {
   toolAddress,
   whenPresent
 } from "@integragents/contracts"
+import type { ToolIcon, ToolMeta } from "@integragents/contracts"
 import { StorageError } from "../errors.ts"
 import type { McpToolDefinition } from "../mcp/client.ts"
 import { normalizeOutputSchema } from "../mcp/result.ts"
@@ -26,10 +27,14 @@ const record = (
   capturedAt: number,
   tool: {
     readonly name: string
+    readonly title?: string | undefined
     readonly description: string
     readonly readOnly: boolean
     readonly destructive: boolean
     readonly idempotent: boolean
+    readonly openWorld: boolean
+    readonly icons?: ReadonlyArray<ToolIcon> | undefined
+    readonly meta?: ToolMeta | undefined
     readonly inputSchema?: typeof Schema.Json.Type
     readonly outputSchema?: typeof Schema.Json.Type
     readonly call: ToolCall
@@ -46,10 +51,14 @@ const record = (
     integration: target.integration,
     connection: target.connection,
     name: tool.name,
+    ...whenPresent("title", tool.title),
     description: tool.description,
     readOnly: tool.readOnly,
     destructive: tool.destructive,
     idempotent: tool.idempotent,
+    openWorld: tool.openWorld,
+    ...whenPresent("icons", tool.icons),
+    ...whenPresent("meta", tool.meta),
     ...whenPresent("inputSchema", tool.inputSchema),
     ...whenPresent("outputSchema", tool.outputSchema),
     call: tool.call,
@@ -66,10 +75,14 @@ export const captureMcpTools = (
     // MCP's own defaults: a tool that writes may destroy, and is not safe to repeat, unless it says otherwise.
     return record(target, capturedAt, {
       name: definition.name,
-      description: definition.description ?? definition.title ?? "",
+      title: definition.title ?? definition.annotations?.title,
+      description: definition.description ?? "",
       readOnly,
       destructive: !readOnly && definition.annotations?.destructiveHint !== false,
       idempotent: readOnly || definition.annotations?.idempotentHint === true,
+      openWorld: definition.annotations?.openWorldHint !== false,
+      icons: definition.icons,
+      meta: definition._meta,
       ...whenPresent("inputSchema", definition.inputSchema),
       ...whenPresent(
         "outputSchema",
@@ -94,6 +107,7 @@ export const captureHostTools = (
       readOnly,
       destructive: definition.destructive ?? !readOnly,
       idempotent: definition.idempotent ?? readOnly,
+      openWorld: definition.openWorld ?? true,
       ...whenPresent("inputSchema", definition.inputSchema),
       ...whenPresent("outputSchema", definition.outputSchema),
       call: { kind: "host", handler: definition.handler ?? definition.name }
@@ -108,11 +122,13 @@ export const captureOpenApiTools = (
   Effect.forEach(spec.operations, (operation) =>
     record(target, capturedAt, {
       name: operation.name,
-      description: Option.getOrElse(operation.summary, () => Option.getOrElse(operation.description, () => "")),
+      title: Option.getOrUndefined(operation.summary),
+      description: Option.getOrElse(operation.description, () => Option.getOrElse(operation.summary, () => "")),
       readOnly: operation.readOnly,
       // HTTP says what repeating a method does; it says nothing about what a write destroys, so every write may.
       destructive: !operation.readOnly,
       idempotent: operation.readOnly || idempotentMethods.has(operation.method),
+      openWorld: true,
       inputSchema: operation.inputSchema,
       ...whenPresent("outputSchema", Option.getOrUndefined(operation.outputSchema)),
       call: {

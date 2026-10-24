@@ -2,7 +2,13 @@ import { Context, Crypto, Duration, Effect, Layer, Option } from "effect"
 import { RateLimiter } from "effect/persistence"
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { Authority } from "./middleware.ts"
-import { authenticateKey, authorizeProfileCapability, GatewayStoreService } from "@integragents/gateway-core"
+import {
+  authenticateKey,
+  authorizeProfileCapability,
+  GatewayStoreService,
+  OAuthSecretHash,
+  sha256Hex
+} from "@integragents/gateway-core"
 import { SessionTokenHash } from "@integragents/gateway-core"
 import { hashSessionToken } from "@integragents/gateway-core"
 import { webCryptoLayer } from "@integragents/contracts"
@@ -24,12 +30,13 @@ export {
   decidedBy,
   Forbidden,
   Identity,
-  requireKeyHolder,
-  requireSecret,
+  requireProfileCaller,
   requireTenant,
   Unauthorized
 } from "./identity.ts"
 import { capture } from "./observability.ts"
+import { gatewayApiResource } from "./authorization-server.ts"
+import { GatewayConfig } from "./services.ts"
 export type { Principal } from "./identity.ts"
 
 const sessionCookieName = "integrations_session"
@@ -125,7 +132,11 @@ export interface AuthorityOptions {
 
 interface ResolvedAuthority {
   readonly store: GatewayStore
+  /** The resource an OAuth access token must be issued for to open this API; none without OAuth. */
+  readonly apiResource: string | undefined
 }
+
+const oauthAccessTokenPrefix = "igoa_"
 
 const resolvePrincipal = Effect.fn("Authority.resolvePrincipal")(function* (
   options: ResolvedAuthority,
@@ -133,6 +144,19 @@ const resolvePrincipal = Effect.fn("Authority.resolvePrincipal")(function* (
   context: RequestContext
 ) {
   const secret = presentedSecret(headers)
+  if (Option.isSome(secret) && secret.value.startsWith(oauthAccessTokenPrefix)) {
+    const granted =
+      options.apiResource === undefined
+        ? undefined
+        : yield* capture(
+            options.store.resolveOAuthAccessToken({
+              hash: OAuthSecretHash.make(yield* sha256Hex(secret.value)),
+              resource: options.apiResource
+            })
+          )
+    if (granted === undefined) return yield* new Unauthorized({ code: "invalid-token" })
+    return { kind: "grant", profile: granted.profile, actor: granted.actor } satisfies Principal
+  }
   if (Option.isSome(secret)) {
     const authentication = yield* capture(authenticateKey(options.store, secret.value))
     if (authentication.status !== "authenticated") {
@@ -200,6 +224,12 @@ const admit = Effect.fn("Authority.admit")(function* (
 
   const capability = requiredCapability(access)
   if (capability === undefined) return
+  if (caller.kind === "grant") {
+    if (!caller.profile.capabilities.includes(capability)) {
+      return yield* new Forbidden({ code: "not-permitted", capability })
+    }
+    return
+  }
   const authorization = yield* capture(authorizeProfileCapability(options.store, caller.secret, capability))
   if (authorization.status === "not-permitted") return yield* new Forbidden({ code: "not-permitted", capability })
   if (authorization.status !== "authorized") return yield* refusedKey(authorization.status)
@@ -217,6 +247,13 @@ const callerAttributes = (caller: Principal) => {
         "api_key.id": caller.key.id,
         "tenant.id": caller.profile.tenantId
       }
+    case "grant":
+      return {
+        "caller.kind": caller.kind,
+        "profile.id": caller.profile.id,
+        "oauth_grant.id": caller.actor.grantId,
+        "tenant.id": caller.profile.tenantId
+      }
     case "anonymous":
       return { "caller.kind": caller.kind }
   }
@@ -229,6 +266,8 @@ const principalKey = (caller: Principal): Option.Option<string> => {
     case "key":
     case "local":
       return Option.some(`${caller.kind}:${caller.key.id}`)
+    case "grant":
+      return Option.some(`grant:${caller.actor.grantId}`)
     case "anonymous":
       return Option.none()
   }
@@ -250,12 +289,14 @@ const refusalOf = (
  * session cookie, or the local host's borrowed credential. A host with its
  * own identity provides another `Authority` in its place.
  */
-export const authorityLayer = (options: AuthorityOptions = {}): Layer.Layer<Authority, never, GatewayStoreService> =>
+export const authorityLayer = (
+  options: AuthorityOptions = {}
+): Layer.Layer<Authority, never, GatewayStoreService | GatewayConfig> =>
   Layer.effect(
     Authority,
     Effect.gen(function* () {
       const store = yield* GatewayStoreService
-      const resolved: ResolvedAuthority = { store }
+      const resolved: ResolvedAuthority = { store, apiResource: gatewayApiResource(yield* GatewayConfig) }
       const limits = options.rateLimits
       const crypto = yield* Crypto.Crypto
       const limiter = yield* RateLimiter.RateLimiter

@@ -1,6 +1,7 @@
 import { Effect, Option } from "effect"
 import { connectionAddress, InvalidInput, NotFound } from "@integragents/contracts"
-import type { OAuthReconnectRequired, ToolCallFailed } from "@integragents/contracts"
+import { OAuthReconnectRequired } from "@integragents/contracts"
+import type { OAuthScopeRequired, ToolCallFailed } from "@integragents/contracts"
 import type { ConnectionName, ConnectionOwner, IntegrationSlug } from "@integragents/contracts"
 import { findAuthMethod } from "../catalog/auth-methods.ts"
 import { OAuthClientSlug } from "../catalog/ids.ts"
@@ -24,6 +25,7 @@ export type IntegrationFailure =
   | HostToolError
   | ToolCallFailed
   | OAuthReconnectRequired
+  | OAuthScopeRequired
 
 export const requireMcpServer = Effect.fn("Integrations.requireMcpServer")(function* (integration: IntegrationRecord) {
   if (integration.endpoint === undefined) {
@@ -141,7 +143,38 @@ export const connectionAccess = Effect.gen(function* () {
     return Option.map(held, (value) => ({ value, placements }))
   })
 
-  return { requireIntegration, requireConnection, resolveCredential }
+  /**
+   * Runs `use` with the connection's credential. An OAuth token the provider
+   * rejects is refreshed and tried once more; rejected again, the connection
+   * is marked for reconnecting.
+   */
+  const withCredential = <A>(
+    integration: IntegrationRecord,
+    connection: ConnectionRecord,
+    use: (credential: Option.Option<ResolvedCredential>) => Effect.Effect<A, IntegrationFailure>
+  ): Effect.Effect<A, IntegrationFailure> =>
+    Effect.gen(function* () {
+      const attempt = (renew: boolean) =>
+        Effect.result(Effect.flatMap(resolveCredential(integration, connection, renew), use))
+      const first = yield* attempt(false)
+      if (first._tag === "Success") return first.success
+      if (connection.provider !== "oauth" || !rejectsCredential(first.failure)) return yield* first.failure
+      const second = yield* attempt(true)
+      if (second._tag === "Success") return second.success
+      if (!rejectsCredential(second.failure)) return yield* second.failure
+      yield* store.requireReconnect(
+        { owner: connection.owner, integration: connection.integration, name: connection.name },
+        "The provider rejected the connection's token even after a refresh"
+      )
+      return yield* new OAuthReconnectRequired({ integration: connection.integration, connection: connection.name })
+    })
+
+  return { requireIntegration, requireConnection, resolveCredential, withCredential }
 })
+
+/** The provider refused the credential itself, before doing anything, so asking again with a fresh token is safe. */
+const rejectsCredential = (failure: IntegrationFailure): boolean =>
+  (failure._tag === "McpError" && failure.reason === "unauthorized") ||
+  (failure._tag === "InvocationError" && failure.status === 401)
 
 export type ConnectionAccess = Effect.Success<typeof connectionAccess>

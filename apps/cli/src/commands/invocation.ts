@@ -1,20 +1,13 @@
-import type { GatewayError } from "@integragents/contracts"
+import type { Attachment, GatewayError } from "@integragents/contracts"
 import { exitCodes, ReportedFailure } from "../failure.ts"
 import type { GatewayClient } from "@integragents/client"
 import { Effect, Option, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/cli"
-import {
-  Alias,
-  IdempotencyKey,
-  InvocationOutcome,
-  SubjectId,
-  whenPresent,
-  whenPresentMap
-} from "@integragents/contracts"
+import { Alias, IdempotencyKey, InvocationOutcome, whenPresent, whenTrue } from "@integragents/contracts"
 import type { IntegrationsCliError } from "../connection.ts"
 import { cliError, thrownMessage } from "../connection.ts"
 import { jsonOutput, writeStdoutLine } from "../output.ts"
-import { materializeBlobs, resolveFileArguments } from "../blobs.ts"
+import { materializeBlobs, materializeHandle, resolveFileArguments } from "../blobs.ts"
 import { gatewayTask } from "../tasks.ts"
 import type { GatewayTask } from "../tasks.ts"
 
@@ -61,21 +54,25 @@ const readJsonArgument = Effect.fn("Cli.readJsonArgument")(function* (
 
 const looksLikeAddress = (value: string): boolean => value.startsWith("tools.")
 
-/** File results are fetched onto local disk before the agent ever sees them. */
+/** File results and attached media are fetched onto local disk before the agent ever sees them. */
 const settleOutcome = (
   client: GatewayClient,
   outcome: InvocationOutcome,
   out: string | undefined
 ): Effect.Effect<InvocationOutcome, IntegrationsCliError> =>
   outcome.status === "succeeded"
-    ? Effect.map(materializeBlobs(client, outcome.result, out), (result): InvocationOutcome => ({ ...outcome, result }))
+    ? Effect.gen(function* () {
+        const result = yield* materializeBlobs(client, outcome.result, out)
+        const attachments = yield* Effect.forEach(
+          outcome.attachments ?? [],
+          (attachment): Effect.Effect<Attachment, IntegrationsCliError> =>
+            "blob" in attachment
+              ? Effect.map(materializeHandle(client, attachment.blob, undefined), (blob) => ({ ...attachment, blob }))
+              : Effect.succeed(attachment)
+        )
+        return { ...outcome, result, ...whenTrue(attachments.length > 0, () => ({ attachments })) }
+      })
     : Effect.succeed(outcome)
-
-const subjectFlag = () =>
-  Flag.String("subject").pipe(
-    Flag.optional,
-    Flag.withDescription("The user this call acts for; delegated tools require it")
-  )
 
 const idempotencyKeyFlag = () =>
   Flag.String("idempotency-key").pipe(
@@ -118,12 +115,11 @@ export const operatorExecuteCommand = Command.make(
     second: Argument.String("tool").pipe(Argument.withDescription("Tool name")),
     third: Argument.String("json").pipe(Argument.optional, Argument.withDescription("Arguments as JSON (default: {})")),
     file: Flag.String("file").pipe(Flag.optional, Flag.withDescription("Read the JSON input from a file")),
-    subject: subjectFlag(),
     idempotencyKey: idempotencyKeyFlag(),
     out: outFlag(),
     verbose: verboseFlag()
   },
-  ({ target, second, third, file, subject, idempotencyKey, out, verbose }) =>
+  ({ target, second, third, file, idempotencyKey, out, verbose }) =>
     gatewayTask((client) =>
       Effect.gen(function* () {
         const payload = yield* resolveFileArguments(
@@ -135,7 +131,6 @@ export const operatorExecuteCommand = Command.make(
             alias: Alias.make(target),
             tool: second,
             arguments: payload,
-            ...whenPresentMap("subject", Option.getOrUndefined(subject), SubjectId.make),
             ...whenPresent("idempotencyKey", Option.getOrUndefined(idempotencyKey))
           }
         })
@@ -151,12 +146,11 @@ export const clientExecuteCommand = Command.make(
     tool: Argument.String("tool").pipe(Argument.withDescription("Tool name")),
     json: Argument.String("json").pipe(Argument.optional, Argument.withDescription("Arguments as JSON (default: {})")),
     file: Flag.String("file").pipe(Flag.optional, Flag.withDescription("Read the JSON input from a file")),
-    subject: subjectFlag(),
     idempotencyKey: idempotencyKeyFlag(),
     out: outFlag(),
     verbose: verboseFlag()
   },
-  ({ alias, tool, json, file, subject, idempotencyKey, out, verbose }) =>
+  ({ alias, tool, json, file, idempotencyKey, out, verbose }) =>
     gatewayTask((client) =>
       Effect.gen(function* () {
         const arguments_ = yield* resolveFileArguments(
@@ -168,7 +162,6 @@ export const clientExecuteCommand = Command.make(
             alias: Alias.make(alias),
             tool,
             arguments: arguments_,
-            ...whenPresentMap("subject", Option.getOrUndefined(subject), SubjectId.make),
             ...whenPresent("idempotencyKey", Option.getOrUndefined(idempotencyKey))
           }
         })

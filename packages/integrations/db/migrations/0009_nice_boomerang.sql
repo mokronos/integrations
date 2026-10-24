@@ -1,0 +1,1 @@
+ALTER TABLE `connection` ADD `tools_refresh_at` integer;

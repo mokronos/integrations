@@ -43,7 +43,7 @@
   "dependencies": {
     "@effect/platform-bun": "catalog:",
     "@effect/platform-node-shared": "catalog:",
-    "@modelcontextprotocol/server": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.4.0",
     "@integragents/contracts": "workspace:^",
     "@integragents/gateway-core": "workspace:^",
     "@integragents/integrations": "workspace:^",
@@ -53,6 +53,6 @@
     "effect": "catalog:"
   },
   "devDependencies": {
-    "@modelcontextprotocol/client": "^2.0.0"
+    "@modelcontextprotocol/client": "^2.4.0"
   }
 }

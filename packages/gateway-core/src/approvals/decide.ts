@@ -176,6 +176,7 @@ export const approveApproval = Effect.fn("Approvals.approve")(function* (
       status: "approved",
       decidedBy,
       result: outcome.status === "succeeded" ? outcome.result : null,
+      ...whenPresent("attachments", outcome.status === "succeeded" ? outcome.attachments : undefined),
       error: outcome.status === "failed" ? outcome.message : null
     })
     if (outcome.status === "input-required") yield* store.collectApproval(tenantId, id)

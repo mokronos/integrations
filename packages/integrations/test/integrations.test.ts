@@ -1,5 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Clock, Effect, Layer, Option } from "effect"
+import { TestClock } from "effect/testing"
+import type { Json, ResourceContents, ResourceEntry, SkillEntry } from "@integragents/contracts"
 import { CatalogStore } from "../src/catalog/store.ts"
 import {
   CredentialStore,
@@ -36,8 +38,22 @@ const stubMcp = (
   options: {
     readonly readOnly?: boolean
     readonly omitReadOnlyHint?: boolean
-    readonly writeNoteHints?: { readonly destructiveHint?: boolean; readonly idempotentHint?: boolean }
+    readonly writeNoteHints?: {
+      readonly destructiveHint?: boolean
+      readonly idempotentHint?: boolean
+      readonly openWorldHint?: boolean
+    }
+    /** What else the server says about write_note: a title, icons, metadata. */
+    readonly writeNote?: {
+      readonly title?: string
+      readonly icons?: ReadonlyArray<{ readonly src: string }>
+      readonly _meta?: Record<string, Json>
+    }
     readonly onCall?: (tool: string, credential: Option.Option<string>) => void
+    readonly resources?: ReadonlyArray<ResourceEntry>
+    readonly skills?: ReadonlyArray<SkillEntry>
+    readonly contents?: Record<string, ReadonlyArray<ResourceContents>>
+    readonly onRead?: (uri: string, credential: Option.Option<string>) => void
     readonly onList?: () => void
   } = {}
 ): Layer.Layer<McpClient> =>
@@ -74,16 +90,29 @@ const stubMcp = (
               }
         return Effect.succeed({
           era: "legacy",
+          ttlMs: Option.none(),
           tools: [
             searchNotes,
             {
               name: "write_note",
               description: "Add a note.",
               inputSchema: { type: "object", properties: { body: { type: "string" } } },
-              annotations: { readOnlyHint: false, ...options.writeNoteHints }
+              annotations: { readOnlyHint: false, ...options.writeNoteHints },
+              ...options.writeNote
             }
           ]
         })
+      },
+      listResources: () => Effect.succeed(options.resources ?? []),
+      listSkills: () => Effect.succeed(options.skills ?? []),
+      getSkill: (_server, _credential, uri) =>
+        Effect.succeed(Option.fromNullishOr((options.skills ?? []).find((skill) => skill.uri === uri))),
+      readResource: (_server, credential, uri) => {
+        options.onRead?.(
+          uri,
+          Option.map(credential, (value) => value.headerValue)
+        )
+        return Effect.succeed(options.contents?.[uri] ?? [])
       },
       callTool: (_endpoint, credential, tool) => {
         options.onCall?.(
@@ -615,6 +644,7 @@ describe("tools", () => {
           listTools: () =>
             Effect.succeed({
               era: "legacy",
+              ttlMs: Option.none(),
               tools: shrunk
                 ? [{ name: "search_notes", description: "", annotations: { readOnlyHint: true } }]
                 : [
@@ -622,6 +652,10 @@ describe("tools", () => {
                     { name: "write_note", description: "", annotations: { readOnlyHint: false } }
                   ]
             }),
+          listResources: () => Effect.die("unused"),
+          readResource: () => Effect.die("unused"),
+          listSkills: () => Effect.die("unused"),
+          getSkill: () => Effect.die("unused"),
           callTool: () => Effect.succeed({ kind: "complete" as const, result: { content: [] }, declined: [] })
         }))
       )
@@ -638,6 +672,55 @@ describe("tools", () => {
         shrinking
       )
       expect(names).toEqual({ before: 2, after: ["search_notes"] })
+    })
+  )
+
+  it.effect("asks a server for its tools again once its list goes stale, and names the connections that changed", () =>
+    Effect.gen(function* () {
+      let grown = false
+      const growing = Layer.effect(
+        McpClient,
+        Effect.sync(() => ({
+          probe: () => Effect.succeed(notesProbe),
+          listTools: () =>
+            Effect.succeed({
+              era: "modern" as const,
+              ttlMs: Option.some(10 * 60 * 1000),
+              tools: grown
+                ? [
+                    { name: "search_notes", description: "", annotations: { readOnlyHint: true } },
+                    { name: "archive_note", description: "", annotations: { readOnlyHint: false } }
+                  ]
+                : [{ name: "search_notes", description: "", annotations: { readOnlyHint: true } }]
+            }),
+          listResources: () => Effect.die("unused"),
+          readResource: () => Effect.die("unused"),
+          listSkills: () => Effect.die("unused"),
+          getSkill: () => Effect.die("unused"),
+          callTool: () => Effect.die("unused")
+        }))
+      )
+      const rounds = yield* withIntegrations(
+        Effect.gen(function* () {
+          const host = yield* Integrations
+          yield* install()
+          const fresh = yield* host.refreshDueConnections()
+          yield* TestClock.adjust("11 minutes")
+          const unchanged = yield* host.refreshDueConnections()
+          grown = true
+          yield* TestClock.adjust("11 minutes")
+          const changed = yield* host.refreshDueConnections()
+          const tools = (yield* host.toolSummaries({ integration: notes })).map((tool) => String(tool.name))
+          return { fresh, unchanged, changed, tools }
+        }),
+        growing
+      )
+      expect(rounds).toEqual({
+        fresh: [],
+        unchanged: [],
+        changed: [{ owner: "org", integration: notes, name: primary }],
+        tools: ["archive_note", "search_notes"]
+      })
     })
   )
 
@@ -685,6 +768,33 @@ describe("tools", () => {
       expect(hints).toEqual({
         search_notes: { readOnly: true, destructive: false, idempotent: true },
         write_note: { readOnly: false, destructive: false, idempotent: true }
+      })
+    })
+  )
+
+  it.effect("keeps a tool's title, open-world hint, icons and metadata as its server gave them", () =>
+    Effect.gen(function* () {
+      const tool = yield* withIntegrations(
+        Effect.gen(function* () {
+          const host = yield* Integrations
+          yield* install()
+          return yield* host.describeTool({ integration: notes, name: "write_note" })
+        }),
+        stubMcp({
+          writeNoteHints: { openWorldHint: false },
+          writeNote: {
+            title: "Write a note",
+            icons: [{ src: "https://notes.example/pen.svg" }],
+            _meta: { ui: { resourceUri: "ui://notes/editor.html" } }
+          }
+        })
+      )
+      expect(tool).toMatchObject({
+        title: "Write a note",
+        description: "Add a note.",
+        openWorld: false,
+        icons: [{ src: "https://notes.example/pen.svg" }],
+        meta: { ui: { resourceUri: "ui://notes/editor.html" } }
       })
     })
   )
@@ -774,6 +884,7 @@ describe("tools", () => {
           listTools: () =>
             Effect.succeed({
               era: "legacy",
+              ttlMs: Option.none(),
               tools: [
                 {
                   name: "search_notes",
@@ -782,6 +893,10 @@ describe("tools", () => {
                 }
               ]
             }),
+          listResources: () => Effect.die("unused"),
+          readResource: () => Effect.die("unused"),
+          listSkills: () => Effect.die("unused"),
+          getSkill: () => Effect.die("unused"),
           callTool: () =>
             Effect.succeed({
               kind: "complete" as const,
@@ -816,7 +931,7 @@ describe("tools", () => {
       const host = yield* Integrations
       yield* install()
       const out = yield* host.execute(ToolAddress.make("tools.notes.org.primary.search_notes"), { q: "kitchen" })
-      expect(out).toEqual({ kind: "complete", result: "search_notes ran" })
+      expect(out).toEqual({ kind: "complete", result: "search_notes ran", attachments: [] })
     }).pipe(Effect.provide(testIntegrations()))
   )
 

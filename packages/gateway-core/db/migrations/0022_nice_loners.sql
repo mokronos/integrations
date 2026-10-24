@@ -1,0 +1,1 @@
+ALTER TABLE `gateway_pending_approval` ADD `attachments` text;

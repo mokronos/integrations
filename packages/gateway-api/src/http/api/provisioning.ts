@@ -1,13 +1,7 @@
 import { NotFound } from "@integragents/contracts"
 import { Effect, Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/http-api"
-import {
-  IntegrationError,
-  NotImplemented,
-  OAuthClientSubmission,
-  OAuthSessionView,
-  SubjectId
-} from "@integragents/contracts"
+import { IntegrationError, NotImplemented, OAuthClientSubmission, OAuthSessionView } from "@integragents/contracts"
 import {
   Connection,
   Integration,
@@ -38,16 +32,13 @@ const ConnectBody = Schema.Struct({
   integration: Schema.String,
   connection: Schema.optional(Schema.String),
   template: Schema.optional(Schema.String),
-  values: Schema.optional(Schema.Record(Schema.String, Schema.String)),
-  /** Connect on behalf of one person rather than the organisation. */
-  subject: Schema.optional(SubjectId)
+  values: Schema.optional(Schema.Record(Schema.String, Schema.String))
 })
 
 const OAuthStartBody = Schema.Struct({
   integration: Schema.String,
   connection: Schema.optional(Schema.String),
   template: Schema.optional(Schema.String),
-  subject: Schema.optional(SubjectId),
   clientId: Schema.optional(Schema.String),
   clientSecret: Schema.optional(Schema.String),
   timeoutSeconds: Schema.optional(Schema.Number)

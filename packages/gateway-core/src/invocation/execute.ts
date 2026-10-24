@@ -1,7 +1,7 @@
 import { relayableInput, unrelayableInputMessage } from "@integragents/integrations"
 import type { Integrations, StorageError, ToolCallContext } from "@integragents/integrations"
 import { toGatewayError } from "../errors.ts"
-import { connectionOwner, ToolAddress, whenPresent } from "@integragents/contracts"
+import { connectionOwner, ToolAddress, whenPresent, whenTrue } from "@integragents/contracts"
 import type { IdempotencyKey, InputAnswer, InvocationOutcome, Json } from "@integragents/contracts"
 import { Crypto, DateTime, Duration, Effect } from "effect"
 import type { ApprovalId, AuditApproval, Authorization, CallOrigin, ConnectionRef, ToolName } from "../domain.ts"
@@ -42,6 +42,9 @@ export const auditFor = (
       }
     }))
   )
+
+/** Recorded for a call whose caller went away while it ran: the upstream may or may not have acted on it. */
+const cancelledByCaller = "cancelled by the caller while it ran; the tool may have acted on it"
 
 /** How a call came to run, and the round it continues. */
 export interface ExecutionRound {
@@ -86,7 +89,9 @@ export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(funct
     ...whenPresent("idempotencyKey", round.idempotencyKey)
   }
   const invocation = yield* Effect.result(
-    dependencies.integrations.execute(address, argumentsValue, round.upstream, context)
+    dependencies.integrations
+      .execute(address, argumentsValue, round.upstream, context)
+      .pipe(Effect.onInterrupt(() => Effect.ignore(record("failed", cancelledByCaller))))
   )
   if (invocation._tag === "Failure") {
     const failure = invocation.failure
@@ -98,7 +103,11 @@ export const executeAuthorized = Effect.fn("Invocation.executeAuthorized")(funct
   const execution = invocation.success
   if (execution.kind === "complete") {
     yield* record("succeeded", approved?.message ?? null)
-    return { status: "succeeded", result: execution.result }
+    return {
+      status: "succeeded",
+      result: execution.result,
+      ...whenTrue(execution.attachments.length > 0, () => ({ attachments: execution.attachments }))
+    }
   }
   const { inputRequests, requestState } = execution.round
   if (round.relay !== true || !relayableInput(inputRequests)) {

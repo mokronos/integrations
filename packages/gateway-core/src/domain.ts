@@ -59,6 +59,7 @@ import {
 } from "@integragents/contracts"
 import type { Caller } from "@integragents/contracts"
 import type { OAuthActor } from "./authorization-server.ts"
+export type { OAuthActor } from "./authorization-server.ts"
 export const ApiKeyHash = Schema.String.pipe(Schema.brand("ApiKeyHash"))
 export type ApiKeyHash = typeof ApiKeyHash.Type
 export const ApiKey = Schema.Struct({
@@ -66,6 +67,8 @@ export const ApiKey = Schema.Struct({
   profileId: ProfileId,
   name: Schema.String,
   hash: ApiKeyHash,
+  /** The person every call made with the key acts for; delegated tools reach only their connections. */
+  subjectId: Schema.NullOr(SubjectId),
   createdAt: Schema.Date,
   lastUsedAt: Schema.NullOr(Schema.Date),
   revokedAt: Schema.NullOr(Schema.Date)

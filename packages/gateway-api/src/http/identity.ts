@@ -2,10 +2,10 @@ import { Context, Effect, Option, Schema } from "effect"
 import { HttpServerResponse } from "effect/http"
 import { Forbidden, GatewayFailure, RateLimited, Unauthorized } from "@integragents/contracts"
 import type { Profile, ProfileCapability, SubjectId, TenantId } from "@integragents/contracts"
-import type { ApiKey } from "@integragents/gateway-core/domain"
+import type { ApiKey, CallOrigin, OAuthActor } from "@integragents/gateway-core/domain"
 // By subpath: the API definition is imported by browser clients, and the
 // gateway-core index reaches the store.
-import { SessionTokenHash } from "@integragents/gateway-core/domain"
+import { keyOrigin, oauthOrigin, SessionTokenHash } from "@integragents/gateway-core/domain"
 
 export { Forbidden, GatewayFailure, RateLimited, Unauthorized }
 
@@ -33,11 +33,16 @@ export const Unmetered = Context.Reference<boolean>("@integragents/gateway-api/U
   defaultValue: (): boolean => false
 })
 
-/** Who a request authenticated as: one of a profile's keys, a dashboard session, or the local host's borrowed key. */
+/**
+ * Who a request authenticated as: one of a profile's keys, an OAuth grant a
+ * person gave a device such as `i`, a dashboard session, or the local host's
+ * borrowed key.
+ */
 export type Principal =
   /** `sessionExpired` when a session cookie came that no longer opens a session. */
   | { readonly kind: "anonymous"; readonly sessionExpired?: boolean }
   | { readonly kind: "key"; readonly profile: Profile; readonly key: ApiKey; readonly secret: string }
+  | { readonly kind: "grant"; readonly profile: Profile; readonly actor: OAuthActor }
   | { readonly kind: "local"; readonly profile: Profile; readonly key: ApiKey }
   | {
       readonly kind: "session"
@@ -49,24 +54,43 @@ export type Principal =
 
 export class Identity extends Context.Service<Identity, Principal>()("@integragents/gateway-api/Identity") {}
 
-export const requireKeyHolder: Effect.Effect<{ readonly profile: Profile; readonly key: ApiKey }, Forbidden, Identity> =
-  Effect.flatMap(Identity, (caller) =>
-    caller.kind === "key" || caller.kind === "local"
-      ? Effect.succeed(caller)
-      : Effect.fail(new Forbidden({ code: "not-permitted" }))
-  )
+export interface ProfileCaller {
+  readonly profile: Profile
+  readonly origin: CallOrigin
+  /** The person the credential acts for: the one a key was issued for, or who approved a login. */
+  readonly subject: SubjectId | undefined
+}
 
-export const requireSecret: Effect.Effect<string, Unauthorized | Forbidden, Identity> = Effect.gen(function* () {
-  const caller = yield* Identity
-  if (caller.kind === "key") return caller.secret
-  if (caller.kind === "local") return yield* new Forbidden({ code: "not-permitted" })
-  return yield* new Unauthorized({ code: "missing-credential" })
-})
+/** The profile a caller acts as, for whom, and how its calls are attributed. */
+export const requireProfileCaller: Effect.Effect<ProfileCaller, Forbidden, Identity> = Effect.flatMap(
+  Identity,
+  (caller): Effect.Effect<ProfileCaller, Forbidden> => {
+    switch (caller.kind) {
+      case "key":
+      case "local":
+        return Effect.succeed({
+          profile: caller.profile,
+          origin: keyOrigin(caller.key),
+          subject: caller.key.subjectId ?? undefined
+        })
+      case "grant":
+        return Effect.succeed({
+          profile: caller.profile,
+          origin: oauthOrigin(caller.actor),
+          subject: caller.actor.subjectId
+        })
+      case "session":
+      case "anonymous":
+        return Effect.fail(new Forbidden({ code: "not-permitted" }))
+    }
+  }
+)
 
 export const requireTenant: Effect.Effect<TenantId, Forbidden, Identity> = Effect.flatMap(Identity, (caller) => {
   switch (caller.kind) {
     case "key":
     case "local":
+    case "grant":
       return Effect.succeed(caller.profile.tenantId)
     case "session":
       return Effect.succeed(caller.tenantId)

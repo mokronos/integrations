@@ -1,5 +1,6 @@
 import { Effect } from "effect"
 import type { InvocationOutcome } from "@integragents/contracts"
+import { whenTrue } from "@integragents/contracts"
 import type { ApprovalId, PendingApproval, ProfileId, TenantId } from "../domain.ts"
 import type { GatewayStore, SettledApproval } from "../store/index.ts"
 
@@ -11,7 +12,11 @@ export const approvalOutcome = (approval: PendingApproval): ApprovalOutcome | un
   switch (approval.status) {
     case "approved":
       return approval.error === null
-        ? { status: "succeeded", result: approval.result }
+        ? {
+            status: "succeeded",
+            result: approval.result,
+            ...whenTrue(approval.attachments.length > 0, () => ({ attachments: approval.attachments }))
+          }
         : { status: "failed", message: approval.error }
     case "denied":
       return {

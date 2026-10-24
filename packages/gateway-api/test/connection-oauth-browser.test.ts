@@ -63,6 +63,8 @@ const notUsed = (member: string) => () => Effect.die(new Error(`${member} is not
 
 const catalogStore: CatalogStore["Service"] = {
   putConnection: () => Effect.void,
+  scheduleToolRefresh: notUsed("CatalogStore.scheduleToolRefresh"),
+  connectionsDueForRefresh: notUsed("CatalogStore.connectionsDueForRefresh"),
   listIntegrations: notUsed("CatalogStore.listIntegrations"),
   findIntegration: notUsed("CatalogStore.findIntegration"),
   putIntegration: notUsed("CatalogStore.putIntegration"),
@@ -100,7 +102,12 @@ const integrations: Integrations["Service"] = {
   toolSummaries: notUsed("Integrations.toolSummaries"),
   listTools: notUsed("Integrations.listTools"),
   describeTool: notUsed("Integrations.describeTool"),
-  execute: notUsed("Integrations.execute")
+  execute: notUsed("Integrations.execute"),
+  listResources: notUsed("Integrations.listResources"),
+  readResource: notUsed("Integrations.readResource"),
+  listSkills: notUsed("Integrations.listSkills"),
+  getSkill: notUsed("Integrations.getSkill"),
+  refreshDueConnections: notUsed("Integrations.refreshDueConnections")
 }
 
 /**

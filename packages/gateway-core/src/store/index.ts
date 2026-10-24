@@ -5,6 +5,8 @@ import { Context, Effect, Layer, Option } from "effect"
 import { Reactivity } from "effect/reactivity"
 import { SqlClient } from "effect/sql"
 import { isSealed } from "@integragents/integrations"
+import { AppSessionStoreService } from "./app-sessions.ts"
+import type { AppSessionStore } from "./app-sessions.ts"
 import { ApprovalDeliveryStoreService } from "./approval-deliveries.ts"
 import type { ApprovalDeliveryStore } from "./approval-deliveries.ts"
 import { ApprovalStoreService } from "./approvals.ts"
@@ -28,6 +30,7 @@ export { GatewayStoreError, GatewayStoreFailureKind } from "./sql.ts"
 export type { GatewayStoreOptions } from "./sql.ts"
 export type { ApprovalDecisionDeliveryJob, ApprovalDeliveryJob, ApprovalDeliveryStore } from "./approval-deliveries.ts"
 export type { ApprovalStore, CreateApprovalInput, SettledApproval } from "./approvals.ts"
+export type { AppSessionStore } from "./app-sessions.ts"
 export type { AuditQuery, AuditStore, RecordAuditInput } from "./audit.ts"
 export type {
   CreateSubjectInput,
@@ -63,7 +66,8 @@ export interface GatewayStore
     OAuthStore,
     InvocationKeyStore,
     AuditStore,
-    ToolSnapshotStore {
+    ToolSnapshotStore,
+    AppSessionStore {
   close(): Effect.Effect<void, GatewayStoreError>
 }
 
@@ -75,7 +79,8 @@ const areaLayers = Layer.mergeAll(
   OAuthStoreService.layer,
   InvocationKeyStoreService.layer,
   AuditStoreService.layer,
-  ToolSnapshotStoreService.layer
+  ToolSnapshotStoreService.layer,
+  AppSessionStoreService.layer
 )
 
 /**
@@ -105,6 +110,7 @@ export class GatewayStoreService extends Context.Service<GatewayStoreService, Ga
           ...(yield* InvocationKeyStoreService),
           ...(yield* AuditStoreService),
           ...(yield* ToolSnapshotStoreService),
+          ...(yield* AppSessionStoreService),
           // The SqlClient owns the connection; closing it is the scope's business.
           close: () => operation("close", Effect.void)
         }

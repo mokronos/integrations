@@ -10,6 +10,8 @@ import {
   PositiveInt,
   whenPresent,
   type ApiKeyId,
+  type AppContext,
+  type AppSessionId,
   type ApprovalGroupWindowMinutes,
   type ApprovalMethod,
   type GatewayEvent,
@@ -288,6 +290,34 @@ export const decideOAuthConsent = async (id: string, decision: OAuthConsentDecis
     )
   ).redirect
 
+export const getDeviceConsent = async (code: string) => await run(endpoints.oauth.deviceConsent({ query: { code } }))
+
+export const decideDeviceConsent = async (code: string, decision: OAuthConsentDecision) =>
+  (
+    await run(
+      decision.decision === "deny"
+        ? endpoints.oauth.decideDeviceConsent({ query: { code }, payload: decision })
+        : endpoints.oauth.decideDeviceConsent({ query: { code }, payload: decision })
+    )
+  ).approved
+
 export const listOAuthGrants = async () => (await run(endpoints.oauth.listGrants())).grants
 
 export const revokeOAuthGrant = async (id: OAuthGrantId) => await run(endpoints.oauth.revokeGrant({ params: { id } }))
+
+export const getAppSession = async (id: AppSessionId) => await run(endpoints.apps.appSession({ params: { id } }))
+
+export const readAppResource = async (id: AppSessionId, uri: string) =>
+  (await run(endpoints.apps.readFromApp({ params: { id }, payload: { uri } }))).contents
+
+export const callFromApp = async (
+  id: AppSessionId,
+  name: string,
+  args: Readonly<Record<string, typeof Schema.Json.Type>>
+) => await run(endpoints.apps.callFromApp({ params: { id }, payload: { name, arguments: args } }))
+
+export const setAppContext = async (id: AppSessionId, context: AppContext) =>
+  await run(endpoints.apps.appContext({ params: { id }, payload: context }))
+
+export const sendAppMessage = async (id: AppSessionId, content: ReadonlyArray<typeof Schema.Json.Type>) =>
+  await run(endpoints.apps.appMessage({ params: { id }, payload: { content } }))

@@ -77,5 +77,22 @@ export const integrationMigrations: ReadonlyArray<Migration> = [
       "ALTER TABLE `tool` ADD `destructive` integer;",
       "ALTER TABLE `tool` ADD `idempotent` integer;"
     ]
+  },
+  {
+    id: 8,
+    name: "0008_quick_marvex",
+    statements: [
+      "ALTER TABLE `tool` ADD `title` text;",
+      "ALTER TABLE `tool` ADD `open_world` integer;",
+      "ALTER TABLE `tool` ADD `icons` text;",
+      "ALTER TABLE `tool` ADD `meta` text;"
+    ]
+  },
+  {
+    id: 9,
+    name: "0009_nice_boomerang",
+    statements: [
+      "ALTER TABLE `connection` ADD `tools_refresh_at` integer;"
+    ]
   }
 ]

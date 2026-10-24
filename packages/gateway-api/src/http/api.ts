@@ -1,6 +1,7 @@
 import { HttpApi } from "effect/http-api"
 import { Authority } from "./middleware.ts"
 import { AdministrativeGroup } from "./api/administrative.ts"
+import { AppsGroup } from "./api/apps.ts"
 import { AuthGroup } from "./api/auth.ts"
 import { DelegatedGroup } from "./api/delegated.ts"
 import { OAuthGroup } from "./api/oauth.ts"
@@ -15,6 +16,7 @@ export const GatewayApi = HttpApi.make("@integragents/gateway-api/gateway")
   .add(DelegatedGroup)
   .add(ProvisioningGroup)
   .add(AdministrativeGroup)
+  .add(AppsGroup)
   .add(AuthGroup)
   .add(OAuthGroup)
 

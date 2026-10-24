@@ -8,18 +8,18 @@ import type { InputRequests } from "@integragents/contracts"
  * says what was asked and which callers could answer it.
  */
 
-const FormElicitation = Schema.Struct({
+const Elicitation = Schema.Struct({
   method: Schema.Literal("elicitation/create"),
-  params: Schema.Struct({ mode: Schema.optional(Schema.Literal("form")), message: Schema.String })
+  params: Schema.Struct({ mode: Schema.optional(Schema.Literals(["form", "url"])), message: Schema.String })
 })
-const decodeFormElicitation = Schema.decodeUnknownOption(FormElicitation)
+const decodeElicitation = Schema.decodeUnknownOption(Elicitation)
 
 const AskedMessage = Schema.Struct({ params: Schema.Struct({ message: Schema.String }) })
 const decodeAskedMessage = Schema.decodeUnknownOption(AskedMessage)
 
-/** Only form elicitations can be put to the caller's human; sampling, roots and URL requests cannot. */
+/** Only elicitations, form or URL, can be put to the caller's human; sampling and roots requests cannot. */
 export const relayableInput = (requests: InputRequests): boolean =>
-  Object.values(requests).every((request) => Option.isSome(decodeFormElicitation(request)))
+  Object.values(requests).every((request) => Option.isSome(decodeElicitation(request)))
 
 const askedMessages = (requests: InputRequests): ReadonlyArray<string> =>
   Object.values(requests).flatMap((request) =>

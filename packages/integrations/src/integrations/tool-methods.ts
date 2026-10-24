@@ -3,12 +3,14 @@ import {
   InvalidInput,
   NotFound,
   OAuthReconnectRequired,
+  OAuthScopeRequired,
   ToolCallFailed,
   ToolName,
   whenPresent
 } from "@integragents/contracts"
 import type { ToolCallFailure } from "@integragents/contracts"
 import type {
+  Attachment,
   ConnectionName,
   ConnectionOwner,
   InputAnswer,
@@ -25,6 +27,7 @@ import { McpClient } from "../mcp/client.ts"
 import { normalizeToolResult } from "../mcp/result.ts"
 import { declinedInputNote } from "../mcp/unrelayable-input.ts"
 import { OpenApiInvoker } from "../openapi/invoke.ts"
+import { BlobStore } from "../storage/blobs.ts"
 import type { ResolvedCredential } from "../openapi/invoke.ts"
 import { mcpCredential, requireMcpServer } from "./access.ts"
 import type { ConnectionAccess, IntegrationFailure } from "./access.ts"
@@ -32,7 +35,7 @@ import { toTool, toToolSummary } from "./views.ts"
 
 /** A tool call's outcome: its result, or a round of input the tool needs first. */
 export type ToolExecution =
-  | { readonly kind: "complete"; readonly result: Json }
+  | { readonly kind: "complete"; readonly result: Json; readonly attachments: ReadonlyArray<Attachment> }
   | { readonly kind: "input-required"; readonly round: InputRound }
 
 export interface ToolFilter {
@@ -46,11 +49,6 @@ export interface ToolTarget {
   readonly name: string
   readonly connection?: ConnectionName
 }
-
-/** The provider refused the credential itself, before doing anything, so asking again with a fresh token is safe. */
-const rejectsCredential = (failure: IntegrationFailure): boolean =>
-  (failure._tag === "McpError" && failure.reason === "unauthorized") ||
-  (failure._tag === "InvocationError" && failure.status === 401)
 
 const upstreamReason = (status: number | undefined): ToolCallFailure => {
   if (status === 401) return "unauthorized"
@@ -123,7 +121,13 @@ const asCallFailure =
       case "InvocationError":
         return fromInvocationError(failure, tool)
       case "McpError":
-        return callFailed(tool, failure.reason, failure.detail, failure.status)
+        return failure.requiredScopes === undefined
+          ? callFailed(tool, failure.reason, failure.detail, failure.status)
+          : new OAuthScopeRequired({
+              integration: tool.integration,
+              connection: tool.connection,
+              scopes: failure.requiredScopes
+            })
       case "HostToolError":
         return callFailed(tool, "tool_error", failure.message)
       case "OAuthError":
@@ -140,8 +144,9 @@ export const toolMethods = (access: ConnectionAccess) =>
     const store = yield* CatalogStore
     const mcp = yield* McpClient
     const invoker = yield* OpenApiInvoker
+    const blobs = yield* BlobStore
     const hostTools = yield* Effect.serviceOption(HostTools)
-    const { requireIntegration, requireConnection, resolveCredential } = access
+    const { requireIntegration, requireConnection, withCredential } = access
 
     const listTools = Effect.fn("Integrations.listTools")(function* (filter: ToolFilter = {}) {
       const records = yield* store.listTools(filter)
@@ -204,7 +209,7 @@ export const toolMethods = (access: ConnectionAccess) =>
             arguments: input,
             context
           })
-          return { kind: "complete", result }
+          return { kind: "complete", result, attachments: [] }
         }
         const integration = yield* requireIntegration(tool.integration)
         const connection = yield* requireConnection({
@@ -223,18 +228,21 @@ export const toolMethods = (access: ConnectionAccess) =>
                 answer
               )
               if (called.kind === "input-required") return called
-              const result = yield* normalizeToolResult(tool.name, called.result).pipe(
+              const normalized = yield* normalizeToolResult(tool.name, called.result).pipe(
+                Effect.provideService(BlobStore, blobs),
                 Effect.mapError((failed) =>
                   called.declined.length === 0
                     ? failed
-                    : new InvocationError({
-                        code: failed.code,
-                        detail: `${failed.detail}. ${declinedInputNote(called.declined)}`,
-                        ...whenPresent("status", failed.status)
-                      })
+                    : failed._tag === "InvocationError"
+                      ? new InvocationError({
+                          code: failed.code,
+                          detail: `${failed.detail}. ${declinedInputNote(called.declined)}`,
+                          ...whenPresent("status", failed.status)
+                        })
+                      : failed
                 )
               )
-              return { kind: "complete", result }
+              return { kind: "complete", ...normalized }
             }
 
             // The document may base a single operation somewhere other than the
@@ -254,26 +262,10 @@ export const toolMethods = (access: ConnectionAccess) =>
               input,
               credential
             })
-            return { kind: "complete", result }
+            return { kind: "complete", result, attachments: [] }
           })
 
-        const attempt = (renew: boolean) =>
-          Effect.result(Effect.flatMap(resolveCredential(integration, connection, renew), run))
-        const first = yield* attempt(false)
-        if (first._tag === "Success") return first.success
-        if (connection.provider !== "oauth" || !rejectsCredential(first.failure)) {
-          return yield* first.failure
-        }
-        const second = yield* attempt(true)
-        if (second._tag === "Success") return second.success
-        if (rejectsCredential(second.failure)) {
-          yield* store.requireReconnect(
-            { owner: connection.owner, integration: connection.integration, name: connection.name },
-            "The provider rejected the connection's token even after a refresh"
-          )
-          return yield* new OAuthReconnectRequired({ integration: connection.integration, connection: connection.name })
-        }
-        return yield* second.failure
+        return yield* withCredential(integration, connection, run)
       }).pipe(Effect.mapError(asCallFailure(tool)))
     })
 

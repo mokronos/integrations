@@ -1,25 +1,27 @@
 import { whenPresent, webCryptoLayer } from "@integragents/contracts"
-import type { Profile } from "@integragents/contracts"
+import type { OAuthGrantId, Profile } from "@integragents/contracts"
 import {
   newOAuthAccessToken,
   newOAuthApplicationId,
+  newOAuthDeviceCode,
   newOAuthRefreshToken,
   newOAuthRequestId,
   newOAuthTokenFamilyId,
+  newOAuthUserCode,
   OAuthSecretHash,
   sha256Base64Url,
   sha256Hex
 } from "@integragents/gateway-core"
-import type { GatewayStore, OAuthActor } from "@integragents/gateway-core"
+import type { GatewayStore, OAuthActor, OAuthApplication } from "@integragents/gateway-core"
 import { httpsOnlyUrlPolicy, isLoopbackHostname, parseDestination } from "@integragents/integrations"
-import { Crypto, DateTime, Duration, Effect, Exit, Layer, ManagedRuntime, Schema, Stream } from "effect"
+import { Crypto, DateTime, Duration, Effect, Exit, Layer, ManagedRuntime, Option, Schema, Stream } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http"
 import type { GatewaySettings } from "./services.ts"
 
 const ClientMetadata = Schema.Struct({
   client_id: Schema.optional(Schema.String),
   client_name: Schema.String.check(Schema.isMinLength(1)),
-  redirect_uris: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
+  redirect_uris: Schema.optional(Schema.Array(Schema.String)),
   client_uri: Schema.optional(Schema.String),
   logo_uri: Schema.optional(Schema.String),
   grant_types: Schema.optional(Schema.Array(Schema.String)),
@@ -30,7 +32,7 @@ const ClientMetadata = Schema.Struct({
 
 const DcrMetadata = Schema.Struct({
   client_name: Schema.String.check(Schema.isMinLength(1)),
-  redirect_uris: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
+  redirect_uris: Schema.optional(Schema.Array(Schema.String)),
   client_uri: Schema.optional(Schema.String),
   logo_uri: Schema.optional(Schema.String),
   grant_types: Schema.optional(Schema.Array(Schema.String)),
@@ -108,20 +110,47 @@ const cappedText = (response: HttpClientResponse.HttpClientResponse) =>
 
 const decodeClientMetadata = Schema.decodeUnknownEffect(Schema.fromJsonString(ClientMetadata))
 
-const safeMetadata = (metadata: typeof ClientMetadata.Type): boolean =>
-  metadata.redirect_uris.every(validRedirectUri) &&
-  (metadata.token_endpoint_auth_method === undefined || metadata.token_endpoint_auth_method === "none") &&
-  (metadata.response_types === undefined ||
-    (metadata.response_types.includes("code") && metadata.response_types.every((type) => type === "code"))) &&
-  (metadata.grant_types === undefined ||
-    (metadata.grant_types.includes("authorization_code") &&
-      metadata.grant_types.every((type) => type === "authorization_code" || type === "refresh_token")))
+export const deviceCodeGrantType = "urn:ietf:params:oauth:grant-type:device_code"
+
+/**
+ * A public client that either redirects a browser back with a code, or (a
+ * device with no browser of its own, such as `i`) polls while a person
+ * confirms its user code elsewhere. Never both.
+ */
+const safeMetadata = (metadata: typeof ClientMetadata.Type): boolean => {
+  if (metadata.token_endpoint_auth_method !== undefined && metadata.token_endpoint_auth_method !== "none") return false
+  const grants = metadata.grant_types ?? ["authorization_code"]
+  const redirectUris = metadata.redirect_uris ?? []
+  if (grants.includes(deviceCodeGrantType)) {
+    return (
+      grants.every((type) => type === deviceCodeGrantType || type === "refresh_token") &&
+      redirectUris.length === 0 &&
+      (metadata.response_types ?? []).length === 0
+    )
+  }
+  return (
+    redirectUris.length > 0 &&
+    redirectUris.every(validRedirectUri) &&
+    (metadata.response_types === undefined ||
+      (metadata.response_types.includes("code") && metadata.response_types.every((type) => type === "code"))) &&
+    grants.includes("authorization_code") &&
+    grants.every((type) => type === "authorization_code" || type === "refresh_token")
+  )
+}
+
+const GrantTypes = Schema.Struct({ grant_types: Schema.optional(Schema.Array(Schema.String)) })
+const decodeGrantTypes = Schema.decodeUnknownOption(GrantTypes)
+
+const registeredForDevices = (application: OAuthApplication): boolean =>
+  Option.exists(decodeGrantTypes(application.metadata), (metadata) =>
+    (metadata.grant_types ?? []).includes(deviceCodeGrantType)
+  )
 
 const validPkceValue = (value: string): boolean => /^[A-Za-z0-9._~-]{43,128}$/.test(value)
 
 const metadataJson = (metadata: typeof ClientMetadata.Type): typeof Schema.Json.Type => ({
   client_name: metadata.client_name,
-  redirect_uris: metadata.redirect_uris,
+  redirect_uris: metadata.redirect_uris ?? [],
   ...whenPresent("client_id", metadata.client_id),
   ...whenPresent("client_uri", metadata.client_uri),
   ...whenPresent("logo_uri", metadata.logo_uri),
@@ -132,6 +161,13 @@ const metadataJson = (metadata: typeof ClientMetadata.Type): typeof Schema.Json.
 })
 
 const supportedScopes = ["mcp", "offline_access"]
+
+const deviceErrorDescriptions = {
+  invalid_grant: "The device code is invalid or was already used",
+  access_denied: "The person denied the request",
+  expired_token: "The device code expired; start a new login",
+  authorization_pending: "Waiting for a person to confirm the code"
+} as const
 
 /** Every grant is for the MCP resource and comes with a refresh token. */
 const grantedScope = supportedScopes.join(" ")
@@ -157,6 +193,12 @@ const oauthResourceUrl = (settings: GatewaySettings): URL | undefined => {
 
 export const mcpOAuthIssuer = (settings: GatewaySettings): string | undefined => oauthResourceUrl(settings)?.origin
 
+/**
+ * The gateway's HTTP API as an OAuth resource, apart from its MCP endpoint, so
+ * a token issued for one never opens the other. `i` logs in for this one.
+ */
+export const gatewayApiResource = mcpOAuthIssuer
+
 export interface McpOAuthAuthentication {
   readonly profile: Profile
   readonly actor: OAuthActor
@@ -180,8 +222,15 @@ export const mcpOAuthPaths = {
   authorizationServer: "/.well-known/oauth-authorization-server",
   register: "/oauth/register",
   authorize: "/oauth/authorize",
+  deviceAuthorization: "/oauth/device_authorization",
   token: "/oauth/token"
 } as const
+
+/** The dashboard page where a person confirms a device's user code. */
+export const deviceVerificationPath = "/oauth/device"
+
+const deviceRequestLifetime = Duration.minutes(10)
+const devicePollIntervalSeconds = 5
 
 export const createMcpOAuthHandler = (options: {
   readonly store: GatewayStore
@@ -194,6 +243,9 @@ export const createMcpOAuthHandler = (options: {
   const resourceUrl = oauthResourceUrl(options.settings)
   const enabled = resourceUrl !== undefined
   const issuer = mcpOAuthIssuer(options.settings)
+  const apiResource = gatewayApiResource(options.settings)
+  const servedResource = (value: string | null): value is string =>
+    value !== null && (value === resource || value === apiResource)
   const metadataUrl =
     resourceUrl !== undefined
       ? `${resourceUrl.origin}${mcpOAuthPaths.protectedResource}${resourceUrl.pathname === "/" ? "" : resourceUrl.pathname}`
@@ -244,7 +296,7 @@ export const createMcpOAuthHandler = (options: {
         kind: "cimd",
         clientIdentifier,
         name: metadata.client_name,
-        redirectUris: metadata.redirect_uris,
+        redirectUris: metadata.redirect_uris ?? [],
         metadata: metadataJson(metadata)
       })
     })
@@ -263,8 +315,9 @@ export const createMcpOAuthHandler = (options: {
       authorization_endpoint: `${issuer}${mcpOAuthPaths.authorize}`,
       token_endpoint: `${issuer}${mcpOAuthPaths.token}`,
       registration_endpoint: `${issuer}${mcpOAuthPaths.register}`,
+      device_authorization_endpoint: `${issuer}${mcpOAuthPaths.deviceAuthorization}`,
       response_types_supported: ["code"],
-      grant_types_supported: ["authorization_code", "refresh_token"],
+      grant_types_supported: ["authorization_code", "refresh_token", deviceCodeGrantType],
       token_endpoint_auth_methods_supported: ["none"],
       code_challenge_methods_supported: ["S256"],
       scopes_supported: supportedScopes,
@@ -289,7 +342,7 @@ export const createMcpOAuthHandler = (options: {
         kind: "dcr",
         clientIdentifier,
         name: decoded.value.client_name,
-        redirectUris: decoded.value.redirect_uris,
+        redirectUris: decoded.value.redirect_uris ?? [],
         metadata: metadataJson(decoded.value)
       })
       return json(
@@ -320,8 +373,8 @@ export const createMcpOAuthHandler = (options: {
       if (query.get("code_challenge_method") !== "S256")
         return oauthError("invalid_request", "PKCE with S256 is required")
       if (!validPkceValue(challenge)) return oauthError("invalid_request", "code_challenge is not valid")
-      if (requestedResource !== resource)
-        return oauthError("invalid_target", "The resource must identify this MCP server")
+      if (!servedResource(requestedResource))
+        return oauthError("invalid_target", "The resource must identify this gateway's MCP server or API")
       if (!supportedScopeRequest(scope))
         return oauthError("invalid_scope", `Only the ${supportedScopes.join(" and ")} scopes are supported`)
       const applicationResult = yield* Effect.exit(applicationFor(clientIdentifier))
@@ -338,11 +391,104 @@ export const createMcpOAuthHandler = (options: {
         redirectUri,
         state,
         codeChallenge: challenge,
-        resource,
+        resource: requestedResource,
         scope: "mcp",
         expiresAt: DateTime.toDateUtc(DateTime.addDuration(yield* DateTime.now, Duration.minutes(10)))
       })
       return Response.redirect(`${issuer}/oauth/consent?request=${encodeURIComponent(id)}`, 302)
+    })
+
+  const deviceAuthorization = (request: Request) =>
+    Effect.gen(function* () {
+      if (issuer === undefined) return oauthError("server_error", "OAuth is unavailable", 503)
+      const form = new URLSearchParams(yield* Effect.promise(() => request.text()))
+      const requestedResource = form.get("resource")
+      if (!servedResource(requestedResource))
+        return oauthError("invalid_target", "The resource must identify this gateway's MCP server or API")
+      if (!supportedScopeRequest(form.get("scope") ?? ""))
+        return oauthError("invalid_scope", `Only the ${supportedScopes.join(" and ")} scopes are supported`)
+      const application = yield* store.findOAuthApplication(form.get("client_id") ?? "")
+      if (application === undefined || !registeredForDevices(application))
+        return oauthError("invalid_client", "The client is not registered for the device authorization grant")
+      const deviceCode = yield* newOAuthDeviceCode
+      const userCode = yield* newOAuthUserCode
+      yield* store.createOAuthDeviceRequest({
+        deviceCodeHash: OAuthSecretHash.make(yield* sha256Hex(deviceCode)),
+        userCode,
+        applicationId: application.id,
+        resource: requestedResource,
+        scope: "mcp",
+        expiresAt: DateTime.toDateUtc(DateTime.addDuration(yield* DateTime.now, deviceRequestLifetime))
+      })
+      const verificationUri = `${(options.settings.dashboardUrl?.() ?? issuer).replace(/\/+$/, "")}${deviceVerificationPath}`
+      return json({
+        device_code: deviceCode,
+        user_code: userCode,
+        verification_uri: verificationUri,
+        verification_uri_complete: `${verificationUri}?user_code=${encodeURIComponent(userCode)}`,
+        expires_in: Duration.toSeconds(deviceRequestLifetime),
+        interval: devicePollIntervalSeconds
+      })
+    })
+
+  const issueTokens = (grant: {
+    readonly grantId: OAuthGrantId
+    readonly applicationId: OAuthApplication["id"]
+    readonly resource: string
+  }) =>
+    Effect.gen(function* () {
+      const access = yield* newOAuthAccessToken
+      const refresh = yield* newOAuthRefreshToken
+      const familyId = yield* newOAuthTokenFamilyId
+      const at = yield* DateTime.now
+      yield* store.createOAuthTokens([
+        {
+          hash: OAuthSecretHash.make(yield* sha256Hex(access)),
+          kind: "access",
+          familyId,
+          grantId: grant.grantId,
+          applicationId: grant.applicationId,
+          resource: grant.resource,
+          scope: "mcp",
+          expiresAt: DateTime.toDateUtc(DateTime.addDuration(at, Duration.hours(1)))
+        },
+        {
+          hash: OAuthSecretHash.make(yield* sha256Hex(refresh)),
+          kind: "refresh",
+          familyId,
+          grantId: grant.grantId,
+          applicationId: grant.applicationId,
+          resource: grant.resource,
+          scope: "mcp",
+          expiresAt: DateTime.toDateUtc(DateTime.addDuration(at, Duration.days(90)))
+        }
+      ])
+      return { access, refresh }
+    })
+
+  /** What the device's poll answers: an RFC 8628 error while the person has not approved, tokens once they have. */
+  const exchangeDeviceCode = (deviceCode: string, clientIdentifier: string, requestedResource: string) =>
+    Effect.gen(function* () {
+      const application = yield* store.findOAuthApplication(clientIdentifier)
+      const request = yield* store.takeOAuthDeviceRequest(OAuthSecretHash.make(yield* sha256Hex(deviceCode)))
+      if (
+        application === undefined ||
+        request === undefined ||
+        request.applicationId !== application.id ||
+        request.resource !== requestedResource
+      )
+        return { error: "invalid_grant" } as const
+      if (request.deniedAt !== null) return { error: "access_denied" } as const
+      if (request.grantId !== null) {
+        return yield* issueTokens({
+          grantId: request.grantId,
+          applicationId: request.applicationId,
+          resource: request.resource
+        })
+      }
+      if (request.expiresAt.getTime() <= DateTime.toEpochMillis(yield* DateTime.now))
+        return { error: "expired_token" } as const
+      return { error: "authorization_pending" } as const
     })
 
   const issueInitialTokens = (
@@ -365,33 +511,7 @@ export const createMcpOAuthHandler = (options: {
         (yield* sha256Base64Url(verifier)) !== authorization.codeChallenge
       )
         return undefined
-      const access = yield* newOAuthAccessToken
-      const refresh = yield* newOAuthRefreshToken
-      const familyId = yield* newOAuthTokenFamilyId
-      const at = yield* DateTime.now
-      yield* store.createOAuthTokens([
-        {
-          hash: OAuthSecretHash.make(yield* sha256Hex(access)),
-          kind: "access",
-          familyId,
-          grantId: authorization.grantId,
-          applicationId: authorization.applicationId,
-          resource: authorization.resource,
-          scope: authorization.scope,
-          expiresAt: DateTime.toDateUtc(DateTime.addDuration(at, Duration.hours(1)))
-        },
-        {
-          hash: OAuthSecretHash.make(yield* sha256Hex(refresh)),
-          kind: "refresh",
-          familyId,
-          grantId: authorization.grantId,
-          applicationId: authorization.applicationId,
-          resource: authorization.resource,
-          scope: authorization.scope,
-          expiresAt: DateTime.toDateUtc(DateTime.addDuration(at, Duration.days(90)))
-        }
-      ])
-      return { access, refresh }
+      return yield* issueTokens(authorization)
     })
 
   const refreshTokens = (refreshToken: string, clientIdentifier: string, requestedResource: string) =>
@@ -413,6 +533,15 @@ export const createMcpOAuthHandler = (options: {
       return rotated === undefined || rotated === "reused" ? undefined : { access, refresh }
     })
 
+  const tokenResponse = (issued: { readonly access: string; readonly refresh: string }) =>
+    json({
+      access_token: issued.access,
+      token_type: "Bearer",
+      expires_in: 3_600,
+      refresh_token: issued.refresh,
+      scope: grantedScope
+    })
+
   const token = (request: Request) =>
     Effect.gen(function* () {
       if (resource === undefined) return oauthError("server_error", "OAuth is unavailable", 503)
@@ -423,11 +552,20 @@ export const createMcpOAuthHandler = (options: {
       const form = new URLSearchParams(text)
       const clientIdentifier = form.get("client_id")
       const requestedResource = form.get("resource")
-      if (clientIdentifier === null || requestedResource !== resource)
-        return oauthError("invalid_request", "client_id and the MCP resource are required")
+      if (clientIdentifier === null || !servedResource(requestedResource))
+        return oauthError("invalid_request", "client_id and a resource this gateway serves are required")
       const grantType = form.get("grant_type")
+      if (grantType === deviceCodeGrantType) {
+        const exchanged = yield* exchangeDeviceCode(form.get("device_code") ?? "", clientIdentifier, requestedResource)
+        return "error" in exchanged
+          ? oauthError(exchanged.error, deviceErrorDescriptions[exchanged.error])
+          : tokenResponse(exchanged)
+      }
       if (grantType !== "authorization_code" && grantType !== "refresh_token") {
-        return oauthError("unsupported_grant_type", "Only authorization_code and refresh_token are supported")
+        return oauthError(
+          "unsupported_grant_type",
+          "Only authorization_code, refresh_token, and the device code grant are supported"
+        )
       }
       const issued =
         grantType === "authorization_code"
@@ -442,13 +580,7 @@ export const createMcpOAuthHandler = (options: {
             ? yield* refreshTokens(form.get("refresh_token") ?? "", clientIdentifier, requestedResource)
             : undefined
       if (issued === undefined) return oauthError("invalid_grant", "The authorization grant is invalid or expired")
-      return json({
-        access_token: issued.access,
-        token_type: "Bearer",
-        expires_in: 3_600,
-        refresh_token: issued.refresh,
-        scope: grantedScope
-      })
+      return tokenResponse(issued)
     })
 
   const run = <E>(
@@ -513,6 +645,8 @@ export const createMcpOAuthHandler = (options: {
       }
       if (request.method === "GET" && url.pathname === mcpOAuthPaths.authorize)
         return run("authorize", authorize(request))
+      if (request.method === "POST" && url.pathname === mcpOAuthPaths.deviceAuthorization)
+        return run("deviceAuthorization", deviceAuthorization(request))
       if (request.method === "POST" && url.pathname === mcpOAuthPaths.token) return run("token", token(request))
       return undefined
     },

@@ -38,7 +38,7 @@ const clientsLayer: Layer.Layer<McpClient | OpenApiInvoker, never, HttpClient.Ht
 const capabilitiesLayer: Layer.Layer<
   Integrations | OAuthFlows | SpecCache | CatalogStore,
   never,
-  Database | CredentialStore | HttpClient.HttpClient | Egress | McpClient | OpenApiInvoker
+  Database | CredentialStore | HttpClient.HttpClient | Egress | McpClient | OpenApiInvoker | BlobStore
 > = Integrations.layer.pipe(
   Layer.provideMerge(Layer.mergeAll(SpecCache.layer, OAuthFlows.layer)),
   Layer.provideMerge(CatalogStore.layer)
@@ -109,7 +109,9 @@ export const stubbedLayer = (
   Integrations | OAuthFlows | SpecCache | CatalogStore | McpClient | OpenApiInvoker | Database | CredentialStore
 > =>
   capabilitiesLayer.pipe(
-    Layer.provideMerge(Layer.mergeAll(clients, unavailableHttpClientLayer, unavailableEgressLayer)),
+    Layer.provideMerge(
+      Layer.mergeAll(clients, unavailableHttpClientLayer, unavailableEgressLayer, BlobStore.temporaryLayer)
+    ),
     Layer.provideMerge(
       Layer.mergeAll(Database.layer.pipe(Layer.provide(temporarySqlLayer)), CredentialStore.memoryLayer)
     )

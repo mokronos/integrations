@@ -66,6 +66,20 @@ export const OAuthAuthorizationCode = Schema.Struct({
 })
 export type OAuthAuthorizationCode = typeof OAuthAuthorizationCode.Type
 
+/** A device's request to act as a profile, waiting for a person to confirm its user code. */
+export const OAuthDeviceRequest = Schema.Struct({
+  deviceCodeHash: OAuthSecretHash,
+  userCode: Schema.String,
+  applicationId: OAuthApplicationId,
+  resource: Schema.String,
+  scope: Schema.Literal("mcp"),
+  grantId: Schema.NullOr(OAuthGrantId),
+  deniedAt: Schema.NullOr(Schema.Date),
+  createdAt: Schema.Date,
+  expiresAt: Schema.Date
+})
+export type OAuthDeviceRequest = typeof OAuthDeviceRequest.Type
+
 export const OAuthTokenKind = Schema.Literals(["access", "refresh"])
 export type OAuthTokenKind = typeof OAuthTokenKind.Type
 export const OAuthToken = Schema.Struct({

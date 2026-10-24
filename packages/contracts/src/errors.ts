@@ -99,7 +99,9 @@ export const Resource = Schema.Literals([
   "oauth-request",
   "oauth-application",
   "oauth-grant",
-  "route"
+  "route",
+  "resource",
+  "app-session"
 ])
 export type Resource = typeof Resource.Type
 
@@ -108,7 +110,8 @@ const lookupHints: ReadonlyMap<Resource, string> = new Map([
   ["connection", "Connect the integration first"],
   ["tool", "List the tools to see what is available"],
   ["oauth-session", "Start the authorization again"],
-  ["route", "Check the method and path"]
+  ["route", "Check the method and path"],
+  ["resource", "List the resources this key may read"]
 ])
 
 export class NotFound extends Schema.TaggedError<NotFound>()(
@@ -692,6 +695,29 @@ export class OAuthReconnectRequired extends Schema.TaggedError<OAuthReconnectReq
   }
 }
 
+/** The provider refused a call for lack of a scope the connection was never granted. */
+export class OAuthScopeRequired extends Schema.TaggedError<OAuthScopeRequired>()(
+  "OAuthScopeRequired",
+  {
+    integration: Schema.String,
+    connection: Schema.String,
+    /** What the provider said the call needs, as its challenge named them. */
+    scopes: Schema.Array(Schema.String),
+    ...presented
+  },
+  { httpApiStatus: 403 }
+) {
+  override get message(): string {
+    return `${this.integration}/${this.connection} needs more access for this call: ${this.scopes.join(" ")}`
+  }
+  override get hint(): string | undefined {
+    return `A human has to authorize ${this.integration} again, granting ${this.scopes.join(" ")}`
+  }
+  override get retryable(): boolean {
+    return false
+  }
+}
+
 export const ToolCallFailure = Schema.Literals([
   "unauthorized",
   "forbidden",
@@ -814,6 +840,7 @@ export const IntegrationError = Schema.Union([
   RegistryUnavailable,
   OAuthFailed,
   OAuthReconnectRequired,
+  OAuthScopeRequired,
   ToolCallFailed
 ])
 export type IntegrationError = typeof IntegrationError.Type
@@ -841,6 +868,7 @@ export const GatewayError = Schema.Union([
   RegistryUnavailable,
   OAuthFailed,
   OAuthReconnectRequired,
+  OAuthScopeRequired,
   ToolCallFailed,
   GatewayUnavailable,
   GatewayIncompatible,

@@ -1,4 +1,11 @@
-import { AlreadyExists, InvalidInput, NotFound, ProfileRevoked } from "@integragents/contracts"
+import {
+  AlreadyExists,
+  InvalidInput,
+  NotFound,
+  profileActsFor,
+  ProfileRevoked,
+  whenPresent
+} from "@integragents/contracts"
 import {
   NonNegativeInt,
   patternProblem,
@@ -383,9 +390,27 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
           const name = request.payload.name.trim()
           if (name.length === 0)
             return yield* new InvalidInput({ field: "name", problem: "name the key after the app that will use it" })
+          const subject = request.payload.subject
+          if (subject !== undefined) {
+            const known = yield* capture(store.findSubjectById(subject))
+            if (known === undefined || known.tenantId !== tenantId) {
+              return yield* new NotFound({ resource: "subject", id: subject })
+            }
+            if (!profileActsFor(profile, subject)) {
+              return yield* new InvalidInput({ field: "subject", problem: `the profile does not act for ${subject}` })
+            }
+          }
           const key = yield* generateApiKey
-          yield* capture(store.addApiKey({ id: key.id, profileId: profile.id, name, hash: key.hash }))
-          return { id: key.id, profileId: profile.id, name, secret: key.secret }
+          yield* capture(
+            store.addApiKey({
+              id: key.id,
+              profileId: profile.id,
+              name,
+              hash: key.hash,
+              ...whenPresent("subjectId", subject)
+            })
+          )
+          return { id: key.id, profileId: profile.id, name, subject: subject ?? null, secret: key.secret }
         })
       )
       .handle("listKeys", (request) =>
@@ -398,6 +423,7 @@ export const AdministrativeLayer = HttpApiBuilder.group(GatewayApi, "administrat
               id: key.id,
               profileId: key.profileId,
               name: key.name,
+              subject: key.subjectId,
               createdAt: key.createdAt,
               lastUsedAt: key.lastUsedAt,
               revokedAt: key.revokedAt

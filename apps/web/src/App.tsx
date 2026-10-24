@@ -6,6 +6,7 @@ import { AuthGate } from "@/components/auth-gate"
 import { Toaster } from "@/components/ui/sonner"
 
 const ActivityRoute = lazy(() => import("@/routes/activity").then((route) => ({ default: route.ActivityRoute })))
+const AppSessionRoute = lazy(() => import("@/routes/app-session").then((route) => ({ default: route.AppSessionRoute })))
 const ApprovalsRoute = lazy(() => import("@/routes/approvals").then((route) => ({ default: route.ApprovalsRoute })))
 const HomeRoute = lazy(() => import("@/routes/home").then((route) => ({ default: route.HomeRoute })))
 const IntegrationsRoute = lazy(() =>
@@ -19,6 +20,9 @@ const ProfileDetailRoute = lazy(() =>
 const SettingsRoute = lazy(() => import("@/routes/settings").then((route) => ({ default: route.SettingsRoute })))
 const OAuthConsentRoute = lazy(() =>
   import("@/routes/oauth-consent").then((route) => ({ default: route.OAuthConsentRoute }))
+)
+const OAuthDeviceRoute = lazy(() =>
+  import("@/routes/oauth-consent").then((route) => ({ default: route.OAuthDeviceRoute }))
 )
 
 export default function App() {
@@ -35,10 +39,12 @@ export default function App() {
       <AuthGate>
         <Routes>
           <Route path="/oauth/consent" element={<OAuthConsentRoute />} />
+          <Route path="/oauth/device" element={<OAuthDeviceRoute />} />
           <Route element={<AppShell dark={dark} onDarkChange={setDark} />}>
             <Route index element={<HomeRoute />} />
             <Route path="/onboarding" element={<OnboardingRoute />} />
             <Route path="/approvals" element={<ApprovalsRoute />} />
+            <Route path="/apps/:sessionId" element={<AppSessionRoute />} />
             <Route path="/integrations" element={<IntegrationsRoute />} />
             <Route path="/integrations/:slug" element={<IntegrationsRoute />} />
             <Route path="/profiles" element={<ProfilesRoute />} />

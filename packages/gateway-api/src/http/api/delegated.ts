@@ -1,7 +1,14 @@
-import { NotFound } from "@integragents/contracts"
+import { IntegrationError, NotFound, ResourceContents, ResourceEntry, SkillEntry } from "@integragents/contracts"
 import { Effect, Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/http-api"
-import { ApprovalId, BlobId, BlobUpload, IdempotencyKey, PendingApproval, SubjectId } from "@integragents/contracts"
+import {
+  ApprovalId,
+  BlobId,
+  BlobUpload,
+  CredentialIdentity,
+  IdempotencyKey,
+  PendingApproval
+} from "@integragents/contracts"
 import {
   Alias,
   BooleanFromString,
@@ -25,8 +32,6 @@ const ExecuteBody = Schema.Struct({
   alias: WireAlias,
   tool: Schema.String,
   arguments: Schema.optional(Json),
-  /** Who the agent acts for. Required by delegated tools, ignored by the rest. */
-  subject: Schema.optional(SubjectId),
   /**
    * The caller's name for this call, the same on every retry: a repeat gets
    * the first call's outcome, or waits on its approval, instead of running
@@ -48,6 +53,9 @@ const InvokedInvalid = InvocationInvalid.pipe(HttpApiSchema.status(400))
 
 export const DelegatedGroup = HttpApiGroup.make("delegated")
   .add(
+    HttpApiEndpoint.get("whoami", "/v1/whoami", { success: CredentialIdentity }).annotate(RequiredAccess, "delegated")
+  )
+  .add(
     HttpApiEndpoint.get("listTools", "/v1/tools", {
       query: {
         schemas: BooleanFromString.pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed(false))),
@@ -68,6 +76,25 @@ export const DelegatedGroup = HttpApiGroup.make("delegated")
       params: { id: ApprovalId },
       success: PendingApproval,
       error: NotFound
+    }).annotate(RequiredAccess, "delegated")
+  )
+  .add(
+    HttpApiEndpoint.get("listResources", "/v1/resources", {
+      success: Schema.Struct({ resources: Schema.Array(ResourceEntry) }),
+      error: IntegrationError.members
+    }).annotate(RequiredAccess, "delegated")
+  )
+  .add(
+    HttpApiEndpoint.get("readResource", "/v1/resources/read", {
+      query: { uri: Schema.String },
+      success: Schema.Struct({ contents: Schema.Array(ResourceContents) }),
+      error: IntegrationError.members
+    }).annotate(RequiredAccess, "delegated")
+  )
+  .add(
+    HttpApiEndpoint.get("listSkills", "/v1/skills", {
+      success: Schema.Struct({ skills: Schema.Array(SkillEntry) }),
+      error: IntegrationError.members
     }).annotate(RequiredAccess, "delegated")
   )
   .add(
