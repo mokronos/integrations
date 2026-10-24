@@ -58,6 +58,7 @@ export const toToolSummary = (record: IntegrationTool): Effect.Effect<ToolSummar
   Schema.decodeUnknownEffect(ToolSummary)({
     address: record.address,
     name: record.name,
+    ...whenPresent("title", record.title),
     description: record.description,
     integration: record.integration,
     owner: record.owner,
@@ -65,7 +66,8 @@ export const toToolSummary = (record: IntegrationTool): Effect.Effect<ToolSummar
     defaultDecision: defaultDecision(record.readOnly),
     readOnly: record.readOnly,
     destructive: record.destructive,
-    idempotent: record.idempotent
+    idempotent: record.idempotent,
+    openWorld: record.openWorld
   }).pipe(Effect.mapError((cause) => new StorageError({ message: `Could not describe tool ${record.name}`, cause })))
 
 export const toTool = (record: IntegrationTool): Effect.Effect<Tool, StorageError> =>
@@ -73,6 +75,8 @@ export const toTool = (record: IntegrationTool): Effect.Effect<Tool, StorageErro
     Schema.decodeUnknownEffect(Tool)({
       ...summary,
       ...whenPresent("inputSchema", record.inputSchema),
-      ...whenPresent("outputSchema", record.outputSchema)
+      ...whenPresent("outputSchema", record.outputSchema),
+      ...whenPresent("icons", record.icons),
+      ...whenPresent("meta", record.meta)
     }).pipe(Effect.mapError((cause) => new StorageError({ message: `Could not describe tool ${record.name}`, cause })))
   )

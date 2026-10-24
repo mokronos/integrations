@@ -110,6 +110,17 @@ const fetchBlob = Effect.fn("Cli.fetchBlob")(function* (
   return destination
 })
 
+/** One handle's bytes written to local disk, the handle returned with the path they went to. */
+export const materializeHandle = (
+  client: GatewayClient,
+  handle: BlobHandle,
+  out: string | undefined
+): Effect.Effect<BlobHandle, IntegrationsCliError> =>
+  fetchBlob(client, handle, destinationFor(handle, out)).pipe(
+    Effect.map((written): BlobHandle => ({ ...handle, path: written })),
+    Effect.mapError((cause) => cliError(thrownMessage(cause)))
+  )
+
 /**
  * Blob handles can arrive nested — an MCP content array carries one per item —
  * so the whole result is walked rather than only its root.

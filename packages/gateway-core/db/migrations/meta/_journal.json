@@ -155,6 +155,34 @@
       "when": 1792498630296,
       "tag": "0021_remember_keyed_invocations",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1792789097806,
+      "tag": "0022_nice_loners",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1792792272918,
+      "tag": "0023_first_clint_barton",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1792844547914,
+      "tag": "0024_simple_tempest",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1792846626392,
+      "tag": "0025_glamorous_night_thrasher",
+      "breakpoints": true
     }
   ]
 }

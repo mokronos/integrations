@@ -17,6 +17,8 @@
     "@integragents/gateway-api": "workspace:^",
     "@integragents/gateway-core": "workspace:^",
     "@integragents/client": "workspace:^",
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@modelcontextprotocol/ext-apps": "catalog:",
     "@tailwindcss/vite": "catalog:",
     "@tanstack/react-query": "catalog:",
     "@vitejs/plugin-react": "catalog:",

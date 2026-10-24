@@ -57,6 +57,20 @@
       "when": 1792495526034,
       "tag": "0007_majestic_mandroid",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1792788871169,
+      "tag": "0008_quick_marvex",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1792791071308,
+      "tag": "0009_nice_boomerang",
+      "breakpoints": true
     }
   ]
 }

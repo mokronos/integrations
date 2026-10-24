@@ -8,6 +8,7 @@ import {
   ProfileCapability,
   ToolName
 } from "./vocabulary.ts"
+import { Attachment } from "./attachment.ts"
 import { OAuthSessionView } from "./oauth.ts"
 import { ArgumentPattern } from "./argument-paths.ts"
 import { InputRequests } from "./input.ts"
@@ -156,17 +157,29 @@ export const Profile = Schema.Struct({
   includeNewTools: Schema.Boolean,
   /** Minutes a call waits for a decision; null waits until someone decides. */
   approvalExpiryMinutes: Schema.NullOr(ApprovalExpiryMinutes),
-  /** An invocation naming anyone else is refused. */
+  /** The people its credentials may act for; a call for anyone else is refused. */
   subjects: ProfileSubjects,
   createdAt: Schema.Date,
   revokedAt: Schema.NullOr(Schema.Date)
 })
 export type Profile = typeof Profile.Type
+/** Whether a credential for `subject` may use the profile at all. */
+export const profileActsFor = (profile: Profile, subject: SubjectId): boolean =>
+  profile.subjects === "any" || profile.subjects.includes(subject)
+
+/** Who a credential is to the gateway: the profile it acts as, and the person it acts for. */
+export const CredentialIdentity = Schema.Struct({
+  profile: Schema.Struct({ id: ProfileId, name: Schema.String }),
+  credential: Schema.Struct({ kind: Schema.Literals(["key", "login"]), name: Schema.String }),
+  subject: Schema.NullOr(SubjectId)
+})
+export type CredentialIdentity = typeof CredentialIdentity.Type
 
 export const ApiKeyView = Schema.Struct({
   id: ApiKeyId,
   profileId: ProfileId,
   name: Schema.String,
+  subject: Schema.NullOr(SubjectId),
   createdAt: Schema.Date,
   lastUsedAt: Schema.NullOr(Schema.Date),
   revokedAt: Schema.NullOr(Schema.Date)
@@ -238,6 +251,8 @@ export const PendingApproval = Schema.Struct({
   decidedAt: Schema.NullOr(Schema.Date),
   decidedBy: Schema.NullOr(Schema.String),
   result: Schema.NullOr(Schema.Json),
+  /** What the approved call returned beside its result. */
+  attachments: Schema.Array(Attachment),
   error: Schema.NullOr(Schema.String),
   collectedAt: Schema.NullOr(Schema.Date)
 })
@@ -281,7 +296,70 @@ export const GatewayEvent = Schema.Union([
   Schema.TaggedStruct("Changed", { resource: GatewayResource, ids: Schema.optional(Schema.Array(Schema.String)) })
 ])
 export type GatewayEvent = typeof GatewayEvent.Type
-export const InvocationSucceeded = Schema.Struct({ status: Schema.Literal("succeeded"), result: Schema.Json })
+export const AppSessionId = Schema.String.pipe(Schema.brand("AppSessionId"))
+export type AppSessionId = typeof AppSessionId.Type
+
+/**
+ * Where a human opens the MCP App a call's result renders in, for a caller
+ * with no host of its own, such as the `i` CLI. Only a person signed in to the
+ * dashboard can open it; the key that made the call cannot.
+ */
+export const AppSessionLink = Schema.Struct({
+  session: AppSessionId,
+  /** The dashboard page that hosts the view; absent when the gateway knows no dashboard URL. */
+  url: Schema.optional(Schema.String),
+  resourceUri: Schema.String
+})
+export type AppSessionLink = typeof AppSessionLink.Type
+
+/** What a view asked to put in front of the model, as MCP Apps' `ui/update-model-context` carries it. */
+export const AppContext = Schema.Struct({
+  content: Schema.optional(Schema.Array(Schema.Json)),
+  structuredContent: Schema.optional(Schema.Json)
+})
+export type AppContext = typeof AppContext.Type
+
+/** A message a view asked to send the agent, as `ui/message` carries it. */
+export const AppMessage = Schema.Struct({
+  role: Schema.Literal("user"),
+  content: Schema.Array(Schema.Json),
+  sentAt: Schema.Date
+})
+export type AppMessage = typeof AppMessage.Type
+
+/** One rendering of a tool's result in its MCP App, hosted by the dashboard for a person. */
+export const AppSession = Schema.Struct({
+  id: AppSessionId,
+  profileId: ProfileId,
+  alias: Alias,
+  tool: ToolName,
+  arguments: Schema.Json,
+  /** The tool's result as MCP carries it, handed to the view. */
+  result: Schema.Json,
+  resourceUri: Schema.String,
+  createdAt: Schema.Date,
+  expiresAt: Schema.Date,
+  context: Schema.NullOr(AppContext),
+  messages: Schema.Array(AppMessage)
+})
+export type AppSession = typeof AppSession.Type
+
+/** What the agent that made the call may read back: what the view told it. */
+export const AppSessionNotes = Schema.Struct({
+  session: AppSessionId,
+  context: Schema.NullOr(AppContext),
+  messages: Schema.Array(AppMessage)
+})
+export type AppSessionNotes = typeof AppSessionNotes.Type
+
+export const InvocationSucceeded = Schema.Struct({
+  status: Schema.Literal("succeeded"),
+  result: Schema.Json,
+  /** Media, files and resources the tool returned beside its result. */
+  attachments: Schema.optional(Schema.Array(Attachment)),
+  /** The MCP App its result renders in, for a human to open. */
+  app: Schema.optional(AppSessionLink)
+})
 export type InvocationSucceeded = typeof InvocationSucceeded.Type
 export const InvocationPending = Schema.Struct({
   status: Schema.Literal("pending"),
@@ -302,12 +380,19 @@ export const InvocationFailed = Schema.Struct({
 export type InvocationFailed = typeof InvocationFailed.Type
 export const InvocationInvalid = Schema.Struct({ status: Schema.Literal("invalid"), error: InvalidInput })
 export type InvocationInvalid = typeof InvocationInvalid.Type
-/** The tool acts for a user who has not connected yet: the flow is started, bound to them, and waits for their browser. */
+/**
+ * The call needs a human to authorize the integration first: a delegated
+ * tool's user who has not connected yet, or a connection the provider wants
+ * more scopes on. The flow is started and waits for their browser.
+ */
 export const InvocationAuthorizationRequired = Schema.Struct({
   status: Schema.Literal("authorization-required"),
   integration: IntegrationSlug,
   connection: ConnectionName,
-  subject: SubjectId,
+  /** The person the flow is bound to; absent for a connection the organization holds. */
+  subject: Schema.optional(SubjectId),
+  /** The scopes the flow asks for, when the provider said the call needs more than the connection has. */
+  scopes: Schema.optional(Schema.Array(Schema.String)),
   session: OAuthSessionView
 })
 export type InvocationAuthorizationRequired = typeof InvocationAuthorizationRequired.Type

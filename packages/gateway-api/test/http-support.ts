@@ -1,12 +1,20 @@
 import { expect } from "@effect/vitest"
 import { Effect, Option, Schema } from "effect"
 import { FetchHttpClient } from "effect/http"
-import { delegationTemplateOf, ToolAddress, whenPresent } from "@integragents/contracts"
+import { delegationTemplateOf, ToolAddress, whenPresent, whenTrue } from "@integragents/contracts"
 import { makeGatewayEvents, publishingStore } from "@integragents/gateway-core"
 import type { ApprovalReviewer, OAuthSessions } from "@integragents/gateway-core"
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client"
-import type { Connection, ConnectionOwner, Tool } from "@integragents/contracts"
+import type {
+  Connection,
+  ConnectionOwner,
+  ResourceContents,
+  ResourceEntry,
+  SkillEntry,
+  Tool
+} from "@integragents/contracts"
 import { InvocationError, StorageError } from "@integragents/integrations"
+import type { BlobStore, IntegrationFailure, ToolExecution } from "@integragents/integrations"
 import { stubIntegrationsContext } from "./stubs.ts"
 import { openDatabase, storeOn, temporaryDirectory } from "./fixtures.ts"
 import {
@@ -37,14 +45,19 @@ interface ExecutedCall {
   readonly input: typeof Schema.Json.Type
 }
 
-const stubConnection = (reference: { readonly integration: string; readonly name: string }): Connection => ({
+const stubConnection = (reference: {
+  readonly integration: string
+  readonly name: string
+  readonly scope?: string
+}): Connection => ({
   owner: "user:sebastian",
   name: ConnectionName.make(reference.name),
   integration: IntegrationSlug.make(reference.integration),
   template: reference.integration,
   address: `connections.${reference.integration}.user.${reference.name}`,
   provider: reference.integration,
-  status: "connected"
+  status: "connected",
+  ...whenPresent("oauthScope", reference.scope)
 })
 
 const stubTool = (tool: {
@@ -62,7 +75,8 @@ const stubTool = (tool: {
   defaultDecision: tool.defaultDecision ?? "require_approval",
   readOnly: tool.defaultDecision === "allow",
   destructive: tool.defaultDecision !== "allow",
-  idempotent: tool.defaultDecision === "allow"
+  idempotent: tool.defaultDecision === "allow",
+  openWorld: true
 })
 
 const stubIntegrations = (
@@ -71,7 +85,11 @@ const stubIntegrations = (
     readonly fail?: boolean
     /** The catalog's storage breaks under every connection listing. */
     readonly storageFails?: boolean
-    readonly connections?: ReadonlyArray<{ readonly integration: string; readonly name: string }>
+    readonly connections?: ReadonlyArray<{
+      readonly integration: string
+      readonly name: string
+      readonly scope?: string
+    }>
     /** Integrations known to the catalog that offer OAuth, connected or not. */
     readonly oauthIntegrations?: ReadonlyArray<string>
     readonly tools?: ReadonlyArray<{
@@ -80,6 +98,19 @@ const stubIntegrations = (
       readonly owner?: ConnectionOwner
       readonly defaultDecision?: "allow" | "require_approval"
     }>
+    /** What every call returns, instead of `{ ok: true }`. */
+    readonly execution?: ToolExecution
+    readonly failWith?: IntegrationFailure
+    /** What every connection's server publishes as skills. */
+    readonly skills?: ReadonlyArray<SkillEntry>
+    /** What every connection's server lists and serves as resources. */
+    readonly resources?: {
+      readonly listed: ReadonlyArray<ResourceEntry>
+      readonly contents: Record<string, ReadonlyArray<ResourceContents>>
+    }
+    /** What the catalog says about every tool, beyond the stub's defaults. */
+    readonly described?: Partial<Tool>
+    readonly blobs?: BlobStore["Service"]
   } = {}
 ) => {
   const calls: Array<ExecutedCall> = []
@@ -88,82 +119,95 @@ const stubIntegrations = (
   const renamed: Array<{ readonly slug: string; readonly name: string }> = []
   const oauthCapable = new Set(behaviour.oauthIntegrations ?? [])
   const known = new Set([...(behaviour.connections ?? []).map((connection) => connection.integration), ...oauthCapable])
-  const integrationServices = stubIntegrationsContext({
-    execute: (address, input) => {
-      calls.push({ address: String(address), input })
-      return Effect.promise(() => behaviour.beforeExecute?.() ?? Promise.resolve()).pipe(
-        Effect.flatMap(() =>
-          behaviour.fail === true
-            ? Effect.fail(
-                new InvocationError({
-                  code: "upstream_status",
-                  status: 500,
-                  detail: "vendor exploded"
-                })
-              )
-            : Effect.succeed({ kind: "complete" as const, result: { ok: true } })
+  const integrationServices = stubIntegrationsContext(
+    {
+      execute: (address, input) => {
+        calls.push({ address: String(address), input })
+        return Effect.promise(() => behaviour.beforeExecute?.() ?? Promise.resolve()).pipe(
+          Effect.flatMap(() =>
+            behaviour.failWith !== undefined
+              ? Effect.fail(behaviour.failWith)
+              : behaviour.fail === true
+                ? Effect.fail(
+                    new InvocationError({
+                      code: "upstream_status",
+                      status: 500,
+                      detail: "vendor exploded"
+                    })
+                  )
+                : Effect.succeed(
+                    behaviour.execution ?? { kind: "complete" as const, result: { ok: true }, attachments: [] }
+                  )
+          )
         )
-      )
-    },
-    toolSummaries: () => Effect.succeed((behaviour.tools ?? []).map(stubTool)),
-    listTools: () => Effect.succeed((behaviour.tools ?? []).map(stubTool)),
-    describeTool: (target) =>
-      Effect.succeed({
-        ...stubTool({
-          address: String(target),
-          name: String(target).split(".").at(-1) ?? "tool"
+      },
+      listResources: () => Effect.succeed(behaviour.resources?.listed ?? []),
+      readResource: (_reference, uri) => Effect.succeed(behaviour.resources?.contents[uri] ?? []),
+      listSkills: () => Effect.succeed(behaviour.skills ?? []),
+      getSkill: (_reference, uri) =>
+        Effect.succeed(Option.fromNullishOr((behaviour.skills ?? []).find((skill) => skill.uri === uri))),
+      toolSummaries: () => Effect.succeed((behaviour.tools ?? []).map(stubTool)),
+      listTools: () => Effect.succeed((behaviour.tools ?? []).map(stubTool)),
+      describeTool: (target) =>
+        Effect.succeed({
+          ...stubTool({
+            address: String(target),
+            name: String(target).split(".").at(-1) ?? "tool"
+          }),
+          description: "Send an email",
+          inputSchema: {
+            type: "object",
+            properties: { to: { type: "string" } },
+            required: ["to"]
+          },
+          ...behaviour.described
         }),
-        description: "Send an email",
-        inputSchema: {
-          type: "object",
-          properties: { to: { type: "string" } },
-          required: ["to"]
-        }
-      }),
-    listConnections: () =>
-      behaviour.storageFails === true
-        ? Effect.fail(new StorageError({ message: "listConnections" }))
-        : Effect.succeed((behaviour.connections ?? []).map(stubConnection)),
-    removeConnection: (reference) =>
-      Effect.sync(() => {
-        removed.push({ integration: reference.integration, name: reference.name })
-      }),
-    findIntegration: (slug) =>
-      Effect.sync(() =>
-        known.has(slug)
-          ? Option.some({
-              slug,
-              name: renamed.find((entry) => entry.slug === slug)?.name ?? String(slug),
-              description: "",
-              kind: "mcp" as const,
-              canRemove: true,
-              canRefresh: true,
-              authMethods: oauthCapable.has(slug)
-                ? [
-                    {
-                      id: "oauth",
-                      label: "OAuth",
-                      kind: "oauth" as const,
-                      template: "oauth2",
-                      oauth: {
-                        authorizationUrl: "https://accounts.example/authorize",
-                        tokenUrl: "https://accounts.example/token"
+      listConnections: () =>
+        behaviour.storageFails === true
+          ? Effect.fail(new StorageError({ message: "listConnections" }))
+          : Effect.succeed((behaviour.connections ?? []).map(stubConnection)),
+      removeConnection: (reference) =>
+        Effect.sync(() => {
+          removed.push({ integration: reference.integration, name: reference.name })
+        }),
+      findIntegration: (slug) =>
+        Effect.sync(() =>
+          known.has(slug)
+            ? Option.some({
+                slug,
+                name: renamed.find((entry) => entry.slug === slug)?.name ?? String(slug),
+                description: "",
+                kind: "mcp" as const,
+                canRemove: true,
+                canRefresh: true,
+                authMethods: oauthCapable.has(slug)
+                  ? [
+                      {
+                        id: "oauth",
+                        label: "OAuth",
+                        kind: "oauth" as const,
+                        template: "oauth2",
+                        oauth: {
+                          authorizationUrl: "https://accounts.example/authorize",
+                          tokenUrl: "https://accounts.example/token"
+                        }
                       }
-                    }
-                  ]
-                : []
-            })
-          : Option.none()
-      ),
-    renameIntegration: (slug, name) =>
-      Effect.sync(() => {
-        renamed.push({ slug, name })
-      }),
-    removeIntegration: (slug) =>
-      Effect.sync(() => {
-        forgotten.push(slug)
-      })
-  })
+                    ]
+                  : []
+              })
+            : Option.none()
+        ),
+      renameIntegration: (slug, name) =>
+        Effect.sync(() => {
+          renamed.push({ slug, name })
+        }),
+      removeIntegration: (slug) =>
+        Effect.sync(() => {
+          forgotten.push(slug)
+        })
+    },
+    whenPresent("blobs", behaviour.blobs)
+  )
   return { calls, removed, forgotten, renamed, integrationServices }
 }
 
@@ -176,7 +220,11 @@ export const setup = Effect.fnUntraced(function* (
     readonly fail?: boolean
     /** The catalog's storage breaks under every connection listing. */
     readonly storageFails?: boolean
-    readonly connections?: ReadonlyArray<{ readonly integration: string; readonly name: string }>
+    readonly connections?: ReadonlyArray<{
+      readonly integration: string
+      readonly name: string
+      readonly scope?: string
+    }>
     readonly tools?: ReadonlyArray<{
       readonly address: string
       readonly name: string
@@ -190,6 +238,15 @@ export const setup = Effect.fnUntraced(function* (
     readonly oauthStart?: OAuthSessions["start"]
     readonly oauthIntegrations?: ReadonlyArray<string>
     readonly reviewer?: ApprovalReviewer["Service"]
+    readonly execution?: ToolExecution
+    readonly failWith?: IntegrationFailure
+    readonly skills?: ReadonlyArray<SkillEntry>
+    readonly resources?: {
+      readonly listed: ReadonlyArray<ResourceEntry>
+      readonly contents: Record<string, ReadonlyArray<ResourceContents>>
+    }
+    readonly described?: Partial<Tool>
+    readonly blobs?: BlobStore["Service"]
   } = {}
 ) {
   const sql = yield* openDatabase(yield* temporaryDirectory("gateway-http-"))
@@ -213,7 +270,13 @@ export const setup = Effect.fnUntraced(function* (
     ...whenPresent("storageFails", options.storageFails),
     ...whenPresent("connections", options.connections),
     ...whenPresent("tools", options.tools),
-    ...whenPresent("oauthIntegrations", options.oauthIntegrations)
+    ...whenPresent("oauthIntegrations", options.oauthIntegrations),
+    ...whenPresent("execution", options.execution),
+    ...whenPresent("failWith", options.failWith),
+    ...whenPresent("resources", options.resources),
+    ...whenPresent("skills", options.skills),
+    ...whenPresent("described", options.described),
+    ...whenPresent("blobs", options.blobs)
   })
   const { handle } = createGatewayHandler({
     events,
@@ -278,6 +341,19 @@ export const setup = Effect.fnUntraced(function* (
   }
 })
 
+type Call = Effect.Success<ReturnType<typeof setup>>["call"]
+
+/** A key bound to one person, issued the way an administrator issues it. */
+export const keyFor = Effect.fnUntraced(function* (call: Call, profileId: string, subject: string) {
+  yield* call("POST", "/v1/subjects", { local: true, body: { id: subject } })
+  const issued = yield* call("POST", `/v1/profiles/${profileId}/keys`, {
+    local: true,
+    body: { name: `${subject}'s assistant`, subject }
+  })
+  expect(issued.status).toBe(201)
+  return String(issued.body["secret"])
+})
+
 /** Another profile in the same tenant, holding one key named after it. */
 export const profileWithKey = Effect.fnUntraced(function* (
   store: GatewayStore,
@@ -325,6 +401,10 @@ export const mcpClient = Effect.fnUntraced(function* (
     readonly action: "accept" | "decline" | "cancel"
     readonly asked: Array<string>
     readonly content?: Record<string, string | number | boolean>
+    /** The elicitation modes the client declares; form alone when absent. */
+    readonly modes?: { readonly form: boolean; readonly url: boolean }
+    /** The links URL elicitations asked the human to open. */
+    readonly opened?: Array<string>
   }
 ) {
   const transport = new StreamableHTTPClientTransport(new URL("http://gateway.test/mcp"), {
@@ -337,11 +417,20 @@ export const mcpClient = Effect.fnUntraced(function* (
         { name: "gateway-test", version: "1.0.0" },
         elicitation === undefined
           ? {}
-          : { capabilities: { elicitation: { form: {} } }, versionNegotiation: { mode: "auto" } }
+          : {
+              capabilities: {
+                elicitation: {
+                  ...whenTrue(elicitation.modes?.form ?? true, () => ({ form: {} })),
+                  ...whenTrue(elicitation.modes?.url ?? false, () => ({ url: {} }))
+                }
+              },
+              versionNegotiation: { mode: "auto" }
+            }
       )
       if (elicitation !== undefined) {
         client.setRequestHandler("elicitation/create", async (request) => {
           elicitation.asked.push(request.params.message)
+          if (request.params.mode === "url") elicitation.opened?.push(request.params.url)
           return elicitation.action === "accept"
             ? { action: "accept", content: elicitation.content ?? {} }
             : { action: elicitation.action }
@@ -357,5 +446,54 @@ export const mcpClient = Effect.fnUntraced(function* (
 export const mcpJson = Effect.fnUntraced(function* (client: Client, name: string, arguments_: typeof JsonBody.Type) {
   const result = yield* Effect.promise(() => client.callTool({ name, arguments: arguments_ }))
   expect(result.isError, `${name}: ${mcpText(result)}`).not.toBe(true)
-  return Schema.decodeUnknownSync(JsonBody)(JSON.parse(mcpText(result)))
+  return Schema.decodeUnknownSync(JsonBody)(result.structuredContent)
 })
+
+const decodeName = Schema.decodeUnknownOption(Schema.String)
+
+/** One 2026-07-28 request, sent as a client the SDK does not model yet would send it (the Tasks extension). */
+export const rawMcp = (
+  handle: (request: Request) => Promise<Response>,
+  secret: string,
+  capabilities: Record<string, typeof Schema.Json.Type>
+) =>
+  Effect.fnUntraced(function* (method: string, params: Record<string, typeof Schema.Json.Type>) {
+    const name = Option.getOrUndefined(decodeName(params["name"] ?? params["taskId"]))
+    const response = yield* Effect.promise(() =>
+      handle(
+        new Request("http://gateway.test/mcp", {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${secret}`,
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+            "mcp-protocol-version": "2026-07-28",
+            "mcp-method": method,
+            ...whenPresent("mcp-name", name)
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method,
+            params: {
+              ...params,
+              _meta: {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientInfo": { name: "raw-client", version: "1" },
+                "io.modelcontextprotocol/clientCapabilities": capabilities
+              }
+            }
+          })
+        })
+      )
+    )
+    const text = yield* Effect.promise(() => response.text())
+    const payload = text.includes("data:")
+      ? (text
+          .split("\n")
+          .filter((line) => line.startsWith("data:"))
+          .map((line) => line.slice(5).trim())
+          .pop() ?? "{}")
+      : text
+    return Schema.decodeUnknownSync(JsonBody)(JSON.parse(payload))
+  })

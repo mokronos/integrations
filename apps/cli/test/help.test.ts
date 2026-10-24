@@ -51,7 +51,9 @@ describe("i and ii CLI help", () => {
       "disconnect",
       "execute",
       "validate",
-      "approval"
+      "approval",
+      "login",
+      "logout"
     ]) {
       expect(hasCommand(result.stdout, command)).toBe(true)
     }
@@ -70,8 +72,6 @@ describe("i and ii CLI help", () => {
       "audit",
       "drift",
       "maintenance",
-      "login",
-      "logout",
       "serve",
       "dashboard",
       "install",

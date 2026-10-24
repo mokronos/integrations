@@ -11,9 +11,9 @@ import type { HttpClient } from "effect/http"
 import type { Integrations, StorageError } from "@integragents/integrations"
 import type { OAuthSessions } from "../connection-oauth/sessions.ts"
 import { invalidArguments } from "./arguments.ts"
-import { authenticateKey, authorizeProfileInvocation } from "./authorize.ts"
+import { authorizeProfileInvocation } from "./authorize.ts"
 import { defaultArgumentRetentionDays } from "../config.ts"
-import { defaultTenantId, keyOrigin, sameConnectionRef, unattributedOrigin } from "../domain.ts"
+import { sameConnectionRef } from "../domain.ts"
 import type {
   Alias,
   ApprovalId,
@@ -337,6 +337,8 @@ const settle = Effect.fn("Invocation.settle")(
     if (missing !== undefined) return missing
 
     const decide = (idempotencyKey: IdempotencyKey | undefined) =>
+      Effect.flatMap(run(idempotencyKey), (outcome) => stepUpScopes(dependencies, authorization, outcome))
+    const run = (idempotencyKey: IdempotencyKey | undefined) =>
       authorization.decision === "require_approval"
         ? freezeOrCollect(
             {
@@ -561,12 +563,31 @@ const missingUserConnection = Effect.fn("Invocation.missingUserConnection")(func
   const live = held.find((candidate) => candidate.name === connection.name && candidate.status === "connected")
   if (live !== undefined) return undefined
 
-  const deny = (reason: string): InvocationOutcome => ({ status: "denied", reason })
-  if (dependencies.oauth === undefined) {
-    return deny(
-      `${authorization.alias}.${authorization.profileTool.tool} needs ${subject} to connect ${connection.integration} first`
-    )
+  return yield* startAuthorization(dependencies, authorization, {
+    subject,
+    unavailable: `${authorization.alias}.${authorization.profileTool.tool} needs ${subject} to connect ${connection.integration} first`
+  })
+})
+
+/**
+ * Starts the OAuth flow a call is waiting on and answers with what the human
+ * needs to finish it. `scopes` replaces what the integration asks for by
+ * default, for a connection the provider wants more access on.
+ */
+const startAuthorization = Effect.fn("Invocation.startAuthorization")(function* (
+  dependencies: InvokeDependencies,
+  authorization: Authorized,
+  request: {
+    readonly subject?: SubjectId
+    readonly scopes?: ReadonlyArray<string>
+    /** Why the call cannot run, for a gateway that cannot start flows. */
+    readonly unavailable: string
   }
+): Effect.fn.Return<InvocationOutcome> {
+  const connection = authorization.connection
+  const forWhom = request.subject === undefined ? "" : ` on behalf of ${request.subject}`
+  const deny = (reason: string): InvocationOutcome => ({ status: "denied", reason })
+  if (dependencies.oauth === undefined) return deny(request.unavailable)
   const integration = yield* dependencies.integrations
     .findIntegration(connection.integration)
     .pipe(Effect.catch(() => Effect.succeed(Option.none())))
@@ -574,55 +595,62 @@ const missingUserConnection = Effect.fn("Invocation.missingUserConnection")(func
     ? undefined
     : integration.value.authMethods.find((candidate) => candidate.kind === "oauth")
   if (method === undefined) {
-    return deny(`${connection.integration} offers no OAuth method, so it cannot be connected on behalf of ${subject}`)
+    return deny(`${connection.integration} offers no OAuth method, so it cannot be authorized${forWhom}`)
   }
   const session = yield* dependencies.oauth
     .start({
       integration: connection.integration,
       connection: connection.name,
-      authMethod: method,
+      authMethod:
+        request.scopes === undefined ? method : { ...method, oauth: { ...method.oauth, scopes: [...request.scopes] } },
       bindingTenant: authorization.profile.tenantId,
-      subject
+      ...whenPresent("subject", request.subject)
     })
     .pipe(Effect.catch((failure) => Effect.succeed(failure)))
   if ("_tag" in session) {
-    return deny(`${connection.integration} could not start authorization for ${subject}: ${session.message}`)
+    return deny(`${connection.integration} could not start authorization${forWhom}: ${session.message}`)
   }
   return {
     status: "authorization-required",
     integration: connection.integration,
     connection: connection.name,
-    subject,
+    ...whenPresent("subject", request.subject),
+    ...whenPresent("scopes", request.scopes),
     session: { id: session.id, integration: session.integration, connection: session.connection, state: session.state }
   }
 })
 
-/** An invocation presented with an API key, as the HTTP route receives it. */
-export const invokeThroughGateway = Effect.fn("Invocation.invokeThroughGateway")(function* (
+/**
+ * A call the provider refused for a scope the connection lacks is not a dead
+ * end: the flow starts again asking for what the connection already holds
+ * plus what the provider named, and the caller is sent to a human with it.
+ * Whoever finishes a flow binds their account to the connection, so one the
+ * organization holds is only re-authorized for a profile that may provision
+ * connections; anyone else gets the refusal, which says what to grant.
+ */
+const stepUpScopes = Effect.fn("Invocation.stepUpScopes")(function* (
   dependencies: InvokeDependencies,
-  input: {
-    readonly secret: string
-    readonly alias: Alias
-    readonly tool: ToolName
-    readonly arguments: Json
-    readonly subject?: SubjectId
-    readonly idempotencyKey?: IdempotencyKey
+  authorization: Authorized,
+  outcome: InvocationOutcome
+): Effect.fn.Return<InvocationOutcome> {
+  if (outcome.status !== "failed" || outcome.error?._tag !== "OAuthScopeRequired") return outcome
+  const required = outcome.error.scopes
+  const connection = authorization.connection
+  if (connection.owner !== "user" && !authorization.profile.capabilities.includes("provision_connections")) {
+    return outcome
   }
-): Effect.fn.Return<InvocationOutcome, GatewayStoreError | StorageError, Crypto.Crypto | HttpClient.HttpClient> {
-  const authentication = yield* authenticateKey(dependencies.store, input.secret)
-  if (authentication.status !== "authenticated") {
-    return yield* settle(dependencies, defaultTenantId, authentication, {
-      ...input,
-      origin: unattributedOrigin,
-      profileId: null
-    })
-  }
-  const authorization = yield* authorizeProfileInvocation(dependencies.store, authentication.profile, input)
-  return yield* settle(dependencies, authentication.profile.tenantId, authorization, {
-    ...input,
-    origin: keyOrigin(authentication.key),
-    profileId: authentication.profile.id
+  const held = yield* dependencies.integrations
+    .listConnections({ integration: connection.integration, owner: connectionOwner(connection) })
+    .pipe(Effect.catch(() => Effect.succeed([])))
+  const granted = (held.find((candidate) => candidate.name === connection.name)?.oauthScope ?? "")
+    .split(/\s+/)
+    .filter((scope) => scope.length > 0)
+  const stepped = yield* startAuthorization(dependencies, authorization, {
+    ...whenPresent("subject", connection.owner === "user" ? connection.subject : undefined),
+    scopes: [...new Set([...granted, ...required])],
+    unavailable: outcome.message
   })
+  return stepped.status === "authorization-required" ? stepped : outcome
 })
 
 /**

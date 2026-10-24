@@ -1,0 +1,1 @@
+ALTER TABLE `gateway_api_key` ADD `subject_id` text REFERENCES gateway_subject(id);

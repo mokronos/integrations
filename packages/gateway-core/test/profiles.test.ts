@@ -37,7 +37,8 @@ const summary = (
   defaultDecision,
   readOnly: defaultDecision === "allow",
   destructive: defaultDecision !== "allow",
-  idempotent: defaultDecision === "allow"
+  idempotent: defaultDecision === "allow",
+  openWorld: true
 })
 
 const catalog = (tools: ReadonlyArray<ReturnType<typeof summary>>) =>

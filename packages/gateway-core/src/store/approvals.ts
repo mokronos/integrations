@@ -1,4 +1,5 @@
 import { Context, Effect, Layer, Schema } from "effect"
+import { Attachment } from "@integragents/contracts"
 import {
   ApprovalId,
   ApprovalRuleId,
@@ -97,6 +98,7 @@ export interface ApprovalStore {
     readonly status: "approved" | "denied" | "expired"
     readonly decidedBy: string | null
     readonly result: typeof Schema.Json.Type | null
+    readonly attachments?: ReadonlyArray<Attachment>
     readonly error: string | null
   }): Effect.Effect<boolean, GatewayStoreError>
   /**
@@ -132,6 +134,7 @@ export const ApprovalRow = Schema.Struct({
   decided_at: NullableMillis,
   decided_by: Schema.NullOr(Schema.String),
   result: Schema.NullOr(Schema.String),
+  attachments: Schema.NullOr(Schema.String),
   error: Schema.NullOr(Schema.String),
   collected_at: NullableMillis
 })
@@ -168,6 +171,10 @@ export const approvalOf = (row: ApprovalRow, open: (sealed: string) => string) =
       decidedAt: row.decided_at,
       decidedBy: row.decided_by,
       result: row.result === null ? null : yield* json(row.result),
+      attachments:
+        row.attachments === null
+          ? []
+          : yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(Attachment)))(open(row.attachments)),
       error: row.error,
       collectedAt: row.collected_at
     }
@@ -447,7 +454,7 @@ export class ApprovalStoreService extends Context.Service<ApprovalStoreService, 
             Effect.gen(function* () {
               const settled = yield* settledRows(
                 `UPDATE gateway_pending_approval
-                SET status = ?, decided_at = ?, decided_by = ?, result = ?, error = ?
+                SET status = ?, decided_at = ?, decided_by = ?, result = ?, attachments = ?, error = ?
               WHERE tenant_id = ? AND id = ? AND status = ?
               RETURNING *`,
                 [
@@ -455,6 +462,9 @@ export class ApprovalStoreService extends Context.Service<ApprovalStoreService, 
                   yield* now,
                   input.decidedBy,
                   input.result === null ? null : db.seal(JSON.stringify(input.result)),
+                  input.attachments === undefined || input.attachments.length === 0
+                    ? null
+                    : db.seal(JSON.stringify(input.attachments)),
                   input.error,
                   input.tenantId,
                   input.id,

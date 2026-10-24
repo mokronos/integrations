@@ -246,11 +246,18 @@ export const keyCommand = Command.make(
     profileId: Argument.String("profile-id"),
     name: Argument.String("name").pipe(
       Argument.withDescription('The app that will use the key, such as "Claude Code". Calls are attributed to it')
+    ),
+    subject: Flag.String("subject").pipe(
+      Flag.optional,
+      Flag.withDescription("The one person the key acts for; its delegated tools reach only their connections")
     )
   },
-  ({ name, profileId }) =>
+  ({ name, profileId, subject }) =>
     controlPlaneTask((client) =>
-      client.request("POST", `/v1/profiles/${encodeURIComponent(profileId)}/keys`, { name })
+      client.request("POST", `/v1/profiles/${encodeURIComponent(profileId)}/keys`, {
+        name,
+        ...whenPresent("subject", Option.getOrUndefined(subject))
+      })
     ).pipe(
       Effect.flatMap((result) => {
         const issued = record(result)

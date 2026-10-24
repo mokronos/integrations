@@ -175,6 +175,23 @@ describe("MCP upstream failures", () => {
     }).pipe(Effect.provide(services))
   )
 
+  it.live("names the scopes an insufficient_scope challenge asks for on a call", () =>
+    Effect.gen(function* () {
+      const { endpoint } = yield* modern(
+        () =>
+          new Response("no", {
+            status: 403,
+            headers: { "www-authenticate": 'Bearer error="insufficient_scope", scope="payments:write payments:read"' }
+          })
+      )
+      const failed = yield* failureOf(callTool(endpoint))
+      expect({ reason: failed.reason, requiredScopes: failed.requiredScopes }).toEqual({
+        reason: "forbidden",
+        requiredScopes: ["payments:write", "payments:read"]
+      })
+    }).pipe(Effect.provide(services))
+  )
+
   it.live("hands a JSON-RPC refusal of tools/call back as the tool's own error", () =>
     Effect.gen(function* () {
       const { endpoint } = yield* modern((id) =>

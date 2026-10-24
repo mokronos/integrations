@@ -17,7 +17,7 @@ import { McpError } from "../errors.ts"
 import type { McpFailureReason } from "../errors.ts"
 import { DestinationRefused, gatewayUserAgent } from "../egress/egress.ts"
 import { hostOf, refusedDestination, transportCode } from "../unreachable.ts"
-import { gatewayVersion, whenPresent } from "@integragents/contracts"
+import { gatewayVersion, mcpAppMimeType, mcpAppsExtension, whenPresent, whenTrue } from "@integragents/contracts"
 import type { McpEra } from "@integragents/contracts"
 import { legacyElicitationAnswer } from "./unrelayable-input.ts"
 import { tracedFetch } from "@integragents/observability"
@@ -144,6 +144,8 @@ class SessionFailure extends Data.TaggedError("SessionFailure")<{
   readonly refusal: Option.Option<string>
   /** For spans and logs only: an errno-style code or the SDK's error class. */
   readonly diagnostic: Option.Option<string>
+  /** What an `insufficient_scope` challenge said the call needs. */
+  readonly requiredScopes: ReadonlyArray<string>
 }> {}
 
 export const failure = (
@@ -153,6 +155,7 @@ export const failure = (
     readonly status?: number
     readonly refusal?: string
     readonly diagnostic?: Option.Option<string>
+    readonly requiredScopes?: ReadonlyArray<string>
   } = {}
 ) =>
   new SessionFailure({
@@ -160,7 +163,8 @@ export const failure = (
     detail,
     status: Option.fromNullishOr(fields.status),
     refusal: Option.fromNullishOr(fields.refusal),
-    diagnostic: fields.diagnostic ?? Option.none()
+    diagnostic: fields.diagnostic ?? Option.none(),
+    requiredScopes: fields.requiredScopes ?? []
   })
 
 const rateLimited = (headers: globalThis.Headers): boolean => {
@@ -174,6 +178,16 @@ const rateLimited = (headers: globalThis.Headers): boolean => {
 const insufficientScope = (headers: globalThis.Headers): boolean =>
   /\bBearer\b.*\berror="insufficient_scope"/i.test(headers.get("www-authenticate") ?? "")
 
+const scopesOf = (scope: string | undefined): ReadonlyArray<string> =>
+  (scope ?? "").split(/\s+/).filter((token) => token.length > 0)
+
+/** The `scope` a Bearer challenge names: what the resource server wants the token to carry. */
+const challengedScopes = (headers: globalThis.Headers): ReadonlyArray<string> =>
+  scopesOf(/\bscope="([^"]*)"/i.exec(headers.get("www-authenticate") ?? "")?.[1])
+
+const scopeRefusal = (status: number, requiredScopes: ReadonlyArray<string>) =>
+  failure("forbidden", "the credential lacks a permission this needs (HTTP 403)", { status, requiredScopes })
+
 export const httpFailure = (
   status: number,
   headers: globalThis.Headers,
@@ -185,7 +199,7 @@ export const httpFailure = (
   }
   if (status === 403) {
     return insufficientScope(headers)
-      ? failure("forbidden", "the credential lacks a permission this needs (HTTP 403)", { status })
+      ? scopeRefusal(status, challengedScopes(headers))
       : failure("rejected", "the server denied access (HTTP 403)", { status })
   }
   if (status >= 500) return failure("unavailable", `the server failed (HTTP ${status})`, { status })
@@ -234,9 +248,7 @@ const classify =
     }
     const none = new globalThis.Headers()
     if (cause instanceof UnauthorizedError) return httpFailure(401, none, Option.none())
-    if (cause instanceof InsufficientScopeError) {
-      return failure("forbidden", "the credential lacks a permission this needs (HTTP 403)", { status: 403 })
-    }
+    if (cause instanceof InsufficientScopeError) return scopeRefusal(403, scopesOf(cause.requiredScope))
     if (cause instanceof SdkHttpError) return httpFailure(cause.status, none, Option.none())
     if (cause instanceof SseError && cause.code !== undefined) return httpFailure(cause.code, none, Option.none())
     if ((cause instanceof SdkError && cause.code === SdkErrorCode.RequestTimeout) || isAbort(cause)) {
@@ -266,7 +278,8 @@ export const asMcpError = (endpoint: string, phase: Option.Option<string>) => (f
       endpoint,
       reason: failed.reason,
       detail: Option.match(phase, { onNone: () => failed.detail, onSome: (name) => `${name}: ${failed.detail}` }),
-      ...whenPresent("status", Option.getOrUndefined(failed.status))
+      ...whenPresent("status", Option.getOrUndefined(failed.status)),
+      ...whenTrue(failed.requiredScopes.length > 0, () => ({ requiredScopes: failed.requiredScopes }))
     })
   })
 
@@ -275,7 +288,8 @@ class ConnectFailure extends Data.TaggedError("ConnectFailure")<{ readonly failu
 
 interface Session {
   readonly client: Client
-  readonly run: <A>(request: (client: Client) => Promise<A>) => Effect.Effect<A, SessionFailure>
+  /** `signal` aborts when the effect is interrupted, so a cancelled call closes its upstream request too. */
+  readonly run: <A>(request: (client: Client, signal: AbortSignal) => Promise<A>) => Effect.Effect<A, SessionFailure>
   /** What a 2025-era server asked by pushing `elicitation/create`, each declined. */
   readonly declined: ReadonlyArray<string>
 }
@@ -309,7 +323,11 @@ const openSession = (
     const { client, transport } = yield* Effect.acquireRelease(
       Effect.sync(() => ({
         client: new Client(clientInfo, {
-          capabilities: { elicitation: { form: {} } },
+          capabilities: {
+            elicitation: { form: {}, url: {} },
+            // The gateway relays App views to the hosts that render them, so a server that lists its UI tools only for such clients lists them.
+            extensions: { [mcpAppsExtension]: { mimeTypes: [mcpAppMimeType] } }
+          },
           inputRequired: { autoFulfill: false },
           versionNegotiation: { mode: kind === "sse" ? "legacy" : negotiation(server.era) }
         }),
@@ -324,8 +342,8 @@ const openSession = (
       declined.push(request.params.message)
       return legacyElicitationAnswer
     })
-    const run = <A>(request: (client: Client) => Promise<A>) =>
-      Effect.tryPromise({ try: () => request(client), catch: classify(endpoint.host, log) })
+    const run = <A>(request: (client: Client, signal: AbortSignal) => Promise<A>) =>
+      Effect.tryPromise({ try: (signal) => request(client, signal), catch: classify(endpoint.host, log) })
     yield* run((session) => session.connect(transport)).pipe(
       Effect.timeoutOrElse({
         duration: connectTimeout,

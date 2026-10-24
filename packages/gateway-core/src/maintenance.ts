@@ -33,6 +33,7 @@ export type MaintenanceResult = {
   readonly expiredIdentityFlows: number
   readonly expiredOAuthState: number
   readonly expiredBlobs: number
+  readonly expiredAppSessions: number
 }
 
 /**
@@ -91,7 +92,8 @@ export const runMaintenance = Effect.fn("Maintenance.run")(function* (
     deletedSessions: yield* store.deleteExpiredSessions(at),
     expiredIdentityFlows: yield* store.deleteExpiredIdentityFlows(at),
     expiredOAuthState: yield* store.deleteExpiredOAuthState(at),
-    expiredBlobs: yield* blobs.expire(new Date(at.getTime() - Duration.toMillis(blobRetention)))
+    expiredBlobs: yield* blobs.expire(new Date(at.getTime() - Duration.toMillis(blobRetention))),
+    expiredAppSessions: yield* store.expireAppSessions(at)
   }
 })
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Clock, Context, Effect, Layer } from "effect"
 import { TestClock } from "effect/testing"
-import { PositiveInt, ToolAddress } from "@integragents/contracts"
+import { PositiveInt, ToolAddress, whenPresent } from "@integragents/contracts"
 import type { Tool } from "@integragents/contracts"
 import {
   Alias,
@@ -53,7 +53,8 @@ const integrationsWithTools = (
         readOnly: false,
         destructive: true,
         idempotent: false,
-        inputSchema: tool.input
+        openWorld: true,
+        ...whenPresent("inputSchema", tool.input)
       }))
     )
 })
@@ -262,7 +263,8 @@ describe("gateway maintenance", () => {
         deletedSessions: 0,
         expiredIdentityFlows: 0,
         expiredOAuthState: 0,
-        expiredBlobs: 0
+        expiredBlobs: 0,
+        expiredAppSessions: 0
       })
     }).pipe(Effect.provide(testServices))
   )

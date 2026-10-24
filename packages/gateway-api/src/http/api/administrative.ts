@@ -122,7 +122,8 @@ const MaintenanceReport = Schema.Struct({
   deletedSessions: Schema.Number,
   expiredIdentityFlows: Schema.Number,
   expiredOAuthState: Schema.Number,
-  expiredBlobs: Schema.Number
+  expiredBlobs: Schema.Number,
+  expiredAppSessions: Schema.Number
 })
 
 export const AdministrativeGroup = HttpApiGroup.make("administrative")
@@ -260,12 +261,17 @@ export const AdministrativeGroup = HttpApiGroup.make("administrative")
   .add(
     HttpApiEndpoint.post("issueKey", "/v1/profiles/:id/keys", {
       params: { id: ProfileId },
-      payload: Schema.Struct({ name: Schema.String }),
+      payload: Schema.Struct({
+        name: Schema.String,
+        /** The one person every call with the key acts for. Without one, the key reaches no delegated tool. */
+        subject: Schema.optional(SubjectId)
+      }),
       success: HttpApiSchema.status(201)(
         Schema.Struct({
           id: ApiKeyId,
           profileId: ProfileId,
           name: Schema.String,
+          subject: Schema.NullOr(SubjectId),
           secret: Schema.String
         })
       ),

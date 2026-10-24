@@ -11,6 +11,7 @@ export type {
 } from "./integrations.ts"
 export { HostIntegrationDefinition, HostToolDefinition, HostToolError, HostTools } from "./host-tools.ts"
 export type { HostToolInvocation, ToolCallContext } from "./host-tools.ts"
+export type { ConnectionReference } from "./integrations/resource-methods.ts"
 export { CatalogStore, ClientAuthMethod } from "./catalog/store.ts"
 export type { ConnectionRecord, IntegrationRecord, OAuthClientRecord, OAuthFlowRecord } from "./catalog/store.ts"
 export { McpClient } from "./mcp/client.ts"

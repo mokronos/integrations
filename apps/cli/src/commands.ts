@@ -26,9 +26,14 @@ import {
   revokeCommand
 } from "./commands/delegation.ts"
 import { clientExecuteCommand, operatorExecuteCommand, validateCommand } from "./commands/invocation.ts"
+import { agentLoginCommand, agentLogoutCommand, whoamiCommand } from "./commands/login.ts"
+import { appCommand, resourceCommand, resourcesCommand, skillsCommand } from "./commands/resources.ts"
 import { gatewayTask, operatorGatewayTask } from "./tasks.ts"
 
 export const clientSubcommands = [
+  whoamiCommand,
+  agentLoginCommand,
+  agentLogoutCommand,
   discoverCommand(gatewayTask),
   searchCommand(gatewayTask),
   integrationsCommand(gatewayTask),
@@ -39,7 +44,11 @@ export const clientSubcommands = [
   disconnectCommand(gatewayTask),
   clientExecuteCommand,
   validateCommand(gatewayTask),
-  approvalCommand
+  approvalCommand,
+  resourcesCommand,
+  resourceCommand,
+  skillsCommand,
+  appCommand
 ] as const
 
 export const operatorClientSubcommands = [
@@ -54,7 +63,11 @@ export const operatorClientSubcommands = [
   disconnectCommand(operatorGatewayTask),
   operatorExecuteCommand,
   validateCommand(operatorGatewayTask),
-  approvalCommand
+  approvalCommand,
+  resourcesCommand,
+  resourceCommand,
+  skillsCommand,
+  appCommand
 ] as const
 
 export const controlPlaneSubcommands = [

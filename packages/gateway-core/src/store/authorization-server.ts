@@ -15,6 +15,7 @@ import type {
   OAuthApplication,
   OAuthAuthorizationCode,
   OAuthAuthorizationRequest,
+  OAuthDeviceRequest,
   OAuthGrant,
   OAuthToken
 } from "../authorization-server.ts"
@@ -57,6 +58,18 @@ export interface OAuthStore {
   consumeOAuthAuthorizationCode(
     hash: OAuthSecretHash
   ): Effect.Effect<OAuthAuthorizationCode | undefined, GatewayStoreError>
+  createOAuthDeviceRequest(
+    input: Omit<OAuthDeviceRequest, "grantId" | "deniedAt" | "createdAt">
+  ): Effect.Effect<void, GatewayStoreError>
+  /** A request still waiting for a person, by the code they were shown. */
+  findPendingOAuthDeviceRequest(userCode: string): Effect.Effect<OAuthDeviceRequest | undefined, GatewayStoreError>
+  /** Settles a waiting request: approved under `grantId`, or denied when it is null. */
+  decideOAuthDeviceRequest(
+    userCode: string,
+    grantId: OAuthGrantId | null
+  ): Effect.Effect<OAuthDeviceRequest | undefined, GatewayStoreError>
+  /** The request the device polls with; one that is settled or expired is removed as it is read. */
+  takeOAuthDeviceRequest(hash: OAuthSecretHash): Effect.Effect<OAuthDeviceRequest | undefined, GatewayStoreError>
   createOAuthTokens(
     tokens: ReadonlyArray<Omit<OAuthToken, "createdAt" | "usedAt" | "revokedAt" | "replacedByHash">>
   ): Effect.Effect<void, GatewayStoreError>
@@ -198,6 +211,28 @@ const AuthorizationCodeRow = Schema.Struct({
     createdAt: "created_at",
     expiresAt: "expires_at",
     consumedAt: "consumed_at"
+  })
+)
+
+const DeviceRequestRow = Schema.Struct({
+  deviceCodeHash: OAuthSecretHash,
+  userCode: Schema.String,
+  applicationId: OAuthApplicationId,
+  resource: Schema.String,
+  scope: Scope,
+  grantId: Schema.NullOr(OAuthGrantId),
+  deniedAt: NullableMillis,
+  createdAt: Millis,
+  expiresAt: Millis
+}).pipe(
+  Schema.encodeKeys({
+    deviceCodeHash: "device_code_hash",
+    userCode: "user_code",
+    applicationId: "application_id",
+    grantId: "grant_id",
+    deniedAt: "denied_at",
+    createdAt: "created_at",
+    expiresAt: "expires_at"
   })
 )
 
@@ -480,6 +515,74 @@ export class OAuthStoreService extends Context.Service<OAuthStoreService, OAuthS
           })
         ),
 
+      createOAuthDeviceRequest: (input) =>
+        operation(
+          "createOAuthDeviceRequest",
+          Effect.gen(function* () {
+            yield* db.run(
+              `INSERT INTO gateway_oauth_device_request
+             (device_code_hash, user_code, application_id, resource, scope, grant_id, denied_at, created_at, expires_at)
+           VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?)`,
+              [
+                input.deviceCodeHash,
+                input.userCode,
+                input.applicationId,
+                input.resource,
+                input.scope,
+                yield* now,
+                millis(input.expiresAt)
+              ]
+            )
+          })
+        ),
+
+      findPendingOAuthDeviceRequest: (userCode) =>
+        operation(
+          "findPendingOAuthDeviceRequest",
+          Effect.gen(function* () {
+            return yield* db.one(
+              DeviceRequestRow,
+              `SELECT * FROM gateway_oauth_device_request
+            WHERE user_code = ? AND grant_id IS NULL AND denied_at IS NULL AND expires_at > ?`,
+              [userCode, yield* now]
+            )
+          })
+        ),
+
+      decideOAuthDeviceRequest: (userCode, grantId) =>
+        operation(
+          "decideOAuthDeviceRequest",
+          Effect.gen(function* () {
+            const at = yield* now
+            return yield* db.one(
+              DeviceRequestRow,
+              `UPDATE gateway_oauth_device_request SET grant_id = ?, denied_at = ?
+            WHERE user_code = ? AND grant_id IS NULL AND denied_at IS NULL AND expires_at > ? RETURNING *`,
+              [grantId, grantId === null ? at : null, userCode, at]
+            )
+          })
+        ),
+
+      takeOAuthDeviceRequest: (hash) =>
+        operation(
+          "takeOAuthDeviceRequest",
+          db.sql.withTransaction(
+            Effect.gen(function* () {
+              const request = yield* db.one(
+                DeviceRequestRow,
+                "SELECT * FROM gateway_oauth_device_request WHERE device_code_hash = ?",
+                [hash]
+              )
+              if (request === undefined) return undefined
+              const settled = request.grantId !== null || request.deniedAt !== null
+              if (settled || request.expiresAt.getTime() <= (yield* now)) {
+                yield* db.run("DELETE FROM gateway_oauth_device_request WHERE device_code_hash = ?", [hash])
+              }
+              return request
+            })
+          )
+        ),
+
       createOAuthTokens: (tokens) =>
         operation(
           "createOAuthTokens",
@@ -605,10 +708,14 @@ export class OAuthStoreService extends Context.Service<OAuthStoreService, OAuthS
               "DELETE FROM gateway_oauth_authorization_code WHERE expires_at <= ? RETURNING hash",
               [expiresAt]
             )
+            const devices = yield* db.changed(
+              "DELETE FROM gateway_oauth_device_request WHERE expires_at <= ? RETURNING device_code_hash",
+              [expiresAt]
+            )
             const tokens = yield* db.changed("DELETE FROM gateway_oauth_token WHERE expires_at <= ? RETURNING hash", [
               expiresAt
             ])
-            return requests + codes + tokens
+            return requests + codes + devices + tokens
           })
         )
     }))

@@ -10,19 +10,10 @@ import {
   InvalidInput,
   NotFound,
   ToolName,
-  userOwner,
   whenPresent,
   whenPresentMap
 } from "@integragents/contracts"
-import type {
-  ApprovalId,
-  IntegrationError,
-  Json,
-  Profile,
-  ProfileId,
-  SubjectId,
-  TenantId
-} from "@integragents/contracts"
+import type { ApprovalId, IntegrationError, Json, Profile, ProfileId, TenantId } from "@integragents/contracts"
 import {
   AuthTemplateSlug,
   Integrations,
@@ -165,7 +156,6 @@ export const connectWithCredentials = Effect.fn("Gateway.connect")(function* (
     readonly connection?: string | undefined
     readonly template?: string | undefined
     readonly values?: Readonly<Record<string, string>> | undefined
-    readonly subject?: SubjectId | undefined
   }
 ) {
   const store = yield* GatewayStoreService
@@ -197,10 +187,10 @@ export const connectWithCredentials = Effect.fn("Gateway.connect")(function* (
     })
   }
   const name = ConnectionName.make(body.connection ?? "default")
-  const fresh = body.subject === undefined && !(yield* orgConnectionExists(slug, name))
+  const fresh = !(yield* orgConnectionExists(slug, name))
   const connection = yield* capture(
     integrations.createConnection({
-      owner: body.subject === undefined ? "org" : userOwner(body.subject),
+      owner: "org",
       integration: slug,
       name,
       template: AuthTemplateSlug.make(method.template),
@@ -226,7 +216,6 @@ export const startOAuthConnection = Effect.fn("Gateway.startOAuth")(function* (
     readonly integration: string
     readonly connection?: string | undefined
     readonly template?: string | undefined
-    readonly subject?: SubjectId | undefined
     readonly clientId?: string | undefined
     readonly clientSecret?: string | undefined
     readonly timeoutSeconds?: number | undefined
@@ -259,8 +248,7 @@ export const startOAuthConnection = Effect.fn("Gateway.startOAuth")(function* (
       connection,
       authMethod: method,
       bindingTenant: tenantId,
-      newConnection: body.subject === undefined && !(yield* orgConnectionExists(integration.slug, connection)),
-      ...whenPresent("subject", body.subject),
+      newConnection: !(yield* orgConnectionExists(integration.slug, connection)),
       ...whenPresentMap("clientId", body.clientId, (id) => id),
       ...whenPresentMap("clientSecret", body.clientSecret, (secret) => secret),
       ...whenPresentMap(

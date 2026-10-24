@@ -2,8 +2,16 @@ import { makeGatewayEvents } from "@integragents/gateway-core"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http"
-import { createGatewayHandler, defaultTenantId, generateApiKey, newProfileId, sha256Base64Url } from "./gateway.ts"
+import {
+  createGatewayHandler,
+  defaultTenantId,
+  generateApiKey,
+  newProfileId,
+  sha256Base64Url,
+  SubjectId
+} from "./gateway.ts"
 import { gatewayStore, testServices } from "./fixtures.ts"
+import { OAuthConsentDecision } from "@integragents/contracts"
 import { stubIntegrationsContext } from "./stubs.ts"
 
 const JsonObject = Schema.Record(Schema.String, Schema.Json)
@@ -13,6 +21,14 @@ const Consent = Schema.Struct({
   profiles: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String }))
 })
 const Redirect = Schema.Struct({ redirect: Schema.String })
+const DeviceAuthorization = Schema.Struct({
+  device_code: Schema.String,
+  user_code: Schema.String,
+  verification_uri: Schema.String,
+  verification_uri_complete: Schema.String,
+  interval: Schema.Number
+})
+const OAuthFailure = Schema.Struct({ error: Schema.String })
 const Grants = Schema.Struct({
   grants: Schema.Array(Schema.Struct({ id: Schema.String, subjectEmail: Schema.String }))
 })
@@ -336,6 +352,152 @@ describe("MCP OAuth authorization server", () => {
       })
       expect(revoked.status).toBe(401)
 
+      yield* Effect.promise(() => gateway.dispose())
+    }).pipe(Effect.provide(testServices))
+  )
+
+  it.effect("lets a device act as a profile on the API once a person confirms its code", () =>
+    Effect.gen(function* () {
+      const gateway = yield* setup()
+      const post = (path: string, form: Record<string, string>) =>
+        request(gateway.handle, path, {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams(form).toString()
+        })
+      const body = <A>(schema: Schema.Codec<A>, response: Response) =>
+        Effect.map(
+          Effect.promise(() => response.json()),
+          (json) => Schema.decodeUnknownSync(schema)(json)
+        )
+
+      const registered = yield* request(gateway.handle, "/oauth/register", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          client_name: "i on a sandbox",
+          grant_types: ["urn:ietf:params:oauth:grant-type:device_code", "refresh_token"],
+          token_endpoint_auth_method: "none"
+        })
+      })
+      expect(registered.status).toBe(201)
+      const { client_id } = yield* body(Registration, registered)
+      const api = "http://127.0.0.1:3210"
+      const start = () => post("/oauth/device_authorization", { client_id, resource: api, scope: "mcp offline_access" })
+      const poll = (deviceCode: string) =>
+        post("/oauth/token", {
+          grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+          device_code: deviceCode,
+          client_id,
+          resource: api
+        })
+      const decide = (userCode: string, decision: typeof OAuthConsentDecision.Encoded) =>
+        request(
+          gateway.handle,
+          `/v1/oauth/device-request?code=${encodeURIComponent(userCode)}`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json", origin: api },
+            body: JSON.stringify(decision)
+          },
+          gateway.key.secret
+        )
+
+      const device = yield* body(DeviceAuthorization, yield* start())
+      expect(device.verification_uri_complete).toBe(
+        `${device.verification_uri}?user_code=${encodeURIComponent(device.user_code)}`
+      )
+      expect(yield* body(OAuthFailure, yield* poll(device.device_code))).toEqual({ error: "authorization_pending" })
+
+      const typed = device.user_code.replace("-", "").toLowerCase()
+      const consent = yield* request(
+        gateway.handle,
+        `/v1/oauth/device-request?code=${typed}`,
+        undefined,
+        gateway.key.secret
+      )
+      expect((yield* body(Consent, consent)).application).toEqual({ name: "i on a sandbox", kind: "dcr" })
+      expect((yield* decide(typed, { decision: "approve", profileId: gateway.profile.id })).status).toBe(200)
+
+      const tokens = yield* body(Tokens, yield* poll(device.device_code))
+      expect(yield* body(OAuthFailure, yield* poll(device.device_code))).toEqual({ error: "invalid_grant" })
+      const bearer = { headers: { authorization: `Bearer ${tokens.access_token}` } }
+      expect((yield* request(gateway.handle, "/v1/tools", bearer)).status).toBe(200)
+      expect((yield* request(gateway.handle, "/v1/profiles", bearer)).status).toBe(403)
+      expect((yield* request(gateway.handle, "/mcp", { method: "GET", ...bearer })).status).toBe(401)
+
+      const refused = yield* body(DeviceAuthorization, yield* start())
+      expect((yield* decide(refused.user_code, { decision: "deny" })).status).toBe(200)
+      expect(yield* body(OAuthFailure, yield* poll(refused.device_code))).toEqual({ error: "access_denied" })
+
+      yield* Effect.promise(() => gateway.dispose())
+    }).pipe(Effect.provide(testServices))
+  )
+
+  it.effect("offers a person only the profiles that act for them", () =>
+    Effect.gen(function* () {
+      const gateway = yield* setup()
+      const restricted = yield* gateway.store.createProfile({
+        id: yield* newProfileId,
+        tenantId: defaultTenantId,
+        name: "alice-only",
+        capabilities: [],
+        tools: [],
+        subjects: [SubjectId.make("alice")]
+      })
+      const registered = yield* request(gateway.handle, "/oauth/register", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          client_name: "i",
+          grant_types: ["urn:ietf:params:oauth:grant-type:device_code", "refresh_token"]
+        })
+      })
+      const { client_id } = Schema.decodeUnknownSync(Registration)(yield* Effect.promise(() => registered.json()))
+      const started = yield* request(gateway.handle, "/oauth/device_authorization", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ client_id, resource: "http://127.0.0.1:3210" }).toString()
+      })
+      const device = Schema.decodeUnknownSync(DeviceAuthorization)(yield* Effect.promise(() => started.json()))
+      const path = `/v1/oauth/device-request?code=${device.user_code}`
+
+      const consent = yield* request(gateway.handle, path, undefined, gateway.key.secret)
+      const offered = Schema.decodeUnknownSync(Consent)(yield* Effect.promise(() => consent.json())).profiles
+      expect(offered.map((profile) => profile.id)).toEqual([gateway.profile.id])
+      const approved = yield* request(
+        gateway.handle,
+        path,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ decision: "approve", profileId: restricted.id })
+        },
+        gateway.key.secret
+      )
+      expect(approved.status).toBe(400)
+      yield* Effect.promise(() => gateway.dispose())
+    }).pipe(Effect.provide(testServices))
+  )
+
+  it.effect("keeps browser clients out of the device grant", () =>
+    Effect.gen(function* () {
+      const gateway = yield* setup()
+      const registered = yield* request(gateway.handle, "/oauth/register", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ client_name: "Browser client", redirect_uris: ["http://127.0.0.1:4567/callback"] })
+      })
+      const { client_id } = Schema.decodeUnknownSync(Registration)(yield* Effect.promise(() => registered.json()))
+      const started = yield* request(gateway.handle, "/oauth/device_authorization", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ client_id, resource: "http://127.0.0.1:3210" }).toString()
+      })
+      expect(started.status).toBe(400)
+      expect(Schema.decodeUnknownSync(OAuthFailure)(yield* Effect.promise(() => started.json()))).toEqual({
+        error: "invalid_client"
+      })
       yield* Effect.promise(() => gateway.dispose())
     }).pipe(Effect.provide(testServices))
   )

@@ -25,7 +25,9 @@ export const HostToolDefinition = Schema.Struct({
   /** May destroy or overwrite. Absent means it may, unless it only reads. */
   destructive: Schema.optional(Schema.Boolean),
   /** Repeating it with the same arguments has no further effect. Absent means it is not, unless it only reads. */
-  idempotent: Schema.optional(Schema.Boolean)
+  idempotent: Schema.optional(Schema.Boolean),
+  /** Reaches an open set of outside things. Absent means it does, as MCP assumes. */
+  openWorld: Schema.optional(Schema.Boolean)
 })
 export type HostToolDefinition = typeof HostToolDefinition.Type
 

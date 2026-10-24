@@ -1,4 +1,4 @@
-import { Clock, Effect, Option } from "effect"
+import { Clock, Duration, Effect, Option } from "effect"
 import { connectionAddress, InvalidInput, whenPresent } from "@integragents/contracts"
 import type { ConnectionName, ConnectionOwner, IntegrationSlug } from "@integragents/contracts"
 import { findAuthMethod } from "../catalog/auth-methods.ts"
@@ -6,6 +6,7 @@ import { captureMcpTools, captureOpenApiTools } from "../catalog/capture.ts"
 import { AuthTemplateSlug, gatewayOAuthClientSlug, OAuthClientSlug } from "../catalog/ids.ts"
 import { CatalogStore } from "../catalog/store.ts"
 import type { ConnectionRecord, IntegrationRecord } from "../catalog/store.ts"
+import type { Tool as IntegrationTool } from "../tool.ts"
 import { McpClient } from "../mcp/client.ts"
 import { OAuthFlows } from "../oauth/flows.ts"
 import { SpecCache } from "../openapi/cache.ts"
@@ -24,6 +25,27 @@ export interface CreateConnectionOptions {
   readonly values?: Readonly<Record<string, string>>
 }
 
+/**
+ * How long a server's tool list is kept before it is asked again: what the
+ * server said, within bounds that neither hammer it nor let a change sit for
+ * days. A 2025-era server says nothing and is asked a few times a day.
+ */
+const toolListFreshness = (ttlMs: Option.Option<number>): number =>
+  Option.match(ttlMs, {
+    onNone: () => Duration.toMillis(Duration.hours(6)),
+    onSome: (said) =>
+      Math.min(Math.max(said, Duration.toMillis(Duration.minutes(5))), Duration.toMillis(Duration.hours(24)))
+  })
+
+/** A server that could not be asked for its tools is asked again after this. */
+const refreshRetry = Duration.hours(1)
+
+/** What a connection's tools are, apart from when they were captured, comparable as one string. */
+const toolListing = (tools: ReadonlyArray<IntegrationTool>): string =>
+  JSON.stringify(
+    [...tools].sort((left, right) => left.name.localeCompare(right.name)).map((tool) => ({ ...tool, capturedAt: 0 }))
+  )
+
 export const connectionMethods = (access: ConnectionAccess) =>
   Effect.gen(function* () {
     const store = yield* CatalogStore
@@ -41,7 +63,7 @@ export const connectionMethods = (access: ConnectionAccess) =>
       if (integration.mcpEra !== listing.era) {
         yield* store.putIntegration({ ...integration, mcpEra: listing.era })
       }
-      return listing.tools
+      return listing
     })
 
     const captureConnection = Effect.fn("Integrations.captureConnection")(function* (
@@ -64,15 +86,16 @@ export const connectionMethods = (access: ConnectionAccess) =>
           connection: connection.name
         })
       }
-      const captured =
-        integration.kind === "mcp"
-          ? yield* captureMcpTools(target, yield* listMcpTools(integration, credential), capturedAt)
-          : yield* captureOpenApiTools(target, yield* specs.load(integration), capturedAt)
-
-      yield* store.replaceTools(
-        { owner: connection.owner, integration: integration.slug, name: connection.name },
-        captured
-      )
+      const reference = { owner: connection.owner, integration: integration.slug, name: connection.name }
+      if (integration.kind !== "mcp") {
+        const captured = yield* captureOpenApiTools(target, yield* specs.load(integration), capturedAt)
+        yield* store.replaceTools(reference, captured)
+        return captured
+      }
+      const listing = yield* listMcpTools(integration, credential)
+      const captured = yield* captureMcpTools(target, listing.tools, capturedAt)
+      yield* store.replaceTools(reference, captured)
+      yield* store.scheduleToolRefresh(reference, capturedAt + toolListFreshness(listing.ttlMs))
       return captured
     })
 
@@ -163,6 +186,35 @@ export const connectionMethods = (access: ConnectionAccess) =>
       return yield* Effect.forEach(captured, toTool)
     })
 
+    /**
+     * Asks every MCP connection whose tool list is due for it again, and
+     * answers the ones whose tools changed. A server that cannot be reached
+     * is tried again later; the catalog keeps what it last said.
+     */
+    const refreshDueConnections = Effect.fn("Integrations.refreshDueConnections")(function* () {
+      const now = yield* Clock.currentTimeMillis
+      const due = yield* store.connectionsDueForRefresh(now)
+      const outcomes = yield* Effect.forEach(
+        due,
+        (reference) =>
+          Effect.gen(function* () {
+            const filter = { integration: reference.integration, owner: reference.owner, connection: reference.name }
+            const before = toolListing(yield* store.listTools(filter))
+            const refreshed = yield* Effect.result(refreshConnection(reference))
+            if (refreshed._tag === "Success") {
+              return toolListing(yield* store.listTools(filter)) === before ? [] : [reference]
+            }
+            yield* Effect.logWarning("A connection's tool list could not be refreshed", refreshed.failure).pipe(
+              Effect.annotateLogs({ integration: reference.integration, connection: reference.name })
+            )
+            yield* store.scheduleToolRefresh(reference, now + Duration.toMillis(refreshRetry))
+            return []
+          }),
+        { concurrency: 4 }
+      )
+      return outcomes.flat()
+    })
+
     const removeConnection = Effect.fn("Integrations.removeConnection")(function* (reference: {
       readonly owner: ConnectionOwner
       readonly integration: IntegrationSlug
@@ -241,6 +293,7 @@ export const connectionMethods = (access: ConnectionAccess) =>
       }),
       removeConnection,
       refreshConnection,
+      refreshDueConnections,
       recompileOpenApiTools
     }
   })

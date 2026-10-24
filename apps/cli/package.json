@@ -50,6 +50,7 @@
     "@integragents/client": "workspace:^",
     "@integragents/integrations": "workspace:^",
     "@integragents/observability": "workspace:^",
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "oauth4webapi": "catalog:"
   }
 }

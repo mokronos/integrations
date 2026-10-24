@@ -54,6 +54,8 @@ export class McpError extends Schema.TaggedError<McpError>()("McpError", {
   reason: McpFailureReason,
   detail: Schema.String,
   status: Schema.optional(Schema.Number),
+  /** The scopes an `insufficient_scope` challenge said the call needs. */
+  requiredScopes: Schema.optional(Schema.Array(Schema.String)),
   cause: Schema.optional(Schema.Defect())
 }) {
   override get message(): string {

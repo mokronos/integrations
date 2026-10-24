@@ -1,8 +1,5 @@
 import { Data, Effect } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import type { HttpClient } from "effect/http"
-import { makeGatewayClient, resolveClientConnection } from "@integragents/client"
-import type { GatewayClient } from "@integragents/client"
 
 export class IntegrationsCliError extends Data.TaggedError("IntegrationsCliError")<{
   readonly message: string
@@ -13,20 +10,6 @@ export const cliError = (message: string): IntegrationsCliError => new Integrati
 /** The text of a value something threw, which is not always an `Error`. */
 // oxlint-disable-next-line anti-slop/no-unknown-parameters
 export const thrownMessage = (thrown: unknown): string => (thrown instanceof Error ? thrown.message : String(thrown))
-
-export const connectToGateway = Effect.fn("Cli.connectToGateway")(function* (): Effect.fn.Return<
-  GatewayClient,
-  IntegrationsCliError,
-  HttpClient.HttpClient
-> {
-  const connection = yield* Effect.promise(() => resolveClientConnection())
-  if (connection === undefined) {
-    return yield* cliError(
-      "No integrations gateway configured. Set INTEGRATIONS_URL and INTEGRATIONS_API_KEY, or start the local gateway with `ii serve`."
-    )
-  }
-  return yield* makeGatewayClient(connection)
-})
 
 /**
  * Hands the URL to the desktop and stops caring. A host with no browser, or

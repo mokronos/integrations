@@ -207,6 +207,8 @@ const decodeToolRow = (row: SqlRow) =>
       })
     const inputSchema = yield* optionalJson("input_schema")
     const outputSchema = yield* optionalJson("output_schema")
+    const icons = yield* optionalJson("icons")
+    const meta = yield* optionalJson("meta")
     const readOnly = number(row, "read_only") === 1
     return yield* Schema.decodeUnknownEffect(Tool)({
       address: text(row, "address"),
@@ -214,10 +216,14 @@ const decodeToolRow = (row: SqlRow) =>
       integration: text(row, "integration"),
       connection: text(row, "connection"),
       name: text(row, "name"),
+      ...whenPresent("title", optionalText(row, "title")),
       description: text(row, "description"),
       readOnly,
       destructive: optionalFlag(row, "destructive") ?? !readOnly,
       idempotent: optionalFlag(row, "idempotent") ?? readOnly,
+      openWorld: optionalFlag(row, "open_world") ?? true,
+      ...whenPresent("icons", icons),
+      ...whenPresent("meta", meta),
       ...whenPresent("inputSchema", inputSchema),
       ...whenPresent("outputSchema", outputSchema),
       call,
@@ -264,6 +270,8 @@ export interface ConnectionFilter {
   readonly name?: ConnectionName
 }
 
+const DueConnection = Schema.Struct({ owner: ConnectionOwner, integration: IntegrationSlug, name: ConnectionName })
+
 export class CatalogStore extends Context.Service<
   CatalogStore,
   {
@@ -283,6 +291,10 @@ export class CatalogStore extends Context.Service<
       readonly name: ConnectionName
     }) => Effect.Effect<void, StorageError>
     readonly requireReconnect: (reference: ConnectionReference, reason: string) => Effect.Effect<void, StorageError>
+    /** When the connection's tool list is due to be asked for again. */
+    readonly scheduleToolRefresh: (reference: ConnectionReference, at: number) => Effect.Effect<void, StorageError>
+    /** MCP connections whose tool list is due, that still work. */
+    readonly connectionsDueForRefresh: (now: number) => Effect.Effect<ReadonlyArray<ConnectionReference>, StorageError>
 
     readonly listOAuthClients: (
       integration: IntegrationSlug
@@ -473,6 +485,29 @@ export class CatalogStore extends Context.Service<
           })
       )
 
+      const scheduleToolRefresh = Effect.fn("CatalogStore.scheduleToolRefresh")(
+        (reference: ConnectionReference, at: number) =>
+          write({
+            sql: "UPDATE connection SET tools_refresh_at = ? WHERE owner = ? AND integration = ? AND name = ?",
+            params: [at, ...connectionKey(reference)]
+          })
+      )
+
+      const connectionsDueForRefresh = Effect.fn("CatalogStore.connectionsDueForRefresh")(function* (now: number) {
+        const rows = yield* database.query({
+          sql: `SELECT connection.owner, connection.integration, connection.name FROM connection
+                  JOIN integration ON integration.slug = connection.integration
+                 WHERE integration.kind = 'mcp' AND connection.reconnect_reason IS NULL
+                   AND (connection.tools_refresh_at IS NULL OR connection.tools_refresh_at <= ?)`,
+          params: [now]
+        })
+        return yield* Effect.forEach(rows, (row) =>
+          Schema.decodeUnknownEffect(DueConnection)(row).pipe(
+            Effect.mapError((cause) => new StorageError({ message: "Malformed connection row", cause }))
+          )
+        )
+      })
+
       const listOAuthClients = Effect.fn("CatalogStore.listOAuthClients")(function* (integration: IntegrationSlug) {
         const rows = yield* database.query({
           sql: "SELECT * FROM oauth_client WHERE integration = ?",
@@ -615,19 +650,24 @@ export class CatalogStore extends Context.Service<
             },
             ...tools.map((tool) => ({
               sql: `INSERT INTO tool
-                    (address, owner, integration, connection, name, description,
-                     read_only, destructive, idempotent, input_schema, output_schema, call, captured_at)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    (address, owner, integration, connection, name, title, description,
+                     read_only, destructive, idempotent, open_world, icons, meta,
+                     input_schema, output_schema, call, captured_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               params: [
                 tool.address,
                 tool.owner,
                 tool.integration,
                 tool.connection,
                 tool.name,
+                nullable(tool.title),
                 tool.description,
                 tool.readOnly ? 1 : 0,
                 tool.destructive ? 1 : 0,
                 tool.idempotent ? 1 : 0,
+                tool.openWorld ? 1 : 0,
+                nullable(tool.icons === undefined ? undefined : JSON.stringify(tool.icons)),
+                nullable(tool.meta === undefined ? undefined : JSON.stringify(tool.meta)),
                 nullable(tool.inputSchema === undefined ? undefined : JSON.stringify(tool.inputSchema)),
                 nullable(tool.outputSchema === undefined ? undefined : JSON.stringify(tool.outputSchema)),
                 JSON.stringify(tool.call),
@@ -667,6 +707,8 @@ export class CatalogStore extends Context.Service<
         putConnection,
         removeConnection,
         requireReconnect,
+        scheduleToolRefresh,
+        connectionsDueForRefresh,
         listOAuthClients,
         findOAuthClient,
         putOAuthClient,

@@ -256,5 +256,35 @@ export const gatewayMigrations: ReadonlyArray<Migration> = [
       "CREATE INDEX `gateway_invocation_key_sweep` ON `gateway_invocation_key` (`status`,`created_at`);",
       "ALTER TABLE `gateway_pending_approval` ADD `idempotency_key` text;"
     ]
+  },
+  {
+    id: 22,
+    name: "0022_nice_loners",
+    statements: [
+      "ALTER TABLE `gateway_pending_approval` ADD `attachments` text;"
+    ]
+  },
+  {
+    id: 23,
+    name: "0023_first_clint_barton",
+    statements: [
+      "CREATE TABLE `gateway_app_session` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`tenant_id` text NOT NULL,\n\t`profile_id` text NOT NULL,\n\t`api_key_id` text,\n\t`oauth_grant_id` text,\n\t`oauth_application_id` text,\n\t`credential_name` text,\n\t`agent` text,\n\t`alias` text NOT NULL,\n\t`tool` text NOT NULL,\n\t`arguments` text NOT NULL,\n\t`result` text NOT NULL,\n\t`resource_uri` text NOT NULL,\n\t`context` text,\n\t`messages` text,\n\t`created_at` integer NOT NULL,\n\t`expires_at` integer NOT NULL,\n\tFOREIGN KEY (`tenant_id`) REFERENCES `gateway_tenant`(`id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`profile_id`) REFERENCES `gateway_profile`(`id`) ON UPDATE no action ON DELETE cascade\n);",
+      "CREATE INDEX `gateway_app_session_expiry` ON `gateway_app_session` (`expires_at`);"
+    ]
+  },
+  {
+    id: 24,
+    name: "0024_simple_tempest",
+    statements: [
+      "CREATE TABLE `gateway_oauth_device_request` (\n\t`device_code_hash` text PRIMARY KEY NOT NULL,\n\t`user_code` text NOT NULL,\n\t`application_id` text NOT NULL,\n\t`resource` text NOT NULL,\n\t`scope` text NOT NULL,\n\t`grant_id` text,\n\t`denied_at` integer,\n\t`created_at` integer NOT NULL,\n\t`expires_at` integer NOT NULL,\n\tFOREIGN KEY (`application_id`) REFERENCES `gateway_oauth_application`(`id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`grant_id`) REFERENCES `gateway_oauth_grant`(`id`) ON UPDATE no action ON DELETE cascade\n);",
+      "CREATE UNIQUE INDEX `gateway_oauth_device_request_user_code_unique` ON `gateway_oauth_device_request` (`user_code`);"
+    ]
+  },
+  {
+    id: 25,
+    name: "0025_glamorous_night_thrasher",
+    statements: [
+      "ALTER TABLE `gateway_api_key` ADD `subject_id` text REFERENCES gateway_subject(id);"
+    ]
   }
 ]

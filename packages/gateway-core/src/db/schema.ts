@@ -128,6 +128,7 @@ export const gatewayApiKey = sqliteTable("gateway_api_key", {
     .references(() => gatewayProfile.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   hash: text("hash").notNull().unique(),
+  subjectId: text("subject_id").references(() => gatewaySubject.id, { onDelete: "cascade" }),
   createdAt: createdAt(),
   lastUsedAt: integer("last_used_at"),
   revokedAt: integer("revoked_at")
@@ -208,6 +209,20 @@ export const gatewayOauthAuthorizationCode = sqliteTable("gateway_oauth_authoriz
   createdAt: createdAt(),
   expiresAt: integer("expires_at").notNull(),
   consumedAt: integer("consumed_at")
+})
+
+export const gatewayOauthDeviceRequest = sqliteTable("gateway_oauth_device_request", {
+  deviceCodeHash: text("device_code_hash").primaryKey(),
+  userCode: text("user_code").notNull().unique(),
+  applicationId: text("application_id")
+    .notNull()
+    .references(() => gatewayOauthApplication.id, { onDelete: "cascade" }),
+  resource: text("resource").notNull(),
+  scope: text("scope").notNull(),
+  grantId: text("grant_id").references(() => gatewayOauthGrant.id, { onDelete: "cascade" }),
+  deniedAt: integer("denied_at"),
+  createdAt: createdAt(),
+  expiresAt: integer("expires_at").notNull()
 })
 
 export const gatewayOauthToken = sqliteTable(
@@ -308,6 +323,8 @@ export const gatewayPendingApproval = sqliteTable(
     /** When an approved call's execution started; a claim older than the lease was interrupted. */
     claimedAt: integer("claimed_at"),
     result: text("result"),
+    /** What the call returned beside its result, sealed like it. */
+    attachments: text("attachments"),
     error: text("error"),
     collectedAt: integer("collected_at")
   },
@@ -459,6 +476,38 @@ export const gatewayAuditArguments = sqliteTable("gateway_audit_arguments", {
   arguments: text("arguments").notNull(),
   expiresAt: integer("expires_at").notNull()
 })
+
+/** A tool result rendered in its MCP App for a person, for a caller with no host of its own. */
+export const gatewayAppSession = sqliteTable(
+  "gateway_app_session",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => gatewayTenant.id, { onDelete: "cascade" }),
+    profileId: text("profile_id")
+      .notNull()
+      .references(() => gatewayProfile.id, { onDelete: "cascade" }),
+    apiKeyId: text("api_key_id"),
+    oauthGrantId: text("oauth_grant_id"),
+    oauthApplicationId: text("oauth_application_id"),
+    credentialName: text("credential_name"),
+    agent: text("agent"),
+    alias: text("alias").notNull(),
+    tool: text("tool").notNull(),
+    /** Sealed, like an approval's: the arguments and result are the caller's data. */
+    arguments: text("arguments").notNull(),
+    result: text("result").notNull(),
+    resourceUri: text("resource_uri").notNull(),
+    /** Sealed; what the view last asked to put in front of the model. */
+    context: text("context"),
+    /** Sealed; the messages the view sent the agent, oldest first. */
+    messages: text("messages"),
+    createdAt: createdAt(),
+    expiresAt: integer("expires_at").notNull()
+  },
+  (table) => [index("gateway_app_session_expiry").on(table.expiresAt)]
+)
 
 export const gatewayToolSnapshot = sqliteTable(
   "gateway_tool_snapshot",

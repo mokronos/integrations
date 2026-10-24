@@ -91,6 +91,7 @@ describe("gateway store", () => {
         decided_at: 1_789_526_970_870,
         decided_by: "operator",
         result: null,
+        attachments: null,
         error: null,
         collected_at: null
       })

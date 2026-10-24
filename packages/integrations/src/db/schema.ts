@@ -37,6 +37,8 @@ export const connection = sqliteTable(
     oauthClientOwner: text("oauth_client_owner"),
     oauthScope: text("oauth_scope"),
     reconnectReason: text("reconnect_reason"),
+    /** When the server's tool list is due to be asked again; null until it has been asked once. */
+    toolsRefreshAt: integer("tools_refresh_at"),
     createdAt: integer("created_at").notNull()
   },
   (table) => [
@@ -53,12 +55,17 @@ export const tool = sqliteTable(
     integration: text("integration").notNull(),
     connection: text("connection").notNull(),
     name: text("name").notNull(),
+    title: text("title"),
     description: text("description").notNull().default(""),
     readOnly: integer("read_only").notNull().default(0),
     /** Null on rows captured before the hint was kept; read as "not read-only". */
     destructive: integer("destructive"),
     /** Null on rows captured before the hint was kept; read as "read-only". */
     idempotent: integer("idempotent"),
+    /** Null on rows captured before the hint was kept; read as "open world", MCP's own default. */
+    openWorld: integer("open_world"),
+    icons: text("icons"),
+    meta: text("meta"),
     inputSchema: text("input_schema"),
     outputSchema: text("output_schema"),
     call: text("call").notNull(),

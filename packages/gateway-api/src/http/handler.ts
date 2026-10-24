@@ -10,6 +10,7 @@ import {
   AdministrativeLayer,
   AuthLayer,
   DelegatedLayer,
+  AppsLayer,
   FallbackLayer,
   OAuthLayer,
   ProvisioningLayer,
@@ -31,6 +32,7 @@ import type { GatewayStore } from "@integragents/gateway-core"
 import type { OAuthSessions } from "@integragents/gateway-core"
 import type { WebAssets } from "../web-assets.ts"
 import { createMcpGatewayHandler } from "./mcp.ts"
+import { aiCatalogPath, serveDiscoveryDocument, serverCardPath } from "./server-card.ts"
 import { createMcpOAuthHandler, mcpOAuthPaths } from "./authorization-server.ts"
 
 export interface GatewayRequestContext {
@@ -154,6 +156,7 @@ export const gatewayAppLayer = (options: GatewayHandlerOptions) => {
     DelegatedLayer,
     ProvisioningLayer,
     AdministrativeLayer,
+    AppsLayer,
     AuthLayer,
     OAuthLayer
   ).pipe(Layer.provide(dependencies))
@@ -176,7 +179,7 @@ export const gatewayAppLayer = (options: GatewayHandlerOptions) => {
     Layer.provideMerge(errorCapture)
   )
   const authority = (options.authority ?? authorityLayer(whenPresent("rateLimits", options.rateLimits))).pipe(
-    Layer.provide(services)
+    Layer.provide(Layer.merge(services, Layer.succeed(GatewayConfig, settingsOf(options))))
   )
   return base.pipe(Layer.provideMerge(groups), Layer.provideMerge(authority))
 }
@@ -185,11 +188,14 @@ export const gatewayAppLayer = (options: GatewayHandlerOptions) => {
 export const gatewayRoutes: ReadonlyArray<string> = [
   "/v1/*",
   "/mcp",
+  serverCardPath,
+  aiCatalogPath,
   mcpOAuthPaths.protectedResource,
   `${mcpOAuthPaths.protectedResource}/*`,
   mcpOAuthPaths.authorizationServer,
   mcpOAuthPaths.register,
   mcpOAuthPaths.authorize,
+  mcpOAuthPaths.deviceAuthorization,
   mcpOAuthPaths.token
 ]
 
@@ -246,6 +252,8 @@ export const createGatewayHandler = (options: GatewayHandlerOptions): GatewayHan
     handle: async (request, requestContext) => {
       const oauthResponse = await oauth.handle(request, requestContext)
       if (oauthResponse !== undefined) return oauthResponse
+      const discovery = serveDiscoveryDocument(request, settingsOf(options).mcpUrl?.())
+      if (discovery !== undefined) return discovery
       return new URL(request.url).pathname === "/mcp"
         ? mcp.handle(request)
         : web.handler(request, contextFor(requestContext) ?? Context.empty())

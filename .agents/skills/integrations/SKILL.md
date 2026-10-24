@@ -13,6 +13,13 @@ Commands print compact JSON with every row needed for the next step. `-v`
 includes the complete objects and pretty-prints them. Narrow with `--filter` on
 `tools`, `--limit`/`--offset` on any listing, or a pipe into `jq`.
 
+Start by checking that `i` already reaches a gateway: `i whoami` prints the
+gateway, the profile, and the person `i` acts for. On a machine with its own
+gateway it usually does. Only if it says no gateway is configured, and you were
+given a gateway's URL, run `i login --url <url>`. It prints a link and a code;
+ask the user to open the link, check the code, and approve it, then run
+`i login` again to finish.
+
 ## Quickstart
 
 This is an example of a typical workflow (in this case for Linear).

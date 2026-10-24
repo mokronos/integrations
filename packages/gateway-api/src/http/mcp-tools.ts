@@ -26,6 +26,7 @@ import type {
   JsonEncodable,
   Profile,
   ProfileCapability,
+  SubjectId,
   ToolDecision
 } from "@integragents/contracts"
 import { Integrations, listIntegrationOverviews, searchIntegrations } from "@integragents/integrations"
@@ -33,7 +34,8 @@ import {
   decideWaitingApproval,
   GatewayStoreService,
   invokeAsProfile,
-  listEffectiveTools
+  listEffectiveTools,
+  reachableBy
 } from "@integragents/gateway-core"
 import type { CallOrigin, Interaction } from "@integragents/gateway-core"
 import { capture } from "./observability.ts"
@@ -51,9 +53,23 @@ import type { GatewayOperationServices } from "./operations.ts"
 import { GatewayConfig } from "./services.ts"
 import { OAuthFlowSessions } from "@integragents/gateway-core"
 
+/** A tool call's outcome as the gateway tells it: never `invalid` or `input-required`, which leave by other paths. */
+export type CallOutcome = Exclude<InvocationOutcome, { readonly status: "invalid" | "input-required" }>
+
 export type ToolOutput =
   | { readonly kind: "result"; readonly value: JsonEncodable; readonly failed: boolean }
+  | { readonly kind: "outcome"; readonly alias: Alias; readonly outcome: CallOutcome }
+  /** The call waits for a human, told as a task the client polls. */
+  | { readonly kind: "task"; readonly approvalId: ApprovalId }
   | { readonly kind: "ask-approval"; readonly message: string }
+  /** A link only a human may open, put to them by the client instead of handed to the model. */
+  | {
+      readonly kind: "ask-url"
+      readonly key: string
+      readonly message: string
+      readonly url: string
+      readonly requestState?: string
+    }
   | { readonly kind: "input-required"; readonly inputRequests: InputRequests; readonly requestState: string }
 
 const ok = (value: JsonEncodable): ToolOutput => ({ kind: "result", value, failed: false })
@@ -69,12 +85,66 @@ export type ApprovalPrompt =
   | { readonly kind: "malformed" }
   | { readonly kind: "answered"; readonly action: "accept" | "decline" | "cancel"; readonly remember: boolean }
 
+/** The approval form: one optional choice, and nothing else a client may send back. */
+export const approvalForm = {
+  type: "object",
+  properties: {
+    remember: {
+      type: "boolean",
+      title: "Always approve these exact arguments",
+      description: "Save an approval so later calls to this tool with the same arguments run without asking.",
+      default: false
+    }
+  }
+} as const
+
+const ApprovalAnswer = Schema.Struct({ remember: Schema.optional(Schema.Boolean) })
+export const decodeApprovalAnswer = Schema.decodeUnknownOption(ApprovalAnswer, { onExcessProperty: "error" })
+
+/** Namespaced, so other input requests can ride along in the same round. */
+export const approvalInputKey = "integrations/approval"
+export const authorizeInputKey = "integrations/authorize"
+
 /** The profile an MCP call speaks for, and the credential and app it came through. */
 export interface McpCaller {
   readonly profile: Profile
   readonly origin: CallOrigin
+  /** The person the credential acts for; delegated tools reach only their connections. */
+  readonly subject: SubjectId | undefined
   readonly approvalPrompt: ApprovalPrompt
   readonly interaction: Interaction
+  /** Which kinds of elicitation the client said it can put to its human. */
+  readonly elicitation: { readonly form: boolean; readonly url: boolean }
+  /** The input keys a retried request carries answers for. */
+  readonly answered: ReadonlySet<string>
+  /** The state a retried request carries, as the gateway handed it out. */
+  readonly requestState: string | undefined
+  /** The client declared the Tasks extension, so a call held for a human can answer as a task. */
+  readonly tasks: boolean
+}
+
+export const sessionLink = (state: OAuthSessionView["state"]): string | undefined =>
+  state.status === "pending" ? state.authorizationUrl : state.status === "needs-client" ? state.setupUrl : undefined
+
+/**
+ * An authorization link goes to the client's human as a URL elicitation when
+ * the client can show one, once per call: an answered prompt that still finds
+ * the flow unfinished gets the outcome, not the same prompt again.
+ */
+const askToAuthorize = (caller: McpCaller, outcome: InvocationOutcome): ToolOutput | undefined => {
+  if (outcome.status !== "authorization-required" || !caller.elicitation.url) return undefined
+  if (caller.answered.has(authorizeInputKey)) return undefined
+  const url = sessionLink(outcome.session.state)
+  if (url === undefined) return undefined
+  return {
+    kind: "ask-url",
+    key: authorizeInputKey,
+    message:
+      outcome.scopes === undefined
+        ? `Authorize ${outcome.integration} so the agent can use it on your behalf.`
+        : `${outcome.integration} needs more access for this call: ${outcome.scopes.join(", ")}. Authorize it to continue.`,
+    url
+  }
 }
 
 export type ToolRun = Effect.Effect<ToolOutput, GatewayError, GatewayOperationServices>
@@ -130,22 +200,18 @@ const mentionsKey = (value: Json, key: string): boolean =>
       ? key in value || Object.values(value).some((nested) => mentionsKey(nested, key))
       : false
 
-/** Printed as it travelled: the decoded outcome carries a Date, JSON does not. */
-const encodeOutcome = Schema.encodeSync(InvocationOutcome)
-
 const encodeSession = Schema.encodeSync(OAuthSessionView)
-
-const blobsUnsupported =
-  `This result references gateway blobs (${blobHandleKey}). Downloading them over MCP is not ` +
-  `implemented yet; read them from GET /v1/blobs/<id> with this key, or run the same tool through the i CLI.`
 
 const filesUnsupported = new NotImplemented({
   feature: `Local file arguments (${localFileKey}) over MCP`,
   alternative: `Upload the bytes to POST /v1/blobs with this key and pass the ${blobHandleKey} handle it returns, or call the tool through the i CLI`
 })
 
-const approvalMessage = (input: { readonly alias: Alias; readonly tool: ToolName; readonly arguments: Json }): string =>
-  `Approve ${input.alias}.${input.tool}?\n\n${inline(JSON.stringify(input.arguments), 2_000)}`
+export const approvalMessage = (input: {
+  readonly alias: Alias
+  readonly tool: ToolName
+  readonly arguments: Json
+}): string => `Approve ${input.alias}.${input.tool}?\n\n${inline(JSON.stringify(input.arguments), 2_000)}`
 
 const malformedAnswer = new InvalidInput({
   field: "approval answer",
@@ -166,9 +232,15 @@ export const approvalDescription = (decision: ToolDecision): string | undefined 
  * when it ran into an input round; a call decided elsewhere in the meantime
  * keeps that decision.
  */
-const decideInClient = (
+export const decideInClient = (
   caller: McpCaller,
-  answer: { readonly approvalId: ApprovalId; readonly accepted: boolean; readonly remember: boolean }
+  answer: {
+    readonly approvalId: ApprovalId
+    readonly accepted: boolean
+    readonly remember: boolean
+    /** How the decision reached the gateway, recorded with who made it. */
+    readonly how?: string
+  }
 ): Effect.Effect<InvocationOutcome | undefined, never, GatewayOperationServices> =>
   Effect.gen(function* () {
     const dependencies = yield* invokeDependencies
@@ -180,7 +252,7 @@ const decideInClient = (
           tenantId: caller.profile.tenantId,
           id: answer.approvalId,
           verdict: answer.accepted ? "approve" : "deny",
-          decidedBy: `${caller.origin.caller.credentialName ?? caller.profile.name} (in-client approval)`,
+          decidedBy: `${caller.origin.caller.credentialName ?? caller.profile.name} (${answer.how ?? "in-client approval"})`,
           remember: answer.remember,
           relay: caller.interaction.relay
         }
@@ -216,12 +288,29 @@ export const invokeTool = (
         alias: input.alias,
         tool: input.tool,
         arguments: input.arguments,
-        interaction: caller.interaction
+        interaction: caller.interaction,
+        ...whenPresent("subject", caller.subject)
       })
     )
     const first = yield* invoke
+    if (first.status === "pending" && caller.tasks) return { kind: "task", approvalId: first.approvalId }
     const prompt = caller.approvalPrompt
-    const inClient = first.status === "pending" && caller.profile.approvalMethod === "elicitation"
+    const inClient =
+      first.status === "pending" && caller.profile.approvalMethod === "elicitation" && prompt.kind !== "unsupported"
+    if (
+      first.status === "pending" &&
+      !inClient &&
+      first.approvalUrl !== undefined &&
+      caller.elicitation.url &&
+      !caller.answered.has(approvalInputKey)
+    ) {
+      return {
+        kind: "ask-url",
+        key: approvalInputKey,
+        message: `${approvalMessage(input)}\n\nOpen the link to approve or deny this call.`,
+        url: first.approvalUrl
+      }
+    }
     if (inClient && prompt.kind === "unanswered") return { kind: "ask-approval", message: approvalMessage(input) }
     if (inClient && prompt.kind === "malformed") return yield* malformedAnswer
     const answered =
@@ -235,15 +324,7 @@ export const invokeTool = (
     }
     if (outcome.status === "invalid") return yield* outcome.error
     if (outcome.status === "failed" && outcome.error !== undefined) return yield* outcome.error
-    const encoded = encodeOutcome(outcome)
-    return {
-      kind: "result",
-      value:
-        outcome.status === "succeeded" && mentionsKey(outcome.result, blobHandleKey)
-          ? { ...objectEntries(asJson(encoded)), note: blobsUnsupported }
-          : encoded,
-      failed: outcome.status === "denied" || outcome.status === "failed"
-    }
+    return askToAuthorize(caller, outcome) ?? { kind: "outcome", alias: input.alias, outcome }
   })
 
 const discoverTool = agentTool({
@@ -347,7 +428,7 @@ const effectiveTools = (
   Effect.gen(function* () {
     const store = yield* GatewayStoreService
     const integrations = yield* Integrations
-    return yield* capture(
+    const tools = yield* capture(
       listEffectiveTools(store, caller.profile.id, {
         schemas: true,
         integrations,
@@ -355,6 +436,7 @@ const effectiveTools = (
         ...whenPresent("connection", filter.connection)
       })
     )
+    return tools.filter(reachableBy(caller.subject))
   })
 
 const toolsTool = agentTool({
@@ -449,6 +531,11 @@ const connectTool = agentTool({
   }),
   run: (caller, input) =>
     Effect.gen(function* () {
+      if (caller.requestState !== undefined && caller.answered.has(authorizeInputKey)) {
+        const oauth = yield* OAuthFlowSessions
+        const resumed = yield* capture(oauth.get(caller.requestState))
+        if (resumed !== undefined) return ok(encodeSession(resumed))
+      }
       const integrations = yield* Integrations
       const found = yield* capture(integrations.findIntegration(input.integration))
       if (Option.isNone(found)) return yield* new NotFound({ resource: "integration", id: input.integration })
@@ -483,6 +570,16 @@ const connectTool = agentTool({
           }),
           input.integration
         )
+        const link = sessionLink(session.state)
+        if (link !== undefined && caller.elicitation.url) {
+          return {
+            kind: "ask-url",
+            key: authorizeInputKey,
+            message: `Authorize ${input.integration} for the agent in your browser.`,
+            url: link,
+            requestState: session.id
+          }
+        }
         return ok({
           ...encodeSession(session),
           next: `A human has to finish this in a browser. Poll oauth_status with sessionId ${session.id}.`
