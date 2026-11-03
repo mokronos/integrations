@@ -70,6 +70,16 @@ curl -fsSL https://raw.githubusercontent.com/mokronos/integrations/main/install.
   | sh -s -- --version v0.2.0
 ```
 
+To remove it, stop the gateway, deregister its service, and delete `i`, `ii`,
+and the executable:
+
+```bash
+ii uninstall
+```
+
+Add `--purge` to also delete every connection and credential in
+`~/.integrations`.
+
 `i` mirrors the public TypeScript client: agents can discover integrations,
 manage connections, inspect schemas, invoke their profile's tools, and poll
 their own approvals. `ii` is its strict operator superset, adding every

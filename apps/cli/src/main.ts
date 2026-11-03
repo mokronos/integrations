@@ -10,7 +10,8 @@ import { controlPlaneSubcommands, operatorClientSubcommands } from "./commands.t
 import { authenticationSubcommands } from "./auth-commands.ts"
 import { openBrowser } from "./connection.ts"
 import { writeStdoutLine } from "./output.ts"
-import { installService, serviceLabel, serviceProgram, startDetachedGateway, uninstallService } from "./service.ts"
+import { installService, serviceLabel, serviceProgram, startDetachedGateway, uninstall } from "./service.ts"
+import type { Uninstalled } from "./service.ts"
 import packageMetadata from "../package.json" with { type: "json" }
 import { exitCodeHelp, exitCodes, reportFailure } from "./failure.ts"
 
@@ -154,28 +155,41 @@ const installCommand = Command.make(
     installService({ program: serviceProgram(), port, verbose }).pipe(
       Effect.flatMap((descriptor) =>
         writeStdoutLine(
-          `integrations gateway service installed and started as ${serviceLabel} at http://127.0.0.1:${descriptor.port}\nRemove it with: ii uninstall`
+          `integrations gateway service installed and started as ${serviceLabel} at http://127.0.0.1:${descriptor.port}\nRemove integrations with: ii uninstall`
         )
       )
     )
 ).pipe(Command.withDescription("Register and start the gateway as a per-user service"))
 
+const uninstalledReport = (outcome: Uninstalled): string =>
+  [
+    ...(outcome.deregistered ? [`${serviceLabel} stopped and deregistered.`] : []),
+    ...(outcome.gateway === undefined
+      ? []
+      : [`Stopped the gateway at ${outcome.gateway.url} (pid ${outcome.gateway.pid}).`]),
+    ...outcome.removed.map((file) => `Removed ${file}`),
+    ...(outcome.removed.length === 0 ? ["This is a source install, so no executable was removed."] : []),
+    outcome.purged
+      ? `Deleted ${outcome.home}.`
+      : `Connections and credentials were left in ${outcome.home}; delete it to remove them too.`
+  ].join("\n")
+
 const uninstallCommand = Command.make(
   "uninstall",
   {
+    purge: Flag.Boolean("purge").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription("Also delete every connection, credential, and log in the integrations home")
+    ),
     verbose: Flag.Boolean("verbose").pipe(
       Flag.withDefault(false),
       Flag.withAlias("v"),
       Flag.withDescription("Show service-manager output")
     )
   },
-  ({ verbose }) =>
-    uninstallService(verbose).pipe(
-      Effect.andThen(
-        writeStdoutLine(`${serviceLabel} stopped and deregistered. Connections and credentials were left in place.`)
-      )
-    )
-).pipe(Command.withDescription("Stop and deregister the gateway service"))
+  ({ purge, verbose }) =>
+    uninstall({ purge, verbose }).pipe(Effect.flatMap((outcome) => writeStdoutLine(uninstalledReport(outcome))))
+).pipe(Command.withDescription("Stop the gateway, deregister its service, and remove the installed executable"))
 
 export const rootCommand = Command.make("ii").pipe(
   Command.withDescription(

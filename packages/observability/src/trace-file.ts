@@ -138,6 +138,7 @@ const open = Effect.fnUntraced(function* (path: string) {
     const chunk = pending.join("")
     pending = []
     return Effect.gen(function* () {
+      if (!(yield* fs.exists(dirname(path)))) return
       const size = yield* fs.stat(path).pipe(
         Effect.map((info) => Number(info.size)),
         Effect.orElseSucceed(() => 0)

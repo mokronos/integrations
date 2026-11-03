@@ -1,5 +1,5 @@
 import { closeSync, openSync } from "node:fs"
-import { mkdir, writeFile } from "node:fs/promises"
+import { mkdir, readlink, rm, writeFile } from "node:fs/promises"
 import { homedir, userInfo } from "node:os"
 import path from "node:path"
 import { Data, Duration, Effect, Result, Schedule } from "effect"
@@ -207,10 +207,49 @@ export const uninstallService = Effect.fn("Service.uninstall")(function* (
   return yield* unsupportedPlatform("uninstall")
 })
 
+const isStandalone = (): boolean => Bun.main.startsWith("/$bunfs/") || Bun.main.startsWith("B:\\~BUN\\")
+
 export const serviceProgram = (): ReadonlyArray<string> =>
-  Bun.main.startsWith("/$bunfs/") || Bun.main.startsWith("B:\\~BUN\\")
-    ? [process.execPath]
-    : [process.execPath, Bun.main]
+  isStandalone() ? [process.execPath] : [process.execPath, Bun.main]
+
+/** The standalone executable and the `i`/`ii` links the installer put beside it. */
+const installedFiles = async (): Promise<ReadonlyArray<string>> => {
+  if (!isStandalone()) return []
+  const executable = process.execPath
+  const links = await Promise.all(
+    ["i", "ii"].map(async (name) => {
+      const link = path.join(path.dirname(executable), name)
+      const target = await readlink(link).catch(() => undefined)
+      return target === path.basename(executable) ? [link] : []
+    })
+  )
+  return [executable, ...links.flat()]
+}
+
+export interface Uninstalled {
+  readonly deregistered: boolean
+  readonly gateway: StoppedGateway | undefined
+  readonly removed: ReadonlyArray<string>
+  readonly home: string
+  readonly purged: boolean
+}
+
+export const uninstall = Effect.fn("Service.uninstallProgram")(function* (options: {
+  readonly purge: boolean
+  readonly verbose: boolean
+}): Effect.fn.Return<Uninstalled, ServiceError, ChildProcessSpawner.ChildProcessSpawner | HttpClient.HttpClient> {
+  const deregistered = yield* Effect.promise(serviceIsRegistered)
+  if (deregistered) yield* uninstallService(options.verbose)
+  const gateway = yield* stopGateway()
+  const home = integrationsHome()
+  if (options.purge) yield* attempt(() => rm(home, { recursive: true, force: true }))
+  const removed = yield* attempt(async () => {
+    const files = await installedFiles()
+    await Promise.all(files.map((file) => rm(file, { force: true })))
+    return files
+  })
+  return { deregistered, gateway, removed, home, purged: options.purge }
+})
 
 const probeBase = (host: string, port: number): string =>
   `http://${host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host}:${port}`
@@ -422,11 +461,11 @@ export const stopGateway = Effect.fn("Service.stopGateway")(function* (): Effect
 > {
   const home = integrationsHome()
   const config = yield* Effect.promise(() => readGatewayConfig(home))
-  const port = config?.port ?? defaultGatewayPort
-  const base = config?.url ?? probeBase("127.0.0.1", port)
+  if (config === undefined) return undefined
+  const { port, url: base } = config
   if (!(yield* responds(base))) return undefined
 
-  const recorded = config?.pid
+  const recorded = config.pid
   const pid = recorded !== undefined && isAlive(recorded) ? recorded : yield* listeningPid(port)
   if (pid === undefined) {
     return yield* new ServiceError({
