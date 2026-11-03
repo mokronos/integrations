@@ -27,5 +27,12 @@ export const integrationMigrations: ReadonlyArray<Migration> = [
     statements: [
       "ALTER TABLE `integration` ADD `mcp_era` text;"
     ]
+  },
+  {
+    id: 2,
+    name: "0002_real_fabian_cortez",
+    statements: [
+      "ALTER TABLE `oauth_client` ADD `token_auth_method` text;"
+    ]
   }
 ]

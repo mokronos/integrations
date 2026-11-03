@@ -8,6 +8,7 @@ import {
 } from "@modelcontextprotocol/client"
 import { Clock, Context, Effect, Encoding, Layer, Option, Schema } from "effect"
 import { CatalogStore } from "../catalog/store.ts"
+import { ClientAuthMethod } from "../catalog/store.ts"
 import type { OAuthClientRecord } from "../catalog/store.ts"
 import {
   connectionCredentialKey,
@@ -49,7 +50,8 @@ const decodeTokenResponse = Schema.decodeUnknownEffect(TokenResponse)
 
 const RegisteredClient = Schema.Struct({
   client_id: Schema.String,
-  client_secret: Schema.optional(Schema.String)
+  client_secret: Schema.optional(Schema.String),
+  token_endpoint_auth_method: Schema.optional(ClientAuthMethod)
 })
 
 const decodeRegisteredClient = Schema.decodeUnknownEffect(RegisteredClient)
@@ -96,12 +98,14 @@ const discover = (
 const resourceUrl = (resource: string | undefined): URL | undefined =>
   resource === undefined ? undefined : new URL(resource)
 
+const requestedTokenAuthMethod: ClientAuthMethod = "client_secret_post"
+
 const clientMetadata = (redirectUri: string, scopes: ReadonlyArray<string>) => ({
   client_name: "integrations gateway",
   redirect_uris: [redirectUri],
   grant_types: ["authorization_code", "refresh_token"],
   response_types: ["code"],
-  token_endpoint_auth_method: "client_secret_post",
+  token_endpoint_auth_method: requestedTokenAuthMethod,
   ...whenPresent("scope", scopes.length === 0 ? undefined : scopes.join(" "))
 })
 
@@ -122,6 +126,7 @@ const clientInformation = (
 ) => ({
   client_id: record.clientId,
   ...whenPresent("client_secret", Option.getOrUndefined(secret)),
+  ...whenPresent("token_endpoint_auth_method", record.tokenAuthMethod),
   redirect_uris: noRedirectUris
 })
 
@@ -321,7 +326,8 @@ export class OAuthFlows extends Context.Service<
             ...whenPresent("issuer", options.issuer),
             ...whenPresent("resource", options.resource),
             scopes: options.scopes,
-            tokenAuthMethods: options.tokenAuthMethods ?? []
+            tokenAuthMethods: options.tokenAuthMethods ?? [],
+            tokenAuthMethod: decoded.token_endpoint_auth_method ?? requestedTokenAuthMethod
           })
           if (decoded.client_secret !== undefined) {
             yield* credentials.set(

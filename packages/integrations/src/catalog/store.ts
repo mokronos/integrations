@@ -48,6 +48,9 @@ export const ConnectionRecord = Schema.Struct({
 })
 export type ConnectionRecord = typeof ConnectionRecord.Type
 
+export const ClientAuthMethod = Schema.Literals(["client_secret_basic", "client_secret_post", "none"])
+export type ClientAuthMethod = typeof ClientAuthMethod.Type
+
 export const OAuthClientRecord = Schema.Struct({
   owner: ConnectionOwner,
   slug: OAuthClientSlug,
@@ -59,7 +62,8 @@ export const OAuthClientRecord = Schema.Struct({
   issuer: Schema.optional(Schema.String),
   resource: Schema.optional(Schema.String),
   scopes: Schema.Array(Schema.String),
-  tokenAuthMethods: Schema.Array(Schema.String)
+  tokenAuthMethods: Schema.Array(Schema.String),
+  tokenAuthMethod: Schema.optional(ClientAuthMethod)
 })
 export type OAuthClientRecord = typeof OAuthClientRecord.Type
 
@@ -170,7 +174,8 @@ const decodeOAuthClientRow = (row: SqlRow) =>
       ...whenPresent("issuer", optionalText(row, "issuer")),
       ...whenPresent("resource", optionalText(row, "resource")),
       scopes,
-      tokenAuthMethods
+      tokenAuthMethods,
+      ...whenPresent("tokenAuthMethod", optionalText(row, "token_auth_method"))
     }).pipe(Effect.mapError((cause) =>
       new StorageError({ message: `Malformed oauth_client row ${text(row, "slug")}`, cause })
     ))
@@ -478,8 +483,8 @@ export class CatalogStore extends Context.Service<
             sql: `INSERT INTO oauth_client
                     (owner, slug, integration, client_id, authorization_url, token_url,
                      registration_endpoint, issuer, resource, scopes, token_auth_methods,
-                     created_at)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     token_auth_method, created_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                   ON CONFLICT(owner, slug) DO UPDATE SET
                     integration = excluded.integration,
                     client_id = excluded.client_id,
@@ -489,7 +494,8 @@ export class CatalogStore extends Context.Service<
                     issuer = excluded.issuer,
                     resource = excluded.resource,
                     scopes = excluded.scopes,
-                    token_auth_methods = excluded.token_auth_methods`,
+                    token_auth_methods = excluded.token_auth_methods,
+                    token_auth_method = excluded.token_auth_method`,
             params: [
               record.owner,
               record.slug,
@@ -502,6 +508,7 @@ export class CatalogStore extends Context.Service<
               nullable(record.resource),
               JSON.stringify(record.scopes),
               JSON.stringify(record.tokenAuthMethods),
+              nullable(record.tokenAuthMethod),
               Date.now()
             ]
           })

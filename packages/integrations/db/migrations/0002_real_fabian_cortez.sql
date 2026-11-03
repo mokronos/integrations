@@ -1,0 +1,1 @@
+ALTER TABLE `oauth_client` ADD `token_auth_method` text;
