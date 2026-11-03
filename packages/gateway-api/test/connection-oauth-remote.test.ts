@@ -364,7 +364,7 @@ describe("the remote callback route", () => {
       const response = yield* call("/v1/oauth/callback?state=provider-state-1&code=abc")
 
       expect(response.status).toBe(200)
-      expect(response.text).toContain("Account connected")
+      expect(response.text).toContain("google connected")
       expect(completed?.code).toBe("abc")
     }).pipe(Effect.provide(testServices))
   )
@@ -384,7 +384,14 @@ describe("the remote callback route", () => {
         "/v1/oauth/callback?state=provider-state-1&error=access_denied&error_description=User%20declined"
       )
       expect(errored.status).toBe(400)
+      expect(errored.text).toContain("<h1>Authorization refused</h1>")
       expect(errored.text).toContain("User declined")
+
+      const hostile = yield* call(
+        "/v1/oauth/callback?error=x&error_description=%3Cimg%20src%3Dx%20onerror%3Dalert(1)%3E"
+      )
+      expect(hostile.text).not.toContain("<img src=x")
+      expect(hostile.text).toContain("&#60;img src=x onerror=alert(1)&#62;")
     }).pipe(Effect.provide(testServices))
   )
 

@@ -12,6 +12,7 @@ import {
 } from "@integragents/gateway-core"
 import { generateLoginHandoff, hashLoginHandoff, newSubjectId, newTenantId } from "@integragents/gateway-core"
 import { oauthBrowserPage } from "@integragents/gateway-core"
+import type { BrowserPage } from "@integragents/gateway-core"
 import { generateSessionToken, hashPassword, verifyPassword } from "@integragents/gateway-core"
 import type { GatewayStore, GatewayStoreError, LoginRecord } from "@integragents/gateway-core"
 import { GatewayStoreService } from "@integragents/gateway-core"
@@ -21,22 +22,28 @@ import {
   LoginHandoffFailed,
   NotImplemented,
   PasswordRequired,
-  SignupClosed
+  SignupClosed,
+  integrationLogoUrl
 } from "@integragents/contracts"
 import { GatewayApi } from "../api.ts"
 import { clearSessionCookie, Forbidden, Identity, setSessionCookie } from "../authority.ts"
 import type { SignInPolicy } from "../services.ts"
 import { SessionPolicy } from "../services.ts"
-import { capture } from "../observability.ts"
+import { capture, currentTraceId } from "../observability.ts"
 
-const page = (
-  status: number,
-  content: { readonly title: string; readonly message: string }
-): HttpServerResponse.HttpServerResponse =>
+const page = (status: number, content: BrowserPage): HttpServerResponse.HttpServerResponse =>
   HttpServerResponse.text(oauthBrowserPage(content), {
     status,
-    contentType: "text/html; charset=utf-8"
+    contentType: "text/html; charset=utf-8",
+    headers: { "cache-control": "no-store" }
   })
+
+const googlePage = { name: "Google", logoUrl: integrationLogoUrl("google.com") }
+
+const signInFailed = (status: number, content: { readonly title: string; readonly message: string }) =>
+  Effect.map(currentTraceId, (traceId) =>
+    page(status, { outcome: "failure", flow: "Signing in with Google", integration: googlePage, traceId, ...content })
+  )
 
 const verifyLoginPassword = Effect.fn("Auth.verifyLoginPassword")(function* (
   store: GatewayStore,
@@ -156,7 +163,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
         Effect.gen(function* () {
           const google = sessions.google
           if (google === undefined) {
-            return page(501, {
+            return yield* signInFailed(501, {
               title: "Google sign-in unavailable",
               message: "This gateway has not configured Google sign-in."
             })
@@ -171,7 +178,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
               DateTime.isLessThanOrEqualTo(DateTime.fromDateUnsafe(handoff.expiresAt), now) ||
               handoff.collectedAt !== null
             ) {
-              return page(410, {
+              return yield* signInFailed(410, {
                 title: "Sign-in link expired",
                 message: "Return to the terminal and run `ii login` again."
               })
@@ -199,7 +206,7 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
         Effect.gen(function* () {
           const google = sessions.google
           if (google === undefined) {
-            return page(501, {
+            return yield* signInFailed(501, {
               title: "Google sign-in unavailable",
               message: "This gateway has not configured Google sign-in."
             })
@@ -207,25 +214,27 @@ export const AuthLayer = HttpApiBuilder.group(GatewayApi, "auth", (handlers) =>
           const stateSecret = request.query["state"]
           const code = request.query["code"]
           if (stateSecret === undefined || code === undefined) {
-            return page(400, {
+            return yield* signInFailed(400, {
               title: "Sign-in failed",
               message: "Google did not return a complete sign-in response."
             })
           }
           const state = yield* capture(store.consumeIdentityOAuthState(yield* hashLoginHandoff(stateSecret)))
           if (state === undefined) {
-            return page(400, {
+            return yield* signInFailed(400, {
               title: "Sign-in expired",
               message: "This sign-in could not be verified. Start again."
             })
           }
           const outcome = yield* completeGoogleSignIn({ store, sessions }, google, code, state, issueSession)
           if (outcome._tag === "page") {
-            return page(outcome.status, { title: outcome.title, message: outcome.message })
+            return yield* signInFailed(outcome.status, { title: outcome.title, message: outcome.message })
           }
           yield* startSession(outcome.token)
           if (outcome.handoffHash !== null) {
             return page(200, {
+              outcome: "success",
+              integration: googlePage,
               title: "Signed in",
               message: "The terminal is authenticated. You can close this window and return to ii."
             })

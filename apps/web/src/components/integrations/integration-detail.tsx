@@ -23,7 +23,8 @@ import { cn } from "@/lib/utils"
 import { ConnectDialog, ReauthorizeDialog, reauthorizationMethod } from "./connect-dialog"
 import { ConnectionBadge } from "./connection-badge"
 import { ConnectionIdentity } from "./connection-identity"
-import { IntegrationIcon, integrationHost } from "./integration-icon"
+import { integrationHost } from "@integragents/contracts"
+import { IntegrationIcon } from "./integration-icon"
 import { toastError } from "@/lib/errors"
 const isConnected = (integration: IntegrationOverview): boolean =>
   integration.connections.some((connection) => connection.status === "connected")

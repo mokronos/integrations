@@ -2,8 +2,9 @@ import { whenPresent, whenPresentMap } from "@integragents/contracts"
 import { Integrations, listIntegrationOverviews, searchIntegrations } from "@integragents/integrations"
 import { httpsOnlyUrlPolicy, parseDestination } from "@integragents/integrations"
 import type { IntegrationServices } from "@integragents/integrations"
-import { Effect, Option } from "effect"
-import { NotFound, NotImplemented } from "@integragents/contracts"
+import { Cause, Effect, Option } from "effect"
+import { GatewayFailure, NotFound, NotImplemented } from "@integragents/contracts"
+import type { GatewayError } from "@integragents/contracts"
 import { HttpServerRequest, HttpServerResponse } from "effect/http"
 import { HttpApiBuilder } from "effect/http-api"
 import { ConnectionName } from "@integragents/contracts"
@@ -12,13 +13,16 @@ import {
   connectionRefOf,
   forgetConnection,
   oauthBrowserPage,
+  pageIntegration,
+  providerRefusalOf,
   GatewayStoreService
 } from "@integragents/gateway-core"
+import type { BrowserPage, PageIntegration } from "@integragents/gateway-core"
 import { GatewayApi } from "../api.ts"
 import { Identity, requireTenant } from "../authority.ts"
 import { GatewayConfig } from "../services.ts"
 import { OAuthFlowSessions } from "@integragents/gateway-core"
-import { capture } from "../observability.ts"
+import { capture, currentTraceId, traceIdFor } from "../observability.ts"
 import {
   asCallerFailure,
   connectWithCredentials,
@@ -29,13 +33,11 @@ import {
   validateReference
 } from "../operations.ts"
 
-const page = (
-  status: number,
-  content: { readonly title: string; readonly message: string }
-): HttpServerResponse.HttpServerResponse =>
+const page = (status: number, content: BrowserPage): HttpServerResponse.HttpServerResponse =>
   HttpServerResponse.text(oauthBrowserPage(content), {
     status,
-    contentType: "text/html; charset=utf-8"
+    contentType: "text/html; charset=utf-8",
+    headers: { "cache-control": "no-store" }
   })
 
 export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning", (handlers) =>
@@ -176,49 +178,74 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
       )
       .handle("oauthCallback", (request) =>
         Effect.gen(function* () {
+          const traceId = yield* currentTraceId
+          const provider = providerRefusalOf(request.query)
+          const failed = (
+            status: number,
+            content: {
+              readonly title: string
+              readonly message: string
+              readonly flow?: string
+              readonly error?: GatewayError
+              readonly integration?: PageIntegration
+            }
+          ) =>
+            page(status, {
+              outcome: "failure",
+              flow: "Connecting an integration with OAuth",
+              traceId,
+              provider,
+              ...content
+            })
           const state = request.query["state"]
           if (state === undefined) {
-            return page(400, {
+            return failed(400, {
               title: "Authorization failed",
               message:
-                request.query["error_description"] ??
-                request.query["error"] ??
-                "The provider did not return a usable authorization code."
+                provider?.description ?? provider?.error ?? "The provider did not return a usable authorization code."
             })
           }
           const raw = yield* HttpServerRequest.HttpServerRequest
-          const completed = yield* Effect.catch(
-            oauth.completeByState(state, new URL(raw.url, "http://callback").searchParams),
-            (refusal) =>
-              Effect.succeed(
-                page(502, {
-                  title: "Authorization failed",
-                  message:
-                    refusal.cause instanceof Error ? refusal.cause.message : "Authorization could not be completed"
-                })
-              )
+          const completed = yield* Effect.result(
+            oauth.completeByState(state, new URL(raw.url, "http://callback").searchParams)
           )
-          if (HttpServerResponse.isHttpServerResponse(completed)) return completed
-          const refusal = request.query["error_description"] ?? request.query["error"]
-          if (refusal !== undefined) {
-            return page(400, { title: "Authorization failed", message: refusal })
-          }
-          if (completed === undefined) {
-            return page(400, {
-              title: "Unknown authorization",
-              message:
-                "This callback does not match any authorization in progress. Return to the terminal or dashboard and start again."
+          if (completed._tag === "Failure") {
+            return failed(500, {
+              title: "Authorization failed",
+              message: "The gateway could not record the authorization.",
+              error: new GatewayFailure({ traceId: yield* traceIdFor(Cause.fail(completed.failure)) })
             })
           }
-          if (completed.state.status === "failed") {
-            return page(400, {
-              title: "Authorization failed",
-              message: completed.state.message
+          const session = completed.success
+          if (session === undefined) {
+            return failed(
+              400,
+              provider === undefined
+                ? {
+                    title: "Unknown authorization",
+                    message:
+                      "This callback does not match any authorization in progress. Return to the terminal or dashboard and start again."
+                  }
+                : { title: "Authorization refused", message: provider.description ?? provider.error }
+            )
+          }
+          const integration = yield* pageIntegration(session.integration).pipe(
+            Effect.provideService(Integrations, integrations)
+          )
+          if (session.state.status === "failed") {
+            return failed(400, {
+              integration,
+              title: provider === undefined ? "Authorization failed" : "Authorization refused",
+              message: provider?.description ?? provider?.error ?? session.state.message,
+              flow: `Connecting ${session.integration} (connection "${session.connection}") with OAuth`,
+              ...whenPresent("error", session.state.error)
             })
           }
           return page(200, {
-            title: "Account connected",
-            message: `${completed.integration} was connected. You can close this window.`
+            outcome: "success",
+            integration,
+            title: `${integration.name} connected`,
+            message: "You can close this window and return to the terminal or dashboard."
           })
         })
       )

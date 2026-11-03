@@ -1,22 +1,9 @@
+import { integrationLogoUrl } from "@integragents/contracts"
 import { Plug } from "lucide-react"
 import { useState } from "react"
 
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
-
-const logoUrl = (host: string): string => `https://integrations.sh/logo/${host}?sz=128`
-
-const hostLike = /^[a-z0-9][a-z0-9-]*(\.[a-z0-9-]+)+$/i
-
-export const integrationHost = (integration: {
-  readonly slug: string
-  readonly displayUrl?: string | undefined
-}): string | undefined => {
-  const url = integration.displayUrl
-  if (url !== undefined && URL.canParse(url)) return new URL(url).hostname
-  const asHost = integration.slug.replaceAll("_", ".")
-  return hostLike.test(asHost) ? asHost : undefined
-}
 
 export function IntegrationIcon({
   host,
@@ -44,7 +31,7 @@ export function IntegrationIcon({
     <span className={cn("relative inline-block shrink-0", className)} style={{ width: size, height: size }}>
       {loadedHost === host ? null : <Skeleton className="absolute inset-0 size-full" />}
       <img
-        src={logoUrl(host)}
+        src={integrationLogoUrl(host)}
         alt=""
         width={size}
         height={size}

@@ -90,7 +90,7 @@ const integrations: Integrations["Service"] = {
   recompileOpenApiTools: () => Effect.void,
   registerHostIntegration: notUsed("Integrations.registerHostIntegration"),
   listIntegrations: notUsed("Integrations.listIntegrations"),
-  findIntegration: notUsed("Integrations.findIntegration"),
+  findIntegration: () => Effect.succeed(Option.none()),
   addMcp: notUsed("Integrations.addMcp"),
   addOpenApi: notUsed("Integrations.addOpenApi"),
   renameIntegration: notUsed("Integrations.renameIntegration"),

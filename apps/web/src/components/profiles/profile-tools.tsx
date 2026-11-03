@@ -13,7 +13,8 @@ import {
 } from "@integragents/contracts"
 
 import { ConnectionIdentity, ToolIdentity } from "@/components/integrations/connection-identity"
-import { IntegrationIcon, integrationHost } from "@/components/integrations/integration-icon"
+import { integrationHost } from "@integragents/contracts"
+import { IntegrationIcon } from "@/components/integrations/integration-icon"
 import { LoadingRows, QueryError } from "@/components/page"
 import { SavedApproval } from "@/components/profiles/saved-approvals"
 import { Badge } from "@/components/ui/badge"

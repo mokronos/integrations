@@ -167,8 +167,9 @@ export const ProvisioningGroup = HttpApiGroup.make("provisioning")
       query: {
         state: Schema.optional(Schema.String),
         code: Schema.optional(Schema.String),
+        error: Schema.optional(Schema.String),
         error_description: Schema.optional(Schema.String),
-        error: Schema.optional(Schema.String)
+        error_uri: Schema.optional(Schema.String)
       },
       success: Schema.Struct({ rendered: Schema.Literal(true) })
     }).annotate(RequiredAccess, "public")

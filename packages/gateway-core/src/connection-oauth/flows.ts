@@ -101,17 +101,6 @@ export type LocalAuthorizer = (
   input: AuthorizationRequest & { readonly onAuthorizationUrl?: (url: string) => void }
 ) => Effect.Effect<Connection, OAuthFlowError, Scope.Scope | OAuthOperations>
 
-export const oauthBrowserPage = (options: {
-  readonly title: string
-  readonly message: string
-}): string => `<!doctype html>
-<html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${options.title}</title></head>
-<body style="font:16px system-ui,sans-serif;max-width:38rem;margin:12vh auto;padding:0 1.5rem;line-height:1.5">
-<h1>${options.title}</h1><p>${options.message}</p>
-</body>
-</html>`
-
 /** Where the gateway publishes its OAuth client metadata document, for servers that accept one as a client id. */
 export const clientMetadataPath = "/v1/oauth/client-metadata.json"
 export const oauthCallbackPath = "/v1/oauth/callback"

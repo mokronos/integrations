@@ -1,6 +1,7 @@
 import { aliasForConnection, connectionRefOf } from "@integragents/contracts"
 
-import { IntegrationIcon, integrationHost } from "@/components/integrations/integration-icon"
+import { integrationHost } from "@integragents/contracts"
+import { IntegrationIcon } from "@/components/integrations/integration-icon"
 import { Badge } from "@/components/ui/badge"
 import type { ConnectionRef, IntegrationOverview } from "@integragents/contracts"
 import { cn } from "@/lib/utils"
