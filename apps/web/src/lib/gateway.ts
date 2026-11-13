@@ -124,6 +124,9 @@ export const provideOAuthClient = async (
   payload: { readonly clientId: string; readonly clientSecret?: string }
 ) => await run(endpoints.provisioning.provideOAuthClient({ params: { id }, payload }))
 
+export const listIntegrationSkills = async (slug: string) =>
+  await run(endpoints.provisioning.integrationSkills({ params: { slug } }))
+
 export const removeIntegration = async (slug: string) =>
   await run(endpoints.provisioning.removeIntegration({ params: { slug } }))
 

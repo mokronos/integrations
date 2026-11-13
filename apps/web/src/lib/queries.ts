@@ -10,6 +10,8 @@ export const keys = {
   me: ["me"] as const,
   authProviders: ["auth-providers"] as const,
   integrations: ["integrations"] as const,
+  /** Under `integrations`, so whatever refreshes the integrations asks their servers for skills again too. */
+  integrationSkills: (slug: string) => ["integrations", slug, "skills"] as const,
   connections: ["connections"] as const,
   overview: ["overview"] as const,
   profiles: ["profiles"] as const,
@@ -41,6 +43,9 @@ export const useOAuthCallbackUrl = () =>
     queryFn: gateway.listIntegrations,
     select: (response) => response.oauthCallbackUrl
   })
+
+export const useIntegrationSkills = (slug: string, enabled: boolean) =>
+  useQuery({ queryKey: keys.integrationSkills(slug), queryFn: () => gateway.listIntegrationSkills(slug), enabled })
 
 export const useConnections = () => useQuery({ queryKey: keys.connections, queryFn: gateway.listConnections })
 
