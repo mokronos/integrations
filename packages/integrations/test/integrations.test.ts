@@ -11,6 +11,7 @@ import {
 } from "../src/storage/credentials.ts"
 import { McpError } from "../src/errors.ts"
 import { Integrations } from "../src/integrations.ts"
+import { listIntegrationOverviews } from "../src/overview.ts"
 import { McpClient } from "../src/mcp/client.ts"
 import { OAuthFlows } from "../src/oauth/flows.ts"
 import { OpenApiInvoker } from "../src/openapi/invoke.ts"
@@ -792,6 +793,20 @@ describe("tools", () => {
       expect(tools.map((tool) => String(tool.address)).toSorted()).toEqual([
         "tools.notes.org.primary.search_notes",
         "tools.notes.org.primary.write_note"
+      ])
+      // A person's connection may share the organisation's name; the overview keeps each connection's tools apart.
+      yield* host.createConnection({
+        owner: "user:alice",
+        integration: notes,
+        name: primary,
+        template: AuthTemplateSlug.make("none")
+      })
+      const [overview] = yield* listIntegrationOverviews()
+      expect(overview?.tools.map((tool) => String(tool.address)).toSorted()).toEqual([
+        "tools.notes.org.primary.search_notes",
+        "tools.notes.org.primary.write_note",
+        "tools.notes.user:alice.primary.search_notes",
+        "tools.notes.user:alice.primary.write_note"
       ])
     }).pipe(Effect.provide(testIntegrations()))
   )

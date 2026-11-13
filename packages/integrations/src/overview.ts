@@ -24,6 +24,8 @@ export const listIntegrationOverviews = Effect.fn("Integrations.listOverviews")(
         host
           .listTools({
             integration: integration.slug,
+            // Names are unique per owner only: a person's connection may share its name with the organisation's.
+            owner: connection.owner,
             connection: connection.name
           })
           .pipe(
