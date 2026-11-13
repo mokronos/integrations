@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Clock, Effect, Layer, Option } from "effect"
 import { TestClock } from "effect/testing"
-import type { Json, ResourceContents, ResourceEntry, SkillEntry } from "@integragents/contracts"
+import type { EventTypeDescriptor, Json, ResourceContents, ResourceEntry, SkillEntry } from "@integragents/contracts"
 import { CatalogStore } from "../src/catalog/store.ts"
 import {
   CredentialStore,
@@ -91,6 +91,7 @@ const stubMcp = (
         return Effect.succeed({
           era: "legacy",
           ttlMs: Option.none(),
+          eventTypes: Option.some([{ name: "note.added", description: "A note was added", delivery: ["poll"] }]),
           tools: [
             searchNotes,
             {
@@ -107,6 +108,10 @@ const stubMcp = (
       listSkills: () => Effect.succeed(options.skills ?? []),
       getSkill: (_server, _credential, uri) =>
         Effect.succeed(Option.fromNullishOr((options.skills ?? []).find((skill) => skill.uri === uri))),
+      listEvents: () => Effect.die("unused"),
+      pollEvents: () => Effect.succeed({ events: [], cursor: "after-1", truncated: false, hasMore: false }),
+      subscribeEvents: () => Effect.die("unused"),
+      unsubscribeEvents: () => Effect.die("unused"),
       readResource: (_server, credential, uri) => {
         options.onRead?.(
           uri,
@@ -133,6 +138,8 @@ const rejectingMcp: Layer.Layer<McpClient> = Layer.effect(
   Effect.map(Effect.service(McpClient).pipe(Effect.provide(stubMcp())), (stub) => ({
     ...stub,
     callTool: (server: { readonly endpoint: string }) =>
+      Effect.fail(new McpError({ endpoint: server.endpoint, reason: "unauthorized", detail: "401" })),
+    pollEvents: (server: { readonly endpoint: string }) =>
       Effect.fail(new McpError({ endpoint: server.endpoint, reason: "unauthorized", detail: "401" }))
   }))
 )
@@ -242,45 +249,59 @@ describe("the catalog", () => {
     }).pipe(Effect.provide(testIntegrations()))
   )
 
-  it.effect("asks for authorization again when the provider rejects a token that cannot be refreshed", () =>
-    Effect.gen(function* () {
-      const now = yield* Clock.currentTimeMillis
-      const store = yield* CatalogStore
-      const credentials = yield* CredentialStore
-      const host = yield* Integrations
-      yield* store.putIntegration({
-        slug: notes,
-        name: "Notes",
-        description: "A notebook.",
-        kind: "mcp",
-        endpoint: "https://notes.example.com/mcp",
-        authMethods: [{ id: "oauth2", label: "OAuth", kind: "oauth", template: "oauth2" }],
-        createdAt: now
+  it.effect(
+    "asks for authorization again when the provider rejects a token that cannot be refreshed, on calls and event polls alike",
+    () => {
+      const rejected = (
+        name: ConnectionName,
+        attempt: (host: Integrations["Service"], tool: ToolAddress) => Effect.Effect<unknown, { readonly _tag: string }>
+      ) =>
+        Effect.gen(function* () {
+          const now = yield* Clock.currentTimeMillis
+          const store = yield* CatalogStore
+          const credentials = yield* CredentialStore
+          const host = yield* Integrations
+          yield* store.putIntegration({
+            slug: notes,
+            name: "Notes",
+            description: "A notebook.",
+            kind: "mcp",
+            endpoint: "https://notes.example.com/mcp",
+            authMethods: [{ id: "oauth2", label: "OAuth", kind: "oauth", template: "oauth2" }],
+            createdAt: now
+          })
+          yield* store.putConnection({
+            owner: "org",
+            integration: notes,
+            name,
+            template: AuthTemplateSlug.make("oauth2"),
+            provider: "oauth",
+            oauthClient: "notes-client",
+            oauthClientOwner: "org",
+            createdAt: now
+          })
+          yield* writeTokens(
+            credentials,
+            connectionCredentialKey(connectionAddress({ owner: "org", integration: notes, connection: name })),
+            { accessToken: "revoked" }
+          )
+          yield* host.refreshConnection({ owner: "org", integration: notes, name })
+          const [tool] = yield* store.listTools({ integration: notes, connection: name })
+          const failure = yield* Effect.flip(attempt(host, tool?.address ?? ToolAddress.make("missing")))
+          const [connection] = (yield* host.listConnections()).filter((listed) => listed.name === name)
+          return { failure: failure._tag, status: connection?.status }
+        }).pipe(Effect.provide(testIntegrations(rejectingMcp)))
+      return Effect.gen(function* () {
+        const call = yield* rejected(primary, (host, tool) => host.execute(tool, {}))
+        // Events go through the same credential path, refresh and all, as tool calls.
+        const secondary = ConnectionName.make("secondary")
+        const poll = yield* rejected(secondary, (host) =>
+          host.pollEvents({ owner: "org", integration: notes, name: secondary }, { name: "note.added" })
+        )
+        const expected = { failure: "OAuthReconnectRequired", status: "reauthorization_required" }
+        expect({ call, poll }).toEqual({ call: expected, poll: expected })
       })
-      yield* store.putConnection({
-        owner: "org",
-        integration: notes,
-        name: primary,
-        template: AuthTemplateSlug.make("oauth2"),
-        provider: "oauth",
-        oauthClient: "notes-client",
-        oauthClientOwner: "org",
-        createdAt: now
-      })
-      yield* writeTokens(
-        credentials,
-        connectionCredentialKey(connectionAddress({ owner: "org", integration: notes, connection: primary })),
-        { accessToken: "revoked" }
-      )
-      yield* host.refreshConnection({ owner: "org", integration: notes, name: primary })
-      const [tool] = yield* store.listTools({ integration: notes })
-      const failure = yield* Effect.flip(host.execute(tool?.address ?? ToolAddress.make("missing"), {}))
-      const [connection] = yield* host.listConnections()
-      expect({
-        failure: failure._tag,
-        status: connection?.status
-      }).toEqual({ failure: "OAuthReconnectRequired", status: "reauthorization_required" })
-    }).pipe(Effect.provide(testIntegrations(rejectingMcp)))
+    }
   )
 
   it.effect("uses the sealed OAuth grant expiry when reporting connection health", () =>
@@ -385,13 +406,16 @@ describe("the catalog", () => {
     }).pipe(Effect.provide(testIntegrations()))
   )
 
-  it.effect("takes a connection's tools with it when the integration goes", () =>
+  it.effect("takes a connection's tools and event types with it when the integration goes", () =>
     Effect.gen(function* () {
       const host = yield* Integrations
       yield* install()
+      const captured = yield* host.listEventTypes({ integration: notes })
       yield* host.removeIntegration(notes)
       const remaining = yield* host.listConnections()
+      expect(captured.map((type) => type.name)).toEqual(["note.added"])
       expect(remaining).toEqual([])
+      expect(yield* host.listEventTypes({ integration: notes })).toEqual([])
     }).pipe(Effect.provide(testIntegrations()))
   )
 
@@ -645,6 +669,7 @@ describe("tools", () => {
             Effect.succeed({
               era: "legacy",
               ttlMs: Option.none(),
+              eventTypes: Option.none(),
               tools: shrunk
                 ? [{ name: "search_notes", description: "", annotations: { readOnlyHint: true } }]
                 : [
@@ -656,6 +681,10 @@ describe("tools", () => {
           readResource: () => Effect.die("unused"),
           listSkills: () => Effect.die("unused"),
           getSkill: () => Effect.die("unused"),
+          listEvents: () => Effect.die("unused"),
+          pollEvents: () => Effect.die("unused"),
+          subscribeEvents: () => Effect.die("unused"),
+          unsubscribeEvents: () => Effect.die("unused"),
           callTool: () => Effect.succeed({ kind: "complete" as const, result: { content: [] }, declined: [] })
         }))
       )
@@ -675,53 +704,84 @@ describe("tools", () => {
     })
   )
 
-  it.effect("asks a server for its tools again once its list goes stale, and names the connections that changed", () =>
-    Effect.gen(function* () {
-      let grown = false
-      const growing = Layer.effect(
-        McpClient,
-        Effect.sync(() => ({
-          probe: () => Effect.succeed(notesProbe),
-          listTools: () =>
-            Effect.succeed({
-              era: "modern" as const,
-              ttlMs: Option.some(10 * 60 * 1000),
-              tools: grown
-                ? [
-                    { name: "search_notes", description: "", annotations: { readOnlyHint: true } },
-                    { name: "archive_note", description: "", annotations: { readOnlyHint: false } }
-                  ]
-                : [{ name: "search_notes", description: "", annotations: { readOnlyHint: true } }]
-            }),
-          listResources: () => Effect.die("unused"),
-          readResource: () => Effect.die("unused"),
-          listSkills: () => Effect.die("unused"),
-          getSkill: () => Effect.die("unused"),
-          callTool: () => Effect.die("unused")
-        }))
-      )
-      const rounds = yield* withIntegrations(
-        Effect.gen(function* () {
-          const host = yield* Integrations
-          yield* install()
-          const fresh = yield* host.refreshDueConnections()
-          yield* TestClock.adjust("11 minutes")
-          const unchanged = yield* host.refreshDueConnections()
-          grown = true
-          yield* TestClock.adjust("11 minutes")
-          const changed = yield* host.refreshDueConnections()
-          const tools = (yield* host.toolSummaries({ integration: notes })).map((tool) => String(tool.name))
-          return { fresh, unchanged, changed, tools }
-        }),
-        growing
-      )
-      expect(rounds).toEqual({
-        fresh: [],
-        unchanged: [],
-        changed: [{ owner: "org", integration: notes, name: primary }],
-        tools: ["archive_note", "search_notes"]
+  it.effect(
+    "asks a server for its tools and event types again once its list goes stale, and names the connections that changed",
+    () =>
+      Effect.gen(function* () {
+        let grown = false
+        let listings = 0
+        const created: EventTypeDescriptor = {
+          name: "ticket.created",
+          description: "A ticket was opened",
+          delivery: ["poll"]
+        }
+        const closed: EventTypeDescriptor = { name: "ticket.closed", description: "", delivery: ["webhook", "poll"] }
+        const growing = Layer.effect(
+          McpClient,
+          Effect.sync(() => ({
+            probe: () => Effect.succeed(notesProbe),
+            listTools: () =>
+              Effect.succeed({
+                era: "modern" as const,
+                ttlMs: Option.some(10 * 60 * 1000),
+                // The second listing's events/list failed: what the catalog holds stays.
+                eventTypes: grown
+                  ? Option.some([created, closed, created])
+                  : ++listings === 2
+                    ? Option.none()
+                    : Option.some([created]),
+                tools: grown
+                  ? [
+                      { name: "search_notes", description: "", annotations: { readOnlyHint: true } },
+                      { name: "archive_note", description: "", annotations: { readOnlyHint: false } }
+                    ]
+                  : [{ name: "search_notes", description: "", annotations: { readOnlyHint: true } }]
+              }),
+            listResources: () => Effect.die("unused"),
+            readResource: () => Effect.die("unused"),
+            listSkills: () => Effect.die("unused"),
+            getSkill: () => Effect.die("unused"),
+            listEvents: () => Effect.die("unused"),
+            pollEvents: () => Effect.die("unused"),
+            subscribeEvents: () => Effect.die("unused"),
+            unsubscribeEvents: () => Effect.die("unused"),
+            callTool: () => Effect.die("unused")
+          }))
+        )
+        const rounds = yield* withIntegrations(
+          Effect.gen(function* () {
+            const host = yield* Integrations
+            yield* install()
+            const eventNames = () =>
+              Effect.map(host.listEventTypes({ integration: notes }), (types) => types.map((type) => type.name))
+            const fresh = yield* host.refreshDueConnections()
+            yield* TestClock.adjust("11 minutes")
+            const unchanged = yield* host.refreshDueConnections()
+            const kept = yield* eventNames()
+            grown = true
+            yield* TestClock.adjust("11 minutes")
+            const changed = yield* host.refreshDueConnections()
+            const tools = (yield* host.toolSummaries({ integration: notes })).map((tool) => String(tool.name))
+            const [closedType] = yield* host.listEventTypes({ integration: notes, connection: primary })
+            return { fresh, unchanged, changed, tools, kept, events: yield* eventNames(), closedType }
+          }),
+          growing
+        )
+        expect(rounds).toEqual({
+          fresh: [],
+          unchanged: [],
+          changed: [{ owner: "org", integration: notes, name: primary }],
+          tools: ["archive_note", "search_notes"],
+          kept: ["ticket.created"],
+          events: ["ticket.closed", "ticket.created"],
+          closedType: expect.objectContaining({
+            owner: "org",
+            integration: notes,
+            connection: primary,
+            delivery: ["webhook", "poll"]
+          })
+        })
       })
-    })
   )
 
   it.effect("addresses every tool a connection exposes", () =>
@@ -885,6 +945,7 @@ describe("tools", () => {
             Effect.succeed({
               era: "legacy",
               ttlMs: Option.none(),
+              eventTypes: Option.none(),
               tools: [
                 {
                   name: "search_notes",
@@ -897,6 +958,10 @@ describe("tools", () => {
           readResource: () => Effect.die("unused"),
           listSkills: () => Effect.die("unused"),
           getSkill: () => Effect.die("unused"),
+          listEvents: () => Effect.die("unused"),
+          pollEvents: () => Effect.die("unused"),
+          subscribeEvents: () => Effect.die("unused"),
+          unsubscribeEvents: () => Effect.die("unused"),
           callTool: () =>
             Effect.succeed({
               kind: "complete" as const,

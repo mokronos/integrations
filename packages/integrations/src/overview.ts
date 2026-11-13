@@ -37,6 +37,7 @@ export const listIntegrationOverviews = Effect.fn("Integrations.listOverviews")(
           )
       )
       const savedOAuthClientId = yield* host.savedOAuthClientId(integration.slug)
+      const eventTypes = yield* host.listEventTypes({ integration: integration.slug })
       const errors = listings.flatMap((listing) => (listing.error === undefined ? [] : [listing.error]))
       const tools = listings
         .flatMap((listing) => listing.tools)
@@ -52,6 +53,7 @@ export const listIntegrationOverviews = Effect.fn("Integrations.listOverviews")(
         ...whenPresent("savedOAuthClientId", Option.getOrUndefined(savedOAuthClientId)),
         connections: owned,
         tools,
+        eventTypes,
         ...whenPresent("toolError", errors.length === 0 ? undefined : errors.join("; "))
       }
     })

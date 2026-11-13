@@ -15,7 +15,17 @@ export type { ConnectionReference } from "./integrations/resource-methods.ts"
 export { CatalogStore, ClientAuthMethod } from "./catalog/store.ts"
 export type { ConnectionRecord, IntegrationRecord, OAuthClientRecord, OAuthFlowRecord } from "./catalog/store.ts"
 export { McpClient } from "./mcp/client.ts"
-export type { McpCallResult } from "./mcp/client.ts"
+export type { McpCallResult, McpCredential, McpServer, McpToolListing } from "./mcp/client.ts"
+export {
+  generateWebhookSecret,
+  receiveWebhook,
+  WebhookRejected,
+  WebhookRejection,
+  webhookHeaders,
+  webhookSignature,
+  webhookTolerance
+} from "./mcp/webhook.ts"
+export type { WebhookKeys, WebhookReceipt, WebhookRequest } from "./mcp/webhook.ts"
 export { relayableInput, unrelayableInputMessage } from "./mcp/unrelayable-input.ts"
 export { OAuthFlows } from "./oauth/flows.ts"
 export { OpenApiInvoker } from "./openapi/invoke.ts"
@@ -74,6 +84,8 @@ export type { ConnectionGrant, OAuthMethodSettings, OAuthSetup } from "./oauth/f
 export type { StartedOAuthFlow } from "./oauth/connect.ts"
 
 export {
+  EventsRefusal,
+  EventsRefused,
   InvocationError,
   InvocationFailure,
   McpError,

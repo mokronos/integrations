@@ -1,6 +1,12 @@
 import { Clock, Duration, Effect, Option } from "effect"
 import { connectionAddress, InvalidInput, whenPresent } from "@integragents/contracts"
-import type { ConnectionName, ConnectionOwner, IntegrationSlug } from "@integragents/contracts"
+import type {
+  ConnectionName,
+  ConnectionOwner,
+  EventType,
+  EventTypeDescriptor,
+  IntegrationSlug
+} from "@integragents/contracts"
 import { findAuthMethod } from "../catalog/auth-methods.ts"
 import { captureMcpTools, captureOpenApiTools } from "../catalog/capture.ts"
 import { AuthTemplateSlug, gatewayOAuthClientSlug, OAuthClientSlug } from "../catalog/ids.ts"
@@ -45,6 +51,26 @@ const toolListing = (tools: ReadonlyArray<IntegrationTool>): string =>
   JSON.stringify(
     [...tools].sort((left, right) => left.name.localeCompare(right.name)).map((tool) => ({ ...tool, capturedAt: 0 }))
   )
+
+/** What a connection's server listed as event types, once per name, as the catalog keeps them. */
+const catalogEventTypes = (
+  reference: { readonly owner: ConnectionOwner; readonly integration: IntegrationSlug; readonly name: ConnectionName },
+  listed: ReadonlyArray<EventTypeDescriptor>,
+  capturedAt: number
+): ReadonlyArray<EventType> => {
+  const byName = new Map<string, EventType>()
+  for (const descriptor of listed) {
+    if (byName.has(descriptor.name)) continue
+    byName.set(descriptor.name, {
+      ...descriptor,
+      owner: reference.owner,
+      integration: reference.integration,
+      connection: reference.name,
+      capturedAt
+    })
+  }
+  return [...byName.values()]
+}
 
 export const connectionMethods = (access: ConnectionAccess) =>
   Effect.gen(function* () {
@@ -95,6 +121,9 @@ export const connectionMethods = (access: ConnectionAccess) =>
       const listing = yield* listMcpTools(integration, credential)
       const captured = yield* captureMcpTools(target, listing.tools, capturedAt)
       yield* store.replaceTools(reference, captured)
+      if (Option.isSome(listing.eventTypes)) {
+        yield* store.replaceEventTypes(reference, catalogEventTypes(reference, listing.eventTypes.value, capturedAt))
+      }
       yield* store.scheduleToolRefresh(reference, capturedAt + toolListFreshness(listing.ttlMs))
       return captured
     })

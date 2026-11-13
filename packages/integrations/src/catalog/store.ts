@@ -6,6 +6,8 @@ import { AuthTemplateSlug, OAuthClientSlug, OAuthState } from "./ids.ts"
 import {
   AuthMethod,
   ConnectionName,
+  EventDeliveryMode,
+  EventType,
   IntegrationKind,
   IntegrationSlug,
   ConnectionOwner,
@@ -233,6 +235,37 @@ const decodeToolRow = (row: SqlRow) =>
     )
   })
 
+const decodeDelivery = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.NonEmptyArray(EventDeliveryMode)))
+
+const decodeEventTypeRow = (row: SqlRow) =>
+  Effect.gen(function* () {
+    const label = `${text(row, "integration")}/${text(row, "connection")} event ${text(row, "name")}`
+    const malformed = (column: string) => (cause: Schema.SchemaError) =>
+      new StorageError({ message: `Malformed ${column} for ${label}`, cause })
+    const optionalJson = (column: string) =>
+      Effect.gen(function* () {
+        const raw = optionalText(row, column)
+        if (raw === undefined) return undefined
+        return yield* decodeJsonColumn(raw).pipe(Effect.mapError(malformed(column)))
+      })
+    const delivery = yield* decodeDelivery(text(row, "delivery")).pipe(Effect.mapError(malformed("delivery")))
+    const inputSchema = yield* optionalJson("input_schema")
+    const payloadSchema = yield* optionalJson("payload_schema")
+    const meta = yield* optionalJson("meta")
+    return yield* Schema.decodeUnknownEffect(EventType)({
+      owner: text(row, "owner"),
+      integration: text(row, "integration"),
+      connection: text(row, "connection"),
+      name: text(row, "name"),
+      description: text(row, "description"),
+      delivery,
+      ...whenPresent("inputSchema", inputSchema),
+      ...whenPresent("payloadSchema", payloadSchema),
+      ...whenPresent("meta", meta),
+      capturedAt: number(row, "captured_at")
+    }).pipe(Effect.mapError(malformed("row")))
+  })
+
 const decodeOAuthFlowRow = (row: SqlRow) =>
   Effect.gen(function* () {
     const scopes = yield* decodeStrings(text(row, "scopes"), "scopes")
@@ -319,6 +352,13 @@ export class CatalogStore extends Context.Service<
       tools: ReadonlyArray<IntegrationTool>
     ) => Effect.Effect<void, StorageError>
 
+    /** The event types (MCP Events) connections' servers listed when their tools were last captured. */
+    readonly listEventTypes: (filter?: ToolFilter) => Effect.Effect<ReadonlyArray<EventType>, StorageError>
+    readonly replaceEventTypes: (
+      connection: ConnectionReference,
+      eventTypes: ReadonlyArray<EventType>
+    ) => Effect.Effect<void, StorageError>
+
     readonly findSpecDocument: (source: string) => Effect.Effect<Option.Option<string>, StorageError>
     readonly putSpecDocument: (source: string, content: string) => Effect.Effect<void, StorageError>
   }
@@ -390,6 +430,7 @@ export class CatalogStore extends Context.Service<
       const removeIntegration = Effect.fn("CatalogStore.removeIntegration")((slug: IntegrationSlug) =>
         database.batch([
           { sql: "DELETE FROM tool WHERE integration = ?", params: [slug] },
+          { sql: "DELETE FROM event_type WHERE integration = ?", params: [slug] },
           { sql: "DELETE FROM connection WHERE integration = ?", params: [slug] },
           { sql: "DELETE FROM oauth_client WHERE integration = ?", params: [slug] },
           { sql: "DELETE FROM integration WHERE slug = ?", params: [slug] }
@@ -452,7 +493,7 @@ export class CatalogStore extends Context.Service<
         })
       )
 
-      /** A connection's tools leave with it, so none of them can be found or run any more. */
+      /** A connection's tools and event types leave with it, so none of them can be found or run any more. */
       const removeConnection = Effect.fn("CatalogStore.removeConnection")(
         (reference: {
           readonly owner: ConnectionOwner
@@ -462,6 +503,10 @@ export class CatalogStore extends Context.Service<
           database.batch([
             {
               sql: "DELETE FROM tool WHERE owner = ? AND integration = ? AND connection = ?",
+              params: [reference.owner, reference.integration, reference.name]
+            },
+            {
+              sql: "DELETE FROM event_type WHERE owner = ? AND integration = ? AND connection = ?",
               params: [reference.owner, reference.integration, reference.name]
             },
             {
@@ -624,6 +669,57 @@ export class CatalogStore extends Context.Service<
         return yield* Effect.forEach(rows, decodeToolRow)
       })
 
+      const listEventTypes = Effect.fn("CatalogStore.listEventTypes")(function* (filter: ToolFilter = {}) {
+        const clauses: Array<string> = []
+        const params: Array<SqlValue> = []
+        if (filter.integration !== undefined) {
+          clauses.push("integration = ?")
+          params.push(filter.integration)
+        }
+        if (filter.owner !== undefined) {
+          clauses.push("owner = ?")
+          params.push(filter.owner)
+        }
+        if (filter.connection !== undefined) {
+          clauses.push("connection = ?")
+          params.push(filter.connection)
+        }
+        const where = clauses.length === 0 ? "" : ` WHERE ${clauses.join(" AND ")}`
+        const rows = yield* database.query({
+          sql: `SELECT * FROM event_type${where} ORDER BY integration, owner, connection, name`,
+          params
+        })
+        return yield* Effect.forEach(rows, decodeEventTypeRow)
+      })
+
+      const replaceEventTypes = Effect.fn("CatalogStore.replaceEventTypes")(
+        (connection: ConnectionReference, eventTypes: ReadonlyArray<EventType>) =>
+          database.batch([
+            {
+              sql: "DELETE FROM event_type WHERE owner = ? AND integration = ? AND connection = ?",
+              params: [connection.owner, connection.integration, connection.name]
+            },
+            ...eventTypes.map((eventType) => ({
+              sql: `INSERT INTO event_type
+                    (integration, owner, connection, name, description, delivery,
+                     input_schema, payload_schema, meta, captured_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              params: [
+                connection.integration,
+                connection.owner,
+                connection.name,
+                eventType.name,
+                eventType.description,
+                JSON.stringify(eventType.delivery),
+                nullable(eventType.inputSchema === undefined ? undefined : JSON.stringify(eventType.inputSchema)),
+                nullable(eventType.payloadSchema === undefined ? undefined : JSON.stringify(eventType.payloadSchema)),
+                nullable(eventType.meta === undefined ? undefined : JSON.stringify(eventType.meta)),
+                eventType.capturedAt
+              ] satisfies ReadonlyArray<SqlValue>
+            }))
+          ])
+      )
+
       const findTool = Effect.fn("CatalogStore.findTool")(function* (address: ToolAddress) {
         const rows = yield* database.query({
           sql: "SELECT * FROM tool WHERE address = ?",
@@ -717,6 +813,8 @@ export class CatalogStore extends Context.Service<
         listTools,
         findTool,
         replaceTools,
+        listEventTypes,
+        replaceEventTypes,
         findSpecDocument,
         putSpecDocument
       }

@@ -81,6 +81,8 @@ const catalogStore: CatalogStore["Service"] = {
   listTools: notUsed("CatalogStore.listTools"),
   findTool: notUsed("CatalogStore.findTool"),
   replaceTools: notUsed("CatalogStore.replaceTools"),
+  listEventTypes: notUsed("CatalogStore.listEventTypes"),
+  replaceEventTypes: notUsed("CatalogStore.replaceEventTypes"),
   findSpecDocument: notUsed("CatalogStore.findSpecDocument"),
   putSpecDocument: notUsed("CatalogStore.putSpecDocument")
 }
@@ -101,6 +103,10 @@ const integrations: Integrations["Service"] = {
   removeConnection: notUsed("Integrations.removeConnection"),
   toolSummaries: notUsed("Integrations.toolSummaries"),
   listTools: notUsed("Integrations.listTools"),
+  listEventTypes: notUsed("Integrations.listEventTypes"),
+  pollEvents: notUsed("Integrations.pollEvents"),
+  subscribeEvents: notUsed("Integrations.subscribeEvents"),
+  unsubscribeEvents: notUsed("Integrations.unsubscribeEvents"),
   describeTool: notUsed("Integrations.describeTool"),
   execute: notUsed("Integrations.execute"),
   listResources: notUsed("Integrations.listResources"),

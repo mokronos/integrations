@@ -94,5 +94,12 @@ export const integrationMigrations: ReadonlyArray<Migration> = [
     statements: [
       "ALTER TABLE `connection` ADD `tools_refresh_at` integer;"
     ]
+  },
+  {
+    id: 10,
+    name: "0010_tiresome_falcon",
+    statements: [
+      "CREATE TABLE `event_type` (\n\t`integration` text NOT NULL,\n\t`owner` text NOT NULL,\n\t`connection` text NOT NULL,\n\t`name` text NOT NULL,\n\t`description` text DEFAULT '' NOT NULL,\n\t`delivery` text NOT NULL,\n\t`input_schema` text,\n\t`payload_schema` text,\n\t`meta` text,\n\t`captured_at` integer NOT NULL,\n\tPRIMARY KEY(`integration`, `owner`, `connection`, `name`)\n);"
+    ]
   }
 ]

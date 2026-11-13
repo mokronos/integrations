@@ -63,6 +63,45 @@ export class McpError extends Schema.TaggedError<McpError>()("McpError", {
   }
 }
 
+/**
+ * Why an MCP server turned down an `events/*` request, from the JSON-RPC
+ * codes SEP-3415 gives them (provisional until the extension is final).
+ * `not_found` and `unsupported` mean list the event types again and
+ * resubscribe; `forbidden` means stop.
+ */
+export const EventsRefusal = Schema.Literals([
+  "invalid_params",
+  "not_found",
+  "forbidden",
+  "resource_exhausted",
+  "unsupported",
+  "callback_endpoint"
+])
+export type EventsRefusal = typeof EventsRefusal.Type
+
+export const eventsRefusalCodes: ReadonlyMap<number, EventsRefusal> = new Map([
+  [-32602, "invalid_params"],
+  [-32023, "not_found"],
+  [-32024, "forbidden"],
+  [-32025, "resource_exhausted"],
+  [-32026, "unsupported"],
+  [-32027, "callback_endpoint"]
+])
+
+/** An `events/*` request the server refused. `detail` is its bounded message; `data` its typed error data. */
+export class EventsRefused extends Schema.TaggedError<EventsRefused>()("EventsRefused", {
+  endpoint: Schema.String,
+  method: Schema.String,
+  refusal: EventsRefusal,
+  code: Schema.Number,
+  detail: Schema.String,
+  data: Schema.optional(Schema.Json)
+}) {
+  override get message(): string {
+    return `${this.method} on ${this.endpoint} was refused (${this.refusal}): ${this.detail}`
+  }
+}
+
 /** What went wrong, never the provider's response body, a token, or the request. */
 export class OAuthError extends Schema.TaggedError<OAuthError>()("OAuthError", {
   stage: Schema.Literals(["discover", "register", "start", "complete", "refresh"]),

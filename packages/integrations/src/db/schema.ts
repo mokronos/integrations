@@ -74,6 +74,25 @@ export const tool = sqliteTable(
   (table) => [index("tool_by_connection").on(table.integration, table.owner, table.connection)]
 )
 
+/** The event types (MCP Events) a connection's server lists, captured with its tools. */
+export const eventType = sqliteTable(
+  "event_type",
+  {
+    integration: text("integration").notNull(),
+    owner: text("owner").notNull(),
+    connection: text("connection").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    /** JSON array of the delivery modes the server offers for it. */
+    delivery: text("delivery").notNull(),
+    inputSchema: text("input_schema"),
+    payloadSchema: text("payload_schema"),
+    meta: text("meta"),
+    capturedAt: integer("captured_at").notNull()
+  },
+  (table) => [primaryKey({ columns: [table.integration, table.owner, table.connection, table.name] })]
+)
+
 export const oauthClient = sqliteTable(
   "oauth_client",
   {
