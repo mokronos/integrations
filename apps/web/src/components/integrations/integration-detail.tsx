@@ -1,74 +1,31 @@
-import { ChevronRight, ExternalLink, RefreshCcw, Search } from "lucide-react"
-import { useMemo, useState } from "react"
+import { ChevronRight, ExternalLink, RefreshCcw } from "lucide-react"
 import { useNavigate } from "react-router"
 import { toast } from "sonner"
 import { connectionRefOf } from "@integragents/contracts"
 
-import { SchemaView } from "@/components/schema-view"
 import { AuthMethodDetails } from "@/components/integrations/auth-method-details"
 import { ErrorNotice } from "@/components/error-notice"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ConfirmButton } from "@/components/ui/confirm-button"
 import { EditableTitle } from "@/components/ui/editable-title"
-import { Input } from "@/components/ui/input"
-import { Item, ItemActions, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item"
+import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item"
 import { pluralise, when } from "@/lib/format"
 import * as gateway from "@/lib/gateway"
 import { keys, useInvalidate, useMutation } from "@/lib/queries"
-import { type Connection, type IntegrationOverview, type Tool } from "@integragents/contracts"
+import { type Connection, type IntegrationOverview } from "@integragents/contracts"
 import { cn } from "@/lib/utils"
 import { ConnectDialog, ReauthorizeDialog, reauthorizationMethod } from "./connect-dialog"
 import { ConnectionBadge } from "./connection-badge"
 import { ConnectionIdentity } from "./connection-identity"
+import { IntegrationCapabilities } from "./integration-capabilities"
 import { integrationHost } from "@integragents/contracts"
 import { IntegrationIcon } from "./integration-icon"
 import { toastError } from "@/lib/errors"
-const isConnected = (integration: IntegrationOverview): boolean =>
-  integration.connections.some((connection) => connection.status === "connected")
-
 const connectionAuthLabel = (integration: IntegrationOverview, connection: Connection): string =>
   integration.authMethods.find((method) => method.template === connection.template)?.label ??
   `Unavailable method (${connection.template})`
-function ToolCard({ tool }: { readonly tool: Tool }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className="min-w-0 rounded-lg border">
-      <Item
-        render={<button type="button" aria-expanded={open} onClick={() => setOpen(!open)} />}
-        className="cursor-pointer select-none hover:bg-muted"
-      >
-        <ItemMedia>
-          <ChevronRight aria-hidden className={cn("size-4 transition-transform", open && "rotate-90")} />
-        </ItemMedia>
-        <ItemContent>
-          <ItemTitle>
-            <span className="min-w-0 truncate">{tool.name}</span>
-            <Badge variant="outline" className="shrink-0">
-              {tool.connection}
-            </Badge>
-          </ItemTitle>
-          {tool.description.length === 0 ? null : (
-            <ItemDescription className="truncate">{tool.description}</ItemDescription>
-          )}
-        </ItemContent>
-      </Item>
-
-      {open ? (
-        <div className="space-y-3 border-t p-3">
-          {tool.description.length === 0 ? null : <p className="text-muted-foreground text-sm">{tool.description}</p>}
-          <div className="grid min-w-0 gap-2 xl:grid-cols-2">
-            <SchemaView schema={tool.inputSchema} definitions={tool.schemaDefinitions} label="input" />
-            <SchemaView schema={tool.outputSchema} definitions={tool.schemaDefinitions} label="output" />
-          </div>
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
 function RemoveIntegration({ integration }: { readonly integration: IntegrationOverview }) {
   const invalidate = useInvalidate()
   const navigate = useNavigate()
@@ -194,7 +151,6 @@ function ConnectionRow({
 
 export function IntegrationDetail({ integration }: { readonly integration: IntegrationOverview }) {
   const invalidate = useInvalidate()
-  const [filter, setFilter] = useState("")
 
   const disconnect = useMutation({
     mutationFn: (connection: Connection) =>
@@ -214,14 +170,6 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
     },
     onError: (error: Error) => toastError("Could not check for changes", error)
   })
-
-  const tools = useMemo(() => {
-    const needle = filter.trim().toLowerCase()
-    if (needle.length === 0) return integration.tools
-    return integration.tools.filter((tool) =>
-      `${tool.name} ${tool.address} ${tool.description}`.toLowerCase().includes(needle)
-    )
-  }, [filter, integration.tools])
 
   return (
     <div className="min-w-0 space-y-4">
@@ -320,46 +268,7 @@ export function IntegrationDetail({ integration }: { readonly integration: Integ
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <CardTitle>Tools</CardTitle>
-            <div className="relative w-full sm:w-64">
-              <Search className="text-muted-foreground absolute left-2 top-1/2 size-3.5 -translate-y-1/2" />
-              <Input
-                className="pl-7"
-                value={filter}
-                onChange={(event) => setFilter(event.target.value)}
-                placeholder="Filter tools"
-              />
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {integration.toolError === undefined ? null : (
-            <Alert variant="destructive">
-              <AlertTitle>Could not refresh tools</AlertTitle>
-              <AlertDescription>
-                <p>
-                  <span className="font-medium">Stopped at:</span> Reading tools from the live endpoint
-                </p>
-                <p>{integration.toolError}</p>
-              </AlertDescription>
-            </Alert>
-          )}
-          {integration.tools.length === 0 ? (
-            <p className="text-muted-foreground text-sm">
-              {isConnected(integration)
-                ? "This connection exposes no callable tools."
-                : "Connect it to see what it exposes."}
-            </p>
-          ) : tools.length === 0 ? (
-            <p className="text-muted-foreground text-sm">Nothing matches that filter.</p>
-          ) : (
-            tools.map((tool) => <ToolCard key={tool.address} tool={tool} />)
-          )}
-        </CardContent>
-      </Card>
+      <IntegrationCapabilities integration={integration} />
     </div>
   )
 }
