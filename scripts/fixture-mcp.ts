@@ -2,13 +2,22 @@
  * A throwaway upstream MCP server for manual testing, no auth: `echo`;
  * `greet`, which asks for a name in an `input_required` round first; and
  * `weather`, which declares an output schema, returns structured content and
- * an image, and renders in an MCP App view. It also serves a plain resource
- * and one skill.
+ * an image, and renders in an MCP App view. It also serves a plain resource,
+ * one skill, and one MCP Events event type, `echo.sent`, to poll for what
+ * `echo` was asked to say.
  * Prints every traceparent it receives, so a run shows whether the gateway propagated the trace.
  *
  *   bun run scripts/fixture-mcp.ts [port]
  */
-import { createMcpHandler, fromJsonSchema, inputRequired, inputResponse, McpServer } from "@modelcontextprotocol/server"
+import {
+  createMcpHandler,
+  fromJsonSchema,
+  inputRequired,
+  inputResponse,
+  McpServer,
+  ProtocolError
+} from "@modelcontextprotocol/server"
+import { Option, Schema } from "effect"
 import { memorySkillFiles, SkillsExtension } from "@modelcontextprotocol/server/ext/skills"
 
 const port = Number(process.argv[2] ?? 47_912)
@@ -65,12 +74,73 @@ const skills = await SkillsExtension.load(
   })
 )
 
+/** Every text `echo` was given, in order: the event log `echo.sent` polls, its cursor an index into it. */
+const echoed: Array<{ readonly text: string; readonly at: string }> = []
+
+const eventsExtension = "io.modelcontextprotocol/events"
+
+const echoSent = {
+  name: "echo.sent",
+  description: "Fires each time echo runs",
+  delivery: ["poll"],
+  inputSchema: {
+    type: "object",
+    properties: { contains: { type: "string", description: "Only texts containing this" } }
+  },
+  payloadSchema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] }
+}
+
+const ListEventsParams = Schema.toStandardSchemaV1(Schema.Struct({ cursor: Schema.optional(Schema.String) }))
+const PollParams = Schema.toStandardSchemaV1(
+  Schema.Struct({
+    name: Schema.String,
+    arguments: Schema.optional(Schema.Struct({ contains: Schema.optional(Schema.String) })),
+    cursor: Schema.optional(Schema.NullOr(Schema.String)),
+    maxEvents: Schema.optional(Schema.Number)
+  })
+)
+const decodePosition = Schema.decodeUnknownOption(Schema.NumberFromString)
+
+/** The extension's provisional NotFound code. */
+const notFound = -32023
+
 const handler = createMcpHandler(() => {
   const server = new McpServer(
     { name: "fixture", version: "0.0.0" },
     { instructions: "A fixture server for testing the gateway." }
   )
   skills.attach(server)
+  server.server.registerCapabilities({ extensions: { [eventsExtension]: {} } })
+  server.server.setRequestHandler("events/list", { params: ListEventsParams }, async () => ({ events: [echoSent] }))
+  server.server.setRequestHandler("events/poll", { params: PollParams }, async (params) => {
+    if (params.name !== echoSent.name) {
+      throw new ProtocolError(notFound, `Unknown event type ${params.name}`, { kind: "event" })
+    }
+    const head = String(echoed.length)
+    if (params.cursor === undefined || params.cursor === null) {
+      return { events: [], cursor: head, truncated: false, hasMore: false, nextPollMs: 5000 }
+    }
+    const from = Option.getOrElse(decodePosition(params.cursor), () => echoed.length)
+    const limit = params.maxEvents ?? 50
+    const contains = params.arguments?.contains
+    const pending = echoed.slice(from)
+    const batch = pending.slice(0, limit)
+    return {
+      events: batch
+        .map((entry, offset) => ({ entry, position: from + offset }))
+        .filter(({ entry }) => contains === undefined || entry.text.includes(contains))
+        .map(({ entry, position }) => ({
+          eventId: `echo-${position}`,
+          name: echoSent.name,
+          timestamp: entry.at,
+          data: { text: entry.text }
+        })),
+      cursor: String(from + batch.length),
+      truncated: false,
+      hasMore: pending.length > batch.length,
+      nextPollMs: 5000
+    }
+  })
   server.registerResource(
     "weather-view",
     "ui://fixture/weather.html",
@@ -131,7 +201,10 @@ const handler = createMcpHandler(() => {
         properties: { text: { type: "string" } }
       })
     },
-    async ({ text }) => ({ content: [{ type: "text", text: text ?? "pong" }] })
+    async ({ text }) => {
+      echoed.push({ text: text ?? "pong", at: new Date().toISOString() })
+      return { content: [{ type: "text", text: text ?? "pong" }] }
+    }
   )
   server.registerTool(
     "greet",

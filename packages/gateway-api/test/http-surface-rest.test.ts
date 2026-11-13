@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
 import { OAuthScopeRequired, whenPresent } from "@integragents/contracts"
+import { EventsRefused } from "@integragents/integrations"
 import { testServices } from "./fixtures.ts"
 import { ConnectionName, defaultTenantId, IntegrationSlug, ProfileId, ToolName } from "./gateway.ts"
 import {
@@ -301,6 +302,64 @@ describe("gateway http surface", () => {
           connection: { integration: "gmail", name: "work" }
         }
       ])
+    }).pipe(Effect.provide(testServices))
+  )
+
+  it.effect("lists event types under the profile's aliases and polls one on the connection its alias names", () =>
+    Effect.gen(function* () {
+      const received = {
+        owner: "user:sebastian" as const,
+        integration: IntegrationSlug.make("gmail"),
+        connection: ConnectionName.make("work"),
+        name: "email.received",
+        description: "A message arrived",
+        delivery: ["poll", "webhook"] as const,
+        capturedAt: 0
+      }
+      const elsewhere = { ...received, integration: IntegrationSlug.make("calendar"), name: "event.created" }
+      const { call, polls } = yield* setup({ eventTypes: [received, elsewhere] })
+      const alias = "user___sebastian___gmail___work"
+
+      const listed = yield* call("GET", "/v1/event-types")
+      const polled = yield* call("POST", "/v1/event-types/poll", {
+        body: { alias, name: "email.received", arguments: { from: "*@example.com" }, cursor: null }
+      })
+      const unreachable = yield* call("POST", "/v1/event-types/poll", {
+        body: { alias: "org___calendar___main", name: "event.created" }
+      })
+
+      // Only what the profile's connections offer, under their aliases.
+      expect(listed.body["eventTypes"]).toEqual([
+        { alias, name: "email.received", description: "A message arrived", delivery: ["poll", "webhook"] }
+      ])
+      expect({ status: polled.status, body: polled.body }).toEqual({
+        status: 200,
+        body: { events: [], cursor: "next", truncated: false, hasMore: false }
+      })
+      expect(polls).toEqual([
+        {
+          connection: { owner: "user:sebastian", integration: "gmail", name: "work" },
+          poll: { name: "email.received", arguments: { from: "*@example.com" }, cursor: null }
+        }
+      ])
+      expect({ status: unreachable.status, code: unreachable.body["_tag"] }).toEqual({ status: 404, code: "NotFound" })
+    }).pipe(Effect.provide(testServices))
+  )
+
+  it.effect("tells a poll whose arguments the server refused apart from a server that failed", () =>
+    Effect.gen(function* () {
+      const poll = (failWith: EventsRefused) =>
+        Effect.gen(function* () {
+          const { call } = yield* setup({ failWith })
+          const response = yield* call("POST", "/v1/event-types/poll", {
+            body: { alias: "user___sebastian___gmail___work", name: "email.received" }
+          })
+          return { status: response.status, code: response.body["_tag"] }
+        })
+      const refused = (refusal: EventsRefused["refusal"], code: number) =>
+        new EventsRefused({ endpoint: "https://gmail.example/mcp", method: "events/poll", refusal, code, detail: "no" })
+      expect(yield* poll(refused("invalid_params", -32602))).toEqual({ status: 400, code: "InvalidInput" })
+      expect(yield* poll(refused("not_found", -32023))).toEqual({ status: 502, code: "McpServerFailed" })
     }).pipe(Effect.provide(testServices))
   )
 

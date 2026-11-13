@@ -8,13 +8,15 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import type {
   Connection,
   ConnectionOwner,
+  EventPoll,
+  EventType,
   ResourceContents,
   ResourceEntry,
   SkillEntry,
   Tool
 } from "@integragents/contracts"
 import { InvocationError, StorageError } from "@integragents/integrations"
-import type { BlobStore, IntegrationFailure, ToolExecution } from "@integragents/integrations"
+import type { BlobStore, ConnectionReference, IntegrationFailure, ToolExecution } from "@integragents/integrations"
 import { stubIntegrationsContext } from "./stubs.ts"
 import { openDatabase, storeOn, temporaryDirectory } from "./fixtures.ts"
 import {
@@ -103,6 +105,8 @@ const stubIntegrations = (
     readonly failWith?: IntegrationFailure
     /** What every connection's server publishes as skills. */
     readonly skills?: ReadonlyArray<SkillEntry>
+    /** The event types the catalog holds. */
+    readonly eventTypes?: ReadonlyArray<EventType>
     /** What every connection's server lists and serves as resources. */
     readonly resources?: {
       readonly listed: ReadonlyArray<ResourceEntry>
@@ -117,6 +121,7 @@ const stubIntegrations = (
   const removed: Array<{ readonly integration: string; readonly name: string }> = []
   const forgotten: Array<string> = []
   const renamed: Array<{ readonly slug: string; readonly name: string }> = []
+  const polls: Array<{ readonly connection: ConnectionReference; readonly poll: EventPoll }> = []
   const oauthCapable = new Set(behaviour.oauthIntegrations ?? [])
   const known = new Set([...(behaviour.connections ?? []).map((connection) => connection.integration), ...oauthCapable])
   const integrationServices = stubIntegrationsContext(
@@ -144,6 +149,22 @@ const stubIntegrations = (
       listResources: () => Effect.succeed(behaviour.resources?.listed ?? []),
       readResource: (_reference, uri) => Effect.succeed(behaviour.resources?.contents[uri] ?? []),
       listSkills: () => Effect.succeed(behaviour.skills ?? []),
+      listEventTypes: (filter = {}) =>
+        Effect.succeed(
+          (behaviour.eventTypes ?? []).filter(
+            (eventType) =>
+              (filter.integration === undefined || eventType.integration === filter.integration) &&
+              (filter.owner === undefined || eventType.owner === filter.owner) &&
+              (filter.connection === undefined || eventType.connection === filter.connection)
+          )
+        ),
+      pollEvents: (connection, poll) =>
+        Effect.suspend(() => {
+          polls.push({ connection, poll })
+          return behaviour.failWith !== undefined
+            ? Effect.fail(behaviour.failWith)
+            : Effect.succeed({ events: [], cursor: "next", truncated: false, hasMore: false })
+        }),
       getSkill: (_reference, uri) =>
         Effect.succeed(Option.fromNullishOr((behaviour.skills ?? []).find((skill) => skill.uri === uri))),
       toolSummaries: () => Effect.succeed((behaviour.tools ?? []).map(stubTool)),
@@ -208,7 +229,7 @@ const stubIntegrations = (
     },
     whenPresent("blobs", behaviour.blobs)
   )
-  return { calls, removed, forgotten, renamed, integrationServices }
+  return { calls, removed, forgotten, renamed, polls, integrationServices }
 }
 
 export const setup = Effect.fnUntraced(function* (
@@ -241,6 +262,7 @@ export const setup = Effect.fnUntraced(function* (
     readonly execution?: ToolExecution
     readonly failWith?: IntegrationFailure
     readonly skills?: ReadonlyArray<SkillEntry>
+    readonly eventTypes?: ReadonlyArray<EventType>
     readonly resources?: {
       readonly listed: ReadonlyArray<ResourceEntry>
       readonly contents: Record<string, ReadonlyArray<ResourceContents>>
@@ -275,6 +297,7 @@ export const setup = Effect.fnUntraced(function* (
     ...whenPresent("failWith", options.failWith),
     ...whenPresent("resources", options.resources),
     ...whenPresent("skills", options.skills),
+    ...whenPresent("eventTypes", options.eventTypes),
     ...whenPresent("described", options.described),
     ...whenPresent("blobs", options.blobs)
   })
@@ -337,7 +360,8 @@ export const setup = Effect.fnUntraced(function* (
     calls: stub.calls,
     removed: stub.removed,
     forgotten: stub.forgotten,
-    renamed: stub.renamed
+    renamed: stub.renamed,
+    polls: stub.polls
   }
 })
 
