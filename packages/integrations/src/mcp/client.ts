@@ -3,6 +3,7 @@ import { SkillsClient } from "@modelcontextprotocol/client/ext/skills"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/http"
 import { McpError } from "../errors.ts"
+import type { EventsRefused } from "../errors.ts"
 import { Egress, gatewayUserAgent } from "../egress/egress.ts"
 import { OAuthProtocol } from "../oauth/protocol.ts"
 import { whenPresent } from "@integragents/contracts"
@@ -10,6 +11,15 @@ import { isJsonObject, type Json, type JsonObject } from "@integragents/contract
 import { InputRequests, McpEra, SkillEntry, ToolIcon, ToolMeta } from "@integragents/contracts"
 import type { ResourceContents, ResourceEntry } from "@integragents/contracts"
 import type { InputAnswer, InputRound, McpProbe } from "@integragents/contracts"
+import type {
+  EventPoll,
+  EventPollResult,
+  EventSubscribe,
+  EventSubscription,
+  EventTypeDescriptor,
+  EventUnsubscribe
+} from "@integragents/contracts"
+import { listEventTypes, pollEvents, subscribeEvents, unsubscribeEvents } from "./events.ts"
 import { probeServer } from "./discovery.ts"
 import { asMcpError, withClient } from "./session.ts"
 import type { McpCredential, McpServer } from "./session.ts"
@@ -99,6 +109,12 @@ export interface McpToolListing {
   readonly era: McpEra
   /** How long the server said its list stays fresh; 2025-era servers say nothing. */
   readonly ttlMs: Option.Option<number>
+  /**
+   * The event types it lists (MCP Events), read in the same session; none
+   * from a server without the extension, and `None` when it offers them but
+   * `events/list` failed, so a stored listing is kept rather than emptied.
+   */
+  readonly eventTypes: Option.Option<ReadonlyArray<EventTypeDescriptor>>
 }
 
 const ListingFreshness = Schema.Struct({ ttlMs: Schema.optional(Schema.Number) })
@@ -169,6 +185,28 @@ export class McpClient extends Context.Service<
       credential: Option.Option<McpCredential>,
       uri: string
     ) => Effect.Effect<Option.Option<SkillEntry>, McpError>
+    /** The event types the server lists (MCP Events); none from a server without the extension. */
+    readonly listEvents: (
+      server: McpServer,
+      credential: Option.Option<McpCredential>
+    ) => Effect.Effect<ReadonlyArray<EventTypeDescriptor>, McpError | EventsRefused>
+    /** One `events/poll`: what happened since `cursor`, and the cursor to poll from next. */
+    readonly pollEvents: (
+      server: McpServer,
+      credential: Option.Option<McpCredential>,
+      poll: EventPoll
+    ) => Effect.Effect<EventPollResult, McpError | EventsRefused>
+    /** One `events/subscribe`: a webhook subscription, made or refreshed. */
+    readonly subscribeEvents: (
+      server: McpServer,
+      credential: Option.Option<McpCredential>,
+      subscribe: EventSubscribe
+    ) => Effect.Effect<EventSubscription, McpError | EventsRefused>
+    readonly unsubscribeEvents: (
+      server: McpServer,
+      credential: Option.Option<McpCredential>,
+      unsubscribe: EventUnsubscribe
+    ) => Effect.Effect<void, McpError | EventsRefused>
     /** One round of a call; `answer` continues the round a previous call ended with. */
     readonly callTool: (
       server: McpServer,
@@ -210,7 +248,16 @@ export class McpClient extends Context.Service<
                     })
                 )
               )
-              return { tools, era, ttlMs }
+              const eventTypes = yield* listEventTypes(session, server.endpoint).pipe(
+                Effect.map(Option.some),
+                Effect.catch((failure) =>
+                  Effect.logWarning("events/list failed; keeping the stored event types", failure).pipe(
+                    Effect.annotateLogs({ "mcp.endpoint": server.endpoint }),
+                    Effect.as(Option.none<ReadonlyArray<EventTypeDescriptor>>())
+                  )
+                )
+              )
+              return { tools, era, ttlMs, eventTypes }
             })
           )
       )
@@ -345,7 +392,43 @@ export class McpClient extends Context.Service<
           )
       )
 
-      return { probe, listTools, listResources, readResource, listSkills, getSkill, callTool }
+      const listEvents = Effect.fn("McpClient.listEvents")(
+        (server: McpServer, credential: Option.Option<McpCredential>) =>
+          withClient(egress.fetch, server, credential, (session) => listEventTypes(session, server.endpoint))
+      )
+
+      const pollEventsFn = Effect.fn("McpClient.pollEvents")(
+        (server: McpServer, credential: Option.Option<McpCredential>, poll: EventPoll) =>
+          withClient(egress.fetch, server, credential, (session) => pollEvents(session, server.endpoint, poll))
+      )
+
+      const subscribeEventsFn = Effect.fn("McpClient.subscribeEvents")(
+        (server: McpServer, credential: Option.Option<McpCredential>, subscribe: EventSubscribe) =>
+          withClient(egress.fetch, server, credential, (session) =>
+            subscribeEvents(session, server.endpoint, subscribe)
+          )
+      )
+
+      const unsubscribeEventsFn = Effect.fn("McpClient.unsubscribeEvents")(
+        (server: McpServer, credential: Option.Option<McpCredential>, unsubscribe: EventUnsubscribe) =>
+          withClient(egress.fetch, server, credential, (session) =>
+            unsubscribeEvents(session, server.endpoint, unsubscribe)
+          )
+      )
+
+      return {
+        probe,
+        listTools,
+        listResources,
+        readResource,
+        listSkills,
+        getSkill,
+        listEvents,
+        pollEvents: pollEventsFn,
+        subscribeEvents: subscribeEventsFn,
+        unsubscribeEvents: unsubscribeEventsFn,
+        callTool
+      }
     })
   ).pipe(Layer.provide(OAuthProtocol.layer))
 }

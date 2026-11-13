@@ -79,6 +79,10 @@ const integrationsWith = (options: {
     readResource: dies("readResource"),
     listSkills: dies("listSkills"),
     getSkill: dies("getSkill"),
+    listEventTypes: dies("listEventTypes"),
+    pollEvents: dies("pollEvents"),
+    subscribeEvents: dies("subscribeEvents"),
+    unsubscribeEvents: dies("unsubscribeEvents"),
     refreshDueConnections: dies("refreshDueConnections")
   })
 }

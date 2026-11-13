@@ -17,8 +17,18 @@ import { McpError } from "../errors.ts"
 import type { McpFailureReason } from "../errors.ts"
 import { DestinationRefused, gatewayUserAgent } from "../egress/egress.ts"
 import { hostOf, refusedDestination, transportCode } from "../unreachable.ts"
-import { gatewayVersion, mcpAppMimeType, mcpAppsExtension, whenPresent, whenTrue } from "@integragents/contracts"
-import type { McpEra } from "@integragents/contracts"
+import { Base64 } from "effect/encoding"
+import {
+  asJson,
+  gatewayVersion,
+  mcpAppMimeType,
+  mcpAppsExtension,
+  mcpEventsExtension,
+  utf8Bytes,
+  whenPresent,
+  whenTrue
+} from "@integragents/contracts"
+import type { Json, McpEra } from "@integragents/contracts"
 import { legacyElicitationAnswer } from "./unrelayable-input.ts"
 import { tracedFetch } from "@integragents/observability"
 
@@ -110,10 +120,34 @@ const recordFailure =
     throw cause
   }
 
+const NamedRequest = Schema.Struct({
+  method: Schema.String,
+  params: Schema.optional(Schema.Struct({ name: Schema.optional(Schema.String) }))
+})
+const decodeNamedRequest = Schema.decodeUnknownOption(Schema.fromJsonString(NamedRequest))
+
+/** A header value as SEP-2243 carries it: plain when it is safe ASCII, otherwise the base64 sentinel. */
+const headerValue = (value: string): string =>
+  value.length > 0 && value === value.trim() && /^[\t\x20-\x7e]*$/.test(value) && !value.startsWith("=?base64?")
+    ? value
+    : `=?base64?${Base64.encode(utf8Bytes(value))}?=`
+
+/**
+ * The `Mcp-Name` an `events/*` request must carry (SEP-3415): its event
+ * name. The SDK sets it only for the core methods it knows.
+ */
+const eventName = (body: RequestInit["body"]): Option.Option<string> =>
+  Predicate.isString(body)
+    ? Option.flatMap(decodeNamedRequest(body), (request) =>
+        request.method.startsWith("events/") ? Option.fromNullishOr(request.params?.name) : Option.none()
+      )
+    : Option.none()
+
 /**
  * The transport's `fetch`: only the endpoint's origin, a default User-Agent,
- * and a record of how the last POST was turned down, since the SDK reports
- * that as text that may embed the response body.
+ * the routing header of an extension request, and a record of how the last
+ * POST was turned down, since the SDK reports that as text that may embed the
+ * response body.
  */
 const sessionFetch =
   (endpoint: URL, send: FetchLike, log: ExchangeLog): FetchLike =>
@@ -124,6 +158,8 @@ const sessionFetch =
     if (method === "POST") log.last = Option.none()
     const headers = new globalThis.Headers(init?.headers)
     if (!headers.has("user-agent")) headers.set("user-agent", gatewayUserAgent)
+    const named = method === "POST" && !headers.has("mcp-name") ? eventName(init?.body) : Option.none()
+    if (Option.isSome(named)) headers.set("mcp-name", headerValue(named.value))
     const response = await send(target, { ...init, headers }).catch(recordFailure(log, init))
     if (method !== "POST" || response.status < 400) return response
     const text = await response.text()
@@ -136,7 +172,14 @@ const sessionFetch =
     return new Response(text, { status: response.status, statusText: response.statusText, headers: response.headers })
   }
 
-class SessionFailure extends Data.TaggedError("SessionFailure")<{
+/** A JSON-RPC error the server answered with. */
+export interface RpcRefusal {
+  readonly code: number
+  readonly message: string
+  readonly data: Option.Option<Json>
+}
+
+export class SessionFailure extends Data.TaggedError("SessionFailure")<{
   readonly reason: McpFailureReason
   readonly detail: string
   readonly status: Option.Option<number>
@@ -146,6 +189,8 @@ class SessionFailure extends Data.TaggedError("SessionFailure")<{
   readonly diagnostic: Option.Option<string>
   /** What an `insufficient_scope` challenge said the call needs. */
   readonly requiredScopes: ReadonlyArray<string>
+  /** The JSON-RPC error, when the server answered with one. */
+  readonly rpc: Option.Option<RpcRefusal>
 }> {}
 
 export const failure = (
@@ -156,6 +201,7 @@ export const failure = (
     readonly refusal?: string
     readonly diagnostic?: Option.Option<string>
     readonly requiredScopes?: ReadonlyArray<string>
+    readonly rpc?: RpcRefusal
   } = {}
 ) =>
   new SessionFailure({
@@ -164,7 +210,8 @@ export const failure = (
     status: Option.fromNullishOr(fields.status),
     refusal: Option.fromNullishOr(fields.refusal),
     diagnostic: fields.diagnostic ?? Option.none(),
-    requiredScopes: fields.requiredScopes ?? []
+    requiredScopes: fields.requiredScopes ?? [],
+    rpc: Option.fromNullishOr(fields.rpc)
   })
 
 const rateLimited = (headers: globalThis.Headers): boolean => {
@@ -232,7 +279,14 @@ const classify =
       return failure(
         "refused",
         `the server refused it (JSON-RPC ${cause.code})${said.length === 0 ? "" : `: ${excerpt(said)}`}`,
-        { refusal: said.length === 0 ? `The server refused the call (JSON-RPC ${cause.code})` : excerpt(said) }
+        {
+          refusal: said.length === 0 ? `The server refused the call (JSON-RPC ${cause.code})` : excerpt(said),
+          rpc: {
+            code: cause.code,
+            message: excerpt(said),
+            data: cause.data === undefined ? Option.none() : Option.some(asJson(cause.data))
+          }
+        }
       )
     }
     const recorded = Option.getOrUndefined(log.last)
@@ -286,7 +340,7 @@ export const asMcpError = (endpoint: string, phase: Option.Option<string>) => (f
 /** A handshake that failed, the only failure that may be retried over the other transport. */
 class ConnectFailure extends Data.TaggedError("ConnectFailure")<{ readonly failure: SessionFailure }> {}
 
-interface Session {
+export interface Session {
   readonly client: Client
   /** `signal` aborts when the effect is interrupted, so a cancelled call closes its upstream request too. */
   readonly run: <A>(request: (client: Client, signal: AbortSignal) => Promise<A>) => Effect.Effect<A, SessionFailure>
@@ -326,7 +380,8 @@ const openSession = (
           capabilities: {
             elicitation: { form: {}, url: {} },
             // The gateway relays App views to the hosts that render them, so a server that lists its UI tools only for such clients lists them.
-            extensions: { [mcpAppsExtension]: { mimeTypes: [mcpAppMimeType] } }
+            // Events: the gateway polls and subscribes webhooks for the application embedding it.
+            extensions: { [mcpAppsExtension]: { mimeTypes: [mcpAppMimeType] }, [mcpEventsExtension]: {} }
           },
           inputRequired: { autoFulfill: false },
           versionNegotiation: { mode: kind === "sse" ? "legacy" : negotiation(server.era) }

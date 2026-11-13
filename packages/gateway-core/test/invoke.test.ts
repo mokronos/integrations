@@ -70,6 +70,10 @@ const unusedMcp = Layer.succeed(McpClient, {
   readResource: () => Effect.die("unused"),
   listSkills: () => Effect.die("unused"),
   getSkill: () => Effect.die("unused"),
+  listEvents: () => Effect.die("unused"),
+  pollEvents: () => Effect.die("unused"),
+  subscribeEvents: () => Effect.die("unused"),
+  unsubscribeEvents: () => Effect.die("unused"),
   callTool: () => Effect.die("unused")
 })
 

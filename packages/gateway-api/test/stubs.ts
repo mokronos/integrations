@@ -34,6 +34,10 @@ export const stubIntegrations = (overrides: Partial<Integrations["Service"]> = {
   readResource: dies("readResource"),
   listSkills: () => Effect.succeed([]),
   getSkill: () => Effect.succeed(Option.none()),
+  listEventTypes: () => Effect.succeed([]),
+  pollEvents: dies("pollEvents"),
+  subscribeEvents: dies("subscribeEvents"),
+  unsubscribeEvents: dies("unsubscribeEvents"),
   ...overrides
 })
 
@@ -67,6 +71,8 @@ const catalogStore: CatalogStore["Service"] = {
   listTools: dies("CatalogStore.listTools"),
   findTool: dies("CatalogStore.findTool"),
   replaceTools: dies("CatalogStore.replaceTools"),
+  listEventTypes: dies("CatalogStore.listEventTypes"),
+  replaceEventTypes: dies("CatalogStore.replaceEventTypes"),
   findSpecDocument: dies("CatalogStore.findSpecDocument"),
   putSpecDocument: dies("CatalogStore.putSpecDocument")
 }
@@ -98,6 +104,10 @@ export const stubIntegrationsContext = (
       readResource: dies("McpClient.readResource"),
       listSkills: dies("McpClient.listSkills"),
       getSkill: dies("McpClient.getSkill"),
+      listEvents: dies("McpClient.listEvents"),
+      pollEvents: dies("McpClient.pollEvents"),
+      subscribeEvents: dies("McpClient.subscribeEvents"),
+      unsubscribeEvents: dies("McpClient.unsubscribeEvents"),
       callTool: dies("McpClient.callTool"),
       ...reading.mcp
     }),

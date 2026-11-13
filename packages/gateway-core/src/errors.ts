@@ -1,4 +1,11 @@
-import { McpServerFailed, OAuthFailed, SpecInvalid, ToolCallFailed, whenPresent } from "@integragents/contracts"
+import {
+  InvalidInput,
+  McpServerFailed,
+  OAuthFailed,
+  SpecInvalid,
+  ToolCallFailed,
+  whenPresent
+} from "@integragents/contracts"
 import type { DiscoveryFailed, IntegrationError, OAuthStage, RegistryUnavailable } from "@integragents/contracts"
 import { fromInvocationError } from "@integragents/integrations"
 import type { IntegrationFailure, OAuthError, StorageError } from "@integragents/integrations"
@@ -45,6 +52,19 @@ export const toGatewayError = (failure: CallerFailure, integration?: string): In
         reason: failure.reason,
         detail: failure.detail,
         ...whenPresent("status", failure.status)
+      })
+    case "EventsRefused":
+      // The server judged the subscription's arguments: they are the caller's to change.
+      if (failure.refusal === "invalid_params") {
+        return new InvalidInput({
+          field: "arguments",
+          problem: `${failure.method} refused them: ${failure.detail}`
+        })
+      }
+      return new McpServerFailed({
+        endpoint: failure.endpoint,
+        reason: failure.refusal === "forbidden" ? "forbidden" : "refused",
+        detail: `${failure.method} (${failure.refusal}): ${failure.detail}`
       })
     case "OAuthError":
     case "OAuthFlowError":

@@ -59,3 +59,36 @@ Every tool carries `readOnly`, `destructive` and `idempotent`. MCP tools take
 them from their annotations with MCP's defaults (a tool that writes may destroy
 and is not safe to repeat); OpenAPI operations from their HTTP method; host
 tools from their definition.
+
+## MCP Events
+
+A server that declares the MCP Events extension (`io.modelcontextprotocol/events`,
+SEP-3415) lists the things that can happen upstream, and a client polls for
+them or has them POSTed to a webhook. The gateway declares the extension on
+every request; an embedding host turns events into triggers through
+`Integrations`, with each connection's credential, egress and OAuth refresh,
+the same path its tool calls take:
+
+| Call                                                                            | Does                                                                                                                                                                                          |
+| ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `listEventTypes(filter?)`                                                       | The event types from the catalog. They are captured with a connection's tools, in the same session, and refreshed whenever its tools are; a failed `events/list` keeps what was there         |
+| `pollEvents(connection, { name, arguments, cursor, maxEvents?, maxAgeMs? })`    | One `events/poll`. Start with `cursor: null` (from now), store the returned `cursor`, poll again at once while `hasMore`, otherwise after `nextPollMs`. `truncated` means events were skipped |
+| `subscribeEvents(connection, { name, arguments, url, secret, cursor, ttlMs? })` | One `events/subscribe` (webhook). Call it again with the same name, arguments and URL before `refreshBefore` to keep it; `ttlMs: null` asks for no expiry                                     |
+| `unsubscribeEvents(connection, { name, arguments, url })`                       | One `events/unsubscribe`                                                                                                                                                                      |
+
+The host makes a secret per subscription with `generateWebhookSecret` and, in
+its own HTTP route, passes the raw body and headers of each POST to
+`receiveWebhook(request, { secrets, subscriptionId? })`. It verifies the
+Standard Webhooks signature over the raw bytes in constant time under one of
+the secrets, refuses a timestamp more than five minutes from now, and decodes
+the body as an `event`, a `gap` (store the cursor, treat as truncated), a
+`terminated` (the subscription is gone) or a `verification`, whose challenge
+it answers itself in `answer`. A refusal is a `WebhookRejected` whose `status`
+the route answers with. Answer an event's 2xx only once it is stored: the
+server then stops retrying it.
+
+A server's own refusal arrives as `EventsRefused`, whose `refusal`
+(`not_found`, `forbidden`, `invalid_params`, `unsupported`,
+`resource_exhausted`, `callback_endpoint`) says what to do next: list the
+event types again and resubscribe on `not_found` or `unsupported`, stop on
+`forbidden`. The gateway does not hold `push` (`events/stream`) streams.

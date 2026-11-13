@@ -7,7 +7,7 @@ import { findAuthMethod } from "../catalog/auth-methods.ts"
 import { OAuthClientSlug } from "../catalog/ids.ts"
 import { CatalogStore } from "../catalog/store.ts"
 import type { ConnectionRecord, IntegrationRecord } from "../catalog/store.ts"
-import type { InvocationError, McpError, OAuthError, SpecError, StorageError } from "../errors.ts"
+import type { EventsRefused, InvocationError, McpError, OAuthError, SpecError, StorageError } from "../errors.ts"
 import type { HostToolError } from "../host-tools.ts"
 import type { McpCredential, McpServer } from "../mcp/client.ts"
 import { OAuthFlows } from "../oauth/flows.ts"
@@ -21,6 +21,7 @@ export type IntegrationFailure =
   | InvocationError
   | SpecError
   | McpError
+  | EventsRefused
   | OAuthError
   | HostToolError
   | ToolCallFailed

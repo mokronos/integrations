@@ -4,6 +4,12 @@ import type {
   Connection,
   ConnectionName,
   ConnectionOwner,
+  EventPoll,
+  EventPollResult,
+  EventSubscribe,
+  EventSubscription,
+  EventType,
+  EventUnsubscribe,
   InputAnswer,
   Integration,
   IntegrationSlug,
@@ -33,6 +39,7 @@ import { integrationMethods } from "./integrations/integration-methods.ts"
 import type { AddMcpOptions, AddOpenApiOptions } from "./integrations/integration-methods.ts"
 import { toolMethods } from "./integrations/tool-methods.ts"
 import { resourceMethods } from "./integrations/resource-methods.ts"
+import { eventMethods } from "./integrations/event-methods.ts"
 import type { ConnectionReference } from "./integrations/resource-methods.ts"
 import type { ToolExecution, ToolFilter, ToolTarget } from "./integrations/tool-methods.ts"
 
@@ -97,6 +104,29 @@ export class Integrations extends Context.Service<
       reference: ConnectionReference,
       uri: string
     ) => Effect.Effect<Option.Option<SkillEntry>, IntegrationFailure>
+    /**
+     * The event types (MCP Events) connections' servers listed, from the
+     * catalog: captured with each connection's tools and refreshed with them.
+     */
+    readonly listEventTypes: (filter?: ToolFilter) => Effect.Effect<ReadonlyArray<EventType>, StorageError>
+    /** One `events/poll` on a connection, with its credential: what happened since `cursor`, and the next cursor. */
+    readonly pollEvents: (
+      reference: ConnectionReference,
+      poll: EventPoll
+    ) => Effect.Effect<EventPollResult, IntegrationFailure>
+    /**
+     * One `events/subscribe` on a connection: a webhook subscription to `url`,
+     * signed with `secret`, made or refreshed. Subscribe again before
+     * `refreshBefore`; the server keeps nothing the client does not renew.
+     */
+    readonly subscribeEvents: (
+      reference: ConnectionReference,
+      subscribe: EventSubscribe
+    ) => Effect.Effect<EventSubscription, IntegrationFailure>
+    readonly unsubscribeEvents: (
+      reference: ConnectionReference,
+      unsubscribe: EventUnsubscribe
+    ) => Effect.Effect<void, IntegrationFailure>
     readonly toolSummaries: (filter?: ToolFilter) => Effect.Effect<ReadonlyArray<ToolSummary>, StorageError>
     readonly listTools: (filter?: ToolFilter) => Effect.Effect<ReadonlyArray<Tool>, StorageError>
     readonly describeTool: (target: ToolAddress | ToolTarget) => Effect.Effect<Tool, StorageError | NotFound>
@@ -124,7 +154,8 @@ export class Integrations extends Context.Service<
       const integrations = yield* integrationMethods(connections.removeConnection)
       const tools = yield* toolMethods(access)
       const resources = yield* resourceMethods(access)
-      return { ...integrations, ...connections, ...tools, ...resources }
+      const events = yield* eventMethods(access)
+      return { ...integrations, ...connections, ...tools, ...resources, ...events }
     })
   )
 }
