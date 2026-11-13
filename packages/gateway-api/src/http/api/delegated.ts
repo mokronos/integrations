@@ -1,4 +1,13 @@
-import { IntegrationError, NotFound, ResourceContents, ResourceEntry, SkillEntry } from "@integragents/contracts"
+import {
+  EventPoll,
+  EventPollResult,
+  IntegrationError,
+  NotFound,
+  ProfileEventType,
+  ResourceContents,
+  ResourceEntry,
+  SkillEntry
+} from "@integragents/contracts"
 import { Effect, Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/http-api"
 import {
@@ -39,6 +48,9 @@ const ExecuteBody = Schema.Struct({
    */
   idempotencyKey: Schema.optional(IdempotencyKey)
 })
+
+/** One `events/poll` on the connection the alias names: the whole subscription, every time. */
+const PollEventsBody = Schema.Struct({ alias: WireAlias, ...EventPoll.fields })
 
 const InvokedOk = Schema.Union([
   InvocationSucceeded,
@@ -94,6 +106,18 @@ export const DelegatedGroup = HttpApiGroup.make("delegated")
   .add(
     HttpApiEndpoint.get("listSkills", "/v1/skills", {
       success: Schema.Struct({ skills: Schema.Array(SkillEntry) }),
+      error: IntegrationError.members
+    }).annotate(RequiredAccess, "delegated")
+  )
+  .add(
+    HttpApiEndpoint.get("listEventTypes", "/v1/event-types", {
+      success: Schema.Struct({ eventTypes: Schema.Array(ProfileEventType) })
+    }).annotate(RequiredAccess, "delegated")
+  )
+  .add(
+    HttpApiEndpoint.post("pollEvents", "/v1/event-types/poll", {
+      payload: PollEventsBody,
+      success: EventPollResult,
       error: IntegrationError.members
     }).annotate(RequiredAccess, "delegated")
   )

@@ -12,6 +12,7 @@ import { capture } from "../observability.ts"
 import { findProfileApproval, invokeDependencies } from "../operations.ts"
 import { listProfileResources, profileConnections, readProfileResource } from "../resources.ts"
 import { listProfileSkills } from "../skills.ts"
+import { listProfileEventTypes, pollProfileEvents } from "../event-types.ts"
 import { withAppSession } from "../app-sessions.ts"
 
 export const DelegatedLayer = HttpApiBuilder.group(GatewayApi, "delegated", (handlers) =>
@@ -82,6 +83,19 @@ export const DelegatedLayer = HttpApiBuilder.group(GatewayApi, "delegated", (han
         Effect.gen(function* () {
           const { profile } = yield* requireProfileCaller
           return { skills: yield* listProfileSkills(yield* profileConnections(profile)) }
+        })
+      )
+      .handle("listEventTypes", () =>
+        Effect.gen(function* () {
+          const { profile } = yield* requireProfileCaller
+          return { eventTypes: yield* listProfileEventTypes(yield* profileConnections(profile)) }
+        })
+      )
+      .handle("pollEvents", (request) =>
+        Effect.gen(function* () {
+          const { profile } = yield* requireProfileCaller
+          const { alias, ...poll } = request.payload
+          return yield* pollProfileEvents(yield* profileConnections(profile), alias, poll)
         })
       )
       .handle("blob", (request) =>

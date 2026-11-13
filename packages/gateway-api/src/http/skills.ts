@@ -6,10 +6,19 @@ import {
   NotFound,
   parseSkillUri,
   SkillEntry,
-  skillResourceScheme
+  skillResourceScheme,
+  whenPresent
 } from "@integragents/contracts"
-import type { Alias, IntegrationError, ResourceContents } from "@integragents/contracts"
+import type {
+  Alias,
+  ConnectionSkill,
+  IntegrationError,
+  IntegrationSlug,
+  IntegrationSkillsResponse,
+  ResourceContents
+} from "@integragents/contracts"
 import { Integrations } from "@integragents/integrations"
+import { capture } from "./observability.ts"
 import { asCallerFailure } from "./operations.ts"
 import type { GatewayOperationServices } from "./operations.ts"
 import type { ProfileConnection } from "./resources.ts"
@@ -104,4 +113,44 @@ export const readSkillFile = (
       connection.value.reference.integration
     )
     return contents.map((entry) => ({ ...entry, uri }))
+  })
+
+interface ConnectionSkills {
+  readonly skills: ReadonlyArray<ConnectionSkill>
+  readonly error?: string
+}
+
+/**
+ * The skills each of an integration's connections' servers publishes, asked
+ * live, for the dashboard to show beside its tools. A server that cannot be
+ * asked is named in `error` rather than failing the rest.
+ */
+export const listIntegrationSkills = (slug: IntegrationSlug) =>
+  Effect.gen(function* () {
+    const integrations = yield* Integrations
+    const found = yield* capture(integrations.findIntegration(slug))
+    if (Option.isNone(found)) return yield* new NotFound({ resource: "integration", id: slug })
+    const connections = yield* capture(integrations.listConnections({ integration: slug }))
+    const listed = yield* Effect.forEach(
+      connections,
+      (connection) =>
+        asCallerFailure(
+          integrations.listSkills({ owner: connection.owner, integration: slug, name: connection.name }),
+          slug
+        ).pipe(
+          Effect.map((skills): ConnectionSkills => ({
+            skills: skills.map((skill) => ({ owner: connection.owner, connection: connection.name, skill }))
+          })),
+          Effect.catch((failure) =>
+            Effect.succeed<ConnectionSkills>({ skills: [], error: `${connection.name}: ${failure.message}` })
+          )
+        ),
+      { concurrency: 4 }
+    )
+    const errors = listed.flatMap((entry) => (entry.error === undefined ? [] : [entry.error]))
+    const response: IntegrationSkillsResponse = {
+      skills: listed.flatMap((entry) => entry.skills),
+      ...whenPresent("error", errors.length === 0 ? undefined : errors.join("; "))
+    }
+    return response
   })

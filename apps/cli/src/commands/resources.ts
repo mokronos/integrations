@@ -1,9 +1,9 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import path from "node:path"
-import { Effect, Option, Result } from "effect"
+import { Effect, Option, Result, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/cli"
 import { Base64 } from "effect/encoding"
-import { AppSessionId, whenPresent } from "@integragents/contracts"
+import { Alias, AppSessionId, JsonObjectSchema, whenPresent } from "@integragents/contracts"
 import type { ResourceContents } from "@integragents/contracts"
 import { integrationsHome } from "@integragents/contracts/gateway-config"
 import { cliError, thrownMessage } from "../connection.ts"
@@ -89,6 +89,68 @@ export const skillsCommand = Command.make("skills", { verbose: verboseFlag() }, 
 ).pipe(
   Command.withDescription(
     "List the skills the gateway and your connections' servers publish; read a skill's files with `resource <uri>`"
+  )
+)
+
+export const eventsCommand = Command.make("events", { verbose: verboseFlag() }, ({ verbose }) =>
+  gatewayTask((client) => client.delegated.listEventTypes()).pipe(
+    Effect.flatMap((listed) => writeStdoutLine(jsonOutput(listed, verbose)))
+  )
+).pipe(
+  Command.withDescription(
+    "List the event types (MCP Events) your connections' servers offer, with the arguments each takes; poll one with `poll`"
+  )
+)
+
+const decodeEventArguments = Schema.decodeUnknownEffect(Schema.fromJsonString(JsonObjectSchema))
+
+export const pollCommand = Command.make(
+  "poll",
+  {
+    alias: Argument.String("alias").pipe(
+      Argument.withSchema(Alias),
+      Argument.withDescription("The connection's alias, as `events` lists it")
+    ),
+    event: Argument.String("event").pipe(Argument.withDescription("The event type's name")),
+    arguments: Flag.String("arguments").pipe(
+      Flag.optional,
+      Flag.withDescription("Subscription arguments as a JSON object, fitting the event type's inputSchema")
+    ),
+    cursor: Flag.String("cursor").pipe(
+      Flag.optional,
+      Flag.withDescription("The cursor the last poll returned; without it the poll starts from now")
+    ),
+    maxEvents: Flag.Int("max-events").pipe(Flag.optional, Flag.withDescription("Return at most this many")),
+    maxAgeMs: Flag.Int("max-age-ms").pipe(
+      Flag.optional,
+      Flag.withDescription("Replay nothing older than this many milliseconds")
+    ),
+    verbose: verboseFlag()
+  },
+  ({ alias, event, arguments: given, cursor, maxEvents, maxAgeMs, verbose }) =>
+    Effect.gen(function* () {
+      const parsed = Option.isNone(given)
+        ? undefined
+        : yield* decodeEventArguments(given.value).pipe(
+            Effect.mapError(() => cliError("--arguments must be a JSON object"))
+          )
+      const polled = yield* gatewayTask((client) =>
+        client.delegated.pollEvents({
+          payload: {
+            alias,
+            name: event,
+            cursor: Option.getOrNull(cursor),
+            ...whenPresent("arguments", parsed),
+            ...whenPresent("maxEvents", Option.getOrUndefined(maxEvents)),
+            ...whenPresent("maxAgeMs", Option.getOrUndefined(maxAgeMs))
+          }
+        })
+      )
+      yield* writeStdoutLine(jsonOutput(polled, verbose))
+    })
+).pipe(
+  Command.withDescription(
+    "Poll an event type once: what happened since --cursor (or nothing, from now), and the cursor to pass next time"
   )
 )
 

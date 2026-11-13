@@ -19,6 +19,7 @@ import {
 } from "@integragents/gateway-core"
 import type { BrowserPage, PageIntegration } from "@integragents/gateway-core"
 import { GatewayApi } from "../api.ts"
+import { listIntegrationSkills } from "../skills.ts"
 import { Identity, requireTenant } from "../authority.ts"
 import { GatewayConfig } from "../services.ts"
 import { OAuthFlowSessions } from "@integragents/gateway-core"
@@ -85,6 +86,9 @@ export const ProvisioningLayer = HttpApiBuilder.group(GatewayApi, "provisioning"
           const slug = yield* requireSlug(request.params["slug"])
           return { tools: yield* capture(integrations.toolSummaries({ integration: slug })) }
         })
+      )
+      .handle("integrationSkills", (request) =>
+        Effect.flatMap(requireSlug(request.params["slug"]), listIntegrationSkills)
       )
       .handle("describeTool", (request) =>
         Effect.gen(function* () {

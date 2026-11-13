@@ -27,7 +27,14 @@ import {
 } from "./commands/delegation.ts"
 import { clientExecuteCommand, operatorExecuteCommand, validateCommand } from "./commands/invocation.ts"
 import { agentLoginCommand, agentLogoutCommand, whoamiCommand } from "./commands/login.ts"
-import { appCommand, resourceCommand, resourcesCommand, skillsCommand } from "./commands/resources.ts"
+import {
+  appCommand,
+  eventsCommand,
+  pollCommand,
+  resourceCommand,
+  resourcesCommand,
+  skillsCommand
+} from "./commands/resources.ts"
 import { gatewayTask, operatorGatewayTask } from "./tasks.ts"
 
 export const clientSubcommands = [
@@ -48,6 +55,8 @@ export const clientSubcommands = [
   resourcesCommand,
   resourceCommand,
   skillsCommand,
+  eventsCommand,
+  pollCommand,
   appCommand
 ] as const
 
@@ -67,6 +76,8 @@ export const operatorClientSubcommands = [
   resourcesCommand,
   resourceCommand,
   skillsCommand,
+  eventsCommand,
+  pollCommand,
   appCommand
 ] as const
 

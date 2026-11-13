@@ -1,4 +1,4 @@
-import { NotFound } from "@integragents/contracts"
+import { IntegrationSkillsResponse, NotFound } from "@integragents/contracts"
 import { Effect, Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/http-api"
 import { IntegrationError, NotImplemented, OAuthClientSubmission, OAuthSessionView } from "@integragents/contracts"
@@ -89,6 +89,13 @@ export const ProvisioningGroup = HttpApiGroup.make("provisioning")
     HttpApiEndpoint.get("integrationTools", "/v1/integrations/:slug/tools", {
       params: { slug: Schema.String },
       success: Schema.Struct({ tools: Schema.Array(ToolSummary) }),
+      error: NotFound
+    }).annotate(RequiredAccess, "provisioning")
+  )
+  .add(
+    HttpApiEndpoint.get("integrationSkills", "/v1/integrations/:slug/skills", {
+      params: { slug: Schema.String },
+      success: IntegrationSkillsResponse,
       error: NotFound
     }).annotate(RequiredAccess, "provisioning")
   )
