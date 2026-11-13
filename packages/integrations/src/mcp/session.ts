@@ -128,7 +128,7 @@ const decodeNamedRequest = Schema.decodeUnknownOption(Schema.fromJsonString(Name
 
 /** A header value as SEP-2243 carries it: plain when it is safe ASCII, otherwise the base64 sentinel. */
 const headerValue = (value: string): string =>
-  value.length > 0 && value === value.trim() && /^[\t\x20-\x7e]*$/.test(value) && !value.startsWith("=?base64?")
+  value.length > 0 && value === value.trim() && /^[\x20-\x7e]*$/.test(value) && !value.startsWith("=?base64?")
     ? value
     : `=?base64?${Base64.encode(utf8Bytes(value))}?=`
 
