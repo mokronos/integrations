@@ -157,7 +157,11 @@ export function IntegrationCapabilities({ integration }: { readonly integration:
   const [filter, setFilter] = useState("")
   const [tab, setTab] = useState<Capability>("tools")
   const mcp = integration.kind === "mcp"
-  const skills = useIntegrationSkills(integration.slug, mcp && integration.connections.length > 0)
+  const listsSkills = mcp && integration.connections.length > 0
+  const skills = useIntegrationSkills(integration.slug, listsSkills)
+  // A disabled query keeps its last data, so a removed last connection would leave its skills on screen.
+  const skillsData = listsSkills ? skills.data : undefined
+  const skillsError = listsSkills ? skills.error : null
   const needle = filter.trim().toLowerCase()
   const connected = isConnected(integration)
 
@@ -171,10 +175,10 @@ export function IntegrationCapabilities({ integration }: { readonly integration:
   )
   const skillEntries = useMemo(
     () =>
-      (skills.data?.skills ?? []).filter((entry) =>
+      (skillsData?.skills ?? []).filter((entry) =>
         matches(needle, entry.skill.frontmatter.name, entry.skill.frontmatter.description)
       ),
-    [needle, skills.data]
+    [needle, skillsData]
   )
   const nothingYet = connected ? undefined : "Connect it to see what it exposes."
 
@@ -192,7 +196,7 @@ export function IntegrationCapabilities({ integration }: { readonly integration:
                 <BookOpen />
                 Skills{" "}
                 <span className="text-muted-foreground tabular-nums">
-                  {skills.data === undefined ? "…" : skills.data.skills.length}
+                  {listsSkills ? (skillsData === undefined ? "…" : skillsData.skills.length) : 0}
                 </span>
               </TabsTrigger>
               <TabsTrigger value="events" disabled={!mcp}>
@@ -235,16 +239,16 @@ export function IntegrationCapabilities({ integration }: { readonly integration:
             />
           </TabsContent>
           <TabsContent value="skills" className="space-y-2">
-            {skills.data?.error === undefined ? null : (
+            {skillsData?.error === undefined ? null : (
               <Alert variant="destructive">
                 <AlertTitle>Could not read every server's skills</AlertTitle>
-                <AlertDescription>{skills.data.error}</AlertDescription>
+                <AlertDescription>{skillsData.error}</AlertDescription>
               </Alert>
             )}
-            {skills.error === null ? null : (
+            {skillsError === null ? null : (
               <Alert variant="destructive">
                 <AlertTitle>Could not read skills</AlertTitle>
-                <AlertDescription>{skills.error.message}</AlertDescription>
+                <AlertDescription>{skillsError.message}</AlertDescription>
               </Alert>
             )}
             {skills.isPending && skills.fetchStatus !== "idle" ? (
@@ -254,7 +258,7 @@ export function IntegrationCapabilities({ integration }: { readonly integration:
                 items={skillEntries}
                 render={(entry) => <SkillCard key={`${entry.connection}:${entry.skill.uri}`} entry={entry} />}
                 empty={
-                  (skills.data?.skills.length ?? 0) > 0
+                  (skillsData?.skills.length ?? 0) > 0
                     ? "Nothing matches that filter."
                     : (nothingYet ?? "Its server publishes no skills.")
                 }

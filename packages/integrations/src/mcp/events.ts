@@ -172,10 +172,12 @@ export const listEventTypes = (
       cursor = decoded.nextCursor ?? undefined
       if (cursor === undefined) return listed
     }
-    yield* Effect.logWarning("events/list was cut short after too many pages").pipe(
-      Effect.annotateLogs({ "mcp.endpoint": endpoint, pages: maxPages })
-    )
-    return listed
+    // A partial listing would replace the stored one, so failing keeps the last complete listing instead.
+    return yield* new McpError({
+      endpoint,
+      reason: "protocol",
+      detail: `events/list still had more pages after ${maxPages}`
+    })
   })
 
 export const pollEvents = (

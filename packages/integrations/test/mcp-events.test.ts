@@ -60,7 +60,7 @@ const result = (id: JsonRpcRequest["id"], body: Record<string, Json>) =>
  * from `c0`, one too old to replay, and webhook subscriptions keyed as the
  * extension keys them.
  */
-const eventsServer = (offersEvents: boolean) => {
+const eventsServer = (offersEvents: boolean, endlessListing: boolean) => {
   const seen: Array<Seen> = []
   const subscriptions = new Set<string>()
   const answer = (request: JsonRpcRequest, mcpName: string | null): Response => {
@@ -86,6 +86,7 @@ const eventsServer = (offersEvents: boolean) => {
       case "tools/list":
         return Response.json({ jsonrpc: "2.0", id: request.id, result: { ...complete, tools: [] } })
       case "events/list":
+        if (endlessListing) return result(request.id, { events: [created], nextCursor: crypto.randomUUID() })
         return property(params, "cursor") === "page-2"
           ? result(request.id, {
               events: [
@@ -153,11 +154,12 @@ const eventsServer = (offersEvents: boolean) => {
 }
 
 const serve = (
-  offersEvents: boolean
+  offersEvents: boolean,
+  endlessListing = false
 ): Effect.Effect<{ readonly endpoint: string; readonly seen: ReadonlyArray<Seen> }, never, Scope.Scope> =>
   Effect.acquireRelease(
     Effect.sync(() => {
-      const server = eventsServer(offersEvents)
+      const server = eventsServer(offersEvents, endlessListing)
       const listener = Bun.serve({
         hostname: "127.0.0.1",
         port: 0,
@@ -201,6 +203,11 @@ describe("MCP Events client", () => {
         { name: "ticket.closed", description: "", delivery: ["push"] }
       ])
       expect(withTools.eventTypes).toEqual(Option.some(listed))
+      // A listing that never ends fails rather than pass off its first pages as the whole, which would replace the
+      // stored listing with a partial one.
+      const endless = yield* serve(true, true)
+      const cutShort = yield* Effect.flip(mcp.listEvents(server(endless.endpoint), Option.none()))
+      expect(cutShort).toMatchObject({ _tag: "McpError", reason: "protocol" })
     }).pipe(Effect.provide(services))
   )
 
@@ -249,10 +256,11 @@ describe("MCP Events client", () => {
 
   it.live("tells an unknown event type and bad arguments apart from other failures", () =>
     Effect.gen(function* () {
-      const { endpoint } = yield* serve(true)
+      const { endpoint, seen } = yield* serve(true)
       const mcp = yield* McpClient
+      // A tab is a control character, so the name travels base64-encoded in the routing header.
       const unknown = yield* Effect.flip(
-        mcp.pollEvents(server(endpoint), Option.none(), { name: "ticket.vanished", cursor: null })
+        mcp.pollEvents(server(endpoint), Option.none(), { name: "ticket\tvanished", cursor: null })
       )
       const invalid = yield* Effect.flip(
         mcp.pollEvents(server(endpoint), Option.none(), { name: "ticket.created", cursor: "c0", maxEvents: 5 })
@@ -265,6 +273,7 @@ describe("MCP Events client", () => {
         data: { kind: "event" }
       })
       expect(invalid).toMatchObject({ _tag: "EventsRefused", refusal: "invalid_params", code: -32602 })
+      expect(seen[0]?.mcpName).toBe(`=?base64?${btoa("ticket\tvanished")}?=`)
     }).pipe(Effect.provide(services))
   )
 
